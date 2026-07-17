@@ -998,3 +998,124 @@ func TestMergeBranch_ParentBranchCreatedOnDemand(t *testing.T) {
 		t.Error("subtask file should NOT exist on master — merge must target parent branch, not origin")
 	}
 }
+
+// TestMergeBranch_RootTaskMergesIntoOriginBranch verifies that a root task
+// with a branch-name BaseRef merges into that branch (not some other ref).
+func TestMergeBranch_RootTaskMergesIntoOriginBranch(t *testing.T) {
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+
+	// Make a commit on master so we have something to merge against
+	os.WriteFile(filepath.Join(repoDir, "master_update.txt"), []byte("master update\n"), 0o644)
+	runGit(t, repoDir, "add", "master_update.txt")
+	runGit(t, repoDir, "commit", "-m", "master update")
+
+	taskID := "root-origin-merge"
+	task := &types.Task{
+		ID:             taskID,
+		ProjectID:      projectID,
+		Title:          "Root Task",
+		Prompt:         "Root task prompt",
+		Status:         "in_progress",
+		Branch:         "task/" + taskID,
+		BaseRef:        "master", // branch name
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}
+	te.store.CreateTask(task)
+
+	// Create the task branch from master
+	runGit(t, repoDir, "branch", task.Branch, "master")
+
+	// Make a commit on the task branch
+	runGit(t, repoDir, "checkout", task.Branch)
+	taskFile := filepath.Join(repoDir, "task_file.txt")
+	os.WriteFile(taskFile, []byte("task changes\n"), 0o644)
+	runGit(t, repoDir, "add", "task_file.txt")
+	runGit(t, repoDir, "commit", "-m", "task work")
+	taskCommitSHA := getGitRevParse(t, repoDir, "HEAD")
+
+	// Merge task branch
+	err := te.MergeBranch(projectID, taskID, task)
+	if err != nil {
+		t.Fatalf("MergeBranch failed: %v", err)
+	}
+
+	// Verify the task's commit is on master
+	cmd := exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", taskCommitSHA, "master")
+	if err := cmd.Run(); err != nil {
+		t.Fatal("task commit should be ancestor of master after merge")
+	}
+
+	// Verify master has both files
+	cmd = exec.Command("git", "-C", repoDir, "show", "master:task_file.txt")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("task_file.txt should exist on master after merge: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "task changes" {
+		t.Errorf("unexpected content: %q", string(out))
+	}
+}
+
+// TestMergeBranch_RootTaskWithBranchName_BaseRefUsesBranchName verifies that
+// when a root task's BaseRef is a branch name (user-set, not a SHA),
+// MergeBranch merges into that branch.
+func TestMergeBranch_RootTaskWithBranchName_BaseRefUsesBranchName(t *testing.T) {
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+
+	// Create a "develop" branch
+	runGit(t, repoDir, "branch", "develop", "master")
+
+	taskID := "branch-baseref-task"
+	task := &types.Task{
+		ID:             taskID,
+		ProjectID:      projectID,
+		Title:          "Task",
+		Prompt:         "Task prompt",
+		Status:         "in_progress",
+		Branch:         "task/" + taskID,
+		BaseRef:        "develop", // branch name (user-set)
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}
+	te.store.CreateTask(task)
+
+	// Create the task branch from develop
+	runGit(t, repoDir, "branch", task.Branch, "develop")
+
+	// Make a commit on the task branch
+	runGit(t, repoDir, "checkout", task.Branch)
+	taskFile := filepath.Join(repoDir, "task_file.txt")
+	os.WriteFile(taskFile, []byte("task changes\n"), 0o644)
+	runGit(t, repoDir, "add", "task_file.txt")
+	runGit(t, repoDir, "commit", "-m", "task work")
+	taskCommitSHA := getGitRevParse(t, repoDir, "HEAD")
+
+	// Merge task branch
+	err := te.MergeBranch(projectID, taskID, task)
+	if err != nil {
+		t.Fatalf("MergeBranch failed: %v", err)
+	}
+
+	// Verify the task's commit is on develop
+	cmd := exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", taskCommitSHA, "develop")
+	if err := cmd.Run(); err != nil {
+		t.Fatal("task commit should be ancestor of develop after merge")
+	}
+
+	// Verify the commit is NOT on master
+	cmd = exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", taskCommitSHA, "master")
+	if err := cmd.Run(); err == nil {
+		t.Error("task commit should NOT be on master — merge must target develop, not origin")
+	}
+}
+
+func getGitRevParse(t *testing.T, dir, ref string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "rev-parse", ref)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse %s: %v", ref, err)
+	}
+	return strings.TrimSpace(string(out))
+}

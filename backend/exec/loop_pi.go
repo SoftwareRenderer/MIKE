@@ -323,7 +323,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 							conflictedFiles := GetConflictedFiles(worktreePath)
 							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 								TaskBranch:      task.Branch,
-								TargetBranch:    task.BaseRef,
+								TargetBranch:    te.resolveMergeTarget(projectID, task),
 								TaskTitle:       task.Title,
 								TaskDescription: task.Prompt,
 								ConflictedFiles: conflictedFiles,

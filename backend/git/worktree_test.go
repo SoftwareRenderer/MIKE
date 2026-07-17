@@ -177,18 +177,23 @@ func TestCreateWorktree_EarlyReturn_SanitizesFatalBranch(t *testing.T) {
 	}
 }
 
-func TestCreateWorktree_EarlyReturn_ReturnsBranchNameNotSHA(t *testing.T) {
+// TestCreateWorktree_BothPathsReturnBranchName verifies that both the
+// fresh-creation and early-return (worktree exists) paths return a branch
+// name, not a commit SHA. This ensures BaseRef is always a usable merge target.
+func TestCreateWorktree_BothPathsReturnBranchName(t *testing.T) {
 	_, taskID, _, _, wm := setupTestRepo(t)
 
-	// Create the worktree normally first
 	branchName := "task/" + taskID
 	_, baseRefFresh, err := wm.CreateWorktree("test-project", taskID, branchName, "")
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
-	// Fresh creation returns a commit SHA (40 hex chars)
-	if len(baseRefFresh) != 40 {
-		t.Logf("WARNING: fresh CreateWorktree returned baseRef %q (len=%d), expected 40-char SHA", baseRefFresh, len(baseRefFresh))
+	// Fresh creation returns a branch name (e.g. "master"), not a SHA
+	if len(baseRefFresh) == 40 {
+		t.Errorf("fresh CreateWorktree returned a 40-char SHA %q, expected branch name", baseRefFresh)
+	}
+	if baseRefFresh == "" {
+		t.Error("fresh CreateWorktree returned empty baseRef")
 	}
 
 	// Call CreateWorktree again — worktree already exists, hits early return
@@ -196,16 +201,19 @@ func TestCreateWorktree_EarlyReturn_ReturnsBranchNameNotSHA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create worktree (early return): %v", err)
 	}
-	// Early return returns the main repo's current branch name (e.g. "master"), NOT a SHA
-	// This is a known issue: the caller (prepareTaskExecution) should preserve the original BaseRef
-	if baseRefEarly == baseRefFresh {
-		t.Error("early return should return a different value (branch name) than fresh creation (SHA)")
-	}
-	// The early return value is a short branch name, not a 40-char SHA
+	// Early return also returns a branch name
 	if len(baseRefEarly) == 40 {
-		t.Error("early return should NOT return a 40-char SHA, it returns the main repo's branch name")
+		t.Errorf("early return returned a 40-char SHA %q, expected branch name", baseRefEarly)
 	}
-	t.Logf("fresh baseRef=%q (SHA), early return baseRef=%q (branch name)", baseRefFresh, baseRefEarly)
+	if baseRefEarly == "" {
+		t.Error("early return returned empty baseRef")
+	}
+
+	// Both paths should return the same branch name
+	if baseRefFresh != baseRefEarly {
+		t.Errorf("inconsistent baseRef: fresh=%q, early=%q", baseRefFresh, baseRefEarly)
+	}
+	t.Logf("fresh baseRef=%q, early return baseRef=%q (both branch names)", baseRefFresh, baseRefEarly)
 }
 
 func TestCreateWorktree_GeneratesBranchNameWhenEmpty(t *testing.T) {

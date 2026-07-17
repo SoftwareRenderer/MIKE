@@ -256,11 +256,19 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 		return "", "", fmt.Errorf("create branch %s: %w", branchName, branchErr)
 	}
 
-	// Resolve sourceRef to a commit hash so the base ref doesn't move after merges
-	baseCommit, _ := wm.gitRunOutput(worktreePath, "rev-parse", "--verify", sourceRef)
-	baseCommit = strings.TrimSpace(baseCommit)
+	// Return the source branch name (merge target / diff baseline).
+	// For child tasks this is the parent's branch. For root tasks, fall back
+	// to the origin branch captured before worktree creation.
+	baseRef := sourceBranch
+	if baseRef == "" {
+		baseRef = originalBranch
+	}
+	// Sanitize: reject git error messages as branch names
+	if strings.HasPrefix(baseRef, "fatal:") {
+		baseRef = ""
+	}
 
-	return worktreePath, baseCommit, nil
+	return worktreePath, baseRef, nil
 }
 
 // RemoveWorktree removes a task's worktree and its branch.

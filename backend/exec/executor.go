@@ -565,9 +565,8 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 
 	task.Branch = branchName
-	// Preserve existing BaseRef on restart: CreateWorktree returns the main repo's
-	// branch name (e.g. "master") when the worktree already exists, but we need
-	// the original commit SHA for correct diff computation.
+	// Set BaseRef on first start (merge target / diff baseline).
+	// Preserved across restarts — CreateWorktree returns same value either way.
 	if task.BaseRef == "" {
 		task.BaseRef = baseRef
 	}
@@ -881,7 +880,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		conflictedFiles := GetConflictedFiles(execSetup.worktreePath)
 		conflictContext, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 			TaskBranch:      task.Branch,
-			TargetBranch:    task.BaseRef,
+			TargetBranch:    te.resolveMergeTarget(projectID, task),
 			TaskTitle:       task.Title,
 			TaskDescription: task.Prompt,
 			ConflictedFiles: conflictedFiles,
@@ -1019,6 +1018,26 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 	return nil
 }
 
+// resolveMergeTarget determines the branch that changes will be merged into.
+// For child tasks, the target is the parent's branch.
+// For root tasks, the target is the task's base_ref (if set), otherwise the project's origin branch.
+func (te *TaskExecutor) resolveMergeTarget(projectID string, task *types.Task) string {
+	if task.ParentTaskID != "" {
+		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		if err == nil && parent.Branch != "" {
+			return parent.Branch
+		}
+	}
+	if task.BaseRef != "" {
+		return task.BaseRef
+	}
+	project, err := te.store.GetProject(projectID)
+	if err != nil || project.OriginBranch == "" {
+		return ""
+	}
+	return project.OriginBranch
+}
+
 // mergeBranch merges the task's branch into the target branch.
 // For child tasks, merges into the parent's branch. For root tasks, merges into origin.
 // Returns nil on success or if merge is not applicable.
@@ -1083,11 +1102,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			}
 		}
 	} else {
-		// Root task — merge into task's base_ref if set, otherwise origin branch.
-		targetBranch = task.BaseRef
-		if targetBranch == "" {
-			targetBranch = project.OriginBranch
-		}
+		targetBranch = te.resolveMergeTarget(projectID, task)
 		if targetBranch == "" {
 			var err error
 			targetBranch, err = te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
