@@ -368,6 +368,9 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 			}
 			// Read stdout and stderr concurrently, stream output line by line.
 			var buf bytes.Buffer
+			var bufMu sync.Mutex // protect concurrent writes from stdout/stderr goroutines
+			var scanErr error
+			var scanMu sync.Mutex
 			var wg sync.WaitGroup
 			stream := outputCallback != nil
 			readStream := func(r io.Reader) {
@@ -375,10 +378,19 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 				scanner := bufio.NewScanner(r)
 				for scanner.Scan() {
 					line := scanner.Text() + "\n"
+					bufMu.Lock()
 					buf.WriteString(line)
+					bufMu.Unlock()
 					if stream {
 						outputCallback(task.ID, line)
 					}
+				}
+				if err := scanner.Err(); err != nil {
+					scanMu.Lock()
+					if scanErr == nil {
+						scanErr = fmt.Errorf("scan output: %w", err)
+					}
+					scanMu.Unlock()
 				}
 			}
 			wg.Add(2)
@@ -386,7 +398,11 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 			go readStream(stderr)
 			err = c.Wait()
 			wg.Wait()
-			out = buf.String()
+			if scanErr != nil {
+				out = fmt.Sprintf("Failed: %v\n%s", scanErr, buf.String())
+			} else {
+				out = buf.String()
+			}
 		}
 
 		// Strip ANSI escape codes from output so the LLM sees clean text
