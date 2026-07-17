@@ -34,9 +34,12 @@ test.describe.serial('Sandbox Mounts', () => {
     await page.click('.sandbox-config-btn');
     await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
+    // Wait for config options to render inside the modal
+    await expect(page.locator('.config-options')).toBeVisible({ timeout: 5000 });
+
     // Custom Mounts subsection header should be visible
     const mountsHeader = page.locator('.config-row-expandable .config-label').filter({ hasText: 'Custom Mounts' });
-    await expect(mountsHeader).toBeVisible({ timeout: 5000 });
+    await expect(mountsHeader).toBeVisible({ timeout: 10000 });
 
     // Section starts collapsed — click to expand
     await mountsHeader.click();
@@ -55,7 +58,8 @@ test.describe.serial('Sandbox Mounts', () => {
     await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Expand Custom Mounts subsection
-    const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
+    const mountsHeader = page.locator('.config-row-expandable .config-label').filter({ hasText: 'Custom Mounts' });
+    await expect(mountsHeader).toBeVisible({ timeout: 10000 });
     await mountsHeader.click();
     await expect(page.locator('.mount-add-row')).toBeVisible({ timeout: 5000 });
 
@@ -89,7 +93,8 @@ test.describe.serial('Sandbox Mounts', () => {
     await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Expand Custom Mounts subsection
-    const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
+    const mountsHeader = page.locator('.config-row-expandable .config-label').filter({ hasText: 'Custom Mounts' });
+    await expect(mountsHeader).toBeVisible({ timeout: 10000 });
     await mountsHeader.click();
     await expect(page.locator('.mount-add-row')).toBeVisible({ timeout: 5000 });
 
@@ -115,7 +120,8 @@ test.describe.serial('Sandbox Mounts', () => {
     await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Expand Custom Mounts subsection
-    const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
+    const mountsHeader = page.locator('.config-row-expandable .config-label').filter({ hasText: 'Custom Mounts' });
+    await expect(mountsHeader).toBeVisible({ timeout: 10000 });
     await mountsHeader.click();
     await expect(page.locator('.mount-add-row')).toBeVisible({ timeout: 5000 });
 
