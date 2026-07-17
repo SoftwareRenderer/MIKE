@@ -88,4 +88,34 @@ describe('formatToolArgs - write_file', () => {
     it('returns empty when no path', () => {
         expect(formatToolArgs('write_file', {})).toBe('');
     });
+
+    it('shows path from raw_args during streaming (empty args)', () => {
+        const args = {};
+        const rawArgs = '{"path":"src/file.go","content":"hello"}';
+        expect(formatToolArgs('write_file', args, rawArgs)).toBe('./src/file.go');
+    });
+
+    it('shows path from partial raw_args during streaming', () => {
+        const args = {};
+        const rawArgs = '{"path":"src/file.go","content":"hel';
+        expect(formatToolArgs('write_file', args, rawArgs)).toBe('./src/file.go');
+    });
+
+    it('prefers args.path over raw_args when both present', () => {
+        const args = { path: 'args/path.go' };
+        const rawArgs = '{"path":"raw/path.go"}';
+        expect(formatToolArgs('write_file', args, rawArgs)).toBe('./args/path.go');
+    });
+
+    it('handles path already prefixed with ./', () => {
+        const args = {};
+        const rawArgs = '{"path":"./src/file.go"}';
+        expect(formatToolArgs('write_file', args, rawArgs)).toBe('./src/file.go');
+    });
+
+    it('returns empty when neither args nor raw_args have path', () => {
+        const args = {};
+        expect(formatToolArgs('write_file', args, '')).toBe('');
+        expect(formatToolArgs('write_file', args, undefined)).toBe('');
+    });
 });

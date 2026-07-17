@@ -27,12 +27,13 @@ describe('Subtask progress indicator', () => {
     });
 
     it('progress shows 100% when all subtasks are done', () => {
-        expect(source).toContain('doneChildren');
-        expect(source).toContain('totalChildren');
+        expect(source).toContain('subtaskProgress');
+        expect(source).toContain('descendants.done');
+        expect(source).toContain('descendants.total');
     });
 
     it('progress shows 0% when no subtasks are done', () => {
-        expect(source).toContain('doneChildren');
+        expect(source).toContain('descendants.done');
     });
 
     it('progress updates reactively', () => {
