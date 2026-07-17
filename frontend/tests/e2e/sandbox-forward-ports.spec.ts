@@ -32,7 +32,7 @@ test.describe.serial('Sandbox Forward Ports', () => {
   test('should show port forwarding section when sandbox is enabled and network isolation is off', async ({ page }) => {
     // Open sandbox config modal
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Forward Ports subsection header should be visible (nested under Network Isolation)
     await expect(page.locator('.config-row-subsection .config-label')).toContainText('Forward Ports');
@@ -44,7 +44,7 @@ test.describe.serial('Sandbox Forward Ports', () => {
 
     // Close modal
     await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
-    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 
   test('should hide port forwarding section when network isolation is enabled', async ({ page }) => {
@@ -60,14 +60,14 @@ test.describe.serial('Sandbox Forward Ports', () => {
 
     // Open sandbox config modal
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Forward Ports subsection should NOT be visible (network isolation blocks it)
     await expect(page.locator('.config-row-subsection')).not.toBeVisible({ timeout: 2000 });
 
     // Close modal and reset
     await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
-    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
 
     // Reset network isolation to off
     await csrfFetch(page, `/api/projects/${projectId}`, {
@@ -89,14 +89,14 @@ test.describe.serial('Sandbox Forward Ports', () => {
 
     // Open sandbox config modal
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Forward Ports subsection should NOT be visible (no sandbox = no ports to forward)
     await expect(page.locator('.config-row-subsection')).not.toBeVisible({ timeout: 2000 });
 
     // Close modal and reset
     await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
-    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
 
     // Reset sandbox to enabled
     await csrfFetch(page, `/api/projects/${projectId}`, {
@@ -108,7 +108,7 @@ test.describe.serial('Sandbox Forward Ports', () => {
   test('should add and remove port forward', async ({ page }) => {
     // Open sandbox config modal
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Expand Forward Ports subsection
     await page.click('.config-row-subsection');
@@ -131,13 +131,13 @@ test.describe.serial('Sandbox Forward Ports', () => {
 
     // Close modal
     await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
-    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 
   test('should reject invalid port numbers', async ({ page }) => {
     // Open sandbox config modal
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Expand Forward Ports subsection
     await page.click('.config-row-subsection');

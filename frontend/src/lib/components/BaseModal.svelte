@@ -8,6 +8,7 @@
         width = '640px',
         zIndex = 1000,
         trapFocus = true,
+        closeOnOverlayClick = true,
         onClose,
         header,
         toolbar,
@@ -18,6 +19,7 @@
         width?: string;
         zIndex?: number;
         trapFocus?: boolean;
+        closeOnOverlayClick?: boolean;
         onClose: () => void | Promise<void>;
         header?: Snippet<[ { title: string } ]>;
         toolbar?: Snippet<[]>;
@@ -52,7 +54,7 @@
     }
 
     function handleOverlayClick(e: MouseEvent) {
-        if (e.target === e.currentTarget) handleClose();
+        if (e.target === e.currentTarget && closeOnOverlayClick) handleClose();
     }
 </script>
 

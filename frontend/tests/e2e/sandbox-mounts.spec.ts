@@ -32,7 +32,7 @@ test.describe.serial('Sandbox Mounts', () => {
   test('should show custom mounts section when sandbox is enabled', async ({ page }) => {
     // Open sandbox config modal
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Custom Mounts subsection header should be visible
     const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
@@ -46,13 +46,13 @@ test.describe.serial('Sandbox Mounts', () => {
 
     // Close modal
     await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
-    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 
   test('should add and remove mount', async ({ page }) => {
     // Open sandbox config modal
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Expand Custom Mounts subsection
     const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
@@ -80,13 +80,13 @@ test.describe.serial('Sandbox Mounts', () => {
 
     // Close modal
     await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
-    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 
   test('should reject empty paths', async ({ page }) => {
     // Open sandbox config modal
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Expand Custom Mounts subsection
     const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
@@ -112,7 +112,7 @@ test.describe.serial('Sandbox Mounts', () => {
   test('should toggle rw/ro mode', async ({ page }) => {
     // Open sandbox config modal
     await page.click('.sandbox-config-btn');
-    await expect(page.locator('.sandbox-config-dialog')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
     // Expand Custom Mounts subsection
     const mountsHeader = page.locator('.config-row-subsection .config-label').filter({ hasText: 'Custom Mounts' });
@@ -136,7 +136,7 @@ test.describe.serial('Sandbox Mounts', () => {
 
     // Close modal
     await page.click('.sandbox-config-overlay', { position: { x: 10, y: 10 } });
-    await expect(page.locator('.sandbox-config-dialog')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
   });
 
   test('should save mounts via API', async ({ page }) => {
