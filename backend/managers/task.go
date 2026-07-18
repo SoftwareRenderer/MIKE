@@ -283,12 +283,78 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusNotFound, "task not found")
 			return
 		}
-		// Capture original value before unmarshal overwrites it
+		// Capture original values before partial update
 		originalSubtasksAutoMerge := task.SubtasksAutoMerge
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, task)
-		task.ID = taskID
-		task.ProjectID = projectID
+		var rawBody map[string]any
+		json.Unmarshal(body, &rawBody)
+		// Apply partial update: only modify fields present in the request body
+		if v, ok := rawBody["title"]; ok {
+			task.Title = v.(string)
+		}
+		if v, ok := rawBody["prompt"]; ok {
+			task.Prompt = v.(string)
+		}
+		if v, ok := rawBody["status"]; ok {
+			task.Status = v.(string)
+		}
+		if v, ok := rawBody["column_order"]; ok {
+			task.ColumnOrder = int(v.(float64))
+		}
+		if v, ok := rawBody["session_id"]; ok {
+			task.SessionID = v.(string)
+		}
+		if v, ok := rawBody["branch"]; ok {
+			task.Branch = v.(string)
+		}
+		if v, ok := rawBody["base_ref"]; ok {
+			task.BaseRef = v.(string)
+		}
+		if v, ok := rawBody["branch_tip"]; ok {
+			task.BranchTip = v.(string)
+		}
+		if v, ok := rawBody["output"]; ok {
+			task.Output = v.(string)
+		}
+		if v, ok := rawBody["execution_state"]; ok {
+			task.ExecutionState = v.(string)
+		}
+		if v, ok := rawBody["has_merge_conflict"]; ok {
+			task.HasMergeConflict = v.(bool)
+		}
+		if v, ok := rawBody["llama_server_url"]; ok {
+			task.LlamaServerURL = v.(string)
+		}
+		if v, ok := rawBody["model_name"]; ok {
+			task.ModelName = v.(string)
+		}
+		if v, ok := rawBody["reasoning_effort"]; ok {
+			task.ReasoningEffort = v.(string)
+		}
+		if v, ok := rawBody["max_consecutive_failed_turns"]; ok {
+			task.MaxConsecutiveFailedTurns = int(v.(float64))
+		}
+		if v, ok := rawBody["auto_commit"]; ok {
+			task.AutoCommit = v.(bool)
+		}
+		if v, ok := rawBody["auto_merge"]; ok {
+			task.AutoMerge = v.(bool)
+		}
+		if v, ok := rawBody["subtasks_auto_merge"]; ok {
+			task.SubtasksAutoMerge = v.(bool)
+		}
+		if v, ok := rawBody["operating_mode"]; ok {
+			task.OperatingMode = v.(string)
+		}
+		if v, ok := rawBody["parent_task_id"]; ok {
+			task.ParentTaskID = v.(string)
+		}
+		if v, ok := rawBody["title_generating"]; ok {
+			task.TitleGenerating = v.(bool)
+		}
+		if v, ok := rawBody["current_thread_id"]; ok {
+			task.CurrentThreadID = v.(string)
+		}
 		task.UpdatedAt = time.Now()
 		// Auto-commit is a prerequisite for auto-merge
 		if task.AutoMerge {
