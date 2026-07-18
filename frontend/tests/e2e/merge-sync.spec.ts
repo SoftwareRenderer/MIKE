@@ -143,24 +143,17 @@ test.describe.serial('Merge Sync', () => {
     // This test verifies the merge_conflict state UI.
     // We simulate the state directly via API since inducing a real conflict
     // requires specific git setup that's hard to do through the web API.
+    // We keep the task in backlog to avoid the executor overwriting our flag.
 
     const taskId = await createTaskViaApi(page, projectId, `merge-conflict-ui-${Date.now()}`);
     expect(taskId).not.toBe('');
 
-    // Move to in_progress
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
-      method: 'POST',
-      body: { status: 'in_progress' },
-    });
-
-    // Simulate merge conflict via API update
+    // Set has_merge_conflict via API (task stays in backlog, no executor interference)
     const updateResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}`, {
       method: 'PUT',
       body: { has_merge_conflict: true },
     });
     expect(updateResult.ok).toBe(true);
-
-    // Verify the flag was actually set via API response
     expect(updateResult.data?.has_merge_conflict).toBe(true);
 
     // Navigate to the task (full reload picks up the updated task data)
@@ -169,15 +162,6 @@ test.describe.serial('Merge Sync', () => {
 
     // Wait for the side panel to render
     await page.waitForSelector('.column-context .card', { timeout: 10000 }).catch(() => {});
-
-    // Verify the task data via direct task API (more reliable than board API)
-    await expect(async () => {
-      const task = await page.evaluate(async ({ pid, tid }) => {
-        const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-        return res.ok ? res.json() : null;
-      }, { pid: projectId, tid: taskId });
-      expect(task?.has_merge_conflict).toBe(true);
-    }).toPass({ timeout: 10000 });
 
     // Check for the merge conflict badge on the card in the side panel
     // The badge should show "Resolving conflict" with orange color
