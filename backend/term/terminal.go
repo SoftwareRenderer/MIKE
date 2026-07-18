@@ -50,7 +50,7 @@ type sandboxOps interface {
 	BuildImage(projectName, dockerfilePath string) error
 	BuildImageWithProgress(projectName, dockerfilePath string, onProgress func(line string)) error
 	PullImageWithProgress(image string, onProgress func(line string)) error
-	StartShellWithCreate(taskID, worktreePath, baseImage, projectName, projectPath, projectID string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) (*sandbox.ShellProcess, []types.AssignedPort, error)
+	StartShellWithCreate(taskID, worktreePath, projectName, projectPath, projectID string, opts sandbox.SandboxOpts) (*sandbox.ShellProcess, []types.AssignedPort, error)
 	Stop(taskID string) error
 	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
@@ -177,7 +177,16 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		if !strings.HasPrefix(taskID, "proj:") {
 			shellProjectPath = projectPath
 		}
-		shell, assignedPorts, err := tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, imageToUse, projectName, shellProjectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs)
+		shell, assignedPorts, err := tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, projectName, shellProjectPath, projectID, sandbox.SandboxOpts{
+			BaseImage:        imageToUse,
+			NetworkIsolation: networkIsolation,
+			MemoryLimit:      memoryLimit,
+			ForwardPorts:     forwardPorts,
+			PiAgentDir:       piAgentDir,
+			SkillsDir:        prompts.SkillsDir(),
+			SandboxMounts:    sandboxMounts,
+			SandboxEnvs:      sandboxEnvs,
+		})
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)

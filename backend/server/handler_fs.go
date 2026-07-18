@@ -243,8 +243,8 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			sandboxPath = filepath.Join(mountPath, relPath)
 		}
 		// Single command: ls -pA marks dirs with trailing /, one entry per line
-		baseImage, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs := s.fsSandboxConfig(project)
-		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "ls -pA "+sandboxPath, baseImage, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs)
+		opts := s.fsSandboxConfig(project)
+		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "ls -pA "+sandboxPath, opts)
 		if err != nil {
 			JSONError(w, http.StatusNotFound, err.Error())
 			return
@@ -784,10 +784,10 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		sandboxPath := filepath.Join(mountPath, relPath)
 
 		// Resolve sandbox config once, reuse for both calls
-		baseImage, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs := s.fsSandboxConfig(project)
+		opts := s.fsSandboxConfig(project)
 
 		// Check if already a git repo
-		_, gitErr := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "git -C "+sandboxPath+" rev-parse --git-dir 2>/dev/null", baseImage, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs)
+		_, gitErr := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "git -C "+sandboxPath+" rev-parse --git-dir 2>/dev/null", opts)
 		if gitErr == nil {
 			JSONError(w, http.StatusBadRequest, "path is already a git repository")
 			return
@@ -805,7 +805,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 			"base64 -d > "+filepath.Join(sandboxPath, "README.md")+" && " +
 			"git -C "+sandboxPath+" add README.md && " +
 			"git -C "+sandboxPath+" "+authorFlags+" commit -m 'Initial commit'",
-			baseImage, []byte(encoded+"\n"), networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs)
+			[]byte(encoded+"\n"), opts)
 		if err != nil {
 			JSONError(w, http.StatusInternalServerError, "git commit failed: "+err.Error())
 			return
@@ -912,12 +912,12 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		sandboxParent := filepath.Dir(sandboxPath)
 
 		// Combined check + mkdir in single command
-		baseImage, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs := s.fsSandboxConfig(project)
+		opts := s.fsSandboxConfig(project)
 		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name,
 			"if [ ! -d "+sandboxParent+" ]; then echo 'PARENT_MISSING'; " +
 			"elif [ -e "+sandboxPath+" ]; then echo 'ALREADY_EXISTS'; " +
 			"else mkdir "+sandboxPath+" && echo 'OK'; fi",
-			baseImage, networkIsolation, memoryLimit, forwardPorts, piAgentDir, skillsDir, sandboxMounts, sandboxEnvs)
+			opts)
 		if err != nil {
 			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
 			return
@@ -981,15 +981,16 @@ func (s *Server) resolveSandboxConfig(project *types.Project) string {
 	return imageToUse
 }
 
-// fsSandboxConfig returns the full sandbox config parameters for FS operations.
-func (s *Server) fsSandboxConfig(project *types.Project) (baseImage string, networkIsolation bool, memoryLimit int, forwardPorts []types.PortForward, piAgentDir, skillsDir string, sandboxMounts []types.SandboxMount, sandboxEnvs []types.SandboxEnv) {
-	baseImage = s.resolveSandboxConfig(project)
-	networkIsolation = project.SandboxNetworkIsolation
-	memoryLimit = project.SandboxMemoryLimit
-	forwardPorts = project.ForwardPorts
-	piAgentDir = s.configStore.GetAgentConfigDir()
-	skillsDir = prompts.SkillsDir()
-	sandboxMounts = project.SandboxMounts
-	sandboxEnvs = project.SandboxEnvs
-	return
+// fsSandboxConfig returns the full sandbox config for FS operations.
+func (s *Server) fsSandboxConfig(project *types.Project) sandbox.SandboxOpts {
+	return sandbox.SandboxOpts{
+		BaseImage:        s.resolveSandboxConfig(project),
+		NetworkIsolation: project.SandboxNetworkIsolation,
+		MemoryLimit:      project.SandboxMemoryLimit,
+		ForwardPorts:     project.ForwardPorts,
+		PiAgentDir:       s.configStore.GetAgentConfigDir(),
+		SkillsDir:        prompts.SkillsDir(),
+		SandboxMounts:    project.SandboxMounts,
+		SandboxEnvs:      project.SandboxEnvs,
+	}
 }
