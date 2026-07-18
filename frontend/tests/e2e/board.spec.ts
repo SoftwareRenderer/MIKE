@@ -734,6 +734,26 @@ test.describe('Multi-Select', () => {
     await expect(bar).not.toBeVisible();
   });
 
+  test('should clear selection on Escape', async ({ browserName, page }) => {
+    if (browserName === 'webkit') test.skip();
+
+    const card1 = page.locator(`[data-task-id="${taskId1}"]`);
+    const card2 = page.locator(`[data-task-id="${taskId2}"]`);
+
+    await card1.click({ modifiers: ['Control'] });
+    await card2.click({ modifiers: ['Control'] });
+
+    const bar = page.locator('.multi-select-bar');
+    await expect(bar).toBeVisible();
+
+    // Press Escape — should clear selection
+    await page.keyboard.press('Escape');
+
+    await expect(bar).not.toBeVisible();
+    await expect(card1).not.toHaveClass(/multi-selected/);
+    await expect(card2).not.toHaveClass(/multi-selected/);
+  });
+
   test('should not show Start button when selected tasks are in different columns', async ({ browserName, page }) => {
     if (browserName === 'webkit') test.skip();
 

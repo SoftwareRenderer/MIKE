@@ -3,6 +3,7 @@
     import type { Task } from '$lib/types';
     import Card from '../Card.svelte';
     import { sortByActivity } from '$lib/utils/sort-tasks';
+    import type { MultiSelect } from '$lib/composables/use-multi-select.svelte';
 
     let {
         sections,
@@ -25,6 +26,7 @@
         onCreateChildTask,
         onShowCreateTask,
         getColumnColor,
+        multiSelect,
     }: {
         sections: Array<{ id: string; title: string }>;
         allTasks: Task[];
@@ -47,6 +49,7 @@
         onShowCreateTask: () => void;
 
         getColumnColor: (sectionId: string) => string;
+        multiSelect?: MultiSelect | null;
     } = $props();
 
     // Scroll to current task when task detail opens or task changes.
@@ -128,6 +131,7 @@
                             inline={false}
                             showSubtaskBorder={true}
                             onSelect={selectHandler}
+                            {multiSelect}
                             onRefreshBoard={onRefreshBoard}
                         />
                     </div>
