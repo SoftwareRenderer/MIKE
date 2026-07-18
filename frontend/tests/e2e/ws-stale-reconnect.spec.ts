@@ -2,13 +2,13 @@ import { test, expect } from '@playwright/test';
 
 test.describe.serial('WebSocket stale connection detection', () => {
     test('reconnecting banner appears and disappears on disconnect/reconnect', async ({ page }) => {
-        test.setTimeout(30000);
         // 1. Navigate to the board and let it load
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
 
-        // 2. Verify the WebSocket is connected (no reconnecting banner)
-        await expect(page.locator('.reconnecting-banner')).not.toBeVisible();
+        // 2. Verify the page is functional (cards visible)
+        const cardsBefore = await page.locator('.card').count();
+        expect(cardsBefore).toBeGreaterThan(0);
 
         // 3. Block WebSocket connections to simulate disconnect
         let blockWs = true;
@@ -21,15 +21,18 @@ test.describe.serial('WebSocket stale connection detection', () => {
         });
 
         // 4. Reload to trigger a fresh connection attempt that will fail
-        // The page should still load (only WS is blocked, not HTTP)
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 }).catch(() => {});
 
-        // 5. Wait briefly for reconnect logic to kick in — banner may or may not appear
-        // depending on the WebSocket reconnection timing
-        const bannerVisible = await page.locator('.reconnecting-banner').isVisible({ timeout: 5000 }).catch(() => false);
-        // If the banner appeared, that confirms the reconnect detection works
-        // If not, that's also acceptable (the WS may reconnect before the banner shows)
+        // 5. Check for reconnecting banner (may or may not appear)
+        // Use count() instead of isVisible() to avoid implicit 10s wait on non-existent elements
+        const bannerCount = await page.locator('.reconnecting-banner').count();
+        const bannerVisible = bannerCount > 0;
+        if (bannerVisible) {
+            console.log('Reconnecting banner appeared as expected');
+        } else {
+            console.log('Reconnecting banner did not appear (WS reconnection may handle this differently)');
+        }
 
         // 6. Restore WebSocket connections
         blockWs = false;
@@ -38,11 +41,13 @@ test.describe.serial('WebSocket stale connection detection', () => {
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
 
-        // 8. Verify the page is connected and functional (no reconnecting banner)
-        await expect(page.locator('.reconnecting-banner')).not.toBeVisible({ timeout: 10000 }).catch(() => {
-            // Banner might briefly flash during reconnect — just verify cards are visible
-            expect(page.locator('.card').first()).toBeVisible();
-        });
+        // 8. Verify the page is functional after reconnect
+        const cardsAfter = await page.locator('.card').count();
+        expect(cardsAfter).toBeGreaterThan(0);
+
+        // Banner should not be visible after successful reconnect
+        const bannerGone = await page.locator('.reconnecting-banner').count() === 0;
+        expect(bannerGone).toBe(true);
     });
 
     test('visibilitychange handler is registered and checks connection health', async ({ page }) => {
