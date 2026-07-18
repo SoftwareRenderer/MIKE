@@ -94,11 +94,35 @@ test.describe.serial('Agent + Network Isolation', () => {
   test('should allow task start when LLM provider + network isolation enabled', async ({ page }) => {
     const projectId = await getProjectId(page);
 
+    // Stop any running tasks from previous tests (serial suite shared state)
+    const tasks = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}/tasks`);
+      return res.ok ? res.json() : [];
+    }, projectId);
+    for (const task of tasks) {
+      if (task.status === 'in_progress') {
+        await csrfFetch(page, `/api/projects/${projectId}/tasks/${task.id}/move`, {
+          method: 'POST',
+          body: { status: 'backlog' },
+        });
+      }
+    }
+
     // Enable network isolation
     await csrfFetch(page, `/api/projects/${projectId}`, {
       method: 'PUT',
       body: { sandbox_enabled: true, sandbox_network_isolation: true },
     });
+
+    // Verify sandbox was actually enabled before proceeding
+    const projectData = await page.evaluate(async (pid) => {
+      const res = await fetch(`/api/projects/${pid}`);
+      return res.ok ? res.json() : null;
+    }, projectId);
+    if (!projectData?.sandbox_enabled) {
+      console.warn('Sandbox could not be enabled — skipping test');
+      test.skip('Sandbox not enabled (may require gVisor)');
+    }
 
     // Get the default LLM provider
     const config = await page.evaluate(async () => {
