@@ -185,7 +185,16 @@ test.describe.serial('Chat Message Actions', () => {
     await page.click('[role="dialog"] .btn-confirm');
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
 
-    await waitForSendButton(page);
+    // Wait for page to stabilize after deletion (LLM may still be processing)
+    await expect(async () => {
+      const hasSend = await page.locator('.btn-send').isVisible();
+      const hasStop = await page.locator('.btn-stop').isVisible();
+      expect(hasSend || hasStop).toBe(true);
+    }).toPass({ timeout: 15000 });
+    // If stop button is visible, wait for send button
+    if (await page.locator('.btn-stop').isVisible().catch(() => false)) {
+      await waitForSendButton(page);
+    }
 
     // --- ASSERTION: exactly 1 assistant message, no duplicates ---
     const finalAssistantCount = await page.locator('.chat-message.assistant').count();

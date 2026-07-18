@@ -59,6 +59,20 @@ test.describe.serial('Model switcher in task view', () => {
         expect(taskData.model_name).toMatch(/^model-a/);
 
         // Wait for streaming to complete (send button visible means idle)
+        // If the executor is running, wait for it to finish (or stop it if possible)
+        // First ensure the chat form is loaded
+        await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
+        await expect(async () => {
+            const hasSend = await page.locator('.btn-send').isVisible();
+            if (hasSend) return;
+            // If stop button is visible, click it to cancel
+            const hasStop = await page.locator('.btn-stop').isVisible();
+            if (hasStop) {
+                await page.locator('.btn-stop').click().catch(() => {});
+            }
+            // If neither, the form might still be loading
+            throw new Error('Neither send nor stop button visible');
+        }).toPass({ timeout: 15000 });
         await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
 
         // Open the provider dropdown
@@ -96,6 +110,14 @@ test.describe.serial('Model switcher in task view', () => {
         expect(taskData.model_name).toBe('model-a1');
 
         // Wait for streaming to complete (send button visible means idle)
+        await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
+        await expect(async () => {
+            const hasSend = await page.locator('.btn-send').isVisible();
+            if (hasSend) return;
+            const hasStop = await page.locator('.btn-stop').isVisible();
+            if (hasStop) await page.locator('.btn-stop').click().catch(() => {});
+            throw new Error('Neither send nor stop button visible');
+        }).toPass({ timeout: 15000 });
         await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
 
         // Open the model dropdown
@@ -128,6 +150,14 @@ test.describe.serial('Model switcher in task view', () => {
         });
 
         // Wait for streaming to complete (send button visible means idle)
+        await expect(page.locator('.chat-form')).toBeVisible({ timeout: 15000 });
+        await expect(async () => {
+            const hasSend = await page.locator('.btn-send').isVisible();
+            if (hasSend) return;
+            const hasStop = await page.locator('.btn-stop').isVisible();
+            if (hasStop) await page.locator('.btn-stop').click().catch(() => {});
+            throw new Error('Neither send nor stop button visible');
+        }).toPass({ timeout: 15000 });
         await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
 
         // Switch to model-a2 which has reasoning_effort: high
