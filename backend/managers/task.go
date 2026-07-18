@@ -137,16 +137,20 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.configStore != nil {
 			if cfg, err := h.configStore.GetConfig(); err == nil {
-				// Only apply defaults for fields NOT sent by the client
-				if cfg.DefaultAutoCommit != nil && !hasField(rawBody, "auto_commit") {
-					task.AutoCommit = *cfg.DefaultAutoCommit
+				// Build skip set for fields explicitly sent by the client
+				skipFields := make(map[string]struct{})
+				for _, k := range []string{"auto_commit", "auto_merge", "subtasks_auto_merge"} {
+					if hasField(rawBody, k) {
+						skipFields[k] = struct{}{}
+					}
 				}
-				if cfg.DefaultAutoMerge != nil && !hasField(rawBody, "auto_merge") {
-					task.AutoMerge = *cfg.DefaultAutoMerge
+				// Apply config defaults + parent inheritance for auto-merge fields
+				var parentTask *types.Task
+				if task.ParentTaskID != "" {
+					parentTask, _ = h.store.GetTask(projectID, task.ParentTaskID)
 				}
-				if cfg.DefaultSubtasksAutoMerge != nil && !hasField(rawBody, "subtasks_auto_merge") {
-					task.SubtasksAutoMerge = *cfg.DefaultSubtasksAutoMerge
-				}
+				types.ApplyTaskCreationDefaults(&task, cfg, parentTask, skipFields)
+
 				if !hasField(rawBody, "operating_mode") && !hasField(rawBody, "plan_mode") {
 					if cfg.DefaultOperatingMode != nil {
 						task.OperatingMode = *cfg.DefaultOperatingMode
@@ -164,18 +168,6 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				}
 				if cfg.DefaultMaxFailedTurns != nil && !hasField(rawBody, "max_consecutive_failed_turns") {
 					task.MaxConsecutiveFailedTurns = *cfg.DefaultMaxFailedTurns
-				}
-			}
-		}
-		// If this is a child task, inherit auto_commit/auto_merge from parent
-		if task.ParentTaskID != "" {
-			parent, err := h.store.GetTask(projectID, task.ParentTaskID)
-			if err == nil {
-				if !hasField(rawBody, "auto_commit") {
-					task.AutoCommit = parent.AutoCommit
-				}
-				if !hasField(rawBody, "auto_merge") {
-					task.AutoMerge = parent.SubtasksAutoMerge
 				}
 			}
 		}

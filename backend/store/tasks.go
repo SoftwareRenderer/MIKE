@@ -183,6 +183,26 @@ func (s *Store) GetAllTaskIDs() ([]string, error) {
 	return ids, rows.Err()
 }
 
+// GetAllTaskBranches returns all non-empty branch names referenced by tasks.
+func (s *Store) GetAllTaskBranches() ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(`SELECT DISTINCT branch FROM tasks WHERE branch != ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	branches := []string{}
+	for rows.Next() {
+		var branch string
+		if err := rows.Scan(&branch); err != nil {
+			return nil, err
+		}
+		branches = append(branches, branch)
+	}
+	return branches, rows.Err()
+}
+
 // ReorderTasks bulk-updates column_order for tasks in a project.
 func (s *Store) ReorderTasks(projectID string, reorders []types.ReorderRequest) error {
 	s.mu.Lock()

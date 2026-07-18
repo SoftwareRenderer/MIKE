@@ -537,6 +537,10 @@ func TestHandleCreateTask_UsesConfigDefaultsForAutoMerge(t *testing.T) {
 	if !task.SubtasksAutoMerge {
 		t.Errorf("expected SubtasksAutoMerge=true from config default, got %v", task.SubtasksAutoMerge)
 	}
+	// AutoCommit must be true when AutoMerge is true (prerequisite)
+	if !task.AutoCommit {
+		t.Errorf("expected AutoCommit=true (prerequisite for AutoMerge), got %v", task.AutoCommit)
+	}
 }
 
 func TestHandleCreateTask_SubtaskInheritsSubtasksAutoMergeAsAutoMerge(t *testing.T) {
@@ -571,6 +575,10 @@ func TestHandleCreateTask_SubtaskInheritsSubtasksAutoMergeAsAutoMerge(t *testing
 	// Child's SubtasksAutoMerge should come from config default
 	if !child.SubtasksAutoMerge {
 		t.Errorf("expected SubtasksAutoMerge=true from config default, got %v", child.SubtasksAutoMerge)
+	}
+	// AutoCommit must be true when AutoMerge is true (prerequisite)
+	if !child.AutoCommit {
+		t.Errorf("expected AutoCommit=true (prerequisite for AutoMerge), got %v", child.AutoCommit)
 	}
 }
 

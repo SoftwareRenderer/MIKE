@@ -345,6 +345,18 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 		activeSet[id] = true
 	}
 
+	// Also build a set of all branch names referenced by tasks.
+	// Branches with slugified names (e.g., task/count-lines-in-hello-c) won't
+	// match any task ID but are still in use.
+	activeBranches, err := wm.store.GetAllTaskBranches()
+	if err != nil {
+		log.Printf("[gc] error getting task branches: %v", err)
+	}
+	activeBranchSet := make(map[string]bool, len(activeBranches))
+	for _, b := range activeBranches {
+		activeBranchSet[b] = true
+	}
+
 	// Get all active thread IDs for orphaned thread branch detection
 	activeThreadIDs, err := wm.store.GetAllThreadIDs()
 	if err != nil {
@@ -421,7 +433,7 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 				continue
 			}
 			taskID := strings.TrimPrefix(branch, "task/")
-			if !activeSet[taskID] {
+			if !activeSet[taskID] && !activeBranchSet[branch] {
 				if dryRun {
 					log.Printf("[gc] would delete orphaned branch %s in project %s", branch, p.Name)
 				} else {
@@ -520,6 +532,16 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 		activeTaskSet[id] = true
 	}
 
+	// Also check branch names referenced by tasks (slugified names won't match task IDs)
+	activeBranches, err := wm.store.GetAllTaskBranches()
+	if err != nil {
+		log.Printf("[prune] error getting task branches: %v", err)
+	}
+	activeBranchSet := make(map[string]bool, len(activeBranches))
+	for _, b := range activeBranches {
+		activeBranchSet[b] = true
+	}
+
 	// Get all active thread IDs
 	activeThreadIDs, err := wm.store.GetAllThreadIDs()
 	if err != nil {
@@ -541,7 +563,7 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 				continue
 			}
 			taskID := strings.TrimPrefix(branch, "task/")
-			if !activeTaskSet[taskID] {
+			if !activeTaskSet[taskID] && !activeBranchSet[branch] {
 				log.Printf("[prune] deleting orphaned branch %s in project %s", branch, project.Name)
 				wm.gitRun(project.Path, "branch", "-D", branch)
 				removed++
