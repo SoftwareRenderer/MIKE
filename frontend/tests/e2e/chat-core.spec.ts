@@ -8,6 +8,7 @@ import {
   sendMessage,
   csrfFetch,
   ensureChatForm,
+  ensureTaskStarted,
 } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
@@ -111,6 +112,7 @@ test.describe('Chat Core', () => {
     test.setTimeout(30000);
     const taskId = await createTaskViaApi(page, projectId, `escape-stop-${Date.now()}`);
     await navigateToTask(page, taskId);
+    await ensureTaskStarted(page, projectId, taskId);
     await waitForChatForm(page);
 
     if (!await requireSendButton(page)) return;
