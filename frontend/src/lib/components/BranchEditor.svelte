@@ -428,6 +428,10 @@
             await new Promise(resolve => requestAnimationFrame(resolve));
             if (editorEl && !view) {
                 createEditor();
+                // Jump to target line after editor is created (e.g., from search result click)
+                if (targetLine >= 1) {
+                    requestAnimationFrame(() => jumpToLine(targetLine));
+                }
             }
         }
     }

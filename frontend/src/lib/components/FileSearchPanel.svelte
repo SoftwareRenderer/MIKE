@@ -96,7 +96,8 @@
     }
 
     function handleResultClick(result: SearchResult) {
-        onFileSelected(result.path, result.line || undefined);
+        const fullPath = rootPath ? rootPath + '/' + result.path : result.path;
+        onFileSelected(fullPath, result.line || undefined);
     }
 
     /** Escape special HTML characters for safe insertion */
@@ -235,7 +236,6 @@
                     </svg>
                 </button>
             </div>
-            <span class="match-count">{getMatchCount()}</span>
             {#if query}
                 <button class="clear-btn" onclick={() => { query = ''; results = []; searched = false; error = ''; inputEl?.focus(); }} aria-label="Clear search">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -297,6 +297,11 @@
             <p>Search in project</p>
         </div>
     {/if}
+
+    <!-- Footer bar -->
+    <div class="search-footer">
+        <span class="match-count">{getMatchCount()}</span>
+    </div>
 </div>
 
 <style>
@@ -372,14 +377,6 @@
     }
     .toggle-btn.active {
         color: var(--color-accent);
-    }
-
-    .match-count {
-        font-size: 0.6875rem;
-        color: var(--color-text-tertiary);
-        white-space: nowrap;
-        flex-shrink: 0;
-        padding: 0 4px;
     }
 
     .clear-btn {
@@ -503,6 +500,21 @@
         color: inherit;
         border-radius: 2px;
         padding: 0 1px;
+    }
+
+    .search-footer {
+        display: flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-top: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        flex-shrink: 0;
+    }
+
+    .search-footer .match-count {
+        font-size: 0.6875rem;
+        color: var(--color-text-tertiary);
+        white-space: nowrap;
     }
 
     @media (max-width: 768px) {

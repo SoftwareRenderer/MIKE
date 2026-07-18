@@ -258,7 +258,6 @@
     function handleFileSelected(path: string, line?: number) {
         if (!isPathSafe(path)) return;
         closeCommitDiff();
-        showFind = false;
         selectedFilePath = path;
         targetLine = line || 0;
         onUpdateFile(path);
