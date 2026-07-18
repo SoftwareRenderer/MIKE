@@ -579,27 +579,17 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		ModelName:                 parent.ModelName,
 		ReasoningEffort:           parent.ReasoningEffort,
 		MaxConsecutiveFailedTurns: parent.MaxConsecutiveFailedTurns,
-		AutoCommit:                parent.AutoCommit,
 		OperatingMode:             "act",
 		ParentTaskID:              actualParentID,
 		CreatedAt:                 now,
 		UpdatedAt:                 now,
 	}
 
-	// Apply config defaults for auto_merge / subtasks_auto_merge
+	// Apply config defaults + parent inheritance (same logic as UI task creation)
 	if te.configStore != nil {
 		if cfg, err := te.configStore.GetConfig(); err == nil {
-			if cfg.DefaultAutoMerge != nil {
-				newTask.AutoMerge = *cfg.DefaultAutoMerge
-			}
-			if cfg.DefaultSubtasksAutoMerge != nil {
-				newTask.SubtasksAutoMerge = *cfg.DefaultSubtasksAutoMerge
-			}
+			types.ApplyTaskCreationDefaults(newTask, cfg, parentTask, nil)
 		}
-	}
-	// For child tasks, inherit auto_merge from parent's subtasks_auto_merge
-	if actualParentID != "" && parentTask != nil {
-		newTask.AutoMerge = parentTask.SubtasksAutoMerge
 	}
 
 	if err := te.store.CreateTask(newTask); err != nil {

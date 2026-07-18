@@ -369,9 +369,24 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) erro
 		if err := te.EnsureParentBranch(projectID, parent); err != nil {
 			return fmt.Errorf("ensure parent branch: %w", err)
 		}
-		// Broadcast the updated parent (branch now set)
 		parent, _ = te.store.GetTaskByTaskID(subtask.ParentTaskID)
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, parent)
+	} else {
+		// Parent has a branch — sync it if the worktree's actual branch differs.
+		// The stored branch may be stale (e.g., set before collision resolution).
+		if parentWtPath, wtErr := te.worktreeMgr.WorktreePath(parent.ID); wtErr == nil {
+			if _, statErr := os.Stat(parentWtPath); statErr == nil {
+				if actualBranch, gitErr := te.worktreeMgr.GitRunInDirOutput(parentWtPath, "rev-parse", "--abbrev-ref", "HEAD"); gitErr == nil {
+					actualBranch = strings.TrimSpace(actualBranch)
+					if actualBranch != "" && actualBranch != parent.Branch {
+						parent.Branch = actualBranch
+						parent.UpdatedAt = time.Now().UTC()
+						_ = te.store.UpdateTask(parent)
+						te.appStreamMgr.BroadcastTaskUpdated(projectID, parent)
+					}
+				}
+			}
+		}
 	}
 
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, subtask)
@@ -616,12 +631,24 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		}
 	}
 
-	// If this is a child task, branch from the parent's branch
+	// If this is a child task, branch from the parent's actual worktree branch.
+	// The stored parent.Branch may be stale (e.g., set before collision resolution).
 	sourceBranch := ""
 	if task.ParentTaskID != "" {
 		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
-		if err == nil && parent.Branch != "" {
-			sourceBranch = parent.Branch
+		if err == nil {
+			// Prefer the parent's worktree branch if it exists.
+			if parentWtPath, wtErr := te.worktreeMgr.WorktreePath(parent.ID); wtErr == nil {
+				if _, statErr := os.Stat(parentWtPath); statErr == nil {
+					if actualBranch, gitErr := te.worktreeMgr.GitRunInDirOutput(parentWtPath, "rev-parse", "--abbrev-ref", "HEAD"); gitErr == nil {
+						sourceBranch = strings.TrimSpace(actualBranch)
+					}
+				}
+			}
+			// Fallback to stored branch if worktree branch unavailable.
+			if sourceBranch == "" && parent.Branch != "" {
+				sourceBranch = parent.Branch
+			}
 		}
 	}
 	worktreePath, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName, sourceBranch)
@@ -1169,13 +1196,38 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			}
 			parent, _ = te.store.GetTaskByTaskID(task.ParentTaskID)
 		}
-		targetBranch = parent.Branch
-		// Check if parent has a worktree (created by EnsureParentBranch)
+		// Ensure parent has a worktree to merge into.
 		parentWorktreePath, wtErr := te.worktreeMgr.WorktreePath(parent.ID)
-		if wtErr == nil {
-			if _, statErr := os.Stat(parentWorktreePath); statErr == nil {
-				mergeInWorktree = parentWorktreePath
+		hasWorktree := wtErr == nil && parentWorktreePath != ""
+		if hasWorktree {
+			if _, statErr := os.Stat(parentWorktreePath); statErr != nil {
+				hasWorktree = false
+				parentWorktreePath = ""
 			}
+		}
+		if !hasWorktree {
+			// Parent has no worktree — create one from its branch.
+			log.Printf("[merge] task=%s parent %s has no worktree, creating it now", taskID, parent.ID)
+			branchName := parent.Branch
+			if branchName == "" {
+				branchName = te.generateBranchName(parent, parent.ID, projectID)
+			}
+			if _, _, err := te.worktreeMgr.CreateWorktree(projectID, parent.ID, branchName, ""); err != nil {
+				log.Printf("[merge] task=%s failed to create parent worktree: %v", taskID, err)
+			} else {
+				parentWorktreePath, _ = te.worktreeMgr.WorktreePath(parent.ID)
+				hasWorktree = true
+			}
+		}
+		// Use the parent's worktree and the branch it's actually on.
+		if hasWorktree && parentWorktreePath != "" {
+			mergeInWorktree = parentWorktreePath
+			if currentBranch, err := te.worktreeMgr.GitRunInDirOutput(parentWorktreePath, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
+				targetBranch = strings.TrimSpace(currentBranch)
+			}
+		}
+		if targetBranch == "" {
+			targetBranch = parent.Branch
 		}
 	} else {
 		targetBranch = te.ResolveMergeTarget(projectID, task)
@@ -1229,13 +1281,56 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 	if mergeInWorktree != "" {
 		return te.mergeInWorktree(projectID, mergeInWorktree, targetBranch, taskBranch, taskID, task.ParentTaskID)
 	}
+	// For root tasks only: if the target branch is checked out in a worktree, use it.
+	// For child tasks, we always merge into the parent's worktree (created above if needed).
+	if task.ParentTaskID == "" {
+		if wtPath := te.findWorktreeForBranch(projectID, targetBranch); wtPath != "" {
+			return te.mergeInWorktree(projectID, wtPath, targetBranch, taskBranch, taskID, "")
+		}
+	}
 	return te.mergeInProject(projectID, targetBranch, taskBranch, taskID)
 }
 
 // mergeInProject performs a merge in the project's main directory.
 func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, taskID string) error {
 	project, _ := te.store.GetProject(projectID)
+	// Prune stale worktree registrations so a deleted worktree doesn't block checkout.
+	te.worktreeMgr.GitRunInProject(projectID, "worktree", "prune")
 	return te.mergeInto(projectID, project.Path, targetBranch, taskBranch, taskID)
+}
+
+// findWorktreeForBranch returns the path of the worktree that has the given branch
+// checked out, or empty string if no worktree holds it. This is needed because git
+// won't allow checking out a branch in the main working tree if a worktree already
+// has it checked out.
+func (te *TaskExecutor) findWorktreeForBranch(projectID, branch string) string {
+	project, err := te.store.GetProject(projectID)
+	if err != nil {
+		return ""
+	}
+	cmd := osexec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = project.Path
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	worktrees := strings.Split(string(out), "\n")
+	var currentPath, currentBranch string
+	for _, line := range worktrees {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "worktree ") {
+			currentPath = strings.TrimPrefix(line, "worktree ")
+			currentBranch = ""
+		} else if strings.HasPrefix(line, "branch ") {
+			currentBranch = strings.TrimPrefix(line, "branch refs/heads/")
+		}
+		if currentBranch == branch && currentPath != "" {
+			if _, err := os.Stat(currentPath); err == nil {
+				return currentPath
+			}
+		}
+	}
+	return ""
 }
 
 // mergeInWorktree merges inside another task's worktree (e.g. the parent's).

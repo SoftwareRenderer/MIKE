@@ -237,13 +237,22 @@ func TestMergeBranch_SubtaskMergesIntoParentBranch(t *testing.T) {
 		t.Fatalf("MergeBranch failed: %v", err)
 	}
 
-	// Verify the subtask's commit is now on the parent branch
-	cmd = exec.Command("git", "-C", repoDir, "branch", "--contains", "HEAD", parent.Branch)
-	cmd.Dir = repoDir
-	// Switch to parent branch first
-	runGit(t, repoDir, "checkout", parent.Branch)
-	if _, err := os.Stat(subtaskFile); err != nil {
-		t.Fatalf("subtask file should exist on parent branch after merge: %v", err)
+	// Verify the subtask's commit is now on the parent branch.
+	// Merge happens in the parent's worktree, so check there.
+	parentWtPath, err := te.worktreeMgr.WorktreePath(parentID)
+	if err != nil || parentWtPath == "" {
+		// Fallback: check via git (works regardless of worktree)
+		cmd = exec.Command("git", "-C", repoDir, "show", parent.Branch+":subtask_file.txt")
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("subtask file should exist on parent branch after merge: %v", err)
+		}
+		_ = out
+	} else {
+		wtSubtaskFile := filepath.Join(parentWtPath, "subtask_file.txt")
+		if _, err := os.Stat(wtSubtaskFile); err != nil {
+			t.Fatalf("subtask file should exist in parent worktree after merge: %v", err)
+		}
 	}
 
 	// Verify parent branch tip changed (merge happened)
@@ -1086,10 +1095,20 @@ func TestMergeBranch_CommitAndDonePath(t *testing.T) {
 		t.Fatalf("MergeBranch failed: %v", err)
 	}
 
-	// Verify the subtask's commit is on the parent branch
-	runGit(t, repoDir, "checkout", parent.Branch)
-	if _, err := os.Stat(subtaskFile); err != nil {
-		t.Fatalf("subtask file should exist on parent branch after merge: %v", err)
+	// Verify the subtask's commit is on the parent branch.
+	// Merge happens in the parent's worktree, so check there.
+	parentWtPath2, wtErr := te.worktreeMgr.WorktreePath(parentID)
+	if wtErr != nil || parentWtPath2 == "" {
+		showCmd := exec.Command("git", "-C", repoDir, "show", parent.Branch+":commit_done_file.txt")
+		_, showErr := showCmd.Output()
+		if showErr != nil {
+			t.Fatalf("subtask file should exist on parent branch after merge: %v", showErr)
+		}
+	} else {
+		wtSubtaskFile2 := filepath.Join(parentWtPath2, "commit_done_file.txt")
+		if _, err := os.Stat(wtSubtaskFile2); err != nil {
+			t.Fatalf("subtask file should exist in parent worktree after merge: %v", err)
+		}
 	}
 
 	// Verify the commit is NOT on master (origin) — it should only be on parent
