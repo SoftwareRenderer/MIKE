@@ -613,6 +613,13 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 
 	// Create default "Main" thread for the new task
 	defaultThreadID := types.GenerateThreadID()
+	// Ensure uniqueness
+	for {
+		if _, err := te.store.GetThread(defaultThreadID); err != nil {
+			break // unique
+		}
+		defaultThreadID = types.GenerateThreadID()
+	}
 	if err := te.store.CreateThread(&types.TaskThread{
 		ID:        defaultThreadID,
 		TaskID:    newTaskID,

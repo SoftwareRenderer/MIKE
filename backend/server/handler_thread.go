@@ -180,7 +180,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 				// worktrees in the project. Serialize with the shared stash mutex.
 				worktreePath, _ := s.executor.WorktreeMgr().WorktreePath(taskID)
 				s.executor.WorktreeMgr().GetProjectStashMu(projectID).Lock()
-				stashMsg := git.StashMessageForSwitch(taskID, oldThreadID)
+				stashMsg := git.StashMessageForSwitch(taskID)
 				stashHash, _ := s.executor.WorktreeMgr().PushStash(worktreePath, stashMsg)
 				if stashHash != "" {
 					_ = s.executor.WorktreeMgr().DropStashByHash(worktreePath, stashHash)
@@ -281,6 +281,13 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 
 	// Generate new thread ID and branch name
 	newThreadID := types.GenerateThreadID()
+	// Ensure uniqueness
+	for {
+		if _, err := s.store.GetThread(newThreadID); err != nil {
+			break // unique
+		}
+		newThreadID = types.GenerateThreadID()
+	}
 	newBranchName := fmt.Sprintf("thread/%s", newThreadID)
 	// Find the file state at the checkpoint: last commit BEFORE the checkpoint message.
 	// This is the state before its tool calls ran, so the fork starts from a clean slate.
@@ -301,7 +308,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		if s.executor.WorktreeMgr().HasWorktreeChanges(taskID) {
 			worktreePath, _ := s.executor.WorktreeMgr().WorktreePath(taskID)
 			s.executor.WorktreeMgr().GetProjectStashMu(projectID).Lock()
-			stashMsg := git.StashMessageForFork(taskID, task.CurrentThreadID)
+			stashMsg := git.StashMessageForFork(taskID)
 			stashHash, _ := s.executor.WorktreeMgr().PushStash(worktreePath, stashMsg)
 			if stashHash != "" {
 				_ = s.executor.WorktreeMgr().DropStashByHash(worktreePath, stashHash)

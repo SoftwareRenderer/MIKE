@@ -289,7 +289,7 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 	// Run stash creation in background (non-blocking).
 	// Label generation is deferred to fork time (handleThreadFork).
 	go func() {
-		label := git.StashMessageForCheckpoint(taskID, "", "")
+		label := git.StashMessageForCheckpoint(taskID, "")
 
 		// Check for cancellation before git operations
 		select {

@@ -1181,7 +1181,7 @@ func TestPushStash_MessageBased(t *testing.T) {
 	writeFile(t, worktreePath, "new.txt", "new content\n")
 
 	// Use PushStash with a unique message
-	msg := StashMessageForSwitch(taskID, "main-thread")
+	msg := StashMessageForSwitch(taskID)
 	hash, err := wm.PushStash(worktreePath, msg)
 	if err != nil {
 		t.Fatalf("PushStash: %v", err)
@@ -1237,9 +1237,9 @@ func TestPushStash_MultipleEntries(t *testing.T) {
 	_ = wm.gitRun(worktreePath, "add", "-A")
 	_ = wm.gitRun(worktreePath, "commit", "-m", "initial")
 
-	// Push first stash (thread A)
+	// Push first stash (task A)
 	writeFile(t, worktreePath, "file-a.txt", "content A\n")
-	msgA := StashMessageForSwitch(taskID, "thread-a")
+	msgA := StashMessageForSwitch(taskID + "-a")
 	hashA, err := wm.PushStash(worktreePath, msgA)
 	if err != nil {
 		t.Fatalf("PushStash A: %v", err)
@@ -1248,9 +1248,9 @@ func TestPushStash_MultipleEntries(t *testing.T) {
 		t.Fatal("PushStash A returned empty hash")
 	}
 
-	// Push second stash (thread B)
+	// Push second stash (task B)
 	writeFile(t, worktreePath, "file-b.txt", "content B\n")
-	msgB := StashMessageForSwitch(taskID, "thread-b")
+	msgB := StashMessageForSwitch(taskID + "-b")
 	hashB, err := wm.PushStash(worktreePath, msgB)
 	if err != nil {
 		t.Fatalf("PushStash B: %v", err)
@@ -1979,17 +1979,17 @@ func TestDropStashEntriesForTask_RemovesMatchingStashes(t *testing.T) {
 	// Create some stash entries with kanban-labeled messages
 	writeFile(t, repoDir, "changed.txt", "content A\n")
 	runGit(t, repoDir, "add", "changed.txt")
-	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSwitch(taskID, "thread-1"))
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSwitch(taskID))
 
 	writeFile(t, repoDir, "changed.txt", "content B\n")
 	runGit(t, repoDir, "add", "changed.txt")
-	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForFork(taskID, "thread-2"))
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForFork(taskID))
 
 	// Also create a stash for a different (non-existent) task — should be left alone
 	writeFile(t, repoDir, "changed.txt", "content C\n")
 	runGit(t, repoDir, "add", "changed.txt")
 	otherTaskID := "other-task-id"
-	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSwitch(otherTaskID, "thread-3"))
+	runGit(t, repoDir, "stash", "push", "-u", "-m", StashMessageForSwitch(otherTaskID))
 
 	// Verify all three stashes exist
 	listOut := runGitOutput(t, repoDir, "stash", "list", "--format=%s")
@@ -2180,19 +2180,19 @@ func TestGarbageCollect_DropsStaleSyncMergeAndAutoMergeStashes(t *testing.T) {
 func TestStashMessageHelpers_GenerateCorrectFormats(t *testing.T) {
 	taskID := "test-task-id"
 
-	switchMsg := StashMessageForSwitch(taskID, "thread-1")
-	if switchMsg != "kanban-switch-"+taskID+"-thread-1" {
-		t.Errorf("StashMessageForSwitch = %q, want %q", switchMsg, "kanban-switch-"+taskID+"-thread-1")
+	switchMsg := StashMessageForSwitch(taskID)
+	if switchMsg != "kanban-switch-"+taskID {
+		t.Errorf("StashMessageForSwitch = %q, want %q", switchMsg, "kanban-switch-"+taskID)
 	}
 
-	forkMsg := StashMessageForFork(taskID, "thread-2")
-	if forkMsg != "kanban-fork-"+taskID+"-thread-2" {
-		t.Errorf("StashMessageForFork = %q, want %q", forkMsg, "kanban-fork-"+taskID+"-thread-2")
+	forkMsg := StashMessageForFork(taskID)
+	if forkMsg != "kanban-fork-"+taskID {
+		t.Errorf("StashMessageForFork = %q, want %q", forkMsg, "kanban-fork-"+taskID)
 	}
 
-	checkpointMsg := StashMessageForCheckpoint(taskID, "task/fix-bug", "fixed login")
-	if checkpointMsg != "On task/fix-bug: kanban-checkpoint-"+taskID+" fixed login" {
-		t.Errorf("StashMessageForCheckpoint = %q, want correct format", checkpointMsg)
+	checkpointMsg := StashMessageForCheckpoint(taskID, "task/fix-bug")
+	if checkpointMsg != "On task/fix-bug: kanban-checkpoint-"+taskID {
+		t.Errorf("StashMessageForCheckpoint = %q, want %q", checkpointMsg, "On task/fix-bug: kanban-checkpoint-"+taskID)
 	}
 
 	syncMsg := StashMessageForSyncMerge(taskID)
@@ -2203,5 +2203,36 @@ func TestStashMessageHelpers_GenerateCorrectFormats(t *testing.T) {
 	autoMsg := StashMessageForAutoMerge(taskID)
 	if autoMsg != "kanban-auto-merge-"+taskID {
 		t.Errorf("StashMessageForAutoMerge = %q, want %q", autoMsg, "kanban-auto-merge-"+taskID)
+	}
+}
+
+func TestStashMessageHelpers_MaxLength(t *testing.T) {
+	// All stash messages must be ≤ 50 characters
+	longTaskID := "waterfall-lightning-thunder-waterfall-lightning-thunder-x"
+
+	switchMsg := StashMessageForSwitch(longTaskID)
+	if len(switchMsg) > 50 {
+		t.Errorf("StashMessageForSwitch len = %d, want ≤ 50", len(switchMsg))
+	}
+
+	forkMsg := StashMessageForFork(longTaskID)
+	if len(forkMsg) > 50 {
+		t.Errorf("StashMessageForFork len = %d, want ≤ 50", len(forkMsg))
+	}
+
+	longBranch := "task/" + strings.Repeat("x", 100)
+	checkpointMsg := StashMessageForCheckpoint(longTaskID, longBranch)
+	if len(checkpointMsg) > 50 {
+		t.Errorf("StashMessageForCheckpoint len = %d, want ≤ 50", len(checkpointMsg))
+	}
+
+	syncMsg := StashMessageForSyncMerge(longTaskID)
+	if len(syncMsg) > 50 {
+		t.Errorf("StashMessageForSyncMerge len = %d, want ≤ 50", len(syncMsg))
+	}
+
+	autoMsg := StashMessageForAutoMerge(longTaskID)
+	if len(autoMsg) > 50 {
+		t.Errorf("StashMessageForAutoMerge len = %d, want ≤ 50", len(autoMsg))
 	}
 }

@@ -1425,17 +1425,17 @@ func TestTaskDeleteCleansStashes(t *testing.T) {
 	// Need working tree changes for git stash push to work
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("a\n"), 0o644)
 	mustRunGit(t, tmpDir, "add", "change.txt")
-	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(taskID, "thread-abc"))
+	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(taskID))
 
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("b\n"), 0o644)
 	mustRunGit(t, tmpDir, "add", "change.txt")
-	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForFork(taskID, "thread-def"))
+	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForFork(taskID))
 
 	// Also create a stash for a different task — should NOT be removed
 	otherTaskID := "other-task-xyz"
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("c\n"), 0o644)
 	mustRunGit(t, tmpDir, "add", "change.txt")
-	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(otherTaskID, "thread-ghi"))
+	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(otherTaskID))
 
 	// Verify stashes exist
 	stashList := gitListStashes(t, tmpDir)
@@ -1503,7 +1503,7 @@ func TestTaskDeleteCleansStashes_NoBranch(t *testing.T) {
 	// Create kanban-labeled stash entries (simulating stale stashes)
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("a\n"), 0o644)
 	mustRunGit(t, tmpDir, "add", "change.txt")
-	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(taskID, "thread-abc"))
+	mustRunGit(t, tmpDir, "stash", "push", "-u", "-m", git.StashMessageForSwitch(taskID))
 
 	// Verify stash exists
 	stashList := gitListStashes(t, tmpDir)
@@ -1568,12 +1568,12 @@ func TestTaskDeleteCleansCheckpointStashes(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("checkpoint1\n"), 0o644)
 	mustRunGit(t, tmpDir, "add", "change.txt")
 	hash1 := mustRunGitOutput(t, tmpDir, "stash", "create")
-	mustRunGit(t, tmpDir, "stash", "store", "-m", git.StashMessageForCheckpoint(taskID, branchName, "checkpoint 1"), hash1)
+	mustRunGit(t, tmpDir, "stash", "store", "-m", git.StashMessageForCheckpoint(taskID, branchName), hash1)
 
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("checkpoint2\n"), 0o644)
 	mustRunGit(t, tmpDir, "add", "change.txt")
 	hash2 := mustRunGitOutput(t, tmpDir, "stash", "create")
-	mustRunGit(t, tmpDir, "stash", "store", "-m", git.StashMessageForCheckpoint(taskID, branchName, "checkpoint 2"), hash2)
+	mustRunGit(t, tmpDir, "stash", "store", "-m", git.StashMessageForCheckpoint(taskID, branchName), hash2)
 
 	// Verify stashes exist
 	stashList := gitListStashes(t, tmpDir)

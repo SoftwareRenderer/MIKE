@@ -1455,15 +1455,19 @@ func (te *TaskExecutor) branchExists(projectID, branchName string) bool {
 	return err == nil
 }
 
+// maxBranchName is the maximum length for any git branch name.
+const maxBranchName = 50
+
 // generateBranchName creates a unique git branch name for a task.
 // Uses a slugified title when possible (e.g. "task/fix-login-bug"),
 // falls back to the task ID (e.g. "task/frost-amber-quartz"),
 // and appends a short suffix if the branch already exists from a deleted task.
+// The total branch name (including prefix) is capped at 50 characters.
 func (te *TaskExecutor) generateBranchName(task *types.Task, taskID, projectID string) string {
 	branchName := fmt.Sprintf("task/%s", task.ID)
 	if !task.AutoMerge && task.Title != "" {
 		slug := slugifyBranchName(task.Title)
-		if slug != "" && len(slug) <= 50 {
+		if slug != "" && len("task/"+slug) <= maxBranchName {
 			branchName = "task/" + slug
 		}
 	}
@@ -1474,13 +1478,34 @@ func (te *TaskExecutor) generateBranchName(task *types.Task, taskID, projectID s
 	_, wtStatErr := os.Stat(wtPath)
 	wtExists := wtErr == nil && wtStatErr == nil
 	if !wtExists && te.branchExists(projectID, branchName) {
-		branchName = branchName + "-" + taskID[:8]
+		// Append a unique suffix: taskID[:8], then taskID[:8]-N if that also collides
+		suffix := "-" + taskID[:8]
+		n := 1
+		for {
+			candidate := branchName + suffix
+			if n > 1 {
+				candidate = branchName + suffix + fmt.Sprintf("-%d", n)
+			}
+			// Truncate to fit within maxBranchName
+			if len(candidate) > maxBranchName {
+				candidate = candidate[:maxBranchName]
+			}
+			if !te.branchExists(projectID, candidate) {
+				branchName = candidate
+				break
+			}
+			n++
+			if n > 100 {
+				break // safety net — shouldn't happen
+			}
+		}
 	}
 	return branchName
 }
 
-// slugifyBranchName converts a task title into a git-friendly branch name.
+// slugifyBranchName converts a task title into a git-friendly branch name slug.
 // E.g. "Fix login bug #123" -> "fix-login-bug-123"
+// The slug is capped so that "task/" + slug fits within maxBranchName (50 chars).
 func slugifyBranchName(title string) string {
 	// Convert to lowercase
 	s := strings.ToLower(title)
@@ -1496,10 +1521,11 @@ func slugifyBranchName(title string) string {
 	// Trim leading/trailing hyphens
 	out := string(result)
 	out = strings.Trim(out, "-")
-	// Truncate to 50 chars. If the slug exceeds this, the caller falls back
-	// to the task ID (e.g., "frost-amber-quartz"), which is always short.
-	if len(out) > 50 {
-		out = out[:50]
+	// Truncate so "task/" + slug fits within maxBranchName.
+	// If the slug exceeds this, the caller falls back to the task ID.
+	slugMax := maxBranchName - len("task/")
+	if len(out) > slugMax {
+		out = out[:slugMax]
 	}
 	return out
 }

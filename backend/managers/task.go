@@ -118,6 +118,13 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		task.ID = types.GenerateTaskID()
+		// Ensure uniqueness
+		for {
+			if _, err := h.store.GetTaskByTaskID(task.ID); err != nil {
+				break // unique
+			}
+			task.ID = types.GenerateTaskID()
+		}
 		task.ProjectID = projectID
 		if task.Status == "" {
 			task.Status = "backlog"
@@ -202,6 +209,13 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		}
 		// Create default thread for the task
 		defaultThreadID := types.GenerateThreadID()
+		// Ensure uniqueness
+		for {
+			if _, err := h.store.GetThread(defaultThreadID); err != nil {
+				break // unique
+			}
+			defaultThreadID = types.GenerateThreadID()
+		}
 		if err := h.store.CreateThread(&types.TaskThread{
 			ID:        defaultThreadID,
 			TaskID:    task.ID,
