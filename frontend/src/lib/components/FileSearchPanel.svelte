@@ -28,6 +28,33 @@
     let error = $state('');
     let searched = $state(false);
 
+    interface GroupedFile {
+        path: string;
+        line: number;
+        results: SearchResult[];
+    }
+
+    let groupedResults = $derived.by(() => {
+        const map = new Map<string, SearchResult[]>();
+        for (const r of results) {
+            const key = r.path;
+            const group = map.get(key);
+            if (group) {
+                group.push(r);
+            } else {
+                map.set(key, [r]);
+            }
+        }
+        const groups: GroupedFile[] = [];
+        const sortedPaths = [...map.keys()].sort((a, b) => a.localeCompare(b));
+        for (const path of sortedPaths) {
+            const fileResults = map.get(path)!;
+            fileResults.sort((a, b) => (a.line || 0) - (b.line || 0));
+            groups.push({ path, line: fileResults[0].line || 0, results: fileResults });
+        }
+        return groups;
+    });
+
     // Debounce timer
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -263,29 +290,41 @@
         <div class="search-empty">No results found</div>
     {:else if results.length > 0}
         <div class="search-results" role="list" aria-label="Search results">
-            {#each results as result}
-                <button
-                    class="search-result-item"
-                    onclick={() => handleResultClick(result)}
-                    title={result.path}
-                >
+            {#each groupedResults as group}
+                <!-- File header -->
+                <div class="result-file-header" title={group.path}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="file-icon" aria-hidden="true">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                        <polyline points="14,2 14,8 20,8"/>
+                    </svg>
+                    <span class="file-path">{group.path}</span>
+                    <span class="file-match-count">{group.results.length} match{group.results.length !== 1 ? 'es' : ''}</span>
+                </div>
+                <!-- Results for this file -->
+                {#each group.results as result}
                     {#if result.line}
-                        <!-- Content search result with line number -->
-                        <div class="result-path">{result.path}</div>
-                        <div class="result-line">
-                            <span class="line-num">{result.line}</span>
-                            <span class="line-text">{@html highlightMatch(result.text || '', query)}</span>
-                        </div>
+                        <button
+                            class="search-result-item"
+                            onclick={() => handleResultClick(result)}
+                            title={result.path}
+                        >
+                            <div class="result-line">
+                                <span class="line-num">{result.line}</span>
+                                <span class="line-text">{@html highlightMatch(result.text || '', query)}</span>
+                            </div>
+                        </button>
                     {:else}
-                        <!-- Filename-only result -->
-                        <div class="result-path">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="file-icon" aria-hidden="true">
-                                <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-                            </svg>
-                            {result.path}
-                        </div>
+                        <button
+                            class="search-result-item"
+                            onclick={() => handleResultClick(result)}
+                            title={result.path}
+                        >
+                            <div class="result-path">
+                                {result.path}
+                            </div>
+                        </button>
                     {/if}
-                </button>
+                {/each}
             {/each}
         </div>
     {:else}
@@ -437,10 +476,37 @@
         padding: 2px 0;
     }
 
+    .result-file-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        background: var(--color-surface-2);
+        cursor: default;
+    }
+
+    .file-path {
+        flex: 1;
+        min-width: 0;
+        font-family: var(--font-mono, monospace);
+        font-size: 0.6875rem;
+        font-weight: 500;
+        color: var(--color-text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .file-match-count {
+        font-size: 0.6875rem;
+        color: var(--color-text-tertiary);
+        flex-shrink: 0;
+    }
+
     .search-result-item {
         display: block;
         width: 100%;
-        padding: 4px 10px;
+        padding: 2px 10px 2px 16px;
         border: none;
         background: transparent;
         color: var(--color-text-primary);
