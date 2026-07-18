@@ -253,7 +253,9 @@
     /** Scroll to the bottom of the list. */
     function scrollToBottom() {
         if (scrollEl) {
-            scrollEl.scrollTop = isFixedHeight ? totalHeight : (vs?.totalHeight ?? 0);
+            // Buffer past estimated height; browser clamps to actual max.
+            const h = isFixedHeight ? totalHeight : (vs?.totalHeight ?? 0);
+            scrollEl.scrollTop = h + 10000;
         }
     }
 

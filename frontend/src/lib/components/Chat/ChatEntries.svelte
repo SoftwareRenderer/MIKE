@@ -41,6 +41,8 @@
         onViewChanges,
         scrollEl,
         onScrollElChange,
+        onVirtualListChange,
+        entriesReady,
     }: {
         entries: ChatEntry[];
         entryMetas: EntryMeta[];
@@ -75,6 +77,8 @@
         onViewChanges?: (commitHash: string) => void;
         scrollEl: HTMLElement | null;
         onScrollElChange?: (el: HTMLElement | null) => void;
+        onVirtualListChange?: (comp: { scrollToBottom: () => void } | null) => void;
+        entriesReady?: boolean;
     } = $props();
 
     // Estimate rendered height from message data.
@@ -164,11 +168,19 @@
     // VirtualList component instance for accessing scrollToItem
     let virtualListComp: {
         scrollToItem: (index: number, behavior?: ScrollBehavior) => void;
+        scrollToBottom: () => void;
         vs: {
             getItemOffset: (index: number) => number;
             totalHeight: number;
         } | null;
     } | null = $state(null);
+
+    // Expose VirtualList ref to parent
+    $effect(() => {
+        if (onVirtualListChange) {
+            onVirtualListChange(virtualListComp);
+        }
+    });
 
     // Edit diff expand/collapse overrides — lives here (above VirtualList)
     // so state survives item unmount/remount during scroll.
@@ -246,7 +258,7 @@
     });
 </script>
 
-<div class="chat-messages-wrapper">
+<div class="chat-messages-wrapper" style={!entriesReady ? 'opacity: 0;' : ''}>
     {#if entries.length > 0 && computedShowHeader}
         <div class="chat-sticky-header" role="status" aria-live="polite">
             <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title="Scroll to message" aria-label="Scroll to message">{computedStickyMessage}</button>
