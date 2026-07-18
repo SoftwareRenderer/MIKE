@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { Task, TaskCommit } from '$lib/types';
     import type { DiffFile, DiffRow } from '$lib/types/diff';
-    import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
+    import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile } from '$lib/api';
     import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
@@ -44,6 +44,8 @@
     import MobileTabBar from './CardDetail/MobileTabBar.svelte';
     import TaskHeader from './CardDetail/TaskHeader.svelte';
     import BoardOverview from './CardDetail/BoardOverview.svelte';
+    import MultiSelectBar from './MultiSelectBar.svelte';
+    import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
 
     let { task, tasks, projectPath, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, onOpenTerminal, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; tasks?: Task[]; projectPath?: string; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; onOpenTerminal?: () => void; activeTab?: 'context' | 'chat' | 'diff' | 'checkpoint'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff' | 'checkpoint') => void } = $props();
 
@@ -335,6 +337,54 @@
     // Subtask hierarchy (extracted composable)
     let hierarchy = useSubtaskHierarchy(() => allTasks, expandedTasksContext, () => task.parent_task_id);
 
+    // Multi-select actions (wires up floating bar events)
+    let multiSelectActions = useMultiSelectActions({
+        async onDelete(taskIds, titles) {
+            const confirmed = await dialogStore.showConfirm({
+                title: 'Delete Tasks',
+                message: `Permanently delete ${taskIds.length} task${taskIds.length > 1 ? 's' : ''}? This cannot be undone.`,
+                items: titles,
+                confirmText: 'Delete',
+                cancelText: 'Cancel',
+            });
+            if (!confirmed) return;
+            for (const id of taskIds) {
+                try {
+                    await import('$lib/api').then(({ deleteTask }) => deleteTask(task.project_id, id));
+                    removeTaskFromBoard(appStore, id);
+                } catch (err) {
+                    dialogStore.showToast('Failed to delete task: ' + String(err), 'error');
+                }
+            }
+            onRefreshBoard?.();
+        },
+        async onStart(taskIds) {
+            let started = 0;
+            for (const id of taskIds) {
+                try {
+                    const t = allTasks.find(t => t.id === id);
+                    if (!t) continue;
+                    if (t.parent_task_id) {
+                        const { startSubtask } = await import('$lib/api');
+                        const updated = await startSubtask(task.project_id, id);
+                        updateTaskInBoard(appStore, updated.id, updated);
+                    } else {
+                        const { startTask } = await import('$lib/api');
+                        const updated = await startTask(task.project_id, id);
+                        updateTaskInBoard(appStore, updated.id, updated);
+                    }
+                    started++;
+                } catch (err) {
+                    dialogStore.showToast(`Failed to start task: ${String(err)}`, 'error');
+                }
+            }
+            if (started > 0) {
+                dialogStore.showToast(`${started} task${started > 1 ? 's' : ''} started`, 'success');
+            }
+        },
+    });
+    let multiSelect = multiSelectActions.multiSelect;
+
     // Column resize (inline — matches ExplorerView pattern)
     let columnsRef: HTMLDivElement | null = $state(null);
     const DEFAULT_BOARD_RATIO = 0.22;
@@ -429,6 +479,7 @@
         // Focus the detail panel for keyboard/screen reader users
         queueMicrotask(() => detailEl?.focus());
         const unsubDiff = taskDiffStats.subscribe(v => { diffStatsMap = v; });
+        const unsubsMultiSelect = multiSelectActions.setup();
 
         loadDiff();
 
@@ -441,6 +492,8 @@
                     diffFullscreen = false;
                 } else if (checkpointDiffOpen) {
                     closeCheckpointDiff();
+                } else if (multiSelect.hasSelection) {
+                    multiSelect.clear();
                 } else {
                     onClose();
                 }
@@ -449,6 +502,7 @@
         window.addEventListener('keydown', handleKey);
         return () => {
             unsubDiff();
+            unsubsMultiSelect();
             window.removeEventListener('keydown', handleKey);
         };
     });
@@ -651,6 +705,7 @@
                     onCreateChildTask={(parentId: string) => { uiStore.creatingChildOf = parentId; uiStore.showCreateTask = true; }}
                     onShowCreateTask={() => uiStore.showCreateTask = true}
                     getColumnColor={getSectionColor}
+                    {multiSelect}
                 />
             </div>
 
@@ -773,6 +828,13 @@
                 </div>
             </div>
         </div>
+
+        <MultiSelectBar
+            {multiSelect}
+            tasks={allTasks}
+            projectId={task.project_id}
+            onClear={() => multiSelect.clear()}
+        />
     </div>
 
 <style>

@@ -38,6 +38,35 @@
     // Children of this task (from the map passed by Board)
     let children = $derived(childrenMap?.get(task.id) ?? []);
     let hasChildren = $derived(children.length > 0);
+
+    /** Collect all descendant task IDs recursively from childrenMap. */
+    function collectDescendantIds(taskId: string): string[] {
+        const ids: string[] = [];
+        const directChildren = childrenMap?.get(taskId) ?? [];
+        for (const child of directChildren) {
+            ids.push(child.id);
+            ids.push(...collectDescendantIds(child.id));
+        }
+        return ids;
+    }
+
+    /** Toggle a task's multi-select state, recursively including all descendants. */
+    function toggleWithDescendants(taskId: string) {
+        if (!multiSelect) return;
+        const descendantIds = collectDescendantIds(taskId);
+        const willSelect = !multiSelect.isSelected(taskId);
+        // Toggle the task itself
+        multiSelect.toggle(taskId);
+        // Add or remove all descendants to match
+        for (const id of descendantIds) {
+            if (willSelect) {
+                multiSelect.add(id);
+            } else {
+                multiSelect.remove(id);
+            }
+        }
+    }
+
     // Subtask progress: counts ALL descendants regardless of column
     let subtaskProgress = $derived.by(() => {
         if (!hasChildren) return null;
@@ -145,10 +174,10 @@
         if (isMobileCtx.isMobile && multiSelect && multiSelect.hasSelection) {
             return;
         }
-        // Ctrl/Cmd + Click: toggle multi-select
+        // Ctrl/Cmd + Click: toggle multi-select (with descendants)
         if (multiSelect && (e.ctrlKey || e.metaKey)) {
             e.stopPropagation();
-            multiSelect.toggle(task.id);
+            toggleWithDescendants(task.id);
             return;
         }
         if (inline && task.parent_task_id) e.stopPropagation();
@@ -168,7 +197,7 @@
             longPressTimer = setTimeout(() => {
                 longPressTriggered = true;
                 if (navigator.vibrate) navigator.vibrate(30);
-                multiSelect.toggle(task.id);
+                toggleWithDescendants(task.id);
             }, LONG_PRESS_DURATION);
         }
     }
@@ -182,7 +211,7 @@
         if (multiSelect && multiSelect.hasSelection && !longPressTriggered) {
             e.preventDefault();
             e.stopPropagation();
-            multiSelect.toggle(task.id);
+            toggleWithDescendants(task.id);
         }
     }
 
