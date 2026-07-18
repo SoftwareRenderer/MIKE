@@ -307,7 +307,7 @@
     }
 
     /** Called when the inline editor content changes. */
-    function handleInlineEditorHasChanges(hasChanges: boolean) {
+    function handleInlineEditorHasChanges(_filePath: string, hasChanges: boolean) {
         editorHasChanges = hasChanges;
     }
 
@@ -483,6 +483,7 @@
                                 projectId={projectId}
                                 filePath={editorFilePath}
                                 targetLine={editorTargetLine}
+                                active={true}
                                 onFocused={() => {}}
                                 onSymbolsUpdate={() => {}}
                                 onHasChanges={handleInlineEditorHasChanges}

@@ -9,17 +9,7 @@
     import BranchFileBrowser from './BranchFileBrowser.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
     import FileSearchPanel from './FileSearchPanel.svelte';
-    // Lazy-loaded on first file edit
-    let BranchEditorComponent: typeof import('./BranchEditor.svelte').default | null = $state(null);
-    let branchEditorLoading = $state(false);
-    function loadBranchEditor(): void {
-        if (BranchEditorComponent || branchEditorLoading) return;
-        branchEditorLoading = true;
-        import('./BranchEditor.svelte').then((mod) => {
-            BranchEditorComponent = mod.default;
-            branchEditorLoading = false;
-        }).catch(() => { branchEditorLoading = false; });
-    }
+    import EditorTabs from './EditorTabs.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
     import CommitDiffOverlay from './CommitDiffOverlay.svelte';
     import GitStatusPanel from './GitStatusPanel.svelte';
@@ -111,12 +101,13 @@
         return false;
     }
 
-    // Selected file state
-    let selectedFilePath = $state('');
+    // Multi-tab file state
+    interface OpenFile { path: string; targetLine: number; }
+    let openFiles = $state<OpenFile[]>([]);
+    let activeFilePath = $state('');
+    // Set of file paths that are "pinned" (not preview). Preview tabs are replaced when another file is selected.
+    let pinnedFiles = $state(new Set<string>());
     let initialSafeFile = $derived(isPathSafe(initialFile) ? initialFile : '');
-    $effect(() => { if (!selectedFilePath) selectedFilePath = initialSafeFile; });
-    // Target line for cursor positioning when opening from diff view
-    let targetLine = $state(0);
     // O(1) lookup — replaces Array.includes/filter in handleHasChanges and close handler
     let unsavedFiles = $state(new Set<string>());
 
@@ -128,9 +119,18 @@
     // Sync selected file from URL on mount and when initialFile updates
     $effect(() => {
         const file = initialFile;
-        if (file && isPathSafe(file) && !selectedFilePath) {
-            selectedFilePath = file;
+        if (file && isPathSafe(file) && openFiles.length === 0) {
+            openFiles = [{ path: file, targetLine: 0 }];
+            activeFilePath = file;
         }
+    });
+    // Clear open files when project changes
+    $effect(() => {
+        const _ = projectId;
+        openFiles = [];
+        activeFilePath = '';
+        pinnedFiles = new Set();
+        unsavedFiles = new Set();
     });
     let editorFocused = $state(false);
 
@@ -160,7 +160,7 @@
 
     // Clear symbols when no file is selected
     $effect(() => {
-        if (!selectedFilePath) {
+        if (!activeFilePath) {
             symbols = [];
         }
     });
@@ -255,14 +255,66 @@
         }
     }
 
-    function handleFileSelected(path: string, line?: number) {
+    function handleFileSelected(path: string, line?: number, pin: boolean = false) {
         if (!isPathSafe(path)) return;
         closeCommitDiff();
-        selectedFilePath = path;
-        targetLine = line || 0;
+        const existing = openFiles.findIndex(f => f.path === path);
+        if (existing >= 0) {
+            // File already open — switch to its tab
+            activeFilePath = path;
+            if (pin) pinTab(path);
+        } else {
+            // If there's an unpinned (preview) tab, replace it
+            const previewIdx = openFiles.findIndex(f => !pinnedFiles.has(f.path));
+            if (previewIdx >= 0) {
+                const next = [...openFiles];
+                next[previewIdx] = { path, targetLine: line || 0 };
+                openFiles = next;
+            } else {
+                // No preview tab — add a new one
+                openFiles = [...openFiles, { path, targetLine: line || 0 }];
+            }
+            activeFilePath = path;
+            if (pin) pinTab(path);
+        }
         onUpdateFile(path);
         if (isMobileCtx.isMobile) activeTab = 'editor';
-        loadBranchEditor();
+    }
+
+    function pinTab(path: string) {
+        const next = new Set(pinnedFiles);
+        next.add(path);
+        pinnedFiles = next;
+    }
+
+    function handleSelectTab(path: string) {
+        activeFilePath = path;
+    }
+
+    function handleCloseTab(path: string) {
+        const idx = openFiles.findIndex(f => f.path === path);
+        if (idx < 0) return;
+        const next = openFiles.filter(f => f.path !== path);
+        openFiles = next;
+        const nextUnsaved = new Set(unsavedFiles);
+        nextUnsaved.delete(path);
+        unsavedFiles = nextUnsaved;
+        const nextPinned = new Set(pinnedFiles);
+        nextPinned.delete(path);
+        pinnedFiles = nextPinned;
+        if (path === activeFilePath) {
+            if (next.length === 0) {
+                activeFilePath = '';
+                onUpdateFile(null);
+                if (isMobileCtx.isMobile) activeTab = 'files';
+                editorFullscreen = false;
+            } else {
+                // Switch to adjacent tab (prefer left neighbor)
+                const newIdx = Math.min(idx, next.length - 1);
+                activeFilePath = next[newIdx].path;
+                onUpdateFile(activeFilePath);
+            }
+        }
     }
 
     // Commit diff overlay handlers
@@ -312,16 +364,15 @@
         editorFocused = focused;
     }
 
-    function handleHasChanges(hasChanges: boolean) {
-        if (!selectedFilePath) return;
-        const currentlyUnsaved = unsavedFiles.has(selectedFilePath);
+    function handleHasChanges(filePath: string, hasChanges: boolean) {
+        const currentlyUnsaved = unsavedFiles.has(filePath);
         if (hasChanges && !currentlyUnsaved) {
             const next = new Set(unsavedFiles);
-            next.add(selectedFilePath);
+            next.add(filePath);
             unsavedFiles = next;
         } else if (!hasChanges && currentlyUnsaved) {
             const next = new Set(unsavedFiles);
-            next.delete(selectedFilePath);
+            next.delete(filePath);
             unsavedFiles = next;
         }
     }
@@ -416,7 +467,7 @@
         loadCommits();
         loadBranches();
         // If a file is already open, switch to editor tab
-        if (selectedFilePath) {
+        if (openFiles.length > 0) {
             activeTab = 'editor';
         }
         window.addEventListener('keydown', handleKeydown);
@@ -427,7 +478,7 @@
     });
 </script>
 
-<div class="explorer-view" class:fullscreen={editorFullscreen && selectedFilePath} role="dialog" aria-label="Explorer view">
+<div class="explorer-view" class:fullscreen={editorFullscreen && activeFilePath} role="dialog" aria-label="Explorer view">
     <!-- Header bar (replaces top-bar when explorer is open) -->
     <div class="explorer-header">
         <button class="close-btn" onclick={() => { if (showChanges) { showChanges = false; } else { editorFullscreen = false; closeCommitDiff(); onClose(); } }} aria-label="Close branch view" title="Close (Escape)">
@@ -524,7 +575,7 @@
                 onclick={() => activeTab = 'files'}
                 title="File browser"
             >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h4l2 2v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6 2h4l2 2" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 3h4l1.5 2H13l1.5 2.5V13a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
                 <span class="tab-label">{getFolderName(currentFolderPath)}</span>
             </button>
             <button
@@ -533,7 +584,7 @@
                 title="Editor"
             >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-                Editor
+                {activeFilePath ? activeFilePath.split('/').pop() : 'Editor'}
             </button>
             <button
                 class="tab-btn {activeTab === 'symbols' ? 'active' : ''}"
@@ -642,24 +693,23 @@
                         isMobile={isMobileCtx.isMobile}
                     />
                 {:else}
-                    {#if selectedFilePath}
-                        {#if BranchEditorComponent}
-                            {@const BranchEditor = BranchEditorComponent}
-                            <BranchEditor
-                                projectId={projectId}
-                                filePath={selectedFilePath}
-                                targetLine={targetLine}
-                                onFocused={handleEditorFocused}
-                                onSymbolsUpdate={handleSymbolsUpdate}
-                                onHasChanges={handleHasChanges}
-                                onClose={() => { const path = selectedFilePath; selectedFilePath = ''; targetLine = 0; const next = new Set(unsavedFiles); next.delete(path); unsavedFiles = next; onUpdateFile(null); if (isMobileCtx.isMobile) activeTab = 'files'; editorFullscreen = false; }}
-                                onToggleFullscreen={toggleEditorFullscreen}
-                                mobileFullscreen={editorFullscreen}
-                                isMobile={isMobileCtx.isMobile}
-                            />
-                        {:else}
-                            <div class="branch-editor-loading">Loading editor...</div>
-                        {/if}
+                    {#if openFiles.length > 0}
+                        <EditorTabs
+                            projectId={projectId}
+                            openFiles={openFiles}
+                            activeFilePath={activeFilePath}
+                            unsavedFiles={unsavedFiles}
+                            pinnedFiles={pinnedFiles}
+                            onFocused={handleEditorFocused}
+                            onSymbolsUpdate={handleSymbolsUpdate}
+                            onHasChanges={handleHasChanges}
+                            onSelectTab={handleSelectTab}
+                            onCloseTab={handleCloseTab}
+                            onPinTab={pinTab}
+                            onToggleFullscreen={toggleEditorFullscreen}
+                            mobileFullscreen={editorFullscreen}
+                            isMobile={isMobileCtx.isMobile}
+                        />
                     {:else}
                         <div class="branch-editor-placeholder">
                             <svg width="32" height="32" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3" aria-hidden="true">
@@ -959,7 +1009,6 @@
         min-width: 0;
     }
 
-    .branch-editor-loading,
     .branch-editor-placeholder {
         display: flex;
         flex-direction: column;
