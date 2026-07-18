@@ -23,6 +23,12 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let connecting = $state(true);
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let scrollEl: HTMLElement | null = null;
+    // VirtualList ref for scrollToBottom
+    let virtualList: {
+        scrollToBottom: () => void;
+    } | null = $state(null);
+    // Hide entries until scrolled to bottom (avoids flash)
+    let entriesReady = $state(false);
 
     let atBottom = $state(true);
     let userInputPending = false;
@@ -538,19 +544,15 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     }
 
     function scroll(force = false) {
-        if (!scrollEl) return;
         if (!force && !atBottom) return;
-        requestAnimationFrame(() => {
-            if (!scrollEl) return;
-            scrollEl.scrollTop = scrollEl.scrollHeight;
-            // Second frame to correct for DOM shrink (e.g., streaming cursor disappearing)
-            // that happens after the first frame sets scrollTop.
-            requestAnimationFrame(() => {
-                if (scrollEl) {
-                    scrollEl.scrollTop = scrollEl.scrollHeight;
-                }
-            });
-        });
+        entriesReady = true;
+        if (virtualList) {
+            virtualList.scrollToBottom();
+            requestAnimationFrame(() => virtualList?.scrollToBottom());
+            return;
+        }
+        if (!scrollEl) return;
+        scrollEl.scrollTop = scrollEl.scrollHeight;
     }
 
     // rAF-throttled scroll handler — at most once per frame.
@@ -1252,6 +1254,8 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         {onViewChanges}
         {scrollEl}
         onScrollElChange={(el) => scrollEl = el}
+        onVirtualListChange={(comp) => virtualList = comp}
+        {entriesReady}
     />
     {#if showStartButton}
         <StartPanel
