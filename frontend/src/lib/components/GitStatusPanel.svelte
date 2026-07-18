@@ -488,7 +488,6 @@
                                 onSymbolsUpdate={() => {}}
                                 onHasChanges={handleInlineEditorHasChanges}
                                 onClose={closeInlineEditor}
-                                isMobile={isMobile}
                             />
                         {:else}
                             <div class="branch-editor-loading">Loading editor...</div>

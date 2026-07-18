@@ -7,7 +7,7 @@
     }
 
     let { projectId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
-        onSelectTab, onCloseTab, onPinTab, onToggleFullscreen, mobileFullscreen, isMobile }: {
+        onSelectTab, onCloseTab, onPinTab, onToggleFullscreen, mobileFullscreen }: {
         projectId: string;
         openFiles: OpenFile[];
         activeFilePath: string;
@@ -21,7 +21,6 @@
         onPinTab: (path: string) => void;
         onToggleFullscreen?: () => void;
         mobileFullscreen?: boolean;
-        isMobile?: boolean;
     } = $props();
 
     // Lazy-loaded on first file edit
@@ -72,7 +71,6 @@
                 class="editor-tab"
                 class:active={file.path === activeFilePath}
                 class:unsaved={unsavedFiles.has(file.path)}
-                class:preview={!pinnedFiles.has(file.path)}
                 role="tab"
                 tabindex="0"
                 aria-selected={file.path === activeFilePath}
@@ -140,9 +138,6 @@
                     onSymbolsUpdate={(symbols) => handleSymbolsUpdate(file.path, symbols)}
                     onHasChanges={(path: string, hasChanges: boolean) => handleHasChanges(path, hasChanges)}
                     onClose={() => onCloseTab(file.path)}
-                    onToggleFullscreen={file.path === activeFilePath ? onToggleFullscreen : undefined}
-                    mobileFullscreen={file.path === activeFilePath ? mobileFullscreen : undefined}
-                    isMobile={isMobile}
                 />
             {/each}
         {/if}
