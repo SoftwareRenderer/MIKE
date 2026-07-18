@@ -85,11 +85,11 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 2px 8px;
+        padding: 3px 8px;
         border-radius: 12px;
         background: var(--color-surface-2);
         border: 1px solid var(--color-border);
-        font-size: 0.7rem;
+        font-size: 0.75rem;
         color: var(--color-text-secondary);
         white-space: nowrap;
         flex-shrink: 0;
