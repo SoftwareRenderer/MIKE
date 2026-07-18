@@ -54,4 +54,14 @@ describe('ToggleSwitch rendering', () => {
     it('uses bindable checked prop for two-way binding', () => {
         expect(source).toContain('$bindable');
     });
+
+    it('calls onChange callback on toggle', () => {
+        expect(source).toContain('onChange');
+        expect(source).toContain('onChange()');
+    });
+
+    it('only calls onChange when not disabled', () => {
+        // onChange should be inside the !disabled check
+        expect(source).toMatch(/if\s*\(\s*!disabled\s*\)\s*\{[^}]*onChange\(\)/);
+    });
 });

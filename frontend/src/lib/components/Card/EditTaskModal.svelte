@@ -1,12 +1,14 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import type { Provider } from '$lib/types';
+    import { appStore } from '$lib/stores';
     import ModelSelector from '../Chat/ModelSelector.svelte';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import ModeSelect from '../ModeSelect.svelte';
     import BaseModal from '../BaseModal.svelte';
 
     let {
+        taskId,
         projectId,
         taskTitle,
         taskPrompt,
@@ -24,6 +26,7 @@
         onSave,
         onCancel,
     }: {
+        taskId: string;
         projectId: string;
         taskTitle: string;
         taskPrompt: string;
@@ -103,6 +106,17 @@
         closeBranchDropdown();
     }
 
+    // Look up the live task from the board so auto-merge values stay in sync
+    // when the server updates them (e.g., parent subtasks_auto_merge propagation).
+    const liveTask = $derived.by(() => {
+        return appStore.board?.tasks.find(t => t.id === taskId) ?? null;
+    });
+
+    // Track whether the user has manually toggled each switch.
+    // Once touched, live-sync skips the field so local edits take priority.
+    let userTouchedAutoMerge = $state(false);
+    let userTouchedSubtasksAutoMerge = $state(false);
+
     $effect(() => { titleDraft = taskTitle; });
     $effect(() => { modelDraft = editModel; });
     $effect(() => { urlDraft = editUrl; });
@@ -111,6 +125,21 @@
     $effect(() => { autoMergeDraft = editAutoMerge; });
     $effect(() => { subtasksAutoMergeDraft = editSubtasksAutoMerge; });
     $effect(() => { branchDraft = baseRef || targetBranch; });
+
+    // Live-sync auto-merge values from the board (e.g., after parent propagation).
+    // Skips fields the user has already toggled so local edits are preserved.
+    $effect(() => {
+        const val = liveTask?.auto_merge;
+        if (val !== undefined && !userTouchedAutoMerge) {
+            autoMergeDraft = val;
+        }
+    });
+    $effect(() => {
+        const val = liveTask?.subtasks_auto_merge;
+        if (val !== undefined && !userTouchedSubtasksAutoMerge) {
+            subtasksAutoMergeDraft = val;
+        }
+    });
 
     let titleInput: HTMLInputElement | null = null;
 
@@ -238,7 +267,7 @@
                         <span class="config-label">Auto-merge</span>
                         <span class="config-desc">{taskHasParent ? 'Merge changes into parent task when complete' : `Merge changes into ${branchDraft || targetBranch} when complete`}</span>
                     </div>
-                    <ToggleSwitch bind:checked={autoMergeDraft} ariaLabel="Auto-merge on completion" />
+                    <ToggleSwitch bind:checked={autoMergeDraft} onChange={() => { userTouchedAutoMerge = true; }} ariaLabel="Auto-merge on completion" />
                 </div>
                 {#if !taskHasParent}
                 <div class="config-row">
@@ -246,7 +275,7 @@
                         <span class="config-label">Allow subtasks to auto-merge</span>
                         <span class="config-desc">Subtasks created under this task will auto-merge into it</span>
                     </div>
-                    <ToggleSwitch bind:checked={subtasksAutoMergeDraft} ariaLabel="Allow subtasks to auto-merge" />
+                    <ToggleSwitch bind:checked={subtasksAutoMergeDraft} onChange={() => { userTouchedSubtasksAutoMerge = true; }} ariaLabel="Allow subtasks to auto-merge" />
                 </div>
                 {/if}
             </div>

@@ -1,9 +1,10 @@
 <script lang="ts">
-    let { checked = $bindable(false), disabled = false, ariaLabel = '', ariaDescribedby = '' }: {
+    let { checked = $bindable(false), disabled = false, ariaLabel = '', ariaDescribedby = '', onChange = () => {} }: {
         checked: boolean;
         disabled?: boolean;
         ariaLabel?: string;
         ariaDescribedby?: string;
+        onChange?: () => void;
     } = $props();
 </script>
 
@@ -11,7 +12,7 @@
     type="button"
     class="toggle-switch"
     class:active={checked}
-    onclick={(e) => { e.stopPropagation(); if (!disabled) checked = !checked; }}
+    onclick={(e) => { e.stopPropagation(); if (!disabled) { checked = !checked; onChange(); } }}
     role="switch"
     aria-checked={checked}
     aria-label={ariaLabel}

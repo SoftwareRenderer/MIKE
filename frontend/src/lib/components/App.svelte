@@ -1099,6 +1099,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     {/if}
     {#if appStore.showEditTask && appStore.editTaskData}
         <EditTaskModal
+            taskId={appStore.editTaskData.taskId}
             projectId={appStore.editTaskData.projectId}
             taskTitle={appStore.editTaskData.taskTitle}
             taskPrompt={appStore.editTaskData.taskPrompt}
