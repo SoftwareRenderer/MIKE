@@ -42,22 +42,24 @@
         </button>
     </div>
     {#if loading}
-        <div class="checkpoint-diff-loading">
+        <div class="checkpoint-diff-loading checkpoint-diff-loading-root">
             <svg class="checkpoint-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <path d="M12 2a10 10 0 0 1 10 10"/>
             </svg>
         </div>
     {:else}
-        {#if DiffViewerComponent}
-            {@const DiffViewer = DiffViewerComponent}
-            <DiffViewer stagedFiles={[]} unstagedFiles={files} stagedUntracked={[]} unstagedUntracked={untracked} onExpandFile={onExpandFile} onExpandUntracked={onExpandFile} onLineClick={onLineClick} />
-        {:else}
-            <div class="checkpoint-diff-loading">
-                <svg class="checkpoint-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <path d="M12 2a10 10 0 0 1 10 10"/>
-                </svg>
-            </div>
-        {/if}
+        <div class="checkpoint-diff-body">
+            {#if DiffViewerComponent}
+                {@const DiffViewer = DiffViewerComponent}
+                <DiffViewer stagedFiles={[]} unstagedFiles={files} stagedUntracked={[]} unstagedUntracked={untracked} onExpandFile={onExpandFile} onExpandUntracked={onExpandFile} onLineClick={onLineClick} />
+            {:else}
+                <div class="checkpoint-diff-loading">
+                    <svg class="checkpoint-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M12 2a10 10 0 0 1 10 10"/>
+                    </svg>
+                </div>
+            {/if}
+        </div>
     {/if}
 </div>
 
@@ -65,8 +67,8 @@
     .checkpoint-diff-overlay {
         display: flex;
         flex-direction: column;
-        flex: 1;
-        min-height: 0;
+        height: 100%;
+        width: 100%;
         overflow: hidden;
     }
     .checkpoint-diff-header {
@@ -106,12 +108,23 @@
         background: var(--color-surface-3);
         color: var(--color-text-primary);
     }
-    .checkpoint-diff-loading {
+    .checkpoint-diff-body {
         flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
+    .checkpoint-diff-loading {
         display: flex;
         align-items: center;
         justify-content: center;
         color: var(--color-text-tertiary);
+    }
+    .checkpoint-diff-loading-root {
+        flex: 1;
+        min-height: 0;
+    }
+    .checkpoint-diff-body .checkpoint-diff-loading {
+        height: 100%;
     }
     .checkpoint-spinner {
         animation: checkpoint-spin 1s linear infinite;
