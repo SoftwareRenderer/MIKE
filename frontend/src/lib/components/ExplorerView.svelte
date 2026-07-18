@@ -8,6 +8,7 @@
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import BranchFileBrowser from './BranchFileBrowser.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
+    import FileSearchPanel from './FileSearchPanel.svelte';
     // Lazy-loaded on first file edit
     let BranchEditorComponent: typeof import('./BranchEditor.svelte').default | null = $state(null);
     let branchEditorLoading = $state(false);
@@ -55,6 +56,12 @@
 
     // Review Changes panel state
     let showChanges = $state(false);
+
+    // Find in files panel state
+    let showFind = $state(false);
+    function toggleFind() {
+        showFind = !showFind;
+    }
 
     // Sync selectedBranch when parent updates currentBranch via WebSocket
     $effect(() => {
@@ -248,11 +255,12 @@
         }
     }
 
-    function handleFileSelected(path: string) {
+    function handleFileSelected(path: string, line?: number) {
         if (!isPathSafe(path)) return;
         closeCommitDiff();
+        showFind = false;
         selectedFilePath = path;
-        targetLine = 0;
+        targetLine = line || 0;
         onUpdateFile(path);
         if (isMobileCtx.isMobile) activeTab = 'editor';
         loadBranchEditor();
@@ -336,16 +344,23 @@
         }
     });
 
-    // Handle Escape key — close panels in order: changes → commit diff → branch view
+    // Handle Escape key — close panels in order: find → changes → commit diff → branch view
+    // Handle Ctrl+Shift+F — toggle find panel
     function handleKeydown(e: KeyboardEvent) {
         if (e.key === 'Escape') {
-            if (showChanges) {
+            if (showFind) {
+                showFind = false;
+            } else if (showChanges) {
                 showChanges = false;
             } else if (diffCommit) {
                 closeCommitDiff();
             } else if (!editorFocused) {
                 onClose();
             }
+        }
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
+            e.preventDefault();
+            toggleFind();
         }
     }
 
@@ -546,49 +561,60 @@
             />
         </div>
         {:else}
-            <!-- Column 1: File browser + Git graph -->
+            <!-- Column 1: File browser + Git graph (or Find panel) -->
             <div class="explorer-left-column" class:hidden={isMobileCtx.isMobile && activeTab !== 'files'} style="width: {leftWidth}px">
-                <div class="explorer-split-container">
-                    <!-- Top: File browser -->
-                    <div class="explorer-file-browser" class:mobile={isMobileCtx.isMobile} style:height={isMobileCtx.isMobile ? undefined : splitRatio * 100 + '%'}>
-                        <BranchFileBrowser
-                            projectId={projectId}
-                            projectPath={projectPath}
-                            initialPath={currentFolderPath}
-                            sandboxEnabled={sandboxEnabled}
-                            unsavedFiles={[...unsavedFiles]}
-                            pendingFsEvent={pendingFsEvent}
-                            onFileSelected={handleFileSelected}
-                            onPathChange={(p) => currentFolderPath = p}
-                        />
-                    </div>
-
-                    <!-- Drag handle (file browser / git graph split) -->
-                    {#if !isMobileCtx.isMobile}
-                    <ResizeHandle
-                        axis="horizontal"
-                        ariaLabel="Resize file browser and git graph panels"
-                        onDragStart={handleSplitDragStart}
-                        onDragMove={handleSplitDragMove}
-                        onDragEnd={handleSplitDragEnd}
+                {#if showFind}
+                    <!-- Find in files panel (replaces file browser + git graph) -->
+                    <FileSearchPanel
+                        projectId={projectId}
+                        projectPath={projectPath}
+                        onFileSelected={handleFileSelected}
+                        onClose={() => showFind = false}
                     />
-                    {/if}
+                {:else}
+                    <div class="explorer-split-container">
+                        <!-- Top: File browser -->
+                        <div class="explorer-file-browser" class:mobile={isMobileCtx.isMobile} style:height={isMobileCtx.isMobile ? undefined : splitRatio * 100 + '%'}>
+                            <BranchFileBrowser
+                                projectId={projectId}
+                                projectPath={projectPath}
+                                initialPath={currentFolderPath}
+                                sandboxEnabled={sandboxEnabled}
+                                unsavedFiles={[...unsavedFiles]}
+                                pendingFsEvent={pendingFsEvent}
+                                onFileSelected={handleFileSelected}
+                                onPathChange={(p) => currentFolderPath = p}
+                                onToggleFind={toggleFind}
+                            />
+                        </div>
 
-                    <!-- Bottom: Git graph -->
-                    <div class="explorer-git-graph" class:mobile={isMobileCtx.isMobile} style:height={isMobileCtx.isMobile ? undefined : (1 - splitRatio) * 100 + '%'}>
-                        <BranchGitGraph
-                            projectId={projectId}
-                            currentBranch={selectedBranch}
-                            commits={commits}
-                            originTip={originTip}
-                            loading={loadingCommits}
-                            hasMore={hasMoreCommits}
-                            onCommitSelected={handleCommitSelected}
-                            onLoadMore={loadMoreCommits}
-                            selectedCommitHash={diffCommit?.hash}
+                        <!-- Drag handle (file browser / git graph split) -->
+                        {#if !isMobileCtx.isMobile}
+                        <ResizeHandle
+                            axis="horizontal"
+                            ariaLabel="Resize file browser and git graph panels"
+                            onDragStart={handleSplitDragStart}
+                            onDragMove={handleSplitDragMove}
+                            onDragEnd={handleSplitDragEnd}
                         />
+                        {/if}
+
+                        <!-- Bottom: Git graph -->
+                        <div class="explorer-git-graph" class:mobile={isMobileCtx.isMobile} style:height={isMobileCtx.isMobile ? undefined : (1 - splitRatio) * 100 + '%'}>
+                            <BranchGitGraph
+                                projectId={projectId}
+                                currentBranch={selectedBranch}
+                                commits={commits}
+                                originTip={originTip}
+                                loading={loadingCommits}
+                                hasMore={hasMoreCommits}
+                                onCommitSelected={handleCommitSelected}
+                                onLoadMore={loadMoreCommits}
+                                selectedCommitHash={diffCommit?.hash}
+                            />
+                        </div>
                     </div>
-                </div>
+                {/if}
             </div>
 
             <!-- Resize handle: left column -->

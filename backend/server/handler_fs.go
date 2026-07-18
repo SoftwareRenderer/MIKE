@@ -1,13 +1,16 @@
 package server
 
 import (
+	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -319,7 +322,19 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, result)
 }
 
-// handleFSSearch recursively searches for files, returning up to 10 matches.
+// handleFSSearch recursively searches for files by name and optionally by content.
+//
+// Query parameters:
+//   - q: search query (required)
+//   - project: project ID (required)
+//   - task: optional task ID for worktree-scoped search
+//   - content: "1" to search file contents in addition to filenames
+//   - case: "1" for case-sensitive matching
+//   - word: "1" for whole-word matching
+//   - regex: "1" to treat query as a regular expression
+//
+// Filename search returns up to 10 results; content search returns up to 50.
+// Binary files are skipped for content search but still matched by filename.
 func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -334,6 +349,25 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	taskID := r.URL.Query().Get("task")
+	searchContent := r.URL.Query().Get("content") == "1"
+	matchCase := r.URL.Query().Get("case") == "1"
+	wholeWord := r.URL.Query().Get("word") == "1"
+	useRegex := r.URL.Query().Get("regex") == "1"
+
+	// For content search, compile regex upfront if needed
+	var contentRe *regexp.Regexp
+	if searchContent && useRegex && q != "" {
+		flags := ""
+		if !matchCase {
+			flags = "(?i)"
+		}
+		var err error
+		contentRe, err = regexp.Compile(flags + q)
+		if err != nil {
+			JSONError(w, http.StatusBadRequest, "invalid regex: "+err.Error())
+			return
+		}
+	}
 
 	// Resolve search root from project or task worktree
 	var searchRoot string
@@ -396,8 +430,16 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Result limit: 50 for content search, 10 for filename-only
+	resultLimit := 10
+	if searchContent {
+		resultLimit = 50
+	}
+
 	type searchResult struct {
 		Path string `json:"path"` // relative to search root
+		Line int    `json:"line,omitempty"`    // 1-based line number (content search)
+		Text string `json:"text,omitempty"`    // matching line content (content search)
 	}
 	var results []searchResult
 
@@ -405,6 +447,46 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	if _, statErr := os.Stat(searchRoot); statErr != nil {
 		JSONError(w, http.StatusNotFound, "search root does not exist: "+statErr.Error())
 		return
+	}
+
+	// Helper: check if filename/relative path matches query
+	filenameMatch := func(rel string) bool {
+		if q == "" {
+			return true
+		}
+		if useRegex {
+			flags := ""
+			if !matchCase {
+				flags = "(?i)"
+			}
+			re, err := regexp.Compile(flags + q)
+			if err != nil {
+				return false
+			}
+			if wholeWord {
+				return re.MatchString("\b" + rel + "\b")
+			}
+			return re.MatchString(rel)
+		}
+		checkStr := rel
+		searchStr := q
+		if !matchCase {
+			checkStr = strings.ToLower(checkStr)
+			searchStr = strings.ToLower(searchStr)
+		}
+		if wholeWord {
+			// Simple whole-word: split by path separators and check each segment
+			parts := strings.Split(checkStr, "/")
+			for _, part := range parts {
+				if part == searchStr {
+					return true
+				}
+			}
+			// Also check if any word in the path matches
+			// For simplicity, treat the whole relative path as words separated by /_.-\n
+			return false
+		}
+		return strings.Contains(checkStr, searchStr)
 	}
 
 	// Recursively walk and collect matching files (worktree is bind-mounted into sandbox)
@@ -437,13 +519,17 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		// Match: filename or relative path contains query (case-insensitive)
-		if q != "" && !strings.Contains(strings.ToLower(rel), strings.ToLower(q)) {
-			return nil
+		// Content search: search all files' contents (filename filter doesn't apply)
+		if searchContent {
+			searchContentInFile(path, q, matchCase, wholeWord, useRegex, contentRe, func(lineNum int, lineText string) {
+				results = append(results, searchResult{Path: rel, Line: lineNum, Text: lineText})
+			})
+		} else if filenameMatch(rel) {
+			// Filename-only search
+			results = append(results, searchResult{Path: rel})
 		}
 
-		results = append(results, searchResult{Path: rel})
-		if len(results) >= 10 {
+		if len(results) >= resultLimit {
 			return errStopWalk
 		}
 		return nil
@@ -452,13 +538,121 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 
 	// Sort results for deterministic output
 	sort.SliceStable(results, func(i, j int) bool {
-		return strings.ToLower(results[i].Path) < strings.ToLower(results[j].Path)
+		if results[i].Path != results[j].Path {
+			return strings.ToLower(results[i].Path) < strings.ToLower(results[j].Path)
+		}
+		return results[i].Line < results[j].Line
 	})
 
+	if results == nil {
+		results = []searchResult{}
+	}
 	JSONResponse(w, http.StatusOK, map[string]any{
 		"root":    searchRoot,
 		"results": results,
 	})
+}
+
+// searchContentInFile searches for matches within a single file.
+// Returns true if the file was binary (content search skipped).
+func searchContentInFile(path, q string, matchCase, wholeWord, useRegex bool, contentRe *regexp.Regexp, onMatch func(lineNum int, lineText string)) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	// Check for binary content: read first 8KB and look for null bytes
+	buf := make([]byte, 8192)
+	n, _ := f.Read(buf)
+	if n > 0 {
+		for _, b := range buf[:n] {
+			if b == 0 {
+				return true // binary file
+			}
+		}
+	}
+
+	// Seek back to start and read line by line
+	f.Seek(0, io.SeekStart)
+	scanner := bufio.NewScanner(f)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := scanner.Text()
+		if matchLine(line, q, matchCase, wholeWord, useRegex, contentRe) {
+			onMatch(lineNum, line)
+		}
+	}
+	return false
+}
+
+// matchLine checks if a line matches the search query.
+func matchLine(line, q string, matchCase, wholeWord, useRegex bool, contentRe *regexp.Regexp) bool {
+	if q == "" {
+		return true
+	}
+	if useRegex && contentRe != nil {
+		if wholeWord {
+			// For regex with whole word, wrap the pattern with \b
+			// Since contentRe is already compiled, we need a different approach.
+			// We'll do a simple word-boundary check around each match.
+			matches := contentRe.FindAllStringIndex(line, -1)
+			for _, m := range matches {
+				beforeOK := m[0] == 0 || !isWordChar(line[m[0]-1])
+				afterOK := m[1] >= len(line) || !isWordChar(line[m[1]])
+				if beforeOK && afterOK {
+					return true
+				}
+			}
+			return false
+		}
+		return contentRe.MatchString(line)
+	}
+	if useRegex {
+		// Fallback if contentRe is nil (shouldn't happen, but be safe)
+		flags := ""
+		if !matchCase {
+			flags = "(?i)"
+		}
+		re, err := regexp.Compile(flags + q)
+		if err != nil {
+			return false
+		}
+		return re.MatchString(line)
+	}
+	// Plain text search
+	checkLine := line
+	searchStr := q
+	if !matchCase {
+		checkLine = strings.ToLower(checkLine)
+		searchStr = strings.ToLower(searchStr)
+	}
+	if wholeWord {
+		// Find all occurrences and check word boundaries
+		idx := 0
+		for idx <= len(checkLine)-len(searchStr) {
+			pos := strings.Index(checkLine[idx:], searchStr)
+			if pos == -1 {
+				break
+			}
+			absPos := idx + pos
+			beforeOK := absPos == 0 || !isWordChar(checkLine[absPos-1])
+			afterPos := absPos + len(searchStr)
+			afterOK := afterPos >= len(checkLine) || !isWordChar(checkLine[afterPos])
+			if beforeOK && afterOK {
+				return true
+			}
+			idx = absPos + 1
+		}
+		return false
+	}
+	return strings.Contains(checkLine, searchStr)
+}
+
+// isWordChar checks if a byte is a word character (alphanumeric or underscore).
+func isWordChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
 }
 
 // errStopWalk is a sentinel error to stop filepath.WalkDir early.
