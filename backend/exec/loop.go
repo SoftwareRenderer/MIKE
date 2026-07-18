@@ -408,6 +408,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					SkillsDir:        prompts.SkillsDir(),
 					SandboxMounts:    setup.sandboxOpts.SandboxMounts,
 					SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
+					Capabilities:     setup.sandboxOpts.Capabilities,
 					PlanMode:         updatedTask.IsPlanMode(),
 				})
 					if createErr != nil {

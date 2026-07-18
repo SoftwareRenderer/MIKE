@@ -23,6 +23,7 @@ type CreateProjectRequest struct {
 	SandboxForwardPorts     []PortForward  `json:"sandbox_forward_ports,omitempty"`
 	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
 	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
+	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
 }
 
 // UpdateProjectRequest is the request body for updating a project.
@@ -36,6 +37,7 @@ type UpdateProjectRequest struct {
 	SandboxForwardPorts     []PortForward  `json:"sandbox_forward_ports,omitempty"`
 	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
 	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
+	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
 }
 
 // CreateDependencyRequest is the request body for creating a dependency.

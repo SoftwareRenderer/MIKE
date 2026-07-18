@@ -751,6 +751,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 			ForwardPorts:     project.ForwardPorts,
 			SandboxMounts:    project.SandboxMounts,
 			SandboxEnvs:      project.SandboxEnvs,
+			Capabilities:     project.SandboxCapabilities,
 		},
 		done: doneCh,
 	}, nil

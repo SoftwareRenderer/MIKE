@@ -122,6 +122,7 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		ForwardPorts:            req.SandboxForwardPorts,
 		SandboxMounts:           req.SandboxMounts,
 		SandboxEnvs:             req.SandboxEnvs,
+		SandboxCapabilities:     req.SandboxCapabilities,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}
@@ -327,7 +328,8 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		hasSandboxChange := req.SandboxEnabled != nil || req.SandboxNetworkIsolation != nil ||
 			req.SandboxImage != nil || req.SandboxDockerfilePath != nil ||
 			req.SandboxMemoryLimit != nil || req.SandboxForwardPorts != nil ||
-			req.SandboxMounts != nil || req.SandboxEnvs != nil
+			req.SandboxMounts != nil || req.SandboxEnvs != nil ||
+			req.SandboxCapabilities != nil
 		if hasSandboxChange && h.executor != nil && h.executor.HasRunningTasks(id) {
 			httputil.JSONError(w, http.StatusConflict, "cannot modify sandbox settings while tasks are running — stop all tasks first")
 			return
@@ -377,6 +379,12 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		if req.SandboxEnvs != nil {
 			if updateErr := h.store.UpdateProjectSandboxEnvs(id, req.SandboxEnvs); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox envs setting")
+				return
+			}
+		}
+		if req.SandboxCapabilities != nil {
+			if updateErr := h.store.UpdateProjectSandboxCapabilities(id, req.SandboxCapabilities); updateErr != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox capabilities setting")
 				return
 			}
 		}

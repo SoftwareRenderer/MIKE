@@ -260,6 +260,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_forward_ports TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_mounts TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_envs TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_capabilities TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_ref TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN branch_tip TEXT DEFAULT NULL`)
 	// Rename status_state -> execution_state
