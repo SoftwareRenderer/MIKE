@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"kanban/backend/git"
+	kanban_sandbox "kanban/backend/sandbox"
 	"kanban/backend/llama"
 	"kanban/backend/prompts"
 	"kanban/backend/stream"
@@ -398,7 +399,17 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					}
 					// Create new container with updated mode
 					var assignedPorts []types.AssignedPort
-					createErr, assignedPorts := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, imageToUse, setup.project.Name, setup.projectPath, setup.projectID, setup.networkIsolation, setup.memoryLimit, setup.forwardPorts, te.configStore.GetAgentConfigDir(), prompts.SkillsDir(), setup.sandboxMounts, setup.sandboxEnvs, updatedTask.IsPlanMode())
+					createErr, assignedPorts := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, setup.projectID, kanban_sandbox.SandboxOpts{
+					BaseImage:        imageToUse,
+					NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
+					MemoryLimit:      setup.sandboxOpts.MemoryLimit,
+					ForwardPorts:     setup.sandboxOpts.ForwardPorts,
+					PiAgentDir:       te.configStore.GetAgentConfigDir(),
+					SkillsDir:        prompts.SkillsDir(),
+					SandboxMounts:    setup.sandboxOpts.SandboxMounts,
+					SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
+					PlanMode:         updatedTask.IsPlanMode(),
+				})
 					if createErr != nil {
 						log.Printf("[mode-switch] setup.task=%s failed to recreate sandbox: %v", setup.task.ID, createErr)
 						setup.task.ExecutionState = "failed"
@@ -891,7 +902,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 								conflictedFiles := GetConflictedFiles(setup.worktreePath)
 								prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 									TaskBranch:      setup.task.Branch,
-									TargetBranch:    te.resolveMergeTarget(setup.projectID, setup.task),
+									TargetBranch:    te.ResolveMergeTarget(setup.projectID, setup.task),
 									TaskTitle:       setup.task.Title,
 									TaskDescription: setup.task.Prompt,
 									ConflictedFiles: conflictedFiles,
@@ -944,7 +955,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 							conflictedFiles := GetResolvedConflictedFiles(setup.worktreePath)
 							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 								TaskBranch:      setup.task.Branch,
-								TargetBranch:    te.resolveMergeTarget(setup.projectID, setup.task),
+								TargetBranch:    te.ResolveMergeTarget(setup.projectID, setup.task),
 								TaskTitle:       setup.task.Title,
 								TaskDescription: setup.task.Prompt,
 								ConflictedFiles: conflictedFiles,

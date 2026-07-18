@@ -563,13 +563,8 @@ type taskExecSetup struct {
 	initialContent        string          // user message content for lazy-start (empty for normal start)
 	regenerate            bool
 	sandboxEnabled        bool
-	networkIsolation      bool
-	baseImage             string
 	sandboxDockerfilePath string
-	memoryLimit           int
-	forwardPorts          []types.PortForward
-	sandboxMounts         []types.SandboxMount
-	sandboxEnvs           []types.SandboxEnv
+	sandboxOpts           sandboxmgr.SandboxOpts
 	done                  chan struct{} // closed by executor defer; see executionState.done
 }
 
@@ -721,14 +716,16 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		userMsgChan:           userMsgChan,
 		summarizeCh:           summarizeCh,
 		sandboxEnabled:        project.SandboxEnabled,
-		networkIsolation:      project.SandboxNetworkIsolation,
-		baseImage:             project.SandboxImage,
 		sandboxDockerfilePath: project.SandboxDockerfilePath,
-		memoryLimit:           project.SandboxMemoryLimit,
-		forwardPorts:          project.ForwardPorts,
-		sandboxMounts:         project.SandboxMounts,
-		sandboxEnvs:           project.SandboxEnvs,
-		done:                  doneCh,
+		sandboxOpts: sandboxmgr.SandboxOpts{
+			BaseImage:        project.SandboxImage,
+			NetworkIsolation: project.SandboxNetworkIsolation,
+			MemoryLimit:      project.SandboxMemoryLimit,
+			ForwardPorts:     project.ForwardPorts,
+			SandboxMounts:    project.SandboxMounts,
+			SandboxEnvs:      project.SandboxEnvs,
+		},
+		done: doneCh,
 	}, nil
 }
 
@@ -951,7 +948,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		conflictedFiles := GetConflictedFiles(execSetup.worktreePath)
 		conflictContext, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 			TaskBranch:      task.Branch,
-			TargetBranch:    te.resolveMergeTarget(projectID, task),
+			TargetBranch:    te.ResolveMergeTarget(projectID, task),
 			TaskTitle:       task.Title,
 			TaskDescription: task.Prompt,
 			ConflictedFiles: conflictedFiles,
@@ -1097,10 +1094,10 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 	return nil
 }
 
-// resolveMergeTarget determines the branch that changes will be merged into.
+// ResolveMergeTarget determines the branch that changes will be merged into.
 // For child tasks, the target is the parent's branch.
 // For root tasks, the target is the task's base_ref (if set), otherwise the project's origin branch.
-func (te *TaskExecutor) resolveMergeTarget(projectID string, task *types.Task) string {
+func (te *TaskExecutor) ResolveMergeTarget(projectID string, task *types.Task) string {
 	if task.ParentTaskID != "" {
 		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
 		if err == nil && parent.Branch != "" {
@@ -1181,7 +1178,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			}
 		}
 	} else {
-		targetBranch = te.resolveMergeTarget(projectID, task)
+		targetBranch = te.ResolveMergeTarget(projectID, task)
 		if targetBranch == "" {
 			var err error
 			targetBranch, err = te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")

@@ -715,7 +715,7 @@ func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request
 	authorName, authorEmail := resolveGitAuthor(projectID, h.store)
 
 	// Resolve merge target branch
-	mergeTarget := h.resolveMergeTarget(projectID, task)
+	mergeTarget := h.executor.ResolveMergeTarget(projectID, task)
 
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{
 		"commit_message": commitMsg,
@@ -743,7 +743,7 @@ func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.R
 
 	// Send metadata immediately (author + merge target)
 	authorName, authorEmail := resolveGitAuthor(projectID, h.store)
-	mergeTarget := h.resolveMergeTarget(projectID, task)
+	mergeTarget := h.executor.ResolveMergeTarget(projectID, task)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -762,27 +762,6 @@ func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.R
 		return
 	}
 	h.executor.StreamCommitMessage(flusher, taskID, task)
-}
-
-// resolveMergeTarget determines the branch that changes will be merged into.
-// For child tasks, the target is the parent's branch.
-// For root tasks, the target is the task's base_ref (if set), otherwise the project's origin branch.
-func (h *TaskHandler) resolveMergeTarget(projectID string, task *types.Task) string {
-	if task.ParentTaskID != "" {
-		parent, err := h.store.GetTaskByTaskID(task.ParentTaskID)
-		if err == nil && parent.Branch != "" {
-			return parent.Branch
-		}
-	}
-	// Use task's custom base_ref if set (will be created at merge time if needed)
-	if task.BaseRef != "" {
-		return task.BaseRef
-	}
-	project, err := h.store.GetProject(projectID)
-	if err != nil || project.OriginBranch == "" {
-		return ""
-	}
-	return project.OriginBranch
 }
 
 // HandleCommitAndDone commits the worktree changes, merges into the origin branch, and moves the task to Done.
@@ -892,7 +871,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		// Render merge conflict prompt template
 		userContent, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 			TaskBranch:      task.Branch,
-			TargetBranch:    h.resolveMergeTarget(projectID, task),
+			TargetBranch:    h.executor.ResolveMergeTarget(projectID, task),
 			TaskTitle:       task.Title,
 			TaskDescription: task.Prompt,
 			ConflictedFiles: conflictedFiles,

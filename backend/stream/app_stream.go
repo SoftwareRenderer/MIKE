@@ -551,18 +551,18 @@ func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff 
 }
 
 // BroadcastDiffStats sends compact diff stats to all clients of a project.
-func (asm *AppStreamManager) BroadcastDiffStats(projectID, taskID, diffHash, shortStat string, filesN, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string, stagedPaths []string) {
-	asm.sendBoardPayload(projectID, map[string]any{
+func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
+	asm.sendBoardPayload(event.ProjectID, map[string]any{
 		"type":            "task_diff_stats",
-		"task_id":         taskID,
-		"hash":            diffHash,
-		"short_stat":      shortStat,
-		"files_n":         filesN,
-		"untracked_n":     untrackedN,
-		"untracked_lines": untrackedLines,
-		"file_hashes":     filterInternalPathsFromHashes(changedHashes),
-		"removed_files":   filterInternalPathsFromList(removedFiles),
-		"staged_paths":    filterInternalPathsFromList(stagedPaths),
+		"task_id":         event.TaskID,
+		"hash":            event.DiffHash,
+		"short_stat":      event.ShortStat,
+		"files_n":         event.FilesN,
+		"untracked_n":     event.UntrackedN,
+		"untracked_lines": event.UntrackedLines,
+		"file_hashes":     filterInternalPathsFromHashes(event.ChangedHashes),
+		"removed_files":   filterInternalPathsFromList(event.RemovedFiles),
+		"staged_paths":    filterInternalPathsFromList(event.StagedPaths),
 	})
 }
 

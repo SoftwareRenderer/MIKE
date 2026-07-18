@@ -113,7 +113,17 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 		untrackedLines += len(u.Lines)
 	}
 	filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
-	te.appStreamMgr.BroadcastDiffStats(projectID, taskID, hash, diffResult.ShortStat, filesN, len(diffResult.Untracked), untrackedLines, fileHashes, nil, diffResult.StagedPaths)
+	te.appStreamMgr.BroadcastDiffStats(stream.DiffStatsEvent{
+		ProjectID:      projectID,
+		TaskID:         taskID,
+		DiffHash:       hash,
+		ShortStat:      diffResult.ShortStat,
+		FilesN:         filesN,
+		UntrackedN:     len(diffResult.Untracked),
+		UntrackedLines: untrackedLines,
+		ChangedHashes:  fileHashes,
+		StagedPaths:    diffResult.StagedPaths,
+	})
 }
 
 // extractPrevSummary returns the content of the most recent summarization message.
@@ -292,13 +302,8 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 	projectName := setup.project.Name
 	worktreePath := setup.worktreePath
 	projectPath := setup.projectPath
-	networkIsolation := setup.networkIsolation
-	memoryLimit := setup.memoryLimit
-	baseImage := setup.baseImage
+	sandboxOpts := setup.sandboxOpts
 	sandboxDockerfilePath := setup.sandboxDockerfilePath
-	forwardPorts := setup.forwardPorts
-	sandboxMounts := setup.sandboxMounts
-	sandboxEnvs := setup.sandboxEnvs
 
 	if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
 		return "", nil, nil, fmt.Errorf("gVisor not available")
@@ -317,7 +322,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 			}
 		}
 	} else {
-		imageToUse = baseImage
+		imageToUse = sandboxOpts.BaseImage
 		if imageToUse == "" {
 			imageToUse = kanban_sandbox.BaseImage
 		}
@@ -336,7 +341,17 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 	if !te.sandboxMgr.ContainerIsRunning(task.ID) {
 		piAgentDir := te.configStore.GetAgentConfigDir()
 		var createErr error
-		createErr, assignedPorts = te.sandboxMgr.Create(task.ID, worktreePath, imageToUse, projectName, projectPath, projectID, networkIsolation, memoryLimit, forwardPorts, piAgentDir, prompts.SkillsDir(), sandboxMounts, sandboxEnvs, task.IsPlanMode())
+		createErr, assignedPorts = te.sandboxMgr.Create(task.ID, worktreePath, projectName, projectPath, projectID, kanban_sandbox.SandboxOpts{
+			BaseImage:        imageToUse,
+			NetworkIsolation: sandboxOpts.NetworkIsolation,
+			MemoryLimit:      sandboxOpts.MemoryLimit,
+			ForwardPorts:     sandboxOpts.ForwardPorts,
+			PiAgentDir:       piAgentDir,
+			SkillsDir:        prompts.SkillsDir(),
+			SandboxMounts:    sandboxOpts.SandboxMounts,
+			SandboxEnvs:      sandboxOpts.SandboxEnvs,
+			PlanMode:         task.IsPlanMode(),
+		})
 		if createErr != nil {
 			return "", nil, nil, fmt.Errorf("failed to create sandbox: %w", createErr)
 		}

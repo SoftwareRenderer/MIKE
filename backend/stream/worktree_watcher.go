@@ -14,8 +14,22 @@ import (
 	"kanban/backend/git"
 )
 
+// DiffStatsEvent holds the data for a diff stats broadcast.
+type DiffStatsEvent struct {
+	ProjectID       string
+	TaskID          string
+	DiffHash        string
+	ShortStat       string
+	FilesN          int
+	UntrackedN      int
+	UntrackedLines  int
+	ChangedHashes   map[string]string
+	RemovedFiles    []string
+	StagedPaths     []string
+}
+
 // diffBroadcastFn broadcasts diff stats to clients.
-type diffBroadcastFn func(projectID, taskID, diffHash, shortStat string, filesN, untrackedN, untrackedLines int, changedHashes map[string]string, removedFiles []string, stagedPaths []string)
+type diffBroadcastFn func(event DiffStatsEvent)
 
 // diffCacheUpdateFn is a callback to update the GitHandler's diff cache.
 type diffCacheUpdateFn func(taskID string, taskDiff *git.TaskDiff)
@@ -322,10 +336,27 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 
 	if diffResult.Diff != "" || untrackedN > 0 {
 		untrackedLines := countUntrackedLines(diffResult.Untracked)
-		ww.broadcast(projectID, taskID, hash, diffResult.ShortStat, filesN, untrackedN, untrackedLines, changedHashes, removedFiles, diffResult.StagedPaths)
+		ww.broadcast(DiffStatsEvent{
+			ProjectID:      projectID,
+			TaskID:         taskID,
+			DiffHash:       hash,
+			ShortStat:      diffResult.ShortStat,
+			FilesN:         filesN,
+			UntrackedN:     untrackedN,
+			UntrackedLines: untrackedLines,
+			ChangedHashes:  changedHashes,
+			RemovedFiles:   removedFiles,
+			StagedPaths:    diffResult.StagedPaths,
+		})
 		log.Printf("[watcher] task=%s diff changed: %s (untracked: %d files)", taskID, diffResult.ShortStat, untrackedN)
 	} else if len(changedHashes) > 0 || len(removedFiles) > 0 {
-		ww.broadcast(projectID, taskID, "", "", 0, 0, 0, changedHashes, removedFiles, diffResult.StagedPaths)
+		ww.broadcast(DiffStatsEvent{
+			ProjectID:     projectID,
+			TaskID:        taskID,
+			ChangedHashes: changedHashes,
+			RemovedFiles:  removedFiles,
+			StagedPaths:   diffResult.StagedPaths,
+		})
 	}
 }
 
