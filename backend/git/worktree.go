@@ -453,7 +453,8 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	}
 
 	// Clean up stale kanban stash entries for tasks that no longer exist.
-	// Kanban stash messages: "kanban-switch-{taskID}-{threadID}" or "kanban-fork-{taskID}-{threadID}"
+	// Kanban stash messages: "kanban-switch-{taskID}", "kanban-fork-{taskID}",
+	// "kanban-checkpoint-{taskID}", "kanban-sync-merge-{taskID}", "kanban-auto-merge-{taskID}"
 	// Task IDs contain hyphens, so we match against all known active task IDs.
 	for _, p := range projects {
 		stashListOut, err := wm.gitRunOutput(p.Path, "stash", "list", "--format=%gd%x00%gs")
@@ -483,9 +484,9 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 			// Try matching against all active task IDs
 			belongsToActiveTask := false
 			for taskID := range activeSet {
-				if strings.Contains(subject, "kanban-switch-"+taskID+"-") ||
-					strings.Contains(subject, "kanban-fork-"+taskID+"-") ||
-					strings.Contains(subject, "kanban-checkpoint-"+taskID+" ") ||
+				if strings.Contains(subject, "kanban-switch-"+taskID) ||
+					strings.Contains(subject, "kanban-fork-"+taskID) ||
+					strings.Contains(subject, "kanban-checkpoint-"+taskID) ||
 					strings.Contains(subject, "kanban-sync-merge-"+taskID) ||
 					strings.Contains(subject, "kanban-auto-merge-"+taskID) {
 					belongsToActiveTask = true
@@ -1285,8 +1286,8 @@ func (wm *WorktreeManager) GetDiff(taskID, baseRef string) (string, error) {
 
 // GetTaskDiff returns the git diff and untracked files for a task's worktree.
 // DropStashEntriesForTask removes kanban-labeled stash entries for the given task.
-// Matches messages like "kanban-switch-{taskID}-*", "kanban-fork-{taskID}-*",
-// "kanban-checkpoint-{taskID} *", "kanban-sync-merge-{taskID}", and "kanban-auto-merge-{taskID}".
+// Matches messages like "kanban-switch-{taskID}", "kanban-fork-{taskID}",
+// "kanban-checkpoint-{taskID}", "kanban-sync-merge-{taskID}", and "kanban-auto-merge-{taskID}".
 // Called during task deletion to clean up stale stash entries.
 func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) error {
 	project, err := wm.store.GetProject(projectID)
@@ -1315,9 +1316,9 @@ func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) err
 		subject := parts[1]
 		// %gs gives reflog subject "On <branch>: <message>" for all stash types.
 		// Match kanban-labeled stashes: switch, fork, checkpoint, sync-merge, auto-merge.
-		if !strings.Contains(subject, "kanban-switch-"+taskID+"-") &&
-			!strings.Contains(subject, "kanban-fork-"+taskID+"-") &&
-			!strings.Contains(subject, "kanban-checkpoint-"+taskID+" ") &&
+		if !strings.Contains(subject, "kanban-switch-"+taskID) &&
+			!strings.Contains(subject, "kanban-fork-"+taskID) &&
+			!strings.Contains(subject, "kanban-checkpoint-"+taskID) &&
 			!strings.Contains(subject, "kanban-sync-merge-"+taskID) &&
 			!strings.Contains(subject, "kanban-auto-merge-"+taskID) {
 			continue
@@ -2231,33 +2232,74 @@ func (wm *WorktreeManager) DropStashByHash(repoPath, hash string) error {
     return wm.gitRun(repoPath, "stash", "drop", "stash@{0}")
 }
 
+// maxStashMessage is the maximum length for any stash message.
+const maxStashMessage = 50
+
 // StashMessageForSwitch generates a unique stash message for a thread switch.
-func StashMessageForSwitch(taskID, threadID string) string {
-    return fmt.Sprintf("kanban-switch-%s-%s", taskID, threadID)
+// Format: "kanban-switch-<taskID>" — task ID is the key identifier for cleanup.
+// Total length is capped at 50 characters.
+func StashMessageForSwitch(taskID string) string {
+    msg := fmt.Sprintf("kanban-switch-%s", taskID)
+    if len(msg) > maxStashMessage {
+        msg = msg[:maxStashMessage]
+    }
+    return msg
 }
 
 // StashMessageForFork generates a unique stash message for a thread fork.
-func StashMessageForFork(taskID, threadID string) string {
-    return fmt.Sprintf("kanban-fork-%s-%s", taskID, threadID)
+// Format: "kanban-fork-<taskID>" — task ID is the key identifier for cleanup.
+// Total length is capped at 50 characters.
+func StashMessageForFork(taskID string) string {
+    msg := fmt.Sprintf("kanban-fork-%s", taskID)
+    if len(msg) > maxStashMessage {
+        msg = msg[:maxStashMessage]
+    }
+    return msg
 }
 
 // StashMessageForCheckpoint generates a stash message for an execution checkpoint.
-// Format: "On <branch>: kanban-checkpoint-<taskID> <msg>"
+// Format: "On <branch>: kanban-checkpoint-<taskID>"
+// The branch name is truncated to fit within 50 characters.
 // The task ID in the message allows cleanup during task deletion.
-func StashMessageForCheckpoint(taskID, branch, msg string) string {
-    return fmt.Sprintf("On %s: kanban-checkpoint-%s %s", branch, taskID, msg)
+func StashMessageForCheckpoint(taskID, branch string) string {
+    // "On : kanban-checkpoint-<taskID>" — branch is optional context
+    // Reserve space for the fixed parts: "On : kanban-checkpoint-" (24) + taskID
+    msg := fmt.Sprintf("On %s: kanban-checkpoint-%s", branch, taskID)
+    if len(msg) > maxStashMessage {
+        // Truncate the branch name to fit
+        prefix := "On "
+        suffix := ": kanban-checkpoint-" + taskID
+        if len(prefix+suffix) > maxStashMessage {
+            // Even with empty branch it's too long — hard truncate
+            msg = (prefix + suffix)[:maxStashMessage]
+        } else {
+            branchMax := maxStashMessage - len(prefix) - len(suffix)
+            msg = fmt.Sprintf("On %s: kanban-checkpoint-%s", branch[:branchMax], taskID)
+        }
+    }
+    return msg
 }
 
 // StashMessageForSyncMerge generates a stash message for a sync-merge operation.
 // The task ID in the message allows cleanup during task deletion and GC.
+// Total length is capped at 50 characters.
 func StashMessageForSyncMerge(taskID string) string {
-    return fmt.Sprintf("kanban-sync-merge-%s", taskID)
+    msg := fmt.Sprintf("kanban-sync-merge-%s", taskID)
+    if len(msg) > maxStashMessage {
+        msg = msg[:maxStashMessage]
+    }
+    return msg
 }
 
 // StashMessageForAutoMerge generates a stash message for an auto-merge operation.
 // The task ID in the message allows cleanup during task deletion and GC.
+// Total length is capped at 50 characters.
 func StashMessageForAutoMerge(taskID string) string {
-    return fmt.Sprintf("kanban-auto-merge-%s", taskID)
+    msg := fmt.Sprintf("kanban-auto-merge-%s", taskID)
+    if len(msg) > maxStashMessage {
+        msg = msg[:maxStashMessage]
+    }
+    return msg
 }
 
 var stashIndexRe = regexp.MustCompile(`stash@\{(\d+)\}`)

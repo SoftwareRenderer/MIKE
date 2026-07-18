@@ -469,3 +469,24 @@ func TestGenerateBranchName_UsesSlugForNormalTitle(t *testing.T) {
 		t.Errorf("expected 'task/fix-login', got %q", branchName)
 	}
 }
+
+func TestGenerateBranchName_MaxLength(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "frost-amber-quartz"
+	// Title that slugifies to more than 45 chars (maxBranchName - len("task/"))
+	longTitle := "Fix a very long bug description that exceeds the maximum allowed branch name length limit"
+	task := &types.Task{ID: taskID, ProjectID: projectID, Title: longTitle}
+	branchName := te.generateBranchName(task, taskID, projectID)
+	if len(branchName) > maxBranchName {
+		t.Errorf("branch name len = %d (%q), want <= %d", len(branchName), branchName, maxBranchName)
+	}
+}
+
+func TestSlugifyBranchName_MaxLength(t *testing.T) {
+	// Title that slugifies to more than 45 chars
+	longTitle := "Fix a very long bug description that exceeds the maximum allowed branch name length limit"
+	slug := slugifyBranchName(longTitle)
+	if len(slug) > maxBranchName-len("task/") {
+		t.Errorf("slug len = %d (%q), want <= %d", len(slug), slug, maxBranchName-len("task/"))
+	}
+}
