@@ -76,6 +76,7 @@
                 aria-selected={file.path === activeFilePath}
                 aria-controls="editor-panel-{file.path.replace(/[^a-zA-Z0-9]/g, '-')}"
                 onclick={() => onSelectTab(file.path)}
+                onmousedown={(e) => { if (e.button === 1) { e.preventDefault(); onCloseTab(file.path); } }}
                 ondblclick={() => { if (!pinnedFiles.has(file.path)) onPinTab(file.path); }}
                 onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectTab(file.path); } }}
             >

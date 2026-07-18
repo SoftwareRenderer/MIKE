@@ -12,6 +12,7 @@
 //   drafts               — key: taskId → string (draft chat text)
 //   editor-drafts        — key: file path → string (draft file content)
 //   editor-history       — key: file path → EditorHistory (undo/redo history)
+//   editor-tabs          — key: projectId → EditorTabState (open files, active file, pinned files)
 //   unsaved-files        — key: projectId → string[] (unsaved file paths)
 //   offline-queue        — Single key 'actions' → QueuedAction[]
 //   explorer-layout      — Single key 'layout' → ExplorerLayout
@@ -29,7 +30,7 @@
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const DB_NAME = 'kanban-storage';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 // Object store names
 const STORE_COLLAPSED_TASKS = 'collapsed-tasks';
@@ -41,6 +42,7 @@ const STORE_UNSAVED_FILES = 'unsaved-files';
 const STORE_OFFLINE_QUEUE = 'offline-queue';
 const STORE_EXPLORER_LAYOUT = 'explorer-layout';
 const STORE_COLLAPSED_DIFF_FILES = 'collapsed-diff-files';
+const STORE_EDITOR_TABS = 'editor-tabs';
 const STORE_APP_SETTINGS = 'app-settings';
 const STORE_ATTACHMENTS = 'attachments';
 const STORE_BOARD_CACHE = 'board-cache';
@@ -56,6 +58,7 @@ const ALL_STORES = [
     STORE_DRAFTS,
     STORE_EDITOR_DRAFTS,
     STORE_EDITOR_HISTORY,
+    STORE_EDITOR_TABS,
     STORE_UNSAVED_FILES,
     STORE_OFFLINE_QUEUE,
     STORE_EXPLORER_LAYOUT,
@@ -110,6 +113,12 @@ function openDB(): Promise<IDBDatabase> {
                 // v2: add board-cache store
                 if (!db.objectStoreNames.contains(STORE_BOARD_CACHE)) {
                     db.createObjectStore(STORE_BOARD_CACHE);
+                }
+            }
+            if (oldVersion < 3) {
+                // v3: add editor-tabs store
+                if (!db.objectStoreNames.contains(STORE_EDITOR_TABS)) {
+                    db.createObjectStore(STORE_EDITOR_TABS);
                 }
             }
         };
@@ -478,6 +487,11 @@ export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>,
     if (allProjectIds) {
         await cleanBoardCacheByProject(allProjectIds);
     }
+
+    // 8. Clean editor tabs (if project IDs provided)
+    if (allProjectIds) {
+        await cleanEditorTabsByProject(allProjectIds);
+    }
 }
 
 /** Remove collapsed task entries for deleted tasks. */
@@ -549,6 +563,15 @@ async function cleanEditorHistoryByProject(allProjectPaths: Set<string>): Promis
     }
 }
 
+/** Remove editor tab entries for projects that no longer exist. */
+async function cleanEditorTabsByProject(allProjectIds: Set<string>): Promise<void> {
+    const keys = await dbGetAllKeys(STORE_EDITOR_TABS);
+    const toDelete = keys.filter(key => !allProjectIds.has(key));
+    if (toDelete.length > 0) {
+        await dbDeleteKeys(STORE_EDITOR_TABS, toDelete);
+    }
+}
+
 /** Remove board cache entries for projects that no longer exist. */
 async function cleanBoardCacheByProject(allProjectIds: Set<string>): Promise<void> {
     const keys = await dbGetAllKeys(STORE_BOARD_CACHE);
@@ -589,6 +612,35 @@ export async function setBoardCache(key: string, value: unknown): Promise<void> 
 export async function getBoardCache<T>(key: string): Promise<T | null> {
     const entry = await dbGet<BoardCacheEntry>(STORE_BOARD_CACHE, key);
     return entry ? (entry.data as T) : null;
+}
+
+// ─── Editor tabs (IndexedDB: editor-tabs store) ──────────────────────────────
+// Persists open file tabs, active file, and pinned files per project.
+
+export interface EditorTabFile {
+    path: string;
+    targetLine: number;
+}
+
+export interface EditorTabState {
+    openFiles: EditorTabFile[];
+    activeFilePath: string;
+    pinnedFiles: string[];
+}
+
+/** Load persisted editor tab state for a project. Returns `null` if none exists. */
+export async function loadEditorTabs(projectId: string): Promise<EditorTabState | null> {
+    return dbGet<EditorTabState>(STORE_EDITOR_TABS, projectId);
+}
+
+/** Save editor tab state for a project. */
+export async function saveEditorTabs(projectId: string, state: EditorTabState): Promise<void> {
+    return dbPut(STORE_EDITOR_TABS, projectId, state);
+}
+
+/** Clear editor tab state for a project. */
+export async function clearEditorTabs(projectId: string): Promise<void> {
+    return dbDelete(STORE_EDITOR_TABS, projectId);
 }
 
 

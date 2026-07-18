@@ -14,7 +14,7 @@
     import CommitDiffOverlay from './CommitDiffOverlay.svelte';
     import GitStatusPanel from './GitStatusPanel.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
-    import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles } from '$lib/storage';
+    import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles, loadEditorTabs, saveEditorTabs } from '$lib/storage';
 
     let { projectId, projectPath, currentBranch, initialFile, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
         projectId: string;
@@ -124,13 +124,22 @@
             activeFilePath = file;
         }
     });
-    // Clear open files when project changes
+    // Clear open files when project changes, then restore from IndexedDB
     $effect(() => {
         const _ = projectId;
         openFiles = [];
         activeFilePath = '';
         pinnedFiles = new Set();
         unsavedFiles = new Set();
+        // Restore persisted tabs for this project
+        loadEditorTabs(projectId).then((saved) => {
+            if (saved && saved.openFiles.length > 0) {
+                openFiles = saved.openFiles;
+                activeFilePath = saved.activeFilePath;
+                pinnedFiles = new Set(saved.pinnedFiles);
+                onUpdateFile(activeFilePath || null);
+            }
+        }).catch(() => {});
     });
     let editorFocused = $state(false);
 
@@ -139,6 +148,23 @@
         unsavedFiles;
         saveUnsavedFiles(projectId, [...unsavedFiles]).catch(() => {});
     });
+
+    // Persist editor tabs to IndexedDB
+    $effect(() => {
+        openFiles;
+        activeFilePath;
+        pinnedFiles;
+        saveEditorTabs(projectId, {
+            openFiles: toPlainOpenFiles(openFiles),
+            activeFilePath,
+            pinnedFiles: [...pinnedFiles],
+        }).catch(() => {});
+    });
+
+    /** Convert openFiles array to plain objects (avoid Svelte 5 proxy issues). */
+    function toPlainOpenFiles(files: OpenFile[]): OpenFile[] {
+        return files.map(f => ({ path: f.path, targetLine: f.targetLine }));
+    }
 
     // Mobile layout
     const isMobileCtx = useIsMobile();
