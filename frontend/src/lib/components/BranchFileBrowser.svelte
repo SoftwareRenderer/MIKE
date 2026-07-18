@@ -5,7 +5,7 @@
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
 
-    let { projectId, projectPath, initialPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange }: {
+    let { projectId, projectPath, initialPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind }: {
         projectId: string;
         projectPath: string;
         initialPath?: string;
@@ -14,6 +14,7 @@
         pendingFsEvent: { op: 'create' | 'delete'; path: string } | null;
         onFileSelected: (path: string) => void;
         onPathChange: (path: string) => void;
+        onToggleFind?: () => void;
     } = $props();
 
     // New file creation
@@ -355,6 +356,12 @@
         <span class="file-browser-label">Files</span>
         {#if !showNewFile && !showNewFolder}
             <div class="file-actions">
+                <button class="new-file-btn" onclick={onToggleFind} title="Find in files (Ctrl+Shift+F)" aria-label="Find in files">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="11" cy="11" r="8"/>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                </button>
                 <button class="new-file-btn" onclick={() => { showNewFile = true; newFileName = ''; createError = ''; }} title="New file" aria-label="Create new file">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
                         <line x1="8" y1="3" x2="8" y2="13"/>

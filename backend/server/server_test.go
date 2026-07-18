@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -605,6 +606,158 @@ func TestHandleFSSearch(t *testing.T) {
 		results := result["results"].([]any)
 		if len(results) > 10 {
 			t.Fatalf("expected at most 10 results, got %d", len(results))
+		}
+	})
+
+	// --- Content search tests ---
+	// Create files with known content for content search
+	os.WriteFile(filepath.Join(tmpDir, "greeting.txt"), []byte("Hello world\nGoodbye world\n"), 0o644)
+	os.WriteFile(filepath.Join(tmpDir, "src", "app.ts"), []byte("const x = 42;\nfunction hello() { return 'hi'; }\n"), 0o644)
+	os.WriteFile(filepath.Join(tmpDir, "src", "utils.ts"), []byte("// utility functions\nexport function format(s: string) { return s.trim(); }\n"), 0o644)
+	// Binary file
+	os.WriteFile(filepath.Join(tmpDir, "binary.dat"), []byte("hello\x00world\x00data"), 0o644)
+
+	t.Run("content search finds matching lines", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/search?q=hello&content=1&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		results := result["results"].([]any)
+		// Should find "Hello world" in greeting.txt and "function hello()" in app.ts
+		found := false
+		for _, r := range results {
+			m := r.(map[string]any)
+			if m["path"] == "src/app.ts" {
+				if m["line"].(float64) != 2 {
+					t.Fatalf("expected line 2, got %v", m["line"])
+				}
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected to find match in src/app.ts, got: %v", results)
+		}
+	})
+
+	t.Run("content search with case sensitivity", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/search?q=Hello&case=1&content=1&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		results := result["results"].([]any)
+		// Only "Hello world" in greeting.txt line 1 should match (not "hello()" in app.ts)
+		var foundGreeting, foundApp bool
+		for _, r := range results {
+			m := r.(map[string]any)
+			if m["path"] == "greeting.txt" {
+				foundGreeting = true
+			}
+			if m["path"] == "src/app.ts" {
+				foundApp = true
+			}
+		}
+		if !foundGreeting {
+			t.Fatal("expected match in greeting.txt")
+		}
+		if foundApp {
+			t.Fatal("expected NO match in src/app.ts (case sensitive)")
+		}
+	})
+
+	t.Run("content search with regex", func(t *testing.T) {
+		// Use url.QueryEscape to properly encode the regex pattern
+		q := url.QueryEscape(`export\s+function`)
+		req := testRequest(http.MethodGet, "/api/fs/search?q="+q+"&regex=1&content=1&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		results := result["results"].([]any)
+		found := false
+		for _, r := range results {
+			m := r.(map[string]any)
+			if m["path"] == "src/utils.ts" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected regex match in src/utils.ts, got: %v", results)
+		}
+	})
+
+	t.Run("content search with whole word", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/search?q=hi&word=1&content=1&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		results := result["results"].([]any)
+		// "hi" should match in app.ts (as 'hi') but not in "utility" in utils.ts
+		found := false
+		for _, r := range results {
+			m := r.(map[string]any)
+			if m["path"] == "src/app.ts" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected whole-word match for 'hi' in src/app.ts, got: %v", results)
+		}
+	})
+
+	t.Run("binary file skipped for content search but matched by filename", func(t *testing.T) {
+		// Content search for "hello" should NOT match inside binary.dat
+		req := testRequest(http.MethodGet, "/api/fs/search?q=hello&content=1&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		result := mustJSON[map[string]any](t, rr.Body)
+		results := result["results"].([]any)
+		for _, r := range results {
+			m := r.(map[string]any)
+			if m["path"] == "binary.dat" {
+				t.Fatalf("expected binary.dat to be skipped in content search, but found: %v", m)
+			}
+		}
+		// But filename search should still find it
+		req2 := testRequest(http.MethodGet, "/api/fs/search?q=binary&project="+projectID, nil)
+		withAuthCSRF(req2, cookie, csrfToken)
+		rr2 := testResponse(t, s, req2)
+		if rr2.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr2.Code, rr2.Body.String())
+		}
+		result2 := mustJSON[map[string]any](t, rr2.Body)
+		results2 := result2["results"].([]any)
+		found := false
+		for _, r := range results2 {
+			m := r.(map[string]any)
+			if m["path"] == "binary.dat" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("expected binary.dat in filename search")
+		}
+	})
+
+	t.Run("invalid regex returns error", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/search?q=[invalid&regex=1&content=1&project="+projectID, nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 		}
 	})
 }
