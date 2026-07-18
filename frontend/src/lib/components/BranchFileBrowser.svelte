@@ -12,7 +12,7 @@
         sandboxEnabled: boolean;
         unsavedFiles: string[];
         pendingFsEvent: { op: 'create' | 'delete'; path: string } | null;
-        onFileSelected: (path: string) => void;
+        onFileSelected: (path: string, line?: number, pin?: boolean) => void;
         onPathChange: (path: string) => void;
         onToggleFind?: () => void;
     } = $props();
@@ -274,11 +274,11 @@
         }
     }
 
-    function handleClick(entry: { isDir: boolean; path: string }) {
+    function handleClick(entry: { isDir: boolean; path: string }, pin: boolean = false) {
         if (entry.isDir) {
             loadDir(entry.path);
         } else {
-            onFileSelected(entry.path);
+            onFileSelected(entry.path, undefined, pin);
         }
     }
 
@@ -441,6 +441,7 @@
                         class="file-browser-item"
                         class:dir={entry.isDir}
                         onclick={() => handleClick(entry)}
+                        ondblclick={() => handleClick(entry, true)}
                         role="treeitem"
                         aria-selected="false"
                         title={entry.path}

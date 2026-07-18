@@ -30,13 +30,14 @@
     import { goTemplate } from '$lib/gotemplate';
     import { getLanguageTreeFromView } from '$lib/highlighter';
 
-    let { projectId, filePath, targetLine, onFocused, onSymbolsUpdate, onHasChanges, onClose, onToggleFullscreen, mobileFullscreen, isMobile }: {
+    let { projectId, filePath, targetLine, active, onFocused, onSymbolsUpdate, onHasChanges, onClose, onToggleFullscreen, mobileFullscreen, isMobile }: {
         projectId: string;
         filePath: string;
         targetLine: number;
+        active: boolean;
         onFocused: (focused: boolean) => void;
         onSymbolsUpdate: (symbols: Array<{ name: string; kind: string; line: number; indent: number }>) => void;
-        onHasChanges: (hasChanges: boolean) => void;
+        onHasChanges: (filePath: string, hasChanges: boolean) => void;
         onClose: () => void;
         onToggleFullscreen?: () => void;
         mobileFullscreen?: boolean;
@@ -69,7 +70,7 @@
 
     // Notify parent when unsaved changes state changes
     $effect(() => {
-        onHasChanges(hasChanges);
+        onHasChanges(filePath, hasChanges);
     });
 
     function requestClose() {
@@ -538,75 +539,35 @@
     });
 </script>
 
-<div class="branch-editor" class:has-file={!!filePath}>
+<div class="branch-editor" class:has-file={!!filePath} class:active={active}>
     {#if filePath}
-        <!-- File tab header -->
-        <div class="editor-header">
-            <div class="editor-tab">
-                <button class="btn-close-file" class:unsaved={hasChanges} onclick={requestClose} aria-label="Close file" title="Close file">
-                    <svg width="20" height="20" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        <circle class="unsaved-circle" cx="8" cy="8" r="6" fill="currentColor"/>
-                        <path class="close-x" d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                    </svg>
-                </button>
-                <span class="editor-filename" title={filePath}>{fileName}</span>
-            </div>
-            <div class="editor-actions">
-                {#if onToggleFullscreen}
-                    <button type="button" class="editor-icon-btn editor-fullscreen-toggle" onclick={onToggleFullscreen} title="Toggle fullscreen">
-                        {#if mobileFullscreen}
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        {:else}
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        {/if}
-                    </button>
-                {/if}
-                <button
-                    class="editor-save-btn"
-                    class:saving={saving}
-                    class:has-changes={hasChanges}
-                    onclick={handleSave}
-                    disabled={!hasChanges || saving || fileTooLarge}
-                    title="Save (Ctrl+S)"
-                >
-                    {#if saving}Saving...{:else}Save{/if}
-                </button>
-            </div>
+        <!-- Editor content area -->
+        <div class="editor-content">
+            {#if loading}
+                <div class="editor-placeholder">Loading file...</div>
+            {:else if error}
+                <div class="editor-error">{error}</div>
+            {:else if fileTooLarge}
+                <div class="editor-placeholder">File too large to edit (max 1MB)</div>
+            {:else}
+                <div class="editor-wrapper" bind:this={editorEl}></div>
+                <div class="search-container" bind:this={searchContainerEl}></div>
+            {/if}
         </div>
-    {/if}
 
-    <!-- Editor content area -->
-    <div class="editor-content">
-        {#if loading}
-            <div class="editor-placeholder">Loading file...</div>
-        {:else if error}
-            <div class="editor-error">{error}</div>
-        {:else if fileTooLarge}
-            <div class="editor-placeholder">File too large to edit (max 1MB)</div>
-        {:else if !filePath}
-            <div class="editor-placeholder">
-                <svg width="32" height="32" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3" aria-hidden="true">
-                    <path d="M3 1h6l4 4v8a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z"/>
-                    <polyline points="9,1 9,5 13,5"/>
-                </svg>
-                <p>Select a file to edit</p>
-            </div>
-        {:else}
-            <div class="editor-wrapper" bind:this={editorEl}></div>
-            <div class="search-container" bind:this={searchContainerEl}></div>
+        <!-- Footer with line/char count -->
+        {#if !loading && !error && !fileTooLarge}
+            <EditorFooter
+                {cursorLine}
+                {cursorCol}
+                {lineCount}
+                {charCount}
+                {hasChanges}
+                onFind={openSearchPanel}
+                onSave={handleSave}
+                {saving}
+            />
         {/if}
-    </div>
-
-    <!-- Footer with line/char count -->
-    {#if !loading && !error && !fileTooLarge && filePath}
-        <EditorFooter
-            {cursorLine}
-            {cursorCol}
-            {lineCount}
-            {charCount}
-            {hasChanges}
-            onFind={openSearchPanel}
-        />
     {/if}
 
     <!-- Confirm close dialog -->
@@ -626,134 +587,13 @@
 
 <style>
     .branch-editor {
-        display: flex;
+        display: none;
         flex-direction: column;
         height: 100%;
         overflow: hidden;
     }
-
-    .editor-header {
+    .branch-editor.active {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 8px;
-        border-bottom: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        flex-shrink: 0;
-        min-height: 40px;
-    }
-
-    .editor-tab {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 8px;
-        font-size: 0.875rem;
-        color: var(--color-text-primary);
-    }
-
-    .editor-filename {
-        max-width: 300px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-family: var(--font-mono);
-        font-size: 0.75rem;
-    }
-
-    .btn-close-file {
-        background: none;
-        border: none;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        padding: 6px;
-        border-radius: var(--radius-sm);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        position: relative;
-    }
-    .btn-close-file:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    .btn-close-file .unsaved-circle {
-        opacity: 0;
-        transition: opacity 0.15s;
-    }
-    .btn-close-file .close-x {
-        opacity: 1;
-        transition: opacity 0.15s;
-    }
-    .btn-close-file.unsaved .unsaved-circle {
-        opacity: 1;
-        color: var(--color-status-yellow, #f0c000);
-    }
-    .btn-close-file.unsaved .close-x {
-        opacity: 0;
-    }
-    .btn-close-file.unsaved:hover .unsaved-circle {
-        opacity: 0;
-    }
-    .btn-close-file.unsaved:hover .close-x {
-        opacity: 1;
-    }
-
-    .editor-actions {
-        display: flex;
-        gap: 4px;
-    }
-
-    .editor-icon-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border: none;
-        background: transparent;
-        color: var(--color-text-tertiary);
-        cursor: pointer;
-        border-radius: 4px;
-        flex-shrink: 0;
-    }
-    .editor-icon-btn:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    /* Fullscreen toggle: visible on mobile and tablets */
-    .editor-fullscreen-toggle {
-        display: none;
-    }
-    @media (max-width: 1024px) {
-        .editor-fullscreen-toggle {
-            display: flex;
-        }
-    }
-
-    .editor-save-btn {
-        padding: 6px 12px;
-        font-size: 0.75rem;
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-3);
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        border: none;
-    }
-    .editor-save-btn:not(:disabled) {
-        background: var(--color-accent-dark);
-        color: white;
-    }
-    .editor-save-btn:hover:not(:disabled) {
-        opacity: 0.9;
-    }
-    .editor-save-btn:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-    }
-    .editor-save-btn.saving {
-        color: var(--color-status-orange);
     }
 
     .editor-content {
@@ -774,10 +614,6 @@
         color: var(--color-text-tertiary);
         font-size: 0.8125rem;
     }
-    .editor-placeholder svg {
-        margin-bottom: 4px;
-    }
-
     .editor-error {
         padding: 16px;
         color: var(--color-status-red);
