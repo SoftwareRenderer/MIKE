@@ -724,7 +724,7 @@
                 </div>
             </div>
 
-            <!-- Resize handle: Chat ↔ Checkpoint/Diff -->
+            <!-- Resize handle: Chat ↔ Diff -->
             {#if !isMobileCtx.isMobile}
                 <ResizeHandle
                     ariaLabel="Resize agent and changes panels"
