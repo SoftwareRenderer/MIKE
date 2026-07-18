@@ -132,7 +132,7 @@
     let commits: TaskCommit[] = $state([]);
     let baseCommit: TaskCommit | null = $state(null);
 
-    // Checkpoint diff overlay
+    // Checkpoint diff overlay (overlays the diff panel)
     let checkpointDiffOpen = $state(false);
     let checkpointDiffHash = $state(''); // which checkpoint hash is currently shown
     let checkpointDiffFiles: DiffFile[] = $state([]);
@@ -389,29 +389,22 @@
     let columnsRef: HTMLDivElement | null = $state(null);
     const DEFAULT_BOARD_RATIO = 0.22;
     const DEFAULT_CHAT_RATIO = 0.55;
-    const DEFAULT_CHECKPOINT_RATIO = 0.5;
     const MIN_BOARD_RATIO = 0.12;
     const MAX_BOARD_RATIO = 0.40;
     const MIN_CHAT_RATIO = 0.15;
     const MAX_CHAT_RATIO = 0.80;
-    const MIN_CHECKPOINT_RATIO = 0.15;
-    const MAX_CHECKPOINT_RATIO = 0.85;
 
     let boardRatio = $state(DEFAULT_BOARD_RATIO);
     let chatRatio = $state(DEFAULT_CHAT_RATIO);
-    let checkpointRatio = $state(DEFAULT_CHECKPOINT_RATIO);
     let boardDragStartX = 0;
     let boardDragStartRatio = 0;
     let chatDragStartX = 0;
     let chatDragStartRatio = 0;
-    let checkpointDragStartX = 0;
-    let checkpointDragStartRatio = 0;
 
     let boardWidth = $derived(`${(boardRatio * 100).toFixed(1)}%`);
     let chatWidth = $derived(`${(chatRatio * (1 - boardRatio) * 100).toFixed(1)}%`);
-    let checkpointWidth = $derived(`${(checkpointRatio * (1 - chatRatio) * (1 - boardRatio) * 100).toFixed(1)}%`);
-    // When checkpoint panel is closed, diff takes full remaining space
-    let diffWidth = $derived(`${((checkpointDiffOpen ? (1 - checkpointRatio) : 1) * (1 - chatRatio) * (1 - boardRatio) * 100).toFixed(1)}%`);
+    // Diff takes full remaining space (checkpoint overlays on top)
+    let diffWidth = $derived(`${((1 - chatRatio) * (1 - boardRatio) * 100).toFixed(1)}%`);
 
     function handleBoardDragStart(ev: MouseEvent | TouchEvent, startX: number) {
         boardDragStartX = startX;
@@ -440,20 +433,6 @@
         saveAppSetting('kanban:detail:chatRatio', chatRatio).catch(() => {});
     }
 
-    function handleCheckpointDragStart(ev: MouseEvent | TouchEvent, startX: number) {
-        checkpointDragStartX = startX;
-        checkpointDragStartRatio = checkpointRatio;
-    }
-    function handleCheckpointDragMove(pointerX: number) {
-        if (!columnsRef) return;
-        const remaining = Math.max(columnsRef.offsetWidth * (1 - chatRatio) * (1 - boardRatio), 1);
-        const delta = (pointerX - checkpointDragStartX) / remaining;
-        checkpointRatio = Math.max(MIN_CHECKPOINT_RATIO, Math.min(MAX_CHECKPOINT_RATIO, checkpointDragStartRatio + delta));
-    }
-    function handleCheckpointDragEnd() {
-        saveAppSetting('kanban:detail:checkpointRatio', checkpointRatio).catch(() => {});
-    }
-
     // Load saved ratios
     loadAppSetting('kanban:detail:boardRatio', DEFAULT_BOARD_RATIO).then(v => {
         const val = Number.parseFloat(String(v));
@@ -462,10 +441,6 @@
     loadAppSetting('kanban:detail:chatRatio', DEFAULT_CHAT_RATIO).then(v => {
         const val = Number.parseFloat(String(v));
         if (!isNaN(val) && val > 0) chatRatio = val;
-    }).catch(() => {});
-    loadAppSetting('kanban:detail:checkpointRatio', DEFAULT_CHECKPOINT_RATIO).then(v => {
-        const val = Number.parseFloat(String(v));
-        if (!isNaN(val) && val > 0) checkpointRatio = val;
     }).catch(() => {});
 
 
@@ -759,32 +734,8 @@
                 />
             {/if}
 
-            <!-- Column 3: Checkpoint Diff (own panel with close button in header) -->
-            {#if checkpointDiffOpen}
-                <div class="column column-checkpoint" class:hidden={isMobileCtx.isMobile && activeTab !== 'checkpoint'} style:width={checkpointWidth}>
-                    <CheckpointOverlay
-                        files={checkpointDiffFiles}
-                        untracked={checkpointDiffUntracked}
-                        loading={checkpointDiffLoading}
-                        onClose={closeCheckpointDiff}
-                        onExpandFile={handleExpandDiff}
-                        onLineClick={handleDiffLineClick}
-                    />
-                </div>
-
-                <!-- Resize handle: Checkpoint ↔ Diff -->
-                {#if !isMobileCtx.isMobile}
-                    <ResizeHandle
-                        ariaLabel="Resize checkpoint and changes panels"
-                        onDragStart={handleCheckpointDragStart}
-                        onDragMove={handleCheckpointDragMove}
-                        onDragEnd={handleCheckpointDragEnd}
-                    />
-                {/if}
-            {/if}
-
-            <!-- Column 4: Working Changes (Diff) -->
-            <div class="column column-diff" class:hidden={isMobileCtx.isMobile && activeTab !== 'diff'} style:width={diffWidth}>
+            <!-- Column 3: Working Changes (Diff) with Checkpoint overlay -->
+            <div class="column column-diff" class:hidden={isMobileCtx.isMobile && activeTab !== 'diff' && activeTab !== 'checkpoint'} style:width={diffWidth}>
                 <div class="diff-content">
                     {#if editingFile}
                         <!-- Inline file editor (lazy-loaded) -->
@@ -806,23 +757,37 @@
                             <div class="file-editor-loading">Loading editor...</div>
                         {/if}
                     {:else}
-                        {#if worktreeExists || task.branch}
-                            <DiffComparison
-                                commits={commits}
-                                baseCommit={baseCommit}
-                                diffFrom={diffFrom}
-                                diffTo={diffTo}
-                                onFromChange={onDiffFromChange}
-                                onToChange={onDiffToChange}
-                                onToggleFullscreen={toggleDiffFullscreen}
-                                isFullscreen={diffFullscreen}
-                            />
+                        {#if !checkpointDiffOpen}
+                            {#if worktreeExists || task.branch}
+                                <DiffComparison
+                                    commits={commits}
+                                    baseCommit={baseCommit}
+                                    diffFrom={diffFrom}
+                                    diffTo={diffTo}
+                                    onFromChange={onDiffFromChange}
+                                    onToChange={onDiffToChange}
+                                    onToggleFullscreen={toggleDiffFullscreen}
+                                    isFullscreen={diffFullscreen}
+                                />
+                            {/if}
+                            {#if DiffViewerComponent}
+                                {@const DiffViewer = DiffViewerComponent}
+                                <DiffViewer stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                            {:else}
+                                <div class="diff-viewer-loading">Loading diff viewer...</div>
+                            {/if}
                         {/if}
-                        {#if DiffViewerComponent}
-                            {@const DiffViewer = DiffViewerComponent}
-                            <DiffViewer stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
-                        {:else}
-                            <div class="diff-viewer-loading">Loading diff viewer...</div>
+
+                        <!-- Checkpoint overlay (overlays entire diff panel) -->
+                        {#if checkpointDiffOpen}
+                            <CheckpointOverlay
+                                files={checkpointDiffFiles}
+                                untracked={checkpointDiffUntracked}
+                                loading={checkpointDiffLoading}
+                                onClose={closeCheckpointDiff}
+                                onExpandFile={handleExpandDiff}
+                                onLineClick={handleDiffLineClick}
+                            />
                         {/if}
                     {/if}
                 </div>
@@ -871,11 +836,6 @@
     .column-diff {
         min-width: 0;
     }
-    .column-checkpoint {
-        min-width: 0;
-        border-right: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-    }
     .diff-content {
         flex: 1;
         display: flex;
@@ -883,6 +843,11 @@
         min-height: 0;
         overflow: hidden;
         position: relative;
+    }
+    .diff-content :global(.checkpoint-diff-overlay) {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
     }
     .diff-viewer-loading {
         display: flex;
