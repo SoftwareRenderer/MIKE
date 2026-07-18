@@ -964,7 +964,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <div class="reconnecting-banner" role="status" aria-live="polite">
         <span class="reconnecting-spinner"></span>
         Reconnecting {#if countdownSeconds > 0}in {countdownSeconds}s {/if}...
-        <span class="reconnecting-stale">Data from {staleTimeText}</span>
+        {#if staleTimeText}<span class="reconnecting-stale">Data from {staleTimeText}</span>{/if}
         <button class="reconnecting-btn" onclick={tryReconnectNow} type="button" aria-label="Try connecting now">Connect</button>
     </div>
 {/if}
