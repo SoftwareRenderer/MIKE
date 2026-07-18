@@ -153,23 +153,35 @@ test.describe.serial('Merge Sync', () => {
       body: { status: 'in_progress' },
     });
 
-    // Simulate merge conflict via direct DB update (for UI testing)
-    await page.evaluate(async ({ pid, tid }) => {
-      const res = await fetch(`/api/projects/${pid}/tasks/${tid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ has_merge_conflict: true }),
-      });
-      return res.ok;
-    }, { pid: projectId, tid: taskId });
+    // Simulate merge conflict via API update
+    const updateResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}`, {
+      method: 'PUT',
+      body: { has_merge_conflict: true },
+    });
+    expect(updateResult.ok).toBe(true);
 
-    // Navigate to the task
+    // Verify the flag was actually set via API response
+    expect(updateResult.data?.has_merge_conflict).toBe(true);
+
+    // Navigate to the task (full reload picks up the updated task data)
     await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
-    // Check for the merge conflict badge on the card
-    // The badge should show "Agent resolving" with orange color
-    const badge = page.locator('.badge:has-text("Agent resolving")');
-    await expect(badge).toBeVisible({ timeout: 10000 });
+    // Wait for the side panel to render
+    await page.waitForSelector('.column-context .card', { timeout: 10000 }).catch(() => {});
+
+    // Verify the task data via direct task API (more reliable than board API)
+    await expect(async () => {
+      const task = await page.evaluate(async ({ pid, tid }) => {
+        const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+        return res.ok ? res.json() : null;
+      }, { pid: projectId, tid: taskId });
+      expect(task?.has_merge_conflict).toBe(true);
+    }).toPass({ timeout: 10000 });
+
+    // Check for the merge conflict badge on the card in the side panel
+    // The badge should show "Resolving conflict" with orange color
+    const badge = page.locator('.column-context .badge:has-text("Resolving conflict")');
+    await expect(badge).toBeVisible({ timeout: 15000 });
   });
 });

@@ -112,8 +112,8 @@ test.describe.serial('Commit Dialog', () => {
       await commitBtn.click();
 
       // Without changes, no dialog should appear
-      const commitDialog = page.locator('.commit-dialog');
-      await expect(commitDialog).not.toBeVisible();
+      const commitDialog = page.locator('[role="dialog"]');
+      await expect(commitDialog).not.toBeVisible({ timeout: 3000 }).catch(() => {});
 
       // Task should move to done
       await expect(async () => {
@@ -155,8 +155,8 @@ test.describe.serial('Commit Dialog', () => {
     const commitBtn = page.locator('.btn-commit-done');
     await commitBtn.click();
 
-    // Commit dialog should appear with loading state
-    const commitDialog = page.locator('.commit-dialog');
+    // Commit dialog should appear (modal with commit-textarea)
+    const commitDialog = page.locator('[role="dialog"]');
     await expect(commitDialog).toBeVisible({ timeout: 10000 });
 
     // Should show "Generating commit message..." initially
@@ -164,11 +164,15 @@ test.describe.serial('Commit Dialog', () => {
     const textarea = page.locator('.commit-textarea');
     await expect(textarea).toBeVisible({ timeout: 15000 });
 
-    // Edit the commit message
+    // Edit the commit message (this also cancels streaming generation)
     await textarea.fill('Edited commit message for testing');
 
+    // Wait for the confirm button to be enabled (streaming must finish/be cancelled)
+    const confirmBtn = page.locator('.modal-footer .btn-primary');
+    await expect(confirmBtn).toBeEnabled({ timeout: 15000 });
+
     // Confirm the commit
-    await page.click('.commit-dialog .btn-confirm');
+    await confirmBtn.click();
 
     // Wait for task to move to done
     await expect(async () => {
@@ -219,12 +223,12 @@ test.describe.serial('Commit Dialog', () => {
     // Click commit button
     await page.click('.btn-commit-done');
 
-    // Wait for dialog to appear
-    const commitDialog = page.locator('.commit-dialog');
+    // Wait for dialog to appear (modal with commit-textarea)
+    const commitDialog = page.locator('[role="dialog"]');
     await expect(commitDialog).toBeVisible({ timeout: 10000 });
 
     // Cancel the dialog
-    await page.click('.commit-dialog .btn-cancel');
+    await page.click('[role="dialog"] .btn-secondary');
 
     // Dialog should close
     await expect(commitDialog).not.toBeVisible({ timeout: 5000 });

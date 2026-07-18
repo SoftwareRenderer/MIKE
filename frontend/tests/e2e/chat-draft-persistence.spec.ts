@@ -7,11 +7,23 @@ test.describe.configure({ mode: 'serial' });
 async function waitForIdle(page: any) {
   await waitForChatFormReady(page);
   // If stop button is visible, click it and wait for send button to reappear
-  if (await page.locator('.btn-stop').isVisible().catch(() => false)) {
-    await page.locator('.btn-stop').click();
-    // Wait up to 60s for send button (LLM mock can be slow)
-    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 60000 });
+  // Retry up to 3 times in case the button detaches before we can click
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!(await page.locator('.btn-stop').isVisible().catch(() => false))) {
+      break; // No stop button, we're idle
+    }
+    try {
+      await page.locator('.btn-stop').click({ timeout: 5000 });
+      // Wait for send button to reappear (LLM mock can be slow)
+      await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
+      return; // Success
+    } catch {
+      // Button detached during click — retry
+      await page.waitForFunction(() => false, {}, { timeout: 500, polling: 500 }).catch(() => {});
+    }
   }
+  // Final attempt: just wait for send button without clicking stop
+  await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 }).catch(() => {});
 }
 
 /** Wait for the chat textarea to be available. Does NOT stop LLM responses. */

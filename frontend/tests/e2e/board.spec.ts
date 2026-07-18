@@ -343,36 +343,39 @@ test.describe('Clear Done Tasks', () => {
     const taskId = await createTaskViaApi(page, projectId, `clear-done-confirm-${Date.now()}`);
     expect(taskId).not.toBe('');
 
-    await page.evaluate(async ({ pid, tid }) => {
-      await fetch(`/api/projects/${pid}/tasks/${tid}/move`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'done' }),
-      });
-    }, { pid: projectId, tid: taskId });
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+      method: 'POST',
+      body: { status: 'done' },
+    });
 
-    await page.goto('/');
+    await page.goto(`/?project=${projectId}`);
     await page.waitForSelector('.card', { timeout: 10000 });
 
-    const doneCountBefore = await page.evaluate(async ({ pid }) => {
-      const res = await fetch(`/api/projects/${pid}/board`);
-      const board = await res.json();
-      return board.tasks.filter((t: any) => t.status === 'done').length;
-    }, { pid: projectId });
-    expect(doneCountBefore).toBeGreaterThan(0);
+    // Verify our task is in done
+    await expect(async () => {
+      const task = await page.evaluate(async ({ pid, tid }) => {
+        const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+        return res.ok ? res.json() : null;
+      }, { pid: projectId, tid: taskId });
+      expect(task?.status).toBe('done');
+    }).toPass({ timeout: 5000 });
 
     await page.click('.clear-btn');
     await expect(page.locator('[role="dialog"]')).toBeVisible();
     expect(await page.locator('[role="dialog"] .confirm-message').textContent()).toContain('Permanently delete');
 
+    // Click Cancel (btn-secondary) to dismiss without deleting
     await page.click('[role="dialog"] .btn-secondary');
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
 
-    const doneCountAfter = await page.evaluate(async ({ pid }) => {
-      const res = await fetch(`/api/projects/${pid}/board`);
-      const board = await res.json();
-      return board.tasks.filter((t: any) => t.status === 'done').length;
-    }, { pid: projectId });
-    expect(doneCountAfter).toBe(doneCountBefore);
+    // Verify our specific task is still in done (not deleted)
+    await expect(async () => {
+      const task = await page.evaluate(async ({ pid, tid }) => {
+        const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+        return res.ok ? res.json() : null;
+      }, { pid: projectId, tid: taskId });
+      expect(task?.status).toBe('done');
+    }).toPass({ timeout: 5000 });
   });
 
   test('should delete all done tasks on confirmation', async ({ page }) => {
