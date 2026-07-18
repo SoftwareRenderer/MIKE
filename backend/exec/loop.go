@@ -483,6 +483,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 		// Queue status polling — runs while waiting for a gate slot.
 		queueDone := make(chan struct{})
+		var entry *queueEntry
 		go func() {
 			tick := time.NewTicker(1 * time.Second)
 			defer tick.Stop()
@@ -493,8 +494,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				case <-setup.ctx.Done():
 					return
 				case <-tick.C:
-					pos := te.gate.Position(setup.serverURL)
-					est := te.gate.EstimateWait(setup.serverURL)
+					pos := te.gate.Position(setup.serverURL, entry)
+					est := te.gate.EstimateWait(setup.serverURL, entry)
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeQueue, Data: map[string]any{
 						"position":               pos,
 						"estimated_wait_seconds": est,
@@ -503,7 +504,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			}
 		}()
 
-		_, err := te.gate.Acquire(setup.ctx, setup.serverURL, concurrency)
+		_, entry, err := te.gate.Acquire(setup.ctx, setup.serverURL, concurrency)
 		if err != nil {
 			close(queueDone) // cleanup polling goroutine
 			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
