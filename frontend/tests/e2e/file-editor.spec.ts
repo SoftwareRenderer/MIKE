@@ -580,8 +580,8 @@ test.describe('Explorer', () => {
     // Verify the file is loaded (loading state disappears)
     await expect(page.locator('.editor-placeholder:has-text("Loading file")')).not.toBeVisible({ timeout: 10000 });
 
-    // Verify the file name is shown in the editor header
-    await expect(page.locator('.editor-filename')).toContainText(testFile);
+    // Verify the file name is shown in the tab bar
+    await expect(page.locator('.editor-tab-name')).toContainText(testFile);
 
     // Verify CodeMirror editor is present
     await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 5000 });

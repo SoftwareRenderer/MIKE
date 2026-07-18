@@ -30,7 +30,7 @@
     import { goTemplate } from '$lib/gotemplate';
     import { getLanguageTreeFromView } from '$lib/highlighter';
 
-    let { projectId, filePath, targetLine, active, onFocused, onSymbolsUpdate, onHasChanges, onClose, onToggleFullscreen, mobileFullscreen, isMobile }: {
+    let { projectId, filePath, targetLine, active, onFocused, onSymbolsUpdate, onHasChanges, onClose }: {
         projectId: string;
         filePath: string;
         targetLine: number;
@@ -39,9 +39,6 @@
         onSymbolsUpdate: (symbols: Array<{ name: string; kind: string; line: number; indent: number }>) => void;
         onHasChanges: (filePath: string, hasChanges: boolean) => void;
         onClose: () => void;
-        onToggleFullscreen?: () => void;
-        mobileFullscreen?: boolean;
-        isMobile?: boolean;
     } = $props();
 
     let content = $state('');
@@ -49,11 +46,8 @@
     let saving = $state(false);
     let error = $state('');
     let fileTooLarge = $state(false);
-    let fileName = $state('');
-    let editorFocused = $state(false);
     let originalContent = $state(''); // HEAD content for git gutter
     let savedContent = $state('');    // disk content for unsaved-changes tracking
-    let showConfirm = $state(false);
 
     // Tracked incrementally to avoid O(n) string compare/split on every edit
     let hasChanges = $state(false);
@@ -72,33 +66,6 @@
     $effect(() => {
         onHasChanges(filePath, hasChanges);
     });
-
-    function requestClose() {
-        if (hasChanges) {
-            showConfirm = true;
-        } else {
-            onClose();
-        }
-    }
-
-    async function confirmClose(discard: boolean) {
-        showConfirm = false;
-        if (discard) {
-            clearTimeout((view as any)._draftTimer);
-            clearTimeout((view as any)._historyTimer);
-            // Reset editor content to original so state is clean
-            content = originalContent;
-            hasChanges = false;
-            historyBase = '';
-            historyDeltas = [];
-            // Await persistence cleanup before closing to prevent stale draft on re-open
-            await Promise.allSettled([
-                clearEditorDraft(filePath),
-                clearEditorHistory(filePath),
-            ]);
-            onClose();
-        }
-    }
 
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let editorEl: HTMLDivElement | null = null;
@@ -327,11 +294,9 @@
         // Track focus/blur via DOM events on the editor's dom element
         if (view.dom) {
             view.dom.addEventListener('focus', () => {
-                editorFocused = true;
                 onFocused(true);
             }, true);
             view.dom.addEventListener('blur', () => {
-                editorFocused = false;
                 onFocused(false);
             }, true);
         }
@@ -349,7 +314,6 @@
             loading = false;
             content = '';
             originalContent = '';
-            fileName = '';
             view?.destroy();
             view = null;
             return;
@@ -357,7 +321,6 @@
         loading = true;
         error = '';
         fileTooLarge = false;
-        fileName = filePath.split('/').pop() || filePath;
 
         // Destroy old editor
         view?.destroy();
@@ -570,19 +533,6 @@
         {/if}
     {/if}
 
-    <!-- Confirm close dialog -->
-    {#if showConfirm}
-        <div class="confirm-overlay" role="alertdialog" aria-modal="true" tabindex="-1" onclick={() => showConfirm = false} onkeydown={(e) => { if (e.key === 'Escape') showConfirm = false; }}>
-            <div class="confirm-dialog" onclick={(e) => e.stopPropagation()} role="presentation">
-                <h3>Unsaved changes</h3>
-                <p id="confirm-desc">You have unsaved changes. Discard them?</p>
-                <div class="confirm-actions">
-                    <button class="btn-cancel" onclick={() => showConfirm = false}>Cancel</button>
-                    <button class="btn-discard" onclick={() => confirmClose(true)}>Discard</button>
-                </div>
-            </div>
-        </div>
-    {/if}
 </div>
 
 <style>
@@ -632,61 +582,5 @@
         right: 0;
         z-index: 100;
         pointer-events: none;
-    }
-    .confirm-overlay {
-        position: absolute;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 100;
-    }
-    .confirm-dialog {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        padding: 20px;
-        min-width: 300px;
-        max-width: 400px;
-    }
-    .confirm-dialog h3 {
-        margin: 0 0 8px;
-        font-size: 0.9375rem;
-        font-weight: 600;
-    }
-    .confirm-dialog p {
-        margin: 0 0 16px;
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-    }
-    .confirm-actions {
-        display: flex;
-        gap: 8px;
-        justify-content: flex-end;
-    }
-    .btn-cancel {
-        padding: 4px 12px;
-        border-radius: var(--radius-sm);
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        border: none;
-        cursor: pointer;
-        font-size: 0.75rem;
-    }
-    .btn-cancel:hover {
-        background: var(--color-surface-2);
-    }
-    .btn-discard {
-        padding: 4px 12px;
-        border-radius: var(--radius-sm);
-        background: var(--color-status-red-dark);
-        color: white;
-        border: none;
-        cursor: pointer;
-        font-size: 0.75rem;
-    }
-    .btn-discard:hover {
-        opacity: 0.9;
     }
 </style>

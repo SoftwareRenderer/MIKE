@@ -708,7 +708,6 @@
                             onPinTab={pinTab}
                             onToggleFullscreen={toggleEditorFullscreen}
                             mobileFullscreen={editorFullscreen}
-                            isMobile={isMobileCtx.isMobile}
                         />
                     {:else}
                         <div class="branch-editor-placeholder">
