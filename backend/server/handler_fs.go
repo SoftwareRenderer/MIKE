@@ -992,5 +992,6 @@ func (s *Server) fsSandboxConfig(project *types.Project) sandbox.SandboxOpts {
 		SkillsDir:        prompts.SkillsDir(),
 		SandboxMounts:    project.SandboxMounts,
 		SandboxEnvs:      project.SandboxEnvs,
+		Capabilities:     project.SandboxCapabilities,
 	}
 }

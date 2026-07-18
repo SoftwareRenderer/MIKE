@@ -928,3 +928,75 @@ func TestProjectSandboxEnvs(t *testing.T) {
 		t.Fatal("expected to find proj-envs in list")
 	}
 }
+
+func TestProjectSandboxCapabilities(t *testing.T) {
+	s := testStore(t)
+
+	// Create project with sandbox capabilities
+	proj := newProject("proj-caps", "caps-test", "/tmp/repo-caps")
+	proj.SandboxCapabilities = []string{"CAP_CHOWN", "CAP_SETUID", "CAP_NET_RAW"}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Verify it was saved
+	got, err := s.GetProject("proj-caps")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if len(got.SandboxCapabilities) != 3 {
+		t.Fatalf("expected 3 capabilities, got %d", len(got.SandboxCapabilities))
+	}
+	if got.SandboxCapabilities[0] != "CAP_CHOWN" {
+		t.Fatalf("expected CAP_CHOWN, got %s", got.SandboxCapabilities[0])
+	}
+	if got.SandboxCapabilities[2] != "CAP_NET_RAW" {
+		t.Fatalf("expected CAP_NET_RAW, got %s", got.SandboxCapabilities[2])
+	}
+
+	// Update capabilities
+	newCaps := []string{"CAP_SYS_PTRACE"}
+	if err := s.UpdateProjectSandboxCapabilities("proj-caps", newCaps); err != nil {
+		t.Fatalf("update capabilities: %v", err)
+	}
+	got, err = s.GetProject("proj-caps")
+	if err != nil {
+		t.Fatalf("get project after update: %v", err)
+	}
+	if len(got.SandboxCapabilities) != 1 {
+		t.Fatalf("expected 1 capability, got %d", len(got.SandboxCapabilities))
+	}
+	if got.SandboxCapabilities[0] != "CAP_SYS_PTRACE" {
+		t.Fatalf("expected CAP_SYS_PTRACE, got %s", got.SandboxCapabilities[0])
+	}
+
+	// Clear capabilities
+	if err := s.UpdateProjectSandboxCapabilities("proj-caps", nil); err != nil {
+		t.Fatalf("clear capabilities: %v", err)
+	}
+	got, err = s.GetProject("proj-caps")
+	if err != nil {
+		t.Fatalf("get project after clear: %v", err)
+	}
+	if len(got.SandboxCapabilities) != 0 {
+		t.Fatalf("expected 0 capabilities, got %d", len(got.SandboxCapabilities))
+	}
+
+	// Verify in list
+	projects, err := s.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	found := false
+	for _, p := range projects {
+		if p.ID == "proj-caps" {
+			found = true
+			if len(p.SandboxCapabilities) != 0 {
+				t.Fatalf("expected 0 capabilities in list, got %d", len(p.SandboxCapabilities))
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected to find proj-caps in list")
+	}
+}

@@ -50,6 +50,7 @@ type SandboxOpts struct {
 	SkillsDir        string
 	SandboxMounts    []types.SandboxMount
 	SandboxEnvs      []types.SandboxEnv
+	Capabilities     []string
 	PlanMode         bool
 }
 
@@ -271,7 +272,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 	// --runtime-flag overlay2=root:self: use kernel overlay2 for writable rootfs
 	// --runtime-flag ignore-cgroups: required for rootless gVisor (no cgroup access)
 	// --security-opt label=disable: required for gVisor (no SELinux support)
-	// --cap-drop=ALL: drop all capabilities, re-add only what's needed (see below)
+	// --cap-drop=ALL: drop all capabilities, re-add only those explicitly configured
 	// --security-opt no-new-privileges: prevent privilege escalation via setuid binaries
 	image := opts.BaseImage
 	if image == "" {
@@ -288,13 +289,12 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 		"--runtime", "runsc",
 		"--security-opt", "label=disable",
 		"--cap-drop", "ALL",
-		"--cap-add", "CAP_CHOWN", // worktree files may have mismatched ownership
-		"--cap-add", "CAP_DAC_OVERRIDE", // apt's _apt user must access root-owned temp files accessible in the container
-		"--cap-add", "CAP_SETUID", // apt drops privileges via seteuid()
-		"--cap-add", "CAP_SETGID", // apt drops privileges via setegid()
-		"--cap-add", "CAP_FOWNER", // apt chmod on /var/lib/apt/lists/
 		"--security-opt", "no-new-privileges",
 		"--workdir", mountPath,
+	}
+	// Add back any explicitly requested capabilities
+	for _, cap := range opts.Capabilities {
+		createArgs = append(createArgs, "--cap-add", cap)
 	}
 	worktreeMode := "rw"
 	if opts.PlanMode {

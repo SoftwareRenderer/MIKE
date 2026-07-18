@@ -49,6 +49,7 @@ export interface Project {
     forward_ports?: PortForward[];
     sandbox_mounts?: SandboxMount[];
     sandbox_envs?: SandboxEnv[];
+    sandbox_capabilities?: string[];
     active_terminal_ports?: AssignedPort[];
     created_at: string;
     updated_at: string;

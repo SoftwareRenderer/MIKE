@@ -124,6 +124,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 	var forwardPorts []types.PortForward
 	var sandboxMounts []types.SandboxMount
 	var sandboxEnvs []types.SandboxEnv
+	var capabilities []string
 	if projectID != "" {
 		proj, err := tm.store.GetProject(projectID)
 		if err != nil {
@@ -139,6 +140,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		forwardPorts = proj.ForwardPorts
 		sandboxMounts = proj.SandboxMounts
 		sandboxEnvs = proj.SandboxEnvs
+		capabilities = proj.SandboxCapabilities
 	}
 
 	var sess *taskTerminal
@@ -186,6 +188,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 			SkillsDir:        prompts.SkillsDir(),
 			SandboxMounts:    sandboxMounts,
 			SandboxEnvs:      sandboxEnvs,
+			Capabilities:     capabilities,
 		})
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)

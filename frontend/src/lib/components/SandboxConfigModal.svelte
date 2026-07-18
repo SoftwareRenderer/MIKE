@@ -62,6 +62,66 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let envError = $state('');
     let envsExpanded = $state(false);
     let hasPendingEnv = $derived(newEnvKey.trim() !== '');
+    // Capabilities (multiselect/input combo)
+    let sandboxCapabilities = $state<string[]>([]);
+    let capsExpanded = $state(false);
+    let capInputValue = $state('');
+    let capDropdownOpen = $state(false);
+    let capInputEl: HTMLInputElement | null = null;
+    $effect(() => { sandboxCapabilities = project.sandbox_capabilities ?? []; });
+    $effect(() => { capsExpanded = !!project.sandbox_capabilities && project.sandbox_capabilities.length > 0; });
+    // Known capabilities for autocomplete suggestions
+    const KNOWN_CAPABILITIES: Array<{ value: string; desc: string }> = [
+        { value: 'CAP_CHOWN', desc: 'Change file ownership' },
+        { value: 'CAP_DAC_OVERRIDE', desc: 'Bypass file permission checks' },
+        { value: 'CAP_DAC_READ_SEARCH', desc: 'Bypass read permission on files/dirs' },
+        { value: 'CAP_FOWNER', desc: 'Bypass permission checks requiring inode owner' },
+        { value: 'CAP_FSETID', desc: "Don't clear setuid/setgid on file mod" },
+        { value: 'CAP_IPC_LOCK', desc: 'Lock memory' },
+        { value: 'CAP_IPC_OWNER', desc: 'Bypass IPC ownership checks' },
+        { value: 'CAP_KILL', desc: 'Bypass permission checks for signals' },
+        { value: 'CAP_LEASE', desc: 'Lease files' },
+        { value: 'CAP_LINUX_IMMUTABLE', desc: 'Set immutable file attribute' },
+        { value: 'CAP_MKNOD', desc: 'Create special files' },
+        { value: 'CAP_NET_ADMIN', desc: 'Perform network-related operations' },
+        { value: 'CAP_NET_BIND_SERVICE', desc: 'Bind to ports < 1024' },
+        { value: 'CAP_NET_BROADCAST', desc: 'Make socket broadcasts' },
+        { value: 'CAP_NET_RAW', desc: 'Use RAW and PACKET sockets' },
+        { value: 'CAP_SETFCAP', desc: 'Set file capabilities' },
+        { value: 'CAP_SETGID', desc: 'Manipulate process group IDs' },
+        { value: 'CAP_SETPCAP', desc: 'Transfer capabilities' },
+        { value: 'CAP_SETUID', desc: 'Manipulate process user IDs' },
+        { value: 'CAP_SYS_CHROOT', desc: 'Use chroot()' },
+        { value: 'CAP_SYS_PTRACE', desc: 'Trace arbitrary processes' },
+        { value: 'CAP_SYS_ADMIN', desc: 'Perform a wide range of system admin operations' },
+        { value: 'CAP_SYS_BOOT', desc: 'Reboot the system' },
+        { value: 'CAP_SYS_MODULE', desc: 'Load/unload kernel modules' },
+        { value: 'CAP_SYS_NICE', desc: 'Raise process nice priority' },
+        { value: 'CAP_SYS_RAWIO', desc: 'Perform raw I/O ports' },
+        { value: 'CAP_SYS_RESOURCE', desc: 'Override resource limits' },
+        { value: 'CAP_SYS_TIME', desc: 'Set system clock' },
+        { value: 'CAP_SYS_TTY_CONFIG', desc: 'Configure TTY devices' },
+        { value: 'CAP_BPF', desc: 'Use BPF operations' },
+        { value: 'CAP_PERFMON', desc: 'Use performance monitoring' },
+        { value: 'CAP_AUDIT_CONTROL', desc: 'Modify kernel audit configuration' },
+        { value: 'CAP_AUDIT_READ', desc: 'Read kernel audit log' },
+        { value: 'CAP_AUDIT_WRITE', desc: 'Write records to kernel audit log' },
+        { value: 'CAP_BLOCK_SUSPEND', desc: 'Use suspend-to-memory/disk' },
+        { value: 'CAP_CHECKPOINT_RESTORE', desc: 'Checkpoint and restore' },
+        { value: 'CAP_MAC_ADMIN', desc: 'Override MAC configuration' },
+        { value: 'CAP_MAC_OVERRIDE', desc: 'Override MAC enforcement' },
+        { value: 'CAP_WAKE_ALARM', desc: 'Trigger wake alarms' },
+        { value: 'CAP_SYSLOG', desc: 'Perform syslog operations' },
+    ];
+    // Filtered suggestions based on input
+    let capSuggestions = $derived.by(() => {
+        const query = capInputValue.trim().toUpperCase();
+        if (!query) return [];
+        return KNOWN_CAPABILITIES.filter(c =>
+            !sandboxCapabilities.includes(c.value) &&
+            c.value.toUpperCase().includes(query)
+        ).slice(0, 8);
+    });
     // Save warning for un-added changes
     let saveWarning = $state('');
     // Active host ports from running tasks (container_port → host_port map)
@@ -240,6 +300,44 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         sandboxEnvs = sandboxEnvs.filter((_, i) => i !== index);
     }
 
+    // Capabilities helpers
+    function addCapability(cap: string) {
+        const normalized = cap.trim().toUpperCase();
+        if (!normalized || sandboxCapabilities.includes(normalized)) return;
+        sandboxCapabilities = [...sandboxCapabilities, normalized];
+        capInputValue = '';
+        capDropdownOpen = false;
+    }
+
+    function removeCapability(cap: string) {
+        sandboxCapabilities = sandboxCapabilities.filter(c => c !== cap);
+    }
+
+    function handleCapInputKeydown(e: KeyboardEvent) {
+        if (e.key === 'Enter' && capInputValue.trim()) {
+            e.preventDefault();
+            addCapability(capInputValue);
+        } else if (e.key === 'Backspace' && !capInputValue && sandboxCapabilities.length > 0) {
+            // Remove last capability on backspace when input is empty
+            removeCapability(sandboxCapabilities[sandboxCapabilities.length - 1]);
+        } else if (e.key === 'Escape') {
+            capDropdownOpen = false;
+        }
+    }
+
+    function handleCapInputFocus() {
+        capDropdownOpen = true;
+    }
+
+    function handleCapInputBlur() {
+        // Delay to allow click on suggestion
+        setTimeout(() => { capDropdownOpen = false; }, 150);
+    }
+
+    function handleCapInputClick() {
+        capDropdownOpen = true;
+    }
+
     async function handleRebuild() {
         if (!sandboxDockerfilePath || building) return;
         building = true;
@@ -282,6 +380,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             sandbox_forward_ports?: PortForward[];
             sandbox_mounts?: SandboxMount[];
             sandbox_envs?: SandboxEnv[];
+            sandbox_capabilities?: string[];
         } = {};
         let needsConfirmation = false;
 
@@ -344,6 +443,14 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 e.value !== originalEnvs[i]?.value);
         if (envsChanged) {
             changes.sandbox_envs = sandboxEnvs;
+        }
+
+        // Capabilities changes
+        const originalCaps = project.sandbox_capabilities ?? [];
+        const capsChanged = sandboxCapabilities.length !== originalCaps.length ||
+            sandboxCapabilities.some((c, i) => c !== originalCaps[i]);
+        if (capsChanged) {
+            changes.sandbox_capabilities = sandboxCapabilities;
         }
 
         // Validate: dockerfile mode requires a path
@@ -488,6 +595,20 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                             <span class="locked-env-key" title={env.key}>{env.key}</span>
                             <span class="locked-env-equals">=</span>
                             <span class="locked-env-value" title={env.value}>{env.value || '(empty)'}</span>
+                        </div>
+                        {/each}
+                    </div>
+                </div>
+                {/if}
+
+                <!-- Capabilities -->
+                {#if sandboxCapabilities.length > 0}
+                <div class="locked-caps-section">
+                    <span class="section-label">Capabilities</span>
+                    <div class="locked-caps-list">
+                        {#each sandboxCapabilities as cap}
+                        <div class="locked-cap-item">
+                            <span class="locked-cap-value" title={cap}>{cap}</span>
                         </div>
                         {/each}
                     </div>
@@ -760,6 +881,84 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             {#if envError}
             <div class="env-error">{envError}</div>
             {/if}
+            </div>
+            {/if}
+            </div>
+
+            <!-- Capabilities (collapsible) -->
+            <div class="config-row-group" class:expanded={capsExpanded}>
+            <button type="button" class="config-row config-row-expandable" onclick={() => { capsExpanded = !capsExpanded; }} aria-expanded={capsExpanded} aria-label="Toggle capabilities settings">
+                <div class="config-info">
+                    <div class="config-icon">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="M10 2l2.2 4.5 5 .7-3.6 3.5.9 5L10 13.3 5.5 15.7l.9-5L2.8 7.2l5-.7L10 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <div class="config-text">
+                        <span class="config-label" class:collapsed={!capsExpanded}>Capabilities</span>
+                        {#if capsExpanded}
+                        <span class="config-desc">Linux capabilities to add to the container. By default, all capabilities are dropped (--cap-drop=ALL).</span>
+                        {/if}
+                    </div>
+                </div>
+                <svg class="chevron" class:chevron-open={capsExpanded} width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
+
+            {#if capsExpanded}
+            <div class="caps-content" transition:slide={{ duration: 200 }}>
+            <!-- Multiselect input -->
+            <div class="caps-input-wrapper">
+                <!-- Selected tags -->
+                {#if sandboxCapabilities.length > 0}
+                <div class="caps-tags">
+                    {#each sandboxCapabilities as cap}
+                    <span class="caps-tag" title={cap}>
+                        <span class="caps-tag-text">{cap}</span>
+                        {#if !isLocked}
+                        <button type="button" class="caps-tag-remove" onclick={() => removeCapability(cap)} title="Remove {cap}" aria-label="Remove {cap}">
+                            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                                <path d="M2 2L8 8M8 2L2 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                        {/if}
+                    </span>
+                    {/each}
+                </div>
+                {/if}
+                <!-- Input and dropdown -->
+                <div class="caps-input-field" class:focus={capDropdownOpen}>
+                    <input
+                        type="text"
+                        class="caps-input"
+                        bind:value={capInputValue}
+                        onkeydown={handleCapInputKeydown}
+                        onfocus={handleCapInputFocus}
+                        onblur={handleCapInputBlur}
+                        onclick={handleCapInputClick}
+                        bind:this={capInputEl}
+                        placeholder={sandboxCapabilities.length === 0 ? 'Type capability name, e.g. CAP_NET_RAW' : 'Add more...'}
+                        disabled={isLocked}
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="Add capability"
+                        role="combobox"
+                        aria-expanded={capDropdownOpen}
+                    />
+                    <!-- Suggestions dropdown -->
+                    {#if capDropdownOpen && capSuggestions.length > 0}
+                    <div class="caps-dropdown" role="listbox">
+                        {#each capSuggestions as suggestion}
+                        <button type="button" class="caps-dropdown-item" role="option" onclick={() => addCapability(suggestion.value)}>
+                            <span class="caps-dropdown-name">{suggestion.value}</span>
+                            <span class="caps-dropdown-desc">{suggestion.desc}</span>
+                        </button>
+                        {/each}
+                    </div>
+                    {/if}
+                </div>
+            </div>
             </div>
             {/if}
             </div>
@@ -1169,6 +1368,34 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    /* Capabilities in locked view */
+    .locked-caps-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 4px;
+        padding-top: 8px;
+        border-top: 1px solid var(--color-border);
+    }
+
+    .locked-caps-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .locked-cap-item {
+        padding: 2px 8px;
+        background: var(--color-surface-2);
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+    }
+
+    .locked-cap-value {
+        color: var(--color-text-primary);
     }
 
     .config-options {
@@ -2104,6 +2331,145 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         border-radius: var(--radius-sm);
         color: var(--color-status-red);
         font-size: 0.75rem;
+    }
+
+    /* Capabilities section */
+    .caps-content {
+        padding: 12px 12px 4px;
+        border-top: 1px solid var(--color-border);
+    }
+
+    .caps-input-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    /* Selected tags row */
+    .caps-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .caps-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 4px 2px 8px;
+        background: rgba(136, 192, 208, 0.12);
+        border: 1px solid rgba(136, 192, 208, 0.25);
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        color: var(--color-accent-light, #88c0d0);
+    }
+
+    .caps-tag-text {
+        max-width: 180px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .caps-tag-remove {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        height: 14px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        border-radius: 50%;
+        opacity: 0.6;
+        transition: opacity 0.15s, background 0.15s;
+    }
+
+    .caps-tag-remove:hover {
+        opacity: 1;
+        background: rgba(136, 192, 208, 0.2);
+    }
+
+    /* Input field */
+    .caps-input-field {
+        position: relative;
+    }
+
+    .caps-input {
+        width: 100%;
+        padding: 6px 10px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-1);
+        color: var(--color-text-primary);
+        font-size: 0.8125rem;
+        font-family: var(--font-mono, monospace);
+        outline: none;
+        transition: border-color 0.15s;
+        box-sizing: border-box;
+    }
+
+    .caps-input::placeholder {
+        color: var(--color-text-secondary);
+        font-family: var(--font-sans, system-ui, sans-serif);
+    }
+
+    .caps-input:focus,
+    .caps-input-field:focus .caps-input {
+        border-color: var(--color-accent, #88c0d0);
+    }
+
+    .caps-input:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* Suggestions dropdown */
+    .caps-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        margin-top: 2px;
+        max-height: 200px;
+        overflow-y: auto;
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        z-index: 100;
+    }
+
+    .caps-dropdown-item {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        width: 100%;
+        padding: 6px 10px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-primary);
+        cursor: pointer;
+        text-align: left;
+        transition: background 0.1s;
+    }
+
+    .caps-dropdown-item:hover {
+        background: var(--color-surface-2);
+    }
+
+    .caps-dropdown-name {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        font-family: var(--font-mono, monospace);
+    }
+
+    .caps-dropdown-desc {
+        font-size: 0.6875rem;
+        color: var(--color-text-secondary);
     }
 
     @media (max-width: 768px) {

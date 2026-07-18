@@ -350,6 +350,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 			SkillsDir:        prompts.SkillsDir(),
 			SandboxMounts:    sandboxOpts.SandboxMounts,
 			SandboxEnvs:      sandboxOpts.SandboxEnvs,
+			Capabilities:     sandboxOpts.Capabilities,
 			PlanMode:         task.IsPlanMode(),
 		})
 		if createErr != nil {

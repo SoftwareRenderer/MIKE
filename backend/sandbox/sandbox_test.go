@@ -750,6 +750,49 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 	}
 }
 
+func TestCreateWithCapabilities(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("KANBAN_AGENT_PATH", agentPath)
+	defer os.Unsetenv("KANBAN_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	taskID := "test-capabilities-task"
+
+	// Create with custom capabilities
+	err, _ := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{
+		Capabilities: []string{"CAP_NET_RAW", "CAP_CHOWN"},
+	})
+	if err != nil {
+		t.Fatalf("create sandbox with capabilities: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	// Verify container exists
+	exists, err := sm.containerExists(ContainerNamePrefix + "-" + taskID)
+	if err != nil {
+		t.Fatalf("check container: %v", err)
+	}
+	if !exists {
+		t.Error("expected container to exist after Create with capabilities")
+	}
+
+	// Verify the container can run commands
+	output, err := sm.Exec(taskID, "echo hello", nil)
+	if err != nil {
+		t.Fatalf("exec in container with capabilities: %v", err)
+	}
+	if output != "hello\n" {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
 func TestExecProject_FullConfig(t *testing.T) {
 	agentPath := findAgentBinary(t)
 	os.Setenv("KANBAN_AGENT_PATH", agentPath)

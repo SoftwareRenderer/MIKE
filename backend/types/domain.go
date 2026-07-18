@@ -174,6 +174,7 @@ type Project struct {
 	ForwardPorts            []PortForward  `json:"forward_ports,omitempty"`
 	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
 	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
+	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
 	ActiveTerminalPorts     []AssignedPort `json:"active_terminal_ports,omitempty"` // transient: assigned ports from project-level terminal
 	CreatedAt               time.Time     `json:"created_at"`
 	UpdatedAt               time.Time     `json:"updated_at"`
