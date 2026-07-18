@@ -206,6 +206,7 @@
                 }
             } finally {
                 isEditing = false;
+                isSubmitting = false;
             }
         }
     }
