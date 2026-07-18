@@ -827,7 +827,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 
     function toggleSidebar() {
         collapsed = !collapsed;
-        // sidebarCollapsed persisted via AppStore;
+        appStore.sidebarCollapsed = collapsed;
         // Manage focus: when collapsing, focus the toggle button; when expanding, focus the first project
         queueMicrotask(() => {
             if (collapsed) {
@@ -856,7 +856,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // Auto-collapse sidebar on tablet to give editor more space
             if (isTablet() && !collapsed) {
                 collapsed = true;
-                // sidebarCollapsed persisted via AppStore;
+                appStore.sidebarCollapsed = collapsed;
                 sidebarAutoCollapsed = true;
             }
         } else {
@@ -864,7 +864,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // Restore sidebar when file is closed
             if (sidebarAutoCollapsed) {
                 collapsed = false;
-                // sidebarCollapsed persisted via AppStore;
+                appStore.sidebarCollapsed = collapsed;
                 sidebarAutoCollapsed = false;
             }
         }
@@ -874,7 +874,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     function restoreExplorerSidebar() {
         if (sidebarAutoCollapsed) {
             collapsed = false;
-            // sidebarCollapsed persisted via AppStore;
+            appStore.sidebarCollapsed = collapsed;
             sidebarAutoCollapsed = false;
         }
     }
