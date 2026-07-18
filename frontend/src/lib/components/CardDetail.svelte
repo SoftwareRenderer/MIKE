@@ -1,6 +1,5 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { get } from 'svelte/store';
     import type { Task, TaskCommit } from '$lib/types';
     import type { DiffFile, DiffRow } from '$lib/types/diff';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
@@ -273,9 +272,16 @@
     }
 
     // Context stores
-    let streamingIds = getStreamingContext();
+    let streamingIdsContext = getStreamingContext();
     let expandedTasksContext = getExpandedTasksContext();
     let taskDiffStats = getTaskDiffStatsContext();
+    // Sync streamingIds store to $state for reactive tracking in $derived.by
+    // (get() on a Svelte store inside $derived.by does NOT establish a dependency)
+    let streamingIds = $state<Set<string>>(new Set());
+    $effect(() => {
+        const unsub = streamingIdsContext.subscribe(v => { streamingIds = v; });
+        return unsub;
+    });
     // Sync store to reactive state for $effect tracking
     let diffStatsMap = $state<Record<string, { hash: string; files: number; additions: number; deletions: number; file_hashes?: Record<string, string>; removed_files?: string[]; staged_paths?: string[] }>>({});
 
@@ -309,7 +315,7 @@
 
     // Status badge
     let badge = $derived.by(() => {
-        const streaming = get(streamingIds).has(task.id);
+        const streaming = streamingIds.has(task.id);
         const state = appStore.board?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
         if (state === 'idle' && task.status === 'in_progress') return { text: 'Pending', color: 'var(--color-status-orange)' };
