@@ -452,63 +452,38 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 		}
 	}
 
-	// Clean up stale kanban stash entries for tasks that no longer exist.
-	// Kanban stash messages: "kanban-switch-{taskID}", "kanban-fork-{taskID}",
-	// "kanban-checkpoint-{taskID}", "kanban-sync-merge-{taskID}", "kanban-auto-merge-{taskID}"
-	// Task IDs contain hyphens, so we match against all known active task IDs.
+	// Drop kanban-labeled stashes whose task ID is no longer in the active set.
+	// Label-based match (permissive), hash-based drop.
 	for _, p := range projects {
-		stashListOut, err := wm.gitRunOutput(p.Path, "stash", "list", "--format=%gd%x00%gs")
+		entries, err := wm.listStashEntries(p.Path)
 		if err != nil {
-			continue // no stash list, skip
+			continue
 		}
-		var dropIndices []int
-		for line := range strings.SplitSeq(stashListOut, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
+		var dropRefs []StashEntry
+		for _, e := range entries {
+			if !hasKanbanLabel(e.Subject) {
 				continue
 			}
-			parts := strings.SplitN(line, "\x00", 2)
-			if len(parts) < 2 {
-				continue
-			}
-			subject := parts[1]
-			// Check if this is a kanban-labeled stash belonging to an active task.
-			// %gs gives "On <branch>: <message>", so use Contains to find kanban labels.
-			if !strings.Contains(subject, "kanban-switch-") &&
-				!strings.Contains(subject, "kanban-fork-") &&
-				!strings.Contains(subject, "kanban-checkpoint-") &&
-				!strings.Contains(subject, "kanban-sync-merge-") &&
-				!strings.Contains(subject, "kanban-auto-merge-") {
-				continue
-			}
-			// Try matching against all active task IDs
 			belongsToActiveTask := false
 			for taskID := range activeSet {
-				if strings.Contains(subject, "kanban-switch-"+taskID) ||
-					strings.Contains(subject, "kanban-fork-"+taskID) ||
-					strings.Contains(subject, "kanban-checkpoint-"+taskID) ||
-					strings.Contains(subject, "kanban-sync-merge-"+taskID) ||
-					strings.Contains(subject, "kanban-auto-merge-"+taskID) {
+				if matchKanbanTaskID(e.Subject, taskID) {
 					belongsToActiveTask = true
 					break
 				}
 			}
 			if !belongsToActiveTask {
-				if match := stashIndexRe.FindStringSubmatch(parts[0]); match != nil {
-					if idx, err := strconv.Atoi(match[1]); err == nil {
-						dropIndices = append(dropIndices, idx)
-					}
-				}
+				dropRefs = append(dropRefs, e)
 			}
 		}
-		// Drop from highest to lowest (git renumbers after each drop)
 		wm.GetProjectStashMu(p.ID).Lock()
-		for i := len(dropIndices) - 1; i >= 0; i-- {
+		// Reverse order: highest stash index first so refs don't shift.
+		for i := len(dropRefs) - 1; i >= 0; i-- {
+			e := dropRefs[i]
 			if dryRun {
-				log.Printf("[gc] would drop stale stash entry stash@{%d} in project %s", dropIndices[i], p.Name)
+				log.Printf("[gc] would drop stale stash entry %s in project %s", e.Hash[:8], p.Name)
 			} else {
-				log.Printf("[gc] dropping stale stash entry stash@{%d} in project %s", dropIndices[i], p.Name)
-				_ = wm.gitRun(p.Path, "stash", "drop", fmt.Sprintf("stash@{%d}", dropIndices[i]))
+				log.Printf("[gc] dropping stale stash entry %s in project %s", e.Hash[:8], p.Name)
+				_ = wm.gitRun(p.Path, "stash", "drop", e.Ref)
 			}
 		}
 		wm.GetProjectStashMu(p.ID).Unlock()
@@ -798,7 +773,7 @@ type UntrackedFile struct {
 type DiffRow struct {
 	LineNumber *int                `json:"lineNumber"` // null for non-code rows
 	Variant    string              `json:"variant"`    // "context", "added", "removed"
-	Text       string              `json:"text"` // empty string for blank lines; absent when segments present
+	Text       string              `json:"text"`       // empty string for blank lines; absent when segments present
 	Segments   []InlineDiffSegment `json:"segments,omitempty"`
 }
 
@@ -811,18 +786,18 @@ type InlineDiffSegment struct {
 
 // TrackedDiffFile holds the parsed diff for a single tracked file.
 type TrackedDiffFile struct {
-	Path      string    `json:"path"`
-	OrigPath  string    `json:"origPath,omitempty"`  // original path for renames (a/ path when different from b/)
-	Rows      []DiffRow `json:"rows"`
-	Added     int       `json:"added"`
-	Removed   int       `json:"removed"`
-	FileSize  *int64    `json:"fileSize,omitempty"`  // set for binary/large files
-	IsBinary  bool      `json:"isBinary,omitempty"`  // true when file is binary (git-detected)
-	IsNew     bool      `json:"isNew,omitempty"`     // true when file is newly created (from "new file mode" marker)
-	IsDeleted bool      `json:"isDeleted,omitempty"` // true when file is deleted (from "deleted file mode" marker)
-	Truncated bool      `json:"truncated,omitempty"`
-	OrigAdded int       `json:"origAdded,omitempty"`
-	OrigRemoved int     `json:"origRemoved,omitempty"`
+	Path        string    `json:"path"`
+	OrigPath    string    `json:"origPath,omitempty"` // original path for renames (a/ path when different from b/)
+	Rows        []DiffRow `json:"rows"`
+	Added       int       `json:"added"`
+	Removed     int       `json:"removed"`
+	FileSize    *int64    `json:"fileSize,omitempty"`  // set for binary/large files
+	IsBinary    bool      `json:"isBinary,omitempty"`  // true when file is binary (git-detected)
+	IsNew       bool      `json:"isNew,omitempty"`     // true when file is newly created (from "new file mode" marker)
+	IsDeleted   bool      `json:"isDeleted,omitempty"` // true when file is deleted (from "deleted file mode" marker)
+	Truncated   bool      `json:"truncated,omitempty"`
+	OrigAdded   int       `json:"origAdded,omitempty"`
+	OrigRemoved int       `json:"origRemoved,omitempty"`
 }
 
 // TaskDiff holds the diff output and list of untracked files for a task.
@@ -1284,112 +1259,75 @@ func (wm *WorktreeManager) GetDiff(taskID, baseRef string) (string, error) {
 	return out, nil
 }
 
-// GetTaskDiff returns the git diff and untracked files for a task's worktree.
-// DropStashEntriesForTask removes kanban-labeled stash entries for the given task.
-// Matches messages like "kanban-switch-{taskID}", "kanban-fork-{taskID}",
-// "kanban-checkpoint-{taskID}", "kanban-sync-merge-{taskID}", and "kanban-auto-merge-{taskID}".
-// Called during task deletion to clean up stale stash entries.
-func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) error {
+// kanbanLabelPrefixes are the stash message prefixes used by kanban operations.
+var kanbanLabelPrefixes = []string{
+	"kanban-switch-",
+	"kanban-fork-",
+	"kanban-checkpoint-",
+	"kanban-sync-merge-",
+	"kanban-auto-merge-",
+}
+
+// hasKanbanLabel returns true if the subject contains any kanban label prefix.
+func hasKanbanLabel(subject string) bool {
+	for _, p := range kanbanLabelPrefixes {
+		if strings.Contains(subject, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchKanbanTaskID returns true if the subject is a kanban-labeled stash for the given task.
+func matchKanbanTaskID(subject, taskID string) bool {
+	for _, p := range kanbanLabelPrefixes {
+		if strings.Contains(subject, p+taskID) {
+			return true
+		}
+	}
+	return false
+}
+
+// dropMatchingStashes lists stashes in the project, filters by predicate, and drops by ref.
+// Drops in reverse order (highest index first) so refs don't shift mid-loop.
+// The caller must hold the project stash mutex.
+func (wm *WorktreeManager) dropMatchingStashes(projectID string, filter func(subject string) bool) error {
 	project, err := wm.store.GetProject(projectID)
 	if err != nil {
 		return fmt.Errorf("get project: %w", err)
 	}
-
-	wm.GetProjectStashMu(projectID).Lock()
-	defer wm.GetProjectStashMu(projectID).Unlock()
-
-	listOut, err := wm.gitRunOutput(project.Path, "stash", "list", "--format=%gd%x00%gs")
+	entries, err := wm.listStashEntries(project.Path)
 	if err != nil {
-		return nil // no stash, nothing to clean
+		return nil
 	}
-
-	var dropIndices []int
-	for line := range strings.SplitSeq(listOut, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\x00", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		subject := parts[1]
-		// %gs gives reflog subject "On <branch>: <message>" for all stash types.
-		// Match kanban-labeled stashes: switch, fork, checkpoint, sync-merge, auto-merge.
-		if !strings.Contains(subject, "kanban-switch-"+taskID) &&
-			!strings.Contains(subject, "kanban-fork-"+taskID) &&
-			!strings.Contains(subject, "kanban-checkpoint-"+taskID) &&
-			!strings.Contains(subject, "kanban-sync-merge-"+taskID) &&
-			!strings.Contains(subject, "kanban-auto-merge-"+taskID) {
-			continue
-		}
-		if match := stashIndexRe.FindStringSubmatch(parts[0]); match != nil {
-			if idx, err := strconv.Atoi(match[1]); err == nil {
-				dropIndices = append(dropIndices, idx)
-			}
+	// Reverse order: highest stash index first so refs don't shift.
+	for i := len(entries) - 1; i >= 0; i-- {
+		if filter(entries[i].Subject) {
+			_ = wm.gitRun(project.Path, "stash", "drop", entries[i].Ref)
 		}
 	}
-
-	// Drop from highest index to lowest (git renumbers after each drop)
-	for i := len(dropIndices) - 1; i >= 0; i-- {
-		_ = wm.gitRun(project.Path, "stash", "drop", fmt.Sprintf("stash@{%d}", dropIndices[i]))
-	}
-
 	return nil
 }
 
-// DropStashEntriesForBranch removes stash entries that belong to the given branch.
-// Stash entries are labeled with the branch name (e.g., "On task/abc-def-ghi: label").
-func (wm *WorktreeManager) DropStashEntriesForBranch(projectID string, branchName string) error {
-	project, err := wm.store.GetProject(projectID)
-	if err != nil {
-		return fmt.Errorf("get project: %w", err)
-	}
-
-	// Serialize with shared stash mutex — stash list/drop touches .git/refs/stash.
+// DropStashEntriesForTask removes kanban-labeled stash entries for the given task.
+// Drops by commit hash — no index renumbering issues.
+func (wm *WorktreeManager) DropStashEntriesForTask(projectID, taskID string) error {
 	wm.GetProjectStashMu(projectID).Lock()
 	defer wm.GetProjectStashMu(projectID).Unlock()
+	return wm.dropMatchingStashes(projectID, func(subject string) bool {
+		return matchKanbanTaskID(subject, taskID)
+	})
+}
 
-	// List stash entries with their reflog subjects.
-	// %gs gives two formats:
-	// "On <branch>: <message>" — from `stash push -m` and `stash store -m`
-	// "WIP on <branch>: <hash> <msg>" — from `stash push` without -m
-	listOut, err := wm.gitRunOutput(project.Path, "stash", "list", "--format=%gd%x00%gs")
-	if err != nil {
-		return nil // no stash, nothing to clean
-	}
-
-	// Match on " <branch>:" to cover both formats above.
+// DropStashEntriesForBranch removes stash entries for the given branch.
+// Drops by commit hash — no index renumbering issues.
+func (wm *WorktreeManager) DropStashEntriesForBranch(projectID string, branchName string) error {
+	wm.GetProjectStashMu(projectID).Lock()
+	defer wm.GetProjectStashMu(projectID).Unlock()
 	branchMarker := " " + branchName + ":"
-	// Find stash indices that belong to this branch (newest first)
-	var dropIndices []int
-	for line := range strings.SplitSeq(listOut, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\x00", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		subject := parts[1]
-		if !strings.Contains(subject, branchMarker) {
-			continue
-		}
-		// Extract index from stash@{N}
-		if match := stashIndexRe.FindStringSubmatch(parts[0]); match != nil {
-			if idx, err := strconv.Atoi(match[1]); err == nil {
-				dropIndices = append(dropIndices, idx)
-			}
-		}
-	}
-
-	// Drop from highest index to lowest (git renumbers after each drop)
-	for i := len(dropIndices) - 1; i >= 0; i-- {
-		_ = wm.gitRun(project.Path, "stash", "drop", fmt.Sprintf("stash@{%d}", dropIndices[i]))
-	}
-
-	return nil
+	return wm.dropMatchingStashes(projectID, func(subject string) bool {
+		return strings.Contains(subject, branchMarker)
+	})
 }
 
 // GetTaskDiff returns the git diff for a task's worktree.
@@ -2096,43 +2034,22 @@ func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (
 		return headRef, err
 	}
 
-	// Get the task's branch name to filter stash entries
 	task, err := wm.store.GetTaskByTaskID(taskID)
 	if err != nil {
 		return headRef, nil
 	}
-	// %gs gives two formats:
-	// "On <branch>: <message>" — from `stash push -m` and `stash store -m`
-	// "WIP on <branch>: <hash> <msg>" — from `stash push` without -m
-	// Match on " <branch>:" to cover both.
 	branchMarker := " " + task.Branch + ":"
 
-	// List stash entries with reflog subject: newest first (stash@{0}, stash@{1}, ...)
-	listOut, err := wm.gitRunOutput(worktreePath, "stash", "list", "--format=%gd%x00%H%x00%gs")
+	entries, err := wm.listStashEntries(worktreePath)
 	if err != nil {
 		return headRef, nil
 	}
 
-	// Parse stash list and find entries matching this branch.
-	// Use null byte as separator between gd, H, and subject.
-	var branchEntries []string // hashes belonging to this branch, newest first
-	for line := range strings.SplitSeq(listOut, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	var branchEntries []string
+	for _, e := range entries {
+		if strings.Contains(e.Subject, branchMarker) {
+			branchEntries = append(branchEntries, e.Hash)
 		}
-		parts := strings.SplitN(line, "\x00", 3)
-		if len(parts) < 2 {
-			continue
-		}
-		subject := ""
-		if len(parts) > 2 {
-			subject = parts[2]
-		}
-		if !strings.Contains(subject, branchMarker) {
-			continue // skip entries from other branches
-		}
-		branchEntries = append(branchEntries, strings.TrimSpace(parts[1]))
 	}
 
 	// Find headRef in branch entries and return the next one (previous checkpoint)
@@ -2165,144 +2082,128 @@ func (wm *WorktreeManager) branchExistsInRepo(repoPath, branchName string) bool 
 	return err == nil
 }
 
+// StashEntry holds a parsed stash list entry.
+type StashEntry struct {
+	Ref     string // stash@{N}
+	Hash    string // commit hash
+	Subject string // reflog subject
+}
+
+// listStashEntries parses "git stash list --format=%gd%x00%H%x00%gs" output.
+func (wm *WorktreeManager) listStashEntries(repoPath string) ([]StashEntry, error) {
+	out, err := wm.gitRunOutput(repoPath, "stash", "list", "--format=%gd%x00%H%x00%gs")
+	if err != nil {
+		return nil, err
+	}
+	var entries []StashEntry
+	for line := range strings.SplitSeq(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\x00", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		entries = append(entries, StashEntry{
+			Ref:     parts[0],
+			Hash:    strings.TrimSpace(parts[1]),
+			Subject: parts[2],
+		})
+	}
+	return entries, nil
+}
+
 // PushStash pushes worktree changes as a stash with a labeled message and
 // returns the commit hash of the stash entry. Searches the stash list by
 // message to find the correct entry, avoiding the fragile stash@{0} assumption.
 // The caller must hold the project stash mutex.
 func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
-    if err := wm.gitRun(repoPath, "stash", "push", "-u", "-m", message); err != nil {
-        return "", fmt.Errorf("stash push: %w", err)
-    }
-    // Find our stash entry by searching the list for our message.
-    // %gs gives "On <branch>: <message>", so use Contains to match.
-    // This is more robust than assuming stash@{0} because other tasks
-    // (or stale entries from crashes) may have pushed their own stashes.
-    listOut, err := wm.gitRunOutput(repoPath, "stash", "list", "--format=%gd%x00%H%x00%gs")
-    if err != nil {
-        return "", fmt.Errorf("stash list: %w", err)
-    }
-    for line := range strings.SplitSeq(listOut, "\n") {
-        line = strings.TrimSpace(line)
-        if line == "" {
-            continue
-        }
-        parts := strings.SplitN(line, "\x00", 3)
-        if len(parts) < 3 {
-            continue
-        }
-        if strings.Contains(parts[2], message) {
-            return parts[1], nil // return the commit hash
-        }
-    }
-    // Fallback: if message match fails (e.g., git reformatted the message),
-    // use stash@{0} as a last resort. The mutex serializes operations so
-    // our push should be at the top.
-    hash, _ := wm.gitRunOutput(repoPath, "rev-parse", "stash@{0}")
-    return strings.TrimSpace(hash), nil
+	if err := wm.gitRun(repoPath, "stash", "push", "-u", "-m", message); err != nil {
+		return "", fmt.Errorf("stash push: %w", err)
+	}
+	entries, err := wm.listStashEntries(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("stash list: %w", err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Subject, message) {
+			return e.Hash, nil
+		}
+	}
+	// Fallback: mutex serializes operations, our push should be at the top.
+	hash, _ := wm.gitRunOutput(repoPath, "rev-parse", "stash@{0}")
+	return strings.TrimSpace(hash), nil
 }
 
 // DropStashByHash drops a stash entry identified by its commit hash.
-// Searches the stash list to find the matching entry and drops it by index.
+// Searches the stash list to find the matching entry and drops it by ref.
 // The caller must hold the project stash mutex.
 func (wm *WorktreeManager) DropStashByHash(repoPath, hash string) error {
-    if hash == "" {
-        return nil
-    }
-    hash = strings.TrimSpace(hash)
-    // List stash entries and find the one matching our hash
-    listOut, err := wm.gitRunOutput(repoPath, "stash", "list", "--format=%gd%x00%H")
-    if err != nil {
-        return nil // no stash list, nothing to drop
-    }
-    for line := range strings.SplitSeq(listOut, "\n") {
-        line = strings.TrimSpace(line)
-        if line == "" {
-            continue
-        }
-        parts := strings.SplitN(line, "\x00", 2)
-        if len(parts) < 2 {
-            continue
-        }
-        entryHash := strings.TrimSpace(parts[1])
-        if entryHash == hash || strings.HasPrefix(entryHash, hash) {
-            return wm.gitRun(repoPath, "stash", "drop", parts[0])
-        }
-    }
-    // Fallback: try dropping stash@{0} if hash match fails
-    return wm.gitRun(repoPath, "stash", "drop", "stash@{0}")
+	if hash == "" {
+		return nil
+	}
+	hash = strings.TrimSpace(hash)
+	entries, err := wm.listStashEntries(repoPath)
+	if err != nil {
+		return nil
+	}
+	for _, e := range entries {
+		if e.Hash == hash || strings.HasPrefix(e.Hash, hash) {
+			return wm.gitRun(repoPath, "stash", "drop", e.Ref)
+		}
+	}
+	return wm.gitRun(repoPath, "stash", "drop", "stash@{0}")
 }
 
 // maxStashMessage is the maximum length for any stash message.
 const maxStashMessage = 50
 
-// StashMessageForSwitch generates a unique stash message for a thread switch.
-// Format: "kanban-switch-<taskID>" — task ID is the key identifier for cleanup.
-// Total length is capped at 50 characters.
+// stashMessageWithPrefix creates a stash message from a prefix and task ID,
+// truncated to maxStashMessage characters.
+func stashMessageWithPrefix(prefix, taskID string) string {
+	msg := prefix + taskID
+	if len(msg) > maxStashMessage {
+		msg = msg[:maxStashMessage]
+	}
+	return msg
+}
+
+// StashMessageForSwitch returns a stash message for a thread switch.
 func StashMessageForSwitch(taskID string) string {
-    msg := fmt.Sprintf("kanban-switch-%s", taskID)
-    if len(msg) > maxStashMessage {
-        msg = msg[:maxStashMessage]
-    }
-    return msg
+	return stashMessageWithPrefix("kanban-switch-", taskID)
 }
 
-// StashMessageForFork generates a unique stash message for a thread fork.
-// Format: "kanban-fork-<taskID>" — task ID is the key identifier for cleanup.
-// Total length is capped at 50 characters.
+// StashMessageForFork returns a stash message for a thread fork.
 func StashMessageForFork(taskID string) string {
-    msg := fmt.Sprintf("kanban-fork-%s", taskID)
-    if len(msg) > maxStashMessage {
-        msg = msg[:maxStashMessage]
-    }
-    return msg
+	return stashMessageWithPrefix("kanban-fork-", taskID)
 }
 
-// StashMessageForCheckpoint generates a stash message for an execution checkpoint.
-// Format: "On <branch>: kanban-checkpoint-<taskID>"
-// The branch name is truncated to fit within 50 characters.
-// The task ID in the message allows cleanup during task deletion.
+// StashMessageForCheckpoint returns a stash message for an execution checkpoint.
+// Branch name is truncated to fit within maxStashMessage characters.
 func StashMessageForCheckpoint(taskID, branch string) string {
-    // "On : kanban-checkpoint-<taskID>" — branch is optional context
-    // Reserve space for the fixed parts: "On : kanban-checkpoint-" (24) + taskID
-    msg := fmt.Sprintf("On %s: kanban-checkpoint-%s", branch, taskID)
-    if len(msg) > maxStashMessage {
-        // Truncate the branch name to fit
-        prefix := "On "
-        suffix := ": kanban-checkpoint-" + taskID
-        if len(prefix+suffix) > maxStashMessage {
-            // Even with empty branch it's too long — hard truncate
-            msg = (prefix + suffix)[:maxStashMessage]
-        } else {
-            branchMax := maxStashMessage - len(prefix) - len(suffix)
-            msg = fmt.Sprintf("On %s: kanban-checkpoint-%s", branch[:branchMax], taskID)
-        }
-    }
-    return msg
+	prefix := "On "
+	suffix := ": kanban-checkpoint-" + taskID
+	if len(prefix+suffix) > maxStashMessage {
+		return (prefix + suffix)[:maxStashMessage]
+	}
+	branchMax := maxStashMessage - len(prefix) - len(suffix)
+	if len(branch) > branchMax {
+		branch = branch[:branchMax]
+	}
+	return fmt.Sprintf("On %s: kanban-checkpoint-%s", branch, taskID)
 }
 
-// StashMessageForSyncMerge generates a stash message for a sync-merge operation.
-// The task ID in the message allows cleanup during task deletion and GC.
-// Total length is capped at 50 characters.
+// StashMessageForSyncMerge returns a stash message for a sync-merge operation.
 func StashMessageForSyncMerge(taskID string) string {
-    msg := fmt.Sprintf("kanban-sync-merge-%s", taskID)
-    if len(msg) > maxStashMessage {
-        msg = msg[:maxStashMessage]
-    }
-    return msg
+	return stashMessageWithPrefix("kanban-sync-merge-", taskID)
 }
 
-// StashMessageForAutoMerge generates a stash message for an auto-merge operation.
-// The task ID in the message allows cleanup during task deletion and GC.
-// Total length is capped at 50 characters.
+// StashMessageForAutoMerge returns a stash message for an auto-merge operation.
 func StashMessageForAutoMerge(taskID string) string {
-    msg := fmt.Sprintf("kanban-auto-merge-%s", taskID)
-    if len(msg) > maxStashMessage {
-        msg = msg[:maxStashMessage]
-    }
-    return msg
+	return stashMessageWithPrefix("kanban-auto-merge-", taskID)
 }
 
-var stashIndexRe = regexp.MustCompile(`stash@\{(\d+)\}`)
 var fileRe = regexp.MustCompile(`^diff --git a/(.+?) b/`)
 
 // IsGitRepo checks if a path is a git repository.
