@@ -5,6 +5,7 @@ frontend/dist
 worktrees/*
 frontend/test-results
 test-results
+test-results2
 .worktrees/*
 prompts/skills/
 
