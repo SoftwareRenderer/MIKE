@@ -138,7 +138,7 @@ func (te *TaskExecutor) WorktreeMgr() *git.WorktreeManager {
 // is returned directly. The caller treats both cases identically.
 func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn func() error) error {
 	concurrency := te.configStore.GetProviderConcurrency(serverURL)
-	if _, err := te.gate.Acquire(ctx, serverURL, concurrency); err != nil {
+	if _, _, err := te.gate.Acquire(ctx, serverURL, concurrency); err != nil {
 		return err
 	}
 	defer te.gate.Release(serverURL)

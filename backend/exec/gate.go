@@ -47,8 +47,9 @@ func NewConcurrencyGate() *ConcurrencyGate {
 
 // Acquire blocks until a slot is available for the given provider.
 // concurrency is the maximum number of concurrent slots for this provider (min 1).
-// Returns queue position (0 = not queued, slot available immediately).
-func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concurrency int) (int, error) {
+// Returns queue position (0 = not queued, slot available immediately), the entry,
+// and an error if the context is cancelled.
+func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concurrency int) (int, *queueEntry, error) {
 	if concurrency < 1 {
 		concurrency = 1
 	}
@@ -64,7 +65,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 	if ps.active < concurrency {
 		ps.active++
 		g.mu.Unlock()
-		return 0, nil
+		return 0, nil, nil
 	}
 
 	// Must wait — enqueue
@@ -75,11 +76,11 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 	// Block until served or cancelled
 	select {
 	case <-entry.done:
-		return 0, nil
+		return 0, entry, nil
 	case <-ctx.Done():
 		entry.once.Do(func() { close(entry.done) })
 		g.cleanupEntry(entry)
-		return 0, ctx.Err()
+		return 0, entry, ctx.Err()
 	}
 }
 
@@ -140,12 +141,15 @@ func (g *ConcurrencyGate) Release(providerURL string) {
 }
 
 // Position returns the 1-indexed queue position for the given provider.
+// currentEntry is the entry to find the position of; if nil, counts all active
+// entries (legacy behavior for tests that don't track per-entry positions).
 // Returns 0 if no one is waiting.
-func (g *ConcurrencyGate) Position(providerURL string) int {
+func (g *ConcurrencyGate) Position(providerURL string, currentEntry *queueEntry) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	ahead := 0
+	found := false
 	for _, e := range g.queue {
 		if e.provider != providerURL {
 			continue
@@ -154,19 +158,31 @@ func (g *ConcurrencyGate) Position(providerURL string) int {
 		case <-e.done:
 			continue // cancelled, skip
 		default:
-			ahead++
+			if currentEntry != nil && e == currentEntry {
+				found = true
+				continue
+			}
+			if !found {
+				ahead++
+			}
 		}
+	}
+	if found {
+		return ahead + 1
 	}
 	return ahead
 }
 
 // EstimateWait returns the estimated wait time in seconds for the given provider.
 // Based on average slot duration × queue position.
-func (g *ConcurrencyGate) EstimateWait(providerURL string) int {
+// currentEntry is the entry to find the position of; if nil, counts all active
+// entries (legacy behavior for tests that don't track per-entry positions).
+func (g *ConcurrencyGate) EstimateWait(providerURL string, currentEntry *queueEntry) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	ahead := 0
+	found := false
 	for _, e := range g.queue {
 		if e.provider != providerURL {
 			continue
@@ -175,7 +191,13 @@ func (g *ConcurrencyGate) EstimateWait(providerURL string) int {
 		case <-e.done:
 			continue
 		default:
-			ahead++
+			if currentEntry != nil && e == currentEntry {
+				found = true
+				continue
+			}
+			if !found {
+				ahead++
+			}
 		}
 	}
 	if ahead == 0 {
@@ -186,6 +208,27 @@ func (g *ConcurrencyGate) EstimateWait(providerURL string) int {
 	}
 	avgSlot := g.totalSlotTime / time.Duration(g.completions)
 	return int((avgSlot * time.Duration(ahead)) / time.Second)
+}
+
+// QueueEntries returns the queue entries for the given provider in FIFO order.
+// Only active (non-cancelled) entries are included.
+func (g *ConcurrencyGate) QueueEntries(providerURL string) []*queueEntry {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	var result []*queueEntry
+	for _, e := range g.queue {
+		if e.provider != providerURL {
+			continue
+		}
+		select {
+		case <-e.done:
+			continue
+		default:
+			result = append(result, e)
+		}
+	}
+	return result
 }
 
 // Close shuts down the gate and releases all waiting goroutines.
