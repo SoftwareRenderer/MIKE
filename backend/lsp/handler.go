@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -153,7 +154,28 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[lsp] client %d connected", clientID)
 
-	ctx := r.Context()
+	// Ping/pong keepalive
+	// If a ping fails, cancel the read context to unblock Read() and close the connection.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	go func() {
+		ticker := time.NewTicker(27 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
+				err := conn.Ping(pingCtx)
+				pingCancel()
+				if err != nil {
+					cancel() // unblock Read() to tear down the connection
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	// Read loop — handle client messages
 	for {
