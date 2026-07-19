@@ -115,20 +115,14 @@
     }
     .lsp-status {
         font-family: var(--font-mono);
-        opacity: 0.5;
         cursor: pointer;
-        transition: opacity 0.2s, color 0.2s;
         background: none;
         border: none;
         padding: 0;
         font-size: inherit;
         color: inherit;
     }
-    .lsp-status:hover {
-        opacity: 1;
-    }
     .lsp-status.lsp-error {
-        opacity: 1;
         color: var(--color-status-red);
     }
     .lsp-tooltip {
