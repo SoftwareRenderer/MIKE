@@ -356,6 +356,11 @@ func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg
 		return
 	}
 
+	// Log the method for debugging
+	var rpc JSONRPCMessage
+	_ = json.Unmarshal(msg, &rpc)
+	log.Printf("[lsp] client %d: notification %s", session.clientID, rpc.Method)
+
 	if err := h.manager.SendToServer(ws.process, msg); err != nil {
 		log.Printf("[lsp] client %d: forward raw failed: %v", session.clientID, err)
 	}
@@ -460,11 +465,8 @@ func (h *LSPHandler) broadcastNotification(serverMsg json.RawMessage) {
 
 // mergeInitParams merges the server config's InitParamsOverride into the
 // initialize request's params before forwarding to the language server.
+// It also ensures workspaceFolders is set from rootUri (required by gopls v0.23+).
 func mergeInitParams(msg json.RawMessage, cfg *ServerConfig) json.RawMessage {
-	if cfg == nil || len(cfg.InitParamsOverride) == 0 {
-		return msg // nothing to merge
-	}
-
 	var msgMap map[string]any
 	if err := json.Unmarshal(msg, &msgMap); err != nil {
 		return msg // malformed, forward as-is
@@ -490,20 +492,39 @@ func mergeInitParams(msg json.RawMessage, cfg *ServerConfig) json.RawMessage {
 		return msg // unexpected type, forward as-is
 	}
 
-	// Deep-merge InitParamsOverride into params
-	for k, v := range cfg.InitParamsOverride {
-		if existing, ok := params[k]; ok {
-			// Both sides are maps — merge recursively
-			if existingMap, ok := existing.(map[string]any); ok {
-				if overrideMap, ok := v.(map[string]any); ok {
-					for ok2, ov := range overrideMap {
-						existingMap[ok2] = ov
-					}
-					continue
-				}
+	// Ensure workspaceFolders is set from rootUri (required by gopls v0.23+)
+	if rootUri, ok := params["rootUri"]; ok && rootUri != nil && rootUri != "" {
+		if _, hasFolders := params["workspaceFolders"]; !hasFolders {
+			params["workspaceFolders"] = []map[string]any{
+				{"uri": rootUri, "name": "workspace"},
 			}
 		}
-		params[k] = v
+		// Also ensure the workspaceFolders capability is advertised
+		if caps, ok := params["capabilities"].(map[string]any); ok {
+			if wsCaps, ok := caps["workspace"].(map[string]any); ok {
+				wsCaps["workspaceFolders"] = true
+			} else {
+				caps["workspace"] = map[string]any{"workspaceFolders": true}
+			}
+		}
+	}
+
+	// Deep-merge InitParamsOverride into params
+	if cfg != nil && len(cfg.InitParamsOverride) > 0 {
+		for k, v := range cfg.InitParamsOverride {
+			if existing, ok := params[k]; ok {
+				// Both sides are maps — merge recursively
+				if existingMap, ok := existing.(map[string]any); ok {
+					if overrideMap, ok := v.(map[string]any); ok {
+						for ok2, ov := range overrideMap {
+							existingMap[ok2] = ov
+						}
+						continue
+					}
+				}
+			}
+			params[k] = v
+		}
 	}
 
 	msgMap["params"] = params
