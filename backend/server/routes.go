@@ -26,6 +26,9 @@ func (s *Server) setupRoutes() {
 	// WebSocket stream
 	s.mux.HandleFunc("/api/stream", s.appStreamMgr.HandleStream)
 
+	// LSP WebSocket
+	s.mux.HandleFunc("/api/lsp", s.lspHandler.HandleLSP)
+
 	// Global utilities
 	s.mux.HandleFunc("/api/home", s.handleHome)
 	s.mux.HandleFunc("/api/gc", s.handleGC)
