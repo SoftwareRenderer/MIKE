@@ -1388,14 +1388,15 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .locked-cap-item {
         padding: 2px 8px;
-        background: var(--color-surface-2);
+        background: rgba(136, 192, 208, 0.12);
+        border: 1px solid rgba(136, 192, 208, 0.25);
         border-radius: var(--radius-sm);
         font-size: 0.75rem;
         font-family: var(--font-mono, monospace);
     }
 
     .locked-cap-value {
-        color: var(--color-text-primary);
+        color: var(--color-accent-light, #88c0d0);
     }
 
     .config-options {
