@@ -24,10 +24,6 @@
     function toggleLspTooltip() {
         lspTooltipVisible = !lspTooltipVisible;
     }
-
-    function closeLspTooltip() {
-        lspTooltipVisible = false;
-    }
 </script>
 
 <div class="editor-footer">

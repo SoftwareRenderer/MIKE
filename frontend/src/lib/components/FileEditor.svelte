@@ -4,7 +4,7 @@
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, clearEditorHistory } from '$lib/storage';
     import { EditorView } from 'codemirror';
     import { EditorState, Compartment } from '@codemirror/state';
-    import { keymap, ViewPlugin } from '@codemirror/view';
+    import { keymap } from '@codemirror/view';
     import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
