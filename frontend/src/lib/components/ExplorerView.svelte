@@ -722,6 +722,7 @@
                     {#if openFiles.length > 0}
                         <EditorTabs
                             projectId={projectId}
+                            projectPath={projectPath}
                             openFiles={openFiles}
                             activeFilePath={activeFilePath}
                             unsavedFiles={unsavedFiles}
@@ -736,7 +737,7 @@
                             mobileFullscreen={editorFullscreen}
                         />
                     {:else}
-                        <div class="branch-editor-placeholder">
+                        <div class="file-editor-placeholder">
                             <svg width="32" height="32" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3" aria-hidden="true">
                                 <path d="M3 1h6l4 4v8a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z"/>
                                 <polyline points="9,1 9,5 13,5"/>
@@ -1034,7 +1035,7 @@
         min-width: 0;
     }
 
-    .branch-editor-placeholder {
+    .file-editor-placeholder {
         display: flex;
         flex-direction: column;
         align-items: center;

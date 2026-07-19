@@ -17,15 +17,15 @@
         }).catch(() => { diffViewerLoading = false; });
     }
     // Lazy-loaded on first file edit
-    let BranchEditorComponent: typeof import('./BranchEditor.svelte').default | null = $state(null);
-    let branchEditorLoading = $state(false);
-    function loadBranchEditor(): void {
-        if (BranchEditorComponent || branchEditorLoading) return;
-        branchEditorLoading = true;
-        import('./BranchEditor.svelte').then((mod) => {
-            BranchEditorComponent = mod.default;
-            branchEditorLoading = false;
-        }).catch(() => { branchEditorLoading = false; });
+    let FileEditorComponent: typeof import('./FileEditor.svelte').default | null = $state(null);
+    let fileEditorLoading = $state(false);
+    function loadFileEditor(): void {
+        if (FileEditorComponent || fileEditorLoading) return;
+        fileEditorLoading = true;
+        import('./FileEditor.svelte').then((mod) => {
+            FileEditorComponent = mod.default;
+            fileEditorLoading = false;
+        }).catch(() => { fileEditorLoading = false; });
     }
     import ResizeHandle from './ResizeHandle.svelte';
 
@@ -294,7 +294,7 @@
         editorFilePath = absPath;
         editorTargetLine = lineNumber;
         if (onUpdateFile) onUpdateFile(absPath);
-        loadBranchEditor();
+        loadFileEditor();
     }
 
     /** Close the inline editor and return to diff view. */
@@ -477,9 +477,9 @@
                         <span class="changes-editor-path" title={editorFilePath}>{editorFilePath.replace(projectPath + '/', '')}</span>
                     </div>
                     <div class="changes-editor-body">
-                        {#if BranchEditorComponent}
-                            {@const BranchEditor = BranchEditorComponent}
-                            <BranchEditor
+                        {#if FileEditorComponent}
+                            {@const FileEditor = FileEditorComponent}
+                            <FileEditor
                                 projectId={projectId}
                                 filePath={editorFilePath}
                                 targetLine={editorTargetLine}
@@ -490,7 +490,7 @@
                                 onClose={closeInlineEditor}
                             />
                         {:else}
-                            <div class="branch-editor-loading">Loading editor...</div>
+                            <div class="file-editor-loading">Loading editor...</div>
                         {/if}
                     </div>
                 {:else}
@@ -810,7 +810,7 @@
         flex-direction: column;
         overflow: hidden;
     }
-    .branch-editor-loading,
+    .file-editor-loading,
     .diff-viewer-loading {
         display: flex;
         align-items: center;

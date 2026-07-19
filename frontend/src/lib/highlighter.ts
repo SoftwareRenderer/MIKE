@@ -3,7 +3,7 @@ import { syntaxTree, Language } from '@codemirror/language';
 import { HIGHLIGHT_CACHE_MAX } from '$lib/constants';
 
 /**
- * GitHub Dark highlighter — matches the FileEditor's githubDarkHighlight colors.
+ * GitHub Dark highlighter — matches the DiffEditor's githubDarkHighlight colors.
  * Maps Lezer tags to CSS class names (hl-*).
  */
 const githubDarkHighlighter = tagHighlighter([

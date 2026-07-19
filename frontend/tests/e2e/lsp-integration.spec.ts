@@ -210,39 +210,44 @@ test.describe.serial('LSP Integration', () => {
     // Ensure the editor has focus
     await page.locator('.cm-content').click();
 
-    // Give LSP time to process the document for hover info
-    await page.waitForTimeout(5000);
+    // Give LSP time to connect, initialize, and index the workspace
+    await page.waitForTimeout(15000);
 
-    // Move cursor to the "fmt" identifier in the import line
+    // Navigate cursor to the "fmt" identifier in 'import "fmt"' (line 3)
     await page.keyboard.press('Control+Home');
     await page.keyboard.press('ArrowDown'); // line 2: blank
     await page.keyboard.press('ArrowDown'); // line 3: import "fmt"
-    for (let i = 0; i < 9; i++) {
-      await page.keyboard.press('ArrowRight');
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press('ArrowRight'); // position before "fmt"
     }
+    await page.keyboard.press('ArrowRight'); // land on 'f' of "fmt"
     await page.waitForTimeout(200);
 
-    // Trigger hover by moving mouse over the editor content
-    const cmContent = page.locator('.cm-content');
-    const box = await cmContent.boundingBox();
-    if (box) {
-      // Move mouse to a position near the import line (line 3, roughly)
-      await page.mouse.move(box.x + 50, box.y + box.height * 0.2);
+    // Get the bounding box of the current cursor position and move mouse there
+    const lineEl = await page.evaluate(() => {
+      const editorEl = document.querySelector('.cm-editor');
+      if (!editorEl) return null;
+      const view = (editorEl as any).__view;
+      if (!view) return null;
+      const pos = view.state.selection.main.head;
+      const coords = view.coordsAtPos(pos);
+      return coords ? { top: coords.top, left: coords.left, bottom: coords.bottom, right: coords.right } : null;
+    });
+
+    if (lineEl) {
+      // Move mouse to the center of the character and hold
+      const midY = (lineEl.top + lineEl.bottom) / 2;
+      const midX = (lineEl.left + lineEl.right) / 2;
+      await page.mouse.move(midX, midY);
     }
 
-    // Wait for the hover tooltip to appear
-    const hasTooltip = await page.locator('.cm-tooltip').isVisible({ timeout: 15000 }).catch(() => false);
+    // Wait for the hover tooltip to appear (CodeMirror default hoverTime is 300ms)
+    await expect(page.locator('.cm-tooltip')).toBeVisible({ timeout: 15000 });
 
-    if (hasTooltip) {
-      // The tooltip should contain some content (package documentation)
-      const tooltip = page.locator('.cm-tooltip');
-      const tooltipText = await tooltip.textContent();
-      expect(tooltipText?.length, 'Hover tooltip should contain documentation').toBeGreaterThan(0);
-    } else {
-      // Hover may not work in headless mode (mouse events not dispatched to CodeMirror)
-      console.log('Note: LSP hover not available (may not work in headless mode)');
-      test.skip();
-    }
+    // The tooltip should contain package documentation
+    const tooltipText = await page.locator('.cm-tooltip').textContent();
+    expect(tooltipText?.length, 'Hover tooltip should contain documentation').toBeGreaterThan(0);
+    expect(tooltipText).toContain('fmt');
   });
 
   test('should not produce LSP-related console errors during interaction', async ({ page }) => {

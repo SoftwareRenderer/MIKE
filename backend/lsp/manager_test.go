@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -11,33 +13,39 @@ import (
 	"time"
 )
 
-// echoConfig returns a ServerConfig that echoes stdin to stdout with
-// line buffering so the test reader sees output immediately.
+// echoServerPath returns the absolute path to the test echo server script.
+func echoServerPath() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(file), "testdata", "lsp-echo.py")
+}
+
+// echoConfig returns a ServerConfig that echoes Content-Length framed
+// messages from stdin back to stdout with proper LSP framing.
 func echoConfig() *ServerConfig {
 	return &ServerConfig{
-		Command: "stdbuf",
-		Args:    []string{"-oL", "cat"},
+		Command: "python3",
+		Args:    []string{echoServerPath()},
 		Language: "go",
 	}
 }
 
 // stderrConfig returns a ServerConfig that writes a known line to stderr,
-// then echoes stdin to stdout.
+// then echoes Content-Length framed messages.
 func stderrConfig() *ServerConfig {
 	return &ServerConfig{
-		Command: "sh",
-		Args:    []string{"-c", "echo 'stderr-line-123' >&2; exec stdbuf -oL cat"},
+		Command: "python3",
+		Args:    []string{echoServerPath(), "--stderr", "stderr-line-123"},
 		Language: "go",
 	}
 }
 
 // notificationConfig returns a ServerConfig that immediately emits a
-// JSON-RPC notification on stdout, then echoes stdin to stdout.
+// Content-Length framed JSON-RPC notification on stdout, then echoes stdin.
 func notificationConfig() *ServerConfig {
 	notif := `{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":1,"message":"hello-lsp"}}`
 	return &ServerConfig{
-		Command: "sh",
-		Args:    []string{"-c", "echo '" + notif + "'; exec stdbuf -oL cat"},
+		Command: "python3",
+		Args:    []string{echoServerPath(), "--initial-notif", notif},
 		Language: "go",
 	}
 }

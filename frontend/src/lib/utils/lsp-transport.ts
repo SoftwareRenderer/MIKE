@@ -5,6 +5,7 @@ export interface LSPTransportOptions {
   filePath: string;    // absolute file path
   onConnected?: () => void;
   onDisconnected?: () => void;
+  onServerInfo?: (name: string, version: string | null) => void;
 }
 
 /**
@@ -19,6 +20,7 @@ export function createLSPTransport(options: LSPTransportOptions): Promise<Transp
     const ws = new WebSocket(wsUrl);
 
     let currentHandler: ((value: string) => void) | null = null;
+    let serverInfoReported = false;
 
     ws.onopen = () => {
       // Subscribe to workspace before resolving
@@ -33,8 +35,23 @@ export function createLSPTransport(options: LSPTransportOptions): Promise<Transp
         },
         subscribe(fn: (value: string) => void) {
           currentHandler = fn;
-          ws.onmessage = (e: MessageEvent) =>
-            fn(typeof e.data === 'string' ? e.data : new TextDecoder().decode(e.data));
+          ws.onmessage = (e: MessageEvent) => {
+            const data = typeof e.data === 'string' ? e.data : new TextDecoder().decode(e.data);
+            // Intercept initialize response to extract server info
+            if (!serverInfoReported && options.onServerInfo) {
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed?.result?.serverInfo) {
+                  const info = parsed.result.serverInfo;
+                  options.onServerInfo(info.name || '', info.version || null);
+                  serverInfoReported = true;
+                }
+              } catch {
+                // Not JSON or parse error — ignore
+              }
+            }
+            fn(data);
+          };
         },
         unsubscribe(fn: (value: string) => void) {
           if (currentHandler === fn) {

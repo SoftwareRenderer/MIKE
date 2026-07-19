@@ -1,14 +1,15 @@
 <script lang="ts">
-    import BranchEditor from './BranchEditor.svelte';
+    import FileEditor from './FileEditor.svelte';
 
     interface OpenFile {
         path: string;
         targetLine: number;
     }
 
-    let { projectId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
+    let { projectId, projectPath, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
         onSelectTab, onCloseTab, onPinTab, onToggleFullscreen, mobileFullscreen }: {
         projectId: string;
+        projectPath?: string;
         openFiles: OpenFile[];
         activeFilePath: string;
         unsavedFiles: Set<string>;
@@ -24,21 +25,21 @@
     } = $props();
 
     // Lazy-loaded on first file edit
-    let BranchEditorComponent: typeof BranchEditor | null = $state(null);
-    let branchEditorLoading = $state(false);
+    let FileEditorComponent: typeof FileEditor | null = $state(null);
+    let fileEditorLoading = $state(false);
 
-    function loadBranchEditor(): void {
-        if (BranchEditorComponent || branchEditorLoading) return;
-        branchEditorLoading = true;
-        import('./BranchEditor.svelte').then((mod) => {
-            BranchEditorComponent = mod.default;
-            branchEditorLoading = false;
-        }).catch(() => { branchEditorLoading = false; });
+    function loadFileEditor(): void {
+        if (FileEditorComponent || fileEditorLoading) return;
+        fileEditorLoading = true;
+        import('./FileEditor.svelte').then((mod) => {
+            FileEditorComponent = mod.default;
+            fileEditorLoading = false;
+        }).catch(() => { fileEditorLoading = false; });
     }
 
     $effect(() => {
         if (openFiles.length > 0) {
-            loadBranchEditor();
+            loadFileEditor();
         }
     });
 
@@ -125,13 +126,14 @@
 
     <!-- Editor panels -->
     <div class="editor-panels">
-        {#if branchEditorLoading}
-            <div class="branch-editor-loading">Loading editor...</div>
-        {:else if BranchEditorComponent}
-            {@const BranchEditor = BranchEditorComponent}
+        {#if fileEditorLoading}
+            <div class="file-editor-loading">Loading editor...</div>
+        {:else if FileEditorComponent}
+            {@const FileEditor = FileEditorComponent}
             {#each openFiles as file (file.path)}
-                <BranchEditor
+                <FileEditor
                     projectId={projectId}
+                    projectPath={projectPath}
                     filePath={file.path}
                     targetLine={file.targetLine}
                     active={file.path === activeFilePath}
@@ -279,17 +281,17 @@
         min-height: 0;
     }
 
-    /* BranchEditor inside panels: only active one visible */
-    .editor-panels :global(> .branch-editor) {
+    /* FileEditor inside panels: only active one visible */
+    .editor-panels :global(> .file-editor) {
         position: absolute;
         inset: 0;
         display: none;
     }
-    .editor-panels :global(> .branch-editor.active) {
+    .editor-panels :global(> .file-editor.active) {
         display: flex;
     }
 
-    .branch-editor-loading {
+    .file-editor-loading {
         display: flex;
         align-items: center;
         justify-content: center;

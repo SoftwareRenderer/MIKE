@@ -1,16 +1,14 @@
 <script lang="ts">
-    import { onMount, unmount } from 'svelte';
+    import { onMount, onDestroy } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
-    import { dialogStore } from '$lib/stores';
-
-    // CodeMirror
+    import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, clearEditorHistory } from '$lib/storage';
     import { EditorView } from 'codemirror';
     import { EditorState, Compartment } from '@codemirror/state';
-    import { keymap } from '@codemirror/view';
+    import { keymap, ViewPlugin } from '@codemirror/view';
     import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-    import { LSPClient, languageServerExtensions } from '@codemirror/lsp-client';
+    import { LSPClient, languageServerExtensions, hoverTooltips } from '@codemirror/lsp-client';
     import { createLSPTransport } from '$lib/utils/lsp-transport';
     import { isLSPEnabled } from '$lib/storage';
     import { highlightSelectionMatches } from '@codemirror/search';
@@ -19,7 +17,7 @@
     import { darkTheme, darkSyntax } from '$lib/utils/codemirror-theme';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
-    import { mount } from 'svelte';
+    import { mount, unmount } from 'svelte';
     import { javascript } from '@codemirror/lang-javascript';
     import { python } from '@codemirror/lang-python';
     import { go } from '@codemirror/lang-go';
@@ -33,58 +31,84 @@
     import { css } from '@codemirror/lang-css';
     import { svelte } from '@replit/codemirror-lang-svelte';
     import { goTemplate } from '$lib/gotemplate';
+    import { getLanguageTreeFromView } from '$lib/highlighter';
 
-    let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId, projectPath, baseRef, onToggleFullscreen, mobileFullscreen, isMobile }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string; projectPath?: string; baseRef?: string; onToggleFullscreen?: () => void; mobileFullscreen?: boolean; isMobile?: boolean } = $props();
+    let { projectId, projectPath, filePath, targetLine, active, onFocused, onSymbolsUpdate, onHasChanges, onClose }: {
+        projectId: string;
+        projectPath?: string;
+        filePath: string;
+        targetLine: number;
+        active: boolean;
+        onFocused: (focused: boolean) => void;
+        onSymbolsUpdate: (symbols: Array<{ name: string; kind: string; line: number; indent: number }>) => void;
+        onHasChanges: (filePath: string, hasChanges: boolean) => void;
+        onClose: () => void;
+    } = $props();
 
     let content = $state('');
-    let originalContent = $state('');
-    let originalContentLoaded = $state(false);
-    let savedContent = $state('');
-    let loading = $state(true);
+    let loading = $state(false);
     let saving = $state(false);
     let error = $state('');
     let fileTooLarge = $state(false);
-    let displayPath = $state('');
+    let originalContent = $state(''); // HEAD content for git gutter
+    let savedContent = $state('');    // disk content for unsaved-changes tracking
 
-    let hasChanges = $derived(content !== savedContent);
-    let lineCount = $derived(content.split('\n').length);
+    // Tracked incrementally to avoid O(n) string compare/split on every edit
+    let hasChanges = $state(false);
+    let lineCount = $state(0);
+    let charCount = $state(0);
     let cursorLine = $state(1);
     let cursorCol = $state(1);
 
-    // svelte-ignore non_reactive_update — DOM ref via bind:this
-    // svelte-ignore non_reactive_update — DOM ref via bind:this
-    let editorEl: HTMLDivElement | null = null;
-    // svelte-ignore non_reactive_update — DOM ref via bind:this
-    let searchContainerEl: HTMLDivElement | null = null;
-    let showConfirm = $state(false);
-
-    let view: EditorView | null = null;
-    let gitGutterState: { original: string } | null = null; // mutable ref for git gutter
-    let searchVisible = $state(false);
-    let searchApp: any = null;
+    // Undo/redo history persistence
+    // historyBase: the base document content (first snapshot)
+    // historyDeltas: ordered list of (from, to, insert) deltas applied sequentially
+    let historyBase = $state('');
+    let historyDeltas = $state<{ from: number; to: number; insert: string }[]>([]);
 
     // LSP state
     let lspClient: LSPClient | null = null;
     let lspReady = $state(false);
     let lspError = $state('');
+    let lspLanguage = $state(''); // language name for display (e.g., "Go", "TypeScript")
+    let lspServerName = $state(''); // server name from LSP (e.g., "gopls")
+    let lspServerVersion = $state(''); // server version from LSP (e.g., "v0.15.0")
     let fileUri = $state('');
     let lspCompartment = $state(new Compartment());
     let lspEnabled = $state(true);
 
+    // Notify parent when unsaved changes state changes
+    $effect(() => {
+        onHasChanges(filePath, hasChanges);
+    });
+
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
+    let editorEl: HTMLDivElement | null = null;
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
+    let searchContainerEl: HTMLDivElement | null = null;
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
+    let view: EditorView | null = null;
+    // Reactive flag to signal when the editor view is created (for LSP effect dependency)
+    let editorReady = $state(false);
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
+    let searchVisible = $state(false);
+    let searchApp: any = null;
+    let editorCreating = $state(false); // prevent race between loadFile() and $effect
+    let gitGutterState: { original: string } | null = null; // mutable ref for git gutter
+
     function getLanguageSupport(path: string) {
         const ext = path.split('.').pop()?.toLowerCase() || '';
         const base = path.split('/').pop()?.toLowerCase() || '';
-
         const extMap: Record<string, () => any> = {
-            js: javascript, mjs: javascript, cjs: javascript, jsx: javascript, mx: javascript,
+            js: javascript, mjs: javascript, cjs: javascript, jsx: javascript,
             ts: javascript, tsx: javascript,
-            py: python, pyw: python,
+            py: python,
             go: go,
             c: cpp, h: cpp,
-            cpp: cpp, cc: cpp, cxx: cpp, hxx: cpp, hpp: cpp,
+            cpp: cpp, cc: cpp, cxx: cpp,
             rs: rust,
             json: json,
-            md: markdown, mdx: markdown,
+            md: markdown,
             php: php,
             sql: sql,
             html: html, htm: html,
@@ -92,12 +116,15 @@
             svelte: svelte,
             tmpl: goTemplate, gohtml: goTemplate,
         };
-
-        if (base === 'dockerfile') return null;
-        if (base === 'makefile' || base === 'cmakeLists.txt') return null;
-
+        if (base === 'dockerfile' || base === 'makefile' || base === 'cmakeLists.txt') return null;
         const support = extMap[ext];
         return support ? support() : null;
+    }
+
+    function extractSymbols() {
+        if (!view) return;
+        const symbols = getLanguageTreeFromView(view, filePath);
+        onSymbolsUpdate(symbols);
     }
 
     function openSearchPanel() {
@@ -131,7 +158,7 @@
         view?.focus();
     }
 
-    // Custom keymap to replace default search with our panel
+    // Custom keymap to replace default search with our panel + save shortcut
     const searchKeymapOverride = keymap.of([
         {
             key: 'Ctrl-f',
@@ -149,14 +176,25 @@
                 return true;
             },
         } as any,
+        {
+            key: 'Ctrl-s',
+            macKey: 'Cmd-s',
+            run: () => {
+                if (hasChanges && !fileTooLarge) {
+                    handleSave();
+                    return true;
+                }
+                return false;
+            },
+        } as any,
     ]);
 
-
-
     function createEditor() {
-        if (!editorEl) return;
-
+        if (!editorEl || editorCreating) return;
+        editorCreating = true;
         const langSupport = getLanguageSupport(filePath);
+        // Use base content so delta replay starts from the saved state.
+        const initialDoc = historyBase || content;
         const gitGutterExt = gitGutter();
         gitGutterState = gitGutterExt.state;
         gitGutterExt.state.original = originalContent;
@@ -195,6 +233,7 @@
             bracketMatching(),
             closeBrackets(),
             lspCompartment.of(autocompletion()),
+            hoverTooltips(),
             rectangularSelection(),
             crosshairCursor(),
             highlightActiveLine(),
@@ -211,110 +250,268 @@
             darkSyntax,
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
+                    // Sync content first, then compute hasChanges vs disk
                     content = update.state.doc.toString();
+                    hasChanges = content !== savedContent;
+                    lineCount = update.state.doc.lines;
+                    charCount = update.state.doc.length;
+                    // Capture delta for undo/redo history persistence.
+                    // Only capture user edits (not programmatic changes during restore).
+                    if (!(view as any).__restoring) {
+                        const deltas: { from: number; to: number; insert: string }[] = [];
+                        update.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+                            deltas.push({ from: fromA, to: toA, insert: inserted.toString() });
+                        });
+                        if (deltas.length > 0) {
+                            historyDeltas = [...historyDeltas, ...deltas];
+                            // Persist history (throttled)
+                            clearTimeout((view as any)._historyTimer);
+                            (view as any)._historyTimer = setTimeout(() => {
+                                saveEditorHistory(filePath, historyBase, historyDeltas).catch(() => {});
+                            }, 500);
+                        }
+                    }
+                    // Persist unsaved draft (throttled)
+                    clearTimeout((view as any)._draftTimer);
+                    (view as any)._draftTimer = setTimeout(() => setEditorDraft(filePath, content), 200);
                 }
                 if (update.selectionSet) {
+                    // Update cursor position
                     const pos = update.state.selection.main.head;
                     const line = update.state.doc.lineAt(pos);
                     cursorLine = line.number;
                     cursorCol = pos - line.from + 1;
+                    // Extract symbols on selection change (debounced)
+                    clearTimeout((view as any)._symbolTimer);
+                    (view as any)._symbolTimer = setTimeout(extractSymbols, 300);
                 }
             }),
             EditorState.tabSize.of(4),
             ...(langSupport ? [langSupport] : []),
         ];
 
-        const state = EditorState.create({
-            doc: content,
-            extensions,
-        });
+        const state = EditorState.create({ doc: initialDoc, extensions });
+        view = new EditorView({ state, parent: editorEl });
+        // Signal that the editor is ready (triggers LSP initialization)
+        editorReady = true;
+        // Expose view on DOM for e2e testing
+        (view.dom as any).__view = view;
 
-        view = new EditorView({
-            state,
-            parent: editorEl,
-        });
-
-        // Scroll to target line, centered in the viewport
-        if (lineNumber >= 1) {
-            requestAnimationFrame(() => {
-                if (!view) return;
-                const totalLines = view.state.doc.lines;
-                const lineNum = Math.min(lineNumber, totalLines);
-                const line = view.state.doc.line(lineNum);
+        // Replay persisted deltas to reach current document state.
+        // Each delta is applied as a change dispatch, building up the undo stack.
+        if (historyDeltas.length > 0) {
+            (view as any).__restoring = true;
+            for (const delta of historyDeltas) {
                 view.dispatch({
-                    selection: { anchor: line.from, head: line.from },
+                    changes: { from: delta.from, to: delta.to, insert: delta.insert },
+                    userEvent: 'internal.restore',
                 });
-                view.focus();
+            }
+            (view as any).__restoring = false;
+            // Sync content after replay
+            content = view.state.doc.toString();
+            hasChanges = content !== savedContent;
+        }
 
-                // Second rAF to ensure layout is complete
-                requestAnimationFrame(() => {
-                    if (!view || !editorEl) return;
-                    const scroller = editorEl.querySelector('.cm-scroller');
-                    if (!scroller) return;
-                    const coords = view.coordsAtPos(line.from);
-                    if (!coords) return;
-                    const viewportHeight = scroller.clientHeight;
-                    const docHeight = scroller.scrollHeight;
-                    // Place the line ~30% from the top of the viewport for context above
-                    const targetScroll = coords.top + scroller.scrollTop - viewportHeight * 0.3;
-                    scroller.scrollTop = Math.max(0, Math.min(targetScroll, docHeight - viewportHeight));
-                });
-            });
+        // Track focus/blur via DOM events on the editor's dom element
+        if (view.dom) {
+            view.dom.addEventListener('focus', () => {
+                onFocused(true);
+            }, true);
+            view.dom.addEventListener('blur', () => {
+                onFocused(false);
+            }, true);
+        }
+
+        // Extract symbols after a short delay
+        setTimeout(extractSymbols, 500);
+        // Jump to target line if set (from diff view click)
+        if (targetLine >= 1) {
+            requestAnimationFrame(() => jumpToLine(targetLine));
         }
     }
 
-    function updateEditorContent() {
-        if (view) {
-            const current = view.state.doc.toString();
-            if (current !== content) {
-                view.dispatch({
-                    changes: { from: 0, to: current.length, insert: content },
-                    selection: { anchor: 0 },
-                });
-            }
-        }
-    }
-
-    onMount(() => {
-        loadFile();
-
-        // On mobile, the keyboard changes the viewport height. Scroll cursor into view.
-        function handleResize() {
-            if (!view) return;
-            const sel = view.state.selection.main;
-            if (sel.anchor !== sel.head) return; // don't interrupt selections
-            view.dispatch(
-                { selection: { anchor: sel.anchor, head: sel.head } },
-                { scrollIntoView: true },
-            );
-        }
-
-        // Use visualViewport API for accurate keyboard tracking (Chrome Android)
-        const vv = typeof visualViewport !== 'undefined' ? visualViewport : null;
-        vv?.addEventListener('resize', handleResize, { passive: true });
-        // Fallback for iOS Safari (uses window resize)
-        window.addEventListener('resize', handleResize);
-
-        return () => {
-            if (searchApp) {
-                unmount(searchApp);
-                searchApp = null;
-            }
+    async function loadFile() {
+        if (!filePath) {
             lspClient?.disconnect();
             lspClient = null;
+            lspReady = false;
+            loading = false;
+            content = '';
+            originalContent = '';
             view?.destroy();
-            vv?.removeEventListener('resize', handleResize);
-            window.removeEventListener('resize', handleResize);
-        };
+            view = null;
+            return;
+        }
+        loading = true;
+        error = '';
+        fileTooLarge = false;
+
+        // Destroy old editor and LSP client
+        lspClient?.disconnect();
+        lspClient = null;
+        lspReady = false;
+        lspError = '';
+        view?.destroy();
+        view = null;
+        editorReady = false;
+        editorCreating = false;
+        content = '';
+        originalContent = '';
+        hasChanges = false;
+        lineCount = 0;
+        charCount = 0;
+        cursorLine = 1;
+        cursorCol = 1;
+        historyBase = '';
+        historyDeltas = [];
+
+        try {
+            const res = await fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}`);
+            if (!res.ok) {
+                if (res.status === 413) {
+                    fileTooLarge = true;
+                    return;
+                }
+                const err = await res.json().catch(() => ({ error: 'Failed to read file' }));
+                throw new Error(err.error || 'Failed to read file');
+            }
+            const data = await res.json();
+            const fileContent = data.content || '';
+
+            // Fetch HEAD version for git gutter comparison
+            try {
+                const headRes = await fetch(
+                    `/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}&ref=HEAD`
+                );
+                if (headRes.ok) {
+                    const headData = await headRes.json();
+                    originalContent = headData.content || '';
+                } else {
+                    originalContent = fileContent; // new file, no HEAD
+                }
+            } catch {
+                originalContent = fileContent;
+            }
+            // Use unsaved draft if available, otherwise use current file content
+            const draft = await getEditorDraft(filePath);
+            content = draft !== null ? draft : fileContent;
+            savedContent = fileContent;
+            hasChanges = content !== savedContent;
+            lineCount = content ? content.split('\n').length : 0;
+            charCount = content.length;
+
+            // Load persisted undo/redo history (auto-evicted if older than 72h)
+            const savedHistory = await loadEditorHistory(filePath);
+            if (savedHistory && Array.isArray(savedHistory.deltas)) {
+                historyBase = savedHistory.base;
+                historyDeltas = savedHistory.deltas;
+            } else {
+                // No history or expired — start fresh from current file content
+                historyBase = fileContent;
+                historyDeltas = [];
+            }
+        } catch (e) {
+            error = String(e);
+        } finally {
+            loading = false;
+        }
+
+        // Create editor after DOM has updated (loading=false renders the editor div)
+        if (!error && !fileTooLarge) {
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            if (editorEl && !view) {
+                createEditor();
+                // Jump to target line after editor is created (e.g., from search result click)
+                if (targetLine >= 1) {
+                    requestAnimationFrame(() => jumpToLine(targetLine));
+                }
+            }
+        }
+    }
+
+    async function handleSave() {
+        if (saving || !hasChanges || fileTooLarge || !filePath) return;
+        saving = true;
+        try {
+            const csrfToken = await ensureCsrfToken();
+            const res = await fetch(`/api/fs/write?project=${encodeURIComponent(projectId)}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+                },
+                body: JSON.stringify({ path: filePath, content }),
+                credentials: 'include',
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ error: 'Failed to save' }));
+                throw new Error(err.error || 'Failed to save');
+            }
+            savedContent = content;
+            hasChanges = false;
+            // Update git gutter — disk now matches editor, recompute vs HEAD
+            if (view) {
+                if (gitGutterState) {
+                    gitGutterState.original = content;
+                }
+            }
+            await clearEditorDraft(filePath);
+        } catch (e) {
+            error = String(e);
+        } finally {
+            saving = false;
+        }
+    }
+
+    /** Position cursor on a specific line and scroll it into view. */
+    function jumpToLine(line: number) {
+        if (!view || line < 1) return;
+        const editorView = view;
+        const totalLines = editorView.state.doc.lines;
+        const lineNum = Math.min(line, totalLines);
+        const lineObj = editorView.state.doc.line(lineNum);
+        editorView.dispatch({ selection: { anchor: lineObj.from, head: lineObj.from } });
+        editorView.focus();
+        // Scroll into view — place line ~30% from top for context above
+        requestAnimationFrame(() => {
+            const scroller = editorEl?.querySelector('.cm-scroller');
+            if (!scroller) return;
+            const coords = editorView.coordsAtPos(lineObj.from);
+            if (!coords) return;
+            const targetScroll = coords.top + scroller.scrollTop - scroller.clientHeight * 0.3;
+            scroller.scrollTop = Math.max(0, Math.min(targetScroll, scroller.scrollHeight - scroller.clientHeight));
+        });
+    }
+
+    // Handle jump-to-line events from symbol outline
+    function handleJumpToLine(e: Event) {
+        const line = (e as CustomEvent).detail.line;
+        jumpToLine(line);
+    }
+
+    // Jump to targetLine when editor is ready (from diff view click)
+    $effect(() => {
+        const line = targetLine;
+        if (line >= 1 && view && !loading && !fileTooLarge && !error && filePath) {
+            requestAnimationFrame(() => jumpToLine(line));
+        }
     });
 
-    // Re-create editor after baseline fetch completes so gitGutter has a comparison target.
+    // Re-create editor when file changes
     $effect(() => {
-        const _loaded = originalContentLoaded;
-        const _original = originalContent;
-        if (!loading && !fileTooLarge && !view && editorEl && _loaded !== undefined) {
+        if (filePath) {
+            loadFile();
+        }
+    });
+
+    // Create editor after content is loaded and DOM is ready.
+    // Tracks originalContent so it waits for loadFile() to complete.
+    $effect(() => {
+        const _ = originalContent; // force dependency on load completion
+        if (!loading && !fileTooLarge && !view && editorEl && !editorCreating) {
             requestAnimationFrame(() => {
-                if (editorEl && !view) {
+                if (editorEl && !view && !editorCreating) {
                     createEditor();
                 }
             });
@@ -323,13 +520,11 @@
 
     // Initialize LSP after the file and editor are ready
     $effect(() => {
-        const _loaded = originalContentLoaded;
-        const _view = view;
+        const _editorReady = editorReady;
         const _projPath = projectPath;
         const _projId = projectId;
-        const _taskId = taskId;
 
-        if (!_view || !_projId || !_taskId || !_projPath || _loaded === undefined) return;
+        if (!_editorReady || !view || !_projId || !_projPath) return;
         if (lspClient) return; // already initialized
 
         async function initLSP() {
@@ -345,6 +540,19 @@
                     onDisconnected: () => {
                         lspReady = false;
                     },
+                    onServerInfo: (name, version) => {
+                        lspServerName = name;
+                        if (version) {
+                            try {
+                                const parsed = JSON.parse(version);
+                                lspServerVersion = parsed.Main?.Version || parsed.Version || version;
+                            } catch {
+                                lspServerVersion = version;
+                            }
+                        } else {
+                            lspServerVersion = '';
+                        }
+                    },
                 });
 
                 lspClient = new LSPClient({
@@ -354,6 +562,14 @@
 
                 await lspClient.connect(transport).initializing;
                 lspReady = true;
+                // Derive language name from file extension
+                const ext = filePath.split('.').pop()?.toLowerCase() || '';
+                const langMap: Record<string, string> = {
+                    go: 'Go', ts: 'TypeScript', tsx: 'TypeScript',
+                    js: 'JavaScript', jsx: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript',
+                    py: 'Python', pyi: 'Python', rs: 'Rust',
+                };
+                lspLanguage = langMap[ext] || ext.toUpperCase();
 
                 // Swap compartment: replace autocompletion() with LSP plugin
                 if (view && lspClient) {
@@ -390,6 +606,19 @@
                     onDisconnected: () => {
                         lspReady = false;
                     },
+                    onServerInfo: (name, version) => {
+                        lspServerName = name;
+                        if (version) {
+                            try {
+                                const parsed = JSON.parse(version);
+                                lspServerVersion = parsed.Main?.Version || parsed.Version || version;
+                            } catch {
+                                lspServerVersion = version;
+                            }
+                        } else {
+                            lspServerVersion = '';
+                        }
+                    },
                 });
 
                 if (!_lspClient) return; // may have been disconnected in the meantime
@@ -410,405 +639,98 @@
         reconnectLSP();
     });
 
-    async function loadFile() {
-        loading = true;
-        error = '';
-        fileTooLarge = false;
-        displayPath = displayPathProp || filePath.split('/').pop() || filePath;
+    onMount(() => {
+        window.addEventListener('jump-to-line', handleJumpToLine);
+    });
 
-        try {
-            const params = new URLSearchParams({ path: filePath });
-            if (projectId) params.set('project', projectId);
-            if (taskId) params.set('task', taskId);
-            const res = await fetch(`/api/fs/read?${params}`);
-            if (!res.ok) {
-                if (res.status === 413) {
-                    fileTooLarge = true;
-                    return;
-                }
-                const err = await res.json().catch(() => ({ error: 'Failed to read file' }));
-                throw new Error(err.error || 'Failed to read file');
-            }
-            const data = await res.json();
-            content = data.content || '';
-
-            // Fetch baseline for git gutter. Uses DiffViewer's baseRef so markers match the diff.
-            // On failure (new file), originalContent stays empty — all lines shown as added.
-            const refToUse = baseRef || 'HEAD';
-            const headParams = new URLSearchParams({ path: filePath, ref: refToUse });
-            if (projectId) headParams.set('project', projectId);
-            if (taskId) headParams.set('task', taskId);
-            try {
-                const headRes = await fetch(`/api/fs/read?${headParams}`);
-                if (headRes.ok) {
-                    const headData = await headRes.json();
-                    originalContent = headData.content || '';
-                    originalContentLoaded = true;
-                } else {
-                    originalContent = '';
-                    originalContentLoaded = false;
-                }
-            } catch {
-                originalContent = '';
-                originalContentLoaded = false;
-            }
-            savedContent = content; // disk matches current
-        } catch (e) {
-            error = String(e);
-        } finally {
-            loading = false;
+    onDestroy(() => {
+        if (searchApp) {
+            unmount(searchApp);
+            searchApp = null;
         }
-    }
-
-    async function handleSave() {
-        if (saving || !hasChanges || fileTooLarge) return;
-        saving = true;
-        try {
-            const csrfToken = await ensureCsrfToken();
-            const params = new URLSearchParams();
-            if (projectId) params.set('project', projectId);
-            if (taskId) params.set('task', taskId);
-            const res = await fetch(`/api/fs/write?${params}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
-                },
-                body: JSON.stringify({ path: filePath, content }),
-                credentials: 'include',
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ error: 'Failed to save file' }));
-                throw new Error(err.error || 'Failed to save file');
-            }
-            savedContent = content;
-            if (view) {
-                if (gitGutterState) {
-                    gitGutterState.original = content;
-                }
-            }
-        } catch (e) {
-            dialogStore.showToast('Failed to save: ' + String(e), 'error');
-        } finally {
-            saving = false;
-        }
-    }
-
-    function handleClose() {
-        onClose(true);
-    }
-
-    function handleKeyDown(e: KeyboardEvent) {
-        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-            e.preventDefault();
-            if (hasChanges && !fileTooLarge) handleSave();
-            return;
-        }
-        if (e.key === 'Escape') {
-            e.stopPropagation();
-            if (showConfirm) {
-                showConfirm = false;
-                return;
-            }
-            if (mobileFullscreen && onToggleFullscreen) {
-                onToggleFullscreen();
-                return;
-            }
-            requestClose();
-            return;
-        }
-    }
-
-    function requestClose() {
-        if (hasChanges) {
-            showConfirm = true;
-        } else {
-            handleClose();
-        }
-    }
-
-    function confirmClose(discard: boolean) {
-        showConfirm = false;
-        if (discard) handleClose();
-    }
+        lspClient?.disconnect();
+        lspClient = null;
+        view?.destroy();
+        window.removeEventListener('jump-to-line', handleJumpToLine);
+    });
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions — role="application" makes this an interactive landmark -->
-<div class="file-editor" role="application" tabindex="-1" onkeydown={handleKeyDown}>
-    <!-- Header -->
-    <div class="editor-header">
-        <div class="header-left">
-            <button class="btn-back" class:unsaved={hasChanges} onclick={requestClose} aria-label="Close editor" title="Close editor">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <circle class="unsaved-circle" cx="8" cy="8" r="6" fill="currentColor"/>
-                    <path class="close-x" d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                </svg>
-            </button>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-                <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-            </svg>
-            <span class="file-path" title={filePath}>{displayPath}</span>
-        </div>
-        <div class="editor-actions">
-            {#if onToggleFullscreen}
-                <button type="button" class="editor-icon-btn editor-fullscreen-toggle" onclick={onToggleFullscreen} title="Toggle fullscreen">
-                    {#if mobileFullscreen}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    {:else}
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    {/if}
-                </button>
-            {/if}
-            <button
-                class="btn-save"
-                onclick={handleSave}
-                disabled={!hasChanges || saving || fileTooLarge}
-                title="Save (Ctrl+S)"
-            >
-            {#if saving}
-                <svg class="save-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <path d="M12 2a10 10 0 0 1 10 10"/>
-                </svg>
-                Saving...
+<div class="file-editor" class:has-file={!!filePath} class:active={active}>
+    {#if filePath}
+        <!-- Editor content area -->
+        <div class="editor-content">
+            {#if loading}
+                <div class="editor-placeholder">Loading file...</div>
+            {:else if error}
+                <div class="editor-error">{error}</div>
+            {:else if fileTooLarge}
+                <div class="editor-placeholder">File too large to edit (max 1MB)</div>
             {:else}
-                Save
+                <div class="editor-wrapper" bind:this={editorEl}></div>
+                <div class="search-container" bind:this={searchContainerEl}></div>
             {/if}
-            </button>
         </div>
-    </div>
 
-    <!-- Body -->
-    <div class="editor-body">
-        {#if loading}
-            <div class="editor-loading">
-                <svg class="spinner" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <path d="M12 2a10 10 0 0 1 10 10"/>
-                </svg>
-                <span>Loading file...</span>
-            </div>
-        {:else if error}
-            <div class="editor-error">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 8v4M12 16h.01"/>
-                </svg>
-                <span>{error}</span>
-            </div>
-        {:else if fileTooLarge}
-            <div class="editor-large">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                    <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z"/>
-                    <path d="M6 6l4 4M10 6l-4 4"/>
-                </svg>
-                <span>File too large to edit (max 1MB)</span>
-            </div>
-        {:else}
-            <div class="editor-content" bind:this={editorEl}></div>
-            <div class="search-container" bind:this={searchContainerEl}></div>
+        <!-- Footer with line/char count -->
+        {#if !loading && !error && !fileTooLarge}
+            <EditorFooter
+                {cursorLine}
+                {cursorCol}
+                {lineCount}
+                {charCount}
+                {hasChanges}
+                onFind={openSearchPanel}
+                onSave={handleSave}
+                {saving}
+                lspReady={lspReady}
+                {lspError}
+                {lspLanguage}
+                {lspServerName}
+                {lspServerVersion}
+            />
         {/if}
-    </div>
-
-    <!-- Footer -->
-    {#if !loading && !error && !fileTooLarge}
-        <EditorFooter
-            {cursorLine}
-            {cursorCol}
-            {lineCount}
-            charCount={content.length}
-            {hasChanges}
-            onFind={openSearchPanel}
-        />
     {/if}
-</div>
 
-<!-- Unsaved changes confirmation dialog -->
-{#if showConfirm}
-    <div class="confirm-overlay" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc">
-        <div class="confirm-dialog" onclick={(e) => e.stopPropagation()} role="presentation">
-            <h3 id="confirm-title">Unsaved Changes</h3>
-            <p id="confirm-desc">You have unsaved changes. Discard them?</p>
-            <div class="confirm-actions">
-                <button class="btn-confirm-cancel" onclick={() => confirmClose(false)}>Keep Editing</button>
-                <button class="btn-confirm-discard" onclick={() => confirmClose(true)}>Discard &amp; Close</button>
-            </div>
-        </div>
-    </div>
-{/if}
+</div>
 
 <style>
     .file-editor {
-        display: flex;
+        display: none;
         flex-direction: column;
         height: 100%;
         overflow: hidden;
     }
-
-    .editor-header {
+    .file-editor.active {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 6px 8px;
-        flex-shrink: 0;
-        background: var(--color-surface-2);
-        border-bottom: 1px solid var(--color-border);
-        gap: 8px;
-    }
-    .header-left {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        min-width: 0;
-        flex: 1;
-        color: var(--color-text-secondary);
-    }
-    .header-left svg {
-        flex-shrink: 0;
-        opacity: 0.6;
-    }
-    .file-path {
-        font-size: 0.75rem;
-        font-weight: 500;
-        font-family: var(--font-mono);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .btn-back {
-        background: none;
-        border: none;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        padding: 6px;
-        border-radius: var(--radius-sm);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        position: relative;
-    }
-    .btn-back:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    /* Unsaved indicator — yellow circle, X appears on hover */
-    .btn-back .unsaved-circle {
-        display: none;
-    }
-    .btn-back .close-x {
-        display: block;
-    }
-    .btn-back.unsaved .unsaved-circle {
-        display: block;
-    }
-    .btn-back.unsaved .close-x {
-        display: none;
-    }
-    .btn-back.unsaved {
-        color: var(--color-status-yellow, #f0c000);
-    }
-    .btn-back.unsaved:hover .unsaved-circle {
-        display: none;
-    }
-    .btn-back.unsaved:hover .close-x {
-        display: block;
-    }
-    .btn-back.unsaved:hover {
-        color: var(--color-text-primary);
-    }
-
-    .editor-actions {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        flex-shrink: 0;
-    }
-
-    .editor-icon-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border: none;
-        background: transparent;
-        color: var(--color-text-tertiary);
-        cursor: pointer;
-        border-radius: 4px;
-        flex-shrink: 0;
-    }
-    .editor-icon-btn:hover {
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-    }
-    .editor-fullscreen-toggle {
-        display: flex;
-    }
-
-    .btn-save {
-        padding: 4px 12px;
-        background: var(--color-accent-dark);
-        color: white;
-        border: none;
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        font-weight: 500;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        font-family: inherit;
-        flex-shrink: 0;
-    }
-    .btn-save:hover:not(:disabled) {
-        background: var(--color-accent-hover);
-    }
-    .btn-save:disabled {
-        background: var(--color-surface-3);
-        color: var(--color-text-secondary);
-        cursor: not-allowed;
-    }
-    .save-spinner {
-        animation: spin 0.8s linear infinite;
-        transform-origin: center;
-    }
-
-    .editor-body {
-        flex: 1;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-        position: relative;
-    }
-
-    .editor-loading,
-    .editor-error,
-    .editor-large {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        color: var(--color-text-tertiary);
-        font-size: 0.8125rem;
-    }
-    .editor-error {
-        color: var(--color-status-red);
-    }
-    .spinner {
-        animation: spin 0.8s linear infinite;
-        transform-origin: center;
-    }
-    @keyframes spin {
-        to { transform: rotate(360deg); }
     }
 
     .editor-content {
         flex: 1;
         overflow: hidden;
-        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+    }
+
+    .editor-placeholder {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        color: var(--color-text-tertiary);
+        font-size: 0.8125rem;
+    }
+    .editor-error {
+        padding: 16px;
+        color: var(--color-status-red);
+        font-size: 0.8125rem;
+    }
+
+    .editor-wrapper {
+        flex: 1;
+        overflow: hidden;
     }
 
     .search-container {
@@ -818,91 +740,5 @@
         right: 0;
         z-index: 100;
         pointer-events: none;
-    }
-
-
-    /* CodeMirror theme overrides to match our UI */
-    .editor-content :global(.cm-editor) {
-        height: 100%;
-        font-size: 14px;
-    }
-    .editor-content :global(.cm-scroller) {
-        font-family: var(--font-mono);
-        font-size: 14px;
-        line-height: 1.5;
-        tab-size: 4;
-    }
-    .editor-content :global(.cm-gutters) {
-        background: var(--color-surface-1);
-        border-right: 1px solid var(--color-border);
-        color: var(--color-text-tertiary);
-        padding: 0 6px 0 0;
-    }
-    .editor-content :global(.cm-activeLineGutter) {
-        color: #8B949E;
-        background: rgba(255,255,255,0.06);
-    }
-    .editor-content :global(.cm-content) {
-        caret-color: var(--color-text-primary);
-    }
-
-    .confirm-overlay {
-        position: absolute;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.3);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10;
-        border-radius: 6px;
-    }
-    .confirm-dialog {
-        background: var(--color-surface-1);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        padding: 20px;
-        width: 320px;
-        max-width: 90%;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    }
-    .confirm-dialog h3 {
-        margin: 0 0 6px;
-        font-size: 0.9375rem;
-    }
-    .confirm-dialog p {
-        margin: 0 0 16px;
-        font-size: 0.8125rem;
-        color: var(--color-text-secondary);
-    }
-    .confirm-actions {
-        display: flex;
-        gap: 8px;
-        justify-content: flex-end;
-    }
-    .btn-confirm-cancel {
-        padding: 5px 14px;
-        background: var(--color-surface-3);
-        color: var(--color-text-primary);
-        border: none;
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        cursor: pointer;
-        font-family: inherit;
-    }
-    .btn-confirm-cancel:hover {
-        background: var(--color-surface-4);
-    }
-    .btn-confirm-discard {
-        padding: 5px 14px;
-        background: var(--color-status-red-dark);
-        color: white;
-        border: none;
-        border-radius: var(--radius-sm);
-        font-size: 0.75rem;
-        cursor: pointer;
-        font-family: inherit;
-    }
-    .btn-confirm-discard:hover {
-        opacity: 0.9;
     }
 </style>

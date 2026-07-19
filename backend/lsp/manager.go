@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -114,7 +115,7 @@ func (pm *ProcessManager) SendToServer(process *LSPProcess, msg json.RawMessage)
 	}
 
 	select {
-	case process.writeCh <- string(msg) + "\n":
+	case process.writeCh <- string(msg):
 		return nil
 	case <-process.quit:
 		return fmt.Errorf("lsp process %s/%s is shutting down", process.Workspace, process.Language)
@@ -220,20 +221,44 @@ func (p *LSPProcess) teardown() {
 	p.mu.Unlock()
 }
 
-// readLoop decodes JSON-RPC messages from stdout and dispatches them.
+// readLoop reads Content-Length framed JSON-RPC messages from stdout and dispatches them.
+// LSP spec: each message is prefixed with "Content-Length: N\r\n\r\n" followed by N bytes of JSON.
 func (p *LSPProcess) readLoop() {
 	defer p.wg.Done()
-	decoder := json.NewDecoder(p.Stdout)
+	reader := bufio.NewReader(p.Stdout)
 	for {
-		var raw json.RawMessage
-		if err := decoder.Decode(&raw); err != nil {
-			return // EOF or error (process killed / pipe closed)
+		// Read the Content-Length header line
+		headerLine, err := reader.ReadString('\n')
+		if err != nil {
+			return // EOF or error
 		}
-		p.dispatchMessage(raw)
+		headerLine = strings.TrimSpace(headerLine)
+		if !strings.HasPrefix(headerLine, "Content-Length: ") {
+			return // unexpected header, stop reading
+		}
+		lengthStr := strings.TrimPrefix(headerLine, "Content-Length: ")
+		length, err := strconv.Atoi(lengthStr)
+		if err != nil || length <= 0 {
+			return // invalid content length
+		}
+
+		// Read the blank separator line (\r\n after headers)
+		if _, err := reader.ReadString('\n'); err != nil {
+			return
+		}
+
+		// Read exactly `length` bytes of JSON body
+		body := make([]byte, length)
+		if _, err := io.ReadFull(reader, body); err != nil {
+			return // EOF or short read
+		}
+
+		p.dispatchMessage(json.RawMessage(body))
 	}
 }
 
-// writeLoop reads messages from writeCh and forwards them to the server's stdin.
+// writeLoop reads messages from writeCh and sends them to the server's stdin
+// using Content-Length framing as required by the LSP specification.
 func (p *LSPProcess) writeLoop() {
 	defer p.wg.Done()
 	for {
@@ -244,7 +269,14 @@ func (p *LSPProcess) writeLoop() {
 			if !ok {
 				return
 			}
-			_, _ = p.Stdin.Write([]byte(msg))
+			body := []byte(msg)
+			header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))
+			if _, err := p.Stdin.Write([]byte(header)); err != nil {
+				return
+			}
+			if _, err := p.Stdin.Write(body); err != nil {
+				return
+			}
 		}
 	}
 }

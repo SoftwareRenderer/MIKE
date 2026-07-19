@@ -31,15 +31,15 @@
     import CheckpointOverlay from './CardDetail/CheckpointOverlay.svelte';
     import DiffComparison from './CardDetail/DiffComparison.svelte';
     // Lazy-loaded on first file edit
-    let FileEditorComponent: typeof import('./FileEditor.svelte').default | null = $state(null);
-    let fileEditorLoading = $state(false);
-    function loadFileEditor(): void {
-        if (FileEditorComponent || fileEditorLoading) return;
-        fileEditorLoading = true;
-        import('./FileEditor.svelte').then((mod) => {
-            FileEditorComponent = mod.default;
-            fileEditorLoading = false;
-        }).catch(() => { fileEditorLoading = false; });
+    let DiffEditorComponent: typeof import('./DiffEditor.svelte').default | null = $state(null);
+    let diffEditorLoading = $state(false);
+    function loadDiffEditor(): void {
+        if (DiffEditorComponent || diffEditorLoading) return;
+        diffEditorLoading = true;
+        import('./DiffEditor.svelte').then((mod) => {
+            DiffEditorComponent = mod.default;
+            diffEditorLoading = false;
+        }).catch(() => { diffEditorLoading = false; });
     }
     import MobileTabBar from './CardDetail/MobileTabBar.svelte';
     import TaskHeader from './CardDetail/TaskHeader.svelte';
@@ -169,7 +169,7 @@
     function handleDiffLineClick(relativePath: string, lineNumber: number) {
         const fullPath = resolveFilePath(relativePath);
         if (!fullPath) return;
-        loadFileEditor();
+        loadDiffEditor();
         editingFile = { path: fullPath, lineNumber, displayPath: relativePath };
     }
 
@@ -195,7 +195,7 @@
         await diffCache.unstageAll();
     }
 
-    function closeFileEditor(saved: boolean) {
+    function closeDiffEditor(saved: boolean) {
         editorFullscreen = false;
         editingFile = null;
     }
@@ -739,9 +739,9 @@
                 <div class="diff-content">
                     {#if editingFile}
                         <!-- Inline file editor (lazy-loaded) -->
-                        {#if FileEditorComponent}
-                            {@const FileEditor = FileEditorComponent}
-                            <FileEditor
+                        {#if DiffEditorComponent}
+                            {@const DiffEditor = DiffEditorComponent}
+                            <DiffEditor
                                 filePath={editingFile.path}
                                 lineNumber={editingFile.lineNumber}
                                 displayPath={editingFile.displayPath}
@@ -749,13 +749,13 @@
                                 taskId={task.id}
                                 projectPath={projectPath}
                                 baseRef={diffCache.state.baseRef}
-                                onClose={closeFileEditor}
+                                onClose={closeDiffEditor}
                                 onToggleFullscreen={toggleEditorFullscreen}
                                 mobileFullscreen={editorFullscreen}
                                 isMobile={isMobileCtx.isMobile}
                             />
                         {:else}
-                            <div class="file-editor-loading">Loading editor...</div>
+                            <div class="diff-editor-loading">Loading editor...</div>
                         {/if}
                     {:else}
                         {#if !checkpointDiffOpen}
