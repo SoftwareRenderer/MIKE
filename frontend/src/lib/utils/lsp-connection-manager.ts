@@ -6,10 +6,26 @@ import type { Transport } from '@codemirror/lsp-client';
  */
 const CHANNEL_ID_STEP = 1000;
 
+/**
+ * Map file extensions to language identifiers. Must match backend registry.
+ * Used to tag messages so the backend routes to the correct language server.
+ */
+const EXTENSION_TO_LANGUAGE: Record<string, string> = {
+  go: 'go',
+  ts: 'typescript', tsx: 'typescript', js: 'typescript', jsx: 'typescript', mjs: 'typescript', cjs: 'typescript',
+  py: 'python', pyi: 'python',
+  rs: 'rust',
+};
+
+/** Derive the language identifier from a file path. */
+export function detectLanguage(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() || '';
+  return EXTENSION_TO_LANGUAGE[ext] || ext;
+}
+
 export interface LSPTransportOptions {
   workspace: string;
   filePath: string;
-  onConnected?: () => void;
   onDisconnected?: () => void;
   onServerInfo?: (name: string, version: string | null) => void;
 }
@@ -22,7 +38,9 @@ export interface VirtualTransport extends Transport {
 interface Channel {
   id: number;
   file: string;
+  lang: string;
   handler: ((value: string) => void) | null;
+  onServerInfo?: (name: string, version: string | null) => void;
 }
 
 /**
@@ -54,7 +72,7 @@ class WorkspaceConnection {
 
   requestChannel(options: LSPTransportOptions): Promise<VirtualTransport> {
     const channelId = ++this.nextChannelId;
-    const channel: Channel = { id: channelId, file: options.filePath, handler: null };
+    const channel: Channel = { id: channelId, file: options.filePath, lang: detectLanguage(options.filePath), handler: null, onServerInfo: options.onServerInfo };
     this.channels.set(channelId, channel);
 
     // If connection is already open but not yet subscribed (no file available),
@@ -75,10 +93,14 @@ class WorkspaceConnection {
       send: (msg: string) => {
         this.getCurrentWS().then((ws) => {
           if (ws.readyState === WebSocket.OPEN) {
-            // Wrap message with channel ID so the backend can route responses
+            // Wrap message with channel ID, language, and file path so the backend can
+            // route to the correct language server, create it lazily if needed, and
+            // route the response back to this channel.
             try {
               const parsed = JSON.parse(msg);
               parsed._ch = channelId;
+              parsed._lang = channel.lang;
+              parsed._file = channel.file;
               ws.send(JSON.stringify(parsed));
             } catch {
               // Not JSON — send as-is
@@ -136,6 +158,11 @@ class WorkspaceConnection {
       if (parsed._ch != null) {
         const target = this.channels.get(parsed._ch);
         if (target?.handler) {
+          // Extract serverInfo from initialize response
+          const si = parsed.result?.serverInfo;
+          if (si && target.onServerInfo) {
+            target.onServerInfo(si.name || '', si.version || null);
+          }
           const clean = { ...parsed };
           delete clean._ch;
           target.handler(JSON.stringify(clean));
@@ -149,6 +176,11 @@ class WorkspaceConnection {
         for (const ch of this.channels.values()) {
           const base = ch.id * CHANNEL_ID_STEP;
           if (idNum >= base + 1 && idNum < base + CHANNEL_ID_STEP) {
+            // Extract serverInfo from initialize response
+            const si = parsed.result?.serverInfo;
+            if (si && ch.onServerInfo) {
+              ch.onServerInfo(si.name || '', si.version || null);
+            }
             ch.handler?.(text);
             return;
           }
@@ -254,6 +286,8 @@ class LSPConnectionManager {
     return LSPConnectionManager.instance;
   }
 
+  // Keyed by workspace path — one WS per workspace, all languages multiplexed.
+  // The _lang hint on each message tells the backend which language server to route to.
   private connections = new Map<string, WorkspaceConnection>();
 
   requestChannel(options: LSPTransportOptions): Promise<VirtualTransport> {
@@ -275,7 +309,8 @@ class LSPConnectionManager {
 
 /**
  * Request a virtual LSP transport from the shared connection manager.
- * All editors in the same workspace share one WebSocket.
+ * All editors in the same workspace share one WebSocket, regardless of language.
+ * The backend routes messages to the correct language server via the _lang hint.
  *
  * Returns a standard CodeMirror Transport plus a `release()` method
  * to free the channel when the editor tab is closed.

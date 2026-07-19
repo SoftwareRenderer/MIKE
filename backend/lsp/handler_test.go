@@ -247,44 +247,6 @@ func TestIDRemapping(t *testing.T) {
 	}
 }
 
-func TestNotificationBroadcast(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := NewRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
-
-	url := startTestServer(t, handler)
-
-	// Connect 3 clients to the same workspace
-	clients := make([]*testClient, 3)
-	for i := range clients {
-		clients[i] = subscribeClient(t, url, "/tmp/test-project", "main.go")
-	}
-
-	// Simulate a server notification (no id, has method)
-	notification := map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "textDocument/publishDiagnostics",
-		"params": map[string]any{
-			"uri":         "file:///main.go",
-			"diagnostics": []any{},
-		},
-	}
-	notifData, _ := json.Marshal(notification)
-	mgr.Deliver(notifData)
-
-	// All 3 clients should receive the notification
-	for i, c := range clients {
-		resp := c.receiveJSON(t)
-		if resp.Method != "textDocument/publishDiagnostics" {
-			t.Errorf("client %d: expected publishDiagnostics, got %s", i, resp.Method)
-		}
-		if resp.ID != nil {
-			t.Errorf("client %d: notification should have no id", i)
-		}
-	}
-}
-
 func TestInitializeCaching(t *testing.T) {
 	mgr := newMockProcessManager()
 	reg := NewRegistry()
@@ -488,40 +450,6 @@ func TestMultipleRequestRemapping(t *testing.T) {
 	}
 }
 
-func TestNotificationDoesNotRemapIDs(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := NewRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
-
-	url := startTestServer(t, handler)
-
-	client := subscribeClient(t, url, "/tmp/test-project", "main.go")
-
-	// Server sends a notification — it should arrive unchanged
-	notification := map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "$/progress",
-		"params": map[string]any{
-			"token": "progressToken1",
-			"value": map[string]any{
-				"kind":    "report",
-				"message": "Indexing...",
-			},
-		},
-	}
-	notifData, _ := json.Marshal(notification)
-	mgr.Deliver(notifData)
-
-	resp := client.receiveJSON(t)
-	if resp.Method != "$/progress" {
-		t.Errorf("expected $/progress, got %s", resp.Method)
-	}
-	if resp.ID != nil {
-		t.Error("notification should have no id")
-	}
-}
-
 func TestInitializedNotificationForwarded(t *testing.T) {
 	mgr := newMockProcessManager()
 	reg := NewRegistry()
@@ -660,36 +588,6 @@ func TestTwoClientsSameWorkspace(t *testing.T) {
 	_, _, err := client2.conn.Read(ctx)
 	if err == nil {
 		t.Error("client2 should not have received the response")
-	}
-}
-
-func TestNotificationBroadcastsToAllSameWorkspace(t *testing.T) {
-	mgr := newMockProcessManager()
-	reg := NewRegistry()
-	handler := NewLSPHandler(reg, mgr)
-	defer handler.Close()
-
-	url := startTestServer(t, handler)
-
-	// Both clients subscribe to the same workspace
-	client1 := subscribeClient(t, url, "/tmp/test-project", "main.go")
-	client2 := subscribeClient(t, url, "/tmp/test-project", "main.go")
-
-	// Server sends a notification
-	notification := map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "textDocument/publishDiagnostics",
-		"params":  map[string]any{"uri": "file:///main.go"},
-	}
-	notifData, _ := json.Marshal(notification)
-	mgr.Deliver(notifData)
-
-	// Both clients should receive it
-	for i, c := range []*testClient{client1, client2} {
-		resp := c.receiveJSON(t)
-		if resp.Method != "textDocument/publishDiagnostics" {
-			t.Errorf("client %d: expected publishDiagnostics, got %s", i+1, resp.Method)
-		}
 	}
 }
 

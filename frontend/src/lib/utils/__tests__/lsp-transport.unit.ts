@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { detectLanguage } from '$lib/utils/lsp-connection-manager';
 
 /**
  * Tests for the LSP connection manager's message routing logic.
@@ -10,9 +11,42 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 const CHANNEL_ID_STEP = 1000;
 
+describe('detectLanguage', () => {
+  it('maps Go extensions to go', () => {
+    expect(detectLanguage('main.go')).toBe('go');
+  });
+
+  it('maps TypeScript extensions to typescript', () => {
+    expect(detectLanguage('app.ts')).toBe('typescript');
+    expect(detectLanguage('app.tsx')).toBe('typescript');
+  });
+
+  it('maps JavaScript extensions to typescript', () => {
+    expect(detectLanguage('app.js')).toBe('typescript');
+    expect(detectLanguage('app.jsx')).toBe('typescript');
+    expect(detectLanguage('app.mjs')).toBe('typescript');
+    expect(detectLanguage('app.cjs')).toBe('typescript');
+  });
+
+  it('maps Python extensions to python', () => {
+    expect(detectLanguage('main.py')).toBe('python');
+    expect(detectLanguage('stub.pyi')).toBe('python');
+  });
+
+  it('maps Rust extensions to rust', () => {
+    expect(detectLanguage('main.rs')).toBe('rust');
+  });
+
+  it('falls back to lowercase extension for unknown types', () => {
+    expect(detectLanguage('config.toml')).toBe('toml');
+    expect(detectLanguage('README.md')).toBe('md');
+  });
+});
+
 interface Channel {
   id: number;
   handler: ((value: string) => void) | null;
+  onServerInfo?: (name: string, version: string | null) => void;
 }
 
 /**
@@ -41,6 +75,11 @@ function dispatchMessage(channels: Channel[], data: string): void {
     if (parsed._ch != null) {
       const target = channels.find(ch => ch.id === parsed._ch);
       if (target?.handler) {
+        // Extract serverInfo from initialize response
+        const si = parsed.result?.serverInfo;
+        if (si && target.onServerInfo) {
+          target.onServerInfo(si.name || '', si.version || null);
+        }
         const clean = { ...parsed };
         delete clean._ch;
         target.handler(JSON.stringify(clean));
@@ -54,6 +93,11 @@ function dispatchMessage(channels: Channel[], data: string): void {
       for (const ch of channels) {
         const base = ch.id * CHANNEL_ID_STEP;
         if (idNum >= base + 1 && idNum < base + CHANNEL_ID_STEP) {
+          // Extract serverInfo from initialize response
+          const si = parsed.result?.serverInfo;
+          if (si && ch.onServerInfo) {
+            ch.onServerInfo(si.name || '', si.version || null);
+          }
           ch.handler?.(data);
           return;
         }
@@ -315,6 +359,86 @@ describe('LSP connection manager — message routing', () => {
       const parsed = JSON.parse(received[0][0]);
       expect(parsed.error).toEqual({ code: -32603, message: 'Internal error' });
       expect(received[1]).toHaveLength(0);
+    });
+  });
+
+  describe('serverInfo extraction', () => {
+    it('calls onServerInfo with server name and version from initialize response', () => {
+      setup(2);
+      let serverInfo: { name: string; version: string | null } | null = null;
+      channels[0].onServerInfo = (name, version) => {
+        serverInfo = { name, version };
+      };
+
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        _ch: 1,
+        result: {
+          capabilities: { completionProvider: {} },
+          serverInfo: { name: 'gopls', version: 'v0.15.0' },
+        },
+      }));
+
+      expect(serverInfo).toEqual({ name: 'gopls', version: 'v0.15.0' });
+      expect(received[0]).toHaveLength(1);
+      const parsed = JSON.parse(received[0][0]);
+      expect(parsed._ch).toBeUndefined(); // _ch stripped
+      expect(parsed.result.serverInfo).toEqual({ name: 'gopls', version: 'v0.15.0' });
+    });
+
+    it('calls onServerInfo with null version when not provided', () => {
+      setup(1);
+      let serverInfo: { name: string; version: string | null } | null = null;
+      channels[0].onServerInfo = (name, version) => {
+        serverInfo = { name, version };
+      };
+
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        _ch: 1,
+        result: {
+          capabilities: {},
+          serverInfo: { name: 'ts-lsp' },
+        },
+      }));
+
+      expect(serverInfo).toEqual({ name: 'ts-lsp', version: null });
+    });
+
+    it('does not call onServerInfo for non-initialize responses', () => {
+      setup(1);
+      let called = false;
+      channels[0].onServerInfo = () => { called = true; };
+
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        _ch: 1,
+        result: { items: [] },
+      }));
+
+      expect(called).toBe(false);
+    });
+
+    it('calls onServerInfo via ID range fallback', () => {
+      setup(2);
+      let serverInfo: { name: string; version: string | null } | null = null;
+      channels[0].onServerInfo = (name, version) => {
+        serverInfo = { name, version };
+      };
+
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1001, // in channel 1's range (1001-1999)
+        result: {
+          capabilities: {},
+          serverInfo: { name: 'rust-analyzer', version: '1.75.0' },
+        },
+      }));
+
+      expect(serverInfo).toEqual({ name: 'rust-analyzer', version: '1.75.0' });
     });
   });
 });

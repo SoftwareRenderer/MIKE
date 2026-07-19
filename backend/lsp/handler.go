@@ -44,12 +44,15 @@ type ClientSession struct {
 	clientID  uint64
 	workspace string
 	language  string
-	// clientRequestID → backendRequestID (outgoing requests)
-	outgoingIDs map[string]string
 	// backendRequestID → clientRequestID (incoming responses)
 	incomingIDs map[string]string
 	// backendRequestID → channelID (for multiplex response routing)
 	channelIDs map[string]int64
+	// backendRequestID → workspaceKey (workspace + language, for per-language routing)
+	workspaceKeys map[string]string
+	// activeWorkspaces tracks all workspace keys this session has forwarded requests to.
+	// Used for cleanup on disconnect (a session can talk to multiple language servers).
+	activeWorkspaces map[string]int
 }
 
 // queuedInit holds a pending initialize request waiting for the server response.
@@ -144,11 +147,12 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 
 	clientID := h.nextID.Add(1)
 	session := &ClientSession{
-		conn:        conn,
-		clientID:    clientID,
-		outgoingIDs: make(map[string]string),
-		incomingIDs: make(map[string]string),
-		channelIDs:  make(map[string]int64),
+		conn:             conn,
+		clientID:         clientID,
+		incomingIDs:      make(map[string]string),
+		channelIDs:       make(map[string]int64),
+		workspaceKeys:    make(map[string]string),
+		activeWorkspaces: make(map[string]int),
 	}
 
 	h.mu.Lock()
@@ -159,13 +163,15 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		delete(h.clients, conn)
 
-		// Clean up workspace state on disconnect
-		if session.workspace != "" {
-			if ws, ok := h.workspaces[session.workspace]; ok {
+		// Clean up workspace state on disconnect.
+		// A session can talk to multiple language servers (one per language).
+		// Decrement client count for each workspace the session used.
+		for wk := range session.activeWorkspaces {
+			if ws, ok := h.workspaces[wk]; ok {
 				ws.clientCount--
 				if ws.clientCount <= 0 {
 					h.manager.Release(ws.process.Workspace, ws.process.Language)
-					delete(h.workspaces, session.workspace)
+					delete(h.workspaces, wk)
 					log.Printf("[lsp] removed process for workspace=%s lang=%s (no clients)",
 						ws.process.Workspace, ws.process.Language)
 				}
@@ -244,8 +250,8 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 		return
 	}
 
-	// Extract channel ID and strip wrapper
-	channelID, stripped := extractChannelID(msg)
+	// Extract channel ID, language, file path, and strip wrapper
+	channelID, lang, file, stripped := extractHints(msg)
 
 	// Parse to check message type
 	var rpc JSONRPCMessage
@@ -254,20 +260,32 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 		return
 	}
 
+	// Derive workspace key from workspace path + language.
+	// In multiplex mode, _lang hint tells us the language.
+	// Fall back to session.language for non-multiplex clients.
+	workspaceKey := session.workspace
+	routingLang := lang
+	if routingLang == "" {
+		routingLang = session.language
+	}
+	if routingLang != "" {
+		workspaceKey = processKey(session.workspace, routingLang)
+	}
+
 	// Handle initialize interception
 	if rpc.Method == "initialize" && rpc.ID != nil {
-		h.handleInitialize(ctx, session, stripped, rpc.ID.String(), channelID)
+		h.handleInitialize(ctx, session, stripped, rpc.ID.String(), channelID, workspaceKey, file)
 		return
 	}
 
-	// Filter "initialized" notification — only the first should reach the server
+	// Filter "initialized" notification — only the first per language should reach the server
 	if rpc.Method == "initialized" && rpc.ID == nil {
 		h.mu.Lock()
-		ws, ok := h.workspaces[session.workspace]
+		ws, ok := h.workspaces[workspaceKey]
 		if ok && !ws.sentInitialized {
 			ws.sentInitialized = true
 			h.mu.Unlock()
-			h.forwardRaw(ctx, session, stripped)
+			h.forwardRaw(ctx, session, stripped, workspaceKey)
 		} else {
 			h.mu.Unlock()
 			// Silently drop duplicate "initialized" notifications
@@ -277,25 +295,25 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 
 	// If it's a request (has both id and method), remap the ID
 	if rpc.ID != nil && rpc.Method != "" {
-		h.forwardRequest(ctx, session, stripped, rpc.ID.String(), channelID)
+		h.forwardRequest(ctx, session, stripped, rpc.ID.String(), channelID, workspaceKey)
 		return
 	}
 
 	// Notification or other message — forward as-is
-	h.forwardRaw(ctx, session, stripped)
+	h.forwardRaw(ctx, session, stripped, workspaceKey)
 }
 
-// extractChannelID extracts the _ch field from a message and returns the
-// channel ID along with the message with _ch stripped.
-// Returns (0, original msg) if no _ch field is present.
-func extractChannelID(msg json.RawMessage) (int64, json.RawMessage) {
+// extractHints extracts _ch (channel ID), _lang (language), and _file (file path)
+// from a message and returns them along with the message with all fields stripped.
+// Returns (0, "", "", original msg) if no _ch field is present.
+func extractHints(msg json.RawMessage) (int64, string, string, json.RawMessage) {
 	var msgMap map[string]any
 	if err := json.Unmarshal(msg, &msgMap); err != nil {
-		return 0, msg
+		return 0, "", "", msg
 	}
 	chRaw, ok := msgMap["_ch"]
 	if !ok {
-		return 0, msg
+		return 0, "", "", msg
 	}
 	var channelID int64
 	switch v := chRaw.(type) {
@@ -305,17 +323,21 @@ func extractChannelID(msg json.RawMessage) (int64, json.RawMessage) {
 		var err error
 		channelID, err = v.Int64()
 		if err != nil {
-			return 0, msg
+			return 0, "", "", msg
 		}
 	default:
-		return 0, msg
+		return 0, "", "", msg
 	}
 	delete(msgMap, "_ch")
+	lang, _ := msgMap["_lang"].(string)
+	delete(msgMap, "_lang")
+	file, _ := msgMap["_file"].(string)
+	delete(msgMap, "_file")
 	result, err := json.Marshal(msgMap)
 	if err != nil {
-		return 0, msg
+		return 0, "", "", msg
 	}
-	return channelID, result
+	return channelID, lang, file, result
 }
 
 // handleSubscription processes the workspace/subscribe message.
@@ -381,8 +403,9 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 		ws.clientCount++
 	}
 
-	session.workspace = workspaceKey
+	session.workspace = sub.Params.Workspace // store just the path; per-request routing uses workspaceKeys
 	session.language = cfg.Language
+	session.activeWorkspaces[workspaceKey]++ // track for cleanup on disconnect
 	log.Printf("[lsp] client %d subscribed to workspace=%s lang=%s (clients=%d)",
 		session.clientID, sub.Params.Workspace, cfg.Language, ws.clientCount)
 }
@@ -392,12 +415,39 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 // subsequent clients/channels get the cached response with a channel ID hint.
 // If the first initialize is still in flight, later requests are queued and
 // replayed once the server responds.
-func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64) {
+// workspaceKey identifies the (workspace, language) pair for this request.
+// If the workspace doesn't exist yet (e.g., a second language on the same WS),
+// it is created lazily using the file path to look up the server config.
+func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64, workspaceKey string, filePath string) {
 	h.mu.Lock()
-	ws, ok := h.workspaces[session.workspace]
+	ws, ok := h.workspaces[workspaceKey]
 	if !ok {
-		h.mu.Unlock()
-		return
+		// Lazy workspace creation: this is the first request for this language.
+		// Look up the server config from the file path and create the workspace.
+		cfg := h.registry.Lookup(filePath)
+		if cfg == nil {
+			cfg = h.registry.Lookup(session.workspace)
+		}
+		if cfg == nil {
+			h.mu.Unlock()
+			log.Printf("[lsp] client %d: no language server config for file %s (lazy init failed)", session.clientID, filePath)
+			return
+		}
+		process, err := h.manager.GetOrCreate(session.workspace, cfg.Language, cfg)
+		if err != nil {
+			h.mu.Unlock()
+			log.Printf("[lsp] client %d: failed to spawn process for lazy init: %v", session.clientID, err)
+			return
+		}
+		ws = &workspaceState{
+			process:     process,
+			language:    cfg.Language,
+			cfg:         cfg,
+			clientCount: 1,
+		}
+		h.workspaces[workspaceKey] = ws
+		session.activeWorkspaces[workspaceKey]++
+		log.Printf("[lsp] client %d: lazy-created workspace=%s lang=%s", session.clientID, session.workspace, cfg.Language)
 	}
 
 	if ws.initialized {
@@ -430,20 +480,23 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 	h.mu.Unlock()
 
 	merged := mergeInitParams(msg, ws.cfg)
-	h.forwardRequest(ctx, session, merged, clientReqID, channelID)
+	h.forwardRequest(ctx, session, merged, clientReqID, channelID, workspaceKey)
 }
 
 // forwardRequest remaps the request ID and forwards to the language server.
 // channelID is used for multiplex response routing (0 for non-multiplex).
-func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64) {
+// workspaceKey identifies the (workspace, language) pair.
+func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64, workspaceKey string) {
 	// Generate a unique backend ID
 	backendID := h.nextBackendID.Add(1)
 	backendIDStr := itoa(backendID)
 
 	// Store the mapping
-	session.outgoingIDs[clientReqID] = backendIDStr
 	session.incomingIDs[backendIDStr] = clientReqID
 	session.channelIDs[backendIDStr] = channelID
+	session.workspaceKeys[backendIDStr] = workspaceKey
+	// Track that this session uses this workspace (for cleanup on disconnect)
+	session.activeWorkspaces[workspaceKey]++
 
 	// Remap the id in the JSON
 	remapped := remapRequestID(msg, backendID)
@@ -454,7 +507,7 @@ func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession,
 
 	// Forward to server
 	h.mu.Lock()
-	ws, ok := h.workspaces[session.workspace]
+	ws, ok := h.workspaces[workspaceKey]
 	h.mu.Unlock()
 
 	if !ok || ws.process == nil {
@@ -469,9 +522,13 @@ func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession,
 }
 
 // forwardRaw forwards a message to the server without ID remapping.
-func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg json.RawMessage) {
+// workspaceKey identifies the (workspace, language) pair.
+func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg json.RawMessage, workspaceKey string) {
 	h.mu.Lock()
-	ws, ok := h.workspaces[session.workspace]
+	ws, ok := h.workspaces[workspaceKey]
+	if ok {
+		session.activeWorkspaces[workspaceKey]++
+	}
 	h.mu.Unlock()
 
 	if !ok || ws.process == nil {
@@ -489,6 +546,8 @@ func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg
 }
 
 // routeServerMessage routes a message from the language server to the appropriate client(s).
+// Only responses (with id) reach this function — notifications are delivered directly
+// to subscriber channels by the LSPProcess and never pass through messageCh.
 func (h *LSPHandler) routeServerMessage(serverMsg json.RawMessage) {
 	var rpc JSONRPCMessage
 	if err := json.Unmarshal(serverMsg, &rpc); err != nil {
@@ -502,11 +561,8 @@ func (h *LSPHandler) routeServerMessage(serverMsg json.RawMessage) {
 		return
 	}
 
-	// Notification: has method but no id — broadcast to all clients on this process
-	if rpc.Method != "" && rpc.ID == nil {
-		h.broadcastNotification(serverMsg)
-		return
-	}
+	// Server request (has both id and method) — not expected, log and skip
+	log.Printf("[lsp] unexpected server message: id=%v method=%s", rpc.ID, rpc.Method)
 }
 
 // routeResponse routes a server response back to the originating client with ID remapping.
@@ -517,7 +573,7 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 	var targetSession *ClientSession
 	var originalClientID string
 	var channelID int64
-	var targetWorkspace *workspaceState
+	var workspaceKey string
 	for _, s := range h.clients {
 		if s.workspace == "" {
 			continue
@@ -526,11 +582,11 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 			targetSession = s
 			originalClientID = clientID
 			channelID = s.channelIDs[backendID]
-			targetWorkspace = h.workspaces[s.workspace]
+			workspaceKey = s.workspaceKeys[backendID]
 			// Clean up mappings
 			delete(s.incomingIDs, backendID)
-			delete(s.outgoingIDs, clientID)
 			delete(s.channelIDs, backendID)
+			delete(s.workspaceKeys, backendID)
 			break
 		}
 	}
@@ -540,6 +596,8 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 		log.Printf("[lsp] no client found for backend response id=%s", backendID)
 		return
 	}
+
+	targetWorkspace := h.workspaces[workspaceKey]
 
 	// Check if this is an initialize response — cache it and replay to queued clients
 	var queuedReplay []*queuedInit
@@ -574,27 +632,6 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 		if qremapped != nil {
 			q.session.conn.Write(context.Background(), websocket.MessageText, qremapped)
 			log.Printf("[lsp] replayed queued initialize to client %d", q.session.clientID)
-		}
-	}
-}
-
-// broadcastNotification sends a notification to all clients subscribed to the same process.
-func (h *LSPHandler) broadcastNotification(serverMsg json.RawMessage) {
-	h.mu.Lock()
-
-	// Group sessions by workspace key
-	workspaceClients := make(map[string][]*ClientSession)
-	for _, s := range h.clients {
-		if s.workspace != "" {
-			workspaceClients[s.workspace] = append(workspaceClients[s.workspace], s)
-		}
-	}
-	h.mu.Unlock()
-
-	ctx := context.Background()
-	for _, sessions := range workspaceClients {
-		for _, s := range sessions {
-			s.conn.Write(ctx, websocket.MessageText, serverMsg)
 		}
 	}
 }
@@ -683,11 +720,6 @@ func remapRequestID(msg json.RawMessage, backendID int64) json.RawMessage {
 		return nil
 	}
 	return result
-}
-
-// remapResponseID replaces the "id" field in a JSON-RPC response with the original client ID.
-func remapResponseID(msg json.RawMessage, clientID string) json.RawMessage {
-	return remapResponseIDWithChannel(msg, clientID, 0)
 }
 
 // remapResponseIDWithChannel replaces the "id" field and optionally adds
