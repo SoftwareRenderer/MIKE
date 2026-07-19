@@ -10,7 +10,7 @@
     import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-    import { LSPClient, languageServerExtensions, hoverTooltips } from '@codemirror/lsp-client';
+    import { LSPClient, languageServerExtensions } from '@codemirror/lsp-client';
     import { createLSPTransport } from '$lib/utils/lsp-transport';
     import { isLSPEnabled } from '$lib/storage';
     import { highlightSelectionMatches } from '@codemirror/search';
@@ -196,7 +196,6 @@
             bracketMatching(),
             closeBrackets(),
             lspCompartment.of(autocompletion()),
-            hoverTooltips(),
             rectangularSelection(),
             crosshairCursor(),
             highlightActiveLine(),
