@@ -13,6 +13,7 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/exec"
 	"kanban/backend/git"
+	"kanban/backend/lsp"
 	"kanban/backend/managers"
 	"kanban/backend/sandbox"
 	"kanban/backend/store"
@@ -37,6 +38,7 @@ type Server struct {
 	executor       *exec.TaskExecutor
 	terminalMgr    *term.TerminalManager
 	sandboxMgr     *sandbox.SandboxManager
+	lspHandler     *lsp.LSPHandler
 	mux            *http.ServeMux
 	addr           string
 	frontendDist   string
@@ -127,6 +129,9 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
 	// Wire worktree mutex so GitHandler can serialize per-task git operations.
 	s.gitHandler.SetWorktreeMutex(s.getWorktreeMutex)
+
+	// LSP handler for language server WebSocket bridging
+	s.lspHandler = lsp.NewLSPHandler(lsp.NewRegistry(), lsp.NewProcessManager())
 	// Wire project mutex so GitHandler can serialize project-level git operations.
 	s.gitHandler.SetProjectMutex(s.getProjectMutex)
 	// Wire worktree watcher -> GitHandler diff cache so on-demand file fetches work
