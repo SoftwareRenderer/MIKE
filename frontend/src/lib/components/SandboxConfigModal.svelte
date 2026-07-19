@@ -67,6 +67,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let capsExpanded = $state(false);
     let capInputValue = $state('');
     let capDropdownOpen = $state(false);
+    let capSelectedIndex = $state(-1);
     let capInputEl: HTMLInputElement | null = null;
     $effect(() => { sandboxCapabilities = project.sandbox_capabilities ?? []; });
     $effect(() => { capsExpanded = !!project.sandbox_capabilities && project.sandbox_capabilities.length > 0; });
@@ -307,6 +308,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         sandboxCapabilities = [...sandboxCapabilities, normalized];
         capInputValue = '';
         capDropdownOpen = false;
+        capSelectedIndex = -1;
     }
 
     function removeCapability(cap: string) {
@@ -314,14 +316,41 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     function handleCapInputKeydown(e: KeyboardEvent) {
-        if (e.key === 'Enter' && capInputValue.trim()) {
+        if (e.key === 'Tab') {
             e.preventDefault();
-            addCapability(capInputValue);
+            if (capSuggestions.length > 0) {
+                const shift = e.shiftKey;
+                if (capSelectedIndex < 0) {
+                    capSelectedIndex = shift ? capSuggestions.length - 1 : 0;
+                } else {
+                    capSelectedIndex = shift
+                        ? (capSelectedIndex - 1 + capSuggestions.length) % capSuggestions.length
+                        : (capSelectedIndex + 1) % capSuggestions.length;
+                }
+                capInputValue = capSuggestions[capSelectedIndex].value;
+            }
+        } else if (e.key === 'Enter' && capInputValue.trim()) {
+            e.preventDefault();
+            // If a suggestion is selected, use it; otherwise add the raw input
+            if (capSelectedIndex >= 0 && capSuggestions[capSelectedIndex]) {
+                addCapability(capSuggestions[capSelectedIndex].value);
+            } else {
+                addCapability(capInputValue);
+            }
+        } else if (e.key === 'ArrowDown' && capSuggestions.length > 0) {
+            e.preventDefault();
+            capSelectedIndex = capSelectedIndex < 0 ? 0 : (capSelectedIndex + 1) % capSuggestions.length;
+            capInputValue = capSuggestions[capSelectedIndex].value;
+        } else if (e.key === 'ArrowUp' && capSuggestions.length > 0) {
+            e.preventDefault();
+            capSelectedIndex = capSelectedIndex < 0 ? capSuggestions.length - 1 : (capSelectedIndex - 1 + capSuggestions.length) % capSuggestions.length;
+            capInputValue = capSuggestions[capSelectedIndex].value;
         } else if (e.key === 'Backspace' && !capInputValue && sandboxCapabilities.length > 0) {
             // Remove last capability on backspace when input is empty
             removeCapability(sandboxCapabilities[sandboxCapabilities.length - 1]);
         } else if (e.key === 'Escape') {
             capDropdownOpen = false;
+            capSelectedIndex = -1;
         }
     }
 
@@ -336,6 +365,11 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     function handleCapInputClick() {
         capDropdownOpen = true;
+    }
+
+    function handleCapInputChange() {
+        // Reset selection when user types
+        capSelectedIndex = -1;
     }
 
     async function handleRebuild() {
@@ -933,6 +967,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         type="text"
                         class="caps-input"
                         bind:value={capInputValue}
+                        oninput={handleCapInputChange}
                         onkeydown={handleCapInputKeydown}
                         onfocus={handleCapInputFocus}
                         onblur={handleCapInputBlur}
@@ -949,8 +984,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                     <!-- Suggestions dropdown -->
                     {#if capDropdownOpen && capSuggestions.length > 0}
                     <div class="caps-dropdown" role="listbox">
-                        {#each capSuggestions as suggestion}
-                        <button type="button" class="caps-dropdown-item" role="option" onclick={() => addCapability(suggestion.value)}>
+                        {#each capSuggestions as suggestion, i}
+                        <button type="button" class="caps-dropdown-item" class:selected={i === capSelectedIndex} role="option" aria-selected={i === capSelectedIndex} onclick={() => addCapability(suggestion.value)}>
                             <span class="caps-dropdown-name">{suggestion.value}</span>
                             <span class="caps-dropdown-desc">{suggestion.desc}</span>
                         </button>
@@ -2458,7 +2493,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         transition: background 0.1s;
     }
 
-    .caps-dropdown-item:hover {
+    .caps-dropdown-item:hover,
+    .caps-dropdown-item.selected {
         background: var(--color-surface-2);
     }
 
