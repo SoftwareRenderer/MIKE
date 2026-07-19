@@ -370,6 +370,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     function handleCapInputChange() {
         // Reset selection when user types
         capSelectedIndex = -1;
+        capDropdownOpen = true;
     }
 
     async function handleRebuild() {
