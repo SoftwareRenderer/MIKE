@@ -528,7 +528,8 @@
     let diffLoading = $state(false);
 
     /** Reload the full diff. Aborts in-flight delta fetches and resets overlay state.
-     * Used after thread switch or task change to ensure a clean slate. */
+     * Used after thread switch or task change to ensure a clean slate.
+     * For done tasks, uses branch_tip to show the diff of committed changes. */
     async function loadDiff() {
         if (!task || task.status === 'backlog' || diffLoading) return;
         // Reset overlay and comparison state
@@ -542,7 +543,11 @@
         // Preload the diff viewer chunk while fetching diff data
         loadDiffViewer();
         try {
-            await Promise.all([loadCommits(), diffCache.loadDiff(() => {})]);
+            // For done tasks, fetch the diff of committed changes using branch_tip
+            const diffOptions = task.status === 'done' && task.branch_tip
+                ? { headRef: task.branch_tip }
+                : {};
+            await Promise.all([loadCommits(), diffCache.loadDiff(() => {}, diffOptions)]);
         } finally {
             diffLoading = false;
             // Apply any pending staged_paths from a WebSocket broadcast that

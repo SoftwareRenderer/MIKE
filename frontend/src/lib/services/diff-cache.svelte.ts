@@ -46,6 +46,7 @@ export interface DiffApiResponse {
     }>;
     short_stat?: string;
     base_ref?: string;
+    diff?: string; // raw unified diff (returned when headRef is set)
 }
 
 /** Response from getDiffFile API. */
@@ -205,7 +206,11 @@ export class DiffCache {
         }
     }
 
-    /** Update cache from a full diff manifest response. */
+    /** Update cache from a full diff manifest response or a raw diff string.
+     * When data.diff is present (e.g., commit-to-commit diff for done tasks),
+     * the diff rows are already parsed by the caller and passed via data.files.
+     * When data.files is a manifest (normal working-tree diff), individual files
+     * are fetched on-demand. */
     updateDiff(data: DiffApiResponse) {
         if (data.base_ref !== undefined) {
             this.state.baseRef = data.base_ref;
@@ -264,8 +269,29 @@ export class DiffCache {
         this.fileHashes = newHashes;
     }
 
-    /** Reload the full diff. Aborts in-flight delta fetches and resets state. */
-    async loadDiff(onResetState: () => void) {
+    /** Update cache from a parsed diff (used for done-task branch-tip diffs).
+     * Files already have their rows populated. */
+    updateDiffFromFiles(files: DiffFile[]) {
+        const ignoreSwp = (p: string) => !p.split('/').pop()?.match(/\..*\.swp$/);
+        const newCache: Record<string, DiffFile> = {};
+        for (const file of files) {
+            if (!ignoreSwp(file.path)) continue;
+            newCache[file.path] = { ...file, staged: false };
+        }
+        this.state.files = newCache;
+        this.state.untracked = {};
+        this.tracker.untrackedN = 0;
+        // Generate simple hashes from path for dedup
+        const newHashes: Record<string, string> = {};
+        for (const file of Object.values(newCache)) {
+            newHashes[file.path] = file.path;
+        }
+        this.fileHashes = newHashes;
+    }
+
+    /** Reload the full diff. Aborts in-flight delta fetches and resets state.
+     * Optional options are passed through to the API (e.g., headRef for done-task diffs). */
+    async loadDiff(onResetState: () => void, options?: { headRef?: string; baseRef?: string }) {
         // Abort any in-flight delta fetches
         for (const controller of Object.values(this.abortControllers)) {
             controller.abort();
@@ -287,12 +313,23 @@ export class DiffCache {
         this.state.loading = true;
 
         try {
-            const result = await this._apis.getTaskDiff(this._getProjectId(), this._getTaskId());
-            const oldHashes = { ...this.fileHashes };
-            this.updateDiff(result);
-            // For manifest format, fetch individual files
-            if (result.files) {
-                await this.fetchChangedFiles(result.files, oldHashes);
+            const result = await this._apis.getTaskDiff(this._getProjectId(), this._getTaskId(), options);
+            // When headRef is set, backend returns a raw diff string (commit-to-commit diff).
+            // Parse it directly instead of fetching individual files from a manifest.
+            if (result.diff) {
+                const { parseUnifiedDiff } = await import('$lib/utils/diff-parser');
+                const files = parseUnifiedDiff(result.diff).filter((f: DiffFile) => !f.path.split('/').pop()?.match(/\..*\.swp$/));
+                for (const file of files) {
+                    file.rows = this._apis.enrichRows(file.rows as any[] as ApiDiffRow[]);
+                }
+                this.updateDiffFromFiles(files);
+            } else {
+                // Manifest format — fetch individual files on-demand
+                const oldHashes = { ...this.fileHashes };
+                this.updateDiff(result);
+                if (result.files) {
+                    await this.fetchChangedFiles(result.files, oldHashes);
+                }
             }
         } catch (e) {
             this.state.files = {};
