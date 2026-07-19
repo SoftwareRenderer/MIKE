@@ -4,6 +4,7 @@
     import { isAgentProvider, PI_SENTINEL_URL } from '$lib/types';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testPiConnection as testPiConnectionApi } from '$lib/api';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
+    import { isLSPEnabled, setLSPEnabled } from '$lib/storage';
     import BaseModal from './BaseModal.svelte';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -31,6 +32,7 @@
     let defaultSubtasksAutoMerge = $state(true);
     let defaultOperatingMode = $state('act');
     let defaultMaxFailedTurns = $state(3);
+    let lspEnabled = $state(true);
     let loading = $state(false);
     let error = $state('');
 
@@ -160,6 +162,13 @@
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
+    });
+
+    // Load LSP toggle from IndexedDB on open
+    $effect(() => {
+        (async () => {
+            lspEnabled = await isLSPEnabled();
+        })();
     });
 
     // Close agent menu when clicking outside
@@ -606,6 +615,13 @@
                     <div class="readonly-value">{config?.database_path || '—'}</div>
                     <span class="field-help">Path to the server's SQLite database</span>
                 </div>
+                <div class="field-row">
+                    <div class="field-row-left">
+                        <span class="field-label-inline">Language Server (LSP)</span>
+                        <span class="field-help">Enable editor features like completions, hover, diagnostics, and go-to-definition</span>
+                    </div>
+                    <ToggleSwitch bind:checked={lspEnabled} ariaLabel="Enable LSP" onChange={() => setLSPEnabled(lspEnabled)} />
+                </div>
                 {#if appStore.pwaInstallPrompt}
                     <button type="button" class="btn-pwa-install" onclick={handlePwaInstall} title="Install as a Progressive Web App">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -748,6 +764,20 @@
         font-size: 0.875rem;
         font-weight: 500;
         color: var(--color-text-primary);
+    }
+
+    /* Toggle row layout */
+    .field-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .field-row-left {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
     }
 
     /* Buttons */

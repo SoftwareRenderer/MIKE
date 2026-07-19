@@ -437,6 +437,21 @@ export async function saveAppSetting<T>(key: string, value: T): Promise<void> {
     return dbPut(STORE_APP_SETTINGS, key, value);
 }
 
+// ─── LSP setting ─────────────────────────────────────────────────────────────
+// Controls whether the editor connects to the backend LSP proxy.
+
+const KEY_LSP_ENABLED = 'lsp-enabled';
+
+/** Check whether LSP is enabled. Defaults to `true` (enabled). */
+export async function isLSPEnabled(): Promise<boolean> {
+    return loadAppSetting(KEY_LSP_ENABLED, true);
+}
+
+/** Set whether LSP is enabled. */
+export async function setLSPEnabled(enabled: boolean): Promise<void> {
+    return saveAppSetting(KEY_LSP_ENABLED, enabled);
+}
+
 // ─── Collapsed diff files (IndexedDB: collapsed-diff-files store) ────────────
 
 /** Load collapsed diff file paths. */
