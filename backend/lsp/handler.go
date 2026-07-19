@@ -166,6 +166,11 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 			case <-ticker.C:
 				pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
 				err := conn.Ping(pingCtx)
+				if err == nil {
+					// Control Ping/Pong frames are transparent to JS and don't reset
+					// the client-side stale-detection timer.
+					_ = conn.Write(pingCtx, websocket.MessageText, []byte(`{"type":"ping"}`))
+				}
 				pingCancel()
 				if err != nil {
 					cancel() // unblock Read() to tear down the connection
