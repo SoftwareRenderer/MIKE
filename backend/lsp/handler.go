@@ -48,6 +48,8 @@ type ClientSession struct {
 	outgoingIDs map[string]string
 	// backendRequestID → clientRequestID (incoming responses)
 	incomingIDs map[string]string
+	// backendRequestID → channelID (for multiplex response routing)
+	channelIDs map[string]int64
 }
 
 // workspaceState tracks per-workspace+language state in the handler.
@@ -56,6 +58,9 @@ type workspaceState struct {
 	language     string
 	cfg          *ServerConfig
 	clientCount  int
+	// initialized tracks whether the LSP server has been initialized.
+	// In multiplex mode, only the first channel's initialize reaches the server;
+	// subsequent channels get the cached response.
 	initialized  bool
 	initResponse json.RawMessage
 }
@@ -118,12 +123,16 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Allow large LSP responses (hover docs, completions, etc.)
+	conn.SetReadLimit(1024 * 1024) // 1MB
+
 	clientID := h.nextID.Add(1)
 	session := &ClientSession{
 		conn:        conn,
 		clientID:    clientID,
 		outgoingIDs: make(map[string]string),
 		incomingIDs: make(map[string]string),
+		channelIDs:  make(map[string]int64),
 	}
 
 	h.mu.Lock()
@@ -219,27 +228,63 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 		return
 	}
 
+	// Extract channel ID and strip wrapper
+	channelID, stripped := extractChannelID(msg)
+
 	// Parse to check message type
 	var rpc JSONRPCMessage
-	if err := json.Unmarshal(msg, &rpc); err != nil {
+	if err := json.Unmarshal(stripped, &rpc); err != nil {
 		log.Printf("[lsp] client %d: invalid JSON: %v", session.clientID, err)
 		return
 	}
 
 	// Handle initialize interception
 	if rpc.Method == "initialize" && rpc.ID != nil {
-		h.handleInitialize(ctx, session, msg, rpc.ID.String())
+		h.handleInitialize(ctx, session, stripped, rpc.ID.String(), channelID)
 		return
 	}
 
 	// If it's a request (has both id and method), remap the ID
 	if rpc.ID != nil && rpc.Method != "" {
-		h.forwardRequest(ctx, session, msg, rpc.ID.String())
+		h.forwardRequest(ctx, session, stripped, rpc.ID.String(), channelID)
 		return
 	}
 
 	// Notification or other message — forward as-is
-	h.forwardRaw(ctx, session, msg)
+	h.forwardRaw(ctx, session, stripped)
+}
+
+// extractChannelID extracts the _ch field from a message and returns the
+// channel ID along with the message with _ch stripped.
+// Returns (0, original msg) if no _ch field is present.
+func extractChannelID(msg json.RawMessage) (int64, json.RawMessage) {
+	var msgMap map[string]any
+	if err := json.Unmarshal(msg, &msgMap); err != nil {
+		return 0, msg
+	}
+	chRaw, ok := msgMap["_ch"]
+	if !ok {
+		return 0, msg
+	}
+	var channelID int64
+	switch v := chRaw.(type) {
+	case float64:
+		channelID = int64(v)
+	case json.Number:
+		var err error
+		channelID, err = v.Int64()
+		if err != nil {
+			return 0, msg
+		}
+	default:
+		return 0, msg
+	}
+	delete(msgMap, "_ch")
+	result, err := json.Marshal(msgMap)
+	if err != nil {
+		return 0, msg
+	}
+	return channelID, result
 }
 
 // handleSubscription processes the workspace/subscribe message.
@@ -312,8 +357,9 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 }
 
 // handleInitialize intercepts initialize requests. Only the first client's
-// initialize reaches the server; subsequent clients get the cached response.
-func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string) {
+// (or first channel's in multiplex mode) initialize reaches the server;
+// subsequent clients/channels get the cached response with a channel ID hint.
+func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64) {
 	h.mu.Lock()
 	ws, ok := h.workspaces[session.workspace]
 	h.mu.Unlock()
@@ -323,11 +369,11 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 	}
 
 	if ws.initialized {
-		// Return cached response immediately
+		// Return cached response immediately, with channel hint
 		if ws.initResponse == nil {
 			return
 		}
-		remapped := remapResponseID(ws.initResponse, clientReqID)
+		remapped := remapResponseIDWithChannel(ws.initResponse, clientReqID, channelID)
 		if remapped == nil {
 			return
 		}
@@ -335,13 +381,14 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 		return
 	}
 
-	// First client — merge InitParamsOverride into params, then forward
+	// First client/channel — merge InitParamsOverride into params, then forward
 	merged := mergeInitParams(msg, ws.cfg)
-	h.forwardRequest(ctx, session, merged, clientReqID)
+	h.forwardRequest(ctx, session, merged, clientReqID, channelID)
 }
 
 // forwardRequest remaps the request ID and forwards to the language server.
-func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string) {
+// channelID is used for multiplex response routing (0 for non-multiplex).
+func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64) {
 	// Generate a unique backend ID
 	backendID := h.nextBackendID.Add(1)
 	backendIDStr := itoa(backendID)
@@ -349,6 +396,7 @@ func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession,
 	// Store the mapping
 	session.outgoingIDs[clientReqID] = backendIDStr
 	session.incomingIDs[backendIDStr] = clientReqID
+	session.channelIDs[backendIDStr] = channelID
 
 	// Remap the id in the JSON
 	remapped := remapRequestID(msg, backendID)
@@ -415,11 +463,13 @@ func (h *LSPHandler) routeServerMessage(serverMsg json.RawMessage) {
 }
 
 // routeResponse routes a server response back to the originating client with ID remapping.
+// In multiplex mode, includes a channel ID hint (_ch) for frontend routing.
 func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) {
 	h.mu.Lock()
 	// Find the session that owns this backend ID
 	var targetSession *ClientSession
 	var originalClientID string
+	var channelID int64
 	var targetWorkspace *workspaceState
 	for _, s := range h.clients {
 		if s.workspace == "" {
@@ -428,10 +478,12 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 		if clientID, ok := s.incomingIDs[backendID]; ok {
 			targetSession = s
 			originalClientID = clientID
+			channelID = s.channelIDs[backendID]
 			targetWorkspace = h.workspaces[s.workspace]
 			// Clean up mappings
 			delete(s.incomingIDs, backendID)
 			delete(s.outgoingIDs, clientID)
+			delete(s.channelIDs, backendID)
 			break
 		}
 	}
@@ -460,8 +512,8 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 		}
 	}
 
-	// Remap the id back to the original client ID
-	remapped := remapResponseID(serverMsg, originalClientID)
+	// Remap the id back to the original client ID, with channel hint if multiplexed
+	remapped := remapResponseIDWithChannel(serverMsg, originalClientID, channelID)
 	if remapped == nil {
 		return
 	}
@@ -578,11 +630,22 @@ func remapRequestID(msg json.RawMessage, backendID int64) json.RawMessage {
 
 // remapResponseID replaces the "id" field in a JSON-RPC response with the original client ID.
 func remapResponseID(msg json.RawMessage, clientID string) json.RawMessage {
+	return remapResponseIDWithChannel(msg, clientID, 0)
+}
+
+// remapResponseIDWithChannel replaces the "id" field and optionally adds
+// a _ch (channel) hint for multiplex frontend routing.
+// When channelID > 0, the response includes {"_ch": channelID} so the
+// frontend can route it to the correct virtual transport.
+func remapResponseIDWithChannel(msg json.RawMessage, clientID string, channelID int64) json.RawMessage {
 	var msgMap map[string]any
 	if err := json.Unmarshal(msg, &msgMap); err != nil {
 		return nil
 	}
 	msgMap["id"] = clientID
+	if channelID > 0 {
+		msgMap["_ch"] = channelID
+	}
 	result, err := json.Marshal(msgMap)
 	if err != nil {
 		return nil

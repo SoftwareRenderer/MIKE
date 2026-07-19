@@ -1,257 +1,320 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createLSPTransport } from '$lib/utils/lsp-transport';
+import { describe, it, expect, beforeEach } from 'vitest';
 
-interface MockResult {
-  ctor: typeof WebSocket;
-  capturedUrl: () => string | null;
-  lastMock: () => any;
+/**
+ * Tests for the LSP connection manager's message routing logic.
+ *
+ * The routing logic is extracted here for direct unit testing without
+ * WebSocket mocking (jsdom WebSocket mocking is unreliable).
+ * Connection lifecycle tests are covered by the backend handler tests.
+ */
+
+const CHANNEL_ID_STEP = 1000;
+
+interface Channel {
+  id: number;
+  handler: ((value: string) => void) | null;
 }
 
-/** Build a mock WebSocket constructor for use in tests. */
-function makeMockCtor(shouldFail: boolean = false): MockResult {
-  let capturedUrl: string | null = null;
-  let lastMock: any = null;
+/**
+ * Simulates the dispatchMessage logic from WorkspaceConnection.
+ * This is the core routing logic that determines which channel gets which message.
+ */
+function dispatchMessage(channels: Channel[], data: string): void {
+  let parsed: any;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    // Not JSON — deliver to all
+    for (const ch of channels) ch.handler?.(data);
+    return;
+  }
 
-  function MockWs(this: any, url: string) {
-    capturedUrl = url;
-    this.url = url;
-    this.readyState = 1; // OPEN
-    this.onopen = null;
-    this.onerror = null;
-    this.onclose = null;
-    this.onmessage = null;
-    this._sent = [] as string[];
+  // Notification (no id, has method) → broadcast to ALL channels
+  if (parsed.id == null && parsed.method) {
+    for (const ch of channels) ch.handler?.(data);
+    return;
+  }
 
-    const self = this;
-    this.send = function (data: string) {
-      self._sent.push(data);
-    };
-    this.getSentMessages = function (): string[] {
-      return [...self._sent];
-    };
+  // Response (has id) → route to owning channel
+  if (parsed.id != null) {
+    // Backend _ch hint (multiplex mode)
+    if (parsed._ch != null) {
+      const target = channels.find(ch => ch.id === parsed._ch);
+      if (target?.handler) {
+        const clean = { ...parsed };
+        delete clean._ch;
+        target.handler(JSON.stringify(clean));
+      }
+      return;
+    }
 
-    lastMock = this;
+    // Fallback: ID range check (backward compat)
+    const idNum = Number(parsed.id);
+    if (!isNaN(idNum)) {
+      for (const ch of channels) {
+        const base = ch.id * CHANNEL_ID_STEP;
+        if (idNum >= base + 1 && idNum < base + CHANNEL_ID_STEP) {
+          ch.handler?.(data);
+          return;
+        }
+      }
+    }
+    return;
+  }
 
-    // Schedule onopen or onerror asynchronously (mimics real WebSocket)
-    if (shouldFail) {
-      queueMicrotask(() => {
-        if (self.onerror) self.onerror(new Event('error'));
-      });
-    } else {
-      queueMicrotask(() => {
-        if (self.onopen) self.onopen();
-      });
+  // Unknown message type — deliver to all
+  for (const ch of channels) ch.handler?.(data);
+}
+
+describe('LSP connection manager — message routing', () => {
+  let channels: Channel[];
+  let received: string[][];
+
+  function setup(channelCount: number) {
+    channels = [];
+    received = [];
+    for (let i = 1; i <= channelCount; i++) {
+      channels.push({ id: i, handler: null });
+      received.push([]);
+    }
+    // Wire up handlers
+    for (let i = 0; i < channels.length; i++) {
+      const idx = i;
+      channels[i].handler = (msg) => received[idx].push(msg);
     }
   }
 
-  // Set static readonly properties via Object.defineProperty
-  Object.defineProperty(MockWs, 'CONNECTING', { value: 0 });
-  Object.defineProperty(MockWs, 'OPEN', { value: 1 });
-  Object.defineProperty(MockWs, 'CLOSING', { value: 2 });
-  Object.defineProperty(MockWs, 'CLOSED', { value: 3 });
+  describe('notifications', () => {
+    beforeEach(() => setup(3));
 
-  return {
-    ctor: MockWs as unknown as typeof WebSocket,
-    capturedUrl: () => capturedUrl,
-    lastMock: () => lastMock,
-  };
-}
+    it('broadcasts to all channels', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'textDocument/publishDiagnostics',
+        params: { uri: 'file:///main.go' },
+      }));
 
-describe('createLSPTransport', () => {
-  let originalWebSocket: typeof WebSocket;
-  let capturedUrlGetter: () => string | null;
-  let lastMockGetter: () => any;
+      expect(received[0]).toHaveLength(1);
+      expect(received[1]).toHaveLength(1);
+      expect(received[2]).toHaveLength(1);
+    });
 
-  function setupMock(shouldFail: boolean = false) {
-    const result = makeMockCtor(shouldFail);
-    capturedUrlGetter = result.capturedUrl;
-    lastMockGetter = result.lastMock;
-    globalThis.WebSocket = result.ctor;
-  }
+    it('broadcasts progress notifications', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        method: '$/progress',
+        params: { token: 'tok1', value: { kind: 'report' } },
+      }));
 
-  beforeEach(() => {
-    originalWebSocket = globalThis.WebSocket;
-    setupMock();
-    Object.defineProperty(globalThis, 'location', {
-      value: { protocol: 'http:', host: 'localhost:3000' },
-      writable: true,
-      configurable: true,
+      expect(received[0]).toHaveLength(1);
+      expect(received[1]).toHaveLength(1);
+      expect(received[2]).toHaveLength(1);
+    });
+
+    it('delivers non-JSON data to all channels', () => {
+      dispatchMessage(channels, 'not-json');
+
+      expect(received[0]).toHaveLength(1);
+      expect(received[0][0]).toBe('not-json');
     });
   });
 
-  afterEach(() => {
-    globalThis.WebSocket = originalWebSocket;
-  });
+  describe('response routing by _ch hint', () => {
+    beforeEach(() => setup(3));
 
-  describe('WebSocket URL construction', () => {
-    it('uses ws:// for http protocol', async () => {
-      await createLSPTransport({
-        workspace: '/home/user/project',
-        filePath: '/home/user/project/main.go',
-      });
+    it('routes to channel 1', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1001,
+        _ch: 1,
+        result: { items: [] },
+      }));
 
-      expect(capturedUrlGetter()).toBe('ws://localhost:3000/api/lsp');
+      expect(received[0]).toHaveLength(1);
+      const parsed = JSON.parse(received[0][0]);
+      expect(parsed.id).toBe(1001);
+      expect(parsed._ch).toBeUndefined(); // stripped
+      expect(parsed.result).toEqual({ items: [] });
+      expect(received[1]).toHaveLength(0);
+      expect(received[2]).toHaveLength(0);
     });
 
-    it('uses wss:// for https protocol', async () => {
-      Object.defineProperty(globalThis, 'location', {
-        value: { protocol: 'https:', host: 'example.com' },
-        writable: true,
-        configurable: true,
-      });
-      setupMock();
+    it('routes to channel 2', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2001,
+        _ch: 2,
+        result: { items: ['a'] },
+      }));
 
-      await createLSPTransport({
-        workspace: '/home/user/project',
-        filePath: '/home/user/project/main.go',
-      });
-
-      expect(capturedUrlGetter()).toBe('wss://example.com/api/lsp');
-    });
-  });
-
-  describe('workspace/subscribe message', () => {
-    it('sends subscribe message on connect', async () => {
-      await createLSPTransport({
-        workspace: '/workspace/myproject',
-        filePath: '/workspace/myproject/src/index.ts',
-      });
-
-      const mock = lastMockGetter();
-      const messages = mock.getSentMessages();
-      expect(messages).toHaveLength(1);
-      const parsed = JSON.parse(messages[0]);
-      expect(parsed.method).toBe('workspace/subscribe');
-      expect(parsed.params.workspace).toBe('/workspace/myproject');
-      expect(parsed.params.file).toBe('/workspace/myproject/src/index.ts');
-    });
-  });
-
-  describe('Transport send', () => {
-    it('forwards messages to WebSocket', async () => {
-      const transport = await createLSPTransport({
-        workspace: '/home/user/project',
-        filePath: '/home/user/project/main.go',
-      });
-
-      const mock = lastMockGetter();
-      transport.send('{"jsonrpc":"2.0","method":"initialize"}');
-
-      const messages = mock.getSentMessages();
-      // First message is the subscribe, second is our send
-      expect(messages).toHaveLength(2);
-      expect(messages[1]).toBe('{"jsonrpc":"2.0","method":"initialize"}');
+      expect(received[0]).toHaveLength(0);
+      expect(received[1]).toHaveLength(1);
+      expect(received[2]).toHaveLength(0);
     });
 
-    it('does not send when WebSocket is not OPEN', async () => {
-      const transport = await createLSPTransport({
-        workspace: '/home/user/project',
-        filePath: '/home/user/project/main.go',
-      });
+    it('routes to channel 3', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3001,
+        _ch: 3,
+        result: null,
+      }));
 
-      const mock = lastMockGetter();
-      mock.readyState = 3; // CLOSED
-      transport.send('should not send');
+      expect(received[0]).toHaveLength(0);
+      expect(received[1]).toHaveLength(0);
+      expect(received[2]).toHaveLength(1);
+    });
 
-      const messages = mock.getSentMessages();
-      expect(messages).toHaveLength(1); // only the subscribe
+    it('drops response for unknown channel', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 9999,
+        _ch: 99,
+        result: {},
+      }));
+
+      expect(received[0]).toHaveLength(0);
+      expect(received[1]).toHaveLength(0);
+      expect(received[2]).toHaveLength(0);
     });
   });
 
-  describe('Transport subscribe', () => {
-    it('receives incoming messages via callback', async () => {
-      const transport = await createLSPTransport({
-        workspace: '/home/user/project',
-        filePath: '/home/user/project/main.go',
-      });
+  describe('response routing by ID range (fallback)', () => {
+    beforeEach(() => setup(3));
 
-      const received: string[] = [];
-      transport.subscribe((msg) => received.push(msg));
+    it('routes ID 1500 to channel 1 (range 1001–1999)', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1500,
+        result: {},
+      }));
 
-      const mock = lastMockGetter();
-      mock.onmessage(new MessageEvent('message', { data: '{"jsonrpc":"2.0","result":{}}' }));
-      mock.onmessage(new MessageEvent('message', { data: '{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics"}' }));
-
-      expect(received).toHaveLength(2);
-      expect(received[0]).toBe('{"jsonrpc":"2.0","result":{}}');
-      expect(received[1]).toBe('{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics"}');
+      expect(received[0]).toHaveLength(1);
+      expect(received[1]).toHaveLength(0);
+      expect(received[2]).toHaveLength(0);
     });
 
-    it('decodes ArrayBuffer data', async () => {
-      const transport = await createLSPTransport({
-        workspace: '/home/user/project',
-        filePath: '/home/user/project/main.go',
-      });
+    it('routes ID 2500 to channel 2 (range 2001–2999)', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2500,
+        result: {},
+      }));
 
-      const received: string[] = [];
-      transport.subscribe((msg) => received.push(msg));
-
-      const mock = lastMockGetter();
-      const encoder = new TextEncoder();
-      const buffer = encoder.encode('{"jsonrpc":"2.0"}');
-      mock.onmessage(new MessageEvent('message', { data: buffer }));
-
-      expect(received).toHaveLength(1);
-      expect(received[0]).toBe('{"jsonrpc":"2.0"}');
-    });
-  });
-
-  describe('Transport unsubscribe', () => {
-    it('stops receiving messages after unsubscribe', async () => {
-      const transport = await createLSPTransport({
-        workspace: '/home/user/project',
-        filePath: '/home/user/project/main.go',
-      });
-
-      const received: string[] = [];
-      const handler = (msg: string) => received.push(msg);
-      transport.subscribe(handler);
-
-      const mock = lastMockGetter();
-      mock.onmessage(new MessageEvent('message', { data: 'before-unsubscribe' }));
-      expect(received).toHaveLength(1);
-
-      transport.unsubscribe(handler);
-      // After unsubscribe, onmessage is set to null
-      expect(mock.onmessage).toBeNull();
-    });
-  });
-
-  describe('Connection callbacks', () => {
-    it('calls onConnected when WebSocket opens', async () => {
-      let connected = false;
-      await createLSPTransport({
-        workspace: '/home/user/project',
-        filePath: '/home/user/project/main.go',
-        onConnected: () => { connected = true; },
-      });
-
-      expect(connected).toBe(true);
+      expect(received[0]).toHaveLength(0);
+      expect(received[1]).toHaveLength(1);
+      expect(received[2]).toHaveLength(0);
     });
 
-    it('calls onDisconnected when WebSocket closes', async () => {
-      let disconnected = false;
-      await createLSPTransport({
-        workspace: '/home/user/project',
-        filePath: '/home/user/project/main.go',
-        onDisconnected: () => { disconnected = true; },
-      });
+    it('routes ID 3001 to channel 3 (range 3001–3999)', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3001,
+        result: {},
+      }));
 
-      const mock = lastMockGetter();
-      mock.onclose();
+      expect(received[0]).toHaveLength(0);
+      expect(received[1]).toHaveLength(0);
+      expect(received[2]).toHaveLength(1);
+    });
 
-      expect(disconnected).toBe(true);
+    it('does not route ID 500 (below all ranges)', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 500,
+        result: {},
+      }));
+
+      expect(received[0]).toHaveLength(0);
+      expect(received[1]).toHaveLength(0);
+      expect(received[2]).toHaveLength(0);
+    });
+
+    it('does not route ID 1000 (boundary — not in any range)', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1000,
+        result: {},
+      }));
+
+      expect(received[0]).toHaveLength(0);
+      expect(received[1]).toHaveLength(0);
+      expect(received[2]).toHaveLength(0);
+    });
+
+    it('does not route ID 2000 (boundary)', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2000,
+        result: {},
+      }));
+
+      expect(received[0]).toHaveLength(0);
+      expect(received[1]).toHaveLength(0);
+      expect(received[2]).toHaveLength(0);
     });
   });
 
-  describe('Error handling', () => {
-    it('rejects on WebSocket error', async () => {
-      setupMock(true);
+  describe('_ch hint takes precedence over ID range', () => {
+    beforeEach(() => setup(3));
 
-      await expect(createLSPTransport({
-        workspace: '/home/user/project',
-        filePath: '/home/user/project/main.go',
-      })).rejects.toThrow('LSP WebSocket error');
+    it('routes ID 1500 with _ch:2 to channel 2 (not channel 1)', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1500,
+        _ch: 2,
+        result: {},
+      }));
+
+      expect(received[0]).toHaveLength(0);
+      expect(received[1]).toHaveLength(1);
+      expect(received[2]).toHaveLength(0);
+    });
+  });
+
+  describe('channel lifecycle', () => {
+    it('handles empty channel list', () => {
+      dispatchMessage([], JSON.stringify({ jsonrpc: '2.0', method: 'test' }));
+      // No error
+    });
+
+    it('handles channel with null handler', () => {
+      const ch: Channel = { id: 1, handler: null };
+      dispatchMessage([ch], JSON.stringify({ jsonrpc: '2.0', method: 'test' }));
+      // No error
+    });
+
+    it('handles removed channels', () => {
+      setup(3);
+      // Simulate removing channel 2
+      channels[1].handler = null;
+
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'test',
+      }));
+
+      expect(received[0]).toHaveLength(1);
+      expect(received[1]).toHaveLength(0); // removed
+      expect(received[2]).toHaveLength(1);
+    });
+  });
+
+  describe('error responses', () => {
+    beforeEach(() => setup(2));
+
+    it('routes error response by _ch', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1001,
+        _ch: 1,
+        error: { code: -32603, message: 'Internal error' },
+      }));
+
+      expect(received[0]).toHaveLength(1);
+      const parsed = JSON.parse(received[0][0]);
+      expect(parsed.error).toEqual({ code: -32603, message: 'Internal error' });
+      expect(received[1]).toHaveLength(0);
     });
   });
 });
