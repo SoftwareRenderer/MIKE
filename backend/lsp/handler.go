@@ -52,6 +52,14 @@ type ClientSession struct {
 	channelIDs map[string]int64
 }
 
+// queuedInit holds a pending initialize request waiting for the server response.
+type queuedInit struct {
+	session    *ClientSession
+	msg        json.RawMessage
+	clientReqID string
+	channelID  int64
+}
+
 // workspaceState tracks per-workspace+language state in the handler.
 type workspaceState struct {
 	process      *LSPProcess
@@ -63,6 +71,14 @@ type workspaceState struct {
 	// subsequent channels get the cached response.
 	initialized  bool
 	initResponse json.RawMessage
+	// pendingInitialize is true while the first initialize request is in flight.
+	// Subsequent initialize requests during this window are queued.
+	pendingInitialize bool
+	// queuedInitialize holds initialize requests that arrived while the first was pending.
+	queuedInitialize []*queuedInit
+	// sentInitialized tracks whether the "initialized" notification has been forwarded.
+	// Only the first one should reach the server.
+	sentInitialized bool
 }
 
 // lspManager defines the operations the LSP handler needs from the process manager.
@@ -244,6 +260,21 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 		return
 	}
 
+	// Filter "initialized" notification — only the first should reach the server
+	if rpc.Method == "initialized" && rpc.ID == nil {
+		h.mu.Lock()
+		ws, ok := h.workspaces[session.workspace]
+		if ok && !ws.sentInitialized {
+			ws.sentInitialized = true
+			h.mu.Unlock()
+			h.forwardRaw(ctx, session, stripped)
+		} else {
+			h.mu.Unlock()
+			// Silently drop duplicate "initialized" notifications
+		}
+		return
+	}
+
 	// If it's a request (has both id and method), remap the ID
 	if rpc.ID != nil && rpc.Method != "" {
 		h.forwardRequest(ctx, session, stripped, rpc.ID.String(), channelID)
@@ -359,29 +390,45 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 // handleInitialize intercepts initialize requests. Only the first client's
 // (or first channel's in multiplex mode) initialize reaches the server;
 // subsequent clients/channels get the cached response with a channel ID hint.
+// If the first initialize is still in flight, later requests are queued and
+// replayed once the server responds.
 func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64) {
 	h.mu.Lock()
 	ws, ok := h.workspaces[session.workspace]
-	h.mu.Unlock()
-
 	if !ok {
+		h.mu.Unlock()
 		return
 	}
 
 	if ws.initialized {
-		// Return cached response immediately, with channel hint
-		if ws.initResponse == nil {
-			return
+		// Already initialized — return cached response immediately
+		if ws.initResponse != nil {
+			remapped := remapResponseIDWithChannel(ws.initResponse, clientReqID, channelID)
+			if remapped != nil {
+				session.conn.Write(ctx, websocket.MessageText, remapped)
+			}
 		}
-		remapped := remapResponseIDWithChannel(ws.initResponse, clientReqID, channelID)
-		if remapped == nil {
-			return
-		}
-		session.conn.Write(ctx, websocket.MessageText, remapped)
+		h.mu.Unlock()
 		return
 	}
 
-	// First client/channel — merge InitParamsOverride into params, then forward
+	if ws.pendingInitialize {
+		// First initialize is in flight — queue this request
+		ws.queuedInitialize = append(ws.queuedInitialize, &queuedInit{
+			session:     session,
+			msg:         msg,
+			clientReqID: clientReqID,
+			channelID:   channelID,
+		})
+		log.Printf("[lsp] client %d: queued initialize (pending, queue size=%d)", session.clientID, len(ws.queuedInitialize))
+		h.mu.Unlock()
+		return
+	}
+
+	// First client/channel — mark pending, merge params, forward
+	ws.pendingInitialize = true
+	h.mu.Unlock()
+
 	merged := mergeInitParams(msg, ws.cfg)
 	h.forwardRequest(ctx, session, merged, clientReqID, channelID)
 }
@@ -494,31 +541,41 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 		return
 	}
 
-	// Check if this is an initialize response — cache it before remapping
+	// Check if this is an initialize response — cache it and replay to queued clients
+	var queuedReplay []*queuedInit
 	if targetWorkspace != nil && !targetWorkspace.initialized {
-		// Check if the original request was "initialize" by looking at the client's outgoing mapping
-		// We already cleaned up the mapping, so check if the response contains init capabilities
 		var rpc JSONRPCMessage
 		if err := json.Unmarshal(serverMsg, &rpc); err == nil && rpc.Result != nil {
 			var result struct {
 				Capabilities json.RawMessage `json:"capabilities"`
 			}
 			if err := json.Unmarshal(rpc.Result, &result); err == nil && len(result.Capabilities) > 0 {
-				// This looks like an initialize response — cache it
+				// This is the initialize response — cache it and wake up queued clients
 				targetWorkspace.initialized = true
+				targetWorkspace.pendingInitialize = false
 				targetWorkspace.initResponse = serverMsg
-				log.Printf("[lsp] cached initialize response for workspace=%s", targetWorkspace.process.Workspace)
+				queuedReplay = targetWorkspace.queuedInitialize
+				targetWorkspace.queuedInitialize = nil
+				log.Printf("[lsp] cached initialize response for workspace=%s (queued=%d)",
+					targetWorkspace.process.Workspace, len(queuedReplay))
 			}
 		}
 	}
 
 	// Remap the id back to the original client ID, with channel hint if multiplexed
 	remapped := remapResponseIDWithChannel(serverMsg, originalClientID, channelID)
-	if remapped == nil {
-		return
+	if remapped != nil {
+		targetSession.conn.Write(context.Background(), websocket.MessageText, remapped)
 	}
 
-	targetSession.conn.Write(context.Background(), websocket.MessageText, remapped)
+	// Replay cached initialize response to queued clients
+	for _, q := range queuedReplay {
+		qremapped := remapResponseIDWithChannel(serverMsg, q.clientReqID, q.channelID)
+		if qremapped != nil {
+			q.session.conn.Write(context.Background(), websocket.MessageText, qremapped)
+			log.Printf("[lsp] replayed queued initialize to client %d", q.session.clientID)
+		}
+	}
 }
 
 // broadcastNotification sends a notification to all clients subscribed to the same process.
