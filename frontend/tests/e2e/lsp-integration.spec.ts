@@ -80,7 +80,29 @@ test.describe.serial('LSP Integration', () => {
     // Open the explorer view
     await page.locator('.explorer-btn').click();
     await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.file-browser-list')).toBeVisible({ timeout: 10000 });
+
+    // Wait for file browser to finish loading (sandbox initialization can be slow).
+    // The file browser shows "Initializing sandbox..." or "Loading..." during startup.
+    // We wait for the loading overlay to disappear, then check for errors.
+    await expect(async () => {
+      // The loading element is visible while sandbox initializes
+      const loadingVisible = await page.locator('.file-browser-loading').isVisible();
+      const listVisible = await page.locator('.file-browser-list').isVisible().catch(() => false);
+      const errorVisible = await page.locator('.file-browser-error').isVisible().catch(() => false);
+
+      // We're done when loading is gone AND either list or error is visible
+      if (!loadingVisible && (listVisible || errorVisible)) {
+        if (errorVisible) {
+          const errorText = await page.locator('.file-browser-error').textContent();
+          throw new Error(`File browser error: ${errorText}`);
+        }
+        if (!listVisible) {
+          throw new Error('File browser finished loading but list is not visible');
+        }
+        return; // Success
+      }
+      throw new Error('File browser still loading');
+    }).toPass({ timeout: 60000, intervals: [2000] });
 
     // Open main.go in the editor
     const mainGoItem = page.locator('.file-browser-item', { hasText: 'main.go' });
