@@ -128,6 +128,18 @@ Sandbox Isolation is enabled for this project
                         </div>
                     </div>
                     {/if}
+
+                    <!-- Capabilities -->
+                    {#if project.sandbox_capabilities && project.sandbox_capabilities.length > 0}
+                    <div class="caps-section">
+                        <span class="section-label">Capabilities</span>
+                        <div class="caps-list">
+                            {#each project.sandbox_capabilities as cap}
+                            <span class="caps-pill" title={cap}>{cap}</span>
+                            {/each}
+                        </div>
+                    </div>
+                    {/if}
                 </div>
             {/if}
         </div>
@@ -357,6 +369,32 @@ Sandbox Isolation is enabled for this project
 
     .env-value {
         color: var(--color-text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .caps-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .caps-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .caps-pill {
+        padding: 2px 8px;
+        background: rgba(136, 192, 208, 0.12);
+        border: 1px solid rgba(136, 192, 208, 0.25);
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-family: var(--font-mono, monospace);
+        color: var(--color-accent-light, #88c0d0);
+        max-width: 100%;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;

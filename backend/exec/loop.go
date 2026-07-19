@@ -239,6 +239,9 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		if state, exists := te.tasks[setup.task.ID]; exists && state.ctx == setup.ctx {
 			if state.executorType != "pi" {
 				delete(te.tasks, setup.task.ID)
+			} else {
+				// Clear status so HasRunningTasks doesn't count completed Pi tasks
+				state.taskStatus = ""
 			}
 		}
 		te.taskMu.Unlock()
