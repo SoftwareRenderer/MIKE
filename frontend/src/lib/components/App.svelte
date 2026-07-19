@@ -111,6 +111,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let collapsed = $state(false);
     let appStream: ReturnType<typeof createAppStream> | null = $state(null);
     let wsConnected = $state(false);
+    let initialLoadComplete = $state(false); // tracks whether onMount data load is done
     let lastSyncedAt = $state(Infinity); // epoch ms of last successful data sync
     let nextReconnectAt = $state(0); // epoch ms of next reconnect attempt
     let countdownSeconds = $state(0);
@@ -481,10 +482,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                             stopStaleTick();
                             nextReconnectAt = 0;
                             countdownSeconds = 0;
-                            // Always refresh on reconnect — per-connection event buffer
-                            // is lost when the WebSocket drops, so we may have missed
-                            // task_updated/project_counts events during the gap.
-                            silentRefresh().catch(() => {});
+                            // Skip refresh on first connect — data was just loaded in onMount.
+                            // Only refresh on reconnection (after a disconnect), where we may
+                            // have missed task_updated/project_counts events during the gap.
+                            if (initialLoadComplete) {
+                                silentRefresh().catch(() => {});
+                            }
                         }
                     },
                     onReconnectScheduled: (nextAttemptAt) => {
@@ -590,7 +593,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     stopStaleTick();
                     nextReconnectAt = 0;
                     countdownSeconds = 0;
-                    silentRefresh().catch(() => {});
+                    // Skip refresh on first connect — data was just loaded in onMount.
+                    if (initialLoadComplete) {
+                        silentRefresh().catch(() => {});
+                    }
                 }
             },
             onReconnectScheduled: (nextAttemptAt) => {
@@ -605,6 +611,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         });
         setAppStreamRef(appStream);
         await loadAppData();
+        initialLoadComplete = true; // mark initial data load as done
         isLoadingAuth = false; // hide loading screen after data is loaded
     }
 
