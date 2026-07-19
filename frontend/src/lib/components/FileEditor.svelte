@@ -5,11 +5,13 @@
 
     // CodeMirror
     import { EditorView } from 'codemirror';
-    import { EditorState } from '@codemirror/state';
+    import { EditorState, Compartment } from '@codemirror/state';
     import { keymap } from '@codemirror/view';
     import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+    import { LSPClient, languageServerExtensions } from '@codemirror/lsp-client';
+    import { createLSPTransport } from '$lib/utils/lsp-transport';
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
     import { gitGutter } from '$lib/utils/git-gutter';
@@ -31,7 +33,7 @@
     import { svelte } from '@replit/codemirror-lang-svelte';
     import { goTemplate } from '$lib/gotemplate';
 
-    let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId, baseRef, onToggleFullscreen, mobileFullscreen, isMobile }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string; baseRef?: string; onToggleFullscreen?: () => void; mobileFullscreen?: boolean; isMobile?: boolean } = $props();
+    let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId, projectPath, baseRef, onToggleFullscreen, mobileFullscreen, isMobile }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string; projectPath?: string; baseRef?: string; onToggleFullscreen?: () => void; mobileFullscreen?: boolean; isMobile?: boolean } = $props();
 
     let content = $state('');
     let originalContent = $state('');
@@ -59,6 +61,13 @@
     let gitGutterState: { original: string } | null = null; // mutable ref for git gutter
     let searchVisible = $state(false);
     let searchApp: any = null;
+
+    // LSP state
+    let lspClient: LSPClient | null = null;
+    let lspReady = $state(false);
+    let lspError = $state('');
+    let fileUri = $state('');
+    let lspCompartment = $state(new Compartment());
 
     function getLanguageSupport(path: string) {
         const ext = path.split('.').pop()?.toLowerCase() || '';
@@ -140,6 +149,8 @@
         } as any,
     ]);
 
+
+
     function createEditor() {
         if (!editorEl) return;
 
@@ -181,7 +192,7 @@
             syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
             bracketMatching(),
             closeBrackets(),
-            autocompletion(),
+            lspCompartment.of(autocompletion()),
             rectangularSelection(),
             crosshairCursor(),
             highlightActiveLine(),
@@ -287,6 +298,8 @@
                 unmount(searchApp);
                 searchApp = null;
             }
+            lspClient?.disconnect();
+            lspClient = null;
             view?.destroy();
             vv?.removeEventListener('resize', handleResize);
             window.removeEventListener('resize', handleResize);
@@ -304,6 +317,48 @@
                 }
             });
         }
+    });
+
+    // Initialize LSP after the file and editor are ready
+    $effect(() => {
+        const _loaded = originalContentLoaded;
+        const _view = view;
+        const _projPath = projectPath;
+        const _projId = projectId;
+        const _taskId = taskId;
+
+        if (!_view || !_projId || !_taskId || !_projPath || _loaded === undefined) return;
+        if (lspClient) return; // already initialized
+
+        async function initLSP() {
+            fileUri = `file://${filePath}`;
+            try {
+                const transport = await createLSPTransport({
+                    workspace: _projPath!,
+                    filePath,
+                });
+
+                lspClient = new LSPClient({
+                    extensions: languageServerExtensions(),
+                    rootUri: `file://${_projPath!}`,
+                });
+
+                await lspClient.connect(transport).initializing;
+                lspReady = true;
+
+                // Swap compartment: replace autocompletion() with LSP plugin
+                if (view && lspClient) {
+                    view.dispatch({
+                        effects: lspCompartment.reconfigure(lspClient.plugin(fileUri)),
+                    });
+                }
+            } catch (e) {
+                lspError = String(e);
+                console.warn('[lsp] connection failed:', e);
+            }
+        }
+
+        initLSP();
     });
 
     async function loadFile() {

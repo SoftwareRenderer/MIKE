@@ -747,6 +747,7 @@
                                 displayPath={editingFile.displayPath}
                                 projectId={task.project_id}
                                 taskId={task.id}
+                                projectPath={projectPath}
                                 baseRef={diffCache.state.baseRef}
                                 onClose={closeFileEditor}
                                 onToggleFullscreen={toggleEditorFullscreen}
