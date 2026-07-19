@@ -19,9 +19,6 @@
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let lspStatusEl: HTMLButtonElement | null = null;
 
-    const lspStatusText = $derived(
-        lspError ? '⚠' : lspReady ? '✓' : '◷'
-    );
     const lspStatusLabel = $derived(lspLanguage || 'LSP');
 
     function toggleLspTooltip() {
@@ -39,14 +36,12 @@
             <button
                 type="button"
                 class="lsp-status"
-                class:lsp-ready={lspReady}
                 class:lsp-error={!!lspError}
-                class:lsp-connecting={!lspReady && !lspError}
                 bind:this={lspStatusEl}
                 onclick={toggleLspTooltip}
                 aria-label="LSP status"
             >
-                {lspStatusText} {lspStatusLabel}
+                {lspStatusLabel}
             </button>
             {#if lspTooltipVisible}
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -131,13 +126,6 @@
     }
     .lsp-status:hover {
         opacity: 1;
-    }
-    .lsp-status.lsp-connecting {
-        opacity: 0.6;
-    }
-    .lsp-status.lsp-ready {
-        opacity: 0.7;
-        color: var(--color-status-green);
     }
     .lsp-status.lsp-error {
         opacity: 1;
