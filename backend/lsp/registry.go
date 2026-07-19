@@ -10,6 +10,7 @@ type ServerConfig struct {
 	Command            string         // binary to execute (e.g., "gopls")
 	Args               []string       // args template, {workspace} replaced with workspace path
 	Extensions         []string       // file extensions (without dot), e.g., []string{"go"}
+	Language           string         // language identifier, e.g., "go", "typescript"
 	InitParamsOverride map[string]any // merged into initialize params sent to server
 }
 
@@ -29,21 +30,25 @@ func NewRegistry() *Registry {
 			Command:    "gopls",
 			Args:       []string{"serve"},
 			Extensions: []string{"go"},
+			Language:   "go",
 		},
 		{
 			Command:    "npx",
 			Args:       []string{"-y", "typescript-language-server", "--stdio"},
 			Extensions: []string{"ts", "tsx", "js", "jsx", "mjs", "cjs"},
+			Language:   "typescript",
 		},
 		{
 			Command:    "pyright-langserver",
 			Args:       []string{"--stdio"},
 			Extensions: []string{"py", "pyi"},
+			Language:   "python",
 		},
 		{
 			Command:    "rust-analyzer",
 			Args:       []string{},
 			Extensions: []string{"rs"},
+			Language:   "rust",
 		},
 	}
 

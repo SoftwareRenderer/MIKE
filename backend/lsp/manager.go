@@ -12,12 +12,6 @@ import (
 	"sync/atomic"
 )
 
-// ServerConfig describes how to launch a language server process.
-type ServerConfig struct {
-	Command string   // executable path
-	Args    []string // command-line arguments ({workspace} is replaced)
-}
-
 // LSPProcess wraps a single language server subprocess with ref-counted
 // sharing across multiple WebSocket clients.
 type LSPProcess struct {
@@ -33,6 +27,9 @@ type LSPProcess struct {
 	quit        chan struct{}
 	writeCh     chan string // messages to send to the server
 	wg          sync.WaitGroup
+	// messageCh is a reference to the ProcessManager's channel for delivering
+	// server responses to the handler's router.
+	messageCh chan<- json.RawMessage
 }
 
 // ProcessManager tracks and shares LSPProcess instances by
@@ -40,12 +37,15 @@ type LSPProcess struct {
 type ProcessManager struct {
 	mu        sync.Mutex
 	processes map[string]*LSPProcess // key: "workspacePath\tlanguage"
+	// messageCh delivers all server messages to the handler's router.
+	messageCh chan json.RawMessage
 }
 
 // NewProcessManager creates a ready-to-use ProcessManager.
 func NewProcessManager() *ProcessManager {
 	return &ProcessManager{
 		processes: make(map[string]*LSPProcess),
+		messageCh: make(chan json.RawMessage, 1024),
 	}
 }
 
@@ -66,7 +66,7 @@ func (pm *ProcessManager) GetOrCreate(workspacePath, language string, cfg *Serve
 		return proc, nil
 	}
 
-	proc, err := spawnProcess(workspacePath, language, cfg)
+	proc, err := spawnProcess(workspacePath, language, cfg, pm.messageCh)
 	if err != nil {
 		pm.mu.Unlock()
 		return nil, err
@@ -104,7 +104,7 @@ func (pm *ProcessManager) Release(workspacePath, language string) {
 }
 
 // SendToServer writes a JSON-RPC message to the language server's stdin.
-func (pm *ProcessManager) SendToServer(process *LSPProcess, msg string) error {
+func (pm *ProcessManager) SendToServer(process *LSPProcess, msg json.RawMessage) error {
 	// Non-blocking check first so we prefer the shutdown path when both
 	// channels are ready (quit closed + writeCh has buffer space).
 	select {
@@ -112,12 +112,19 @@ func (pm *ProcessManager) SendToServer(process *LSPProcess, msg string) error {
 		return fmt.Errorf("lsp process %s/%s is shutting down", process.Workspace, process.Language)
 	default:
 	}
+
 	select {
-	case process.writeCh <- msg:
+	case process.writeCh <- string(msg) + "\n":
 		return nil
 	case <-process.quit:
 		return fmt.Errorf("lsp process %s/%s is shutting down", process.Workspace, process.Language)
 	}
+}
+
+// ServerMessageCh returns the channel for receiving all server messages.
+// The handler's serverMessageRouter reads from this channel.
+func (pm *ProcessManager) ServerMessageCh() <-chan json.RawMessage {
+	return pm.messageCh
 }
 
 // Subscribe registers a client to receive notification messages from the
@@ -143,7 +150,7 @@ func (pm *ProcessManager) Unsubscribe(process *LSPProcess, clientID uint64) {
 
 // --- internal helpers ---
 
-func spawnProcess(workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error) {
+func spawnProcess(workspacePath, language string, cfg *ServerConfig, messageCh chan<- json.RawMessage) (*LSPProcess, error) {
 	args := make([]string, 0, len(cfg.Args))
 	for _, a := range cfg.Args {
 		args = append(args, strings.ReplaceAll(a, "{workspace}", workspacePath))
@@ -176,6 +183,7 @@ func spawnProcess(workspacePath, language string, cfg *ServerConfig) (*LSPProces
 		subscribers: make(map[uint64]chan []byte),
 		quit:        make(chan struct{}),
 		writeCh:     make(chan string, 128),
+		messageCh:   messageCh,
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -236,7 +244,7 @@ func (p *LSPProcess) writeLoop() {
 			if !ok {
 				return
 			}
-			_, _ = p.Stdin.Write([]byte(msg + "\n"))
+			_, _ = p.Stdin.Write([]byte(msg))
 		}
 	}
 }
@@ -261,15 +269,20 @@ func (p *LSPProcess) dispatchMessage(raw json.RawMessage) {
 		return // malformed message, skip
 	}
 
-	// Notification: no id field
+	// Notification: no id field — broadcast to subscribers.
 	if envelope.ID == nil {
 		p.broadcastNotification(raw)
 		return
 	}
 
-	// Server request (rare, e.g. window/showMessage): id + method present.
-	// Responses (id present, no method) are routed by the handler layer.
-	// We ignore server requests here; the handler can handle them if needed.
+	// Response (id present, no method) or server request (id + method).
+	// Both are forwarded to the handler via messageCh for ID remapping.
+	// The handler's serverMessageRouter handles routing.
+	select {
+	case p.messageCh <- raw:
+	default:
+		// Drop if channel is full to avoid blocking the read goroutine.
+	}
 }
 
 // broadcastNotification sends a raw notification to all subscriber channels.

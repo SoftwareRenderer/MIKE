@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -40,18 +41,28 @@ type SubscribeParams struct {
 type ClientSession struct {
 	conn      *websocket.Conn
 	clientID  uint64
-	process   *LSPProcess
-	writeMu   sync.Mutex
+	workspace string
+	language  string
 	// clientRequestID → backendRequestID (outgoing requests)
 	outgoingIDs map[string]string
 	// backendRequestID → clientRequestID (incoming responses)
 	incomingIDs map[string]string
 }
 
-// ProcessManagerOps defines the interface for managing LSP processes.
-type ProcessManagerOps interface {
-	GetOrCreateProcess(workspace string, cfg *ServerConfig) *LSPProcess
-	RemoveProcess(workspace string)
+// workspaceState tracks per-workspace+language state in the handler.
+type workspaceState struct {
+	process      *LSPProcess
+	language     string
+	cfg          *ServerConfig
+	clientCount  int
+	initialized  bool
+	initResponse json.RawMessage
+}
+
+// lspManager defines the operations the LSP handler needs from the process manager.
+type lspManager interface {
+	GetOrCreate(workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error)
+	Release(workspacePath, language string)
 	SendToServer(process *LSPProcess, msg json.RawMessage) error
 	ServerMessageCh() <-chan json.RawMessage
 }
@@ -59,11 +70,13 @@ type ProcessManagerOps interface {
 // LSPHandler bridges frontend LSP clients to backend-managed language server processes.
 // It handles request ID remapping so multiple clients can share a single language server.
 type LSPHandler struct {
-	manager  ProcessManagerOps
+	manager  lspManager
 	registry *Registry
 	mu       sync.Mutex
 	clients  map[*websocket.Conn]*ClientSession
-	nextID   atomic.Uint64
+	// Per workspace+language state
+	workspaces map[string]*workspaceState
+	nextID      atomic.Uint64
 	// nextBackendID generates unique backend request IDs for remapping
 	nextBackendID atomic.Int64
 	// serverRouterDone signals the server message router to stop
@@ -73,11 +86,12 @@ type LSPHandler struct {
 }
 
 // NewLSPHandler creates a new LSPHandler.
-func NewLSPHandler(reg *Registry, mgr ProcessManagerOps) *LSPHandler {
+func NewLSPHandler(reg *Registry, mgr lspManager) *LSPHandler {
 	h := &LSPHandler{
 		registry:         reg,
 		manager:          mgr,
 		clients:          make(map[*websocket.Conn]*ClientSession),
+		workspaces:       make(map[string]*workspaceState),
 		serverRouterDone: make(chan struct{}),
 	}
 	// Start the server message router
@@ -118,15 +132,20 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		h.mu.Lock()
 		delete(h.clients, conn)
-		h.mu.Unlock()
 
-		if session.process != nil {
-			remaining := session.process.RemoveClient()
-			if remaining == 0 {
-				h.manager.RemoveProcess(session.process.Workspace)
-				log.Printf("[lsp] removed process for workspace=%s (no clients)", session.process.Workspace)
+		// Clean up workspace state on disconnect
+		if session.workspace != "" {
+			if ws, ok := h.workspaces[session.workspace]; ok {
+				ws.clientCount--
+				if ws.clientCount <= 0 {
+					h.manager.Release(ws.process.Workspace, ws.process.Language)
+					delete(h.workspaces, session.workspace)
+					log.Printf("[lsp] removed process for workspace=%s lang=%s (no clients)",
+						ws.process.Workspace, ws.process.Language)
+				}
 			}
 		}
+		h.mu.Unlock()
 
 		conn.Close(websocket.StatusNormalClosure, "closed")
 		log.Printf("[lsp] client %d disconnected", clientID)
@@ -168,7 +187,7 @@ func (h *LSPHandler) serverMessageRouter() {
 // handleClientMessage processes a message from a WebSocket client.
 func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSession, msg json.RawMessage) {
 	// First message must be a subscription
-	if session.process == nil {
+	if session.workspace == "" {
 		h.handleSubscription(ctx, session, msg)
 		return
 	}
@@ -220,77 +239,123 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 		return
 	}
 
-	// Look up the server config from the registry
+	// Look up the server config from the registry using the file extension
 	cfg := h.registry.Lookup(sub.Params.File)
 	if cfg == nil {
 		// Try to look up by workspace path as fallback
 		cfg = h.registry.Lookup(sub.Params.Workspace)
 	}
 	if cfg == nil {
-		// No config found — create a process with nil config for manual servers
-		cfg = &ServerConfig{}
+		// No config found — close connection with error
+		log.Printf("[lsp] client %d: no language server config for file %s", session.clientID, sub.Params.File)
+		session.conn.Close(websocket.StatusProtocolError, "no language server config for file")
+		return
 	}
 
-	// Get or create the process
-	process := h.manager.GetOrCreateProcess(sub.Params.Workspace, cfg)
-	process.AddClient()
+	workspaceKey := processKey(sub.Params.Workspace, cfg.Language)
 
-	session.process = process
-	log.Printf("[lsp] client %d subscribed to workspace=%s (process=%s, clients=%d)",
-		session.clientID, sub.Params.Workspace, process.ID, process.ClientCount())
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	ws, ok := h.workspaces[workspaceKey]
+	if !ok {
+		// Spawn a new process
+		process, err := h.manager.GetOrCreate(sub.Params.Workspace, cfg.Language, cfg)
+		if err != nil {
+			log.Printf("[lsp] client %d: failed to spawn process: %v", session.clientID, err)
+			session.conn.Close(websocket.StatusInternalError, fmt.Sprintf("spawn failed: %v", err))
+			return
+		}
+
+		ws = &workspaceState{
+			process:   process,
+			language:  cfg.Language,
+			cfg:       cfg,
+			clientCount: 1,
+		}
+		h.workspaces[workspaceKey] = ws
+	} else {
+		ws.clientCount++
+	}
+
+	session.workspace = workspaceKey
+	session.language = cfg.Language
+	log.Printf("[lsp] client %d subscribed to workspace=%s lang=%s (clients=%d)",
+		session.clientID, sub.Params.Workspace, cfg.Language, ws.clientCount)
 }
 
 // handleInitialize intercepts initialize requests. Only the first client's
 // initialize reaches the server; subsequent clients get the cached response.
-func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientID string) {
-	if session.process.Initialized() {
+func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string) {
+	h.mu.Lock()
+	ws, ok := h.workspaces[session.workspace]
+	h.mu.Unlock()
+
+	if !ok {
+		return
+	}
+
+	if ws.initialized {
 		// Return cached response immediately
-		cached := session.process.GetInitResponse()
-		if cached == nil {
+		if ws.initResponse == nil {
 			return
 		}
-		remapped := remapResponseID(cached, clientID)
+		remapped := remapResponseID(ws.initResponse, clientReqID)
 		if remapped == nil {
 			return
 		}
-		session.writeMu.Lock()
 		session.conn.Write(ctx, websocket.MessageText, remapped)
-		session.writeMu.Unlock()
 		return
 	}
 
 	// First client — forward to server with ID remapping
-	h.forwardRequest(ctx, session, msg, clientID)
+	h.forwardRequest(ctx, session, msg, clientReqID)
 }
 
 // forwardRequest remaps the request ID and forwards to the language server.
-func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession, msg json.RawMessage, clientID string) {
+func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string) {
 	// Generate a unique backend ID
 	backendID := h.nextBackendID.Add(1)
 	backendIDStr := itoa(backendID)
 
 	// Store the mapping
-	session.outgoingIDs[clientID] = backendIDStr
-	session.incomingIDs[backendIDStr] = clientID
+	session.outgoingIDs[clientReqID] = backendIDStr
+	session.incomingIDs[backendIDStr] = clientReqID
 
 	// Remap the id in the JSON
 	remapped := remapRequestID(msg, backendID)
 	if remapped == nil {
-		log.Printf("[lsp] client %d: failed to remap request id=%s", session.clientID, clientID)
+		log.Printf("[lsp] client %d: failed to remap request id=%s", session.clientID, clientReqID)
 		return
 	}
 
 	// Forward to server
-	if err := h.manager.SendToServer(session.process, remapped); err != nil {
+	h.mu.Lock()
+	ws, ok := h.workspaces[session.workspace]
+	h.mu.Unlock()
+
+	if !ok || ws.process == nil {
+		return
+	}
+
+	if err := h.manager.SendToServer(ws.process, remapped); err != nil {
 		log.Printf("[lsp] client %d: send to server failed: %v", session.clientID, err)
 	}
 
-	log.Printf("[lsp] client %d: request id=%s → backend id=%s", session.clientID, clientID, backendIDStr)
+	log.Printf("[lsp] client %d: request id=%s → backend id=%s", session.clientID, clientReqID, backendIDStr)
 }
 
 // forwardRaw forwards a message to the server without ID remapping.
 func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg json.RawMessage) {
-	if err := h.manager.SendToServer(session.process, msg); err != nil {
+	h.mu.Lock()
+	ws, ok := h.workspaces[session.workspace]
+	h.mu.Unlock()
+
+	if !ok || ws.process == nil {
+		return
+	}
+
+	if err := h.manager.SendToServer(ws.process, msg); err != nil {
 		log.Printf("[lsp] client %d: forward raw failed: %v", session.clientID, err)
 	}
 }
@@ -322,13 +387,15 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 	// Find the session that owns this backend ID
 	var targetSession *ClientSession
 	var originalClientID string
+	var targetWorkspace *workspaceState
 	for _, s := range h.clients {
-		if s.process == nil {
+		if s.workspace == "" {
 			continue
 		}
 		if clientID, ok := s.incomingIDs[backendID]; ok {
 			targetSession = s
 			originalClientID = clientID
+			targetWorkspace = h.workspaces[s.workspace]
 			// Clean up mappings
 			delete(s.incomingIDs, backendID)
 			delete(s.outgoingIDs, clientID)
@@ -343,12 +410,20 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 	}
 
 	// Check if this is an initialize response — cache it before remapping
-	if targetSession.process != nil && !targetSession.process.Initialized() {
-		// Check if the original request was "initialize"
+	if targetWorkspace != nil && !targetWorkspace.initialized {
+		// Check if the original request was "initialize" by looking at the client's outgoing mapping
+		// We already cleaned up the mapping, so check if the response contains init capabilities
 		var rpc JSONRPCMessage
-		if err := json.Unmarshal(serverMsg, &rpc); err == nil {
-			// Cache the original server response (with backend ID)
-			targetSession.process.MarkInitialized(serverMsg)
+		if err := json.Unmarshal(serverMsg, &rpc); err == nil && rpc.Result != nil {
+			var result struct {
+				Capabilities json.RawMessage `json:"capabilities"`
+			}
+			if err := json.Unmarshal(rpc.Result, &result); err == nil && len(result.Capabilities) > 0 {
+				// This looks like an initialize response — cache it
+				targetWorkspace.initialized = true
+				targetWorkspace.initResponse = serverMsg
+				log.Printf("[lsp] cached initialize response for workspace=%s", targetWorkspace.process.Workspace)
+			}
 		}
 	}
 
@@ -358,30 +433,26 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 		return
 	}
 
-	targetSession.writeMu.Lock()
 	targetSession.conn.Write(context.Background(), websocket.MessageText, remapped)
-	targetSession.writeMu.Unlock()
 }
 
 // broadcastNotification sends a notification to all clients subscribed to the same process.
 func (h *LSPHandler) broadcastNotification(serverMsg json.RawMessage) {
 	h.mu.Lock()
 
-	// Group sessions by process
-	processClients := make(map[*LSPProcess][]*ClientSession)
+	// Group sessions by workspace key
+	workspaceClients := make(map[string][]*ClientSession)
 	for _, s := range h.clients {
-		if s.process != nil {
-			processClients[s.process] = append(processClients[s.process], s)
+		if s.workspace != "" {
+			workspaceClients[s.workspace] = append(workspaceClients[s.workspace], s)
 		}
 	}
 	h.mu.Unlock()
 
 	ctx := context.Background()
-	for _, sessions := range processClients {
+	for _, sessions := range workspaceClients {
 		for _, s := range sessions {
-			s.writeMu.Lock()
 			s.conn.Write(ctx, websocket.MessageText, serverMsg)
-			s.writeMu.Unlock()
 		}
 	}
 }

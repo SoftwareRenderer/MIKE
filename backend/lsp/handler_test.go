@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,9 +16,9 @@ import (
 // mockProcessManager is a test double for ProcessManager that captures sent messages
 // and can inject server responses.
 type mockProcessManager struct {
-	mu        sync.Mutex
-	processes map[string]*LSPProcess
-	nextID    int
+	mu           sync.Mutex
+	processes    map[string]*LSPProcess // key: "workspace\tlanguage"
+	nextID       atomic.Int64
 	// sentMessages captures messages sent to the server (in order)
 	sentMessages []json.RawMessage
 	// messageCh for delivering server responses
@@ -26,31 +27,39 @@ type mockProcessManager struct {
 
 func newMockProcessManager() *mockProcessManager {
 	return &mockProcessManager{
-		processes:  make(map[string]*LSPProcess),
-		messageCh:  make(chan json.RawMessage, 1024),
+		processes: make(map[string]*LSPProcess),
+		messageCh: make(chan json.RawMessage, 1024),
 	}
 }
 
-func (m *mockProcessManager) GetOrCreateProcess(workspace string, cfg *ServerConfig) *LSPProcess {
+func (m *mockProcessManager) GetOrCreate(workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if p, ok := m.processes[workspace]; ok {
-		return p
+	key := processKey(workspacePath, language)
+	if p, ok := m.processes[key]; ok {
+		atomic.AddInt32(&p.RefCount, 1)
+		return p, nil
 	}
-	m.nextID++
+	m.nextID.Add(1)
 	p := &LSPProcess{
-		ID:        "test-proc-" + string(rune(m.nextID)),
-		Workspace: workspace,
-		Config:    cfg,
+		Workspace: workspacePath,
+		Language:  language,
+		RefCount:  1,
 	}
-	m.processes[workspace] = p
-	return p
+	m.processes[key] = p
+	return p, nil
 }
 
-func (m *mockProcessManager) RemoveProcess(workspace string) {
+func (m *mockProcessManager) Release(workspacePath, language string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.processes, workspace)
+	key := processKey(workspacePath, language)
+	if p, ok := m.processes[key]; ok {
+		n := atomic.AddInt32(&p.RefCount, -1)
+		if n <= 0 {
+			delete(m.processes, key)
+		}
+	}
 }
 
 func (m *mockProcessManager) SendToServer(process *LSPProcess, msg json.RawMessage) error {
@@ -63,6 +72,12 @@ func (m *mockProcessManager) SendToServer(process *LSPProcess, msg json.RawMessa
 func (m *mockProcessManager) ServerMessageCh() <-chan json.RawMessage {
 	return m.messageCh
 }
+
+func (m *mockProcessManager) Subscribe(process *LSPProcess, clientID uint64) chan []byte {
+	return make(chan []byte, 64)
+}
+
+func (m *mockProcessManager) Unsubscribe(process *LSPProcess, clientID uint64) {}
 
 func (m *mockProcessManager) Deliver(msg json.RawMessage) {
 	select {
@@ -85,27 +100,10 @@ func (m *mockProcessManager) ResetSent() {
 	m.sentMessages = nil
 }
 
-// dialClient creates a test HTTP request and upgrades it to a WebSocket.
-func dialClient(t *testing.T, handler *LSPHandler) *websocket.Conn {
-	t.Helper()
-	req := httptest.NewRequest("GET", "/api/lsp", nil)
-	req.Header.Set("Upgrade", "websocket")
-	req.Header.Set("Connection", "Upgrade")
-	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
-	req.Header.Set("Sec-WebSocket-Version", "13")
-
-	rec := httptest.NewRecorder()
-	handler.HandleLSP(rec, req)
-
-	if rec.Code != http.StatusSwitchingProtocols {
-		t.Fatalf("expected 101 Switching Protocols, got %d", rec.Code)
-	}
-
-	// The coder/websocket test recorder doesn't give us a real conn,
-	// so we need to use a different approach with a real listener.
-	_ = req
-	_ = rec
-	return nil
+func (m *mockProcessManager) ProcessCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.processes)
 }
 
 // testClient wraps a WebSocket connection for test convenience.
@@ -173,6 +171,21 @@ func connectClient(t *testing.T, url string) *testClient {
 	return &testClient{conn: conn}
 }
 
+// subscribeClient connects and subscribes to a workspace.
+func subscribeClient(t *testing.T, url string, workspace, file string) *testClient {
+	t.Helper()
+	client := connectClient(t, url)
+	client.send(t, map[string]any{
+		"method": "workspace/subscribe",
+		"params": map[string]any{
+			"workspace": workspace,
+			"file":      file,
+		},
+	})
+	time.Sleep(50 * time.Millisecond)
+	return client
+}
+
 func TestIDRemapping(t *testing.T) {
 	mgr := newMockProcessManager()
 	reg := NewRegistry()
@@ -181,17 +194,8 @@ func TestIDRemapping(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	// Connect client
-	client := connectClient(t, url)
-
-	// Subscribe
-	client.send(t, map[string]any{
-		"method": "workspace/subscribe",
-		"params": map[string]any{
-			"workspace": "/tmp/test-project",
-			"file":      "main.go",
-		},
-	})
+	// Connect client and subscribe
+	client := subscribeClient(t, url, "/tmp/test-project", "main.go")
 
 	// Send a request with id=5
 	client.send(t, map[string]any{
@@ -251,28 +255,18 @@ func TestNotificationBroadcast(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	// Connect 3 clients
+	// Connect 3 clients to the same workspace
 	clients := make([]*testClient, 3)
 	for i := range clients {
-		clients[i] = connectClient(t, url)
-		clients[i].send(t, map[string]any{
-			"method": "workspace/subscribe",
-			"params": map[string]any{
-				"workspace": "/tmp/test-project",
-				"file":      "main.go",
-			},
-		})
+		clients[i] = subscribeClient(t, url, "/tmp/test-project", "main.go")
 	}
-
-	// Give time for subscriptions to process
-	time.Sleep(50 * time.Millisecond)
 
 	// Simulate a server notification (no id, has method)
 	notification := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "textDocument/publishDiagnostics",
 		"params": map[string]any{
-			"uri":      "file:///main.go",
+			"uri":         "file:///main.go",
 			"diagnostics": []any{},
 		},
 	}
@@ -300,14 +294,7 @@ func TestInitializeCaching(t *testing.T) {
 	url := startTestServer(t, handler)
 
 	// Connect first client
-	client1 := connectClient(t, url)
-	client1.send(t, map[string]any{
-		"method": "workspace/subscribe",
-		"params": map[string]any{
-			"workspace": "/tmp/test-project",
-			"file":      "main.go",
-		},
-	})
+	client1 := subscribeClient(t, url, "/tmp/test-project", "main.go")
 
 	// First client sends initialize with id=1
 	client1.send(t, map[string]any{
@@ -365,14 +352,7 @@ func TestInitializeCaching(t *testing.T) {
 	}
 
 	// Connect second client to the same workspace
-	client2 := connectClient(t, url)
-	client2.send(t, map[string]any{
-		"method": "workspace/subscribe",
-		"params": map[string]any{
-			"workspace": "/tmp/test-project",
-			"file":      "main.go",
-		},
-	})
+	client2 := subscribeClient(t, url, "/tmp/test-project", "main.go")
 
 	// Second client sends initialize with id=2
 	client2.send(t, map[string]any{
@@ -422,26 +402,11 @@ func TestDisconnectCleanup(t *testing.T) {
 	url := startTestServer(t, handler)
 
 	// Connect client
-	client := connectClient(t, url)
-	client.send(t, map[string]any{
-		"method": "workspace/subscribe",
-		"params": map[string]any{
-			"workspace": "/tmp/test-project",
-			"file":      "main.go",
-		},
-	})
+	client := subscribeClient(t, url, "/tmp/test-project", "main.go")
 
-	time.Sleep(50 * time.Millisecond)
-
-	// Verify the process has 1 client
-	mgr.mu.Lock()
-	process := mgr.processes["/tmp/test-project"]
-	mgr.mu.Unlock()
-	if process == nil {
-		t.Fatal("expected process to exist after subscription")
-	}
-	if process.ClientCount() != 1 {
-		t.Errorf("expected 1 client, got %d", process.ClientCount())
+	// Verify the process exists
+	if mgr.ProcessCount() != 1 {
+		t.Errorf("expected 1 process, got %d", mgr.ProcessCount())
 	}
 
 	// Disconnect client
@@ -451,11 +416,8 @@ func TestDisconnectCleanup(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify the process was removed (0 clients)
-	mgr.mu.Lock()
-	_, exists := mgr.processes["/tmp/test-project"]
-	mgr.mu.Unlock()
-	if exists {
-		t.Error("expected process to be removed after client disconnect")
+	if mgr.ProcessCount() != 0 {
+		t.Errorf("expected 0 processes after disconnect, got %d", mgr.ProcessCount())
 	}
 }
 
@@ -467,14 +429,7 @@ func TestMultipleRequestRemapping(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	client := connectClient(t, url)
-	client.send(t, map[string]any{
-		"method": "workspace/subscribe",
-		"params": map[string]any{
-			"workspace": "/tmp/test-project",
-			"file":      "main.go",
-		},
-	})
+	client := subscribeClient(t, url, "/tmp/test-project", "main.go")
 
 	// Send multiple requests with different IDs
 	requests := []int64{10, 20, 30}
@@ -521,7 +476,7 @@ func TestMultipleRequestRemapping(t *testing.T) {
 		mgr.Deliver(respData)
 	}
 
-	// All 3 clients should receive responses
+	// All 3 responses should be received
 	for i := 0; i < 3; i++ {
 		resp := client.receiveJSON(t)
 		if resp.ID == nil {
@@ -541,16 +496,7 @@ func TestNotificationDoesNotRemapIDs(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	client := connectClient(t, url)
-	client.send(t, map[string]any{
-		"method": "workspace/subscribe",
-		"params": map[string]any{
-			"workspace": "/tmp/test-project",
-			"file":      "main.go",
-		},
-	})
-
-	time.Sleep(50 * time.Millisecond)
+	client := subscribeClient(t, url, "/tmp/test-project", "main.go")
 
 	// Server sends a notification — it should arrive unchanged
 	notification := map[string]any{
@@ -559,7 +505,7 @@ func TestNotificationDoesNotRemapIDs(t *testing.T) {
 		"params": map[string]any{
 			"token": "progressToken1",
 			"value": map[string]any{
-				"kind": "report",
+				"kind":    "report",
 				"message": "Indexing...",
 			},
 		},
@@ -584,16 +530,7 @@ func TestInitializedNotificationForwarded(t *testing.T) {
 
 	url := startTestServer(t, handler)
 
-	client := connectClient(t, url)
-	client.send(t, map[string]any{
-		"method": "workspace/subscribe",
-		"params": map[string]any{
-			"workspace": "/tmp/test-project",
-			"file":      "main.go",
-		},
-	})
-
-	time.Sleep(50 * time.Millisecond)
+	client := subscribeClient(t, url, "/tmp/test-project", "main.go")
 	mgr.ResetSent()
 
 	// Send "initialized" notification (no id, method="initialized")
@@ -627,26 +564,10 @@ func TestTwoClientsDifferentWorkspaces(t *testing.T) {
 	url := startTestServer(t, handler)
 
 	// Client 1 subscribes to workspace A
-	client1 := connectClient(t, url)
-	client1.send(t, map[string]any{
-		"method": "workspace/subscribe",
-		"params": map[string]any{
-			"workspace": "/tmp/project-a",
-			"file":      "main.go",
-		},
-	})
+	client1 := subscribeClient(t, url, "/tmp/project-a", "main.go")
 
 	// Client 2 subscribes to workspace B
-	client2 := connectClient(t, url)
-	client2.send(t, map[string]any{
-		"method": "workspace/subscribe",
-		"params": map[string]any{
-			"workspace": "/tmp/project-b",
-			"file":      "main.go",
-		},
-	})
-
-	time.Sleep(50 * time.Millisecond)
+	client2 := subscribeClient(t, url, "/tmp/project-b", "main.go")
 
 	// Client 1 sends a request
 	client1.send(t, map[string]any{
@@ -686,5 +607,114 @@ func TestTwoClientsDifferentWorkspaces(t *testing.T) {
 	_, _, err := client2.conn.Read(ctx)
 	if err == nil {
 		t.Error("client2 should not have received any message (different workspace)")
+	}
+}
+
+func TestTwoClientsSameWorkspace(t *testing.T) {
+	mgr := newMockProcessManager()
+	reg := NewRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+
+	// Both clients subscribe to the same workspace
+	client1 := subscribeClient(t, url, "/tmp/test-project", "main.go")
+	client2 := subscribeClient(t, url, "/tmp/test-project", "main.go")
+
+	// Client 1 sends a request
+	client1.send(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      100,
+		"method":  "textDocument/completion",
+		"params":  map[string]any{},
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	sent := mgr.SentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 sent message, got %d", len(sent))
+	}
+
+	// Simulate response
+	var m map[string]any
+	json.Unmarshal(sent[0], &m)
+	response := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      m["id"],
+		"result":  map[string]any{"items": []any{}},
+	}
+	respData, _ := json.Marshal(response)
+	mgr.Deliver(respData)
+
+	// Client 1 should receive the response
+	resp := client1.receiveJSON(t)
+	if resp.ID == nil || resp.ID.String() != "100" {
+		t.Errorf("client1: expected id 100, got %v", resp.ID)
+	}
+
+	// Client 2 should NOT receive the response (it didn't make the request)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, _, err := client2.conn.Read(ctx)
+	if err == nil {
+		t.Error("client2 should not have received the response")
+	}
+}
+
+func TestNotificationBroadcastsToAllSameWorkspace(t *testing.T) {
+	mgr := newMockProcessManager()
+	reg := NewRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+
+	// Both clients subscribe to the same workspace
+	client1 := subscribeClient(t, url, "/tmp/test-project", "main.go")
+	client2 := subscribeClient(t, url, "/tmp/test-project", "main.go")
+
+	// Server sends a notification
+	notification := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "textDocument/publishDiagnostics",
+		"params":  map[string]any{"uri": "file:///main.go"},
+	}
+	notifData, _ := json.Marshal(notification)
+	mgr.Deliver(notifData)
+
+	// Both clients should receive it
+	for i, c := range []*testClient{client1, client2} {
+		resp := c.receiveJSON(t)
+		if resp.Method != "textDocument/publishDiagnostics" {
+			t.Errorf("client %d: expected publishDiagnostics, got %s", i+1, resp.Method)
+		}
+	}
+}
+
+func TestUnknownExtensionRejected(t *testing.T) {
+	mgr := newMockProcessManager()
+	reg := NewRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+
+	client := connectClient(t, url)
+	client.send(t, map[string]any{
+		"method": "workspace/subscribe",
+		"params": map[string]any{
+			"workspace": "/tmp/test-project",
+			"file":      "file.unknown",
+		},
+	})
+
+	// The connection should be closed with an error
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _, err := client.conn.Read(ctx)
+	if err == nil {
+		t.Error("expected connection to be closed for unknown extension")
 	}
 }

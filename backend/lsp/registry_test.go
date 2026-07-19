@@ -40,24 +40,25 @@ func TestAllPreRegisteredExtensions(t *testing.T) {
 	tests := []struct {
 		path     string
 		command  string
+		language string
 	}{
 		// Go
-		{"file.go", "gopls"},
+		{"file.go", "gopls", "go"},
 
 		// TypeScript family
-		{"file.ts", "npx"},
-		{"file.tsx", "npx"},
-		{"file.js", "npx"},
-		{"file.jsx", "npx"},
-		{"file.mjs", "npx"},
-		{"file.cjs", "npx"},
+		{"file.ts", "npx", "typescript"},
+		{"file.tsx", "npx", "typescript"},
+		{"file.js", "npx", "typescript"},
+		{"file.jsx", "npx", "typescript"},
+		{"file.mjs", "npx", "typescript"},
+		{"file.cjs", "npx", "typescript"},
 
 		// Python
-		{"file.py", "pyright-langserver"},
-		{"file.pyi", "pyright-langserver"},
+		{"file.py", "pyright-langserver", "python"},
+		{"file.pyi", "pyright-langserver", "python"},
 
 		// Rust
-		{"file.rs", "rust-analyzer"},
+		{"file.rs", "rust-analyzer", "rust"},
 	}
 
 	for _, tt := range tests {
@@ -68,6 +69,9 @@ func TestAllPreRegisteredExtensions(t *testing.T) {
 			}
 			if cfg.Command != tt.command {
 				t.Errorf("path %s: expected command %s, got %s", tt.path, tt.command, cfg.Command)
+			}
+			if cfg.Language != tt.language {
+				t.Errorf("path %s: expected language %s, got %s", tt.path, tt.language, cfg.Language)
 			}
 		})
 	}
