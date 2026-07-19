@@ -11,7 +11,7 @@
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
     import { LSPClient, languageServerExtensions } from '@codemirror/lsp-client';
-    import { createLSPTransport } from '$lib/utils/lsp-transport';
+    import { requestLSPChannel, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
     import { isLSPEnabled } from '$lib/storage';
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
@@ -66,7 +66,9 @@
 
     // LSP state
     let lspClient: LSPClient | null = null;
+    let lspTransport: VirtualTransport | null = null;
     let lspReady = $state(false);
+    let lspConnecting = $state(false); // prevents duplicate connections
     let lspError = $state('');
     let fileUri = $state('');
     let lspCompartment = $state(new Compartment());
@@ -305,6 +307,8 @@
                 searchApp = null;
             }
             lspClient?.disconnect();
+            lspTransport?.release();
+            lspTransport = null;
             lspClient = null;
             view?.destroy();
             editorReady = false;
@@ -341,22 +345,24 @@
             lspEnabled = await isLSPEnabled();
             if (!lspEnabled) return; // fall back to built-in autocompletion
 
+            lspConnecting = true;
             fileUri = `file://${filePath}`;
             try {
-                const transport = await createLSPTransport({
+                const virtTransport = await requestLSPChannel({
                     workspace: _projPath!,
                     filePath,
                     onDisconnected: () => {
                         lspReady = false;
                     },
                 });
+                lspTransport = virtTransport;
 
                 lspClient = new LSPClient({
                     extensions: languageServerExtensions(),
                     rootUri: `file://${_projPath!}`,
                 });
 
-                await lspClient.connect(transport).initializing;
+                await lspClient.connect(virtTransport).initializing;
                 lspReady = true;
 
                 // Swap compartment: replace autocompletion() with LSP plugin
@@ -368,15 +374,19 @@
             } catch (e) {
                 lspError = String(e);
                 console.warn('[lsp] connection failed:', e);
+            } finally {
+                lspConnecting = false;
             }
         }
 
         initLSP();
     });
 
-    // Attempt LSP reconnection when the client is disconnected and the editor is visible
+    // Attempt LSP reconnection when the client is disconnected and the editor is visible.
+    // With shared connections, reconnection creates a new virtual transport from the manager.
     $effect(() => {
         const _lspReady = lspReady;
+        const _lspConnecting = lspConnecting;
         const _lspClient = lspClient;
         const _view = view;
         const _projPath = projectPath;
@@ -384,30 +394,42 @@
 
         // Only reconnect if we previously had a client but it's now disconnected
         if (!_lspClient || !_view || !_projPath || !_lspEnabled) return;
-        if (_lspReady || _lspClient.connected) return; // still connected
+        if (_lspReady || _lspClient.connected || _lspConnecting) return; // still connected or connecting
 
         async function reconnectLSP() {
+            lspConnecting = true;
             try {
-                const transport = await createLSPTransport({
+                lspTransport?.release();
+                lspTransport = null;
+                _lspClient?.disconnect();
+
+                const virtTransport = await requestLSPChannel({
                     workspace: _projPath!,
                     filePath,
                     onDisconnected: () => {
                         lspReady = false;
                     },
                 });
+                lspTransport = virtTransport;
 
-                if (!_lspClient) return; // may have been disconnected in the meantime
-                await _lspClient.connect(transport).initializing;
+                const newClient = new LSPClient({
+                    extensions: languageServerExtensions(),
+                    rootUri: `file://${_projPath!}`,
+                });
+                lspClient = newClient;
+
+                await newClient.connect(virtTransport).initializing;
                 lspReady = true;
 
-                // Re-attach plugin if needed
-                if (_view && _lspClient) {
+                if (_view && newClient) {
                     _view.dispatch({
-                        effects: lspCompartment.reconfigure(_lspClient.plugin(fileUri)),
+                        effects: lspCompartment.reconfigure(newClient.plugin(fileUri)),
                     });
                 }
             } catch (e) {
                 console.warn('[lsp] reconnection failed:', e);
+            } finally {
+                lspConnecting = false;
             }
         }
 
