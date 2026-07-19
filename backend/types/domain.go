@@ -13,6 +13,7 @@ type Task struct {
 	SessionID                 string    `json:"session_id"`
 	Branch                    string    `json:"branch"`
 	BaseRef                   string    `json:"base_ref,omitempty"`
+	BaseRefCommit             string    `json:"base_ref_commit,omitempty"` // commit hash of base_ref at task start
 	BranchTip                 string    `json:"branch_tip,omitempty"` // commit hash at time of commit-and-done
 	Output                    string    `json:"output"`
 	ExecutionState            string    `json:"execution_state"`

@@ -64,6 +64,7 @@ export interface Task {
     column_order: number;
     session_id?: string;
     branch?: string;
+    branch_tip?: string; // commit hash at time of commit-and-done
     output?: string;
     execution_state: string;
     has_merge_conflict: boolean;

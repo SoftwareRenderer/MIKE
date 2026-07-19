@@ -682,6 +682,11 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	var baseRef string
 	if customBase != "" {
 		baseRef = customBase
+	} else if headRef != "" && task.BaseRefCommit != "" {
+		// Done-task diff: use the base ref commit captured at task start time.
+		// After a fast-forward merge, the base ref branch pointer has moved forward,
+		// so using the branch name would give an empty diff.
+		baseRef = task.BaseRefCommit
 	} else {
 		thread, _ := h.store.GetThread(task.CurrentThreadID)
 		forkBranch := ""
@@ -947,10 +952,19 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 
 // getTaskDiffFromProject runs git diff from the project repo using the task's branch.
 // Uses BranchTip (captured at commit-and-done time) if available, otherwise falls back to Branch.
+// Uses BaseRefCommit (captured at task start time) as the base for done tasks,
+// since the base ref branch pointer may have moved forward after a merge.
 func (h *GitHandler) getTaskDiffFromProject(projectID, taskID string, task *types.Task, baseRef, headRef string) (*git.TaskDiff, error) {
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		return nil, err
+	}
+
+	// For done tasks, prefer the base ref commit captured at task start time.
+	// After a fast-forward merge, the base ref branch pointer has moved forward,
+	// so using the branch name would give an empty diff.
+	if task.Status == "done" && task.BaseRefCommit != "" {
+		baseRef = task.BaseRefCommit
 	}
 
 	// Determine the refs to diff

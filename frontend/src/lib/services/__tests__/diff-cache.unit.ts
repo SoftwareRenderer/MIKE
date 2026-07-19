@@ -264,7 +264,7 @@ describe('DiffCache', () => {
         resolveDiff!({ files: { 'a.ts': { hash: 'h1', type: 'tracked', added: 1, removed: 0, staged: false } } });
         await loadPromise;
         // Original call used old IDs (captured at call time)
-        expect(apis.getTaskDiff).toHaveBeenNthCalledWith(1, 'proj-1', 'task-1');
+        expect(apis.getTaskDiff).toHaveBeenNthCalledWith(1, 'proj-1', 'task-1', undefined);
         // Subsequent calls use new IDs
         cache.state.files = {
             'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
