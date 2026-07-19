@@ -308,8 +308,9 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 		return
 	}
 
-	// First client — forward to server with ID remapping
-	h.forwardRequest(ctx, session, msg, clientReqID)
+	// First client — merge InitParamsOverride into params, then forward
+	merged := mergeInitParams(msg, ws.cfg)
+	h.forwardRequest(ctx, session, merged, clientReqID)
 }
 
 // forwardRequest remaps the request ID and forwards to the language server.
@@ -455,6 +456,62 @@ func (h *LSPHandler) broadcastNotification(serverMsg json.RawMessage) {
 			s.conn.Write(ctx, websocket.MessageText, serverMsg)
 		}
 	}
+}
+
+// mergeInitParams merges the server config's InitParamsOverride into the
+// initialize request's params before forwarding to the language server.
+func mergeInitParams(msg json.RawMessage, cfg *ServerConfig) json.RawMessage {
+	if cfg == nil || len(cfg.InitParamsOverride) == 0 {
+		return msg // nothing to merge
+	}
+
+	var msgMap map[string]any
+	if err := json.Unmarshal(msg, &msgMap); err != nil {
+		return msg // malformed, forward as-is
+	}
+
+	paramsRaw, ok := msgMap["params"]
+	if !ok {
+		return msg // no params field, forward as-is
+	}
+
+	var params map[string]any
+	switch p := paramsRaw.(type) {
+	case map[string]any:
+		params = p
+	case string:
+		// params might be a JSON string in some edge cases
+		if err := json.Unmarshal([]byte(p), &params); err != nil {
+			return msg
+		}
+	case nil:
+		return msg
+	default:
+		return msg // unexpected type, forward as-is
+	}
+
+	// Deep-merge InitParamsOverride into params
+	for k, v := range cfg.InitParamsOverride {
+		if existing, ok := params[k]; ok {
+			// Both sides are maps — merge recursively
+			if existingMap, ok := existing.(map[string]any); ok {
+				if overrideMap, ok := v.(map[string]any); ok {
+					for ok2, ov := range overrideMap {
+						existingMap[ok2] = ov
+					}
+					continue
+				}
+			}
+		}
+		params[k] = v
+	}
+
+	msgMap["params"] = params
+	result, err := json.Marshal(msgMap)
+	if err != nil {
+		return msg // marshal failed, forward original
+	}
+	return result
 }
 
 // remapRequestID replaces the "id" field in a JSON-RPC request with a new backend ID.

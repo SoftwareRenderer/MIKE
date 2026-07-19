@@ -31,6 +31,23 @@ func NewRegistry() *Registry {
 			Args:       []string{"serve"},
 			Extensions: []string{"go"},
 			Language:   "go",
+			InitParamsOverride: map[string]any{
+				"hover": map[string]any{
+					"actions": map[string]any{"enabled": true},
+				},
+				"codeLens": map[string]any{
+					"disable": []string{"generated_test"},
+				},
+				"hints": map[string]any{
+					"assignVariableType":     true,
+					"compositeLiteralFields": true,
+					"constantValues":         true,
+					"functionTypeParameters": true,
+					"parameterNames":         true,
+				},
+				"usePlaceholders": true,
+				"staticcheck":     true,
+			},
 		},
 		{
 			Command:    "npx",

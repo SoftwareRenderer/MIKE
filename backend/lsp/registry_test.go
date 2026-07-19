@@ -112,3 +112,76 @@ func TestLookupDeepPath(t *testing.T) {
 		t.Errorf("expected command npx, got %s", cfg.Command)
 	}
 }
+
+func TestGoConfigHasInitParamsOverride(t *testing.T) {
+	r := NewRegistry()
+	cfg := r.Lookup("main.go")
+	if cfg == nil {
+		t.Fatal("expected gopls config for .go file")
+	}
+	if cfg.Command != "gopls" {
+		t.Fatalf("expected command gopls, got %s", cfg.Command)
+	}
+	if cfg.InitParamsOverride == nil {
+		t.Fatal("expected InitParamsOverride to be set for gopls")
+	}
+
+	// Check hover.actions.enabled
+	hover, ok := cfg.InitParamsOverride["hover"].(map[string]any)
+	if !ok {
+		t.Fatal("expected hover to be a map")
+	}
+	actions, ok := hover["actions"].(map[string]any)
+	if !ok {
+		t.Fatal("expected hover.actions to be a map")
+	}
+	if actions["enabled"] != true {
+		t.Errorf("expected hover.actions.enabled = true, got %v", actions["enabled"])
+	}
+
+	// Check codeLens.disable contains "generated_test"
+	codeLens, ok := cfg.InitParamsOverride["codeLens"].(map[string]any)
+	if !ok {
+		t.Fatal("expected codeLens to be a map")
+	}
+	disable, ok := codeLens["disable"].([]string)
+	if !ok {
+		t.Fatalf("expected codeLens.disable to be []string, got %T", codeLens["disable"])
+	}
+	if len(disable) != 1 || disable[0] != "generated_test" {
+		t.Errorf("expected codeLens.disable = [\"generated_test\"], got %v", disable)
+	}
+
+	// Check hints fields
+	hints, ok := cfg.InitParamsOverride["hints"].(map[string]any)
+	if !ok {
+		t.Fatal("expected hints to be a map")
+	}
+	boolHints := []string{"assignVariableType", "compositeLiteralFields", "constantValues", "functionTypeParameters", "parameterNames"}
+	for _, key := range boolHints {
+		if hints[key] != true {
+			t.Errorf("expected hints.%s = true, got %v", key, hints[key])
+		}
+	}
+
+	// Check usePlaceholders
+	if cfg.InitParamsOverride["usePlaceholders"] != true {
+		t.Errorf("expected usePlaceholders = true, got %v", cfg.InitParamsOverride["usePlaceholders"])
+	}
+
+	// Check staticcheck
+	if cfg.InitParamsOverride["staticcheck"] != true {
+		t.Errorf("expected staticcheck = true, got %v", cfg.InitParamsOverride["staticcheck"])
+	}
+}
+
+func TestNonGoConfigHasNoInitParamsOverride(t *testing.T) {
+	r := NewRegistry()
+	cfg := r.Lookup("app.ts")
+	if cfg == nil {
+		t.Fatal("expected typescript config for .ts file")
+	}
+	if cfg.InitParamsOverride != nil {
+		t.Errorf("expected no InitParamsOverride for typescript, got %+v", cfg.InitParamsOverride)
+	}
+}
