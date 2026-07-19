@@ -12,6 +12,7 @@
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
     import { LSPClient, languageServerExtensions } from '@codemirror/lsp-client';
     import { createLSPTransport } from '$lib/utils/lsp-transport';
+    import { isLSPEnabled } from '$lib/storage';
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
     import { gitGutter } from '$lib/utils/git-gutter';
@@ -68,6 +69,7 @@
     let lspError = $state('');
     let fileUri = $state('');
     let lspCompartment = $state(new Compartment());
+    let lspEnabled = $state(true);
 
     function getLanguageSupport(path: string) {
         const ext = path.split('.').pop()?.toLowerCase() || '';
@@ -331,11 +333,18 @@
         if (lspClient) return; // already initialized
 
         async function initLSP() {
+            // Check user preference
+            lspEnabled = await isLSPEnabled();
+            if (!lspEnabled) return; // fall back to built-in autocompletion
+
             fileUri = `file://${filePath}`;
             try {
                 const transport = await createLSPTransport({
                     workspace: _projPath!,
                     filePath,
+                    onDisconnected: () => {
+                        lspReady = false;
+                    },
                 });
 
                 lspClient = new LSPClient({
@@ -359,6 +368,46 @@
         }
 
         initLSP();
+    });
+
+    // Attempt LSP reconnection when the client is disconnected and the editor is visible
+    $effect(() => {
+        const _lspReady = lspReady;
+        const _lspClient = lspClient;
+        const _view = view;
+        const _projPath = projectPath;
+        const _lspEnabled = lspEnabled;
+
+        // Only reconnect if we previously had a client but it's now disconnected
+        if (!_lspClient || !_view || !_projPath || !_lspEnabled) return;
+        if (_lspReady || _lspClient.connected) return; // still connected
+
+        async function reconnectLSP() {
+            try {
+                const transport = await createLSPTransport({
+                    workspace: _projPath!,
+                    filePath,
+                    onDisconnected: () => {
+                        lspReady = false;
+                    },
+                });
+
+                if (!_lspClient) return; // may have been disconnected in the meantime
+                await _lspClient.connect(transport).initializing;
+                lspReady = true;
+
+                // Re-attach plugin if needed
+                if (_view && _lspClient) {
+                    _view.dispatch({
+                        effects: lspCompartment.reconfigure(_lspClient.plugin(fileUri)),
+                    });
+                }
+            } catch (e) {
+                console.warn('[lsp] reconnection failed:', e);
+            }
+        }
+
+        reconnectLSP();
     });
 
     async function loadFile() {
