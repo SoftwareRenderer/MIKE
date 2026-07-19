@@ -17,6 +17,7 @@ func echoConfig() *ServerConfig {
 	return &ServerConfig{
 		Command: "stdbuf",
 		Args:    []string{"-oL", "cat"},
+		Language: "go",
 	}
 }
 
@@ -25,7 +26,8 @@ func echoConfig() *ServerConfig {
 func stderrConfig() *ServerConfig {
 	return &ServerConfig{
 		Command: "sh",
-		Args:    []string{"-c", "echo 'stderr-line-123' >&2; exec cat"},
+		Args:    []string{"-c", "echo 'stderr-line-123' >&2; exec stdbuf -oL cat"},
+		Language: "go",
 	}
 }
 
@@ -35,7 +37,8 @@ func notificationConfig() *ServerConfig {
 	notif := `{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":1,"message":"hello-lsp"}}`
 	return &ServerConfig{
 		Command: "sh",
-		Args:    []string{"-c", "echo '" + notif + "'; exec cat"},
+		Args:    []string{"-c", "echo '" + notif + "'; exec stdbuf -oL cat"},
+		Language: "go",
 	}
 }
 
@@ -170,7 +173,7 @@ func TestSendToServer(t *testing.T) {
 
 	// Send a notification (no id) through the manager.
 	msg := `{"jsonrpc":"2.0","method":"test/echo","params":{"value":"hello"}}`
-	if err := pm.SendToServer(proc, msg); err != nil {
+	if err := pm.SendToServer(proc, json.RawMessage(msg)); err != nil {
 		t.Fatalf("SendToServer: %v", err)
 	}
 
@@ -212,7 +215,7 @@ func TestSendToServer_AfterShutdown(t *testing.T) {
 	pm.Release(dir, "go")
 
 	// Sending after shutdown should fail.
-	err = pm.SendToServer(proc, `{"jsonrpc":"2.0"}`)
+	err = pm.SendToServer(proc, json.RawMessage(`{"jsonrpc":"2.0"}`))
 	if err == nil {
 		t.Error("expected error when sending to shutdown process")
 	}
@@ -309,7 +312,7 @@ func TestSubscribe_Notifications(t *testing.T) {
 
 	// Send another notification via the echo server.
 	notif := `{"jsonrpc":"2.0","method":"$/progress","params":{"token":"t1"}}`
-	if err := pm.SendToServer(proc, notif); err != nil {
+	if err := pm.SendToServer(proc, json.RawMessage(notif)); err != nil {
 		t.Fatalf("SendToServer: %v", err)
 	}
 
@@ -360,7 +363,7 @@ func TestSubscribe_UnsubscribeStopsDelivery(t *testing.T) {
 
 	// Send another notification.
 	notif := `{"jsonrpc":"2.0","method":"test","params":{}}`
-	if err := pm.SendToServer(proc, notif); err != nil {
+	if err := pm.SendToServer(proc, json.RawMessage(notif)); err != nil {
 		t.Fatalf("SendToServer: %v", err)
 	}
 
@@ -384,7 +387,8 @@ func TestWorkspaceReplacementInArgs(t *testing.T) {
 
 	cfg := &ServerConfig{
 		Command: "sh",
-		Args:    []string{"-c", "echo '{\"workspace\":\"{workspace}\"}' >&2; exec cat"},
+		Args:    []string{"-c", "echo '{\"workspace\":\"{workspace}\"}' >&2; exec stdbuf -oL cat"},
+		Language: "go",
 	}
 
 	proc, err := pm.GetOrCreate(dir, "go", cfg)
@@ -422,6 +426,40 @@ func TestMultipleReleasePanicSafety(t *testing.T) {
 	}
 
 	_ = proc // avoid unused variable warning
+}
+
+func TestServerMessageCh_Responses(t *testing.T) {
+	pm := NewProcessManager()
+	dir := t.TempDir()
+
+	proc, err := pm.GetOrCreate(dir, "go", echoConfig())
+	if err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+
+	// Send a response-like message (has id, no method) — should go to messageCh.
+	msg := `{"jsonrpc":"2.0","id":42,"result":{"capabilities":{}}}`
+	if err := pm.SendToServer(proc, json.RawMessage(msg)); err != nil {
+		t.Fatalf("SendToServer: %v", err)
+	}
+
+	// The echo process reflects it back; it should arrive on messageCh.
+	select {
+	case got := <-pm.messageCh:
+		var env struct {
+			ID json.Number `json:"id"`
+		}
+		if err := json.Unmarshal(got, &env); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if env.ID.String() != "42" {
+			t.Errorf("expected id 42, got %s", env.ID.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for message on messageCh")
+	}
+
+	pm.Release(dir, "go")
 }
 
 // --- helpers ---
