@@ -6,7 +6,7 @@
     import { EditorState, Compartment } from '@codemirror/state';
     import { keymap, ViewPlugin } from '@codemirror/view';
     import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-    import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
+    import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
     import { LSPClient, languageServerExtensions } from '@codemirror/lsp-client';
     import { createLSPTransport } from '$lib/utils/lsp-transport';
@@ -182,9 +182,8 @@
             run: () => {
                 if (hasChanges && !fileTooLarge) {
                     handleSave();
-                    return true;
                 }
-                return false;
+                return true;
             },
         } as any,
     ]);
@@ -227,6 +226,14 @@
             }),
             drawSelection(),
             dropCursor(),
+            EditorView.domEventHandlers({
+                keydown: (e, view) => {
+                    if (e.key === 'Tab') {
+                        e.preventDefault();
+                    }
+                    return false;
+                },
+            }),
             EditorState.allowMultipleSelections.of(true),
             indentOnInput(),
             syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
@@ -286,6 +293,7 @@
                 }
             }),
             EditorState.tabSize.of(4),
+            indentUnit.of('    '),
             ...(langSupport ? [langSupport] : []),
         ];
 
