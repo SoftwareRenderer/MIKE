@@ -276,6 +276,8 @@
         selectedModel = modelName;
         selectedUrl = providerUrl;
         selectedReasoningEffort = reasoningEffort || '';
+        // Agent providers always use ideate mode; reset to act when switching away
+        operatingMode = isAgentSelected() ? 'ideate' : 'act';
     }
 
     async function handleSubmit() {
