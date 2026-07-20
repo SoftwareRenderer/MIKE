@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"kanban/backend/types"
@@ -31,6 +32,7 @@ type LlamaClient struct {
 	reasoningEffort string
 	apiKey          string
 	httpClient      *http.Client
+	readIdleTimeout time.Duration // 0 means default 30s
 }
 
 // NewLlamaClient creates a new LlamaClient.
@@ -44,7 +46,14 @@ func NewLlamaClient(baseURL, modelName, reasoningEffort, apiKey string) *LlamaCl
 		reasoningEffort: reasoningEffort,
 		apiKey:          apiKey,
 		httpClient:      &http.Client{Timeout: 0},
+		readIdleTimeout: 30 * time.Second,
 	}
+}
+
+// SetReadIdleTimeout sets the read idle timeout for streaming responses.
+// If no data arrives for this duration, the stream is aborted.
+func (c *LlamaClient) SetReadIdleTimeout(d time.Duration) {
+	c.readIdleTimeout = d
 }
 
 // setAuthHeader sets the Authorization header on a request if an API key is configured.
@@ -180,25 +189,22 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
-	// Read idle timeout: abort if no data arrives for 30s.
-	// Reset the deadline on each successful scan to handle slow token generation.
-	var readCtx context.Context
-	var readCancel context.CancelFunc
-	readCtx, readCancel = context.WithTimeout(ctx, 30*time.Second)
+	// Read idle timeout: close resp.Body to unblock scanner.Scan().
+	idleTimeout := c.readIdleTimeout
+	if idleTimeout == 0 {
+		idleTimeout = 30 * time.Second
+	}
+	var timedOut atomic.Bool
+	readTimer := time.AfterFunc(idleTimeout, func() {
+		timedOut.Store(true)
+		_ = resp.Body.Close()
+	})
+	readTimer.Stop()
 
 	for scanner.Scan() {
-		select {
-		case <-readCtx.Done():
-			readCancel()
-			if ctx.Err() != nil {
-				return usage, ctx.Err()
-			}
-			return usage, readCtx.Err()
-		default:
-		}
 		line := scanner.Text()
-		readCancel()
-		readCtx, readCancel = context.WithTimeout(ctx, 30*time.Second)
+		readTimer.Stop()
+		readTimer.Reset(idleTimeout)
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
@@ -242,7 +248,11 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 			cb(choice)
 		}
 	}
-	readCancel()
+	readTimer.Stop()
+
+	if timedOut.Load() {
+		return usage, context.DeadlineExceeded
+	}
 
 	if usage != nil {
 		log.Printf("[llama] final usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d",
