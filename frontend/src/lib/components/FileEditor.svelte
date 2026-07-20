@@ -13,7 +13,7 @@
     import { isLSPEnabled } from '$lib/storage';
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
-    import { gitGutter } from '$lib/utils/git-gutter';
+    import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax } from '$lib/utils/codemirror-theme';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
@@ -51,8 +51,9 @@
     let error = $state('');
     let fileTooLarge = $state(false);
     let fileNotFound = $state(false);
-    let originalContent = $state(''); // HEAD content for git gutter
-    let savedContent = $state('');    // disk content for unsaved-changes tracking
+    let baselineContent = $state('');       // disk content at load time (for gutter delta tracking)
+    let gutterMarkers = $state<Map<number, string[]> | null>(null); // pre-computed markers from server
+    let savedContent = $state('');          // disk content for unsaved-changes tracking
 
     // Tracked incrementally to avoid O(n) string compare/split on every edit
     let hasChanges = $state(false);
@@ -97,7 +98,7 @@
     let searchVisible = $state(false);
     let searchApp: any = null;
     let editorCreating = $state(false); // prevent race between loadFile() and $effect
-    let gitGutterState: { original: string } | null = null; // mutable ref for git gutter
+    let gitGutterState: GitGutterState | null = null; // mutable ref for git gutter
 
     function getLanguageSupport(path: string) {
         const ext = path.split('.').pop()?.toLowerCase() || '';
@@ -199,7 +200,8 @@
         const initialDoc = historyBase || content;
         const gitGutterExt = gitGutter();
         gitGutterState = gitGutterExt.state;
-        gitGutterExt.state.original = originalContent;
+        gitGutterExt.state.initialMarkers = gutterMarkers;
+        gitGutterExt.state.baselineContent = baselineContent;
         const extensions = [
             // Explicit setup (replaces basicSetup, excludes searchKeymap)
             gitGutterExt.extension,
@@ -348,7 +350,8 @@
             lspReady = false;
             loading = false;
             content = '';
-            originalContent = '';
+            baselineContent = '';
+            gutterMarkers = null;
             view?.destroy();
             view = null;
             return;
@@ -370,7 +373,8 @@
         editorReady = false;
         editorCreating = false;
         content = '';
-        originalContent = '';
+        baselineContent = '';
+        gutterMarkers = null;
         hasChanges = false;
         lineCount = 0;
         charCount = 0;
@@ -396,23 +400,22 @@
             const data = await res.json();
             const fileContent = data.content || '';
 
-            // Fetch HEAD version for git gutter comparison
-            try {
-                const headRes = await fetch(
-                    `/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}&ref=HEAD`
-                );
-                if (headRes.ok) {
-                    const headData = await headRes.json();
-                    originalContent = headData.content || '';
-                } else {
-                    originalContent = fileContent; // new file, no HEAD
+            // Parse gutter markers from server (diff vs HEAD)
+            const rawMarkers = data.gutter_markers;
+            if (rawMarkers && typeof rawMarkers === 'object') {
+                const m = new Map<number, string[]>();
+                for (const [ln, types] of Object.entries(rawMarkers)) {
+                    if (Array.isArray(types)) m.set(parseInt(ln, 10), types);
                 }
-            } catch {
-                originalContent = fileContent;
+                gutterMarkers = m;
+            } else {
+                gutterMarkers = null;
             }
+
             // Use unsaved draft if available, otherwise use current file content
             const draft = await getEditorDraft(filePath);
             content = draft !== null ? draft : fileContent;
+            baselineContent = fileContent;
             savedContent = fileContent;
             hasChanges = content !== savedContent;
             lineCount = content ? content.split('\n').length : 0;
@@ -467,11 +470,19 @@
             }
             savedContent = content;
             hasChanges = false;
-            // Update git gutter — disk now matches editor, recompute vs HEAD
-            if (view) {
-                if (gitGutterState) {
-                    gitGutterState.original = content;
+            // Update git gutter — disk now matches editor.
+            // The current merged markers (server + delta) represent the diff vs HEAD
+            // for the saved content. Use them as the new server markers.
+            if (view && gitGutterState) {
+                gitGutterState.baselineContent = content;
+                // Convert the current merged map back to a plain Map for server markers
+                const newMarkers = new Map<number, string[]>();
+                for (const [ln, types] of gitGutterState.map) {
+                    newMarkers.set(ln, types as string[]);
                 }
+                gitGutterState.initialMarkers = newMarkers;
+                gutterMarkers = newMarkers;
+                baselineContent = content;
             }
             await clearEditorDraft(filePath);
         } catch (e) {
@@ -523,9 +534,9 @@
     });
 
     // Create editor after content is loaded and DOM is ready.
-    // Tracks originalContent so it waits for loadFile() to complete.
+    // Tracks baselineContent so it waits for loadFile() to complete.
     $effect(() => {
-        const _ = originalContent; // force dependency on load completion
+        const _ = baselineContent; // force dependency on load completion
         if (!loading && !fileTooLarge && !fileNotFound && !view && editorEl && !editorCreating) {
             requestAnimationFrame(() => {
                 if (editorEl && !view && !editorCreating) {

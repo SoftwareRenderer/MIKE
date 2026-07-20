@@ -387,4 +387,64 @@ test.describe('Editor Tabs', () => {
       } catch { /* ignore */ }
     }
   });
+
+  test('should warn about unsaved changes when closing a tab', async ({ page }) => {
+    const worktreeDir = findWorktreeDir();
+    const projectId = await getProjectId(page);
+    if (!worktreeDir || !projectId) {
+      await expect(page.locator('.board')).toBeVisible();
+      return;
+    }
+
+    const uniqueId = Date.now();
+    const file1 = `tab-unsaved-close-${uniqueId}.txt`;
+    writeFileSync(join(worktreeDir, file1), 'Original content\n');
+
+    try {
+      // Open explorer
+      await page.locator('.project-item').first().click();
+      await page.waitForSelector('.top-bar', { timeout: 10000 });
+      await page.locator('.explorer-btn').click();
+      await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('.file-browser-list')).toBeVisible({ timeout: 10000 });
+
+      // Open the file
+      await page.locator('.file-browser-item', { hasText: file1 }).click();
+      await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 10000 });
+
+      // Edit the file to create unsaved changes
+      await page.keyboard.press('End');
+      await page.keyboard.type(' Modified');
+      await page.waitForTimeout(300);
+
+      // Tab should have unsaved indicator
+      await expect(page.locator('.editor-tab.unsaved')).toBeVisible();
+
+      // Try to close the tab
+      await page.locator('.btn-close-tab').click();
+
+      // Confirmation dialog should appear
+      await expect(page.locator('.overlay')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('.modal')).toContainText('Unsaved changes');
+      await expect(page.locator('.modal')).toContainText('Discard');
+
+      // Cancel — tab should stay open
+      await page.locator('.btn-secondary').click();
+      await expect(page.locator('.overlay')).not.toBeVisible({ timeout: 5000 });
+      await expect(page.locator('.editor-tab')).toHaveCount(1);
+
+      // Try closing again, this time confirm
+      await page.locator('.btn-close-tab').click();
+      await expect(page.locator('.overlay')).toBeVisible({ timeout: 5000 });
+      await page.locator('.btn-confirm').click();
+
+      // Tab should be closed
+      await expect(page.locator('.overlay')).not.toBeVisible({ timeout: 5000 });
+      await expect(page.locator('.editor-tab')).toHaveCount(0);
+    } finally {
+      try {
+        rmSync(join(worktreeDir, file1), { force: true });
+      } catch { /* ignore */ }
+    }
+  });
 });
