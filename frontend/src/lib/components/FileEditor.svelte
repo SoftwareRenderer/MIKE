@@ -50,6 +50,7 @@
     let saving = $state(false);
     let error = $state('');
     let fileTooLarge = $state(false);
+    let fileNotFound = $state(false);
     let originalContent = $state(''); // HEAD content for git gutter
     let savedContent = $state('');    // disk content for unsaved-changes tracking
 
@@ -355,6 +356,7 @@
         loading = true;
         error = '';
         fileTooLarge = false;
+        fileNotFound = false;
 
         // Destroy old editor and LSP client
         lspClient?.disconnect();
@@ -382,6 +384,10 @@
             if (!res.ok) {
                 if (res.status === 413) {
                     fileTooLarge = true;
+                    return;
+                }
+                if (res.status === 404) {
+                    fileNotFound = true;
                     return;
                 }
                 const err = await res.json().catch(() => ({ error: 'Failed to read file' }));
@@ -429,7 +435,7 @@
         }
 
         // Create editor after DOM has updated (loading=false renders the editor div)
-        if (!error && !fileTooLarge) {
+        if (!error && !fileTooLarge && !fileNotFound) {
             await new Promise(resolve => requestAnimationFrame(resolve));
             if (editorEl && !view) {
                 createEditor();
@@ -442,7 +448,7 @@
     }
 
     async function handleSave() {
-        if (saving || !hasChanges || fileTooLarge || !filePath) return;
+        if (saving || !hasChanges || fileTooLarge || fileNotFound || !filePath) return;
         saving = true;
         try {
             const csrfToken = await ensureCsrfToken();
@@ -504,7 +510,7 @@
     // Jump to targetLine when editor is ready (from diff view click)
     $effect(() => {
         const line = targetLine;
-        if (line >= 1 && view && !loading && !fileTooLarge && !error && filePath) {
+        if (line >= 1 && view && !loading && !fileTooLarge && !fileNotFound && !error && filePath) {
             requestAnimationFrame(() => jumpToLine(line));
         }
     });
@@ -520,7 +526,7 @@
     // Tracks originalContent so it waits for loadFile() to complete.
     $effect(() => {
         const _ = originalContent; // force dependency on load completion
-        if (!loading && !fileTooLarge && !view && editorEl && !editorCreating) {
+        if (!loading && !fileTooLarge && !fileNotFound && !view && editorEl && !editorCreating) {
             requestAnimationFrame(() => {
                 if (editorEl && !view && !editorCreating) {
                     createEditor();
@@ -698,6 +704,11 @@
                 <div class="editor-placeholder">Loading file...</div>
             {:else if error}
                 <div class="editor-error">{error}</div>
+            {:else if fileNotFound}
+                <div class="editor-placeholder">
+                    <p style="margin:0 0 8px">File not found</p>
+                    <p style="margin:0;font-size:0.75rem;color:var(--color-text-tertiary)">{filePath}</p>
+                </div>
             {:else if fileTooLarge}
                 <div class="editor-placeholder">File too large to edit (max 1MB)</div>
             {:else}
@@ -707,7 +718,7 @@
         </div>
 
         <!-- Footer with line/char count -->
-        {#if !loading && !error && !fileTooLarge}
+        {#if !loading && !error && !fileTooLarge && !fileNotFound}
             <EditorFooter
                 {cursorLine}
                 {cursorCol}

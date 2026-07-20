@@ -543,9 +543,10 @@
         // Preload the diff viewer chunk while fetching diff data
         loadDiffViewer();
         try {
-            // For done tasks, fetch the diff of committed changes using branch_tip
-            const diffOptions = task.status === 'done' && task.branch_tip
-                ? { headRef: task.branch_tip }
+            // For done tasks, fetch the diff of committed changes.
+            // Use branch_tip (captured at commit time) if available, otherwise fall back to branch name.
+            const diffOptions = task.status === 'done' && (task.branch_tip || task.branch)
+                ? { headRef: task.branch_tip || task.branch }
                 : {};
             await Promise.all([loadCommits(), diffCache.loadDiff(() => {}, diffOptions)]);
         } finally {
@@ -770,6 +771,7 @@
                                     baseCommit={baseCommit}
                                     diffFrom={diffFrom}
                                     diffTo={diffTo}
+                                    taskStatus={task.status}
                                     onFromChange={onDiffFromChange}
                                     onToChange={onDiffToChange}
                                     onToggleFullscreen={toggleDiffFullscreen}

@@ -44,6 +44,7 @@
     let saving = $state(false);
     let error = $state('');
     let fileTooLarge = $state(false);
+    let fileNotFound = $state(false);
     let displayPath = $state('');
 
     let hasChanges = $derived(content !== savedContent);
@@ -321,7 +322,7 @@
     $effect(() => {
         const _loaded = originalContentLoaded;
         const _original = originalContent;
-        if (!loading && !fileTooLarge && !view && editorEl && _loaded !== undefined) {
+        if (!loading && !fileTooLarge && !fileNotFound && !view && editorEl && _loaded !== undefined) {
             requestAnimationFrame(() => {
                 if (editorEl && !view) {
                     createEditor();
@@ -440,6 +441,7 @@
         loading = true;
         error = '';
         fileTooLarge = false;
+        fileNotFound = false;
         displayPath = displayPathProp || filePath.split('/').pop() || filePath;
 
         try {
@@ -450,6 +452,10 @@
             if (!res.ok) {
                 if (res.status === 413) {
                     fileTooLarge = true;
+                    return;
+                }
+                if (res.status === 404) {
+                    fileNotFound = true;
                     return;
                 }
                 const err = await res.json().catch(() => ({ error: 'Failed to read file' }));
@@ -487,7 +493,7 @@
     }
 
     async function handleSave() {
-        if (saving || !hasChanges || fileTooLarge) return;
+        if (saving || !hasChanges || fileTooLarge || fileNotFound) return;
         saving = true;
         try {
             const csrfToken = await ensureCsrfToken();
@@ -527,7 +533,7 @@
     function handleKeyDown(e: KeyboardEvent) {
         if ((e.ctrlKey || e.metaKey) && e.key === 's') {
             e.preventDefault();
-            if (hasChanges && !fileTooLarge) handleSave();
+            if (hasChanges && !fileTooLarge || fileNotFound) handleSave();
             return;
         }
         if (e.key === 'Escape') {
@@ -621,6 +627,11 @@
                 </svg>
                 <span>{error}</span>
             </div>
+        {:else if fileNotFound}
+            <div class="editor-placeholder">
+                <p style="margin:0 0 8px">File not found</p>
+                <p style="margin:0;font-size:0.75rem;color:var(--color-text-tertiary)">{displayPath || filePath}</p>
+            </div>
         {:else if fileTooLarge}
             <div class="editor-large">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -636,7 +647,7 @@
     </div>
 
     <!-- Footer -->
-    {#if !loading && !error && !fileTooLarge}
+    {#if !loading && !error && !fileTooLarge && !fileNotFound}
         <EditorFooter
             {cursorLine}
             {cursorCol}

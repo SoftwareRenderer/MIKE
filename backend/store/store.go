@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     session_id                   TEXT,
     branch                       TEXT,
     base_ref                     TEXT DEFAULT NULL,
-    base_ref_commit              TEXT DEFAULT NULL,
+    base_commit                  TEXT DEFAULT NULL,
     branch_tip                   TEXT DEFAULT NULL,
     output                       TEXT,
     execution_state              TEXT NOT NULL DEFAULT 'idle',
@@ -263,7 +263,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_envs TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_capabilities TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_ref TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_ref_commit TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_commit TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN branch_tip TEXT DEFAULT NULL`)
 	// Rename status_state -> execution_state
 	_, _ = s.db.Exec(`ALTER TABLE tasks RENAME COLUMN status_state TO execution_state`)
@@ -495,9 +495,9 @@ func scanTime(s string) time.Time {
 func scanTask(s scanner, t *types.Task) error {
 	var autoCommit, autoMerge, subtasksAutoMerge, titleGenerating, hasMergeConflict int
 	var createdAt, updatedAt string
-	var parentTaskID, currentThreadID, reasoningEffort, baseRef, baseRefCommit, branchTip, assignedPortsJSON sql.NullString
+	var parentTaskID, currentThreadID, reasoningEffort, baseRef, baseCommit, branchTip, assignedPortsJSON sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
-		&t.SessionID, &t.Branch, &baseRef, &baseRefCommit, &branchTip, &t.Output, &t.ExecutionState, &hasMergeConflict,
+		&t.SessionID, &t.Branch, &baseRef, &baseCommit, &branchTip, &t.Output, &t.ExecutionState, &hasMergeConflict,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
 		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &titleGenerating, &currentThreadID, &createdAt, &updatedAt, &assignedPortsJSON)
 	if err != nil {
@@ -512,7 +512,7 @@ func scanTask(s scanner, t *types.Task) error {
 	t.CurrentThreadID = currentThreadID.String
 	t.ReasoningEffort = reasoningEffort.String
 	t.BaseRef = baseRef.String
-	t.BaseRefCommit = baseRefCommit.String
+	t.BaseCommit = baseCommit.String
 	t.BranchTip = branchTip.String
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)

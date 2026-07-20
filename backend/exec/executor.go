@@ -665,12 +665,12 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	// Capture the base ref's commit hash at task start time.
 	// Used for done-task diffs: after a fast-forward merge, the base ref branch
 	// pointer moves forward, so we need the original commit to compute the diff.
-	if task.BaseRefCommit == "" && task.BaseRef != "" {
+	if task.BaseCommit == "" && task.BaseRef != "" {
 		project, _ := te.store.GetProject(projectID)
 		if project != nil {
 			c := osexec.Command("git", "-C", project.Path, "rev-parse", task.BaseRef)
 			if out, err := c.CombinedOutput(); err == nil {
-				task.BaseRefCommit = strings.TrimSpace(string(out))
+				task.BaseCommit = strings.TrimSpace(string(out))
 			}
 		}
 	}

@@ -104,9 +104,23 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		content = []byte(output)
 	} else {
 		// Host filesystem (worktree is bind-mounted into sandbox)
+		// Check if path exists and is a regular file
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				JSONError(w, http.StatusNotFound, "file not found: "+path)
+			} else {
+				JSONError(w, http.StatusNotFound, statErr.Error())
+			}
+			return
+		}
+		if info.IsDir() {
+			JSONError(w, http.StatusBadRequest, "path is a directory: "+path)
+			return
+		}
 		content, readErr = os.ReadFile(path)
 		if readErr != nil {
-			JSONError(w, http.StatusNotFound, err.Error())
+			JSONError(w, http.StatusInternalServerError, "failed to read file: "+readErr.Error())
 			return
 		}
 	}
