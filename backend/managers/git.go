@@ -679,6 +679,17 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	customBase := r.URL.Query().Get("base")
 	fullDiff := r.URL.Query().Get("full") == "1"
 
+	// For done tasks, always show the committed diff (BaseCommit..BranchTip).
+	// If no explicit head is provided, use BranchTip to trigger commit-to-commit diff.
+	// This ensures the response is a raw diff string (not a working-tree manifest),
+	// which works correctly even when the worktree no longer exists.
+	if task.Status == "done" && headRef == "" && customBase == "" {
+		headRef = task.BranchTip
+		if headRef == "" {
+			headRef = task.Branch
+		}
+	}
+
 	var baseRef string
 	if customBase != "" {
 		baseRef = customBase
@@ -715,7 +726,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 			taskDiff, err = h.getTaskDiffFromProject(projectID, taskID, task, baseRef, headRef)
 		}
 		// Orphaned worktree — return 404
-		if strings.Contains(err.Error(), "exit status 128") {
+		if err != nil && strings.Contains(err.Error(), "exit status 128") {
 			httputil.JSONError(w, http.StatusNotFound, "worktree not found")
 			return
 		}

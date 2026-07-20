@@ -1175,3 +1175,93 @@ func TestHandleStatus_IncludesAuthorInfo(t *testing.T) {
 		t.Fatalf("expected author_email 'test@test.com', got '%s'", authorEmail)
 	}
 }
+
+// TestDoneTaskDiffReturnsCommittedDiff verifies that the diff API for a done task
+// returns the committed diff (BaseCommit..BranchTip) instead of a working-tree diff.
+func TestDoneTaskDiffReturnsCommittedDiff(t *testing.T) {
+	s := testServer(t)
+
+	// Create a git repo in the temp dir
+	dir := t.TempDir()
+	exec.Command("git", "-C", dir, "init", "-b", "main").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+
+	// Create initial commit (this will be the base)
+	os.WriteFile(join(dir, "initial.txt"), []byte("initial\n"), 0644)
+	exec.Command("git", "-C", dir, "add", "initial.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Initial commit").Run()
+	baseCommit := strings.TrimSpace(execOutput(t, "git", "-C", dir, "rev-parse", "HEAD"))
+
+	// Create a project pointing to this repo
+	proj := &types.Project{
+		ID:   "diff-test-proj",
+		Name: "diff-test",
+		Path: dir,
+	}
+	s.store.CreateProject(proj)
+
+	// Create a task branch with a commit
+	exec.Command("git", "-C", dir, "checkout", "-b", "task/test-done-diff").Run()
+	os.WriteFile(join(dir, "new-file.txt"), []byte("committed content\n"), 0644)
+	exec.Command("git", "-C", dir, "add", "new-file.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add new file").Run()
+	branchTip := strings.TrimSpace(execOutput(t, "git", "-C", dir, "rev-parse", "HEAD"))
+
+	// Create a done task with base_commit and branch_tip
+	task := &types.Task{
+		ID:         "done-diff-task",
+		ProjectID:  proj.ID,
+		Title:      "Done diff test",
+		Prompt:     "Test done task diff",
+		Status:     "done",
+		Branch:     "task/test-done-diff",
+		BaseRef:    "main",
+		BaseCommit: baseCommit,
+		BranchTip:  branchTip,
+	}
+	s.store.CreateTask(task)
+
+	// Call the diff API without explicit head param
+	// For done tasks, the backend should automatically use BranchTip
+	cookie, csrfToken := loginTestCSRF(t, s)
+	req := testRequest(http.MethodGet, "/api/projects/diff-test-proj/tasks/done-diff-task/diff", nil)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("diff API returned %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(rr.Body).Decode(&resp)
+
+	// For done tasks, the response should contain a raw diff string (not a manifest)
+	diff, ok := resp["diff"].(string)
+	if !ok {
+		t.Fatalf("expected 'diff' field (string) in response, got: %v", resp)
+	}
+
+	// The diff should contain the committed file
+	if !strings.Contains(diff, "new-file.txt") {
+		t.Fatalf("diff does not contain committed file 'new-file.txt':\n%s", diff)
+	}
+	if !strings.Contains(diff, "committed content") {
+		t.Fatalf("diff does not contain committed content:\n%s", diff)
+	}
+}
+
+// execOutput runs a command and returns its stdout, failing the test on error.
+func execOutput(t *testing.T, cmd string, args ...string) string {
+	t.Helper()
+	c := exec.Command(cmd, args...)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %s: %v: %s", cmd, strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+func join(parts ...string) string {
+	return filepath.Join(parts...)
+}
