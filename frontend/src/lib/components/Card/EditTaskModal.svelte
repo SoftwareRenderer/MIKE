@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import type { Provider } from '$lib/types';
+    import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { appStore } from '$lib/stores';
     import ModelSelector from '../Chat/ModelSelector.svelte';
     import ToggleSwitch from '../ToggleSwitch.svelte';
@@ -168,6 +169,14 @@
         modelDraft = modelName;
         urlDraft = providerUrl;
         effortDraft = reasoningEffort || '';
+        // Agent providers always use ideate mode
+        const provider = editProviders.find(p => p.url === providerUrl);
+        if (providerUrl === PI_SENTINEL_URL || (provider && isAgentProvider(provider))) {
+            operatingModeDraft = 'ideate';
+        } else if (operatingModeDraft === 'ideate') {
+            // Switching away from agent: reset to act
+            operatingModeDraft = 'act';
+        }
     }
 
     function handleSave() {
