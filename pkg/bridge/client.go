@@ -572,6 +572,39 @@ func (c *Client) ShellClose(sessionID uint32) error {
 	return protocol.WriteFrame(c.conn, frame)
 }
 
+// LSPSend sends a raw JSON-RPC message to the LSP server and waits for the response.
+// The raw parameter is the raw JSON-RPC message bytes.
+// Returns the raw JSON-RPC response bytes.
+func (c *Client) LSPSend(ctx context.Context, raw json.RawMessage) ([]byte, error) {
+	params, _ := json.Marshal(protocol.LSPParams{Raw: raw})
+	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodLSP, params)
+
+	final, _, err := c.waitForCtx(ctx, frame, 0)
+	if err != nil {
+		return nil, err
+	}
+	if final.Type == protocol.TypeError {
+		return nil, errors.New(final.ErrorMsg())
+	}
+	return final.Payload, nil
+}
+
+// LSPStart starts the LSP server process inside the sandbox.
+// Command and args specify the LSP server to start.
+func (c *Client) LSPStart(ctx context.Context, command string, args []string) error {
+	params, _ := json.Marshal(protocol.LSPParams{Command: command, Args: args})
+	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodLSP, params)
+
+	final, _, err := c.waitForCtx(ctx, frame, 0)
+	if err != nil {
+		return err
+	}
+	if final.Type == protocol.TypeError {
+		return errors.New(final.ErrorMsg())
+	}
+	return nil
+}
+
 // Close closes the client connection and all shell sessions.
 func (c *Client) Close() error {
 	c.mu.Lock()

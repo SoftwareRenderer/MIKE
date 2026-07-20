@@ -185,7 +185,8 @@ Both servers share a mock LLM on port 9999. Test data dirs, worktrees (`/tmp/kan
 - Framework: `vitest` + `@testing-library/svelte`
 - Config: `frontend/vitest.config.ts` (jsdom environment, `$lib` alias)
 - Test modules:
-  - `src/lib/api/__tests__/` — API cache utilities
+  - `src/lib/api/__tests__/` — API cache utilities, extensions API
+  - `src/lib/services/` — reactive services (DiffCache, StreamState, StreamHandler, extension-manager, ui-injector)
   - `src/lib/composables/__tests__/` — reactive composables (multi-select, sw-update, virtual-scroll)
   - `src/lib/services/__tests__/` — reactive services (`DiffCache`, `StreamState`, `StreamHandler`)
   - `src/lib/stores/__tests__/` — app store tests
@@ -198,6 +199,7 @@ Both servers share a mock LLM on port 9999. Test data dirs, worktrees (`/tmp/kan
 - Run: `go test ./backend/... ./pkg/... -count=1 -parallel 8` (~60s, ~790 tests)
 - Test packages:
   - `backend/server/` — API handlers (~175 tests)
+  - `backend/extensions/` — extensions system (~66 tests)
   - `backend/store/` — database operations (~90 tests)
   - `backend/exec/` — tool execution (~315 tests)
   - `backend/git/` — git operations (~55 tests)
@@ -282,6 +284,48 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 - This means features like "fetch models" must be proxied through a Go endpoint (e.g., `POST /api/config/fetch-models`), not called from the browser.
 - All real-time communication uses WebSocket through the Go server.
 - Model/provider changes are sent via WebSocket `user_message` with optional `model_name`/`llama_server_url` fields.
+
+### Extensions System
+The Extensions system replaces hardcoded LSP configurations with user-defined and downloadable extensions.
+
+**Key files:**
+- `backend/extensions/extensions.go` — Domain types (Extension, ExtensionManifest, LSPConfig, UIConfig, SandboxConfig)
+- `backend/extensions/store.go` — SQLite CRUD (ExtensionStore)
+- `backend/extensions/registry.go` — Registry client (FetchIndex, FetchManifest, PullImage, BuildImage)
+- `backend/extensions/sandbox.go` — Sandbox manager (Create/Start/Stop/Destroy, refcount lifecycle)
+- `backend/extensions/handler.go` — REST API handlers (10 endpoints)
+- `backend/lsp/extension_manager.go` — Extension-driven LSP discovery (replaces hardcoded registry)
+- `frontend/src/lib/services/extension-manager.svelte.ts` — Reactive singleton service
+- `frontend/src/lib/services/ui-injector.svelte.ts` — UI injection framework (6 named slots)
+- `frontend/src/lib/components/ConfigModal/ExtensionsTab.svelte` — Settings UI
+- `frontend/src/lib/api/extensions.ts` — API client functions
+- `extensions/gopls/` — gopls extension package (Dockerfile, manifest.json)
+- `extensions/registry.json` — Default registry index
+
+**API endpoints:**
+- `GET /api/extensions` — List all extensions
+- `GET /api/extensions/{id}` — Get single extension
+- `POST /api/extensions` — Create extension
+- `PUT /api/extensions/{id}` — Update extension
+- `DELETE /api/extensions/{id}` — Delete extension
+- `PATCH /api/extensions/{id}/enabled` — Toggle enabled
+- `GET /api/extensions/registry` — Fetch registry index
+- `POST /api/extensions/install` — Install from registry
+- `GET /api/extensions/check-updates` — Check for updates
+- `GET /api/extensions/{id}/logs` — Get sandbox logs
+- `GET /api/extensions/build-progress?name=` — SSE build progress stream
+
+**Extension types:**
+- `lsp` — Language Server Protocol servers (run in gVisor sandboxes)
+- `ui` — UI plugins (inject into existing components via slots)
+
+**LSP Discovery:** `ExtensionRegistry.Lookup()` replaces `lsp.Registry.Lookup()` to dynamically resolve language servers from installed extensions. LSP availability is determined by installed extensions, not a global toggle.
+
+**UI Injection:** Extensions can inject content into named slots: `card-header`, `card-footer`, `editor-toolbar`, `board-section`, `task-chat-header`, `task-chat-footer`.
+
+**Registry:** URL configurable via `registry_url` in config. Default: `file://./extensions/registry.json`.
+
+**Sandbox:** Each LSP extension runs in a dedicated gVisor sandbox. Bridge protocol uses `MethodLSP` (0x0A) for JSON-RPC passthrough.
 
 ## Common Patterns
 

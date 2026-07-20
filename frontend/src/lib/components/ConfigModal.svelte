@@ -4,12 +4,12 @@
     import { isAgentProvider, PI_SENTINEL_URL } from '$lib/types';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testPiConnection as testPiConnectionApi } from '$lib/api';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
-    import { isLSPEnabled, setLSPEnabled } from '$lib/storage';
     import BaseModal from './BaseModal.svelte';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import TaskDefaults from './ConfigModal/TaskDefaults.svelte';
     import ProviderCard from './ConfigModal/ProviderCard.svelte';
+    import ExtensionsTab from './ConfigModal/ExtensionsTab.svelte';
 
     let { config, onClose, onSaved, onSignOut }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void> } = $props();
 
@@ -32,7 +32,6 @@
     let defaultSubtasksAutoMerge = $state(true);
     let defaultOperatingMode = $state('act');
     let defaultMaxFailedTurns = $state(3);
-    let lspEnabled = $state(true);
     let loading = $state(false);
     let error = $state('');
 
@@ -172,13 +171,6 @@
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
         hasChanges = false;
-    });
-
-    // Load LSP toggle from IndexedDB on open
-    $effect(() => {
-        (async () => {
-            lspEnabled = await isLSPEnabled();
-        })();
     });
 
     // Close agent menu when clicking outside
@@ -556,6 +548,7 @@
     <div class="tab-bar">
         <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>Providers</button>
         <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>Task Defaults</button>
+        <button type="button" class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => activeTab = 'extensions'}>Extensions</button>
         <button type="button" class="tab-btn" class:active={activeTab === 'general'} onclick={() => activeTab = 'general'}>General</button>
     </div>
 
@@ -651,18 +644,16 @@
             />
         {/if}
 
+        <!-- Extensions Tab -->
+        {#if activeTab === 'extensions'}
+            <ExtensionsTab />
+        {/if}
+
         <!-- General Tab -->
         {#if activeTab === 'general'}
             <!-- Features -->
             <div class="section">
                 <h3 class="section-label">Features</h3>
-                <div class="field-row">
-                    <div class="field-row-left">
-                        <span class="field-label-inline">Language Server (LSP)</span>
-                        <span class="field-help">Enable editor features like completions, hover, diagnostics, and go-to-definition</span>
-                    </div>
-                    <ToggleSwitch bind:checked={lspEnabled} ariaLabel="Enable LSP" onChange={() => { setLSPEnabled(lspEnabled); markDirty(); }} />
-                </div>
                 {#if appStore.pwaInstallPrompt}
                     <button type="button" class="btn-pwa-install" onclick={handlePwaInstall} title="Install as a Progressive Web App">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none">

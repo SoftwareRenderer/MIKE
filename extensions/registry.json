@@ -1,0 +1,12 @@
+[
+    {
+        "name": "gopls",
+        "version": "1.0.0",
+        "type": "lsp",
+        "display_name": "Go Language Server",
+        "description": "Official Go language server (gopls) by Google. Provides completions, hover, diagnostics, go-to-definition, and more for Go projects.",
+        "author": "Go Team",
+        "dockerfile_url": "gopls/Dockerfile",
+        "manifest_url": "gopls/manifest.json"
+    }
+]

@@ -10,7 +10,9 @@
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
     import { LSPClient, languageServerExtensions } from '@codemirror/lsp-client';
     import { requestLSPChannel, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
-    import { isLSPEnabled } from '$lib/storage';
+    import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
+    import { extensionManager } from '$lib/services/extension-manager.svelte';
+    import { uiInjector } from '$lib/services/ui-injector.svelte';
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
@@ -79,7 +81,7 @@
     let lspServerVersion = $state(''); // server version from LSP (e.g., "v0.15.0")
     let fileUri = $state('');
     let lspCompartment = $state(new Compartment());
-    let lspEnabled = $state(true);
+    let lspAvailable = $state(false);
 
     // Notify parent when unsaved changes state changes
     $effect(() => {
@@ -547,18 +549,23 @@
     });
 
     // Initialize LSP after the file and editor are ready
+    // Track extension manager state so this effect re-runs when extensions are loaded
     $effect(() => {
         const _editorReady = editorReady;
         const _projPath = projectPath;
         const _projId = projectId;
+        // Read extension state to track it as a dependency
+        const _extCount = extensionManager.state.extensions.length;
+        // Check LSP availability here (outside async) so effect re-runs when extensions load
+        const _lspAvail = isLSPAvailable(filePath);
 
         if (!_editorReady || !view || !_projId || !_projPath) return;
         if (lspClient) return; // already initialized
 
         async function initLSP() {
-            // Check user preference
-            lspEnabled = await isLSPEnabled();
-            if (!lspEnabled) return; // fall back to built-in autocompletion
+            // Check if LSP extension is available for this file
+            lspAvailable = _lspAvail;
+            if (!lspAvailable) return; // fall back to built-in autocompletion
 
             lspConnecting = true;
             fileUri = `file://${filePath}`;
@@ -590,6 +597,8 @@
                 lspClient = new LSPClient({
                     extensions: languageServerExtensions(),
                     rootUri: `file://${_projPath!}`,
+                    // Gopls can take 10-20s to initialize on large workspaces
+                    timeout: 30000,
                 });
 
                 await lspClient.connect(virtTransport).initializing;
@@ -628,10 +637,10 @@
         const _lspClient = lspClient;
         const _view = view;
         const _projPath = projectPath;
-        const _lspEnabled = lspEnabled;
+        const _lspAvailable = lspAvailable;
 
         // Only reconnect if we previously had a client but it's now disconnected
-        if (!_lspClient || !_view || !_projPath || !_lspEnabled) return;
+        if (!_lspClient || !_view || !_projPath || !_lspAvailable) return;
         if (_lspReady || _lspClient.connected || _lspConnecting) return; // still connected or connecting
 
         async function reconnectLSP() {
@@ -667,6 +676,7 @@
                 const newClient = new LSPClient({
                     extensions: languageServerExtensions(),
                     rootUri: `file://${_projPath!}`,
+                    timeout: 30000,
                 });
                 lspClient = newClient;
 
@@ -708,6 +718,12 @@
 </script>
 
 <div class="file-editor" class:has-file={!!filePath} class:active={active}>
+    <!-- UI Extension Injection: editor-toolbar -->
+    {#if uiInjector.hasContent('editor-toolbar')}
+        <div class="editor-injection-toolbar">
+            <!-- UI extensions render here -->
+        </div>
+    {/if}
     {#if filePath}
         <!-- Editor content area -->
         <div class="editor-content">
@@ -740,6 +756,7 @@
                 onSave={handleSave}
                 {saving}
                 lspReady={lspReady}
+                lspConnecting={lspConnecting}
                 {lspError}
                 {lspLanguage}
                 {lspServerName}
@@ -759,6 +776,12 @@
     }
     .file-editor.active {
         display: flex;
+    }
+
+    /* UI Extension Injection */
+    .editor-injection-toolbar {
+        padding: 0.25rem 0.5rem;
+        border-bottom: 1px solid var(--color-border-subtle);
     }
 
     .editor-content {

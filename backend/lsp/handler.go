@@ -84,6 +84,11 @@ type workspaceState struct {
 	sentInitialized bool
 }
 
+// lspRegistry defines the operations the LSP handler needs from the registry.
+type lspRegistry interface {
+	Lookup(fileOrPath string) *ServerConfig
+}
+
 // lspManager defines the operations the LSP handler needs from the process manager.
 type lspManager interface {
 	GetOrCreate(workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error)
@@ -96,7 +101,7 @@ type lspManager interface {
 // It handles request ID remapping so multiple clients can share a single language server.
 type LSPHandler struct {
 	manager  lspManager
-	registry *Registry
+	registry lspRegistry
 	mu       sync.Mutex
 	clients  map[*websocket.Conn]*ClientSession
 	// Per workspace+language state
@@ -111,7 +116,7 @@ type LSPHandler struct {
 }
 
 // NewLSPHandler creates a new LSPHandler.
-func NewLSPHandler(reg *Registry, mgr lspManager) *LSPHandler {
+func NewLSPHandler(reg lspRegistry, mgr lspManager) *LSPHandler {
 	h := &LSPHandler{
 		registry:         reg,
 		manager:          mgr,
@@ -422,6 +427,7 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 	h.mu.Lock()
 	ws, ok := h.workspaces[workspaceKey]
 	if !ok {
+		log.Printf("[lsp] client %d: workspaceKey=%s not found, lazy init", session.clientID, workspaceKey)
 		// Lazy workspace creation: this is the first request for this language.
 		// Look up the server config from the file path and create the workspace.
 		cfg := h.registry.Lookup(filePath)
@@ -470,7 +476,6 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 			clientReqID: clientReqID,
 			channelID:   channelID,
 		})
-		log.Printf("[lsp] client %d: queued initialize (pending, queue size=%d)", session.clientID, len(ws.queuedInitialize))
 		h.mu.Unlock()
 		return
 	}
@@ -511,6 +516,7 @@ func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession,
 	h.mu.Unlock()
 
 	if !ok || ws.process == nil {
+		log.Printf("[lsp] client %d: workspaceKey=%s not found or process nil (ok=%v, process=%v)", session.clientID, workspaceKey, ok, ok && ws.process != nil)
 		return
 	}
 
@@ -518,7 +524,6 @@ func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession,
 		log.Printf("[lsp] client %d: send to server failed: %v", session.clientID, err)
 	}
 
-	log.Printf("[lsp] client %d: request id=%s → backend id=%s", session.clientID, clientReqID, backendIDStr)
 }
 
 // forwardRaw forwards a message to the server without ID remapping.
@@ -538,7 +543,6 @@ func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg
 	// Log the method for debugging
 	var rpc JSONRPCMessage
 	_ = json.Unmarshal(msg, &rpc)
-	log.Printf("[lsp] client %d: notification %s", session.clientID, rpc.Method)
 
 	if err := h.manager.SendToServer(ws.process, msg); err != nil {
 		log.Printf("[lsp] client %d: forward raw failed: %v", session.clientID, err)
@@ -546,8 +550,6 @@ func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg
 }
 
 // routeServerMessage routes a message from the language server to the appropriate client(s).
-// Only responses (with id) reach this function — notifications are delivered directly
-// to subscriber channels by the LSPProcess and never pass through messageCh.
 func (h *LSPHandler) routeServerMessage(serverMsg json.RawMessage) {
 	var rpc JSONRPCMessage
 	if err := json.Unmarshal(serverMsg, &rpc); err != nil {
@@ -561,8 +563,36 @@ func (h *LSPHandler) routeServerMessage(serverMsg json.RawMessage) {
 		return
 	}
 
-	// Server request (has both id and method) — not expected, log and skip
-	log.Printf("[lsp] unexpected server message: id=%v method=%s", rpc.ID, rpc.Method)
+	// Notification: has method but no id — broadcast to all clients
+	if rpc.ID == nil && rpc.Method != "" {
+		h.routeNotification(serverMsg)
+		return
+	}
+
+	// Server request (has both id and method) — e.g. window/workDoneProgress.
+	// We don't implement server request handling yet; silently drop.
+	if rpc.ID != nil && rpc.Method != "" {
+		return
+	}
+
+	// Malformed message (neither id nor method) — can occur during process
+	// teardown when a partial read dispatches a truncated body. Silently drop.
+}
+
+// routeNotification broadcasts a server notification to all connected clients.
+func (h *LSPHandler) routeNotification(serverMsg json.RawMessage) {
+	h.mu.Lock()
+	clients := make([]*ClientSession, 0, len(h.clients))
+	for _, s := range h.clients {
+		if s.workspace != "" {
+			clients = append(clients, s)
+		}
+	}
+	h.mu.Unlock()
+
+	for _, s := range clients {
+		_ = s.conn.Write(context.Background(), websocket.MessageText, serverMsg)
+	}
 }
 
 // routeResponse routes a server response back to the originating client with ID remapping.
@@ -614,8 +644,6 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 				targetWorkspace.initResponse = serverMsg
 				queuedReplay = targetWorkspace.queuedInitialize
 				targetWorkspace.queuedInitialize = nil
-				log.Printf("[lsp] cached initialize response for workspace=%s (queued=%d)",
-					targetWorkspace.process.Workspace, len(queuedReplay))
 			}
 		}
 	}
@@ -631,7 +659,6 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 		qremapped := remapResponseIDWithChannel(serverMsg, q.clientReqID, q.channelID)
 		if qremapped != nil {
 			q.session.conn.Write(context.Background(), websocket.MessageText, qremapped)
-			log.Printf("[lsp] replayed queued initialize to client %d", q.session.clientID)
 		}
 	}
 }

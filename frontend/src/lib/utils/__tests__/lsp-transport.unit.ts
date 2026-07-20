@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { detectLanguage } from '$lib/utils/lsp-connection-manager';
+import { extensionManager } from '$lib/services/extension-manager.svelte';
+import type { Extension } from '$lib/types';
 
 /**
  * Tests for the LSP connection manager's message routing logic.
@@ -11,33 +13,77 @@ import { detectLanguage } from '$lib/utils/lsp-connection-manager';
 
 const CHANNEL_ID_STEP = 1000;
 
+/** Helper to add a mock LSP extension to the manager. */
+function addMockLSPExt(name: string, language: string, extensions: string[]) {
+    const ext: Extension = {
+        id: `${name}-1`,
+        name,
+        version: '1.0.0',
+        type: 'lsp',
+        manifest: {
+            display_name: name,
+            description: '',
+            author: 'Test',
+            deprecated: false,
+            lsp: {
+                command: name,
+                args: [],
+                extensions,
+                language,
+            },
+        },
+        config: {},
+        container_config: {},
+        sandbox_config: { network_isolation: true, memory_limit: 256 },
+        install_source: 'manual',
+        enabled: true,
+        running: false,
+        installed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    };
+    extensionManager.state.extensions.push(ext);
+}
+
 describe('detectLanguage', () => {
-  it('maps Go extensions to go', () => {
+  beforeEach(() => {
+    // Reset extensions before each test
+    extensionManager.state.extensions = [];
+  });
+
+  it('falls back to lowercase extension when no LSP extension installed', () => {
+    expect(detectLanguage('main.go')).toBe('go');
+    expect(detectLanguage('app.ts')).toBe('ts');
+    expect(detectLanguage('config.toml')).toBe('toml');
+  });
+
+  it('maps Go to go when gopls extension is installed', () => {
+    addMockLSPExt('gopls', 'go', ['go']);
     expect(detectLanguage('main.go')).toBe('go');
   });
 
-  it('maps TypeScript extensions to typescript', () => {
+  it('maps TypeScript extensions to typescript when tsserver extension is installed', () => {
+    addMockLSPExt('tsserver', 'typescript', ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs']);
     expect(detectLanguage('app.ts')).toBe('typescript');
     expect(detectLanguage('app.tsx')).toBe('typescript');
-  });
-
-  it('maps JavaScript extensions to typescript', () => {
     expect(detectLanguage('app.js')).toBe('typescript');
     expect(detectLanguage('app.jsx')).toBe('typescript');
     expect(detectLanguage('app.mjs')).toBe('typescript');
     expect(detectLanguage('app.cjs')).toBe('typescript');
   });
 
-  it('maps Python extensions to python', () => {
+  it('maps Python extensions to python when pylsp extension is installed', () => {
+    addMockLSPExt('pylsp', 'python', ['py', 'pyi']);
     expect(detectLanguage('main.py')).toBe('python');
     expect(detectLanguage('stub.pyi')).toBe('python');
   });
 
-  it('maps Rust extensions to rust', () => {
+  it('maps Rust extensions to rust when rust-analyzer extension is installed', () => {
+    addMockLSPExt('rust-analyzer', 'rust', ['rs']);
     expect(detectLanguage('main.rs')).toBe('rust');
   });
 
-  it('falls back to lowercase extension for unknown types', () => {
+  it('falls back to lowercase extension for unknown types even with extensions installed', () => {
+    addMockLSPExt('gopls', 'go', ['go']);
     expect(detectLanguage('config.toml')).toBe('toml');
     expect(detectLanguage('README.md')).toBe('md');
   });

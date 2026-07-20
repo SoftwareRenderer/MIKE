@@ -12,6 +12,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     import type { Project, Task, Config, StreamEvent } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
+    import { extensionManager } from '$lib/services/extension-manager.svelte';
     let TerminalPanelComponent: typeof import('./TerminalPanel.svelte').default | null = $state(null);
     let terminalLoading = $state(false);
     import CreateTaskModal from './CreateTaskModal.svelte';
@@ -513,6 +514,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     showExplorerViewVal = true;
                 }
                 await loadAppData();
+                // Load installed extensions for LSP discovery
+                extensionManager.loadExtensions().catch(() => {});
             }
             isLoadingAuth = false;
         } catch (e) {
@@ -613,6 +616,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         await loadAppData();
         initialLoadComplete = true; // mark initial data load as done
         isLoadingAuth = false; // hide loading screen after data is loaded
+
+        // Load installed extensions for LSP discovery
+        extensionManager.loadExtensions().catch(() => {});
     }
 
     // Detect external URL changes (e.g., page.goto() in Playwright, direct URL navigation).

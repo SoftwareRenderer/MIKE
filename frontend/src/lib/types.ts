@@ -385,3 +385,100 @@ export type CommitQueueEntry = { taskID: string; status: 'queued' | 'processing'
 
 export type TaskEventData = { task_id: string; type: string; data: any };
 
+// ─── Extension types ───
+
+export type ExtensionType = 'lsp' | 'ui';
+
+export interface ExtensionManifest {
+    display_name: string;
+    description: string;
+    author: string;
+    homepage?: string;
+    deprecated: boolean;
+    config_schema?: ConfigSchema;
+    lsp?: LSPConfig;
+    ui?: UIExtensionConfig;
+}
+
+export interface LSPConfig {
+    command: string;
+    args: string[];
+    extensions: string[];
+    language: string;
+    initParamsOverride?: Record<string, any>;
+}
+
+export interface UIExtensionConfig {
+    module_url: string;
+    injection_points: string[];
+}
+
+export interface ConfigSchema {
+    type: string;
+    properties?: Record<string, SchemaProperty>;
+    required?: string[];
+}
+
+export interface SchemaProperty {
+    type: string;
+    title?: string;
+    description?: string;
+    default?: any;
+    minimum?: number;
+    maximum?: number;
+    enum?: any[];
+}
+
+export interface ContainerConfig {
+    image?: string;
+    dockerfile?: string;
+    entrypoint?: string[];
+    working_dir?: string;
+}
+
+export interface ExtensionSandboxConfig {
+    network_isolation: boolean;
+    memory_limit: number;
+    forward_ports?: PortForward[];
+    mounts?: SandboxMount[];
+    envs?: SandboxEnv[];
+    capabilities?: string[];
+}
+
+export interface Extension {
+    id: string;
+    name: string;
+    version: string;
+    type: ExtensionType;
+    manifest: ExtensionManifest;
+    config: Record<string, any>;
+    container_config: ContainerConfig;
+    sandbox_config: ExtensionSandboxConfig;
+    install_source: string;
+    image_ref?: string;
+    enabled: boolean;
+    running: boolean;
+    ports?: AssignedPort[];
+    installed_at: string;
+    updated_at: string;
+}
+
+export interface RegistryEntry {
+    name: string;
+    version: string;
+    type: ExtensionType;
+    display_name: string;
+    description: string;
+    author: string;
+    image?: string;
+    dockerfile_url?: string;
+    manifest_url?: string;
+}
+
+export interface ExtensionUpdate {
+    id: string;
+    name: string;
+    current_version: string;
+    available_version: string;
+}
+

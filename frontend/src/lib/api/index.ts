@@ -111,3 +111,19 @@ export type { AppStream, AppStreamCallbacks } from './stream';
 
 // -- Terminal --
 export { createTerminal, createProjectTerminal, isTerminalStale } from './terminal';
+
+// -- Extensions --
+export {
+    listExtensions,
+    getExtension,
+    createExtension,
+    updateExtension,
+    deleteExtension,
+    setExtensionEnabled,
+    getRegistryIndex,
+    installExtension,
+    checkUpdates,
+    getExtensionLogs,
+    streamBuildProgress,
+    type BuildProgressEvent,
+} from './extensions';
