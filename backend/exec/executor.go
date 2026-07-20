@@ -1013,15 +1013,14 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	go te.executeTask(execSetup)
 }
 
-// CommitAndMerge commits worktree changes and optionally merges the task branch.
+// CommitAndMerge commits staged worktree changes and optionally merges the task branch.
+// Only explicitly staged files are committed; unstaged changes remain in the working tree.
 // Operations are serialized per project via the commit queue to prevent git race conditions.
 func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMsg string, autoMerge bool) error {
 	release := te.commitQueue.Acquire(projectID)
 	defer release()
 
-	te.gitRun(worktreePath, "add", "-A")
-	unstageNewBinaryFilesInDir(worktreePath)
-	te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg)...)
+	te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
 
 	if autoMerge {
 		task, _ := te.store.GetTaskByTaskID(taskID)

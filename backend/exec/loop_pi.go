@@ -453,7 +453,7 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 	// Reload task — state may have been set inside the event loop (agent_end handler).
 	// Only set state here if the loop exited abnormally (ctx cancelled, process exited).
 	task, _ = te.store.GetTaskByTaskID(task.ID)
-	if task.ExecutionState == "running" || task.ExecutionState == "idle" {
+	if task.ExecutionState == "running" {
 		// Loop exited without agent_end setting state (e.g., process crash)
 		task.ExecutionState = "failed"
 		task.Status = "review"
