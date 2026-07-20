@@ -3,7 +3,7 @@
     import { formatRelativeTime } from '$lib/utils/format-time';
     import DiffSelect from '../DiffSelect.svelte';
 
-    let { commits, baseCommit, diffFrom, diffTo, onFromChange, onToChange, onToggleFullscreen, isFullscreen }: {
+    let { commits, baseCommit, diffFrom, diffTo, onFromChange, onToChange, onToggleFullscreen, isFullscreen, taskStatus }: {
         commits: TaskCommit[];
         baseCommit: TaskCommit | null;
         diffFrom: string;
@@ -12,6 +12,7 @@
         onToChange: (value: string) => void;
         onToggleFullscreen: () => void;
         isFullscreen: boolean;
+        taskStatus?: string;
     } = $props();
 
     function getCommitSubject(commit: TaskCommit): string {
@@ -52,10 +53,10 @@
         return opts;
     });
 
-    // Options for the To dropdown: Working tree at top, then commits newest→oldest
+    // Options for the To dropdown: Working tree (or HEAD for done tasks) at top, then commits newest→oldest
     let toOptions = $derived.by(() => {
         const opts: { value: string; label: string; meta?: string }[] = [
-            { value: 'working', label: 'Working tree' },
+            { value: 'working', label: taskStatus === 'done' ? 'HEAD' : 'Working tree' },
         ];
         for (const c of sortedCommits) {
             opts.push({
