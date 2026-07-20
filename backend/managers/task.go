@@ -450,6 +450,17 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		if h.executor != nil {
 			h.executor.StopSandbox(taskID)
 		}
+		// Capture branch tip for post-commit diff comparison.
+		// If already set (commit-and-done flow), keep the existing value.
+		if task.BranchTip == "" && task.Branch != "" {
+			project, pErr := h.store.GetProject(projectID)
+			if pErr == nil {
+				c := osexec.Command("git", "-C", project.Path, "rev-parse", task.Branch)
+				if out, err := c.CombinedOutput(); err == nil {
+					task.BranchTip = strings.TrimSpace(string(out))
+				}
+			}
+		}
 	} else if task.ExecutionState == "completed" {
 		// Task moved away from Done — reset status so it can run again
 		task.ExecutionState = "idle"

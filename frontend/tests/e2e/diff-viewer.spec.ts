@@ -977,4 +977,148 @@ test.describe.serial('Diff panel real-time file updates', () => {
     });
 });
 
+// --- Tests: done-task diff (BaseCommit..BranchTip) ---
+
+test.describe.serial('Done-task diff shows committed changes', () => {
+    test.beforeEach(async ({ page }) => {
+        test.setTimeout(60000);
+        await page.goto('/');
+        await page.waitForSelector('.project-item', { timeout: 10000 });
+    });
+
+    test('diff API returns committed diff for done tasks', async ({ page }) => {
+        const projectId = await getProjectId(page);
+        const taskId = await createTaskViaApi(page, projectId, `done-diff-test-${Date.now()}`);
+
+        await ensureTaskStarted(page, projectId, taskId);
+
+        // Poll until the task has a branch and worktree
+        let taskData: any = null;
+        for (let i = 0; i < 30; i++) {
+            taskData = await page.evaluate(async ({ pid, tid }: { pid: string; tid: string }) => {
+                const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+                return res.ok ? res.json() : null;
+            }, { pid: projectId, tid: taskId });
+            if (taskData?.branch) break;
+            await new Promise(r => setTimeout(r, 500));
+        }
+
+        if (!taskData?.branch) {
+            test.skip('Task did not get a branch');
+        }
+
+        const worktreePath = `${getConfig().workspace_dir}/${taskId}`;
+        if (!statSync(worktreePath).isDirectory()) {
+            test.skip('Worktree directory not found');
+        }
+
+        // Create a test file in the worktree
+        const uniqueId = Date.now();
+        const testFile = `done-task-diff-${uniqueId}.txt`;
+        const fileContent = `Committed content for done task diff test\nLine 2\n`;
+        writeFileSync(join(worktreePath, testFile), fileContent);
+
+        // Commit the file in the worktree
+        execSync(`cd ${worktreePath} && git add ${testFile}`);
+        execSync(`cd ${worktreePath} && git commit -m "Add done-task diff test file"`);
+
+        // Get the current HEAD (branch tip)
+        const branchTip = execSync(`cd ${worktreePath} && git rev-parse HEAD`).toString().trim();
+
+        // Move task to done, setting branch_tip
+        await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+            method: 'POST',
+            body: { status: 'done', branch_tip: branchTip },
+        });
+
+        // Verify task is done
+        const doneTask = await page.evaluate(async ({ pid, tid }: { pid: string; tid: string }) => {
+            const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+            return res.ok ? res.json() : null;
+        }, { pid: projectId, tid: taskId });
+        expect(doneTask.status).toBe('done');
+
+        // Call the diff API - should return the committed diff (BaseCommit..BranchTip)
+        const diffData = JSON.parse(execSync(
+            `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff"`,
+            { encoding: 'utf-8' }
+        ));
+
+        // The diff should contain the committed file
+        // For done tasks, the API returns a raw diff string (not a manifest)
+        expect(diffData.diff).toBeDefined();
+        expect(diffData.diff).toContain(testFile);
+        expect(diffData.diff).toContain('Committed content for done task diff test');
+
+        // Cleanup
+        rmSync(join(worktreePath, testFile), { force: true });
+    });
+
+    test('diff panel renders committed diff for done tasks in UI', async ({ page }) => {
+        const projectId = await getProjectId(page);
+        const taskId = await createTaskViaApi(page, projectId, `done-diff-ui-${Date.now()}`);
+
+        await ensureTaskStarted(page, projectId, taskId);
+
+        // Poll until the task has a branch and worktree
+        let taskData: any = null;
+        for (let i = 0; i < 30; i++) {
+            taskData = await page.evaluate(async ({ pid, tid }: { pid: string; tid: string }) => {
+                const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+                return res.ok ? res.json() : null;
+            }, { pid: projectId, tid: taskId });
+            if (taskData?.branch) break;
+            await new Promise(r => setTimeout(r, 500));
+        }
+
+        if (!taskData?.branch) {
+            test.skip('Task did not get a branch');
+        }
+
+        const worktreePath = `${getConfig().workspace_dir}/${taskId}`;
+        if (!statSync(worktreePath).isDirectory()) {
+            test.skip('Worktree directory not found');
+        }
+
+        // Create a test file in the worktree
+        const uniqueId = Date.now();
+        const testFile = `done-task-ui-${uniqueId}.txt`;
+        const fileContent = `UI test content for done task\nSecond line\n`;
+        writeFileSync(join(worktreePath, testFile), fileContent);
+
+        // Commit the file
+        execSync(`cd ${worktreePath} && git add ${testFile}`);
+        execSync(`cd ${worktreePath} && git commit -m "Add done-task UI test file"`);
+
+        const branchTip = execSync(`cd ${worktreePath} && git rev-parse HEAD`).toString().trim();
+
+        // Move task to done
+        await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+            method: 'POST',
+            body: { status: 'done', branch_tip: branchTip },
+        });
+
+        // Navigate to the done task
+        await navigateToTask(page, taskId, projectId);
+        await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+
+        // Wait for the diff panel to load
+        await expect(page.locator('.diff-viewer-loading')).not.toBeVisible({ timeout: 15000 });
+
+        // The diff panel should show the committed file
+        await expect(async () => {
+            const diffText = await page.locator('.column-diff, .diff-scroll').textContent().catch(() => '');
+            expect(diffText).toContain(testFile);
+        }).toPass({ timeout: 10000 });
+
+        await expect(async () => {
+            const diffText = await page.locator('.column-diff, .diff-scroll').textContent().catch(() => '');
+            expect(diffText).toContain('UI test content for done task');
+        }).toPass({ timeout: 10000 });
+
+        // Cleanup
+        rmSync(join(worktreePath, testFile), { force: true });
+    });
+});
+
 

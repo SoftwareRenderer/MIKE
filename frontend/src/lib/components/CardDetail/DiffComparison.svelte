@@ -3,7 +3,7 @@
     import { formatRelativeTime } from '$lib/utils/format-time';
     import DiffSelect from '../DiffSelect.svelte';
 
-    let { commits, baseCommit, diffFrom, diffTo, onFromChange, onToChange, onToggleFullscreen, isFullscreen, taskStatus }: {
+    let { commits, baseCommit, diffFrom, diffTo, onFromChange, onToChange, onToggleFullscreen, isFullscreen, isDone, branchTip, branchName }: {
         commits: TaskCommit[];
         baseCommit: TaskCommit | null;
         diffFrom: string;
@@ -12,7 +12,9 @@
         onToChange: (value: string) => void;
         onToggleFullscreen: () => void;
         isFullscreen: boolean;
-        taskStatus?: string;
+        isDone: boolean;
+        branchTip?: string;
+        branchName?: string;
     } = $props();
 
     function getCommitSubject(commit: TaskCommit): string {
@@ -53,10 +55,16 @@
         return opts;
     });
 
-    // Options for the To dropdown: Working tree (or HEAD for done tasks) at top, then commits newest→oldest
+    // Options for the To dropdown: Working tree at top, then commits newest→oldest.
+    // For done tasks, 'working' still matches but the backend returns the committed
+    // diff (BaseCommit..BranchTip). Label shows the commit hash or branch name.
     let toOptions = $derived.by(() => {
+        let toLabel = 'Working tree';
+        if (isDone) {
+            toLabel = branchTip || sortedCommits[0]?.hash || branchName || '';
+        }
         const opts: { value: string; label: string; meta?: string }[] = [
-            { value: 'working', label: taskStatus === 'done' ? 'HEAD' : 'Working tree' },
+            { value: 'working', label: toLabel },
         ];
         for (const c of sortedCommits) {
             opts.push({

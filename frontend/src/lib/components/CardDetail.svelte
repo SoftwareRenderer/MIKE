@@ -581,7 +581,13 @@
                 return;
             }
             // Fallback: fetch full diff for all files
-            const headRef = diffTo === 'working' ? undefined : diffTo;
+            // For done tasks, always use branch_tip (committed diff), never working tree.
+            let headRef: string | undefined;
+            if (task.status === 'done') {
+                headRef = task.branch_tip || task.branch || undefined;
+            } else {
+                headRef = diffTo === 'working' ? undefined : diffTo;
+            }
             const baseRef = diffFrom || undefined;
             const result = await getTaskDiff(task.project_id, task.id, { headRef, baseRef, full: true });
             diffCache.updateDiff(result);
@@ -771,7 +777,9 @@
                                     baseCommit={baseCommit}
                                     diffFrom={diffFrom}
                                     diffTo={diffTo}
-                                    taskStatus={task.status}
+                                    isDone={task.status === 'done'}
+                                    branchTip={task.branch_tip}
+                                    branchName={task.branch}
                                     onFromChange={onDiffFromChange}
                                     onToChange={onDiffToChange}
                                     onToggleFullscreen={toggleDiffFullscreen}
