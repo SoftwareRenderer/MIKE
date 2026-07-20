@@ -128,7 +128,128 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 1MB)")
 		return
 	}
-	JSONResponse(w, http.StatusOK, map[string]string{"content": string(content)})
+	// Compute gutter markers (diff vs HEAD) for non-ref reads
+	var markers map[int][]string
+	if ref == "" {
+		markers = computeGutterMarkers(s, worktreePath, path, project, taskID)
+	}
+	JSONResponse(w, http.StatusOK, fsReadResponse{
+		Content:       string(content),
+		GutterMarkers: markers,
+	})
+}
+
+// fsReadResponse is the JSON response for GET /api/fs/read.
+type fsReadResponse struct {
+	Content       string              `json:"content"`
+	GutterMarkers map[int][]string    `json:"gutter_markers,omitempty"`
+}
+
+// computeGutterMarkers runs `git diff HEAD -- <path>` and parses the unified diff
+// into per-line markers indexed by the current (working tree) line number (1-based).
+// Returns nil if the file is untracked, the repo has no commits, or git is unavailable.
+func computeGutterMarkers(s *Server, worktreePath, path string, project *types.Project, taskID string) map[int][]string {
+	relPath, err := filepath.Rel(worktreePath, path)
+	if err != nil {
+		return nil
+	}
+	var diffOutput string
+	if taskID != "" {
+		diffOutput, err = s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "diff", "HEAD", "--", relPath)
+	} else {
+		diffOutput, err = s.executor.WorktreeMgr().GitRunInDirOutput(worktreePath, "diff", "HEAD", "--", relPath)
+	}
+	if err != nil || diffOutput == "" {
+		return nil
+	}
+	return parseUnifiedDiff(diffOutput)
+}
+
+// parseUnifiedDiff parses a unified diff and returns per-line markers for the
+// current (working tree) file. Line numbers are 1-based. Marker types:
+// "added", "removed", "modified".
+func parseUnifiedDiff(diff string) map[int][]string {
+	markers := make(map[int][]string)
+	lines := strings.Split(diff, "\n")
+	// Remove trailing empty element from final newline
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	newLine := 0          // current line number in working tree (0-based internally)
+	hunkOldStart := 0
+	hunkOldCount := 0
+	hunkNewStart := 0
+	hunkNewCount := 0
+	inHunk := false
+	hunkOldPos := 0        // lines consumed from old range
+	hunkNewPos := 0        // lines consumed from new range
+	var pendingRemovals int
+
+	for _, line := range lines {
+		// Detect hunk header: @@ -oldStart,oldCount +newStart,newCount @@
+		if strings.HasPrefix(line, "@@ ") {
+			_, _ = fmt.Sscanf(line, "@@ -%d,%d +%d,%d @@", &hunkOldStart, &hunkOldCount, &hunkNewStart, &hunkNewCount)
+			newLine = hunkNewStart - 1 // 0-based
+			inHunk = true
+			hunkOldPos = 0
+			hunkNewPos = 0
+			pendingRemovals = 0
+			continue
+		}
+		if !inHunk {
+			continue
+		}
+
+		if strings.HasPrefix(line, "+") {
+			// Added line
+			if pendingRemovals > 0 {
+				// Paired with a removal → modified
+				markers[newLine+1] = append(markers[newLine+1], "modified")
+				pendingRemovals--
+			} else {
+				markers[newLine+1] = append(markers[newLine+1], "added")
+			}
+			newLine++
+			hunkNewPos++
+		} else if strings.HasPrefix(line, "-") {
+			// Removed line
+			pendingRemovals++
+			hunkOldPos++
+		} else {
+			// Context line (starts with " ")
+			if pendingRemovals > 0 {
+				// Removals followed by context — mark removed on the line before
+				if newLine > 0 {
+					markers[newLine] = append(markers[newLine], "removed")
+				}
+				pendingRemovals = 0
+			}
+			newLine++
+			hunkOldPos++
+			hunkNewPos++
+		}
+
+		// Check if hunk is exhausted
+		if hunkOldPos >= hunkOldCount && hunkNewPos >= hunkNewCount {
+			inHunk = false
+			// Flush remaining removals at end of hunk
+			if pendingRemovals > 0 && newLine > 0 {
+				markers[newLine] = append(markers[newLine], "removed")
+				pendingRemovals = 0
+			}
+		}
+	}
+
+	// Flush remaining removals at end of diff
+	if pendingRemovals > 0 && newLine > 0 {
+		markers[newLine] = append(markers[newLine], "removed")
+	}
+
+	if len(markers) == 0 {
+		return nil
+	}
+	return markers
 }
 
 func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {

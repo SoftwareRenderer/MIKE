@@ -4,7 +4,7 @@
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
     import { getGitStatus, getProjectDiff, stageProjectFile, commitProject } from '$lib/api/git';
     import { dialogStore } from '$lib/stores';
-    import { loadAppSetting, saveAppSetting } from '$lib/storage';
+    import { loadAppSetting, saveAppSetting, clearEditorDraft, clearEditorHistory } from '$lib/storage';
     // Lazy-loaded on first diff view
     let DiffViewerComponent: typeof import('./DiffViewer.svelte').default | null = $state(null);
     let diffViewerLoading = $state(false);
@@ -298,7 +298,21 @@
     }
 
     /** Close the inline editor and return to diff view. */
-    function closeInlineEditor() {
+    async function closeInlineEditor() {
+        if (editorHasChanges) {
+            const fileName = editorFilePath.split('/').pop() || editorFilePath;
+            const confirmed = await dialogStore.showConfirm({
+                title: 'Unsaved changes',
+                message: `"${fileName}" has unsaved changes. Discard them?`,
+                confirmText: 'Discard',
+                cancelText: 'Cancel',
+                variant: 'destructive',
+            });
+            if (!confirmed) return;
+            // Clear cached draft and history so changes don't reappear on reopen
+            clearEditorDraft(editorFilePath).catch(() => {});
+            clearEditorHistory(editorFilePath).catch(() => {});
+        }
         editorFilePath = '';
         editorTargetLine = 0;
         if (onUpdateFile) onUpdateFile(null);

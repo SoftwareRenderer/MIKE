@@ -3,7 +3,7 @@ import {
     gutter,
     GutterMarker,
 } from '@codemirror/view';
-import { computeDiffMarkers } from './diff-gutter';
+import { mergeMarkers } from './diff-gutter';
 
 interface IndicatorDef {
     color: string;
@@ -103,9 +103,15 @@ class PlainLineMarker extends GutterMarker {
 
 /** Per-editor mutable state — updated directly by editors after save.
  * Avoids CodeMirror state transactions entirely (no stale view issues).
+ *
+ * @param initialMarkers - Pre-computed markers from server (diff vs HEAD), keyed by baseline line number
+ * @param baselineContent - File content as read from disk (before user edits)
+ * @param current - Last computed document content (for change detection)
+ * @param map - Merged markers keyed by current document line number
  */
 export interface GitGutterState {
-    original: string;
+    initialMarkers: Map<number, string[]> | null;
+    baselineContent: string;
     current: string;
     map: Map<number, ('added' | 'modified' | 'removed')[]>;
 }
@@ -119,11 +125,14 @@ export interface GitGutterState {
  * Usage:
  *   const { extension, state } = gitGutter();
  *   // ... create editor with extension ...
- *   // After save:
- *   state.original = newContent;
+ *   state.initialMarkers = serverMarkers; // from /api/fs/read response
+ *   state.baselineContent = fileContent;  // content from disk
+ *   // After save (re-fetch file):
+ *   state.initialMarkers = newMarkers;
+ *   state.baselineContent = newContent;
  */
 export function gitGutter() {
-    const state: GitGutterState = { original: '', current: '', map: new Map() };
+    const state: GitGutterState = { initialMarkers: null, baselineContent: '', current: '', map: new Map() };
 
     const gutterDef = gutter({
         class: 'cm-gitGutter',
@@ -134,21 +143,11 @@ export function gitGutter() {
             // Recompute when content changes
             if (current !== state.current) {
                 state.current = current;
+                const merged = mergeMarkers(state.initialMarkers, state.baselineContent, current);
+                // Convert to typed map
                 const map = new Map<number, ('added' | 'modified' | 'removed')[]>();
-                if (state.original !== current) {
-                    const markers = computeDiffMarkers(state.original, current);
-                    for (let i = 1; i < markers.length; i++) {
-                        const markerList = markers[i];
-                        if (markerList) {
-                            const types: ('added' | 'modified' | 'removed')[] = [];
-                            for (const m of markerList) {
-                                if (m && m.type !== 'context') {
-                                    types.push(m.type as 'added' | 'modified' | 'removed');
-                                }
-                            }
-                            if (types.length > 0) map.set(i, types);
-                        }
-                    }
+                for (const [ln, types] of merged) {
+                    map.set(ln, types as ('added' | 'modified' | 'removed')[]);
                 }
                 state.map = map;
             }

@@ -15,7 +15,7 @@
     import { isLSPEnabled } from '$lib/storage';
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
-    import { gitGutter } from '$lib/utils/git-gutter';
+    import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax } from '$lib/utils/codemirror-theme';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
@@ -37,8 +37,8 @@
     let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId, projectPath, baseRef, onToggleFullscreen, mobileFullscreen, isMobile }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string; projectPath?: string; baseRef?: string; onToggleFullscreen?: () => void; mobileFullscreen?: boolean; isMobile?: boolean } = $props();
 
     let content = $state('');
-    let originalContent = $state('');
-    let originalContentLoaded = $state(false);
+    let baselineContent = $state('');
+    let baselineContentLoaded = $state(false);
     let savedContent = $state('');
     let loading = $state(true);
     let saving = $state(false);
@@ -61,7 +61,7 @@
 
     let view: EditorView | null = null;
     let editorReady = $state(false); // signals when editor view is created (for LSP effect)
-    let gitGutterState: { original: string } | null = null; // mutable ref for git gutter
+    let gitGutterState: GitGutterState | null = null; // mutable ref for git gutter
     let searchVisible = $state(false);
     let searchApp: any = null;
 
@@ -163,7 +163,8 @@
         const langSupport = getLanguageSupport(filePath);
         const gitGutterExt = gitGutter();
         gitGutterState = gitGutterExt.state;
-        gitGutterExt.state.original = originalContent;
+        gitGutterExt.state.initialMarkers = null; // DiffEditor computes diff vs baseline ref
+        gitGutterExt.state.baselineContent = baselineContent;
         const extensions = [
             // Explicit setup (replaces basicSetup, excludes searchKeymap)
             gitGutterExt.extension,
@@ -320,8 +321,8 @@
 
     // Re-create editor after baseline fetch completes so gitGutter has a comparison target.
     $effect(() => {
-        const _loaded = originalContentLoaded;
-        const _original = originalContent;
+        const _loaded = baselineContentLoaded;
+        const _baseline = baselineContent;
         if (!loading && !fileTooLarge && !fileNotFound && !view && editorEl && _loaded !== undefined) {
             requestAnimationFrame(() => {
                 if (editorEl && !view) {
@@ -334,7 +335,7 @@
     // Initialize LSP after the file and editor are ready
     $effect(() => {
         const _editorReady = editorReady;
-        const _loaded = originalContentLoaded;
+        const _loaded = baselineContentLoaded;
         const _projPath = projectPath;
         const _projId = projectId;
 
@@ -465,7 +466,7 @@
             content = data.content || '';
 
             // Fetch baseline for git gutter. Uses DiffViewer's baseRef so markers match the diff.
-            // On failure (new file), originalContent stays empty — all lines shown as added.
+            // On failure (new file), baselineContent stays empty — all lines shown as added.
             const refToUse = baseRef || 'HEAD';
             const headParams = new URLSearchParams({ path: filePath, ref: refToUse });
             if (projectId) headParams.set('project', projectId);
@@ -474,15 +475,15 @@
                 const headRes = await fetch(`/api/fs/read?${headParams}`);
                 if (headRes.ok) {
                     const headData = await headRes.json();
-                    originalContent = headData.content || '';
-                    originalContentLoaded = true;
+                    baselineContent = headData.content || '';
+                    baselineContentLoaded = true;
                 } else {
-                    originalContent = '';
-                    originalContentLoaded = false;
+                    baselineContent = '';
+                    baselineContentLoaded = false;
                 }
             } catch {
-                originalContent = '';
-                originalContentLoaded = false;
+                baselineContent = '';
+                baselineContentLoaded = false;
             }
             savedContent = content; // disk matches current
         } catch (e) {
@@ -514,11 +515,6 @@
                 throw new Error(err.error || 'Failed to save file');
             }
             savedContent = content;
-            if (view) {
-                if (gitGutterState) {
-                    gitGutterState.original = content;
-                }
-            }
         } catch (e) {
             dialogStore.showToast('Failed to save: ' + String(e), 'error');
         } finally {

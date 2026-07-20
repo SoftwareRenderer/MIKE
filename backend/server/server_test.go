@@ -470,6 +470,133 @@ func TestHandleFSPathValidation(t *testing.T) {
 	})
 }
 
+func TestHandleFSReadGutterMarkers(t *testing.T) {
+	s := testServer(t)
+
+	// Create a git repo with a committed file
+	tmpDir := t.TempDir()
+	project := &types.Project{
+		ID:   "test-project-gutter",
+		Name: "Gutter Test Project",
+		Path: tmpDir,
+	}
+	if err := s.store.CreateProject(project); err != nil {
+		t.Fatal(err)
+	}
+
+	// Initialize git repo and commit a file
+	mustRunGit(t, tmpDir, "init")
+	mustRunGit(t, tmpDir, "config", "user.email", "test@test.com")
+	mustRunGit(t, tmpDir, "config", "user.name", "Test")
+
+	// Create and commit a file with known content
+	originalContent := "line1\nline2\nline3\nline4\nline5\n"
+	testFile := filepath.Join(tmpDir, "test.txt")
+	os.WriteFile(testFile, []byte(originalContent), 0644)
+	mustRunGit(t, tmpDir, "add", "test.txt")
+	mustRunGit(t, tmpDir, "commit", "-m", "initial")
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+
+	t.Run("modified file returns gutter markers", func(t *testing.T) {
+		// Modify the file: change line 2, delete line 4, add a line at end
+		modifiedContent := "line1\nline2-changed\nline3\nline5\nline6-new\n"
+		os.WriteFile(testFile, []byte(modifiedContent), 0644)
+
+		req := testRequest(http.MethodGet, "/api/fs/read?path="+testFile+"&project=test-project-gutter", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		var resp fsReadResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.GutterMarkers == nil {
+			t.Fatal("expected gutter markers, got nil")
+		}
+
+		// Line 2 was modified (line2 → line2-changed)
+		if markers, ok := resp.GutterMarkers[2]; !ok || len(markers) == 0 {
+			t.Errorf("expected marker on line 2, got %v", resp.GutterMarkers)
+		} else if markers[0] != "modified" {
+			t.Errorf("expected 'modified' on line 2, got %v", markers)
+		}
+
+		// Line 4 (was line5, now at position 4) — line 4 was removed,
+		// so a "removed" marker should appear on line 3 (before the gap)
+		// Line 5 (line6-new) is added
+		if markers, ok := resp.GutterMarkers[5]; !ok || len(markers) == 0 {
+			t.Errorf("expected marker on line 5 (added), got %v", resp.GutterMarkers)
+		} else if markers[0] != "added" {
+			t.Errorf("expected 'added' on line 5, got %v", markers)
+		}
+	})
+
+	t.Run("unmodified file returns no markers", func(t *testing.T) {
+		// Reset file to match HEAD
+		os.WriteFile(testFile, []byte(originalContent), 0644)
+
+		req := testRequest(http.MethodGet, "/api/fs/read?path="+testFile+"&project=test-project-gutter", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		var resp fsReadResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.GutterMarkers != nil {
+			t.Errorf("expected no markers for unmodified file, got %v", resp.GutterMarkers)
+		}
+	})
+
+	t.Run("untracked file returns no markers", func(t *testing.T) {
+		// Create a file that is not tracked by git
+		untrackedFile := filepath.Join(tmpDir, "untracked.txt")
+		os.WriteFile(untrackedFile, []byte("new content\n"), 0644)
+
+		req := testRequest(http.MethodGet, "/api/fs/read?path="+untrackedFile+"&project=test-project-gutter", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		var resp fsReadResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.GutterMarkers != nil {
+			t.Errorf("expected no markers for untracked file, got %v", resp.GutterMarkers)
+		}
+	})
+
+	t.Run("ref parameter returns no gutter markers", func(t *testing.T) {
+		req := testRequest(http.MethodGet, "/api/fs/read?path="+testFile+"&project=test-project-gutter&ref=HEAD", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		var resp fsReadResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.Content != originalContent {
+			t.Errorf("expected original content, got %q", resp.Content)
+		}
+		if resp.GutterMarkers != nil {
+			t.Errorf("expected no markers with ref param, got %v", resp.GutterMarkers)
+		}
+	})
+}
+
 func TestHandleFSSearch(t *testing.T) {
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)

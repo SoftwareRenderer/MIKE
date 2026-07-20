@@ -14,7 +14,8 @@
     import CommitDiffOverlay from './CommitDiffOverlay.svelte';
     import GitStatusPanel from './GitStatusPanel.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
-    import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles, loadEditorTabs, saveEditorTabs } from '$lib/storage';
+    import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles, loadEditorTabs, saveEditorTabs, clearEditorDraft, clearEditorHistory } from '$lib/storage';
+    import { dialogStore } from '$lib/stores';
 
     let { projectId, projectPath, currentBranch, initialFile, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
         projectId: string;
@@ -317,9 +318,30 @@
         activeFilePath = path;
     }
 
-    function handleCloseTab(path: string) {
+    async function handleCloseTab(path: string) {
         const idx = openFiles.findIndex(f => f.path === path);
         if (idx < 0) return;
+
+        // Warn about unsaved changes
+        if (unsavedFiles.has(path)) {
+            const fileName = path.split('/').pop() || path;
+            const confirmed = await dialogStore.showConfirm({
+                title: 'Unsaved changes',
+                message: `"${fileName}" has unsaved changes. Discard them?`,
+                confirmText: 'Discard',
+                cancelText: 'Cancel',
+                variant: 'destructive',
+            });
+            if (!confirmed) return;
+            // Clear cached draft and history so changes don't reappear on reopen
+            clearEditorDraft(path).catch(() => {});
+            clearEditorHistory(path).catch(() => {});
+        }
+
+        closeTab(path, idx);
+    }
+
+    function closeTab(path: string, idx: number) {
         const next = openFiles.filter(f => f.path !== path);
         openFiles = next;
         const nextUnsaved = new Set(unsavedFiles);

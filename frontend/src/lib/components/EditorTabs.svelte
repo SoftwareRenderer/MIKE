@@ -18,7 +18,7 @@
         onSymbolsUpdate: (symbols: Array<{ name: string; kind: string; line: number; indent: number }>) => void;
         onHasChanges: (filePath: string, hasChanges: boolean) => void;
         onSelectTab: (path: string) => void;
-        onCloseTab: (path: string) => void;
+        onCloseTab: (path: string) => void | Promise<void>;
         onPinTab: (path: string) => void;
         onToggleFullscreen?: () => void;
         mobileFullscreen?: boolean;
