@@ -777,10 +777,13 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		callCancel()
 
 		if streamErr != nil {
-			log.Printf("[connect] setup.task=%s connection failed: %v, retrying...", setup.task.ID, streamErr)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Connection failed: %v, retrying...", streamErr)}})
-			time.Sleep(5 * time.Second)
-			continue
+			// Release gate slot (was acquired before the LLM call above).
+			te.gate.Release(setup.serverURL)
+			log.Printf("[connect] setup.task=%s LLM connection failed after retries: %v", setup.task.ID, streamErr)
+			te.failTask(setup.task, setup.projectID,
+				fmt.Sprintf("LLM connection failed: %v", streamErr),
+				"llm_connection_failed")
+			return
 		}
 
 		// Release gate slot after LLM call (before tool execution).
