@@ -265,6 +265,10 @@ func (te *TaskExecutor) executeTaskWithPi(ctx context.Context, task *types.Task,
 				totalPromptTokens += pt
 				totalPredictedTokens += ptok
 
+				// Checkpoint file changes after agent turn completes.
+				checkpointMsgID := uuid.New().String()
+				te.createCheckpoint(ctx, projectID, task.ID, worktreePath, task.CurrentThreadID, checkpointMsgID, nil, sandboxEnabled)
+
 				// Check for queued user messages before ending.
 				// If a follow-up was sent while Pi was processing, forward it
 				// with steer behavior to start the next turn.
