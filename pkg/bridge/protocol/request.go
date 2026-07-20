@@ -18,6 +18,7 @@ const (
 	MethodShellResize uint8 = 0x07
 	MethodShellClose uint8 = 0x08
 	MethodBashCancel uint8 = 0x09
+	MethodLSP        uint8 = 0x0A
 )
 
 func methodString(m uint8) string {
@@ -40,6 +41,8 @@ func methodString(m uint8) string {
 		return "shell_close"
 	case MethodBashCancel:
 		return "bash_cancel"
+	case MethodLSP:
+		return "lsp"
 	default:
 		return fmt.Sprintf("unknown(%d)", m)
 	}

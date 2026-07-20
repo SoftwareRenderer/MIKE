@@ -591,6 +591,58 @@ func TestTwoClientsSameWorkspace(t *testing.T) {
 	}
 }
 
+func TestRouteServerRequest(t *testing.T) {
+	// Server requests (has both id AND method) should not be logged as "unexpected".
+	// LSP servers can send requests like window/workDoneProgress that the client
+	// must respond to. We currently don't implement server request handling,
+	// but the message should be silently dropped rather than logged as an error.
+	mgr := newMockProcessManager()
+	reg := NewRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	defer handler.Close()
+
+	// Deliver a server request (has both id and method)
+	serverRequest := json.RawMessage(`{"jsonrpc":"2.0","id":99,"method":"window/workDoneProgress","params":{"token":"abc"}}`)
+	mgr.Deliver(serverRequest)
+
+	// Give the router time to process
+	time.Sleep(50 * time.Millisecond)
+
+	// Should not panic or block — the message is silently dropped
+	// (We don't verify the absence of a log line here, just that it doesn't crash)
+}
+
+func TestRouteMalformedMessage(t *testing.T) {
+	// Messages with neither id nor method can occur during process teardown
+	// (partial reads dispatch truncated bodies). Should be silently dropped.
+	mgr := newMockProcessManager()
+	reg := NewRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	defer handler.Close()
+
+	// Deliver a malformed message (no id, no method)
+	malformed := json.RawMessage(`{"jsonrpc":"2.0","result":{}}`)
+	mgr.Deliver(malformed)
+
+	// Give the router time to process
+	time.Sleep(50 * time.Millisecond)
+
+	// Should not panic or block — the message is silently dropped
+}
+
+func TestRouteEmptyMessage(t *testing.T) {
+	// An empty JSON object should be silently dropped.
+	mgr := newMockProcessManager()
+	reg := NewRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	defer handler.Close()
+
+	empty := json.RawMessage(`{}`)
+	mgr.Deliver(empty)
+
+	time.Sleep(50 * time.Millisecond)
+}
+
 func TestUnknownExtensionRejected(t *testing.T) {
 	mgr := newMockProcessManager()
 	reg := NewRegistry()

@@ -76,6 +76,20 @@ func (s *Store) Exec(query string, args ...any) (sql.Result, error) {
 	return s.db.Exec(query, args...)
 }
 
+// Query runs a raw SQL query that returns rows.
+func (s *Store) Query(query string, args ...any) (*sql.Rows, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.db.Query(query, args...)
+}
+
+// QueryRow runs a raw SQL query that returns a single row.
+func (s *Store) QueryRow(query string, args ...any) *sql.Row {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.db.QueryRow(query, args...)
+}
+
 func (s *Store) initSchema() error {
 	schema := `
 CREATE TABLE IF NOT EXISTS projects (
@@ -343,6 +357,7 @@ func (s *Store) initConfigDefaults() error {
 	defer s.mu.Unlock()
 	defaults := map[string]string{
 		"workspace_dir":    "./.worktrees",
+		"registry_url":     "file://./extensions/registry.json",
 		"providers":        "",
 		"default_provider": "",
 	}

@@ -1,4 +1,5 @@
 import type { Transport } from '@codemirror/lsp-client';
+import { extensionManager } from '$lib/services/extension-manager.svelte';
 
 /**
  * Channel ID step for non-overlapping ID ranges per virtual transport.
@@ -7,20 +8,36 @@ import type { Transport } from '@codemirror/lsp-client';
 const CHANNEL_ID_STEP = 1000;
 
 /**
- * Map file extensions to language identifiers. Must match backend registry.
- * Used to tag messages so the backend routes to the correct language server.
+ * Derive the language identifier from a file path.
+ * Uses installed LSP extensions to determine language support.
+ * Falls back to file extension if no extension is found.
  */
-const EXTENSION_TO_LANGUAGE: Record<string, string> = {
-  go: 'go',
-  ts: 'typescript', tsx: 'typescript', js: 'typescript', jsx: 'typescript', mjs: 'typescript', cjs: 'typescript',
-  py: 'python', pyi: 'python',
-  rs: 'rust',
-};
-
-/** Derive the language identifier from a file path. */
 export function detectLanguage(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() || '';
-  return EXTENSION_TO_LANGUAGE[ext] || ext;
+  // Check if an LSP extension handles this file
+  const lspExt = extensionManager.getLSPForFile(filePath);
+  if (lspExt?.manifest.lsp?.language) {
+    return lspExt.manifest.lsp.language;
+  }
+  return ext;
+}
+
+/** Check if LSP is available for a given file. */
+export function isLSPAvailable(filePath: string): boolean {
+  return extensionManager.getLSPForFile(filePath) !== undefined;
+}
+
+/** Get all supported file extensions from installed LSP extensions. */
+export function getSupportedExtensions(): string[] {
+  const exts = new Set<string>();
+  for (const ext of extensionManager.getLSPExtensions()) {
+    if (ext.manifest.lsp?.extensions) {
+      for (const e of ext.manifest.lsp.extensions) {
+        exts.add(e);
+      }
+    }
+  }
+  return [...exts];
 }
 
 export interface LSPTransportOptions {
@@ -225,11 +242,11 @@ class WorkspaceConnection {
     let settled = false;
     const settle = () => { settled = true; };
 
-    this.connectPromise = new Promise<WebSocket>((resolve, reject) => {
-      const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/lsp`;
-      const ws = new WebSocket(wsUrl);
-      this.ws = ws;
+    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/lsp`;
+    const ws = new WebSocket(wsUrl);
+    this.ws = ws;
 
+    this.connectPromise = new Promise<WebSocket>((resolve, reject) => {
       ws.addEventListener('open', () => {
         if (settled) return;
         // Install unified dispatcher before sending subscribe
@@ -242,13 +259,22 @@ class WorkspaceConnection {
       ws.addEventListener('error', () => {
         if (settled) return;
         settle();
-        this.connectPromise = null;
+        // Only clear connectPromise if this is still the current connection.
+        // A stale error from a replaced WebSocket must not clear the new promise.
+        if (this.ws === ws) {
+          this.connectPromise = null;
+        }
         reject(new Error('LSP WebSocket error'));
       });
 
       ws.addEventListener('close', () => {
-        this.ws = null;
-        this.subscribed = false;
+        // Only clear state if this is still the current connection.
+        // A stale close event from a replaced WebSocket must not overwrite
+        // the new connection reference.
+        if (this.ws === ws) {
+          this.ws = null;
+          this.subscribed = false;
+        }
         if (this.channels.size === 0) {
           this.onDisconnected?.();
         }
@@ -259,7 +285,12 @@ class WorkspaceConnection {
     p.catch(() => {});
     p.finally(() => {
       if (!settled) settle();
-      this.connectPromise = null;
+      // Only clear connectPromise if this WebSocket is still the current one.
+      // Without this check, a stale finally callback from the old connection
+      // would clear the new connection's promise.
+      if (this.ws === ws || this.connectPromise === p) {
+        this.connectPromise = null;
+      }
     });
     return p;
   }

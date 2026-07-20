@@ -15,6 +15,7 @@
     import Icon from './Icon.svelte';
     import { fade, slide } from 'svelte/transition';
     import { onMount, onDestroy } from 'svelte';
+    import { uiInjector } from '$lib/services/ui-injector.svelte';
 
     let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard, multiSelect }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void; multiSelect?: MultiSelect | null } = $props();
 
@@ -832,6 +833,12 @@
             </span>
         </div>
     {/if}
+    <!-- UI Extension Injection: card-footer -->
+    {#if uiInjector.hasContent('card-footer')}
+        <div class="card-injection-footer">
+            <!-- UI extensions render here -->
+        </div>
+    {/if}
     {#if subtaskProgress}
         <button
             type="button"
@@ -1143,6 +1150,11 @@
         .card-title-text {
             padding-right: calc(var(--actions) * 28px + 6px);
         }
+    }
+
+    /* UI Extension Injection */
+    .card-injection-footer {
+        padding: 0.25rem 0;
     }
 
     /* Subtask progress bar (full-width) */

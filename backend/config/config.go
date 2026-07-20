@@ -64,6 +64,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	registryURL, _ := cs.store.GetConfigValue("registry_url")
 	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
 	defaultAutoMergeRaw, _ := cs.store.GetConfigValue("default_auto_merge")
 	defaultSubtasksAutoMergeRaw, _ := cs.store.GetConfigValue("default_subtasks_auto_merge")
@@ -73,6 +74,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	cfg := &types.Config{
 		WorkspaceDir:    workspaceDir,
 		DatabasePath:    cs.dbPath,
+		RegistryURL:     registryURL,
 		Providers:       providers,
 		DefaultProvider: defaultProvider,
 	}
@@ -125,6 +127,9 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	if err := cs.store.SetConfigValue("default_provider", c.DefaultProvider); err != nil {
 		return err
 	}
+	if err := cs.store.SetConfigValue("registry_url", c.RegistryURL); err != nil {
+		return err
+	}
 	if c.DefaultAutoCommit != nil {
 		if err := cs.store.SetConfigValue("default_auto_commit", fmt.Sprintf("%t", *c.DefaultAutoCommit)); err != nil {
 			return err
@@ -157,6 +162,7 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 type configResponse struct {
 	WorkspaceDir          string           `json:"workspace_dir"`
 	DatabasePath          string           `json:"database_path"`
+	RegistryURL           string           `json:"registry_url"`
 	Providers             []types.Provider `json:"providers"`
 	DefaultProvider       string           `json:"default_provider"`
 	DefaultAutoCommit     *bool            `json:"default_auto_commit"`
@@ -193,6 +199,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		resp := configResponse{
 			WorkspaceDir:          cfg.WorkspaceDir,
 			DatabasePath:          cfg.DatabasePath,
+			RegistryURL:           cfg.RegistryURL,
 			Providers:             cfg.Providers,
 			DefaultProvider:       cfg.DefaultProvider,
 			DefaultAutoCommit:     cfg.DefaultAutoCommit,
@@ -277,6 +284,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		resp := configResponse{
 			WorkspaceDir:          current.WorkspaceDir,
 			DatabasePath:          current.DatabasePath,
+			RegistryURL:           current.RegistryURL,
 			Providers:             current.Providers,
 			DefaultProvider:       current.DefaultProvider,
 			DefaultAutoCommit:     current.DefaultAutoCommit,

@@ -1,5 +1,5 @@
 <script lang="ts">
-    let { cursorLine, cursorCol, lineCount, charCount, hasChanges, onFind, onSave, saving, lspReady, lspError, lspLanguage, lspServerName, lspServerVersion }: {
+    let { cursorLine, cursorCol, lineCount, charCount, hasChanges, onFind, onSave, saving, lspReady, lspConnecting, lspError, lspLanguage, lspServerName, lspServerVersion }: {
         cursorLine: number;
         cursorCol: number;
         lineCount: number;
@@ -9,6 +9,7 @@
         onSave?: () => void;
         saving?: boolean;
         lspReady?: boolean;
+        lspConnecting?: boolean;
         lspError?: string;
         lspLanguage?: string;
         lspServerName?: string;
@@ -36,6 +37,9 @@
                 onclick={toggleLspTooltip}
                 aria-label="LSP status"
             >
+                {#if lspConnecting}
+                    <span class="lsp-spinner"></span>
+                {/if}
                 {lspStatusLabel}
             </button>
             {#if lspTooltipVisible}
@@ -116,7 +120,21 @@
         padding: 0;
         font-size: inherit;
         color: inherit;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
     }
+    .lsp-spinner {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border: 2px solid currentColor;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: lsp-spin 0.6s linear infinite;
+        opacity: 0.6;
+    }
+    @keyframes lsp-spin { to { transform: rotate(360deg); } }
     .lsp-tooltip {
         position: absolute;
         bottom: calc(100% + 4px);

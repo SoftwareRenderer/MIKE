@@ -12,6 +12,7 @@ import (
 	"kanban/backend/auth"
 	"kanban/backend/config"
 	"kanban/backend/exec"
+	"kanban/backend/extensions"
 	"kanban/backend/git"
 	"kanban/backend/lsp"
 	"kanban/backend/managers"
@@ -25,24 +26,27 @@ import (
 
 // Server is the main HTTP server.
 type Server struct {
-	store          *store.Store
-	configStore    *config.ConfigStore
-	sessionMgr     *auth.SessionManager
-	projectHandler *managers.ProjectHandler
-	taskHandler    *managers.TaskHandler
-	boardHandler   *managers.BoardHandler
-	appStreamMgr   *stream.AppStreamManager
-	depHandler     *managers.DependencyHandler
-	reviewHandler  *managers.ReviewHandler
-	gitHandler     *managers.GitHandler
-	executor       *exec.TaskExecutor
-	terminalMgr    *term.TerminalManager
-	sandboxMgr     *sandbox.SandboxManager
-	lspHandler     *lsp.LSPHandler
-	mux            *http.ServeMux
-	addr           string
-	frontendDist   string
-	tlsConfig      *tls.Config
+	store             *store.Store
+	configStore       *config.ConfigStore
+	sessionMgr        *auth.SessionManager
+	projectHandler    *managers.ProjectHandler
+	taskHandler       *managers.TaskHandler
+	boardHandler      *managers.BoardHandler
+	appStreamMgr      *stream.AppStreamManager
+	depHandler        *managers.DependencyHandler
+	reviewHandler     *managers.ReviewHandler
+	gitHandler        *managers.GitHandler
+	executor          *exec.TaskExecutor
+	terminalMgr       *term.TerminalManager
+	sandboxMgr        *sandbox.SandboxManager
+	extStore          *extensions.ExtensionStore
+	extSandboxMgr     *extensions.ExtensionSandboxManager
+	extHandler        *extensions.ExtensionHandler
+	lspHandler        *lsp.LSPHandler
+	mux               *http.ServeMux
+	addr              string
+	frontendDist      string
+	tlsConfig         *tls.Config
 
 	// worktreeMu serializes all git operations per task.
 	// Prevents concurrent stash/checkout/branch/reset operations that would
@@ -130,8 +134,23 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	// Wire worktree mutex so GitHandler can serialize per-task git operations.
 	s.gitHandler.SetWorktreeMutex(s.getWorktreeMutex)
 
+	// Extension system
+	s.extStore = extensions.NewExtensionStore(store)
+	if err := s.extStore.InitSchema(); err != nil {
+		return nil, fmt.Errorf("init extension schema: %w", err)
+	}
+	extRegistry := extensions.NewRegistryClient()
+	s.extSandboxMgr = extensions.NewExtensionSandboxManager(extRegistry, s.extStore)
+	s.extHandler = extensions.NewExtensionHandler(s.extStore, s.extSandboxMgr, extRegistry, &extensions.ExtensionConfig{
+		RegistryURL:  cfg.RegistryURL,
+		WorkspaceDir: cfg.WorkspaceDir,
+	})
+
 	// LSP handler for language server WebSocket bridging
-	s.lspHandler = lsp.NewLSPHandler(lsp.NewRegistry(), lsp.NewProcessManager())
+	// Use extension-based registry and manager for dynamic LSP discovery
+	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)
+	extLSPManager := lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
+	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, extLSPManager)
 	// Wire project mutex so GitHandler can serialize project-level git operations.
 	s.gitHandler.SetProjectMutex(s.getProjectMutex)
 	// Wire worktree watcher -> GitHandler diff cache so on-demand file fetches work

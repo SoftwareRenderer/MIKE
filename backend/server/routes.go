@@ -29,6 +29,33 @@ func (s *Server) setupRoutes() {
 	// LSP WebSocket
 	s.mux.HandleFunc("/api/lsp", s.lspHandler.HandleLSP)
 
+	// Extensions
+	s.mux.HandleFunc("GET /api/extensions", s.extHandler.HandleList)
+	s.mux.HandleFunc("POST /api/extensions", s.extHandler.HandleCreate)
+	s.mux.HandleFunc("/api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		switch r.Method {
+		case http.MethodGet:
+			s.extHandler.HandleGet(w, r, id)
+		case http.MethodPut, http.MethodPatch:
+			s.extHandler.HandleUpdate(w, r, id)
+		case http.MethodDelete:
+			s.extHandler.HandleDelete(w, r, id)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	s.mux.HandleFunc("/api/extensions/{id}/enabled", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleSetEnabled(w, r, r.PathValue("id"))
+	})
+	s.mux.HandleFunc("GET /api/extensions/registry", s.extHandler.HandleRegistryIndex)
+	s.mux.HandleFunc("POST /api/extensions/install", s.extHandler.HandleInstall)
+	s.mux.HandleFunc("GET /api/extensions/check-updates", s.extHandler.HandleCheckUpdates)
+	s.mux.HandleFunc("GET /api/extensions/build-progress", s.extHandler.HandleBuildProgress)
+	s.mux.HandleFunc("GET /api/extensions/{id}/logs", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleSandboxLogs(w, r, r.PathValue("id"))
+	})
+
 	// Global utilities
 	s.mux.HandleFunc("/api/home", s.handleHome)
 	s.mux.HandleFunc("/api/gc", s.handleGC)

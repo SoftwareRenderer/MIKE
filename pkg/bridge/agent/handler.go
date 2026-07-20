@@ -18,6 +18,7 @@ type handler struct {
 	sessions    map[uint32]*shellSession
 	nextSession uint32
 	bashProcs   map[uint32]*bashProc // msgID → running bash process
+	lsp         *lspState            // LSP server state (one per connection)
 	writeMu     sync.Mutex        // serializes all writes to conn (shell readLoop + dispatch + read loop)
 	closed      atomic.Bool       // set true when connection is torn down (atomic: accessed from readLoop + close)
 }
@@ -96,6 +97,15 @@ func (h *handler) handleConn(conn net.Conn) error {
 		switch method {
 		case protocol.MethodShellIO:
 			h.handleShellIO(conn, frame)
+			continue
+		case protocol.MethodLSP:
+			req, err := protocol.ParseRequest(frame)
+			if err != nil {
+				log.Printf("agent: parse request MsgID %d: %v", frame.MsgID, err)
+				_ = h.writeFrame(conn, protocol.NewError(frame.MsgID, err.Error()))
+				continue
+			}
+			go h.handleLSP(conn, req)
 			continue
 		case protocol.MethodShellResize:
 			h.handleShellResize(conn, frame)

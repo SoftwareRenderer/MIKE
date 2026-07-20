@@ -1,0 +1,626 @@
+package extensions
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"kanban/backend/types"
+	sandbox "kanban/pkg/bridge"
+)
+
+const (
+	// ExtensionContainerPrefix is the prefix for extension sandbox container names.
+	ExtensionContainerPrefix = "kanban-ext"
+	// DefaultExtensionMemory is the default memory limit for extension sandboxes (MB).
+	DefaultExtensionMemory = 256
+	// ExtensionLivenessTTL is how long to cache a liveness check result.
+	ExtensionLivenessTTL = 5 * time.Minute
+)
+
+// ExtensionSandboxManager manages gVisor sandbox containers for extensions.
+type ExtensionSandboxManager struct {
+	mu       sync.Mutex
+	clients  map[string]*sandbox.Client         // extID -> bridge client
+	refs     map[string]int                     // extID -> active client count
+	states   map[string]*extensionSandboxState  // extID -> runtime state
+	registry *RegistryClient
+	store    *ExtensionStore
+	available bool
+}
+
+// extensionSandboxState tracks the runtime state of an extension sandbox.
+type extensionSandboxState struct {
+	containerName string
+	client        *sandbox.Client
+	agentCmd      *exec.Cmd       // podman exec process
+	ports         []types.AssignedPort
+	createdAt     time.Time
+	lastCheckedAt time.Time
+	isAlive       bool
+	// Project-based mount mapping for URI translation.
+	// Each registered project is mounted at /mnt/<project-dirname>.
+	// projectMounts maps host project path → container mount path.
+	projectMounts map[string]string
+	// mountedProjects is the sorted list of host paths that were mounted,
+	// used to detect when the project set has changed.
+	mountedProjects []string
+}
+
+// NewExtensionSandboxManager creates a new ExtensionSandboxManager.
+func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *ExtensionSandboxManager {
+	sm := &ExtensionSandboxManager{
+		clients:   make(map[string]*sandbox.Client),
+		refs:      make(map[string]int),
+		states:    make(map[string]*extensionSandboxState),
+		registry:  reg,
+		store:     store,
+		available: checkExtensionSandboxAvailable(),
+	}
+	if sm.available {
+		log.Println("[ext-sandbox] gVisor available, extension sandboxing enabled")
+	} else {
+		log.Println("[ext-sandbox] gVisor not available, extension sandboxing disabled")
+	}
+	// Clean up stale containers from previous runs
+	sm.cleanupStaleContainers()
+	return sm
+}
+
+// checkExtensionSandboxAvailable checks if gVisor and podman are available.
+func checkExtensionSandboxAvailable() bool {
+	if _, err := exec.LookPath("runsc"); err != nil {
+		return false
+	}
+	if _, err := exec.LookPath("podman"); err != nil {
+		return false
+	}
+	return true
+}
+
+// cleanupStaleContainers removes any kanban-ext-* containers left behind.
+func (sm *ExtensionSandboxManager) cleanupStaleContainers() {
+	out, err := exec.Command("podman", "ps", "-a", "--filter", fmt.Sprintf("name=%s-", ExtensionContainerPrefix), "--format", "{{.Names}}").CombinedOutput()
+	if err != nil {
+		log.Printf("[ext-sandbox] startup: failed to list stale containers: %v", err)
+		return
+	}
+	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		log.Printf("[ext-sandbox] startup: removing stale container %s", name)
+		_, _ = exec.Command("podman", "rm", "-f", name).CombinedOutput()
+	}
+}
+
+// podmanExec runs a podman command.
+func podmanExec(args ...string) ([]byte, error) {
+	cmd := exec.Command("podman", args...)
+	return cmd.CombinedOutput()
+}
+
+// agentBinaryPath resolves the path to the sandbox-bridge binary.
+func agentBinaryPath() (string, error) {
+	if p := os.Getenv("KANBAN_AGENT_PATH"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		exe = os.Args[0]
+	}
+	for _, name := range []string{"sandbox-bridge", "sandbox/sandbox-bridge"} {
+		candidate := filepath.Join(filepath.Dir(exe), name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	for _, name := range []string{"sandbox-bridge", "sandbox/sandbox-bridge"} {
+		if _, err := os.Stat(name); err == nil {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("sandbox-bridge binary not found")
+}
+
+// sanitizeContainerID sanitizes an ID for use as a podman container name.
+func sanitizeContainerID(id string) (string, error) {
+	// Replace invalid characters with hyphens
+	sanitized := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-' {
+			return r
+		}
+		return '-'
+	}, id)
+	// Ensure it starts and ends with alphanumeric
+	sanitized = strings.Trim(sanitized, "-_.")
+	if sanitized == "" {
+		return "", fmt.Errorf("invalid container ID: %s", id)
+	}
+	return sanitized, nil
+}
+
+// IsAvailable returns true if extension sandboxing is available.
+func (sm *ExtensionSandboxManager) IsAvailable() bool {
+	return sm.available
+}
+
+// Create creates and starts a sandbox container for an extension.
+// The container runs sleep infinity; the sandbox-bridge is started via podman exec.
+// projectMounts maps host project paths to container mount paths (/mnt/<name>).
+func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[string]string) ([]types.AssignedPort, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if !sm.available {
+		return nil, fmt.Errorf("gVisor not available (runsc not installed)")
+	}
+
+	safeID, err := sanitizeContainerID(ext.ID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid extension ID for sandbox container: %w", err)
+	}
+	containerName := fmt.Sprintf("%s-%s", ExtensionContainerPrefix, safeID)
+
+	// Check if container already exists
+	exists, err := containerExists(containerName)
+	if err != nil {
+		return nil, fmt.Errorf("check container: %w", err)
+	}
+	if exists {
+		log.Printf("[ext-sandbox] ext=%s removing stale container %s", ext.ID, containerName)
+		if rmErr := removeContainer(containerName); rmErr != nil {
+			return nil, fmt.Errorf("remove stale container %s: %w", containerName, rmErr)
+		}
+	}
+
+	// Resolve agent binary path
+	agentPath, err := agentBinaryPath()
+	if err != nil {
+		return nil, fmt.Errorf("sandbox-bridge binary not found: %w", err)
+	}
+	agentPath, err = filepath.Abs(agentPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve agent path: %w", err)
+	}
+
+	// Determine image
+	image := ext.ContainerConfig.Image
+	if image == "" {
+		image = "docker.io/library/ubuntu:latest"
+	}
+
+	// Build container create args - container runs sleep infinity
+	// sandbox-bridge is started via podman exec when needed
+	createArgs := []string{
+		"--runtime-flag=overlay2=root:self",
+		"--runtime-flag=ignore-cgroups",
+		"create",
+		"--name", containerName,
+		"--runtime", "runsc",
+		"--security-opt", "label=disable",
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges",
+	}
+
+	// Add back explicitly requested capabilities
+	for _, cap := range ext.SandboxConfig.Capabilities {
+		createArgs = append(createArgs, "--cap-add", cap)
+	}
+
+	// Mount each registered project at /mnt/<project-dirname> read-only.
+	// This allows the container to serve any workspace without recreation.
+	mountedProjects := make([]string, 0, len(projectMounts))
+	for hostPath, containerPath := range projectMounts {
+		createArgs = append(createArgs,
+			"-v", hostPath+":"+containerPath+":rprivate,ro",
+		)
+		mountedProjects = append(mountedProjects, hostPath)
+	}
+	// Sort for deterministic comparison
+	sort.Strings(mountedProjects)
+
+	// Environment variables
+	createArgs = append(createArgs,
+		"-e", "TERM=xterm-256color",
+	)
+	for _, env := range ext.SandboxConfig.Envs {
+		createArgs = append(createArgs, "-e", fmt.Sprintf("%s=%s", env.Key, env.Value))
+	}
+
+	// Memory limit
+	memoryLimit := ext.SandboxConfig.MemoryLimit
+	if memoryLimit == 0 {
+		memoryLimit = DefaultExtensionMemory
+	}
+	createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memoryLimit))
+
+	// Custom mounts
+	for _, m := range ext.SandboxConfig.Mounts {
+		mode := "ro"
+		if m.Mode == "rw" {
+			mode = "rw"
+		}
+		absHost, err := filepath.Abs(m.HostPath)
+		if err != nil {
+			continue
+		}
+		createArgs = append(createArgs,
+			"-v", fmt.Sprintf("%s:%s:rprivate,%s", absHost, m.ContainerPath, mode),
+		)
+	}
+
+	// Container entrypoint: sleep infinity (agent is started via podman exec)
+	createArgs = append(createArgs, image,
+		"/bin/sh", "-c",
+		"chmod +x /sandbox-bridge && sleep infinity",
+	)
+
+	// Create container
+	out, err := exec.Command("podman", createArgs...).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("create container %s: %w (output: %s)", containerName, err, string(out))
+	}
+
+	// Copy agent binary into container
+	cpOut, cpErr := exec.Command("podman", "cp", agentPath, containerName+":"+"/sandbox-bridge").CombinedOutput()
+	if cpErr != nil {
+		_, _ = exec.Command("podman", "rm", "-f", containerName).CombinedOutput()
+		return nil, fmt.Errorf("copy agent to container: %w (%s)", cpErr, cpOut)
+	}
+
+	// Start the container (needed for exec sessions)
+	startOut, err := exec.Command("podman", "--runtime-flag=overlay2=root:self", "--runtime-flag=ignore-cgroups", "start", containerName).CombinedOutput()
+	if err != nil {
+		_, _ = exec.Command("podman", "rm", "-f", containerName).CombinedOutput()
+		return nil, fmt.Errorf("start container: %w (%s)", err, startOut)
+	}
+
+	log.Printf("[ext-sandbox] ext=%s created and started container %s (mounts: %d projects)", ext.ID, containerName, len(projectMounts))
+
+	// Store state
+	sm.states[ext.ID] = &extensionSandboxState{
+		containerName:   containerName,
+		createdAt:       time.Now(),
+		lastCheckedAt:   time.Now(),
+		isAlive:         true,
+		projectMounts:   projectMounts,
+		mountedProjects: mountedProjects,
+	}
+
+	return nil, nil
+}
+
+// Start starts the sandbox-bridge agent in the extension container via podman exec.
+// The agent communicates over stdin/stdout.
+func (sm *ExtensionSandboxManager) Start(extID string) (*sandbox.Client, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	state, ok := sm.states[extID]
+	if !ok {
+		return nil, fmt.Errorf("extension sandbox not created: %s", extID)
+	}
+
+	containerName := state.containerName
+
+	// Start agent in container via podman exec (stdin/stdout protocol)
+	agentCmd := exec.Command(
+		"podman", "--runtime-flag=overlay2=root:self", "--runtime-flag=ignore-cgroups",
+		"exec", "-i", containerName,
+		"/sandbox-bridge",
+	)
+
+	// Create pipes for communication with the agent
+	stdin, err := agentCmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("create stdin pipe: %w", err)
+	}
+	stdout, err := agentCmd.StdoutPipe()
+	if err != nil {
+		stdin.Close()
+		return nil, fmt.Errorf("create stdout pipe: %w", err)
+	}
+	// Capture stderr for debugging
+	agentCmd.Stderr = os.Stderr
+
+	if err := agentCmd.Start(); err != nil {
+		stdin.Close()
+		return nil, fmt.Errorf("start agent: %w", err)
+	}
+
+	// Create bridge client using stdin/stdout pipes
+	client := sandbox.NewClient(stdin, stdout)
+	sm.clients[extID] = client
+	state.client = client
+	state.agentCmd = agentCmd
+	sm.refs[extID] = 1
+
+	log.Printf("[ext-sandbox] ext=%s started agent in container %s", extID, containerName)
+	return client, nil
+}
+
+// discloser discards all writes (for stderr).
+type discloser struct{}
+
+func (d discloser) Write(p []byte) (n int, err error) { return len(p), nil }
+func (d discloser) Close() error                      { return nil }
+
+// GetOrCreate starts the extension sandbox if not running, returns existing bridge client.
+func (sm *ExtensionSandboxManager) GetOrCreate(extID string) (*sandbox.Client, error) {
+	sm.mu.Lock()
+	client := sm.clients[extID]
+	if client != nil && client.IsAlive() {
+		sm.refs[extID]++
+		sm.mu.Unlock()
+		return client, nil
+	}
+
+	// Check if container is running
+	state := sm.states[extID]
+	if state != nil {
+		running, _ := isContainerRunning(state.containerName)
+		if running {
+			// Container is running but client is dead, try to reconnect
+			// For now, just return error — caller should call Stop + Start
+		}
+	}
+	sm.mu.Unlock()
+
+	// Not running — caller needs to create and start
+	return nil, fmt.Errorf("extension sandbox not running: %s", extID)
+}
+
+// Release decrements the refcount for an extension sandbox.
+// When refcount reaches zero, the sandbox is stopped immediately.
+func (sm *ExtensionSandboxManager) Release(extID string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sm.refs[extID]--
+	if sm.refs[extID] <= 0 {
+		sm.stopLocked(extID)
+	}
+}
+
+// stopLocked stops an extension sandbox (must hold sm.mu).
+func (sm *ExtensionSandboxManager) stopLocked(extID string) {
+	state := sm.states[extID]
+	if state == nil {
+		return
+	}
+
+	// Kill the agent process
+	if state.agentCmd != nil && state.agentCmd.Process != nil {
+		_ = state.agentCmd.Process.Kill()
+		_ = state.agentCmd.Wait()
+	}
+
+	// Close client
+	if state.client != nil {
+		_ = state.client.Close()
+	}
+
+	// Stop container
+	_, _ = exec.Command("podman", "stop", "-t", "5", state.containerName).CombinedOutput()
+
+	delete(sm.clients, extID)
+	delete(sm.refs, extID)
+	delete(sm.states, extID)
+
+	log.Printf("[ext-sandbox] ext=%s stopped", extID)
+}
+
+// Stop stops an extension sandbox.
+func (sm *ExtensionSandboxManager) Stop(extID string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.stopLocked(extID)
+	return nil
+}
+
+// Destroy fully removes an extension sandbox (stop + remove container).
+func (sm *ExtensionSandboxManager) Destroy(extID string) error {
+	sm.mu.Lock()
+	state := sm.states[extID]
+	sm.mu.Unlock()
+
+	if state != nil {
+		// Stop
+		sm.Stop(extID)
+
+		// Remove container
+		if err := removeContainer(state.containerName); err != nil {
+			return fmt.Errorf("remove container: %w", err)
+		}
+	}
+
+	// Remove image if it was built locally
+	if ext, err := sm.store.GetByID(extID); err == nil && ext.IsLocalInstalled() && ext.ImageRef != "" {
+		_, _ = exec.Command("podman", "rmi", ext.ImageRef).CombinedOutput()
+	}
+
+	log.Printf("[ext-sandbox] ext=%s destroyed", extID)
+	return nil
+}
+
+// IsRunning checks if an extension sandbox is running.
+func (sm *ExtensionSandboxManager) IsRunning(extID string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	state := sm.states[extID]
+	if state == nil {
+		return false
+	}
+
+	// Check cache
+	if time.Since(state.lastCheckedAt) < ExtensionLivenessTTL {
+		return state.isAlive
+	}
+
+	running, err := isContainerRunning(state.containerName)
+	state.isAlive = running && err == nil
+	state.lastCheckedAt = time.Now()
+	return state.isAlive
+}
+
+// MountMapping returns the project mount mapping for an extension sandbox.
+// Returns nil if the sandbox is not running.
+func (sm *ExtensionSandboxManager) MountMapping(extID string) map[string]string {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	state := sm.states[extID]
+	if state == nil {
+		return nil
+	}
+	// Return a copy to avoid external mutation
+	result := make(map[string]string, len(state.projectMounts))
+	for k, v := range state.projectMounts {
+		result[k] = v
+	}
+	return result
+}
+
+// MountsCompatible checks if the current sandbox mounts match the desired set.
+// Returns true if the mounted projects match, false if the container needs recreation.
+func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[string]string) bool {
+	state := sm.states[extID]
+	if state == nil {
+		return false
+	}
+	// Compare sorted lists of host paths
+	desiredSorted := make([]string, 0, len(desired))
+	for p := range desired {
+		desiredSorted = append(desiredSorted, p)
+	}
+	sort.Strings(desiredSorted)
+	if len(desiredSorted) != len(state.mountedProjects) {
+		return false
+	}
+	for i := range desiredSorted {
+		if desiredSorted[i] != state.mountedProjects[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// ListRunning returns all running extension sandboxes with their status.
+func (sm *ExtensionSandboxManager) ListRunning() map[string]ExtensionRuntimeStatus {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	result := make(map[string]ExtensionRuntimeStatus)
+	for extID, state := range sm.states {
+		running, _ := isContainerRunning(state.containerName)
+		result[extID] = ExtensionRuntimeStatus{
+			Running:     running,
+			Container:   state.containerName,
+			Ports:       state.ports,
+			RefCount:    sm.refs[extID],
+			CreatedAt:   state.createdAt,
+		}
+	}
+	return result
+}
+
+// ExtensionRuntimeStatus describes the runtime state of an extension sandbox.
+type ExtensionRuntimeStatus struct {
+	Running   bool                   `json:"running"`
+	Container string                 `json:"container"`
+	Ports     []types.AssignedPort   `json:"ports,omitempty"`
+	RefCount  int                    `json:"ref_count"`
+	CreatedAt time.Time              `json:"created_at"`
+}
+
+// containerExists checks if a podman container exists.
+func containerExists(name string) (bool, error) {
+	out, err := exec.Command("podman", "ps", "-a", "--filter", fmt.Sprintf("name=%s", name), "--format", "{{.Names}}").CombinedOutput()
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) == name, nil
+}
+
+// isContainerRunning checks if a podman container is running.
+func isContainerRunning(name string) (bool, error) {
+	out, err := exec.Command("podman", "ps", "--filter", fmt.Sprintf("name=%s", name), "--filter", "status=running", "--format", "{{.Names}}").CombinedOutput()
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) == name, nil
+}
+
+// removeContainer removes a podman container.
+func removeContainer(name string) error {
+	_, err := exec.Command("podman", "rm", "-f", name).CombinedOutput()
+	return err
+}
+
+// InstallAndCreate installs an extension from a registry entry and creates its sandbox.
+func (sm *ExtensionSandboxManager) InstallAndCreate(entry *RegistryEntry, ext *Extension, workspacePath string) ([]types.AssignedPort, error) {
+	// Determine image reference
+	imageRef := entry.Image
+	if imageRef == "" {
+		// Build from Dockerfile
+		imageRef = fmt.Sprintf("kanban-ext-%s:%s", entry.Name, entry.Version)
+	}
+
+	// Pull or build image
+	if entry.Image != "" {
+		// Pull OCI image
+		if !sm.registry.ImageExists(entry.Image) {
+			if err := sm.registry.PullImage(entry.Image); err != nil {
+				return nil, fmt.Errorf("pull image %s: %w", entry.Image, err)
+			}
+		}
+	} else if entry.DockerfileURL != "" {
+		// Build from Dockerfile
+		dockerfile, err := sm.registry.FetchDockerfile(entry.DockerfileURL)
+		if err != nil {
+			return nil, fmt.Errorf("fetch dockerfile: %w", err)
+		}
+		if err := sm.registry.BuildImageFromReader(dockerfile, imageRef); err != nil {
+			return nil, fmt.Errorf("build image: %w", err)
+		}
+	}
+
+	// Update extension with image ref
+	ext.ContainerConfig.Image = imageRef
+	ext.ImageRef = imageRef
+
+	// Create sandbox with workspace as a single project mount
+	absWorkspace, _ := filepath.Abs(workspacePath)
+	projectMounts := map[string]string{
+		absWorkspace: "/mnt/" + filepath.Base(absWorkspace),
+	}
+	return sm.Create(ext, projectMounts)
+}
+
+// MarshalJSON implements json.Marshaler for ExtensionRuntimeStatus.
+func (s ExtensionRuntimeStatus) MarshalJSON() ([]byte, error) {
+	type Alias ExtensionRuntimeStatus
+	return json.Marshal(&struct {
+		CreatedAt string `json:"created_at"`
+		*Alias
+	}{
+		CreatedAt: s.CreatedAt.Format(time.RFC3339),
+		Alias:     (*Alias)(&s),
+	})
+}
+
+// Ensure io is imported
+var _ io.Reader

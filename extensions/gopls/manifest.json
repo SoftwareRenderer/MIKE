@@ -1,0 +1,58 @@
+{
+    "display_name": "Go Language Server",
+    "description": "Official Go language server (gopls) by Google. Provides completions, hover, diagnostics, go-to-definition, and more for Go projects.",
+    "author": "Go Team",
+    "homepage": "https://github.com/golang/tools/tree/master/gopls",
+    "deprecated": false,
+    "config_schema": {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "title": "Command",
+                "description": "Path to gopls binary",
+                "default": "gopls"
+            },
+            "args": {
+                "type": "array",
+                "title": "Arguments",
+                "description": "Command-line arguments for gopls",
+                "default": ["serve"]
+            },
+            "memory_limit": {
+                "type": "number",
+                "title": "Memory Limit (MB)",
+                "description": "Maximum memory for the gopls sandbox",
+                "default": 256,
+                "minimum": 64,
+                "maximum": 2048
+            }
+        },
+        "required": []
+    },
+    "lsp": {
+        "command": "gopls",
+        "args": ["serve"],
+        "extensions": ["go"],
+        "language": "go",
+        "initParamsOverride": {
+            "hover": {
+                "actions": {
+                    "enabled": true
+                }
+            },
+            "codeLens": {
+                "disable": ["generated_test"]
+            },
+            "hints": {
+                "assignVariableType": true,
+                "compositeLiteralFields": true,
+                "constantValues": true,
+                "functionTypeParameters": true,
+                "parameterNames": true
+            },
+            "usePlaceholders": true,
+            "staticcheck": true
+        }
+    }
+}

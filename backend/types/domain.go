@@ -69,6 +69,7 @@ type TaskThread struct {
 type Config struct {
 	WorkspaceDir          string     `json:"workspace_dir"`
 	DatabasePath          string     `json:"database_path"`
+	RegistryURL           string     `json:"registry_url"`
 	Providers             []Provider `json:"providers"`
 	DefaultProvider       string     `json:"default_provider"`
 	DefaultAutoCommit     *bool      `json:"default_auto_commit"`

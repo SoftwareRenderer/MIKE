@@ -12,7 +12,8 @@
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
     import { LSPClient, languageServerExtensions } from '@codemirror/lsp-client';
     import { requestLSPChannel, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
-    import { isLSPEnabled } from '$lib/storage';
+    import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
+    import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
@@ -73,7 +74,7 @@
     let lspError = $state('');
     let fileUri = $state('');
     let lspCompartment = $state(new Compartment());
-    let lspEnabled = $state(true);
+    let lspAvailable = $state(false);
 
     function getLanguageSupport(path: string) {
         const ext = path.split('.').pop()?.toLowerCase() || '';
@@ -343,9 +344,9 @@
         if (lspClient) return; // already initialized
 
         async function initLSP() {
-            // Check user preference
-            lspEnabled = await isLSPEnabled();
-            if (!lspEnabled) return; // fall back to built-in autocompletion
+            // Check if LSP extension is available for this file
+            lspAvailable = isLSPAvailable(filePath);
+            if (!lspAvailable) return; // fall back to built-in autocompletion
 
             lspConnecting = true;
             fileUri = `file://${filePath}`;
@@ -392,10 +393,10 @@
         const _lspClient = lspClient;
         const _view = view;
         const _projPath = projectPath;
-        const _lspEnabled = lspEnabled;
+        const _lspAvailable = lspAvailable;
 
         // Only reconnect if we previously had a client but it's now disconnected
-        if (!_lspClient || !_view || !_projPath || !_lspEnabled) return;
+        if (!_lspClient || !_view || !_projPath || !_lspAvailable) return;
         if (_lspReady || _lspClient.connected || _lspConnecting) return; // still connected or connecting
 
         async function reconnectLSP() {
