@@ -8,12 +8,14 @@
         defaultSubtasksAutoMerge = $bindable(true),
         defaultMaxFailedTurns = $bindable(3),
         originBranch,
+        onDirty,
     }: {
         defaultOperatingMode?: string;
         defaultAutoMerge?: boolean;
         defaultSubtasksAutoMerge?: boolean;
         defaultMaxFailedTurns?: number;
         originBranch: string;
+        onDirty?: () => void;
     } = $props();
 
     const modeDescription = $derived({
@@ -32,7 +34,7 @@
             <span id="toggle-mode-label" class="toggle-label">Operating mode</span>
             <span id="toggle-mode-desc" class="toggle-desc">{modeDescription}</span>
         </div>
-        <ModeSelect value={defaultOperatingMode} onChange={(m: string) => defaultOperatingMode = m} />
+        <ModeSelect value={defaultOperatingMode} onChange={(m: string) => { defaultOperatingMode = m; onDirty?.(); }} />
     </div>
 
     <div class="toggle-field">
@@ -40,7 +42,7 @@
             <span id="toggle-mergeoncommit-label" class="toggle-label">Auto-merge</span>
             <span id="toggle-mergeoncommit-desc" class="toggle-desc">Merge changes into <span class="branch-badge" title={`Branch: ${originBranch}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{originBranch}</span> when complete</span>
         </div>
-        <ToggleSwitch bind:checked={defaultAutoMerge} ariaLabel="Auto-merge into main" ariaDescribedby="toggle-mergeoncommit-desc" />
+        <ToggleSwitch bind:checked={defaultAutoMerge} ariaLabel="Auto-merge into main" ariaDescribedby="toggle-mergeoncommit-desc" onChange={() => onDirty?.()} />
     </div>
 
     <div class="toggle-field">
@@ -48,7 +50,7 @@
             <span id="toggle-mergechildren-label" class="toggle-label">Allow subtasks to auto-merge</span>
             <span id="toggle-mergechildren-desc" class="toggle-desc">Subtasks created under a task will auto-merge into it</span>
         </div>
-        <ToggleSwitch bind:checked={defaultSubtasksAutoMerge} ariaLabel="Allow subtasks to auto-merge" ariaDescribedby="toggle-mergechildren-desc" />
+        <ToggleSwitch bind:checked={defaultSubtasksAutoMerge} ariaLabel="Allow subtasks to auto-merge" ariaDescribedby="toggle-mergechildren-desc" onChange={() => onDirty?.()} />
     </div>
 
     <div class="toggle-field">
@@ -56,7 +58,7 @@
             <label class="toggle-label" for="default-max-failed">Max failed turns</label>
             <span class="toggle-desc">Stop task after this many consecutive LLM failures</span>
         </div>
-        <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" />
+        <input id="default-max-failed" type="number" bind:value={defaultMaxFailedTurns} min="1" max="20" class="option-input" onchange={() => onDirty?.()} />
     </div>
 </fieldset>
 

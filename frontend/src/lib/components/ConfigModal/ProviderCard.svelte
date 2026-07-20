@@ -35,7 +35,7 @@
         testResult: { success: boolean; message: string } | null;
     }
 
-    let { provider, index, defaultProvider, encryptionEnabled, currencySymbol, getModelColor, parseDefaultModel, onDragStart, onRemove, onFetchModels, onTestConnection, onToggleDefaultProvider, onAddModel, onRemoveModel, onSetDefaultModel, onSyncMeta, isDragging } = $props();
+    let { provider, index, defaultProvider, encryptionEnabled, currencySymbol, getModelColor, parseDefaultModel, onDragStart, onRemove, onFetchModels, onTestConnection, onToggleDefaultProvider, onAddModel, onRemoveModel, onSetDefaultModel, onSyncMeta, isDragging, onDirty } = $props();
 
     function handleToggle() {
         provider.expanded = !provider.expanded;
@@ -116,7 +116,7 @@
                 <div class="url-and-key-row">
                     <div class="url-field">
                         <label class="url-label" for={`provider-url-${provider.name}`}>Provider URL</label>
-                        <input id={`provider-url-${provider.name}`} type="text" bind:value={provider.url} placeholder="http://localhost:8080/v1" oninput={onSyncMeta} onclick={(e) => e.stopPropagation()} aria-label="Provider URL" />
+                        <input id={`provider-url-${provider.name}`} type="text" bind:value={provider.url} placeholder="http://localhost:8080/v1" oninput={(e) => { onSyncMeta(); onDirty?.(); }} onclick={(e) => e.stopPropagation()} aria-label="Provider URL" />
                     </div>
                     <div class="api-key-field">
                         <label class="api-key-label" for={`provider-key-${provider.name}`}>API key <span class="optional-text">(optional)</span></label>
@@ -126,6 +126,7 @@
                             bind:value={provider.api_key}
                             placeholder="API key..."
                             onclick={(e) => e.stopPropagation()}
+                            onchange={() => onDirty?.()}
                         />
                     </div>
                 </div>
@@ -206,7 +207,7 @@
                                 </svg>
                             </span>
                         </div>
-                        <input id={`concurrency-${index}`} type="number" bind:value={provider.concurrency} min="1" max="20" class="option-input" />
+                        <input id={`concurrency-${index}`} type="number" bind:value={provider.concurrency} min="1" max="20" class="option-input" onchange={() => onDirty?.()} />
                     </div>
                 </div>
 
@@ -219,7 +220,7 @@
                     {getModelColor}
                 />
 
-                <PricingSection {provider} {currencySymbol} {index} />
+                <PricingSection {provider} {currencySymbol} {index} onDirty={onDirty} />
             {/if}
         </div>
     {/if}

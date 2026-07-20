@@ -36,6 +36,15 @@
     let loading = $state(false);
     let error = $state('');
 
+    // Tab navigation
+    let activeTab = $state('providers');
+
+    // Track unsaved changes
+    let hasChanges = $state(false);
+    function markDirty() {
+        hasChanges = true;
+    }
+
     // Locale-aware currency formatting for pricing inputs
     const currencySymbol = (() => {
         const parts = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).formatToParts(0);
@@ -162,6 +171,7 @@
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
+        hasChanges = false;
     });
 
     // Load LSP toggle from IndexedDB on open
@@ -240,6 +250,7 @@
             testingConnection: false,
             testResult: null,
         });
+        markDirty();
     }
 
     let agentMenuOpen = $state(false);
@@ -290,10 +301,12 @@
             testingConnection: false,
             testResult: null,
         });
+        markDirty();
     }
 
     function removeProvider(idx: number) {
         providers.splice(idx, 1);
+        markDirty();
     }
 
     function swapProviders(fromIdx: number, toIdx: number) {
@@ -496,7 +509,18 @@
         }
     }
 
-    function handleClose() {
+    async function handleClose() {
+        if (hasChanges) {
+            const confirmed = await dialogStore.showConfirm({
+                title: 'Discard changes?',
+                message: 'You have unsaved changes. Discard them?',
+                confirmText: 'Discard',
+                cancelText: 'Keep editing',
+                variant: 'destructive',
+            });
+            if (!confirmed) return;
+        }
+        hasChanges = false;
         onClose();
     }
 
@@ -527,9 +551,20 @@
     }
 </script>
 
-<BaseModal title="Settings" footer={footer} onClose={handleClose}>
-            <!-- Providers Section -->
-            <fieldset class="section">
+<BaseModal title="Settings" width="720px" footer={footer} onClose={handleClose}>
+    <!-- Tab Bar -->
+    <div class="tab-bar">
+        <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>Providers</button>
+        <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>Task Defaults</button>
+        <button type="button" class="tab-btn" class:active={activeTab === 'general'} onclick={() => activeTab = 'general'}>General</button>
+    </div>
+
+    <!-- Tab Content -->
+    <div class="tab-content">
+
+        <!-- Providers Tab -->
+        {#if activeTab === 'providers'}
+            <div class="section">
                 <div class="section-header">
                     <h3 class="section-label">Providers</h3>
                     <div class="section-actions">
@@ -575,6 +610,7 @@
                             onRemoveModel={(mi: number) => removeModelFromProvider(i, mi)}
                             onSetDefaultModel={(name: string, effort?: string) => setProviderDefaultModel(i, name, effort)}
                             onSyncMeta={() => syncProviderMeta(p)}
+                            onDirty={markDirty}
                         />
                     {/each}
                 </div>
@@ -600,27 +636,32 @@
                         <span>Add an LLM provider to get started. Supports any OpenAI-compatible API.</span>
                     </div>
                 {/if}
-            </fieldset>
+            </div>
+        {/if}
 
-            <!-- General Section -->
-            <fieldset class="section">
-                <h3 class="section-label">General</h3>
-                <div class="field-label">
-                    <span class="field-label-inline">Directory for Worktrees</span>
-                    <div class="readonly-value">{config?.workspace_dir || '—'}</div>
-                    <span class="field-help">Directory where task worktrees are created</span>
-                </div>
-                <div class="field-label">
-                    <span class="field-label-inline">Database</span>
-                    <div class="readonly-value">{config?.database_path || '—'}</div>
-                    <span class="field-help">Path to the server's SQLite database</span>
-                </div>
+        <!-- Task Defaults Tab -->
+        {#if activeTab === 'task-defaults'}
+            <TaskDefaults
+                bind:defaultOperatingMode
+                bind:defaultAutoMerge
+                bind:defaultSubtasksAutoMerge
+                bind:defaultMaxFailedTurns
+                originBranch={appStore.selectedProject?.origin_branch || 'main'}
+                onDirty={markDirty}
+            />
+        {/if}
+
+        <!-- General Tab -->
+        {#if activeTab === 'general'}
+            <!-- Features -->
+            <div class="section">
+                <h3 class="section-label">Features</h3>
                 <div class="field-row">
                     <div class="field-row-left">
                         <span class="field-label-inline">Language Server (LSP)</span>
                         <span class="field-help">Enable editor features like completions, hover, diagnostics, and go-to-definition</span>
                     </div>
-                    <ToggleSwitch bind:checked={lspEnabled} ariaLabel="Enable LSP" onChange={() => setLSPEnabled(lspEnabled)} />
+                    <ToggleSwitch bind:checked={lspEnabled} ariaLabel="Enable LSP" onChange={() => { setLSPEnabled(lspEnabled); markDirty(); }} />
                 </div>
                 {#if appStore.pwaInstallPrompt}
                     <button type="button" class="btn-pwa-install" onclick={handlePwaInstall} title="Install as a Progressive Web App">
@@ -630,20 +671,28 @@
                         Install as PWA
                     </button>
                 {/if}
-            </fieldset>
+            </div>
 
-            <!-- Task Defaults Section -->
-            <TaskDefaults
-                bind:defaultOperatingMode
-                bind:defaultAutoMerge
-                bind:defaultSubtasksAutoMerge
-                bind:defaultMaxFailedTurns
-                originBranch={appStore.selectedProject?.origin_branch || 'main'}
-            />
+            <!-- System Info -->
+            <div class="section">
+                <h3 class="section-label">System Info</h3>
+                <div class="field-label">
+                    <span class="field-label-inline">Directory for Worktrees</span>
+                    <div class="readonly-value">{config?.workspace_dir || '\u2014'}</div>
+                    <span class="field-help">Directory where task worktrees are created</span>
+                </div>
+                <div class="field-label">
+                    <span class="field-label-inline">Database</span>
+                    <div class="readonly-value">{config?.database_path || '\u2014'}</div>
+                    <span class="field-help">Path to the server's SQLite database</span>
+                </div>
+            </div>
+        {/if}
 
-            {#if error}
-                <div id="config-error" class="error" role="alert" aria-live="assertive">{error}</div>
-            {/if}
+        {#if error}
+            <div id="config-error" class="error" role="alert" aria-live="assertive">{error}</div>
+        {/if}
+    </div>
 </BaseModal>
 
 {#snippet footer()}
@@ -661,11 +710,63 @@
 <style>
     @import '$lib/styles/shared.css';
 
-    /* Section fieldsets */
-    .section {
+    /* Fixed modal size */
+    :global(.modal) {
+        height: 580px;
+        max-height: 580px;
+    }
+
+    /* Tab bar */
+    .tab-bar {
+        display: flex;
+        gap: 0;
+        margin-bottom: 16px;
+        position: sticky;
+        top: 0;
+        background: var(--color-surface-1);
+        z-index: 5;
+        padding-top: 4px;
+    }
+    .tab-btn {
+        padding: 8px 16px;
         border: none;
-        padding: 0;
-        margin: 0;
+        background: none;
+        color: var(--color-text-secondary);
+        font-size: 0.875rem;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        border-bottom: 1px solid var(--color-border);
+        margin-bottom: -1px;
+        transition: color 0.15s, border-color 0.15s;
+        white-space: nowrap;
+    }
+    .tab-btn:hover {
+        color: var(--color-text-primary);
+    }
+    .tab-btn.active {
+        color: var(--color-accent);
+        border-bottom-color: var(--color-accent);
+    }
+    .tab-btn:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: -2px;
+        border-radius: var(--radius-sm);
+    }
+
+    /* Tab content container */
+    .tab-content {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding-bottom: 8px;
+    }
+
+    /* Section cards */
+    .section {
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 16px;
         display: flex;
         flex-direction: column;
         gap: 12px;
@@ -861,8 +962,9 @@
         color: var(--color-text-primary);
         font-size: 0.875rem;
         font-weight: 500;
+        font-family: inherit;
         cursor: pointer;
-        border: 1px solid var(--color-border);
+        border: none;
         transition: background 0.15s;
     }
     .btn-signout:hover {
