@@ -19,7 +19,7 @@
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let lspStatusEl: HTMLButtonElement | null = null;
 
-    const lspStatusLabel = $derived(lspLanguage || 'LSP');
+    const lspStatusLabel = $derived(lspReady ? lspLanguage || 'LSP' : '-');
 
     function toggleLspTooltip() {
         lspTooltipVisible = !lspTooltipVisible;
@@ -32,7 +32,6 @@
             <button
                 type="button"
                 class="lsp-status"
-                class:lsp-error={!!lspError}
                 bind:this={lspStatusEl}
                 onclick={toggleLspTooltip}
                 aria-label="LSP status"
@@ -117,9 +116,6 @@
         padding: 0;
         font-size: inherit;
         color: inherit;
-    }
-    .lsp-status.lsp-error {
-        color: var(--color-status-red);
     }
     .lsp-tooltip {
         position: absolute;
