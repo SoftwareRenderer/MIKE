@@ -273,7 +273,9 @@ func isSandboxableTool(name string) bool {
 // createCheckpoint checks for file changes after tool calls and creates a git stash snapshot.
 // Uses `git stash create` + `git stash store` to record a checkpoint WITHOUT removing changes
 // from the working tree — files stay visible in the filesystem.
-// Runs in a goroutine so it does not block the main execution loop.
+// Runs in a goroutine; acquires WorktreeMu to block the next turn's tool execution
+// until the snapshot is complete, preventing the checkpoint from capturing changes
+// from a subsequent turn.
 // Label generation is deferred to fork time (handleThreadFork).
 // newMessages contains only messages since the last checkpoint.
 func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID, worktreePath, threadID, assistantMsgID string, newMessages []types.ChatMessage, sandboxEnabled bool) {
@@ -286,7 +288,9 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 	// Send pending event to frontend
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeCheckpointPending, Data: map[string]string{"message_id": assistantMsgID}})
 
-	// Run stash creation in background (non-blocking).
+	// Run stash creation in background.
+	// Acquires WorktreeMu to serialize against the next turn's tool calls,
+	// so the checkpoint captures only the changes from the current turn.
 	// Label generation is deferred to fork time (handleThreadFork).
 	go func() {
 		label := git.StashMessageForCheckpoint(taskID, "")
@@ -307,8 +311,11 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 		var stashHash string
 		var stashErr error
 		if projectID != "" {
-			mu := te.worktreeMgr.GetProjectStashMu(projectID)
-			mu.Lock()
+			stashMu := te.worktreeMgr.GetProjectStashMu(projectID)
+			stashMu.Lock()
+			// Acquire worktree mutex to block the next turn's tool calls.
+			// This ensures git add -A captures only the current turn's changes.
+			te.GetWorktreeMu(taskID).Lock()
 			// Stage changes, create stash commit (doesn't remove from working tree), store in stash list
 			_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
 			unstageNewBinaryFiles(te.worktreeMgr, taskID)
@@ -320,9 +327,11 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 			} else {
 				stashErr = createErr
 			}
-			mu.Unlock()
+			te.GetWorktreeMu(taskID).Unlock()
+			stashMu.Unlock()
 		} else {
-			// Fallback without locking (shouldn't happen)
+			// Fallback without stash locking (shouldn't happen)
+			te.GetWorktreeMu(taskID).Lock()
 			_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
 			unstageNewBinaryFiles(te.worktreeMgr, taskID)
 			stashCreateOut, createErr := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "stash", "create")
@@ -333,6 +342,7 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 			} else {
 				stashErr = createErr
 			}
+			te.GetWorktreeMu(taskID).Unlock()
 		}
 
 		if stashErr != nil {
