@@ -15,7 +15,7 @@ test.describe('Extensions Tab', () => {
 
   test('should open Extensions tab from Settings', async ({ page }) => {
     // Open settings modal
-    await page.click('[data-testid="settings-button"], .settings-button, [aria-label="Settings"]');
+    await page.click('.icon-btn[aria-label="Settings"]');
     await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
 
     // Click Extensions tab
@@ -27,7 +27,7 @@ test.describe('Extensions Tab', () => {
 
   test('should show empty state when no extensions installed', async ({ page }) => {
     // Open settings modal
-    await page.click('[data-testid="settings-button"], .settings-button, [aria-label="Settings"]');
+    await page.click('.icon-btn[aria-label="Settings"]');
     await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
 
     // Click Extensions tab
@@ -41,7 +41,7 @@ test.describe('Extensions Tab', () => {
 
   test('should switch between Installed and Browse views', async ({ page }) => {
     // Open settings modal
-    await page.click('[data-testid="settings-button"], .settings-button, [aria-label="Settings"]');
+    await page.click('.icon-btn[aria-label="Settings"]');
     await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
 
     // Click Extensions tab
@@ -52,12 +52,12 @@ test.describe('Extensions Tab', () => {
     await page.click('text=Browse Registry');
 
     // Should show registry URL input or browse view
-    await expect(page.locator('.browse-view, .registry-url-row')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
   });
 
   test('should show Add Extension button', async ({ page }) => {
     // Open settings modal
-    await page.click('[data-testid="settings-button"], .settings-button, [aria-label="Settings"]');
+    await page.click('.icon-btn[aria-label="Settings"]');
     await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
 
     // Click Extensions tab
@@ -147,6 +147,60 @@ test.describe('Extensions Tab', () => {
 
     // Cleanup
     await csrfFetch(page, `/api/extensions/${createResult.data.id}`, { method: 'DELETE' });
+  });
+
+  test('should toggle extension enabled state via UI toggle switch', async ({ page }) => {
+    // Create a test extension
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `ui-toggle-test-${Date.now()}`,
+        type: 'lsp',
+        manifest: { display_name: 'UI Toggle Test', description: '', author: '' },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Open settings > Extensions tab
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Wait for extension to appear in the list
+    await expect(page.locator('.extension-card')).toContainText('UI Toggle Test', { timeout: 5000 });
+
+    // Find the toggle switch for this extension and click it to disable
+    const extCard = page.locator('.extension-card').filter({ hasText: 'UI Toggle Test' });
+    const toggleSwitch = extCard.locator('.toggle-switch');
+    await toggleSwitch.click();
+
+    // Wait for the API call to complete and status to update
+    await page.waitForTimeout(500);
+
+    // Verify the extension is now disabled via API
+    const checkResult = await page.evaluate(async (id) => {
+      const res = await fetch('/api/extensions');
+      const extensions = await res.json();
+      return extensions.find((ext: any) => ext.id === id);
+    }, extId);
+    expect(checkResult.enabled).toBe(false);
+
+    // Click again to re-enable
+    await toggleSwitch.click();
+    await page.waitForTimeout(500);
+
+    // Verify the extension is now enabled
+    const checkResult2 = await page.evaluate(async (id) => {
+      const res = await fetch('/api/extensions');
+      const extensions = await res.json();
+      return extensions.find((ext: any) => ext.id === id);
+    }, extId);
+    expect(checkResult2.enabled).toBe(true);
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
   });
 
   test('should delete extension', async ({ page }) => {
