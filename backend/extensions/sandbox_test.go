@@ -3,6 +3,8 @@ package extensions
 import (
 	"testing"
 	"time"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 func TestSanitizeContainerID(t *testing.T) {
@@ -28,13 +30,13 @@ func TestSanitizeContainerID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got, err := sanitizeContainerID(tt.input)
+			got, err := sandboxruntime.NewRuntime().SanitizeID(tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("sanitizeContainerID(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				t.Errorf("sandboxruntime.NewRuntime().SanitizeID(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 				return
 			}
 			if got != tt.want {
-				t.Errorf("sanitizeContainerID(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("sandboxruntime.NewRuntime().SanitizeID(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
