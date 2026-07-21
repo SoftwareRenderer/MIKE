@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"testing"
 )
@@ -330,6 +331,66 @@ func TestErrorMsg(t *testing.T) {
 	f2 := NewResult(1, []byte("data"))
 	if got := f2.ErrorMsg(); got != "" {
 		t.Errorf("ErrorMsg on Result = %q, want empty", got)
+	}
+}
+
+func TestShellBinaryOffsets(t *testing.T) {
+	// Test ShellIO offsets
+	// Payload: [method][reserved][jsonLen: 4 bytes][sessionID: 4 bytes][inputLen: 4 bytes][input]
+	ioPayload := make([]byte, 6+4+4+5)
+	ioPayload[0] = MethodShellIO
+	binary.BigEndian.PutUint32(ioPayload[2:6], 0xDEADBEEF) // "poison" jsonLen
+	binary.BigEndian.PutUint32(ioPayload[6:10], 123)       // sessionID
+	binary.BigEndian.PutUint32(ioPayload[10:14], 5)        // inputLen
+	copy(ioPayload[14:], []byte("hello"))
+
+	fIO := &Frame{Payload: ioPayload}
+	paramsIO, err := ParseShellIOParams(fIO)
+	if err != nil {
+		t.Fatalf("ParseShellIOParams: %v", err)
+	}
+	if paramsIO.SessionID != 123 {
+		t.Errorf("SessionID = %d, want 123", paramsIO.SessionID)
+	}
+	if string(paramsIO.Input) != "hello" {
+		t.Errorf("Input = %q, want %q", paramsIO.Input, "hello")
+	}
+
+	// Test ShellResize offsets
+	// Payload: [method][reserved][jsonLen: 4 bytes][sessionID: 4 bytes][rows: 2 bytes][cols: 2 bytes]
+	resizePayload := make([]byte, 6+4+2+2)
+	resizePayload[0] = MethodShellResize
+	binary.BigEndian.PutUint32(resizePayload[2:6], 0xCAFEBABE) // "poison" jsonLen
+	binary.BigEndian.PutUint32(resizePayload[6:10], 456)       // sessionID
+	binary.BigEndian.PutUint16(resizePayload[10:12], 24)       // rows
+	binary.BigEndian.PutUint16(resizePayload[12:14], 80)       // cols
+
+	fResize := &Frame{Payload: resizePayload}
+	paramsResize, err := ParseShellResizeParams(fResize)
+	if err != nil {
+		t.Fatalf("ParseShellResizeParams: %v", err)
+	}
+	if paramsResize.SessionID != 456 {
+		t.Errorf("SessionID = %d, want 456", paramsResize.SessionID)
+	}
+	if paramsResize.Rows != 24 || paramsResize.Cols != 80 {
+		t.Errorf("Rows/Cols = %d/%d, want 24/80", paramsResize.Rows, paramsResize.Cols)
+	}
+
+	// Test ShellClose offsets
+	// Payload: [method][reserved][jsonLen: 4 bytes][sessionID: 4 bytes]
+	closePayload := make([]byte, 6+4)
+	closePayload[0] = MethodShellClose
+	binary.BigEndian.PutUint32(closePayload[2:6], 0xBADF00D) // "poison" jsonLen
+	binary.BigEndian.PutUint32(closePayload[6:10], 789)      // sessionID
+
+	fClose := &Frame{Payload: closePayload}
+	paramsClose, err := ParseShellCloseParams(fClose)
+	if err != nil {
+		t.Fatalf("ParseShellCloseParams: %v", err)
+	}
+	if paramsClose.SessionID != 789 {
+		t.Errorf("SessionID = %d, want 789", paramsClose.SessionID)
 	}
 }
 
