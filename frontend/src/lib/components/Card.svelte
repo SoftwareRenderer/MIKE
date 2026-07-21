@@ -22,6 +22,35 @@
     // Track if this task has queued offline actions (for diagonal fade effect)
     let taskHasQueuedActions = $state(false);
     let taskIsQueuedDelete = $state(false);
+
+    // Safety net: stop title generating spinner after a timeout (in case backend
+    // broadcast is lost). Backend has a 30s timeout; we add 15s buffer.
+    const TITLE_GEN_TIMEOUT_MS = 45_000;
+    let titleGenTimer: ReturnType<typeof setTimeout> | null = null;
+    $effect(() => {
+        if (task.title_generating) {
+            // Reset the timer whenever title_generating becomes true
+            if (titleGenTimer) clearTimeout(titleGenTimer);
+            titleGenTimer = setTimeout(() => {
+                // Title generation took too long — clear the flag locally
+                // so the spinner stops even if the backend broadcast was lost.
+                task.title_generating = false;
+                updateTaskInBoard(appStore, task.id, task);
+            }, TITLE_GEN_TIMEOUT_MS);
+        } else {
+            // Title generation finished — clear the safety timer
+            if (titleGenTimer) {
+                clearTimeout(titleGenTimer);
+                titleGenTimer = null;
+            }
+        }
+        return () => {
+            if (titleGenTimer) {
+                clearTimeout(titleGenTimer);
+                titleGenTimer = null;
+            }
+        };
+    });
     function checkQueuedActions() {
         taskHasQueuedActions = getQueuedTaskIds().has(task.id);
         taskIsQueuedDelete = getQueuedDeleteTaskIds().has(task.id);
