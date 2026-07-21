@@ -14,6 +14,7 @@ import (
 
 	"kanban/backend/types"
 	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/sandboxruntime"
 )
 
 const (
@@ -31,6 +32,7 @@ const (
 // ExtensionSandboxManager manages gVisor sandbox containers for extensions.
 type ExtensionSandboxManager struct {
 	mu       sync.Mutex
+	rt       *sandboxruntime.Runtime
 	clients  map[string]*sandbox.Client         // extID -> bridge client
 	refs     map[string]int                     // extID -> active client count
 	states   map[string]*extensionSandboxState  // extID -> runtime state
@@ -62,7 +64,9 @@ type extensionSandboxState struct {
 
 // NewExtensionSandboxManager creates a new ExtensionSandboxManager.
 func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *ExtensionSandboxManager {
+	rt := sandboxruntime.NewRuntime()
 	sm := &ExtensionSandboxManager{
+		rt:        rt,
 		clients:   make(map[string]*sandbox.Client),
 		refs:      make(map[string]int),
 		states:    make(map[string]*extensionSandboxState),
@@ -93,7 +97,7 @@ func checkExtensionSandboxAvailable() bool {
 
 // cleanupStaleContainers removes any kanban-ext-* containers left behind.
 func (sm *ExtensionSandboxManager) cleanupStaleContainers() {
-	out, err := exec.Command("podman", "ps", "-a", "--filter", fmt.Sprintf("name=%s-", ExtensionContainerPrefix), "--format", "{{.Names}}").CombinedOutput()
+	out, err := sm.rt.PodmanExec("ps", "-a", "--filter", fmt.Sprintf("name=%s-", ExtensionContainerPrefix), "--format", "{{.Names}}")
 	if err != nil {
 		log.Printf("[ext-sandbox] startup: failed to list stale containers: %v", err)
 		return
@@ -104,56 +108,8 @@ func (sm *ExtensionSandboxManager) cleanupStaleContainers() {
 			continue
 		}
 		log.Printf("[ext-sandbox] startup: removing stale container %s", name)
-		_, _ = exec.Command("podman", "rm", "-f", name).CombinedOutput()
+		_ = sm.rt.RemoveContainer(name)
 	}
-}
-
-// podmanExec runs a podman command.
-func podmanExec(args ...string) ([]byte, error) {
-	cmd := exec.Command("podman", args...)
-	return cmd.CombinedOutput()
-}
-
-// agentBinaryPath resolves the path to the sandbox-bridge binary.
-func agentBinaryPath() (string, error) {
-	if p := os.Getenv("KANBAN_AGENT_PATH"); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		exe = os.Args[0]
-	}
-	for _, name := range []string{"sandbox-bridge", "sandbox/sandbox-bridge"} {
-		candidate := filepath.Join(filepath.Dir(exe), name)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	for _, name := range []string{"sandbox-bridge", "sandbox/sandbox-bridge"} {
-		if _, err := os.Stat(name); err == nil {
-			return name, nil
-		}
-	}
-	return "", fmt.Errorf("sandbox-bridge binary not found")
-}
-
-// sanitizeContainerID sanitizes an ID for use as a podman container name.
-func sanitizeContainerID(id string) (string, error) {
-	// Replace invalid characters with hyphens
-	sanitized := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-' {
-			return r
-		}
-		return '-'
-	}, id)
-	// Ensure it starts and ends with alphanumeric
-	sanitized = strings.Trim(sanitized, "-_.")
-	if sanitized == "" {
-		return "", fmt.Errorf("invalid container ID: %s", id)
-	}
-	return sanitized, nil
 }
 
 // IsAvailable returns true if extension sandboxing is available.
@@ -172,26 +128,26 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		return nil, fmt.Errorf("gVisor not available (runsc not installed)")
 	}
 
-	safeID, err := sanitizeContainerID(ext.ID)
+	safeID, err := sm.rt.SanitizeID(ext.ID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid extension ID for sandbox container: %w", err)
 	}
 	containerName := fmt.Sprintf("%s-%s", ExtensionContainerPrefix, safeID)
 
 	// Check if container already exists
-	exists, err := containerExists(containerName)
+	exists, err := sm.rt.ContainerExists(containerName)
 	if err != nil {
 		return nil, fmt.Errorf("check container: %w", err)
 	}
 	if exists {
 		log.Printf("[ext-sandbox] ext=%s removing stale container %s", ext.ID, containerName)
-		if rmErr := removeContainer(containerName); rmErr != nil {
+		if rmErr := sm.rt.RemoveContainer(containerName); rmErr != nil {
 			return nil, fmt.Errorf("remove stale container %s: %w", containerName, rmErr)
 		}
 	}
 
 	// Resolve agent binary path
-	agentPath, err := agentBinaryPath()
+	agentPath, err := sm.rt.GetAgentBinaryPath()
 	if err != nil {
 		return nil, fmt.Errorf("sandbox-bridge binary not found: %w", err)
 	}
@@ -382,7 +338,7 @@ func (sm *ExtensionSandboxManager) GetOrCreate(extID string) (*sandbox.Client, e
 	// Check if container is running
 	state := sm.states[extID]
 	if state != nil {
-		running, _ := isContainerRunning(state.containerName)
+		running, _ := sm.rt.IsRunning(state.containerName)
 		if running {
 			// Container is running but client is dead, try to reconnect
 			// For now, just return error — caller should call Stop + Start
@@ -477,14 +433,14 @@ func (sm *ExtensionSandboxManager) Destroy(extID string) error {
 		sm.Stop(extID)
 
 		// Remove container
-		if err := removeContainer(state.containerName); err != nil {
+		if err := sm.rt.RemoveContainer(state.containerName); err != nil {
 			return fmt.Errorf("remove container: %w", err)
 		}
 	}
 
 	// Remove image if it was built locally
 	if ext, err := sm.store.GetByID(extID); err == nil && ext.IsLocalInstalled() && ext.ImageRef != "" {
-		_, _ = exec.Command("podman", "rmi", ext.ImageRef).CombinedOutput()
+		_, _ = sm.rt.PodmanExec("rmi", ext.ImageRef)
 	}
 
 	log.Printf("[ext-sandbox] ext=%s destroyed", extID)
@@ -524,7 +480,7 @@ func (sm *ExtensionSandboxManager) IsRunning(extID string) bool {
 		return state.isAlive
 	}
 
-	running, err := isContainerRunning(state.containerName)
+	running, err := sm.rt.IsRunning(state.containerName)
 	state.isAlive = running && err == nil
 	state.lastCheckedAt = time.Now()
 	return state.isAlive
@@ -579,7 +535,7 @@ func (sm *ExtensionSandboxManager) ListRunning() map[string]ExtensionRuntimeStat
 
 	result := make(map[string]ExtensionRuntimeStatus)
 	for extID, state := range sm.states {
-		running, _ := isContainerRunning(state.containerName)
+		running, _ := sm.rt.IsRunning(state.containerName)
 		result[extID] = ExtensionRuntimeStatus{
 			Running:     running,
 			Container:   state.containerName,
@@ -598,30 +554,6 @@ type ExtensionRuntimeStatus struct {
 	Ports     []types.AssignedPort   `json:"ports,omitempty"`
 	RefCount  int                    `json:"ref_count"`
 	CreatedAt time.Time              `json:"created_at"`
-}
-
-// containerExists checks if a podman container exists.
-func containerExists(name string) (bool, error) {
-	out, err := exec.Command("podman", "ps", "-a", "--filter", fmt.Sprintf("name=%s", name), "--format", "{{.Names}}").CombinedOutput()
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(string(out)) == name, nil
-}
-
-// isContainerRunning checks if a podman container is running.
-func isContainerRunning(name string) (bool, error) {
-	out, err := exec.Command("podman", "ps", "--filter", fmt.Sprintf("name=%s", name), "--filter", "status=running", "--format", "{{.Names}}").CombinedOutput()
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(string(out)) == name, nil
-}
-
-// removeContainer removes a podman container.
-func removeContainer(name string) error {
-	_, err := exec.Command("podman", "rm", "-f", name).CombinedOutput()
-	return err
 }
 
 // InstallAndCreate installs an extension from a registry entry and creates its sandbox.

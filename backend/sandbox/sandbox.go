@@ -19,6 +19,7 @@ import (
 
 	sandbox "kanban/pkg/bridge"
 	"kanban/backend/types"
+	"kanban/pkg/sandboxruntime"
 )
 
 const (
@@ -64,6 +65,7 @@ type agentConn struct {
 // SandboxManager manages gVisor sandbox containers for tasks.
 type SandboxManager struct {
 	mu            sync.Mutex
+	rt            *sandboxruntime.Runtime
 	active        map[string]string    // taskID -> containerName
 	mountPaths    map[string]string    // taskID -> mount path inside container
 	agents        map[string]*agentConn // taskID -> agent pipes + process
@@ -74,7 +76,9 @@ type SandboxManager struct {
 
 // NewSandboxManager creates a new SandboxManager and checks gVisor availability.
 func NewSandboxManager() *SandboxManager {
+	rt := sandboxruntime.NewRuntime()
 	sm := &SandboxManager{
+		rt:            rt,
 		active:        make(map[string]string),
 		mountPaths:    make(map[string]string),
 		agents:        make(map[string]*agentConn),
@@ -99,7 +103,7 @@ func NewSandboxManager() *SandboxManager {
 // by a previous server session (e.g. crash, SIGKILL). This runs at startup
 // so stale containers don't accumulate across restarts.
 func (sm *SandboxManager) cleanupStaleContainers() {
-	out, err := sm.podmanExec("ps", "-a", "--filter", "name=kanban-sandbox-", "--format", "{{.Names}}")
+	out, err := sm.rt.PodmanExec("ps", "-a", "--filter", "name=kanban-sandbox-", "--format", "{{.Names}}")
 	if err != nil {
 		log.Printf("[sandbox] startup: failed to list stale containers: %v", err)
 		return
@@ -109,7 +113,7 @@ func (sm *SandboxManager) cleanupStaleContainers() {
 		return
 	}
 	for _, name := range names {
-		if rmErr := sm.removeContainer(name); rmErr != nil {
+		if rmErr := sm.rt.RemoveContainer(name); rmErr != nil {
 			log.Printf("[sandbox] startup: failed to remove stale container %s: %v", name, rmErr)
 		} else {
 			log.Printf("[sandbox] startup: removed stale container %s", name)
@@ -148,9 +152,7 @@ func (sm *SandboxManager) checkAvailable() bool {
 // When using gVisor (runsc) with rootless podman, --runtime-flag ignore-cgroups=true
 // must be passed to both create and start commands.
 func (sm *SandboxManager) podmanExec(args ...string) ([]byte, error) {
-	c := exec.Command("podman", args...)
-	out, err := c.CombinedOutput()
-	return out, err
+	return sm.rt.PodmanExec(args...)
 }
 
 // agentBinaryPath resolves the path to the sandbox-bridge binary.
@@ -235,21 +237,21 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 	}
 
 	// Sanitize ID: podman container names must match [a-zA-Z0-9][a-zA-Z0-9_.-]*
-	safeID, err := sanitizeContainerID(taskID)
+	safeID, err := sm.rt.SanitizeID(taskID)
 	if err != nil {
 		return fmt.Errorf("invalid task ID for sandbox container: %w", err), nil
 	}
 	containerName := fmt.Sprintf("%s-%s", ContainerNamePrefix, safeID)
 
 	// Check if container already exists
-	exists, err := sm.containerExists(containerName)
+	exists, err := sm.rt.ContainerExists(containerName)
 	if err != nil {
 		return fmt.Errorf("check container: %w", err), nil
 	}
 	if exists {
 		// Clean up stale container from a previous server run
 		log.Printf("[sandbox] task=%s removing stale container %s", taskID, containerName)
-		if rmErr := sm.removeContainer(containerName); rmErr != nil {
+		if rmErr := sm.rt.RemoveContainer(containerName); rmErr != nil {
 			return fmt.Errorf("remove stale container %s: %w", containerName, rmErr), nil
 		}
 	}
@@ -263,7 +265,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 	mountPath := "/home/sandbox/" + projectName
 
 	// Resolve agent binary path (required)
-	agentPath, err := agentBinaryPath()
+	agentPath, err := sm.rt.GetAgentBinaryPath()
 	if err != nil {
 		return fmt.Errorf("sandbox-bridge binary not found: %w", err), nil
 	}
@@ -818,9 +820,9 @@ func (sm *SandboxManager) Stop(taskID string) error {
 	}
 
 	// Remove container (force stop if running)
-	out, err := sm.podmanExec("rm", "-f", containerName)
+	err := sm.rt.RemoveContainer(containerName)
 	if err != nil {
-		log.Printf("[sandbox] task=%s warning: failed to remove container: %s", taskID, out)
+		log.Printf("[sandbox] task=%s warning: failed to remove container: %v", taskID, err)
 		return fmt.Errorf("remove container: %w", err)
 	}
 
@@ -859,8 +861,10 @@ func (sm *SandboxManager) ContainerIsRunning(taskID string) bool {
 		return false
 	}
 
-	out, err := sm.podmanExec("inspect", "-f", "{{.State.Running}}", containerName)
-	running := err == nil && strings.TrimSpace(string(out)) == "true"
+	running, err := sm.rt.IsRunning(containerName)
+	if err != nil {
+		running = false
+	}
 
 	sm.mu.Lock()
 	if running {
@@ -1055,57 +1059,6 @@ func (sm *SandboxManager) ImageReadyForProject(projectName string) bool {
 	return err == nil
 }
 
-// removeContainer force-removes a container, handling overlay filesystem issues
-// that can block normal podman rm -f in rootless mode. If the first attempt fails
-// due to stale overlay merged directory contents, it cleans them and retries.
-func (sm *SandboxManager) removeContainer(name string) error {
-	_, err := sm.podmanExec("rm", "-f", name)
-	if err == nil {
-		return nil
-	}
-	// Overlay merged dirs can have stale files that block rm -f.
-	// Clean them and retry.
-	sm.cleanOverlayMergedDirs()
-	_, err = sm.podmanExec("rm", "-f", name)
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("podman rm -f %s: %w", name, err)
-}
-
-// cleanOverlayMergedDirs removes stale files from podman overlay merged directories.
-// In rootless mode these are not real mount points — just directories that can
-// accumulate stale files when containers are killed abruptly.
-func (sm *SandboxManager) cleanOverlayMergedDirs() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	overlayBase := filepath.Join(home, ".local", "share", "containers", "storage", "overlay")
-	entries, err := os.ReadDir(overlayBase)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		mergedDir := filepath.Join(overlayBase, entry.Name(), "merged")
-		files, _ := os.ReadDir(mergedDir)
-		for _, f := range files {
-			_ = os.RemoveAll(filepath.Join(mergedDir, f.Name()))
-		}
-	}
-}
-
-// containerExists checks if a container with the given name exists.
-func (sm *SandboxManager) containerExists(name string) (bool, error) {
-	// Use "exists" subcommand which is more reliable than ps filtering
-	_, err := sm.podmanExec("inspect", "-t", "container", name)
-	if err != nil {
-		// inspect returns non-zero if container doesn't exist
-		return false, nil
-	}
-	return true, nil
-}
-
 // StopProjectContainers stops all sandbox containers associated with a project.
 // This includes task-level containers (identified by taskIDs) and the project-level
 // container (identified by "proj:" + projectID). Used when sandbox settings change
@@ -1131,26 +1084,4 @@ func (sm *SandboxManager) Cleanup() {
 	for _, taskID := range tasks {
 		_ = sm.Stop(taskID)
 	}
-}
-
-// sanitizeContainerID ensures the ID is a valid podman container name.
-// Podman names must match [a-zA-Z0-9][a-zA-Z0-9_.-]*
-func sanitizeContainerID(id string) (string, error) {
-	var result strings.Builder
-	for _, r := range id {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-' {
-			result.WriteRune(r)
-		} else {
-			result.WriteRune('-')
-		}
-	}
-	s := result.String()
-	// Ensure first character is alphanumeric
-	for len(s) > 0 && !((s[0] >= 'a' && s[0] <= 'z') || (s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= '0' && s[0] <= '9')) {
-		s = s[1:]
-	}
-	if s == "" {
-		return "", fmt.Errorf("ID %q contains no valid container name characters", id)
-	}
-	return s, nil
 }

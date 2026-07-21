@@ -134,7 +134,7 @@ func TestCreateAndStop(t *testing.T) {
 	})
 
 	// Verify container exists
-	exists, err := sm.containerExists(ContainerNamePrefix + "-" + taskID)
+	exists, err := sm.rt.ContainerExists(ContainerNamePrefix + "-" + taskID)
 	if err != nil {
 		t.Fatalf("check container: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestCleanupStaleContainers(t *testing.T) {
 
 	// Verify stale containers exist
 	for _, id := range staleIDs {
-		exists, _ := sm.containerExists(ContainerNamePrefix + "-" + id)
+		exists, _ := sm.rt.ContainerExists(ContainerNamePrefix + "-" + id)
 		if !exists {
 			t.Fatalf("expected stale container %s to exist before cleanup", id)
 		}
@@ -330,7 +330,7 @@ func TestCleanupStaleContainers(t *testing.T) {
 
 	// Verify all stale containers are gone
 	for _, id := range staleIDs {
-		exists, _ := sm.containerExists(ContainerNamePrefix + "-" + id)
+		exists, _ := sm.rt.ContainerExists(ContainerNamePrefix + "-" + id)
 		if exists {
 			t.Errorf("expected stale container %s to be removed after cleanup", id)
 		}
@@ -732,7 +732,7 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 	})
 
 	// Verify container exists
-	exists, err := sm.containerExists(ContainerNamePrefix + "-" + taskID)
+	exists, err := sm.rt.ContainerExists(ContainerNamePrefix + "-" + taskID)
 	if err != nil {
 		t.Fatalf("check container: %v", err)
 	}
@@ -775,7 +775,7 @@ func TestCreateWithCapabilities(t *testing.T) {
 	})
 
 	// Verify container exists
-	exists, err := sm.containerExists(ContainerNamePrefix + "-" + taskID)
+	exists, err := sm.rt.ContainerExists(ContainerNamePrefix + "-" + taskID)
 	if err != nil {
 		t.Fatalf("check container: %v", err)
 	}
