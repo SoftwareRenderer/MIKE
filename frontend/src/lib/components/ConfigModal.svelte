@@ -651,18 +651,17 @@
 
         <!-- General Tab -->
         {#if activeTab === 'general'}
-            <!-- Features -->
+            {#if appStore.pwaInstallPrompt}
             <div class="section">
-                <h3 class="section-label">Features</h3>
-                {#if appStore.pwaInstallPrompt}
+                <h3 class="section-label">Progress Web App</h3>
                     <button type="button" class="btn-pwa-install" onclick={handlePwaInstall} title="Install as a Progressive Web App">
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                             <path d="M8 2v9M5 8l3 3 3-3M3 12v2h10v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                         Install as PWA
-                    </button>
-                {/if}
+                    </button>                
             </div>
+            {/if}
 
             <!-- System Info -->
             <div class="section">
