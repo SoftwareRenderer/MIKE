@@ -197,38 +197,6 @@ type BashParams struct {
 	Timeout int64  `json:"timeout"`
 }
 
-// BashCancelParams holds the target message ID for a bash cancel request.
-type BashCancelParams struct {
-	TargetMsgID uint32 // MsgID of the bash request to cancel
-}
-
-// ParseBashCancelParams parses bash_cancel params from request payload.
-// Format: [method:1][reserved:1][jsonLen:4][targetMsgID:4 BE]
-func ParseBashCancelParams(frame *Frame) (BashCancelParams, error) {
-	payload := frame.Payload
-	if len(payload) < 6 {
-		return BashCancelParams{}, fmt.Errorf("bash_cancel payload too short")
-	}
-	method := payload[0]
-	if method != MethodBashCancel {
-		return BashCancelParams{}, fmt.Errorf("expected bash_cancel method, got %s", methodString(method))
-	}
-	data := payload[5:]
-	if len(data) < 4 {
-		return BashCancelParams{}, fmt.Errorf("bash_cancel data too short (%d bytes)", len(data))
-	}
-	return BashCancelParams{TargetMsgID: binary.BigEndian.Uint32(data[0:4])}, nil
-}
-
-// NewBashCancelRequest creates a bash_cancel request frame.
-func NewBashCancelRequest(msgID uint32, targetMsgID uint32) *Frame {
-	payload := make([]byte, 2+4+4) // method + reserved + jsonLen + targetMsgID
-	payload[0] = MethodBashCancel
-	binary.BigEndian.PutUint32(payload[5:9], targetMsgID)
-
-	return &Frame{MsgID: msgID, Type: TypeRequest, Payload: payload}
-}
-
 // ShellOpenParams holds the parsed parameters for a shell_open request.
 type ShellOpenParams struct {
 	Shell string `json:"shell"`

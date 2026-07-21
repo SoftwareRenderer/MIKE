@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/creack/pty"
