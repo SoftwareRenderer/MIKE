@@ -238,6 +238,45 @@ func TestHandleUpdate(t *testing.T) {
 	}
 }
 
+func TestHandleUpdate_ConfigMemoryLimitSync(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
+	ext.SandboxConfig.MemoryLimit = 256 // default
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Update with memory_limit in config (as the frontend edit form sends)
+	body := map[string]any{
+		"config": map[string]any{
+			"memory_limit": float64(512), // JSON numbers are float64
+		},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.HandleUpdate(w, req, "test-ext")
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+
+	// Verify SandboxConfig.MemoryLimit was synced from config
+	got, err := h.store.GetByID("test-ext")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.SandboxConfig.MemoryLimit != 512 {
+		t.Errorf("SandboxConfig.MemoryLimit = %d, want 512", got.SandboxConfig.MemoryLimit)
+	}
+	// Config should also contain the value
+	if ml, ok := got.Config["memory_limit"]; !ok || ml != float64(512) {
+		t.Errorf("Config[\"memory_limit\"] = %v, want 512", ml)
+	}
+}
+
 func TestHandleUpdate_NotFound(t *testing.T) {
 	h := testHandler(t)
 	body := map[string]any{
