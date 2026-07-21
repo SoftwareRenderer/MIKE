@@ -76,7 +76,7 @@ describe('MultiSelectBar', () => {
         expect(bar).toBeTruthy();
     });
 
-    it('should hide action bar when only 1 task is selected', () => {
+    it('should show action bar when 1 task is selected', () => {
         multiSelect.toggle('task-1');
 
         const { container } = render(MultiSelectBar, {
@@ -87,7 +87,7 @@ describe('MultiSelectBar', () => {
         });
 
         const bar = container.querySelector('.multi-select-bar');
-        expect(bar).toBeNull();
+        expect(bar).toBeTruthy();
     });
 
     it('should show Start button when all selected tasks are in Backlog', () => {

@@ -146,7 +146,12 @@
     function handleDragStart(e: DragEvent) {
         e.stopPropagation();
         if (!e.dataTransfer) return;
-        e.dataTransfer.setData('text/plain', task.id);
+        // If this task is part of an active multi-selection, drag all selected tasks
+        if (multiSelect?.hasSelection && multiSelect.isSelected(task.id)) {
+            e.dataTransfer.setData('text/plain', multiSelect.toArray().join(','));
+        } else {
+            e.dataTransfer.setData('text/plain', task.id);
+        }
         e.dataTransfer.effectAllowed = 'move';
     }
 

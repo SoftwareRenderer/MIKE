@@ -11,7 +11,7 @@
         onClear: () => void;
     } = $props();
 
-    let visible = $derived(multiSelect.hasMultiSelection);
+    let visible = $derived(multiSelect.hasSelection);
 
     // Build a task lookup for the selected tasks
     const selectedTasks = $derived.by(() => {
