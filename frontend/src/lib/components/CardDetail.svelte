@@ -696,7 +696,6 @@
                     sections={overviewSections}
                     {allTasks}
                     consolidatedSubtaskIds={hierarchy.consolidatedSubtaskIds}
-                    subtaskIds={hierarchy.subtaskIds}
                     sectionDragState={dnd.sectionDragState}
                     {collapsedSections}
                     currentTask={task}

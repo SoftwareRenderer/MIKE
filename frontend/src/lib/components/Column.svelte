@@ -3,6 +3,7 @@
     import type { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import Card from './Card.svelte';
     import { fade } from 'svelte/transition';
+    import { countWithDescendants } from '$lib/utils/task-utils';
 
     let { columnId, title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
         columnId: string;
@@ -29,6 +30,8 @@
     let isDropRejected = $state(false);
     let addBtnVisible = $state(true);
     let cardListEl: HTMLDivElement | null = null;
+
+    let taskCount = $derived(tasks.reduce((sum, t) => sum + countWithDescendants(t.id, columnId, childrenMap), 0));
 
     function handleScroll() {
         if (!cardListEl) return;
@@ -86,14 +89,14 @@
             {title}
         </h3>
         <div class="header-right">
-            <span class="count">{tasks.length}</span>
+            <span class="count">{taskCount}</span>
             {#if columnId === 'backlog' && onAddTask && !addBtnVisible}
                 <button class="add-btn" onclick={() => onAddTask()} type="button" aria-label="Create a new task" title="Create a new task">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                 </button>
             {/if}
-            {#if onClearAll && tasks.length > 0}
-                <button class="clear-btn" onclick={(e) => { e.stopPropagation(); onClearAll(); }} aria-label={`Clear all ${tasks.length} done tasks`} title={`Clear all ${tasks.length} done tasks`}>
+            {#if onClearAll && taskCount > 0}
+                <button class="clear-btn" onclick={(e) => { e.stopPropagation(); onClearAll(); }} aria-label={`Clear all ${taskCount} done tasks`} title={`Clear all ${taskCount} done tasks`}>
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
