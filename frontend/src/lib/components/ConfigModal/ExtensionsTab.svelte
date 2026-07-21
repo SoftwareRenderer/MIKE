@@ -420,7 +420,7 @@
                             {/if}
                             <div class="card-actions">
                                 <label class="toggle-label">
-                                    <ToggleSwitch checked={ext.enabled} onToggle={() => handleToggleEnabled(ext.id, !ext.enabled)} />
+                                    <ToggleSwitch checked={ext.enabled} onChange={() => handleToggleEnabled(ext.id, !ext.enabled)} />
                                     <span>Enabled</span>
                                 </label>
                                 <button class="btn btn-icon" title="Edit" onclick={() => openEdit(ext)}>
@@ -537,7 +537,7 @@
                                     <label class="toggle-label">
                                         <ToggleSwitch
                                             checked={editConfig[field.key] ?? field.default ?? false}
-                                            onToggle={() => editConfig[field.key] = !(editConfig[field.key] ?? field.default ?? false)}
+                                            onChange={() => editConfig[field.key] = !(editConfig[field.key] ?? field.default ?? false)}
                                         />
                                     </label>
                                 {:else}
