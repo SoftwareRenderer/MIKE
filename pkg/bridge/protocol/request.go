@@ -72,8 +72,6 @@ func ReadRequest(r io.Reader) (*Request, error) {
 	return req, nil
 }
 
-// ParseRequest parses a Request from a Request frame.
-// Payload format: [method:1][reserved:1][jsonLen:4 BE][json params]
 func ParseRequest(frame *Frame) (*Request, error) {
 	if len(frame.Payload) < 6 {
 		return nil, fmt.Errorf("request payload too short (%d bytes)", len(frame.Payload))
@@ -86,8 +84,8 @@ func ParseRequest(frame *Frame) (*Request, error) {
 	}
 	params := frame.Payload[6 : 6+jsonLen]
 
-	// Validate JSON
-	if jsonLen > 0 {
+	// Validate JSON only for non-binary methods
+	if jsonLen > 0 && !isBinaryMethod(method) {
 		var js json.RawMessage
 		if err := json.Unmarshal(params, &js); err != nil {
 			return nil, fmt.Errorf("invalid JSON params: %w", err)
@@ -99,6 +97,14 @@ func ParseRequest(frame *Frame) (*Request, error) {
 		Method: method,
 		Params: params,
 	}, nil
+}
+
+func isBinaryMethod(m uint8) bool {
+	switch m {
+	case MethodShellIO, MethodShellResize, MethodShellClose, MethodBashCancel:
+		return true
+	}
+	return false
 }
 
 // NewRequest creates a Request frame from method and JSON params.
@@ -139,7 +145,7 @@ type ShellIOParams struct {
 // Format: [sessionID:4][inputLen:4][input bytes]
 func ParseShellIOParams(frame *Frame) (ShellIOParams, error) {
 	payload := frame.Payload
-	if len(payload) < 3 {
+	if len(payload) < 14 {
 		return ShellIOParams{}, fmt.Errorf("shell_io payload too short")
 	}
 	method := payload[0]
@@ -166,6 +172,7 @@ func NewShellIORequest(msgID uint32, sessionID uint32, input []byte) *Frame {
 	// [method:1][reserved:1][jsonLen:4][sessionID:4][inputLen:4][input bytes]
 	payload := make([]byte, 2+4+4+4+len(input))
 	payload[0] = MethodShellIO
+	binary.BigEndian.PutUint32(payload[2:6], uint32(4+4+len(input)))
 	binary.BigEndian.PutUint32(payload[6:10], sessionID)
 	binary.BigEndian.PutUint32(payload[10:14], uint32(len(input)))
 	copy(payload[14:], input)
@@ -184,7 +191,7 @@ type ShellResizeParams struct {
 // Format: [sessionID:4][rows:2][cols:2]
 func ParseShellResizeParams(frame *Frame) (ShellResizeParams, error) {
 	payload := frame.Payload
-	if len(payload) < 3 {
+	if len(payload) < 14 {
 		return ShellResizeParams{}, fmt.Errorf("shell_resize payload too short")
 	}
 	method := payload[0]
@@ -205,6 +212,7 @@ func ParseShellResizeParams(frame *Frame) (ShellResizeParams, error) {
 func NewShellResizeRequest(msgID uint32, sessionID uint32, rows, cols uint16) *Frame {
 	payload := make([]byte, 2+4+4+2+2) // method + reserved + jsonLen + sessionID + rows + cols
 	payload[0] = MethodShellResize
+	binary.BigEndian.PutUint32(payload[2:6], uint32(4+2+2))
 	binary.BigEndian.PutUint32(payload[6:10], sessionID)
 	binary.BigEndian.PutUint16(payload[10:12], rows)
 	binary.BigEndian.PutUint16(payload[12:14], cols)
@@ -220,7 +228,7 @@ type ShellCloseParams struct {
 // ParseShellCloseParams parses shell_close params from request payload.
 func ParseShellCloseParams(frame *Frame) (ShellCloseParams, error) {
 	payload := frame.Payload
-	if len(payload) < 3 {
+	if len(payload) < 10 {
 		return ShellCloseParams{}, fmt.Errorf("shell_close payload too short")
 	}
 	method := payload[0]
@@ -237,7 +245,40 @@ func ParseShellCloseParams(frame *Frame) (ShellCloseParams, error) {
 func NewShellCloseRequest(msgID uint32, sessionID uint32) *Frame {
 	payload := make([]byte, 2+4+4) // method + reserved + jsonLen + sessionID
 	payload[0] = MethodShellClose
+	binary.BigEndian.PutUint32(payload[2:6], uint32(4))
 	binary.BigEndian.PutUint32(payload[6:10], sessionID)
+
+	return &Frame{MsgID: msgID, Type: TypeRequest, Payload: payload}
+}
+
+// BashCancelParams holds the target message ID for a bash cancel request.
+type BashCancelParams struct {
+	TargetMsgID uint32 // MsgID of the bash request to cancel
+}
+
+// ParseBashCancelParams parses bash_cancel params from request payload.
+// Format: [targetMsgID:4]
+func ParseBashCancelParams(frame *Frame) (BashCancelParams, error) {
+	payload := frame.Payload
+	if len(payload) < 10 {
+		return BashCancelParams{}, fmt.Errorf("bash_cancel payload too short")
+	}
+	method := payload[0]
+	if method != MethodBashCancel {
+		return BashCancelParams{}, fmt.Errorf("expected bash_cancel method, got %s", methodString(method))
+	}
+	data := payload[6:]
+	if len(data) < 4 {
+		return BashCancelParams{}, fmt.Errorf("bash_cancel data too short (%d bytes)", len(data))
+	}
+	return BashCancelParams{TargetMsgID: binary.BigEndian.Uint32(data[0:4])}, nil
+}
+
+func NewBashCancelRequest(msgID uint32, targetMsgID uint32) *Frame {
+	payload := make([]byte, 2+4+4) // method + reserved + jsonLen + targetMsgID
+	payload[0] = MethodBashCancel
+	binary.BigEndian.PutUint32(payload[2:6], uint32(4))
+	binary.BigEndian.PutUint32(payload[6:10], targetMsgID)
 
 	return &Frame{MsgID: msgID, Type: TypeRequest, Payload: payload}
 }
