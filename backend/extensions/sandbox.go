@@ -24,6 +24,9 @@ const (
 	DefaultExtensionMemory = 256
 	// ExtensionLivenessTTL is how long to cache a liveness check result.
 	ExtensionLivenessTTL = 5 * time.Minute
+	// ExtensionStopGracePeriod is how long to keep a sandbox alive after the last
+	// client disconnects, to avoid restart overhead if the user quickly reconnects.
+	ExtensionStopGracePeriod = 15 * time.Minute
 )
 
 // ExtensionSandboxManager manages gVisor sandbox containers for extensions.
@@ -46,6 +49,9 @@ type extensionSandboxState struct {
 	createdAt     time.Time
 	lastCheckedAt time.Time
 	isAlive       bool
+	// stopTimer fires after ExtensionStopGracePeriod when refcount hits 0.
+	// Cancelled if a new client connects before it fires.
+	stopTimer *time.Timer
 	// Project-based mount mapping for URI translation.
 	// Each registered project is mounted at /mnt/<project-dirname>.
 	// projectMounts maps host project path → container mount path.
@@ -346,6 +352,12 @@ func (sm *ExtensionSandboxManager) Start(extID string) (*sandbox.Client, error) 
 	state.client = client
 	state.agentCmd = agentCmd
 	sm.refs[extID] = 1
+	// Cancel any pending stop timer — a client has connected
+	if state.stopTimer != nil {
+		state.stopTimer.Stop()
+		state.stopTimer = nil
+		log.Printf("[ext-sandbox] ext=%s grace period cancelled (client connected)", extID)
+	}
 
 	log.Printf("[ext-sandbox] ext=%s started agent in container %s", extID, containerName)
 	return client, nil
@@ -363,6 +375,13 @@ func (sm *ExtensionSandboxManager) GetOrCreate(extID string) (*sandbox.Client, e
 	client := sm.clients[extID]
 	if client != nil && client.IsAlive() {
 		sm.refs[extID]++
+		// Cancel any pending stop timer — a new client has connected
+		state := sm.states[extID]
+		if state != nil && state.stopTimer != nil {
+			state.stopTimer.Stop()
+			state.stopTimer = nil
+			log.Printf("[ext-sandbox] ext=%s grace period cancelled (client reconnected)", extID)
+		}
 		sm.mu.Unlock()
 		return client, nil
 	}
@@ -383,14 +402,32 @@ func (sm *ExtensionSandboxManager) GetOrCreate(extID string) (*sandbox.Client, e
 }
 
 // Release decrements the refcount for an extension sandbox.
-// When refcount reaches zero, the sandbox is stopped immediately.
+// When refcount reaches zero, a grace period timer starts.
+// If no new client connects within the grace period, the sandbox is stopped.
 func (sm *ExtensionSandboxManager) Release(extID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	sm.refs[extID]--
 	if sm.refs[extID] <= 0 {
-		sm.stopLocked(extID)
+		// Cancel any existing timer (shouldn't happen, but be safe)
+		state := sm.states[extID]
+		if state != nil && state.stopTimer != nil {
+			state.stopTimer.Stop()
+		}
+		// Schedule delayed stop
+		state = sm.states[extID]
+		if state != nil {
+			state.stopTimer = time.AfterFunc(ExtensionStopGracePeriod, func() {
+				sm.mu.Lock()
+				defer sm.mu.Unlock()
+				// Only stop if refcount is still 0 (no reconnect during grace period)
+				if sm.refs[extID] <= 0 {
+					sm.stopLocked(extID)
+				}
+			})
+			log.Printf("[ext-sandbox] ext=%s entering %v grace period", extID, ExtensionStopGracePeriod)
+		}
 	}
 }
 
@@ -399,6 +436,12 @@ func (sm *ExtensionSandboxManager) stopLocked(extID string) {
 	state := sm.states[extID]
 	if state == nil {
 		return
+	}
+
+	// Cancel any pending stop timer
+	if state.stopTimer != nil {
+		state.stopTimer.Stop()
+		state.stopTimer = nil
 	}
 
 	// Kill the agent process
@@ -453,6 +496,24 @@ func (sm *ExtensionSandboxManager) Destroy(extID string) error {
 
 	log.Printf("[ext-sandbox] ext=%s destroyed", extID)
 	return nil
+}
+
+// Close stops all running extension sandboxes.
+// Called during server shutdown to clean up all containers.
+func (sm *ExtensionSandboxManager) Close() {
+	sm.mu.Lock()
+	extIDs := make([]string, 0, len(sm.states))
+	for extID := range sm.states {
+		extIDs = append(extIDs, extID)
+	}
+	sm.mu.Unlock()
+
+	for _, extID := range extIDs {
+		log.Printf("[ext-sandbox] shutdown: stopping ext=%s", extID)
+		if err := sm.Destroy(extID); err != nil {
+			log.Printf("[ext-sandbox] shutdown: failed to stop ext=%s: %v", extID, err)
+		}
+	}
 }
 
 // IsRunning checks if an extension sandbox is running.

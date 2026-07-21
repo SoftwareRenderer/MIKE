@@ -152,34 +152,17 @@ func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *S
 	// Collect all registered project paths for mount-based sandbox creation
 	projectMounts := m.collectProjectMounts(workspacePath)
 
-	// Get or create the sandbox
-	bridgeClient, err := m.extSandbox.GetOrCreate(ext.ID)
+	// Get or create the sandbox.
+	// When reusing an existing sandbox (grace period), the LSP process from the
+	// previous workspace may still be running. LSPStart handles this by restarting
+	// the LSP process to get a fresh session for the new workspace.
+	bridgeClient, _, err := m.getOrCreateSandbox(ext, projectMounts)
 	if err != nil {
-		// Sandbox not running — create and start it with project mounts
-		log.Printf("[lsp] creating sandbox for extension %s", ext.ID)
-		_, err = m.extSandbox.Create(ext, projectMounts)
-		if err != nil {
-			return nil, fmt.Errorf("create extension sandbox: %w", err)
-		}
-		bridgeClient, err = m.extSandbox.Start(ext.ID)
-		if err != nil {
-			return nil, fmt.Errorf("start extension sandbox: %w", err)
-		}
-	} else if !m.extSandbox.MountsCompatible(ext.ID, projectMounts) {
-		// Sandbox exists but mounts are stale — recreate
-		log.Printf("[lsp] sandbox mounts changed, recreating for extension %s", ext.ID)
-		_ = m.extSandbox.Stop(ext.ID)
-		_, err = m.extSandbox.Create(ext, projectMounts)
-		if err != nil {
-			return nil, fmt.Errorf("create extension sandbox: %w", err)
-		}
-		bridgeClient, err = m.extSandbox.Start(ext.ID)
-		if err != nil {
-			return nil, fmt.Errorf("start extension sandbox: %w", err)
-		}
+		return nil, err
 	}
 
-	// Start the LSP server process in the sandbox
+	// Start (or restart) the LSP server process in the sandbox.
+	// Always called — the agent restarts the LSP if already running.
 	ctx := context.Background()
 	lspConfig := ext.Manifest.LSP
 	if lspConfig == nil {
@@ -242,6 +225,36 @@ func (m *ExtensionLSPManager) Release(workspacePath, language string) {
 	m.extSandbox.Release(sc.extensionID)
 
 	log.Printf("[lsp] released extension sandbox for workspace=%s lang=%s", workspacePath, language)
+}
+
+// getOrCreateSandbox gets or creates an extension sandbox.
+// Returns the bridge client and a boolean indicating whether a NEW sandbox was created.
+// When reusing an existing sandbox (grace period), newSandbox is false.
+func (m *ExtensionLSPManager) getOrCreateSandbox(ext *extensions.Extension, projectMounts map[string]string) (*sandbox.Client, bool, error) {
+	// Check if sandbox already exists and is alive
+	bridgeClient, err := m.extSandbox.GetOrCreate(ext.ID)
+	if err == nil && bridgeClient != nil && bridgeClient.IsAlive() {
+		// Existing sandbox — check if mounts are compatible
+		if m.extSandbox.MountsCompatible(ext.ID, projectMounts) {
+			log.Printf("[lsp] reusing existing sandbox for extension %s", ext.ID)
+			return bridgeClient, false, nil
+		}
+		// Sandbox exists but mounts are stale — recreate
+		log.Printf("[lsp] sandbox mounts changed, recreating for extension %s", ext.ID)
+		_ = m.extSandbox.Stop(ext.ID)
+	}
+
+	// Create a new sandbox
+	log.Printf("[lsp] creating sandbox for extension %s", ext.ID)
+	_, err = m.extSandbox.Create(ext, projectMounts)
+	if err != nil {
+		return nil, false, fmt.Errorf("create extension sandbox: %w", err)
+	}
+	bridgeClient, err = m.extSandbox.Start(ext.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("start extension sandbox: %w", err)
+	}
+	return bridgeClient, true, nil
 }
 
 // SendToServer sends a JSON-RPC message to the LSP server in the sandbox.

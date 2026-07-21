@@ -42,6 +42,7 @@ type Server struct {
 	extStore          *extensions.ExtensionStore
 	extSandboxMgr     *extensions.ExtensionSandboxManager
 	extHandler        *extensions.ExtensionHandler
+	extLSPMgr         *lsp.ExtensionLSPManager
 	lspHandler        *lsp.LSPHandler
 	mux               *http.ServeMux
 	addr              string
@@ -149,8 +150,8 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	// LSP handler for language server WebSocket bridging
 	// Use extension-based registry and manager for dynamic LSP discovery
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)
-	extLSPManager := lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
-	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, extLSPManager)
+	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
+	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, s.extLSPMgr)
 	// Wire project mutex so GitHandler can serialize project-level git operations.
 	s.gitHandler.SetProjectMutex(s.getProjectMutex)
 	// Wire worktree watcher -> GitHandler diff cache so on-demand file fetches work
@@ -194,7 +195,17 @@ func (s *Server) Serve() error {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	// Clean up all sandbox containers
+	// Stop all LSP connections and sandbox containers
+	if s.lspHandler != nil {
+		s.lspHandler.Close()
+	}
+	if s.extLSPMgr != nil {
+		s.extLSPMgr.Close()
+	}
+	if s.extSandboxMgr != nil {
+		s.extSandboxMgr.Close()
+	}
+	// Clean up all task sandbox containers
 	if s.sandboxMgr != nil {
 		s.sandboxMgr.Cleanup()
 	}
