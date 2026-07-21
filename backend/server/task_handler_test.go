@@ -2145,3 +2145,72 @@ func TestSubtasksAutoMergeSetsAutoCommitOnDescendants(t *testing.T) {
 		t.Fatal("subA auto_commit should be true (prerequisite for auto_merge)")
 	}
 }
+
+func TestTaskOperatingModeRemount(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	// Use agent provider to ensure llama_server_url and model_name are set
+	taskID := createTestTaskWithAgent(t, s, projID, "Test mode remount", "http://localhost:9999/v1")
+
+	t.Run("remounts when not running", func(t *testing.T) {
+		// 1. Start task to create sandbox
+		reqStart := testRequest(http.MethodPost, "/api/projects/"+projID+"/tasks/"+taskID+"/start", nil)
+		rrStart := testResponseAuth(t, s, reqStart)
+		if rrStart.Code != http.StatusOK {
+			t.Fatalf("start task failed: %d %s", rrStart.Code, rrStart.Body.String())
+		}
+
+		// Sandbox should be created synchronously in StartTask (via prepareTaskExecution)
+		if !s.sandboxMgr.HasActiveContainer(taskID) {
+			t.Fatal("expected sandbox to be created after start")
+		}
+
+		// 2. Stop task (execution state becomes idle, but sandbox remains)
+		reqStop := testRequest(http.MethodPost, "/api/projects/"+projID+"/tasks/"+taskID+"/stop", nil)
+		rrStop := testResponseAuth(t, s, reqStop)
+		if rrStop.Code != http.StatusOK {
+			t.Fatalf("stop task failed: %d %s", rrStop.Code, rrStop.Body.String())
+		}
+
+		// 3. Change operating mode
+		reqMode := testRequest(http.MethodPut, "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
+			"operating_mode": "plan",
+		})
+		rrMode := testResponseAuth(t, s, reqMode)
+		if rrMode.Code != http.StatusOK {
+			t.Fatalf("update mode failed: %d %s", rrMode.Code, rrMode.Body.String())
+		}
+
+		// 4. Verify sandbox was stopped (remounted)
+		if s.sandboxMgr.HasActiveContainer(taskID) {
+			t.Fatal("expected sandbox to be stopped after mode change")
+		}
+	})
+
+	t.Run("does not remount when running", func(t *testing.T) {
+		// 1. Start task
+		reqStart := testRequest(http.MethodPost, "/api/projects/"+projID+"/tasks/"+taskID+"/start", nil)
+		rrStart := testResponseAuth(t, s, reqStart)
+		if rrStart.Code != http.StatusOK {
+			t.Fatalf("start task failed: %d %s", rrStart.Code, rrStart.Body.String())
+		}
+
+		if !s.sandboxMgr.HasActiveContainer(taskID) {
+			t.Fatal("expected sandbox to be created after start")
+		}
+
+		// 2. Change operating mode while running
+		reqMode := testRequest(http.MethodPut, "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
+			"operating_mode": "act", // switch back to act
+		})
+		rrMode := testResponseAuth(t, s, reqMode)
+		if rrMode.Code != http.StatusOK {
+			t.Fatalf("update mode failed: %d %s", rrMode.Code, rrMode.Body.String())
+		}
+
+		// 3. Verify sandbox was NOT stopped
+		if !s.sandboxMgr.HasActiveContainer(taskID) {
+			t.Fatal("expected sandbox to remain active while task is running")
+		}
+	})
+}
