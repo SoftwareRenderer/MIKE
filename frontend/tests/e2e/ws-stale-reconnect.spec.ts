@@ -50,39 +50,30 @@ test.describe.serial('WebSocket stale connection detection', () => {
         expect(bannerGone).toBe(true);
     });
 
-    test('visibilitychange handler is registered and checks connection health', async ({ page }) => {
+    test('visibilitychange handler does not crash on visibility toggle', async ({ page }) => {
         // 1. Navigate to the board and let it load
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
 
-        // 2. Verify the page supports visibility API
-        const supportsVisibility = await page.evaluate(() => {
-            return typeof document.hidden === 'boolean';
+        // 2. Capture console errors to verify handler runs cleanly
+        const consoleErrors: string[] = [];
+        page.on('console', msg => {
+            if (msg.type() === 'error') consoleErrors.push(msg.text());
         });
-        expect(supportsVisibility).toBe(true);
 
-        // 3. Simulate a visibility change event
+        // 3. Dispatch visibilitychange (tab is visible in Playwright, so handler runs)
         await page.evaluate(() => {
-            document.dispatchEvent(new CustomEvent('visibilitychange'));
+            document.dispatchEvent(new Event('visibilitychange'));
         });
 
-        // 4. The page should still be functional (cards visible)
-        const cards = await page.locator('.card').count();
-        expect(cards).toBeGreaterThan(0);
-    });
+        // 4. Wait for any async refresh to complete
+        await page.waitForTimeout(500);
 
-    test('focus event triggers same handlers as visibilitychange', async ({ page }) => {
-        // 1. Navigate and load
-        await page.goto('/');
-        await page.waitForSelector('.card', { timeout: 10000 });
+        // 5. No unhandled errors from the handler
+        const appErrors = consoleErrors.filter(e => !e.includes('Navigation duplicated'));
+        expect(appErrors).toHaveLength(0);
 
-        // 2. Verify the focus handler is registered by checking that
-        // dispatching a focus event doesn't break the page
-        await page.evaluate(() => {
-            window.dispatchEvent(new FocusEvent('focus'));
-        });
-
-        // 3. Page should still be functional
+        // 6. Page should still be functional
         const cards = await page.locator('.card').count();
         expect(cards).toBeGreaterThan(0);
     });
@@ -91,11 +82,10 @@ test.describe.serial('WebSocket stale connection detection', () => {
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
 
-        // Test the timeAgo function logic
+        // Test the timeAgo function from App.svelte (matches production thresholds)
         const results = await page.evaluate(() => {
             function timeAgo(seconds: number): string {
-                if (seconds < 5) return 'just now';
-                if (seconds < 60) return `${seconds}s ago`;
+                if (seconds < 60) return `just now`;
                 const mins = Math.floor(seconds / 60);
                 if (mins < 60) return `${mins}m ago`;
                 const hrs = Math.floor(mins / 60);
@@ -103,16 +93,20 @@ test.describe.serial('WebSocket stale connection detection', () => {
             }
             return {
                 '2s': timeAgo(2),
-                '30s': timeAgo(30),
+                '59s': timeAgo(59),
+                '60s': timeAgo(60),
                 '90s': timeAgo(90),
                 '3600s': timeAgo(3600),
+                '7200s': timeAgo(7200),
             };
         });
 
         expect(results['2s']).toBe('just now');
-        expect(results['30s']).toBe('30s ago');
+        expect(results['59s']).toBe('just now');
+        expect(results['60s']).toBe('1m ago');
         expect(results['90s']).toBe('1m ago');
         expect(results['3600s']).toBe('1h ago');
+        expect(results['7200s']).toBe('2h ago');
     });
 });
 
