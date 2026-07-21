@@ -19,15 +19,13 @@ import (
 // It implements the lspManager interface and uses the extension system
 // to discover available language servers and run them in sandboxes.
 type ExtensionLSPManager struct {
-	extStore     *extensions.ExtensionStore
-	extSandbox   *extensions.ExtensionSandboxManager
-	projects     *store.Store
-	mu           sync.Mutex
-	clients      map[string]*sandboxClient // workspaceKey → client state
+	extStore   *extensions.ExtensionStore
+	extSandbox *extensions.ExtensionSandboxManager
+	projects   *store.Store
+	mu         sync.Mutex
+	clients    map[string]*sandboxClient // workspaceKey → client state
 	// serverCh receives messages from all LSP servers
 	serverCh chan json.RawMessage
-	// readLoopDone signals the background read goroutines to stop
-	readLoopDone chan struct{}
 }
 
 // sandboxClient tracks the state of a single LSP connection in a sandbox.
@@ -40,8 +38,6 @@ type sandboxClient struct {
 	// Each registered project is mounted at /mnt/<project-dirname>.
 	// projectMounts maps host project path → container mount path.
 	projectMounts map[string]string
-	// readLoopDone signals the read goroutine for this client to stop
-	readLoopDone chan struct{}
 }
 
 // translateURIsToContainer translates file URIs from host paths to container paths.
@@ -105,23 +101,19 @@ func translateURIsToHost(msg json.RawMessage, workspacePath string, projectMount
 
 // NewExtensionLSPManager creates a new ExtensionLSPManager.
 func NewExtensionLSPManager(extStore *extensions.ExtensionStore, extSandbox *extensions.ExtensionSandboxManager, projects *store.Store) *ExtensionLSPManager {
-	m := &ExtensionLSPManager{
-		extStore:     extStore,
-		extSandbox:   extSandbox,
-		projects:     projects,
-		clients:      make(map[string]*sandboxClient),
-		serverCh:     make(chan json.RawMessage, 256),
-		readLoopDone: make(chan struct{}),
+	return &ExtensionLSPManager{
+		extStore:   extStore,
+		extSandbox: extSandbox,
+		projects:   projects,
+		clients:    make(map[string]*sandboxClient),
+		serverCh:   make(chan json.RawMessage, 256),
 	}
-	return m
 }
 
-// Close stops the manager and all background goroutines.
+// Close stops the manager and removes all client state.
 func (m *ExtensionLSPManager) Close() {
-	close(m.readLoopDone)
 	m.mu.Lock()
-	for key, sc := range m.clients {
-		close(sc.readLoopDone)
+	for key := range m.clients {
 		delete(m.clients, key)
 	}
 	m.mu.Unlock()
@@ -190,7 +182,6 @@ func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *S
 		language:      language,
 		extensionID:   ext.ID,
 		projectMounts: projectMounts,
-		readLoopDone:  make(chan struct{}),
 	}
 
 	m.mu.Lock()
@@ -217,9 +208,6 @@ func (m *ExtensionLSPManager) Release(workspacePath, language string) {
 	}
 	delete(m.clients, workspaceKey)
 	m.mu.Unlock()
-
-	// Stop the read loop
-	close(sc.readLoopDone)
 
 	// Release the sandbox
 	m.extSandbox.Release(sc.extensionID)
@@ -365,15 +353,6 @@ func (m *ExtensionLSPManager) lookupExtension(language string) (*extensions.Exte
 	}
 
 	return nil, fmt.Errorf("no enabled LSP extension found for language %q", language)
-}
-
-// createBridgeClient creates a bridge client for an extension sandbox.
-// This is a placeholder implementation that will be wired to the actual
-// sandbox bridge connection in the full implementation.
-func (m *ExtensionLSPManager) createBridgeClient(extensionID string, port uint16) *sandbox.Client {
-	// TODO: Connect to the sandbox bridge via TCP or pipe
-	// For now, return nil — will be implemented when sandbox networking is ready
-	return nil
 }
 
 // ExtensionRegistry provides language server configuration from installed extensions.
