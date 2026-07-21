@@ -865,18 +865,6 @@
     }
 
     /* Toggle row layout */
-    .field-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-    }
-    .field-row-left {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 0;
-    }
 
     /* Buttons */
     .btn-small {

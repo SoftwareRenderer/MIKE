@@ -21,7 +21,10 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     } = $props();
 
     // Local count refreshed on mount to avoid stale projectCounts
-    let inProgressCount = $state(initialInProgressCount);
+    let inProgressCount = $state(0);
+    $effect(() => {
+        inProgressCount = initialInProgressCount;
+    });
 
     let sandboxEnabled = $state(false);
     let networkIsolation = $state(false);
@@ -68,7 +71,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let capInputValue = $state('');
     let capDropdownOpen = $state(false);
     let capSelectedIndex = $state(-1);
-    let capInputEl: HTMLInputElement | null = null;
+    let capInputEl = $state<HTMLInputElement | null>(null);
     $effect(() => { sandboxCapabilities = project.sandbox_capabilities ?? []; });
     $effect(() => { capsExpanded = !!project.sandbox_capabilities && project.sandbox_capabilities.length > 0; });
     // Known capabilities for autocomplete suggestions
@@ -981,10 +984,11 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         aria-label="Add capability"
                         role="combobox"
                         aria-expanded={capDropdownOpen}
+                        aria-controls="caps-dropdown-list"
                     />
                     <!-- Suggestions dropdown -->
                     {#if capDropdownOpen && capSuggestions.length > 0}
-                    <div class="caps-dropdown" role="listbox">
+                    <div id="caps-dropdown-list" class="caps-dropdown" role="listbox">
                         {#each capSuggestions as suggestion, i}
                         <button type="button" class="caps-dropdown-item" class:selected={i === capSelectedIndex} role="option" aria-selected={i === capSelectedIndex} onclick={() => addCapability(suggestion.value)}>
                             <span class="caps-dropdown-name">{suggestion.value}</span>

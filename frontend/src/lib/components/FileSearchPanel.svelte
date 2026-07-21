@@ -595,10 +595,6 @@
             font-size: 16px; /* Prevent zoom on iOS */
             padding: 6px 0;
         }
-        .options-bar {
-            padding: 4px 10px 6px;
-            gap: 6px;
-        }
         .toggle-btn {
             padding: 6px 8px;
             min-width: 36px;
