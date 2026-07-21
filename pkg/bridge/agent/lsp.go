@@ -23,7 +23,6 @@ type lspSession struct {
 	cmd        *exec.Cmd
 	conn       net.Conn        // connection to LSP server (unix socket)
 	socketPath string          // unix socket path
-	ready      chan struct{}   // closed when LSP server is accepting connections
 	mu         sync.Mutex
 	closed     bool
 	pending    map[string]chan []byte // JSON-RPC id string -> response channel
@@ -66,7 +65,6 @@ func newLSPSession(command string, args []string) (*lspSession, error) {
 	sess := &lspSession{
 		cmd:        cmd,
 		socketPath: socketPath,
-		ready:      make(chan struct{}),
 		pending:    make(map[string]chan []byte),
 	}
 
@@ -90,7 +88,6 @@ func newLSPSession(command string, args []string) (*lspSession, error) {
 			conn, err := net.Dial("unix", socketPath)
 			if err == nil {
 				sess.conn = conn
-				close(sess.ready)
 				go sess.readLoop()
 				return sess, nil
 			}
@@ -331,6 +328,7 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 
 		h.mu.Lock()
 		h.lsp = &lspState{session: sess, command: cmd, args: args}
+		lsp = h.lsp // update reference to new state
 		h.mu.Unlock()
 	}
 
@@ -340,7 +338,6 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, "raw JSON-RPC message required"))
 		return
 	}
-
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

@@ -3,7 +3,6 @@ package extensions
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -363,12 +362,6 @@ func (sm *ExtensionSandboxManager) Start(extID string) (*sandbox.Client, error) 
 	return client, nil
 }
 
-// discloser discards all writes (for stderr).
-type discloser struct{}
-
-func (d discloser) Write(p []byte) (n int, err error) { return len(p), nil }
-func (d discloser) Close() error                      { return nil }
-
 // GetOrCreate starts the extension sandbox if not running, returns existing bridge client.
 func (sm *ExtensionSandboxManager) GetOrCreate(extID string) (*sandbox.Client, error) {
 	sm.mu.Lock()
@@ -682,6 +675,3 @@ func (s ExtensionRuntimeStatus) MarshalJSON() ([]byte, error) {
 		Alias:     (*Alias)(&s),
 	})
 }
-
-// Ensure io is imported
-var _ io.Reader
