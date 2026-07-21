@@ -21,7 +21,6 @@
         padding: 12px;
         background: var(--color-surface-2);
         border-radius: var(--radius-md);
-        border: 1px solid var(--color-border);
     }
     .pi-info-text {
         font-size: 0.8125rem;
