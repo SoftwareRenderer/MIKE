@@ -336,7 +336,14 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			task.SubtasksAutoMerge = v.(bool)
 		}
 		if v, ok := rawBody["operating_mode"]; ok {
-			task.OperatingMode = v.(string)
+			newMode := v.(string)
+			if newMode != task.OperatingMode {
+				task.OperatingMode = newMode
+				// Remount container if not currently running to apply new mount mode (ro vs rw)
+				if task.ExecutionState != "running" && h.executor != nil {
+					h.executor.StopSandbox(task.ID)
+				}
+			}
 		}
 		if v, ok := rawBody["parent_task_id"]; ok {
 			task.ParentTaskID = v.(string)
