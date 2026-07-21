@@ -91,14 +91,16 @@ describe('detectLanguage', () => {
 
 interface Channel {
   id: number;
+  workspace: string;
   handler: ((value: string) => void) | null;
   onServerInfo?: (name: string, version: string | null) => void;
   onReady?: () => void;
 }
 
 /**
- * Simulates the dispatchMessage logic from WorkspaceConnection.
+ * Simulates the dispatchMessage logic from SharedLSPConnection.
  * This is the core routing logic that determines which channel gets which message.
+ * Notifications are scoped by workspace (via textDocument.uri matching).
  */
 function dispatchMessage(channels: Channel[], data: string): void {
   let parsed: any;
@@ -121,8 +123,19 @@ function dispatchMessage(channels: Channel[], data: string): void {
     return;
   }
 
-  // Notification (no id, has method) → broadcast to ALL channels
+  // Notification (no id, has method) → scope by workspace
   if (parsed.id == null && parsed.method) {
+    const uri = parsed?.params?.textDocument?.uri;
+    if (uri && typeof uri === 'string') {
+      const uriPath = uri.replace(/^file:\/\//, '');
+      for (const ch of channels) {
+        if (uriPath.startsWith(ch.workspace)) {
+          ch.handler?.(data);
+        }
+      }
+      return;
+    }
+    // No workspace context — broadcast to all (e.g., $/progress, window/logMessage)
     for (const ch of channels) ch.handler?.(data);
     return;
   }
@@ -172,11 +185,11 @@ describe('LSP connection manager — message routing', () => {
   let channels: Channel[];
   let received: string[][];
 
-  function setup(channelCount: number) {
+  function setup(channelCount: number, workspace = '/tmp/project') {
     channels = [];
     received = [];
     for (let i = 1; i <= channelCount; i++) {
-      channels.push({ id: i, handler: null });
+      channels.push({ id: i, workspace, handler: null });
       received.push([]);
     }
     // Wire up handlers
@@ -186,14 +199,28 @@ describe('LSP connection manager — message routing', () => {
     }
   }
 
-  describe('notifications', () => {
+  function setupMultiWorkspace(workspaces: string[]) {
+    channels = [];
+    received = [];
+    for (let i = 0; i < workspaces.length; i++) {
+      channels.push({ id: i + 1, workspace: workspaces[i], handler: null });
+      received.push([]);
+    }
+    // Wire up handlers
+    for (let i = 0; i < channels.length; i++) {
+      const idx = i;
+      channels[i].handler = (msg) => received[idx].push(msg);
+    }
+  }
+
+  describe('notifications — single workspace', () => {
     beforeEach(() => setup(3));
 
-    it('broadcasts to all channels', () => {
+    it('delivers diagnostics to all channels in the same workspace', () => {
       dispatchMessage(channels, JSON.stringify({
         jsonrpc: '2.0',
         method: 'textDocument/publishDiagnostics',
-        params: { uri: 'file:///main.go' },
+        params: { textDocument: { uri: 'file:///tmp/project/main.go' }, diagnostics: [] },
       }));
 
       expect(received[0]).toHaveLength(1);
@@ -201,7 +228,7 @@ describe('LSP connection manager — message routing', () => {
       expect(received[2]).toHaveLength(1);
     });
 
-    it('broadcasts progress notifications', () => {
+    it('broadcasts progress notifications to all channels', () => {
       dispatchMessage(channels, JSON.stringify({
         jsonrpc: '2.0',
         method: '$/progress',
@@ -218,6 +245,59 @@ describe('LSP connection manager — message routing', () => {
 
       expect(received[0]).toHaveLength(1);
       expect(received[0][0]).toBe('not-json');
+    });
+  });
+
+  describe('notifications — multi-workspace', () => {
+    beforeEach(() => setupMultiWorkspace(['/tmp/project-a', '/tmp/project-b', '/tmp/project-a']));
+
+    it('scopes diagnostics to channels in the matching workspace', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'textDocument/publishDiagnostics',
+        params: { textDocument: { uri: 'file:///tmp/project-a/main.go' }, diagnostics: [] },
+      }));
+
+      // Channels 1 and 3 are in project-a, channel 2 is in project-b
+      expect(received[0]).toHaveLength(1); // project-a
+      expect(received[1]).toHaveLength(0); // project-b — no match
+      expect(received[2]).toHaveLength(1); // project-a
+    });
+
+    it('scopes diagnostics to the other workspace', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'textDocument/publishDiagnostics',
+        params: { textDocument: { uri: 'file:///tmp/project-b/app.ts' }, diagnostics: [] },
+      }));
+
+      expect(received[0]).toHaveLength(0); // project-a — no match
+      expect(received[1]).toHaveLength(1); // project-b
+      expect(received[2]).toHaveLength(0); // project-a — no match
+    });
+
+    it('broadcasts global notifications to all channels regardless of workspace', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'window/logMessage',
+        params: { type: 1, message: 'info' },
+      }));
+
+      expect(received[0]).toHaveLength(1);
+      expect(received[1]).toHaveLength(1);
+      expect(received[2]).toHaveLength(1);
+    });
+
+    it('broadcasts progress notifications to all channels', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        method: '$/progress',
+        params: { token: 'tok1', value: { kind: 'report' } },
+      }));
+
+      expect(received[0]).toHaveLength(1);
+      expect(received[1]).toHaveLength(1);
+      expect(received[2]).toHaveLength(1);
     });
   });
 
@@ -381,7 +461,7 @@ describe('LSP connection manager — message routing', () => {
     });
 
     it('handles channel with null handler', () => {
-      const ch: Channel = { id: 1, handler: null };
+      const ch: Channel = { id: 1, workspace: '/tmp/test', handler: null };
       dispatchMessage([ch], JSON.stringify({ jsonrpc: '2.0', method: 'test' }));
       // No error
     });
@@ -393,7 +473,8 @@ describe('LSP connection manager — message routing', () => {
 
       dispatchMessage(channels, JSON.stringify({
         jsonrpc: '2.0',
-        method: 'test',
+        method: 'textDocument/publishDiagnostics',
+        params: { textDocument: { uri: 'file:///tmp/project/main.go' }, diagnostics: [] },
       }));
 
       expect(received[0]).toHaveLength(1);

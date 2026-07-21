@@ -55,69 +55,177 @@ export interface VirtualTransport extends Transport {
 
 interface Channel {
   id: number;
+  workspace: string;
   file: string;
   lang: string;
   handler: ((value: string) => void) | null;
   onServerInfo?: (name: string, version: string | null) => void;
   onReady?: () => void;
+  subscribed: boolean; // whether workspace/subscribe has been sent for this channel
 }
 
 /**
- * Manages a single WebSocket connection for a workspace, multiplexing
- * multiple editor tabs through virtual transports.
+ * Manages a single shared WebSocket connection for ALL workspaces,
+ * multiplexing multiple editor tabs across multiple projects through
+ * virtual transports.
  *
  * Message routing:
- * - Notifications (no `id`) → delivered to ALL channels
+ * - Notifications (no `id`) → delivered to channels sharing the same workspace
+ *   (determined by matching textDocument.uri against channel workspace paths)
  * - Responses (has `id`) → routed by `_ch` hint or ID range check
+ * - $server/lspReady → routed by `_ch` hint
  */
-class WorkspaceConnection {
+class SharedLSPConnection {
   private ws: WebSocket | null = null;
   private channels = new Map<number, Channel>();
   private nextChannelId = 0;
   private connectPromise: Promise<WebSocket> | null = null;
-  private subscribed = false;
 
-  onDisconnected?: () => void;
-
-  constructor(private workspace: string) {}
-
-  /** Get the first file path from any active channel. */
-  private getFirstFile(): string {
-    for (const ch of this.channels.values()) {
-      if (ch.file) return ch.file;
+  /** Get the current WebSocket, connecting if needed. */
+  private getCurrentWS(): Promise<WebSocket> {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      return Promise.resolve(this.ws);
     }
-    return '';
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
+    if (this.ws?.readyState === WebSocket.CONNECTING) {
+      return new Promise((resolve, reject) => {
+        const w = this.ws!;
+        const onOpen = () => {
+          w.removeEventListener('open', onOpen);
+          w.removeEventListener('error', onErr);
+          resolve(w);
+        };
+        const onErr = () => {
+          w.removeEventListener('open', onOpen);
+          w.removeEventListener('error', onErr);
+          reject(new Error('LSP WebSocket failed'));
+        };
+        w.addEventListener('open', onOpen);
+        w.addEventListener('error', onErr);
+      });
+    }
+    return this.doConnect();
   }
 
-  requestChannel(options: LSPTransportOptions): Promise<VirtualTransport> {
+  private doConnect(): Promise<WebSocket> {
+    let settled = false;
+    const settle = () => { settled = true; };
+
+    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/lsp`;
+    const ws = new WebSocket(wsUrl);
+    this.ws = ws;
+
+    this.connectPromise = new Promise<WebSocket>((resolve, reject) => {
+      ws.addEventListener('open', () => {
+        if (settled) return;
+        settle();
+        // Install unified dispatcher
+        ws.onmessage = (e) => this.dispatchMessage(e.data);
+        resolve(ws);
+        // Send pending subscriptions for all channels
+        this.flushPendingSubscriptions();
+      });
+
+      ws.addEventListener('error', () => {
+        if (settled) return;
+        settle();
+        if (this.ws === ws) {
+          this.connectPromise = null;
+        }
+        reject(new Error('LSP WebSocket error'));
+      });
+
+      ws.addEventListener('close', () => {
+        if (this.ws === ws) {
+          this.ws = null;
+          // Reset subscription state so pending subs are retried on reconnect
+          for (const ch of this.channels.values()) {
+            ch.subscribed = false;
+          }
+        }
+      });
+    });
+
+    const p = this.connectPromise!;
+    p.catch(() => {});
+    p.finally(() => {
+      if (!settled) settle();
+      if (this.ws === ws || this.connectPromise === p) {
+        this.connectPromise = null;
+      }
+    });
+    return p;
+  }
+
+  /** Send pending workspace/subscribe messages for all unsubscribed channels. */
+  private flushPendingSubscriptions(): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    for (const ch of this.channels.values()) {
+      if (!ch.subscribed) {
+        this.sendSubscribe(ch);
+      }
+    }
+  }
+
+  /** Send workspace/subscribe for a single channel. */
+  private sendSubscribe(ch: Channel): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(JSON.stringify({
+      _ch: ch.id,
+      method: 'workspace/subscribe',
+      params: { workspace: ch.workspace, file: ch.file },
+    }));
+    ch.subscribed = true;
+  }
+
+  /** Create a new channel and return its virtual transport. */
+  requestChannel(options: LSPTransportOptions): VirtualTransport {
     const channelId = ++this.nextChannelId;
-    const channel: Channel = { id: channelId, file: options.filePath, lang: detectLanguage(options.filePath), handler: null, onServerInfo: options.onServerInfo, onReady: options.onReady };
+    const channel: Channel = {
+      id: channelId,
+      workspace: options.workspace,
+      file: options.filePath,
+      lang: detectLanguage(options.filePath),
+      handler: null,
+      onServerInfo: options.onServerInfo,
+      onReady: options.onReady,
+      subscribed: false,
+    };
     this.channels.set(channelId, channel);
 
-    // If connection is already open but not yet subscribed (no file available),
-    // now we have a file — send the subscribe message.
-    if (this.ws?.readyState === WebSocket.OPEN && !this.subscribed) {
-      this.sendSubscribe();
+    const sendSubscribe = () => {
+      this.getCurrentWS().then((ws) => {
+        if (ws.readyState === WebSocket.OPEN && !channel.subscribed) {
+          this.sendSubscribe(channel);
+        }
+      }).catch(() => {});
+    };
+
+    // If already connected, subscribe immediately
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      sendSubscribe();
+    } else if (this.connectPromise) {
+      // Wait for connection, then subscribe
+      this.connectPromise.then(() => sendSubscribe()).catch(() => {});
     }
 
     const release = () => {
       this.channels.delete(channelId);
       channel.handler = null;
-      if (this.channels.size === 0) {
-        this.close();
-      }
     };
 
     const transport: VirtualTransport = {
       send: (msg: string) => {
         this.getCurrentWS().then((ws) => {
           if (ws.readyState === WebSocket.OPEN) {
-            // Wrap message with channel ID, language, and file path so the backend can
-            // route to the correct language server, create it lazily if needed, and
-            // route the response back to this channel.
+            // Wrap message with channel ID, workspace, language, and file path
+            // so the backend can route to the correct language server.
             try {
               const parsed = JSON.parse(msg);
-              parsed._ch = channelId;
+              parsed._ch = channel.id;
+              parsed._workspace = channel.workspace;
               parsed._lang = channel.lang;
               parsed._file = channel.file;
               ws.send(JSON.stringify(parsed));
@@ -140,17 +248,7 @@ class WorkspaceConnection {
       release,
     };
 
-    return Promise.resolve(transport);
-  }
-
-  private sendSubscribe(): void {
-    if (this.subscribed || !this.ws) return;
-    const file = this.getFirstFile();
-    this.ws.send(JSON.stringify({
-      method: 'workspace/subscribe',
-      params: { workspace: this.workspace, file },
-    }));
-    this.subscribed = true;
+    return transport;
   }
 
   /** Dispatch an incoming WS message to the appropriate channel(s). */
@@ -161,6 +259,7 @@ class WorkspaceConnection {
     try {
       parsed = JSON.parse(text);
     } catch {
+      // Non-JSON — deliver to all channels
       for (const ch of this.channels.values()) ch.handler?.(text);
       return;
     }
@@ -176,9 +275,9 @@ class WorkspaceConnection {
       return;
     }
 
-    // Notification (no id, has method) → broadcast to ALL channels
+    // Notification (no id, has method) → deliver to channels in the same workspace
     if (parsed.id == null && parsed.method) {
-      for (const ch of this.channels.values()) ch.handler?.(text);
+      this.dispatchNotification(parsed, text);
       return;
     }
 
@@ -223,89 +322,25 @@ class WorkspaceConnection {
     for (const ch of this.channels.values()) ch.handler?.(text);
   }
 
-  /** Get the current WebSocket, connecting if needed. */
-  private getCurrentWS(): Promise<WebSocket> {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      return Promise.resolve(this.ws);
-    }
-    if (this.connectPromise) {
-      return this.connectPromise;
-    }
-    if (this.ws?.readyState === WebSocket.CONNECTING) {
-      return new Promise((resolve, reject) => {
-        const w = this.ws!;
-        const onOpen = () => {
-          w.removeEventListener('open', onOpen);
-          w.removeEventListener('error', onErr);
-          resolve(w);
-        };
-        const onErr = () => {
-          w.removeEventListener('open', onOpen);
-          w.removeEventListener('error', onErr);
-          reject(new Error('LSP WebSocket failed'));
-        };
-        w.addEventListener('open', onOpen);
-        w.addEventListener('error', onErr);
-      });
-    }
-    return this.doConnect();
-  }
-
-  private doConnect(): Promise<WebSocket> {
-    let settled = false;
-    const settle = () => { settled = true; };
-
-    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/lsp`;
-    const ws = new WebSocket(wsUrl);
-    this.ws = ws;
-
-    this.connectPromise = new Promise<WebSocket>((resolve, reject) => {
-      ws.addEventListener('open', () => {
-        if (settled) return;
-        // Install unified dispatcher before sending subscribe
-        ws.onmessage = (e) => this.dispatchMessage(e.data);
-        // Send subscribe with first available file
-        this.sendSubscribe();
-        resolve(ws);
-      });
-
-      ws.addEventListener('error', () => {
-        if (settled) return;
-        settle();
-        // Only clear connectPromise if this is still the current connection.
-        // A stale error from a replaced WebSocket must not clear the new promise.
-        if (this.ws === ws) {
-          this.connectPromise = null;
+  /** Route a notification to channels in the same workspace. */
+  private dispatchNotification(parsed: any, text: string): void {
+    // Try to extract workspace from textDocument.uri
+    const uri = parsed?.params?.textDocument?.uri;
+    if (uri && typeof uri === 'string') {
+      // Strip file:// prefix
+      const uriPath = uri.replace(/^file:\/\//, '');
+      // Deliver to channels whose workspace is a prefix of the URI path
+      for (const ch of this.channels.values()) {
+        if (uriPath.startsWith(ch.workspace)) {
+          ch.handler?.(text);
         }
-        reject(new Error('LSP WebSocket error'));
-      });
-
-      ws.addEventListener('close', () => {
-        // Only clear state if this is still the current connection.
-        // A stale close event from a replaced WebSocket must not overwrite
-        // the new connection reference.
-        if (this.ws === ws) {
-          this.ws = null;
-          this.subscribed = false;
-        }
-        if (this.channels.size === 0) {
-          this.onDisconnected?.();
-        }
-      });
-    });
-
-    const p = this.connectPromise!;
-    p.catch(() => {});
-    p.finally(() => {
-      if (!settled) settle();
-      // Only clear connectPromise if this WebSocket is still the current one.
-      // Without this check, a stale finally callback from the old connection
-      // would clear the new connection's promise.
-      if (this.ws === ws || this.connectPromise === p) {
-        this.connectPromise = null;
       }
-    });
-    return p;
+      return;
+    }
+
+    // No workspace context — broadcast to all channels
+    // (e.g., $/progress, window/logMessage)
+    for (const ch of this.channels.values()) ch.handler?.(text);
   }
 
   close(): void {
@@ -314,9 +349,7 @@ class WorkspaceConnection {
       this.ws.close();
       this.ws = null;
     }
-    this.subscribed = false;
     this.channels.clear();
-    this.onDisconnected?.();
   }
 }
 
@@ -330,31 +363,24 @@ class LSPConnectionManager {
     return LSPConnectionManager.instance;
   }
 
-  // Keyed by workspace path — one WS per workspace, all languages multiplexed.
-  // The _lang hint on each message tells the backend which language server to route to.
-  private connections = new Map<string, WorkspaceConnection>();
+  // Single shared WebSocket connection for all workspaces.
+  // Each channel carries its own workspace path via the _workspace hint.
+  private connection = new SharedLSPConnection();
 
   requestChannel(options: LSPTransportOptions): Promise<VirtualTransport> {
-    const { workspace } = options;
-    let conn = this.connections.get(workspace);
-    if (!conn) {
-      conn = new WorkspaceConnection(workspace);
-      this.connections.set(workspace, conn);
-      conn.onDisconnected = () => this.connections.delete(workspace);
-    }
-    return conn.requestChannel(options);
+    return Promise.resolve(this.connection.requestChannel(options));
   }
 
   releaseAll(): void {
-    for (const [, conn] of this.connections) conn.close();
-    this.connections.clear();
+    this.connection.close();
   }
 }
 
 /**
  * Request a virtual LSP transport from the shared connection manager.
- * All editors in the same workspace share one WebSocket, regardless of language.
- * The backend routes messages to the correct language server via the _lang hint.
+ * All editors across all projects share a single WebSocket connection.
+ * The backend routes messages to the correct language server via the
+ * _workspace and _lang hints on each message.
  *
  * Returns a standard CodeMirror Transport plus a `release()` method
  * to free the channel when the editor tab is closed.
