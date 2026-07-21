@@ -445,10 +445,35 @@ func (r *ExtensionRegistry) GetConfig(language string) *ServerConfig {
 }
 
 // toServerConfig converts an Extension to a ServerConfig.
+// It applies runtime overrides for known extensions (e.g., tsserver.path for TypeScript).
 func (r *ExtensionRegistry) toServerConfig(ext *extensions.Extension) *ServerConfig {
 	lspCfg := ext.Manifest.LSP
 	if lspCfg == nil {
 		return nil
+	}
+
+	initParams := lspCfg.InitParamsOverride
+
+	// Ensure typescript-language-server has tsserver.path pointing to global install.
+	// The sandbox image installs TypeScript globally, not in the workspace.
+	// typescript-language-server expects: initializationOptions.tsserver.path (nested object).
+	if lspCfg.Language == "typescript" || strings.Contains(ext.Name, "typescript") {
+		if initParams == nil {
+			initParams = make(map[string]any)
+		}
+		opts, ok := initParams["initializationOptions"].(map[string]any)
+		if !ok {
+			opts = make(map[string]any)
+			initParams["initializationOptions"] = opts
+		}
+		tsserverOpts, ok := opts["tsserver"].(map[string]any)
+		if !ok {
+			tsserverOpts = make(map[string]any)
+			opts["tsserver"] = tsserverOpts
+		}
+		if _, hasPath := tsserverOpts["path"]; !hasPath {
+			tsserverOpts["path"] = "/usr/local/lib/node_modules/typescript"
+		}
 	}
 
 	return &ServerConfig{
@@ -456,6 +481,6 @@ func (r *ExtensionRegistry) toServerConfig(ext *extensions.Extension) *ServerCon
 		Command:            lspCfg.Command,
 		Args:               lspCfg.Args,
 		Extensions:         lspCfg.Extensions,
-		InitParamsOverride: lspCfg.InitParamsOverride,
+		InitParamsOverride: initParams,
 	}
 }

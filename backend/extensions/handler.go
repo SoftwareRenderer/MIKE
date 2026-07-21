@@ -309,6 +309,32 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 	if len(req.SandboxConfig.Capabilities) > 0 {
 		ext.SandboxConfig.Capabilities = req.SandboxConfig.Capabilities
 	}
+	// LSP config — merge fields from manifest
+	if req.Manifest.LSP != nil {
+		if ext.Manifest.LSP == nil {
+			ext.Manifest.LSP = &LSPConfig{}
+		}
+		if req.Manifest.LSP.Command != "" {
+			ext.Manifest.LSP.Command = req.Manifest.LSP.Command
+		}
+		if len(req.Manifest.LSP.Args) > 0 {
+			ext.Manifest.LSP.Args = req.Manifest.LSP.Args
+		}
+		if len(req.Manifest.LSP.Extensions) > 0 {
+			ext.Manifest.LSP.Extensions = req.Manifest.LSP.Extensions
+		}
+		if req.Manifest.LSP.Language != "" {
+			ext.Manifest.LSP.Language = req.Manifest.LSP.Language
+		}
+		if len(req.Manifest.LSP.InitParamsOverride) > 0 {
+			if ext.Manifest.LSP.InitParamsOverride == nil {
+				ext.Manifest.LSP.InitParamsOverride = make(map[string]any)
+			}
+			for k, v := range req.Manifest.LSP.InitParamsOverride {
+				ext.Manifest.LSP.InitParamsOverride[k] = v
+			}
+		}
+	}
 
 	if err := h.store.Update(id, ext); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())

@@ -233,6 +233,132 @@ func TestExtensionRegistry_NoLSPConfig(t *testing.T) {
 	}
 }
 
+func TestToServerConfig_TypescriptTsserverPath(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	// Create a TypeScript extension WITHOUT tsserver.path in InitParamsOverride
+	// (simulating an old manifest from the registry)
+	ext := makeTestLSPExt("typescript-language-server", "typescript")
+	ext.Manifest.LSP.InitParamsOverride = map[string]any{
+		"preferences": map[string]any{
+			"includeCompletionsForModuleExports": true,
+		},
+	}
+	if err := store.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	reg := NewExtensionRegistry(store)
+	cfg := reg.Lookup("hello.ts")
+	if cfg == nil {
+		t.Fatal("Lookup(hello.ts) = nil, want config")
+	}
+
+	// tsserver.path should be injected inside initializationOptions.tsserver.path
+	if cfg.InitParamsOverride == nil {
+		t.Fatal("InitParamsOverride = nil, want non-nil")
+	}
+	opts, ok := cfg.InitParamsOverride["initializationOptions"].(map[string]any)
+	if !ok {
+		t.Fatal("initializationOptions not found in InitParamsOverride")
+	}
+	tsserverOpts, ok := opts["tsserver"].(map[string]any)
+	if !ok {
+		t.Fatal("tsserver not found in initializationOptions")
+	}
+	tsserverPath, ok := tsserverOpts["path"]
+	if !ok {
+		t.Fatal("path not found in initializationOptions.tsserver")
+	}
+	if tsserverPath != "/usr/local/lib/node_modules/typescript" {
+		t.Errorf("path = %v, want /usr/local/lib/node_modules/typescript", tsserverPath)
+	}
+	// Original preferences should be preserved
+	prefs, ok := cfg.InitParamsOverride["preferences"].(map[string]any)
+	if !ok {
+		t.Fatal("preferences not preserved")
+	}
+	if prefs["includeCompletionsForModuleExports"] != true {
+		t.Error("original preferences not preserved")
+	}
+}
+
+func TestToServerConfig_TypescriptNilInitParams(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	// Create a TypeScript extension with NO InitParamsOverride at all
+	ext := makeTestLSPExt("typescript-language-server", "typescript")
+	ext.Manifest.LSP.InitParamsOverride = nil
+	if err := store.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	reg := NewExtensionRegistry(store)
+	cfg := reg.Lookup("hello.ts")
+	if cfg == nil {
+		t.Fatal("Lookup(hello.ts) = nil, want config")
+	}
+
+	// tsserver.path should still be injected inside initializationOptions.tsserver.path
+	if cfg.InitParamsOverride == nil {
+		t.Fatal("InitParamsOverride = nil, want non-nil")
+	}
+	opts, ok := cfg.InitParamsOverride["initializationOptions"].(map[string]any)
+	if !ok {
+		t.Fatal("initializationOptions not found in InitParamsOverride")
+	}
+	tsserverOpts, ok := opts["tsserver"].(map[string]any)
+	if !ok {
+		t.Fatal("tsserver not found in initializationOptions")
+	}
+	tsserverPath, ok := tsserverOpts["path"]
+	if !ok {
+		t.Fatal("path not found in initializationOptions.tsserver")
+	}
+	if tsserverPath != "/usr/local/lib/node_modules/typescript" {
+		t.Errorf("path = %v, want /usr/local/lib/node_modules/typescript", tsserverPath)
+	}
+}
+
+func TestToServerConfig_NonTypescriptNoOverride(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	// Create a non-TypeScript extension
+	ext := makeTestLSPExt("gopls", "go")
+	ext.Manifest.LSP.InitParamsOverride = map[string]any{
+		"staticcheck": true,
+	}
+	if err := store.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	reg := NewExtensionRegistry(store)
+	cfg := reg.Lookup("main.go")
+	if cfg == nil {
+		t.Fatal("Lookup(main.go) = nil, want config")
+	}
+
+	// Non-TypeScript extensions should NOT get tsserver.path
+	if cfg.InitParamsOverride == nil {
+		t.Fatal("InitParamsOverride = nil")
+	}
+	if _, hasPath := cfg.InitParamsOverride["tsserver.path"]; hasPath {
+		t.Error("non-TypeScript extension should not have tsserver.path")
+	}
+	if cfg.InitParamsOverride["staticcheck"] != true {
+		t.Error("original config not preserved")
+	}
+}
+
 func TestNewExtensionLSPManager(t *testing.T) {
 	store := testExtensionStore(t)
 	if err := store.InitSchema(); err != nil {

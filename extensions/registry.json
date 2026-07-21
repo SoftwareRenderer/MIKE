@@ -8,5 +8,15 @@
         "author": "Go Team",
         "dockerfile_url": "gopls/Dockerfile",
         "manifest_url": "gopls/manifest.json"
+    },
+    {
+        "name": "typescript-language-server",
+        "version": "1.0.0",
+        "type": "lsp",
+        "display_name": "TypeScript Language Server",
+        "description": "Official TypeScript language server. Provides completions, hover, diagnostics, go-to-definition, refactor, and more for TypeScript and JavaScript projects.",
+        "author": "Microsoft",
+        "dockerfile_url": "typescript-language-server/Dockerfile",
+        "manifest_url": "typescript-language-server/manifest.json"
     }
 ]
