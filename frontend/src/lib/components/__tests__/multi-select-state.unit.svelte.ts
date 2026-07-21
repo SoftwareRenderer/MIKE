@@ -18,7 +18,18 @@ vi.mock('$lib/stores', () => ({
         showToast: vi.fn(),
     },
     uiStore: {},
-    appStore: {},
+    appStore: {
+        config: {
+            providers: [
+                {
+                    name: 'test-provider',
+                    display_name: 'Test Provider',
+                    url: 'http://test:8080/v1',
+                    models: [{ name: 'test-model' }],
+                },
+            ],
+        },
+    },
 }));
 
 function createMockTask(id: string, status: string = 'backlog'): Task {
@@ -146,5 +157,68 @@ describe('MultiSelectBar', () => {
 
         // A custom event should have been dispatched
         expect(window.dispatchEvent).toHaveBeenCalled();
+    });
+
+    it('should show Model button when all selected tasks are in Backlog', () => {
+        multiSelect.toggle('task-1');
+        multiSelect.toggle('task-2');
+
+        const { container } = render(MultiSelectBar, {
+            multiSelect,
+            tasks,
+            projectId: 'test-project',
+            onClear,
+        });
+
+        const modelBtn = container.querySelector('.bar-btn-model');
+        expect(modelBtn).toBeTruthy();
+        expect(modelBtn?.textContent).toContain('Model');
+    });
+
+    it('should not show Model button when selected tasks are not all in Backlog', () => {
+        const mixedTasks = [
+            createMockTask('task-1', 'backlog'),
+            createMockTask('task-2', 'in_progress'),
+        ];
+        multiSelect.toggle('task-1');
+        multiSelect.toggle('task-2');
+
+        const { container } = render(MultiSelectBar, {
+            multiSelect,
+            tasks: mixedTasks,
+            projectId: 'test-project',
+            onClear,
+        });
+
+        const modelBtn = container.querySelector('.bar-btn-model');
+        expect(modelBtn).toBeNull();
+    });
+
+    it('should render Model button with correct aria-label', () => {
+        multiSelect.toggle('task-1');
+        multiSelect.toggle('task-2');
+
+        const { container } = render(MultiSelectBar, {
+            multiSelect,
+            tasks,
+            projectId: 'test-project',
+            onClear,
+        });
+
+        const modelBtn = container.querySelector('.bar-btn-model');
+        expect(modelBtn).toBeTruthy();
+        expect(modelBtn?.getAttribute('aria-label')).toBe('Change model for 2 tasks');
+    });
+
+    it('should not show Model button when no tasks are selected', () => {
+        const { container } = render(MultiSelectBar, {
+            multiSelect,
+            tasks,
+            projectId: 'test-project',
+            onClear,
+        });
+
+        const bar = container.querySelector('.multi-select-bar');
+        expect(bar).toBeNull();
     });
 });

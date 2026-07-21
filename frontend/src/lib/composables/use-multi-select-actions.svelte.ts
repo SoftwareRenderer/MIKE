@@ -15,6 +15,8 @@ export interface MultiSelectActionsOptions {
     onDelete: (taskIds: string[], titles: string[]) => Promise<void>;
     /** Called when the user clicks "Start N tasks" in the floating bar. */
     onStart: (taskIds: string[]) => Promise<void>;
+    /** Called when the user changes the model for selected tasks in the floating bar. */
+    onModelChange?: (taskIds: string[], providerUrl: string, modelName: string | undefined, reasoningEffort: string | undefined) => Promise<void>;
 }
 
 export function useMultiSelectActions(options: MultiSelectActionsOptions) {
@@ -35,13 +37,28 @@ export function useMultiSelectActions(options: MultiSelectActionsOptions) {
         });
     }
 
+    function handleModelChange(e: CustomEvent) {
+        // Modal dispatches empty taskIds — use the live selection instead
+        const taskIds = multiSelect.toArray();
+        const providerUrl = e.detail.providerUrl as string;
+        const modelName = e.detail.modelName as string | undefined;
+        const reasoningEffort = e.detail.reasoningEffort as string | undefined;
+        if (options.onModelChange) {
+            options.onModelChange(taskIds, providerUrl, modelName, reasoningEffort).finally(() => {
+                multiSelect.clear();
+            });
+        }
+    }
+
     /** Wire up window event listeners. Returns a cleanup function. */
     function setup(): () => void {
         window.addEventListener('multi-select-delete', handleDelete as EventListener);
         window.addEventListener('multi-select-start', handleStart as EventListener);
+        window.addEventListener('multi-select-model', handleModelChange as EventListener);
         return () => {
             window.removeEventListener('multi-select-delete', handleDelete as EventListener);
             window.removeEventListener('multi-select-start', handleStart as EventListener);
+            window.removeEventListener('multi-select-model', handleModelChange as EventListener);
         };
     }
 

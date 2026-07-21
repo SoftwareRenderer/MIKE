@@ -1,8 +1,9 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
     import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
-    import { dialogStore } from '$lib/stores';
+    import { appStore, dialogStore } from '$lib/stores';
     import { fade } from 'svelte/transition';
+    import ChangeModelModal from './ChangeModelModal.svelte';
 
     let { multiSelect, tasks, projectId, onClear }: {
         multiSelect: MultiSelect;
@@ -21,6 +22,9 @@
             .filter((t): t is Task => t != null);
     });
 
+    // Task titles for the model change modal
+    const selectedTaskTitles = $derived(selectedTasks.map(t => t.title || '(untitled)'));
+
     // Check if all selected tasks are in Backlog
     const allInBacklog = $derived(
         selectedTasks.length > 0 && selectedTasks.every(t => t.status === 'backlog')
@@ -33,6 +37,10 @@
 
     // Bar positioning (fixed at bottom of viewport, centered)
     let barRef: HTMLDivElement | null = $state(null);
+
+    // Model change modal
+    let showModelModal = $state(false);
+    let providers = $derived(appStore.config?.providers || []);
 
     async function handleStart() {
         const titles = selectedTasks.map(t => t.title || '(untitled)');
@@ -56,6 +64,14 @@
             detail: { taskIds: multiSelect.toArray(), titles }
         }));
     }
+
+    function openModelModal() {
+        showModelModal = true;
+    }
+
+    function closeModelModal() {
+        showModelModal = false;
+    }
 </script>
 
 {#if visible}
@@ -68,6 +84,20 @@
         aria-label="Multi-select actions"
     >
         {#if allInBacklog}
+            <button
+                type="button"
+                class="bar-btn bar-btn-model"
+                onclick={openModelModal}
+                aria-label="Change model for {multiSelect.count} tasks"
+            >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M2 5l6-3 6 3v6l-6 3-6-3V5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                    <line x1="8" y1="8" x2="8" y2="14" stroke="currentColor" stroke-width="1.5"/>
+                    <line x1="2" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
+                    <line x1="14" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+                Model
+            </button>
             <button
                 type="button"
                 class="bar-btn bar-btn-start"
@@ -105,6 +135,15 @@
             </svg>
         </button>
     </div>
+{/if}
+
+{#if showModelModal}
+    <ChangeModelModal
+        providers={providers}
+        taskCount={multiSelect.count}
+        taskTitles={selectedTaskTitles}
+        onClose={closeModelModal}
+    />
 {/if}
 
 <style>
@@ -152,6 +191,15 @@
     }
     .bar-btn-start:hover {
         background: var(--color-accent-hover);
+        opacity: 1;
+    }
+
+    .bar-btn-model {
+        background: var(--color-surface-4);
+        color: var(--color-text-primary);
+    }
+    .bar-btn-model:hover {
+        background: var(--color-surface-3);
         opacity: 1;
     }
 
