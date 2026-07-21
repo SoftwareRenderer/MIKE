@@ -20,16 +20,12 @@ import (
 	"github.com/coder/websocket"
 )
 
-// toolCallMarker is the JSON substring used to identify tool_call events in buffered frames.
 var toolCallMarker = []byte(`"event":"tool_call"`)
 
-// isGitPath returns true if the path is inside a .git directory.
-// Matches ".git" as a path component (e.g. ".git/HEAD", "sub/.git/config").
 func isGitPath(path string) bool {
 	if path == ".git" {
 		return true
 	}
-	// Check if any path component is ".git"
 	for _, part := range strings.Split(path, string(filepath.Separator)) {
 		if part == ".git" {
 			return true
@@ -38,8 +34,6 @@ func isGitPath(path string) bool {
 	return false
 }
 
-// isInternalFile returns true for paths that should be suppressed from
-// WebSocket broadcasts: .git directories and flight recorder trace files.
 func isInternalFile(path string) bool {
 	if isGitPath(path) {
 		return true
@@ -51,7 +45,6 @@ func isInternalFile(path string) bool {
 	return false
 }
 
-// filterInternalPathsFromHashes removes entries with internal paths from a hash map.
 func filterInternalPathsFromHashes(hashes map[string]string) map[string]string {
 	if len(hashes) == 0 {
 		return nil
@@ -68,7 +61,6 @@ func filterInternalPathsFromHashes(hashes map[string]string) map[string]string {
 	return filtered
 }
 
-// filterInternalPathsFromList removes internal paths from a string slice.
 func filterInternalPathsFromList(paths []string) []string {
 	if len(paths) == 0 {
 		return nil
@@ -85,22 +77,15 @@ func filterInternalPathsFromList(paths []string) []string {
 	return filtered
 }
 
-// maxFrameBufferSize is the maximum size of a single frame to buffer.
-// Frames larger than this (e.g., tool_result with large output, full diffs)
-// are skipped to prevent ring buffers from consuming excessive memory.
 const maxFrameBufferSize = 256 * 1024 // 256KB
 
-// bytesContains is a simple bytes.Contains that avoids []byte→string allocation.
 func bytesContains(haystack, needle []byte) bool {
 	return bytes.Contains(haystack, needle)
 }
 
 const (
-	// DefaultBufferSize is the default ring buffer size per connection.
-	// Large enough to hold a full LLM streaming session (tokens + reasoning) without evicting tool_call events.
 	DefaultBufferSize = 5000
-	// MaxBufferSize is the maximum ring buffer size per connection.
-	MaxBufferSize = 20000
+	MaxBufferSize     = 20000
 )
 
 // UserMessage carries a user message with optional model override.
@@ -109,22 +94,21 @@ type UserMessage struct {
 	ModelName       string
 	ServerURL       string
 	ReasoningEffort string
-	Attachments     string // JSON array of {mimeType, data} for images
-	Regenerate      bool   // true when re-sending a message to trigger regeneration
-	ContextChanged  bool   // true when conversation context changed (e.g., message deleted); resets loop detector
+	Attachments    string
+	Regenerate     bool
+	ContextChanged bool
 }
 
 // LazyStartHandler is called when a user message arrives for a task with no active executor.
 type LazyStartHandler func(projectID, taskID, content, modelName, serverURL, reasoningEffort string, regenerate bool)
 
-// clientState holds the subscription state for a single WebSocket connection.
 type clientState struct {
 	conn       *websocket.Conn
-	projectSub map[string]int // projectID -> subscriber count (for multi-tab support)
-	taskSub    map[string]int // "projectID:taskID" -> subscriber count
-	writeMu    sync.Mutex     // serializes writes for this connection
+	projectSub map[string]int
+	taskSub    map[string]int
+	writeMu    sync.Mutex
 	bufMu      sync.Mutex
-	ringBuffer [][]byte // raw JSON frames for replay
+	ringBuffer [][]byte
 	bufSize    int
 }
 
@@ -142,13 +126,7 @@ type AppStreamSubscription struct {
 
 
 
-// branchSnapshot holds the last-known branch for a project.
-type branchSnapshot struct {
-	branch string
-}
-
-// AppStreamManager manages a single WebSocket endpoint for all app events.
-// Clients connect once at /api/stream and subscribe to projects/tasks.
+// AppStreamManager manages the /api/stream WebSocket for all app events.
 type AppStreamManager struct {
 	mu          sync.RWMutex
 	clients     map[*websocket.Conn]*clientState
@@ -161,9 +139,8 @@ type AppStreamManager struct {
 	// Filesystem watcher for project directory changes (create/delete)
 	projectWatcher *ProjectWatcher
 
-	// Branch pollers — one per project, for detecting branch switches
-	branchPollersMu sync.Mutex
-	branchPollers   map[string]context.CancelFunc
+	// Event-driven branch watcher — watches .git/HEAD for branch switches
+	branchWatcher *BranchWatcher
 
 	// Lazy start handler — called when a user message arrives for a task with no active executor
 	lazyStartHandler LazyStartHandler
@@ -177,21 +154,19 @@ type AppStreamManager struct {
 	taskBufSize int
 }
 
-// taskFrame is a single entry in the per-task ring buffer.
 type taskFrame struct {
 	data   []byte
 	toolID string
 }
 
-// NewAppStreamManager creates a new AppStreamManager.
+// NewAppStreamManager creates a new AppStreamManager with filesystem watchers.
 func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *AppStreamManager {
 	asm := &AppStreamManager{
-		clients:       make(map[*websocket.Conn]*clientState),
-		store:         store,
-		worktreeMgr:   worktreeMgr,
-		branchPollers: make(map[string]context.CancelFunc),
-		taskBuffers:   make(map[string][]taskFrame),
-		taskBufSize:   DefaultBufferSize,
+		clients:     make(map[*websocket.Conn]*clientState),
+		store:       store,
+		worktreeMgr: worktreeMgr,
+		taskBuffers: make(map[string][]taskFrame),
+		taskBufSize: DefaultBufferSize,
 	}
 	// Initialize the filesystem watcher for task worktrees
 	// Cache update callback is set later via SetDiffCacheUpdate (after GitHandler is created)
@@ -205,6 +180,12 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 	asm.projectWatcher, err = NewProjectWatcher(asm.BroadcastFsEvent)
 	if err == nil {
 		go asm.projectWatcher.StartEventLoop()
+	}
+
+	// Initialize the branch watcher (event-driven, replaces polling)
+	asm.branchWatcher, err = NewBranchWatcher(asm.BroadcastBranch)
+	if err == nil {
+		go asm.branchWatcher.StartEventLoop()
 	}
 
 	return asm
@@ -243,11 +224,13 @@ func (asm *AppStreamManager) Close() {
 	if asm.watcher != nil {
 		asm.watcher.Close()
 	}
+	if asm.branchWatcher != nil {
+		asm.branchWatcher.Close()
+	}
 }
 
 // -- Subscription management --
 
-// subscribeProject adds a project subscription for a client.
 func (asm *AppStreamManager) subscribeProject(conn *websocket.Conn, projectID string) {
 	asm.mu.Lock()
 	client := asm.clients[conn]
@@ -262,18 +245,19 @@ func (asm *AppStreamManager) subscribeProject(conn *websocket.Conn, projectID st
 	wasEmpty := len(client.projectSub) == 1 // first project subscription
 	asm.mu.Unlock()
 
-	// Start branch poller and project watcher if this is the first subscriber to this project
+	// Start branch watcher and project watcher if this is the first subscriber to this project
 	if wasEmpty {
-		asm.startBranchPoller(projectID)
-		// Watch project directory for file create/delete events
+		// Watch project directory for branch switches and file create/delete events
 		project, err := asm.store.GetProject(projectID)
 		if err == nil && project != nil && project.Path != "" {
+			if asm.branchWatcher != nil {
+				_ = asm.branchWatcher.Watch(projectID, project.Path)
+			}
 			_ = asm.projectWatcher.Watch(projectID, project.Path)
 		}
 	}
 }
 
-// unsubscribeProject removes a project subscription for a client.
 func (asm *AppStreamManager) unsubscribeProject(conn *websocket.Conn, projectID string) {
 	asm.mu.Lock()
 	client := asm.clients[conn]
@@ -293,14 +277,15 @@ func (asm *AppStreamManager) unsubscribeProject(conn *websocket.Conn, projectID 
 	hasSubs := len(client.projectSub) > 0
 	asm.mu.Unlock()
 
-	// Stop branch poller and project watcher if no clients are subscribed to this project
+	// Stop branch watcher and project watcher if no clients are subscribed to this project
 	if !hasSubs {
-		asm.stopBranchPoller(projectID)
+		if asm.branchWatcher != nil {
+			asm.branchWatcher.Unwatch(projectID)
+		}
 		asm.projectWatcher.Unwatch(projectID)
 	}
 }
 
-// subscribeTask adds a task subscription for a client.
 func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, taskID string) {
 	asm.mu.Lock()
 	client := asm.clients[conn]
@@ -331,7 +316,6 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 	}
 }
 
-// unsubscribeTask removes a task subscription for a client.
 func (asm *AppStreamManager) unsubscribeTask(conn *websocket.Conn, projectID, taskID string) {
 	asm.mu.Lock()
 	client := asm.clients[conn]
@@ -352,7 +336,6 @@ func (asm *AppStreamManager) unsubscribeTask(conn *websocket.Conn, projectID, ta
 	asm.mu.Unlock()
 }
 
-// hasProjectSubscribers returns true if any client is subscribed to the project.
 func (asm *AppStreamManager) hasProjectSubscribers(projectID string) bool {
 	asm.mu.RLock()
 	defer asm.mu.RUnlock()
@@ -364,7 +347,6 @@ func (asm *AppStreamManager) hasProjectSubscribers(projectID string) bool {
 	return false
 }
 
-// hasTaskSubscribers returns true if any client is subscribed to the task.
 func (asm *AppStreamManager) hasTaskSubscribers(projectID, taskID string) bool {
 	asm.mu.RLock()
 	defer asm.mu.RUnlock()
@@ -384,8 +366,6 @@ func (asm *AppStreamManager) SendBoardEvent(projectID string, event types.Stream
 	asm.sendBoardPayload(projectID, event.Data)
 }
 
-// sendBoardPayload sends a payload directly to all clients subscribed to the project.
-// The payload is JSON-marshaled and sent as the WebSocket frame.
 func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 	asm.mu.RLock()
 	targets := make([]*clientState, 0)
@@ -414,7 +394,6 @@ func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 }
 
 // SendTaskEvent sends a task-level event to all clients subscribed to the task.
-// The event includes task_id for client-side routing.
 func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types.StreamEvent) {
 	// Build flat JSON: {"type":"task_event","task_id":"...","type":"token","data":{...}}
 	payload := map[string]any{
@@ -440,7 +419,6 @@ func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types
 	}
 }
 
-// sendTaskPayload sends a payload to all clients subscribed to a task.
 func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload any) {
 	asm.mu.RLock()
 	targets := make([]*clientState, 0)
@@ -470,7 +448,7 @@ func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload a
 	asm.bufferTask(key, frame)
 }
 
-// BroadcastAll sends a raw message to ALL connected clients.
+// BroadcastAll sends a raw message to all connected clients.
 func (asm *AppStreamManager) BroadcastAll(msg []byte) {
 	asm.mu.RLock()
 	allClients := make([]*clientState, 0, len(asm.clients))
@@ -501,10 +479,9 @@ func (asm *AppStreamManager) BroadcastProjectCounts() {
 	asm.BroadcastAll(msg)
 }
 
-// -- BoardStreamManager compatibility methods --
+// -- BoardStreamManager compatibility --
 
-// Broadcast sends a board_refresh event to all clients of a project,
-// and a project_counts event to ALL connected clients across all projects.
+// Broadcast sends a board_refresh event to a project and project_counts to all clients.
 func (asm *AppStreamManager) Broadcast(projectID string) {
 	asm.sendBoardPayload(projectID, map[string]string{"type": "board_refresh"})
 	asm.BroadcastProjectCounts()
@@ -527,9 +504,7 @@ func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
 	})
 }
 
-// BroadcastFsEvent sends a fs_event to all clients of a project.
-// op is "create" or "delete", path is the affected file/directory path.
-// Events for internal files (.git, flight recorder) are suppressed.
+// BroadcastFsEvent sends an fs_event to all clients of a project.
 func (asm *AppStreamManager) BroadcastFsEvent(projectID, op, path string) {
 	if isInternalFile(path) {
 		return
@@ -541,9 +516,7 @@ func (asm *AppStreamManager) BroadcastFsEvent(projectID, op, path string) {
 	})
 }
 
-// SetDiffCacheUpdate sets a callback to update the GitHandler's diff cache
-// when the worktree watcher computes a new diff. Must be called before diff
-// events are processed.
+// SetDiffCacheUpdate sets a callback to update the GitHandler's diff cache.
 func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff *git.TaskDiff)) {
 	if asm.watcher != nil {
 		asm.watcher.updateCache = fn
@@ -566,8 +539,7 @@ func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 	})
 }
 
-// ComputeDiffHash computes a SHA-256 hash of the tracked diff + untracked files + staged state.
-// Pass empty stagedHash when index state is irrelevant (e.g., worktree file watcher).
+// ComputeDiffHash computes a SHA-256 hash of the diff, untracked files, and staged state.
 func ComputeDiffHash(diff string, untracked []git.UntrackedFile, stagedHash string) string {
 	var hashInput strings.Builder
 	hashInput.WriteString(diff)
@@ -580,8 +552,7 @@ func ComputeDiffHash(diff string, untracked []git.UntrackedFile, stagedHash stri
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput.String())))
 }
 
-// BroadcastTaskUpdated sends a task_updated event with the full task object to all clients of a project,
-// and a project_counts event to ALL connected clients across all projects.
+// BroadcastTaskUpdated sends a task_updated event and project_counts to all clients.
 func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task any) {
 	asm.sendBoardPayload(projectID, map[string]any{
 		"type": "task_updated",
@@ -590,8 +561,7 @@ func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task any) {
 	asm.BroadcastProjectCounts()
 }
 
-// BroadcastTaskDeleted sends a task_deleted event with the task ID to all clients of a project,
-// and a project_counts event to ALL connected clients across all projects.
+// BroadcastTaskDeleted sends a task_deleted event and project_counts to all clients.
 func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
 	asm.sendBoardPayload(projectID, map[string]any{
 		"type":    "task_deleted",
@@ -610,15 +580,19 @@ func (asm *AppStreamManager) BroadcastProjectPorts(projectID string, ports []typ
 
 // -- Ring buffer --
 
-// bufferRaw adds a raw JSON frame to all clients' ring buffers.
-// Skips frames larger than maxFrameBufferSize to prevent memory exhaustion.
 func (asm *AppStreamManager) bufferRaw(frame []byte) {
 	if len(frame) > maxFrameBufferSize {
 		return
 	}
+	// Collect clients under global lock, then release before per-client writes.
 	asm.mu.RLock()
-	defer asm.mu.RUnlock()
+	targets := make([]*clientState, 0, len(asm.clients))
 	for _, client := range asm.clients {
+		targets = append(targets, client)
+	}
+	asm.mu.RUnlock()
+
+	for _, client := range targets {
 		client.bufMu.Lock()
 		if len(client.ringBuffer) >= client.bufSize {
 			client.ringBuffer = client.ringBuffer[1:]
@@ -628,7 +602,6 @@ func (asm *AppStreamManager) bufferRaw(frame []byte) {
 	}
 }
 
-// getBuffer returns the full ring buffer for a client.
 func (asm *AppStreamManager) getBuffer(conn *websocket.Conn) [][]byte {
 	asm.mu.RLock()
 	client := asm.clients[conn]
@@ -641,10 +614,6 @@ func (asm *AppStreamManager) getBuffer(conn *websocket.Conn) [][]byte {
 	return client.ringBuffer
 }
 
-// bufferTask adds a raw JSON frame to the per-task ring buffer.
-// For tool_call events, keeps only the last delta per tool_id (replaces earlier
-// deltas) so the reconnecting client gets the final tool_call state without
-// duplicates. Non-tool_call events are appended normally.
 func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
 	// Skip large frames to prevent memory exhaustion
 	if len(frame) > maxFrameBufferSize {
@@ -680,7 +649,6 @@ func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
 	asm.taskBuffers[taskKey] = buf
 }
 
-// extractToolID extracts the tool_id from a task_event frame containing a tool_call event.
 func extractToolID(frame []byte) string {
 	var parsed struct {
 		Data json.RawMessage `json:"data"`
@@ -697,8 +665,6 @@ func extractToolID(frame []byte) string {
 	return data.ToolID
 }
 
-// removeFrameWithToolID removes any frame from buf that has the given tool_id.
-// Uses pre-extracted toolID for O(1) comparison.
 func removeFrameWithToolID(buf []taskFrame, toolID string) []taskFrame {
 	filtered := make([]taskFrame, 0, len(buf))
 	for _, f := range buf {
@@ -709,9 +675,6 @@ func removeFrameWithToolID(buf []taskFrame, toolID string) []taskFrame {
 	return filtered
 }
 
-// getTaskBuffer returns the per-task ring buffer without clearing it.
-// The buffer is cleared only on complete/terminal status events (bufferTask).
-// This allows multiple clients (or reconnections) to receive the buffer.
 func (asm *AppStreamManager) getTaskBuffer(taskKey string) [][]byte {
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
@@ -724,7 +687,6 @@ func (asm *AppStreamManager) getTaskBuffer(taskKey string) [][]byte {
 	return result
 }
 
-// clearTaskBuffer removes the per-task ring buffer.
 func (asm *AppStreamManager) clearTaskBuffer(taskKey string) {
 	asm.taskBufMu.Lock()
 	defer asm.taskBufMu.Unlock()
@@ -736,9 +698,6 @@ func (asm *AppStreamManager) ClearTaskBuffer(projectID, taskID string) {
 	asm.clearTaskBuffer(projectID + ":" + taskID)
 }
 
-// -- Diff poller --
-
-// getDiffBaseline computes the effective diff baseline for a task.
 func (asm *AppStreamManager) getDiffBaseline(task types.Task) string {
 	if task.Branch == "" || asm.worktreeMgr == nil {
 		return task.BaseRef
@@ -752,56 +711,7 @@ func (asm *AppStreamManager) getDiffBaseline(task types.Task) string {
 	return baseRef
 }
 
-// pollBranch checks the project's current branch and broadcasts if it changed.
-func (asm *AppStreamManager) pollBranch(ctx context.Context, projectID string) {
-	tick := time.NewTicker(2 * time.Second)
-	defer tick.Stop()
-
-	var lastBranch string
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-			branch, _ := asm.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--abbrev-ref", "HEAD")
-			branch = strings.TrimSpace(branch)
-			if branch != lastBranch {
-				log.Printf("[branch poll] project=%s branch changed: %s -> %s", projectID, lastBranch, branch)
-				lastBranch = branch
-				asm.BroadcastBranch(projectID, branch)
-			}
-		}
-	}
-}
-
-// startBranchPoller starts the branch poller for a project if not already running.
-func (asm *AppStreamManager) startBranchPoller(projectID string) {
-	asm.branchPollersMu.Lock()
-	defer asm.branchPollersMu.Unlock()
-	if _, exists := asm.branchPollers[projectID]; exists {
-		return
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	asm.branchPollers[projectID] = cancel
-	go asm.pollBranch(ctx, projectID)
-	log.Printf("[branch poller] project=%s started", projectID)
-}
-
-// stopBranchPoller stops the branch poller for a project.
-func (asm *AppStreamManager) stopBranchPoller(projectID string) {
-	asm.branchPollersMu.Lock()
-	defer asm.branchPollersMu.Unlock()
-	if cancel, exists := asm.branchPollers[projectID]; exists {
-		cancel()
-		delete(asm.branchPollers, projectID)
-		log.Printf("[branch poller] project=%s stopped", projectID)
-	}
-}
-
-// -- WebSocket handler --
-
-// HandleStream is the HTTP handler for the single app-level WebSocket at /api/stream.
+// HandleStream is the HTTP handler for the /api/stream WebSocket endpoint.
 func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
@@ -830,10 +740,13 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 		asm.mu.Unlock()
 		conn.Close(websocket.StatusNormalClosure, "closed")
 
-		// Stop branch pollers for projects no one is subscribed to
+		// Stop watchers for projects no one is subscribed to
 		for projectID := range client.projectSub {
 			if !asm.hasProjectSubscribers(projectID) {
-				asm.stopBranchPoller(projectID)
+				if asm.branchWatcher != nil {
+					asm.branchWatcher.Unwatch(projectID)
+				}
+				asm.projectWatcher.Unwatch(projectID)
 			}
 		}
 	}()
@@ -942,8 +855,6 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// sendInitialProjectData sends initial diffs and branch info for a project on subscription.
-// Runs in a background goroutine; ctx aborts on connection close.
 func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client *clientState, conn *websocket.Conn, projectID string) {
 	if asm.store == nil || asm.worktreeMgr == nil {
 		return
