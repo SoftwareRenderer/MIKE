@@ -56,7 +56,7 @@ func (h *handler) handleShellOpen(conn net.Conn, req *protocol.Request) error {
 	}
 
 	cmd := exec.Command(shell)
-	cmd.Env = append(cmd.Environ(), "TERM=xterm-256color")
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
 	if err != nil {
