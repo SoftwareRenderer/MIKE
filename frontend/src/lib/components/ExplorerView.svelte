@@ -519,10 +519,15 @@
             activeTab = 'editor';
         }
         window.addEventListener('keydown', handleKeydown);
+        window.addEventListener('open-file', (e: any) => {
+            const { path, line } = e.detail;
+            handleFileSelected(path, line);
+        });
     });
 
     onDestroy(() => {
         window.removeEventListener('keydown', handleKeydown);
+        window.removeEventListener('open-file', () => {});
     });
 </script>
 
