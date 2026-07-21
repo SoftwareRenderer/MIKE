@@ -119,6 +119,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let countdownTimer: ReturnType<typeof setInterval> | null = null;
     let staleTimeText = $state(''); // "Data from X ago" text, updated every second while disconnected
     let staleTimer: ReturnType<typeof setInterval> | null = null;
+    let visibilityRetryTimer: ReturnType<typeof setTimeout> | null = null; // retry refresh after network stabilizes
 
     function startCountdown() {
         stopCountdown();
@@ -543,21 +544,34 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     // Always refresh on wake because the per-connection event buffer is lost
     // when the WebSocket drops — any task_updated/project_counts events during
     // the disconnect window are missed and must be recovered via HTTP fetch.
+    // If the first refresh fails (network still recovering from suspension),
+    // retry once after a short delay to give the network stack time to stabilize.
     function handleVisibilityChange() {
-        if (!document.hidden && appStream) {
-            appStream.checkStale();
-            if (!wsConnected) {
-                appStream.reconnectNow();
-            }
-            // Always refresh on tab-visible — WebSocket events may have been lost
-            // during sleep/disconnect (per-connection buffer is evicted on reconnect).
-            refreshBoard().catch(() => {});
+        if (document.hidden || !appStream) return;
+        appStream.checkStale();
+        if (!wsConnected) {
+            appStream.reconnectNow();
         }
+        // Always refresh on tab-visible — WebSocket events may have been lost
+        // during sleep/disconnect (per-connection buffer is evicted on reconnect).
+        refreshBoard().catch(() => {
+            // First refresh failed — network may still be recovering.
+            // Retry once after a short delay.
+            if (visibilityRetryTimer) return; // already retrying
+            visibilityRetryTimer = setTimeout(() => {
+                visibilityRetryTimer = null;
+                refreshBoard().catch(() => {}); // give up after second attempt
+            }, 1000);
+        });
     }
     window.addEventListener('visibilitychange', handleVisibilityChange);
 
     onDestroy(() => {
         stopCountdown();
+        if (visibilityRetryTimer) {
+            clearTimeout(visibilityRetryTimer);
+            visibilityRetryTimer = null;
+        }
         window.removeEventListener('visibilitychange', handleVisibilityChange);
         disconnectBoardStream();
         if (appStream) {
