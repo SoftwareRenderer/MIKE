@@ -97,6 +97,15 @@ export async function checkUpdates(url?: string): Promise<ExtensionUpdate[]> {
     return res.json();
 }
 
+/** Update an extension's image from the registry (rebuild or pull). */
+export async function updateExtensionImage(id: string): Promise<Extension> {
+    const res = await apiFetch(`${API_BASE}/extensions/${id}/update`, {
+        method: 'POST',
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to update extension');
+    return res.json();
+}
+
 /** Get extension sandbox logs. */
 export async function getExtensionLogs(id: string): Promise<string> {
     const res = await apiFetch(`${API_BASE}/extensions/${id}/logs`);

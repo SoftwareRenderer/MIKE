@@ -37,7 +37,7 @@ func makeTestExt(id, name, extType string) *Extension {
 		InstallSource: "manual",
 		Enabled:       true,
 		InstalledAt:   now,
-		UpdatedAt:     now,
+		BuiltAt:       now,
 	}
 }
 
@@ -272,7 +272,7 @@ func TestExtensionWithFullConfig(t *testing.T) {
 		Enabled:       true,
 	}
 	ext.InstalledAt = time.Now().UTC().Format(time.RFC3339)
-	ext.UpdatedAt = ext.InstalledAt
+	ext.BuiltAt = ext.InstalledAt
 
 	if err := es.Create(ext); err != nil {
 		t.Fatalf("Create: %v", err)

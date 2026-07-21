@@ -691,10 +691,12 @@
         <button type="button" class="btn-signout" onclick={handleSignOut} title="Sign out of Kanban">Sign out</button>
     {/if}
     <div class="modal-footer-right">
-        <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
-        <button type="button" class="btn-primary" disabled={loading} onclick={handleSave} title="Save settings">
-            {loading ? 'Saving...' : 'Save'}
-        </button>
+        {#if activeTab !== 'extensions'}
+            <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel and discard changes">Cancel</button>
+            <button type="button" class="btn-primary" disabled={loading} onclick={handleSave} title="Save settings">
+                {loading ? 'Saving...' : 'Save'}
+            </button>
+        {/if}
     </div>
 {/snippet}
 

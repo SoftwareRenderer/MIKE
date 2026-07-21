@@ -24,7 +24,7 @@ type Extension struct {
 	ImageRef        string            `json:"image_ref,omitempty"`
 	Enabled         bool              `json:"enabled"`
 	InstalledAt     string            `json:"installed_at"`
-	UpdatedAt       string            `json:"updated_at"`
+	BuiltAt         string            `json:"built_at"`
 }
 
 // ExtensionManifest defines the metadata and capabilities of an extension.

@@ -118,6 +118,7 @@ export {
     getExtension,
     createExtension,
     updateExtension,
+    updateExtensionImage,
     deleteExtension,
     setExtensionEnabled,
     getRegistryIndex,

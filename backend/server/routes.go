@@ -55,6 +55,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/extensions/{id}/logs", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleSandboxLogs(w, r, r.PathValue("id"))
 	})
+	s.mux.HandleFunc("POST /api/extensions/{id}/update", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleUpdateImage(w, r, r.PathValue("id"))
+	})
 
 	// Global utilities
 	s.mux.HandleFunc("/api/home", s.handleHome)

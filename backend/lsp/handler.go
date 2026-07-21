@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -546,6 +547,12 @@ func (h *LSPHandler) forwardRequest(session *ClientSession, msg json.RawMessage,
 
 	if err := h.manager.SendToServer(ws.process, remapped); err != nil {
 		log.Printf("[lsp] client %d: send to server failed: %v", session.clientID, err)
+		// If sandbox is stale, remove workspace entry so next message triggers reconnect
+		if strings.Contains(err.Error(), "stale") {
+			h.mu.Lock()
+			delete(h.workspaces, workspaceKey)
+			h.mu.Unlock()
+		}
 	}
 
 }
@@ -566,6 +573,11 @@ func (h *LSPHandler) forwardRaw(session *ClientSession, msg json.RawMessage, wor
 
 	if err := h.manager.SendToServer(ws.process, msg); err != nil {
 		log.Printf("[lsp] client %d: forward raw failed: %v", session.clientID, err)
+		if strings.Contains(err.Error(), "stale") {
+			h.mu.Lock()
+			delete(h.workspaces, workspaceKey)
+			h.mu.Unlock()
+		}
 	}
 }
 

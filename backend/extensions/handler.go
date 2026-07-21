@@ -642,6 +642,120 @@ func (h *ExtensionHandler) HandleSandboxLogs(w http.ResponseWriter, r *http.Requ
 	fmt.Fprintln(w, "Logs streaming not yet implemented")
 }
 
+// HandleUpdateImage updates an extension's image from the registry.
+// Rebuilds from Dockerfile if available, otherwise pulls latest pre-built image.
+func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ext, err := h.store.GetByID(id)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "extension not found")
+		return
+	}
+
+	if ext.InstallSource != "registry" {
+		httputil.JSONError(w, http.StatusBadRequest, "only registry-installed extensions can be updated")
+		return
+	}
+
+	// Fetch registry index
+	url := h.config.RegistryURL
+	if url == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "registry URL not configured")
+		return
+	}
+
+	index, err := h.registry.FetchIndex(url)
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch registry: "+err.Error())
+		return
+	}
+
+	// Find the registry entry
+	var entry *RegistryEntry
+	for i, e := range index {
+		if e.Name == ext.Name {
+			entry = &index[i]
+			break
+		}
+	}
+	if entry == nil {
+		httputil.JSONError(w, http.StatusNotFound, "extension not found in registry: "+ext.Name)
+		return
+	}
+
+	// Stop sandbox if running
+	_ = h.sandbox.Stop(ext.ID)
+
+	imageRef := fmt.Sprintf("kanban-ext-%s:%s", ext.Name, entry.Version)
+
+	// Rebuild from Dockerfile if available, otherwise pull image
+	if entry.DockerfileURL != "" {
+		h.progress.StartBuild(ext.Name)
+		dockerfileURL := ResolveURL(url, entry.DockerfileURL)
+		dockerfile, err := h.registry.FetchDockerfile(dockerfileURL)
+		if err != nil {
+			h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to fetch dockerfile: %w", err))
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch dockerfile: "+err.Error())
+			return
+		}
+
+		errCh := make(chan error, 1)
+		go func() {
+			err := h.registry.BuildImageFromReader(dockerfile, imageRef)
+			errCh <- err
+		}()
+
+		// Stream build output to progress
+		go func() {
+			<-errCh
+		}()
+
+		err = <-errCh
+		if err != nil {
+			h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to build image: %w", err))
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to build image: "+err.Error())
+			return
+		}
+		h.progress.CompleteBuild(ext.Name, nil)
+	} else if entry.Image != "" {
+		h.progress.StartBuild(ext.Name)
+		err := h.registry.PullImage(entry.Image)
+		if err != nil {
+			h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to pull image: %w", err))
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to pull image: "+err.Error())
+			return
+		}
+		imageRef = entry.Image
+		h.progress.CompleteBuild(ext.Name, nil)
+	} else {
+		httputil.JSONError(w, http.StatusBadRequest, "extension has no image or dockerfile to update")
+		return
+	}
+
+	// Update extension with new image ref and version
+	ext.Version = entry.Version
+	ext.ImageRef = imageRef
+	ext.ContainerConfig.Image = imageRef
+	if err := h.store.Update(id, ext); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())
+		return
+	}
+
+	// Update built_at timestamp
+	if err := h.store.SetBuiltAt(id); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to update build timestamp: "+err.Error())
+		return
+	}
+
+	statuses := h.sandbox.ListRunning()
+	ext, _ = h.store.GetByID(id)
+	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, statuses))
+}
+
 // --- Request/Response types ---
 
 // CreateExtensionRequest is the request body for creating an extension.
@@ -686,7 +800,7 @@ type ExtensionResponse struct {
 	Running         bool                   `json:"running"`
 	Ports           []types.AssignedPort   `json:"ports,omitempty"`
 	InstalledAt     string                 `json:"installed_at"`
-	UpdatedAt       string                 `json:"updated_at"`
+	BuiltAt         string                 `json:"built_at"`
 }
 
 // ExtensionUpdate describes an available update.
@@ -715,6 +829,6 @@ func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]Extens
 		Running:         ok && status.Running,
 		Ports:           status.Ports,
 		InstalledAt:     ext.InstalledAt,
-		UpdatedAt:       ext.UpdatedAt,
+		BuiltAt:         ext.BuiltAt,
 	}
 }

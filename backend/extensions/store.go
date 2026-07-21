@@ -35,11 +35,18 @@ CREATE TABLE IF NOT EXISTS extensions (
     image_ref         TEXT DEFAULT NULL,
     enabled           INTEGER NOT NULL DEFAULT 1,
     installed_at      TEXT NOT NULL,
-    updated_at        TEXT NOT NULL
+    built_at          TEXT NOT NULL DEFAULT ''
 );
 `
 	_, err := es.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migrate: rename updated_at → built_at for existing tables
+	_, _ = es.db.Exec(`ALTER TABLE extensions RENAME COLUMN updated_at TO built_at`)
+
+	return nil
 }
 
 // List returns all extensions ordered by name.
@@ -52,10 +59,10 @@ func (es *ExtensionStore) GetByType(extType string) ([]Extension, error) {
 	var query string
 	var args []any
 	if extType != "" {
-		query = `SELECT id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, updated_at FROM extensions WHERE type = ? ORDER BY name`
+		query = `SELECT id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at FROM extensions WHERE type = ? ORDER BY name`
 		args = append(args, extType)
 	} else {
-		query = `SELECT id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, updated_at FROM extensions ORDER BY name`
+		query = `SELECT id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at FROM extensions ORDER BY name`
 	}
 
 	rows, err := es.db.Query(query, args...)
@@ -84,12 +91,12 @@ func (es *ExtensionStore) GetByID(id string) (*Extension, error) {
 	var manifestJSON, configJSON, containerConfigJSON, sandboxConfigJSON, imageRef sql.NullString
 	var extType, installSource string
 	var enabled int
-	var installedAt, updatedAt string
+	var installedAt, builtAt string
 
 	err := es.db.QueryRow(
-		`SELECT id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, updated_at FROM extensions WHERE id = ?`,
+		`SELECT id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at FROM extensions WHERE id = ?`,
 		id,
-	).Scan(&ext.ID, &ext.Name, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &updatedAt)
+	).Scan(&ext.ID, &ext.Name, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("extension not found: %s", id)
@@ -102,7 +109,7 @@ func (es *ExtensionStore) GetByID(id string) (*Extension, error) {
 	ext.ImageRef = imageRef.String
 	ext.Enabled = i2b(enabled)
 	ext.InstalledAt = installedAt
-	ext.UpdatedAt = updatedAt
+	ext.BuiltAt = builtAt
 
 	if manifestJSON.Valid {
 		if err := json.Unmarshal([]byte(manifestJSON.String), &ext.Manifest); err != nil {
@@ -136,7 +143,9 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 	if ext.InstalledAt == "" {
 		ext.InstalledAt = now
 	}
-	ext.UpdatedAt = now
+	if ext.BuiltAt == "" {
+		ext.BuiltAt = now
+	}
 
 	manifestJSON, err := json.Marshal(ext.Manifest)
 	if err != nil {
@@ -165,8 +174,8 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 	}
 
 	_, err = es.db.Exec(
-		`INSERT INTO extensions (id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ext.ID, ext.Name, ext.Version, ext.Type, string(manifestJSON), string(configJSON), string(containerConfigJSON), string(sandboxConfigJSON), ext.InstallSource, ext.ImageRef, b2i(ext.Enabled), ext.InstalledAt, ext.UpdatedAt,
+		`INSERT INTO extensions (id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ext.ID, ext.Name, ext.Version, ext.Type, string(manifestJSON), string(configJSON), string(containerConfigJSON), string(sandboxConfigJSON), ext.InstallSource, ext.ImageRef, b2i(ext.Enabled), ext.InstalledAt, ext.BuiltAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert extension: %w", err)
@@ -176,8 +185,6 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 
 // Update updates an existing extension.
 func (es *ExtensionStore) Update(id string, ext *Extension) error {
-	ext.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-
 	manifestJSON, err := json.Marshal(ext.Manifest)
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
@@ -205,8 +212,8 @@ func (es *ExtensionStore) Update(id string, ext *Extension) error {
 	}
 
 	result, err := es.db.Exec(
-		`UPDATE extensions SET version = ?, manifest = ?, config = ?, container_config = ?, sandbox_config = ?, image_ref = ?, updated_at = ? WHERE id = ?`,
-		ext.Version, string(manifestJSON), string(configJSON), string(containerConfigJSON), string(sandboxConfigJSON), ext.ImageRef, ext.UpdatedAt, id,
+		`UPDATE extensions SET version = ?, manifest = ?, config = ?, container_config = ?, sandbox_config = ?, image_ref = ? WHERE id = ?`,
+		ext.Version, string(manifestJSON), string(configJSON), string(containerConfigJSON), string(sandboxConfigJSON), ext.ImageRef, id,
 	)
 	if err != nil {
 		return fmt.Errorf("update extension: %w", err)
@@ -233,13 +240,29 @@ func (es *ExtensionStore) Delete(id string) error {
 
 // SetEnabled toggles the enabled state of an extension.
 func (es *ExtensionStore) SetEnabled(id string, enabled bool) error {
-	now := time.Now().UTC().Format(time.RFC3339)
 	result, err := es.db.Exec(
-		`UPDATE extensions SET enabled = ?, updated_at = ? WHERE id = ?`,
-		b2i(enabled), now, id,
+		`UPDATE extensions SET enabled = ? WHERE id = ?`,
+		b2i(enabled), id,
 	)
 	if err != nil {
 		return fmt.Errorf("set enabled: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("extension not found: %s", id)
+	}
+	return nil
+}
+
+// SetBuiltAt updates the built_at timestamp for an extension.
+func (es *ExtensionStore) SetBuiltAt(id string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := es.db.Exec(
+		`UPDATE extensions SET built_at = ? WHERE id = ?`,
+		now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("set built_at: %w", err)
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
@@ -254,9 +277,9 @@ func scanExtension(s scanner) (*Extension, error) {
 	var manifestJSON, configJSON, containerConfigJSON, sandboxConfigJSON, imageRef sql.NullString
 	var extType, installSource string
 	var enabled int
-	var installedAt, updatedAt string
+	var installedAt, builtAt string
 
-	err := s.Scan(&ext.ID, &ext.Name, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &updatedAt)
+	err := s.Scan(&ext.ID, &ext.Name, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +289,7 @@ func scanExtension(s scanner) (*Extension, error) {
 	ext.ImageRef = imageRef.String
 	ext.Enabled = i2b(enabled)
 	ext.InstalledAt = installedAt
-	ext.UpdatedAt = updatedAt
+	ext.BuiltAt = builtAt
 
 	if manifestJSON.Valid {
 		if err := json.Unmarshal([]byte(manifestJSON.String), &ext.Manifest); err != nil {
