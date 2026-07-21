@@ -125,13 +125,18 @@ func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *S
 	workspaceKey := processKey(workspacePath, language)
 
 	m.mu.Lock()
-	_, ok := m.clients[workspaceKey]
+	sc, ok := m.clients[workspaceKey]
 	if ok {
-		m.mu.Unlock()
-		return &LSPProcess{
-			Workspace: workspacePath,
-			Language:  language,
-		}, nil
+		// Check if the sandbox bridge is still alive (e.g., after a rebuild)
+		if sc.bridgeClient != nil && sc.bridgeClient.IsAlive() {
+			m.mu.Unlock()
+			return &LSPProcess{
+				Workspace: workspacePath,
+				Language:  language,
+			}, nil
+		}
+		// Stale entry — remove and recreate
+		delete(m.clients, workspaceKey)
 	}
 	m.mu.Unlock()
 
@@ -164,19 +169,11 @@ func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *S
 	command := lspConfig.Command
 	args := lspConfig.Args
 
-	// Merge with provided config if available
-	if cfg != nil && len(cfg.Args) > 0 {
-		args = cfg.Args
-	}
-	if cfg != nil && cfg.Command != "" {
-		command = cfg.Command
-	}
-
 	if err := bridgeClient.LSPStart(ctx, command, args); err != nil {
 		return nil, fmt.Errorf("start LSP server in sandbox: %w", err)
 	}
 
-	sc := &sandboxClient{
+	client := &sandboxClient{
 		bridgeClient:  bridgeClient,
 		workspace:     workspacePath,
 		language:      language,
@@ -185,7 +182,7 @@ func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *S
 	}
 
 	m.mu.Lock()
-	m.clients[workspaceKey] = sc
+	m.clients[workspaceKey] = client
 	m.mu.Unlock()
 
 	log.Printf("[lsp] started extension %s (lang=%s) in sandbox for workspace %s", ext.Name, language, workspacePath)
@@ -213,6 +210,18 @@ func (m *ExtensionLSPManager) Release(workspacePath, language string) {
 	m.extSandbox.Release(sc.extensionID)
 
 	log.Printf("[lsp] released extension sandbox for workspace=%s lang=%s", workspacePath, language)
+}
+
+// ClearByExtensionID removes all cached clients for a given extension.
+// Called when the extension sandbox is destroyed (e.g., image rebuild).
+func (m *ExtensionLSPManager) ClearByExtensionID(extID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, sc := range m.clients {
+		if sc.extensionID == extID {
+			delete(m.clients, key)
+		}
+	}
 }
 
 // getOrCreateSandbox gets or creates an extension sandbox.
@@ -252,11 +261,15 @@ func (m *ExtensionLSPManager) SendToServer(process *LSPProcess, msg json.RawMess
 
 	m.mu.Lock()
 	sc, ok := m.clients[workspaceKey]
-	m.mu.Unlock()
-
-	if !ok {
-		return fmt.Errorf("no sandbox client for workspace=%s lang=%s", process.Workspace, process.Language)
+	if !ok || sc.bridgeClient == nil || !sc.bridgeClient.IsAlive() {
+		// Stale or dead — clean up and signal caller to reconnect
+		if ok {
+			delete(m.clients, workspaceKey)
+		}
+		m.mu.Unlock()
+		return fmt.Errorf("sandbox client stale for workspace=%s lang=%s", process.Workspace, process.Language)
 	}
+	m.mu.Unlock()
 
 	// Translate file URIs from host path to container path
 	translated := translateURIsToContainer(msg, sc.workspace, sc.projectMounts)
@@ -266,6 +279,12 @@ func (m *ExtensionLSPManager) SendToServer(process *LSPProcess, msg json.RawMess
 
 	response, err := sc.bridgeClient.LSPSend(ctx, translated)
 	if err != nil {
+		// Connection died — clean up for next retry
+		m.mu.Lock()
+		if sc2, ok2 := m.clients[workspaceKey]; ok2 && sc2 == sc {
+			delete(m.clients, workspaceKey)
+		}
+		m.mu.Unlock()
 		return fmt.Errorf("send to LSP server: %w", err)
 	}
 
@@ -444,28 +463,11 @@ func (r *ExtensionRegistry) toServerConfig(ext *extensions.Extension) *ServerCon
 		return nil
 	}
 
-	cfg := &ServerConfig{
+	return &ServerConfig{
 		Language:           lspCfg.Language,
 		Command:            lspCfg.Command,
 		Args:               lspCfg.Args,
 		Extensions:         lspCfg.Extensions,
 		InitParamsOverride: lspCfg.InitParamsOverride,
 	}
-
-	// Merge any user-provided config overrides
-	if ext.Config != nil {
-		if cmd, ok := ext.Config["command"].(string); ok && cmd != "" {
-			cfg.Command = cmd
-		}
-		if args, ok := ext.Config["args"].([]any); ok && len(args) > 0 {
-			cfg.Args = make([]string, len(args))
-			for i, a := range args {
-				if s, ok := a.(string); ok {
-					cfg.Args[i] = s
-				}
-			}
-		}
-	}
-
-	return cfg
 }

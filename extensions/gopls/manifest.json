@@ -7,18 +7,6 @@
     "config_schema": {
         "type": "object",
         "properties": {
-            "command": {
-                "type": "string",
-                "title": "Command",
-                "description": "Path to gopls binary",
-                "default": "gopls"
-            },
-            "args": {
-                "type": "array",
-                "title": "Arguments",
-                "description": "Command-line arguments for gopls",
-                "default": ["serve"]
-            },
             "memory_limit": {
                 "type": "number",
                 "title": "Memory Limit (MB)",

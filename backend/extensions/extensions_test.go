@@ -18,7 +18,7 @@ func makeTestExtension(t *testing.T, extType, installSource string) *Extension {
 		InstallSource: installSource,
 		Enabled:       true,
 		InstalledAt:   now,
-		UpdatedAt:     now,
+		BuiltAt:       now,
 	}
 }
 

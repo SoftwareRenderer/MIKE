@@ -204,34 +204,6 @@ func TestExtensionRegistry_GetConfig_NotFound(t *testing.T) {
 	}
 }
 
-func TestExtensionRegistry_ConfigOverrides(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	ext := makeTestLSPExt("go", "go")
-	ext.Config = map[string]any{
-		"command": "custom-gopls",
-		"args":    []any{"-custom-flag"},
-	}
-	if err := store.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	reg := NewExtensionRegistry(store)
-	cfg := reg.GetConfig("go")
-	if cfg == nil {
-		t.Fatal("GetConfig(go) = nil, want config")
-	}
-	if cfg.Command != "custom-gopls" {
-		t.Errorf("Command = %q, want custom-gopls", cfg.Command)
-	}
-	if len(cfg.Args) != 1 || cfg.Args[0] != "-custom-flag" {
-		t.Errorf("Args = %v, want [-custom-flag]", cfg.Args)
-	}
-}
-
 func TestExtensionRegistry_NoLSPConfig(t *testing.T) {
 	store := testExtensionStore(t)
 	if err := store.InitSchema(); err != nil {

@@ -460,7 +460,7 @@ export interface Extension {
     running: boolean;
     ports?: AssignedPort[];
     installed_at: string;
-    updated_at: string;
+    built_at: string;
 }
 
 export interface RegistryEntry {

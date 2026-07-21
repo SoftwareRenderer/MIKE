@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Extension, RegistryEntry, ExtensionUpdate } from '$lib/types';
-    import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, createExtension, streamBuildProgress } from '$lib/api';
+    import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage, createExtension, streamBuildProgress } from '$lib/api';
     import type { BuildProgressEvent } from '$lib/api';
     import { getConfig } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
@@ -28,6 +28,7 @@
     let editConfig = $state<Record<string, any>>({});
     let saving = $state(false);
     let installing = $state<Set<string>>(new Set());
+    let updating = $state<Set<string>>(new Set());
     let buildProgress = $state<{ ext: string; progress: number; message: string } | null>(null);
 
     // Add extension form
@@ -38,8 +39,6 @@
         displayName: '',
         description: '',
         author: '',
-        command: '',
-        args: '',
         language: '',
         fileExtensions: '',
     });
@@ -54,8 +53,6 @@
             displayName: '',
             description: '',
             author: '',
-            command: '',
-            args: '',
             language: '',
             fileExtensions: '',
         };
@@ -77,8 +74,7 @@
             };
             if (addForm.type === 'lsp') {
                 manifest.lsp = {
-                    command: addForm.command || addForm.name,
-                    args: addForm.args ? addForm.args.split(' ').filter(Boolean) : [],
+                    command: addForm.name,
                     extensions: addForm.fileExtensions ? addForm.fileExtensions.split(',').map(s => s.trim()).filter(Boolean) : [],
                     language: addForm.language || addForm.name,
                 };
@@ -230,6 +226,33 @@
         }
     }
 
+    // Update extension image from registry (rebuild or pull)
+    async function handleUpdateImage(id: string, name: string) {
+        const confirmed = await dialogStore.showConfirm({
+            title: 'Update Image',
+            message: `Fetch the latest image for ${name}? The sandbox will be restarted.`,
+            confirmText: 'Update',
+        });
+        if (!confirmed) return;
+
+        error = '';
+        updating = new Set(updating).add(name);
+        buildProgress = { ext: name, progress: 0, message: 'Updating...' };
+        try {
+            await updateExtensionImage(id);
+            buildProgress = { ext: name, progress: 100, message: 'Updated!' };
+            setTimeout(() => buildProgress = null, 2000);
+            await loadExtensions();
+        } catch (e: any) {
+            error = e.message || 'Failed to update extension';
+            buildProgress = null;
+        } finally {
+            const next = new Set(updating);
+            next.delete(name);
+            updating = next;
+        }
+    }
+
     // Open edit form
     function openEdit(ext: Extension) {
         editingExtension = ext;
@@ -270,6 +293,23 @@
             type: val.type || 'string',
             default: val.default,
         }));
+    }
+
+    // Format built_at timestamp as a readable relative time
+    function formatBuiltAt(builtAt: string): string {
+        if (!builtAt) return 'Not built';
+        const date = new Date(builtAt);
+        if (isNaN(date.getTime())) return builtAt;
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        if (diffMins < 1) return 'Built just now';
+        if (diffMins < 60) return `Built ${diffMins}m ago`;
+        if (diffHours < 24) return `Built ${diffHours}h ago`;
+        if (diffDays < 7) return `Built ${diffDays}d ago`;
+        return `Built ${date.toLocaleDateString()}`;
     }
 
     // Filter extensions by search
@@ -400,7 +440,7 @@
                                 <div class="ext-info">
                                     <span class="ext-name">{ext.manifest.display_name || ext.name}</span>
                                     <span class="ext-meta">
-                                        v{ext.version}
+                                        {formatBuiltAt(ext.built_at)}
                                         {#if ext.manifest.author} · {ext.manifest.author}{/if}
                                         · {ext.install_source}
                                     </span>
@@ -428,6 +468,18 @@
                                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                                     </svg>
+                                </button>
+                                <button class="btn btn-icon" title="Update Image" onclick={() => handleUpdateImage(ext.id, ext.name)} disabled={updating.has(ext.name)}>
+                                    {#if updating.has(ext.name)}
+                                        <span class="spinner"></span>
+                                    {:else}
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M21 2v6h-6"/>
+                                            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+                                            <path d="M3 22v-6h6"/>
+                                            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                                        </svg>
+                                    {/if}
                                 </button>
                                 <button class="btn btn-icon btn-danger" title="Delete" onclick={() => handleDelete(ext.id, ext.name)}>
                                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -469,10 +521,6 @@
                         </select>
                     </div>
                     <div class="config-field">
-                        <label class="field-label">Version</label>
-                        <input type="text" value={addForm.version} oninput={(e) => addForm.version = (e.target as HTMLInputElement).value} class="config-input" placeholder="1.0.0" />
-                    </div>
-                    <div class="config-field">
                         <label class="field-label">Description</label>
                         <input type="text" value={addForm.description} oninput={(e) => addForm.description = (e.target as HTMLInputElement).value} class="config-input" placeholder="Official Go language server" />
                     </div>
@@ -481,14 +529,6 @@
                         <input type="text" value={addForm.author} oninput={(e) => addForm.author = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Team" />
                     </div>
                     {#if addForm.type === 'lsp'}
-                        <div class="config-field">
-                            <label class="field-label">Command</label>
-                            <input type="text" value={addForm.command} oninput={(e) => addForm.command = (e.target as HTMLInputElement).value} class="config-input" placeholder="gopls" />
-                        </div>
-                        <div class="config-field">
-                            <label class="field-label">Args (space-separated)</label>
-                            <input type="text" value={addForm.args} oninput={(e) => addForm.args = (e.target as HTMLInputElement).value} class="config-input" placeholder="serve" />
-                        </div>
                         <div class="config-field">
                             <label class="field-label">Language</label>
                             <input type="text" value={addForm.language} oninput={(e) => addForm.language = (e.target as HTMLInputElement).value} class="config-input" placeholder="go" />
