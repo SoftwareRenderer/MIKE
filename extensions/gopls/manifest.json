@@ -1,8 +1,9 @@
 {
     "display_name": "Go Language Server",
-    "description": "Official Go language server (gopls) by Google. Provides completions, hover, diagnostics, go-to-definition, and more for Go projects.",
+    "description": "Go language server (gopls) by Google. Provides completions, hover, diagnostics, go-to-definition, and more for Go projects.",
     "author": "Go Team",
     "homepage": "https://github.com/golang/tools/tree/master/gopls",
+    "license_url": "https://github.com/golang/tools/blob/master/LICENSE",
     "deprecated": false,
     "config_schema": {
         "type": "object",

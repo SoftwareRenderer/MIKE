@@ -1,8 +1,9 @@
 {
     "display_name": "TypeScript Language Server",
-    "description": "Official TypeScript language server. Provides completions, hover, diagnostics, go-to-definition, refactor, and more for TypeScript and JavaScript projects.",
+    "description": "TypeScript language server. Provides completions, hover, diagnostics, go-to-definition, refactor, and more for TypeScript and JavaScript projects.",
     "author": "Microsoft",
     "homepage": "https://github.com/typescript-language-server/typescript-language-server",
+    "license_url": "https://github.com/typescript-language-server/typescript-language-server/blob/master/LICENSE",
     "deprecated": false,
     "config_schema": {
         "type": "object",

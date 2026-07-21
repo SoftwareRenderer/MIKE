@@ -39,6 +39,7 @@
         displayName: '',
         description: '',
         author: '',
+        licenseUrl: '',
         language: '',
         fileExtensions: '',
     });
@@ -53,6 +54,7 @@
             displayName: '',
             description: '',
             author: '',
+            licenseUrl: '',
             language: '',
             fileExtensions: '',
         };
@@ -71,6 +73,7 @@
                 display_name: addForm.displayName,
                 description: addForm.description,
                 author: addForm.author,
+                license_url: addForm.licenseUrl,
             };
             if (addForm.type === 'lsp') {
                 manifest.lsp = {
@@ -442,7 +445,7 @@
                                     <span class="ext-meta">
                                         {formatBuiltAt(ext.built_at)}
                                         {#if ext.manifest.author} · {ext.manifest.author}{/if}
-                                        · {ext.install_source}
+                                        {#if ext.manifest.license_url} · <a href={ext.manifest.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
                                     </span>
                                 </div>
                                 <div class="ext-status">
@@ -522,11 +525,15 @@
                     </div>
                     <div class="config-field">
                         <label class="field-label">Description</label>
-                        <input type="text" value={addForm.description} oninput={(e) => addForm.description = (e.target as HTMLInputElement).value} class="config-input" placeholder="Official Go language server" />
+                        <input type="text" value={addForm.description} oninput={(e) => addForm.description = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go language server" />
                     </div>
                     <div class="config-field">
                         <label class="field-label">Author</label>
                         <input type="text" value={addForm.author} oninput={(e) => addForm.author = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Team" />
+                    </div>
+                    <div class="config-field">
+                        <label class="field-label">License URL</label>
+                        <input type="url" value={addForm.licenseUrl} oninput={(e) => addForm.licenseUrl = (e.target as HTMLInputElement).value} class="config-input" placeholder="https://..." />
                     </div>
                     {#if addForm.type === 'lsp'}
                         <div class="config-field">
@@ -646,6 +653,7 @@
                                     <span class="ext-meta">
                                         v{entry.version}
                                         {#if entry.author} · {entry.author}{/if}
+                                        {#if entry.license_url} · <a href={entry.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
                                     </span>
                                 </div>
                             </div>
@@ -900,6 +908,15 @@
     .ext-meta {
         font-size: 0.8rem;
         color: #8b949e;
+    }
+
+    .ext-link {
+        color: #58a6ff;
+        text-decoration: none;
+    }
+
+    .ext-link:hover {
+        text-decoration: underline;
     }
 
     .ext-status {

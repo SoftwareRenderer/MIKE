@@ -4,8 +4,9 @@
         "version": "1.0.0",
         "type": "lsp",
         "display_name": "Go Language Server",
-        "description": "Official Go language server (gopls) by Google. Provides completions, hover, diagnostics, go-to-definition, and more for Go projects.",
+        "description": "Go language server (gopls) by Google. Provides completions, hover, diagnostics, go-to-definition, and more for Go projects.",
         "author": "Go Team",
+        "license_url": "https://github.com/golang/tools/blob/master/LICENSE",
         "dockerfile_url": "gopls/Dockerfile",
         "manifest_url": "gopls/manifest.json"
     },
@@ -14,8 +15,9 @@
         "version": "1.0.0",
         "type": "lsp",
         "display_name": "TypeScript Language Server",
-        "description": "Official TypeScript language server. Provides completions, hover, diagnostics, go-to-definition, refactor, and more for TypeScript and JavaScript projects.",
+        "description": "TypeScript language server. Provides completions, hover, diagnostics, go-to-definition, refactor, and more for TypeScript and JavaScript projects.",
         "author": "Microsoft",
+        "license_url": "https://github.com/typescript-language-server/typescript-language-server/blob/master/LICENSE",
         "dockerfile_url": "typescript-language-server/Dockerfile",
         "manifest_url": "typescript-language-server/manifest.json"
     }

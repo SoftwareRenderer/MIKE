@@ -166,7 +166,7 @@ func TestRegistryEntry_Fields(t *testing.T) {
 		Version:       "1.0.0",
 		Type:          ExtensionTypeLSP,
 		DisplayName:   "Go Language Server",
-		Description:   "Official Go language server",
+		Description:   "Go language server",
 		Author:        "Go Team",
 		Image:         "ghcr.io/kanban/gopls:1.0.0",
 		DockerfileURL: "https://registry.kanban.dev/extensions/gopls/1.0.0/Dockerfile",

@@ -394,6 +394,7 @@ export interface ExtensionManifest {
     description: string;
     author: string;
     homepage?: string;
+    license_url?: string;
     deprecated: boolean;
     config_schema?: ConfigSchema;
     lsp?: LSPConfig;
@@ -470,6 +471,7 @@ export interface RegistryEntry {
     display_name: string;
     description: string;
     author: string;
+    license_url?: string;
     image?: string;
     dockerfile_url?: string;
     manifest_url?: string;
