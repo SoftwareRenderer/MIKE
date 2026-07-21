@@ -147,7 +147,7 @@ func ParseShellIOParams(frame *Frame) (ShellIOParams, error) {
 		return ShellIOParams{}, fmt.Errorf("expected shell_io method, got %s", methodString(method))
 	}
 	// Skip reserved + jsonLen fields (they're 0 for binary params)
-	data := payload[5:] // skip [method][reserved][jsonLen:4]
+	data := payload[6:] // skip [method][reserved][jsonLen:4]
 	if len(data) < 8 {
 		return ShellIOParams{}, fmt.Errorf("shell_io data too short (%d bytes)", len(data))
 	}
@@ -162,14 +162,13 @@ func ParseShellIOParams(frame *Frame) (ShellIOParams, error) {
 	}, nil
 }
 
-// NewShellIORequest creates a shell_io request frame with binary params.
 func NewShellIORequest(msgID uint32, sessionID uint32, input []byte) *Frame {
 	// [method:1][reserved:1][jsonLen:4][sessionID:4][inputLen:4][input bytes]
 	payload := make([]byte, 2+4+4+4+len(input))
 	payload[0] = MethodShellIO
-	binary.BigEndian.PutUint32(payload[5:9], sessionID)
-	binary.BigEndian.PutUint32(payload[9:13], uint32(len(input)))
-	copy(payload[13:], input)
+	binary.BigEndian.PutUint32(payload[6:10], sessionID)
+	binary.BigEndian.PutUint32(payload[10:14], uint32(len(input)))
+	copy(payload[14:], input)
 
 	return &Frame{MsgID: msgID, Type: TypeRequest, Payload: payload}
 }
@@ -192,7 +191,7 @@ func ParseShellResizeParams(frame *Frame) (ShellResizeParams, error) {
 	if method != MethodShellResize {
 		return ShellResizeParams{}, fmt.Errorf("expected shell_resize method, got %s", methodString(method))
 	}
-	data := payload[5:]
+	data := payload[6:]
 	if len(data) < 8 {
 		return ShellResizeParams{}, fmt.Errorf("shell_resize data too short (%d bytes)", len(data))
 	}
@@ -203,13 +202,12 @@ func ParseShellResizeParams(frame *Frame) (ShellResizeParams, error) {
 	}, nil
 }
 
-// NewShellResizeRequest creates a shell_resize request frame.
 func NewShellResizeRequest(msgID uint32, sessionID uint32, rows, cols uint16) *Frame {
 	payload := make([]byte, 2+4+4+2+2) // method + reserved + jsonLen + sessionID + rows + cols
 	payload[0] = MethodShellResize
-	binary.BigEndian.PutUint32(payload[5:9], sessionID)
-	binary.BigEndian.PutUint16(payload[9:11], rows)
-	binary.BigEndian.PutUint16(payload[11:13], cols)
+	binary.BigEndian.PutUint32(payload[6:10], sessionID)
+	binary.BigEndian.PutUint16(payload[10:12], rows)
+	binary.BigEndian.PutUint16(payload[12:14], cols)
 
 	return &Frame{MsgID: msgID, Type: TypeRequest, Payload: payload}
 }
@@ -229,18 +227,17 @@ func ParseShellCloseParams(frame *Frame) (ShellCloseParams, error) {
 	if method != MethodShellClose {
 		return ShellCloseParams{}, fmt.Errorf("expected shell_close method, got %s", methodString(method))
 	}
-	data := payload[5:]
+	data := payload[6:]
 	if len(data) < 4 {
 		return ShellCloseParams{}, fmt.Errorf("shell_close data too short")
 	}
 	return ShellCloseParams{SessionID: binary.BigEndian.Uint32(data[0:4])}, nil
 }
 
-// NewShellCloseRequest creates a shell_close request frame.
 func NewShellCloseRequest(msgID uint32, sessionID uint32) *Frame {
 	payload := make([]byte, 2+4+4) // method + reserved + jsonLen + sessionID
 	payload[0] = MethodShellClose
-	binary.BigEndian.PutUint32(payload[5:9], sessionID)
+	binary.BigEndian.PutUint32(payload[6:10], sessionID)
 
 	return &Frame{MsgID: msgID, Type: TypeRequest, Payload: payload}
 }
