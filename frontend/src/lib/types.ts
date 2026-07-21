@@ -190,6 +190,7 @@ export interface Config {
     default_operating_mode?: string; // "act", "plan", or "ideate"
     default_max_failed_turns?: number;
     encryption_enabled?: boolean;
+    registry_url?: string;
 }
 
 export interface ProviderModel {

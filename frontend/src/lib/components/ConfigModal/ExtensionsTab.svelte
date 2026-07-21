@@ -357,7 +357,7 @@
     {/if}
 
     {#if error}
-        <div class="error-banner" onclick={() => error = ''}>
+        <div class="error-banner" role="button" tabindex="0" onclick={() => error = ''} onkeydown={(e) => e.key === 'Enter' && (error = '')}>
             {error}
             <button class="dismiss" aria-label="Dismiss">\u2715</button>
         </div>
@@ -500,8 +500,8 @@
 
     <!-- Add Extension Form Overlay -->
     {#if showAddForm}
-        <div class="edit-overlay" onclick={() => { showAddForm = false; resetAddForm(); }}>
-            <div class="edit-form" onclick={(e) => e.stopPropagation()}>
+        <div class="edit-overlay" role="button" tabindex="0" onclick={() => { showAddForm = false; resetAddForm(); }} onkeydown={(e) => e.key === 'Enter' && (showAddForm = false)}>
+            <div class="edit-form" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
                 <div class="edit-header">
                     <h3>Add Extension</h3>
                     <button class="btn btn-icon" onclick={() => { showAddForm = false; resetAddForm(); }}>&times;</button>
@@ -509,40 +509,40 @@
 
                 <div class="config-fields">
                     <div class="config-field">
-                        <label class="field-label">Name *</label>
-                        <input type="text" value={addForm.name} oninput={(e) => addForm.name = (e.target as HTMLInputElement).value} class="config-input" placeholder="gopls" />
+                        <label class="field-label" for="add-name">Name *</label>
+                        <input id="add-name" type="text" value={addForm.name} oninput={(e) => addForm.name = (e.target as HTMLInputElement).value} class="config-input" placeholder="gopls" />
                     </div>
                     <div class="config-field">
-                        <label class="field-label">Display Name *</label>
-                        <input type="text" value={addForm.displayName} oninput={(e) => addForm.displayName = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Language Server" />
+                        <label class="field-label" for="add-display-name">Display Name *</label>
+                        <input id="add-display-name" type="text" value={addForm.displayName} oninput={(e) => addForm.displayName = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Language Server" />
                     </div>
                     <div class="config-field">
-                        <label class="field-label">Type</label>
-                        <select value={addForm.type} onchange={(e) => addForm.type = (e.target as HTMLSelectElement).value as 'lsp' | 'ui'} class="config-input">
+                        <label class="field-label" for="add-type">Type</label>
+                        <select id="add-type" value={addForm.type} onchange={(e) => addForm.type = (e.target as HTMLSelectElement).value as 'lsp' | 'ui'} class="config-input">
                             <option value="lsp">LSP</option>
                             <option value="ui">UI</option>
                         </select>
                     </div>
                     <div class="config-field">
-                        <label class="field-label">Description</label>
-                        <input type="text" value={addForm.description} oninput={(e) => addForm.description = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go language server" />
+                        <label class="field-label" for="add-description">Description</label>
+                        <input id="add-description" type="text" value={addForm.description} oninput={(e) => addForm.description = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go language server" />
                     </div>
                     <div class="config-field">
-                        <label class="field-label">Author</label>
-                        <input type="text" value={addForm.author} oninput={(e) => addForm.author = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Team" />
+                        <label class="field-label" for="add-author">Author</label>
+                        <input id="add-author" type="text" value={addForm.author} oninput={(e) => addForm.author = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Team" />
                     </div>
                     <div class="config-field">
-                        <label class="field-label">License URL</label>
-                        <input type="url" value={addForm.licenseUrl} oninput={(e) => addForm.licenseUrl = (e.target as HTMLInputElement).value} class="config-input" placeholder="https://..." />
+                        <label class="field-label" for="add-license-url">License URL</label>
+                        <input id="add-license-url" type="url" value={addForm.licenseUrl} oninput={(e) => addForm.licenseUrl = (e.target as HTMLInputElement).value} class="config-input" placeholder="https://..." />
                     </div>
                     {#if addForm.type === 'lsp'}
                         <div class="config-field">
-                            <label class="field-label">Language</label>
-                            <input type="text" value={addForm.language} oninput={(e) => addForm.language = (e.target as HTMLInputElement).value} class="config-input" placeholder="go" />
+                            <label class="field-label" for="add-language">Language</label>
+                            <input id="add-language" type="text" value={addForm.language} oninput={(e) => addForm.language = (e.target as HTMLInputElement).value} class="config-input" placeholder="go" />
                         </div>
                         <div class="config-field">
-                            <label class="field-label">File Extensions (comma-separated)</label>
-                            <input type="text" value={addForm.fileExtensions} oninput={(e) => addForm.fileExtensions = (e.target as HTMLInputElement).value} class="config-input" placeholder="go" />
+                            <label class="field-label" for="add-file-extensions">File Extensions (comma-separated)</label>
+                            <input id="add-file-extensions" type="text" value={addForm.fileExtensions} oninput={(e) => addForm.fileExtensions = (e.target as HTMLInputElement).value} class="config-input" placeholder="go" />
                         </div>
                     {/if}
                 </div>
@@ -559,8 +559,8 @@
 
     <!-- Edit Form Overlay -->
     {#if editingExtension}
-        <div class="edit-overlay" onclick={closeEdit}>
-            <div class="edit-form" onclick={(e) => e.stopPropagation()}>
+        <div class="edit-overlay" role="button" tabindex="0" onclick={closeEdit} onkeydown={(e) => e.key === 'Enter' && closeEdit()}>
+            <div class="edit-form" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
                 <div class="edit-header">
                     <h3>Edit: {editingExtension.manifest.display_name || editingExtension.name}</h3>
                     <button class="btn btn-icon" onclick={closeEdit}>&times;</button>
@@ -572,9 +572,10 @@
                         <h4>Configuration</h4>
                         {#each getConfigSchemaFields(editingExtension) as field}
                             <div class="config-field">
-                                <label class="field-label">{field.title}</label>
+                                <label class="field-label" for="edit-config-{field.key}">{field.title}</label>
                                 {#if field.type === 'number'}
                                     <input
+                                        id="edit-config-{field.key}"
                                         type="number"
                                         value={editConfig[field.key] ?? field.default ?? ''}
                                         oninput={(e) => editConfig[field.key] = Number((e.target as HTMLInputElement).value)}
@@ -589,6 +590,7 @@
                                     </label>
                                 {:else}
                                     <input
+                                        id="edit-config-{field.key}"
                                         type="text"
                                         value={editConfig[field.key] ?? field.default ?? ''}
                                         oninput={(e) => editConfig[field.key] = (e.target as HTMLInputElement).value}
@@ -617,9 +619,10 @@
         <div class="browse-view">
             <!-- Registry URL -->
             <div class="registry-url-row">
-                <label class="field-label">Registry URL</label>
+                <label class="field-label" for="registry-url">Registry URL</label>
                 <div class="url-input-row">
                     <input
+                        id="registry-url"
                         type="url"
                         placeholder="https://registry.example.com/index.json"
                         value={registryUrl}
