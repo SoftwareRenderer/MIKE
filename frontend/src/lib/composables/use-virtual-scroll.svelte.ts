@@ -132,24 +132,29 @@ export function computeVirtualScrollRange(
  */
 export function useVirtualScroll(
     containerRef: () => HTMLElement | null,
-    itemCount: number | (() => number),
+    items: () => any[],
     getEstimatedHeight: (index: number) => number,
     overscan: number = 3,
+    getKey: (item: any, index: number) => string = (item, idx) => String(idx),
 ): VirtualScrollState {
-    // Measured heights by index (plain object, not Map, to avoid $state mutation).
-    let measuredHeights = $state<Record<number, number>>({});
+    // Measured heights by key (plain object, not Map, to avoid $state mutation).
+    let measuredHeights = $state<Record<string, number>>({});
 
-    /** Get the current item count (supports both number and getter). */
+    /** Get the current item count. */
     function getCount(): number {
-        return typeof itemCount === 'function' ? itemCount() : itemCount;
+        return items().length;
     }
 
     /** Get the height for an item (measured if available, estimated otherwise). */
     function getHeight(index: number): number {
-        const measured = measuredHeights[index];
+        const allItems = items();
+        if (index < 0 || index >= allItems.length) return 60;
+        const key = getKey(allItems[index], index);
+        const measured = measuredHeights[key];
         if (measured !== undefined) return measured;
         return getEstimatedHeight(index);
     }
+
 
     /** Cumulative offset cache — recomputed when heights change. */
     let offsets = $state(new Float64Array(getCount() + 1));
@@ -304,9 +309,12 @@ export function useVirtualScroll(
      */
     let measureTaskPending = false;
     function measureItem(index: number, height: number) {
-        const prev = measuredHeights[index];
+        const allItems = items();
+        if (index < 0 || index >= allItems.length) return;
+        const key = getKey(allItems[index], index);
+        const prev = measuredHeights[key];
         if (prev === height) return; // no change
-        measuredHeights = { ...measuredHeights, [index]: height };
+        measuredHeights = { ...measuredHeights, [key]: height };
         dirty = true;
         if (!measureTaskPending) {
             measureTaskPending = true;
@@ -316,6 +324,8 @@ export function useVirtualScroll(
             });
         }
     }
+
+
 
     /** Cumulative Y offset of an item. */
     function getItemOffset(index: number): number {

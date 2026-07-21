@@ -122,7 +122,7 @@
     if (!isFixedHeight) {
         vs = useVirtualScroll(
             () => scrollEl,
-            () => items.length,
+            () => items,
             (index) => {
                 if (index < 0 || index >= items.length) return 60;
                 return typeof itemHeight === 'function'
@@ -130,6 +130,7 @@
                     : itemHeight;
             },
             effectiveOverscan,
+            getKey,
         );
     }
 
