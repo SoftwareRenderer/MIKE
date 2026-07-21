@@ -131,8 +131,8 @@ func TestHandleGet_NotFound(t *testing.T) {
 func TestHandleCreate(t *testing.T) {
 	h := testHandler(t)
 	body := map[string]any{
-		"name":   "my-lsp",
-		"type":   "lsp",
+		"name":    "my-lsp",
+		"type":    "lsp",
 		"version": "1.0.0",
 		"manifest": map[string]any{
 			"display_name": "My LSP",
@@ -358,7 +358,7 @@ func TestHandleUpdate_LSPConfig_CreateNilLSP(t *testing.T) {
 	body := map[string]any{
 		"manifest": map[string]any{
 			"lsp": map[string]any{
-				"command": "my-lsp",
+				"command":  "my-lsp",
 				"language": "mylang",
 				"initParamsOverride": map[string]any{
 					"customOption": true,
@@ -538,7 +538,7 @@ func TestHandleInstall_Success(t *testing.T) {
 			Version:     "1.0.0",
 			Type:        ExtensionTypeLSP,
 			DisplayName: "Go Language Server",
-			Description: "Official Go language server",
+			Description: "Go language server",
 			Author:      "Go Team",
 		},
 	}
@@ -574,6 +574,51 @@ func TestHandleInstall_Success(t *testing.T) {
 	}
 	if result.InstallSource != "registry" {
 		t.Errorf("InstallSource = %q, want registry", result.InstallSource)
+	}
+}
+
+func TestHandleInstall_WithoutManifestURL_CopiesLicenseURL(t *testing.T) {
+	// Registry entry without ManifestURL — fallback path should copy LicenseURL
+	index := RegistryIndex{
+		{
+			Name:        "gopls",
+			Version:     "1.0.0",
+			Type:        ExtensionTypeLSP,
+			DisplayName: "Go Language Server",
+			Description: "Go language server",
+			Author:      "Go Team",
+			LicenseURL:  "https://github.com/golang/tools/blob/master/LICENSE",
+		},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+
+	body := map[string]any{
+		"name": "gopls",
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.HandleInstall(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", w.Code)
+	}
+
+	var result ExtensionResponse
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result.Manifest.LicenseURL != "https://github.com/golang/tools/blob/master/LICENSE" {
+		t.Errorf("Manifest.LicenseURL = %q, want license URL from registry entry", result.Manifest.LicenseURL)
 	}
 }
 

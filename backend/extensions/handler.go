@@ -250,7 +250,7 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 	if req.Version != "" {
 		ext.Version = req.Version
 	}
-	if req.Manifest.DisplayName != "" || req.Manifest.Description != "" || req.Manifest.Author != "" {
+	if req.Manifest.DisplayName != "" || req.Manifest.Description != "" || req.Manifest.Author != "" || req.Manifest.LicenseURL != "" || req.Manifest.Homepage != "" {
 		if req.Manifest.DisplayName != "" {
 			ext.Manifest.DisplayName = req.Manifest.DisplayName
 		}
@@ -259,6 +259,12 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		}
 		if req.Manifest.Author != "" {
 			ext.Manifest.Author = req.Manifest.Author
+		}
+		if req.Manifest.LicenseURL != "" {
+			ext.Manifest.LicenseURL = req.Manifest.LicenseURL
+		}
+		if req.Manifest.Homepage != "" {
+			ext.Manifest.Homepage = req.Manifest.Homepage
 		}
 	}
 	if req.Config != nil {
@@ -495,6 +501,7 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 			DisplayName: entry.DisplayName,
 			Description: entry.Description,
 			Author:      entry.Author,
+			LicenseURL:  entry.LicenseURL,
 		}
 	}
 
@@ -717,6 +724,16 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 	if entry == nil {
 		httputil.JSONError(w, http.StatusNotFound, "extension not found in registry: "+ext.Name)
 		return
+	}
+
+	// Fetch the latest manifest
+	if entry.ManifestURL != "" {
+		manifestURL := ResolveURL(url, entry.ManifestURL)
+		manifest, err := h.registry.FetchManifest(manifestURL)
+		if err == nil {
+			ext.Manifest = manifest
+		}
+		// We don't fail the whole update if manifest fetch fails, but we could log it
 	}
 
 	// Stop sandbox if running
