@@ -2,6 +2,32 @@
     import type { Task } from '$lib/types';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import Icon from '../Icon.svelte';
+    import { appStore, updateTaskInBoard } from '$lib/stores';
+
+    // Safety net: stop title generating spinner after a timeout (in case backend
+    // broadcast is lost). Backend has a 30s timeout; we add 15s buffer.
+    const TITLE_GEN_TIMEOUT_MS = 45_000;
+    let titleGenTimer: ReturnType<typeof setTimeout> | null = null;
+    $effect(() => {
+        if (task.title_generating) {
+            if (titleGenTimer) clearTimeout(titleGenTimer);
+            titleGenTimer = setTimeout(() => {
+                task.title_generating = false;
+                updateTaskInBoard(appStore, task.id, task);
+            }, TITLE_GEN_TIMEOUT_MS);
+        } else {
+            if (titleGenTimer) {
+                clearTimeout(titleGenTimer);
+                titleGenTimer = null;
+            }
+        }
+        return () => {
+            if (titleGenTimer) {
+                clearTimeout(titleGenTimer);
+                titleGenTimer = null;
+            }
+        };
+    });
 
     let {
         task,
