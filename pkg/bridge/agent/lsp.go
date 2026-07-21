@@ -8,9 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,15 +16,17 @@ import (
 	"kanban/pkg/bridge/protocol"
 )
 
-// lspSession tracks a running LSP server process connected via unix socket.
+// lspSession tracks a running LSP server process.
+// Communication is always over stdin/stdout with Content-Length framing
+// (the standard LSP transport protocol).
 type lspSession struct {
-	cmd        *exec.Cmd
-	conn       net.Conn        // connection to LSP server (unix socket)
-	socketPath string          // unix socket path
-	mu         sync.Mutex
-	closed     bool
-	pending    map[string]chan []byte // JSON-RPC id string -> response channel
-	pendingMu  sync.Mutex
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  io.ReadCloser
+	mu      sync.Mutex
+	closed  bool
+	pending map[string]chan []byte // JSON-RPC id string -> response channel
+	pendingMu sync.Mutex
 }
 
 // isClosed returns true if the session has been closed.
@@ -36,26 +36,29 @@ func (s *lspSession) isClosed() bool {
 	return s.closed
 }
 
-// newLSPSession creates a new LSP session by starting the LSP server with a unix socket.
+// newLSPSession creates a new LSP session by starting the server process
+// and communicating over stdin/stdout with Content-Length framing.
 func newLSPSession(command string, args []string) (*lspSession, error) {
-	// Create a unique unix socket path in /tmp
-	socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("lsp-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
-	_ = os.Remove(socketPath) // clean up any stale socket
+	cmd := exec.Command(command, args...)
 
-	// Build command with -listen flag for unix socket
-	listenArgs := append([]string{command}, args...)
-	listenArgs = append(listenArgs, "-listen", "unix;"+socketPath)
-
-	cmd := exec.Command(listenArgs[0], listenArgs[1:]...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("lsp stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("lsp stdout pipe: %w", err)
+	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return nil, fmt.Errorf("lsp stderr pipe: %w", err)
 	}
 
 	sess := &lspSession{
-		cmd:        cmd,
-		socketPath: socketPath,
-		pending:    make(map[string]chan []byte),
+		cmd:     cmd,
+		stdin:   stdin,
+		stdout:  stdout,
+		pending: make(map[string]chan []byte),
 	}
 
 	// Stream stderr to log
@@ -70,38 +73,19 @@ func newLSPSession(command string, args []string) (*lspSession, error) {
 		return nil, fmt.Errorf("start lsp %s: %w", command, err)
 	}
 
-	// Wait for the socket to be ready (poll with timeout)
-	for i := 0; i < 50; i++ {
-		time.Sleep(50 * time.Millisecond)
-		if _, err := os.Stat(socketPath); err == nil {
-			// Socket exists, try to connect
-			conn, err := net.Dial("unix", socketPath)
-			if err == nil {
-				sess.conn = conn
-				go sess.readLoop()
-				return sess, nil
-			}
-			_ = conn.Close()
-		}
-	}
+	// Start the read loop on stdout
+	go sess.readLoop()
 
-	// Timeout - clean up
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
-	_ = os.Remove(socketPath)
-	return nil, fmt.Errorf("lsp server did not start listening on socket within 5s")
+	return sess, nil
 }
 
-// readLoop reads JSON-RPC responses from the LSP server and dispatches them.
-// Gopls uses HTTP-like Content-Length framing for socket connections.
+// readLoop reads JSON-RPC responses from the LSP server's stdout.
+// Uses Content-Length framing (standard LSP protocol).
 func (s *lspSession) readLoop() {
 	defer func() {
 		s.mu.Lock()
 		s.closed = true
 		s.mu.Unlock()
-		if s.conn != nil {
-			_ = s.conn.Close()
-		}
 		// Close all pending channels
 		s.pendingMu.Lock()
 		for id, ch := range s.pending {
@@ -111,7 +95,7 @@ func (s *lspSession) readLoop() {
 		s.pendingMu.Unlock()
 	}()
 
-	reader := bufio.NewReader(s.conn)
+	reader := bufio.NewReader(s.stdout)
 	for {
 		// Read Content-Length header
 		contentLen := 0
@@ -169,7 +153,7 @@ func (s *lspSession) readLoop() {
 	}
 }
 
-// sendJSONRPC writes a JSON-RPC message with HTTP-like Content-Length framing.
+// sendJSONRPC writes a JSON-RPC message with Content-Length framing.
 func sendJSONRPC(w io.Writer, raw json.RawMessage) error {
 	_, err := fmt.Fprintf(w, "Content-Length: %d\r\n\r\n%s", len(raw), raw)
 	return err
@@ -190,7 +174,7 @@ func (s *lspSession) send(ctx context.Context, raw json.RawMessage) ([]byte, err
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.ID == nil {
 		// Notification — just send, no response expected
-		_ = sendJSONRPC(s.conn, raw)
+		_ = sendJSONRPC(s.stdin, raw)
 		return nil, nil
 	}
 	idKey := string(*envelope.ID)
@@ -202,7 +186,7 @@ func (s *lspSession) send(ctx context.Context, raw json.RawMessage) ([]byte, err
 	s.pendingMu.Unlock()
 
 	// Send request with Content-Length framing
-	err := sendJSONRPC(s.conn, raw)
+	err := sendJSONRPC(s.stdin, raw)
 	if err != nil {
 		s.pendingMu.Lock()
 		delete(s.pending, idKey)
@@ -234,14 +218,16 @@ func (s *lspSession) close() {
 	s.closed = true
 	s.mu.Unlock()
 
-	if s.conn != nil {
-		_ = s.conn.Close()
+	if s.stdin != nil {
+		_ = s.stdin.Close()
+	}
+	if s.stdout != nil {
+		_ = s.stdout.Close()
 	}
 	if s.cmd != nil && s.cmd.Process != nil {
 		_ = s.cmd.Process.Kill()
-		_ = s.cmd.Wait()
+		s.cmd.Process.Wait() // ignore ProcessState
 	}
-	_ = os.Remove(s.socketPath)
 }
 
 // lspState tracks the LSP server for a connection.
@@ -267,8 +253,7 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 
 	if p.Command != "" {
 		// LSPStart request: (re)start the LSP server.
-		// Always restart to get a fresh session for the new workspace,
-		// since gopls doesn't support re-initialization for a different rootUri.
+		// Always restart to get a fresh session for the new workspace.
 		cmd, args := p.Command, p.Args
 
 		// Close existing session if any
@@ -330,7 +315,6 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
 		return
 	}
-
 
 	result := protocol.NewResult(req.MsgID, resp)
 	_ = h.writeFrame(conn, result)

@@ -591,6 +591,7 @@ func (c *Client) LSPSend(ctx context.Context, raw json.RawMessage) ([]byte, erro
 
 // LSPStart starts the LSP server process inside the sandbox.
 // Command and args specify the LSP server to start.
+// Communication is over stdin/stdout with Content-Length framing.
 func (c *Client) LSPStart(ctx context.Context, command string, args []string) error {
 	params, _ := json.Marshal(protocol.LSPParams{Command: command, Args: args})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodLSP, params)

@@ -285,3 +285,62 @@ test.describe('Registry URL Config', () => {
     expect(typeof config.registry_url).toBe('string');
   });
 });
+
+// ============================================================
+// TypeScript Language Server Extension
+// ============================================================
+
+test.describe('TypeScript Language Server Extension', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+  });
+
+  test('should list typescript-language-server in registry', async ({ page }) => {
+    // Fetch registry via API
+    const config = await page.evaluate(async () => {
+      const res = await fetch('/api/config');
+      return res.json();
+    });
+
+    const registryUrl = config.registry_url;
+    if (!registryUrl) {
+      test.skip();
+    }
+
+    const index = await page.evaluate(async (url) => {
+      const res = await fetch(`/api/extensions/registry?url=${encodeURIComponent(url)}`);
+      return res.json();
+    }, registryUrl);
+
+    expect(Array.isArray(index)).toBe(true);
+
+    const tsEntry = index.find((entry: any) => entry.name === 'typescript-language-server');
+    expect(tsEntry).toBeDefined();
+    expect(tsEntry.type).toBe('lsp');
+    expect(tsEntry.display_name).toBe('TypeScript Language Server');
+  });
+
+  test('should have correct registry entry fields for typescript-language-server', async ({ page }) => {
+    const config = await page.evaluate(async () => {
+      const res = await fetch('/api/config');
+      return res.json();
+    });
+
+    const registryUrl = config.registry_url;
+    if (!registryUrl) {
+      test.skip();
+    }
+
+    const index = await page.evaluate(async (url) => {
+      const res = await fetch(`/api/extensions/registry?url=${encodeURIComponent(url)}`);
+      return res.json();
+    }, registryUrl);
+
+    const tsEntry = index.find((entry: any) => entry.name === 'typescript-language-server');
+    expect(tsEntry).toBeDefined();
+    expect(tsEntry.type).toBe('lsp');
+    expect(tsEntry.dockerfile_url).toBe('typescript-language-server/Dockerfile');
+    expect(tsEntry.manifest_url).toBe('typescript-language-server/manifest.json');
+  });
+});

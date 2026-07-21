@@ -294,6 +294,101 @@ func TestHandleUpdate_NotFound(t *testing.T) {
 	}
 }
 
+func TestHandleUpdate_LSPConfig(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
+	ext.Manifest.LSP = &LSPConfig{
+		Command:    "typescript-language-server",
+		Args:       []string{"--stdio"},
+		Extensions: []string{"ts", "tsx", "js", "jsx"},
+		Language:   "typescript",
+	}
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	body := map[string]any{
+		"manifest": map[string]any{
+			"lsp": map[string]any{
+				"initParamsOverride": map[string]any{
+					"tsserver.path": "/usr/local/lib/node_modules/typescript",
+				},
+			},
+		},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.HandleUpdate(w, req, "test-ext")
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+
+	// Verify LSP config was updated in DB
+	updated, err := h.store.GetByID("test-ext")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updated.Manifest.LSP == nil {
+		t.Fatal("LSP config is nil after update")
+	}
+	if updated.Manifest.LSP.InitParamsOverride == nil {
+		t.Fatal("InitParamsOverride is nil after update")
+	}
+	tsserverPath, ok := updated.Manifest.LSP.InitParamsOverride["tsserver.path"]
+	if !ok {
+		t.Fatal("tsserver.path not found in InitParamsOverride")
+	}
+	if tsserverPath != "/usr/local/lib/node_modules/typescript" {
+		t.Errorf("tsserver.path = %v, want /usr/local/lib/node_modules/typescript", tsserverPath)
+	}
+}
+
+func TestHandleUpdate_LSPConfig_CreateNilLSP(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
+	// No LSP config initially
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	body := map[string]any{
+		"manifest": map[string]any{
+			"lsp": map[string]any{
+				"command": "my-lsp",
+				"language": "mylang",
+				"initParamsOverride": map[string]any{
+					"customOption": true,
+				},
+			},
+		},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.HandleUpdate(w, req, "test-ext")
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+
+	updated, err := h.store.GetByID("test-ext")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updated.Manifest.LSP == nil {
+		t.Fatal("LSP config is nil after update")
+	}
+	if updated.Manifest.LSP.Command != "my-lsp" {
+		t.Errorf("Command = %q, want my-lsp", updated.Manifest.LSP.Command)
+	}
+}
+
 func TestHandleDelete(t *testing.T) {
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
