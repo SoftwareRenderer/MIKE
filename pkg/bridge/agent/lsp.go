@@ -36,16 +36,6 @@ func (s *lspSession) isClosed() bool {
 	return s.closed
 }
 
-// LSPParams holds the parameters for an LSP request.
-type LSPParams struct {
-	// Raw is the raw JSON-RPC message to forward to the LSP server.
-	Raw json.RawMessage `json:"raw"`
-	// Command is the LSP server command to start (only used for the first request).
-	Command string `json:"command,omitempty"`
-	// Args are the LSP server arguments (only used for the first request).
-	Args []string `json:"args,omitempty"`
-}
-
 // newLSPSession creates a new LSP session by starting the LSP server with a unix socket.
 func newLSPSession(command string, args []string) (*lspSession, error) {
 	// Create a unique unix socket path in /tmp
@@ -128,11 +118,6 @@ func (s *lspSession) readLoop() {
 		for {
 			line, err := reader.ReadString('\n')
 			if err != nil {
-				if err == io.EOF {
-		
-				} else {
-		
-				}
 				return
 			}
 			line = strings.TrimSpace(line)
@@ -150,10 +135,8 @@ func (s *lspSession) readLoop() {
 		// Read the JSON-RPC message
 		msg := make([]byte, contentLen)
 		if _, err := io.ReadFull(reader, msg); err != nil {
-	
 			return
 		}
-	
 
 		// Extract JSON-RPC id to match with pending request
 		var envelope struct {
@@ -272,7 +255,7 @@ type lspState struct {
 // The first request with a non-empty Command starts the LSP server.
 // Subsequent requests forward the raw JSON-RPC message.
 func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
-	var p LSPParams
+	var p protocol.LSPParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, fmt.Sprintf("parse lsp params: %v", err)))
 		return
