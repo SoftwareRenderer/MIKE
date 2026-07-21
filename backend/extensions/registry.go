@@ -155,7 +155,7 @@ func (rc *RegistryClient) BuildImage(dockerfilePath, imageRef string) error {
 // BuildImageFromReader builds an image from a Dockerfile content via podman.
 func (rc *RegistryClient) BuildImageFromReader(dockerfileContent, imageRef string) error {
 	// Write Dockerfile to temp dir and build from it
-	cmd := exec.Command("podman", "build", "-t", imageRef, "-", ".")
+	cmd := exec.Command("podman", "build", "-t", imageRef, "-f", "-", ".")
 	cmd.Stdin = strings.NewReader(dockerfileContent)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
