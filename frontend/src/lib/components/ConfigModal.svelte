@@ -543,7 +543,7 @@
     }
 </script>
 
-<BaseModal title="Settings" width="720px" footer={footer} onClose={handleClose}>
+<BaseModal title="Settings" width="720px" footer={footer} onClose={handleClose} modalClass="config-modal">
     <!-- Tab Bar -->
     <div class="tab-bar">
         <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>Providers</button>
@@ -702,13 +702,13 @@
     @import '$lib/styles/shared.css';
 
     /* Fixed modal size */
-    :global(.modal) {
+    :global(.config-modal) {
         height: 580px;
         max-height: 580px;
     }
 
     /* Remove top padding so sticky tab-bar reaches the header with no gap */
-    :global(.modal-body) {
+    :global(.config-modal .modal-body) {
         padding-top: 0 !important;
     }
 

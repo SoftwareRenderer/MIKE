@@ -19,7 +19,7 @@ describe('ConfirmationDialog rendering', () => {
     });
 
     it('shows cancel button', () => {
-        expect(source).toContain('btn-secondary');
+        expect(source).toContain('btn-cancel');
         expect(source).toContain('handleCancel');
     });
 

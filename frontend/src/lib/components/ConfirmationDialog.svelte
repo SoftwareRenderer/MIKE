@@ -58,14 +58,28 @@
 </script>
 
 {#if open}
+    {#snippet header({ title }: { title: string })}
+        <h2 style="font-size: 0.9375rem;">{title}</h2>
+    {/snippet}
+
     {#snippet footer()}
-        <button type="button" class="btn-secondary" onclick={handleCancel}>{cancelText}</button>
+        <button type="button" class="btn-cancel" onclick={handleCancel}>{cancelText}</button>
         <button type="button" class="btn-confirm" class:destructive={variant === 'destructive'} onclick={handleConfirm}>
             {confirmText}
         </button>
     {/snippet}
 
-    <BaseModal title={title} width="360px" zIndex={1000} footer={footer} onClose={handleCancel}>
+    <BaseModal
+        title={title}
+        width="320px"
+        zIndex={1000}
+        header={header}
+        footer={footer}
+        onClose={handleCancel}
+        headerStyle="padding: 12px 16px;"
+        bodyStyle="padding: 12px 16px 0; flex: 0 0 auto; overflow: visible;"
+        footerStyle="margin-top: 12px; padding: 12px 16px; gap: 6px;"
+    >
         <p class="confirm-message">{message}</p>
         {#if items.length > 0}
             <ul class="confirm-list">
@@ -85,14 +99,6 @@
         animation: scale-in 0.15s ease-out;
         padding: 4px;
     }
-    :global(.modal-body) {
-        padding: 0;
-    }
-    :global(.modal-footer) {
-        margin-top: 16px;
-        padding-top: 16px;
-        justify-content: flex-end;
-    }
 
     .confirm-message {
         font-size: 0.8125rem;
@@ -109,8 +115,24 @@
         line-height: 1.6;
     }
 
+    .btn-cancel {
+        padding: 6px 14px;
+        border-radius: var(--radius-md);
+        border: none;
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+        font-size: 0.875rem;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        transition: background 0.15s, opacity 0.15s;
+    }
+    .btn-cancel:hover {
+        background: var(--color-surface-4);
+    }
+
     .btn-confirm {
-        padding: 8px 16px;
+        padding: 6px 14px;
         border-radius: var(--radius-md);
         border: none;
         background: var(--color-status-blue);
