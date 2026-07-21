@@ -21,6 +21,16 @@ type handler struct {
 	lsp         *lspState            // LSP server state (one per connection)
 	writeMu     sync.Mutex        // serializes all writes to conn (shell readLoop + dispatch + read loop)
 	closed      atomic.Bool       // set true when connection is torn down (atomic: accessed from readLoop + close)
+	fileLocks   sync.Map          // path → *sync.Mutex, prevents concurrent read-modify-write on same file
+}
+
+// lockFile returns a lock for the given file path and an unlock function.
+// Ensures that only one read-modify-write cycle (e.g. handleEdit) runs per file at a time.
+func (h *handler) lockFile(path string) func() {
+	lock, _ := h.fileLocks.LoadOrStore(path, &sync.Mutex{})
+	mtx := lock.(*sync.Mutex)
+	mtx.Lock()
+	return func() { mtx.Unlock() }
 }
 
 // bashProc tracks a running bash command for cancellation.
