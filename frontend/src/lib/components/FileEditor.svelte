@@ -3,7 +3,7 @@
     import { ensureCsrfToken } from '$lib/api';
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, clearEditorHistory } from '$lib/storage';
     import { EditorView } from 'codemirror';
-    import { EditorState, Compartment } from '@codemirror/state';
+    import { EditorState, Compartment, StateField, StateEffect } from '@codemirror/state';
     import { keymap } from '@codemirror/view';
     import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
@@ -14,7 +14,7 @@
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { uiInjector } from '$lib/services/ui-injector.svelte';
     import { highlightSelectionMatches } from '@codemirror/search';
-    import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
+    import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax } from '$lib/utils/codemirror-theme';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
@@ -262,6 +262,41 @@
             ]),
             darkTheme,
             darkSyntax,
+            hoverTooltip(async (view, pos) => {
+                if (!lspClient || !fileUri) return null;
+                try {
+                    const result = await lspClient.request('textDocument/definition', {
+                        textDocument: { uri: fileUri },
+                        position: {
+                            line: view.state.doc.lineAt(pos).number - 1,
+                            character: pos - view.state.doc.lineAt(pos).from,
+                        },
+                    });
+                    if (result && (Array.isArray(result) ? result.length > 0 : result !== null)) {
+                        return {
+                            pos,
+                            above: true,
+                            arrows: true,
+                            create: () => {
+                                const dom = document.createElement('div');
+                                dom.className = 'lsp-def-tooltip';
+                                const btn = document.createElement('button');
+                                btn.className = 'btn-go-def';
+                                btn.textContent = 'Go to Definition';
+                                btn.onclick = (e) => {
+                                    e.stopPropagation();
+                                    handleGoToDefinition(pos);
+                                };
+                                dom.appendChild(btn);
+                                return { dom, pos };
+                            },
+                        };
+                    }
+                } catch (e) {
+                    console.warn('[lsp] hover definition failed:', e);
+                }
+                return null;
+            }),
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
                     // Sync content first, then compute hasChanges vs disk
@@ -451,6 +486,37 @@
                     requestAnimationFrame(() => jumpToLine(targetLine));
                 }
             }
+        }
+    }
+
+    async function handleGoToDefinition(pos: number) {
+        if (!lspClient || !view) return;
+        try {
+            const result = await lspClient.request('textDocument/definition', {
+                textDocument: { uri: fileUri },
+                position: {
+                    line: view.state.doc.lineAt(pos).number - 1,
+                    character: pos - view.state.doc.lineAt(pos).from,
+                },
+            });
+
+            if (result && result.length > 0) {
+                const location = result[0];
+                const uri = location.uri;
+                const range = location.range;
+                const targetPath = uri.replace(/^file:\/\//, '');
+                const targetLine = range.start.line + 1;
+
+                if (targetPath === filePath) {
+                    jumpToLine(targetLine);
+                } else {
+                    window.dispatchEvent(new CustomEvent('open-file', {
+                        detail: { path: targetPath, line: targetLine },
+                    }));
+                }
+            }
+        } catch (e) {
+            console.warn('[lsp] go to definition failed:', e);
         }
     }
 
@@ -854,6 +920,28 @@
     .editor-wrapper {
         flex: 1;
         overflow: hidden;
+    }
+
+    :global(.lsp-def-tooltip) {
+        display: contents;
+    }
+    :global(.cm-tooltip .cm-tooltip-arrow) {
+        display: none;
+    }
+    :global(.btn-go-def) {
+        background: var(--color-accent);
+        color: white;
+        border: none;
+        border-radius: 3px;
+        padding: 2px 6px;
+        cursor: pointer;
+        font-size: 0.7rem;
+        font-weight: 600;
+        transition: opacity 0.15s;
+        margin-bottom: 6px;
+    }
+    :global(.btn-go-def:hover) {
+        opacity: 0.8;
     }
 
     .search-container {
