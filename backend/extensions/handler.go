@@ -276,6 +276,18 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 	if req.SandboxConfig.MemoryLimit > 0 {
 		ext.SandboxConfig.MemoryLimit = req.SandboxConfig.MemoryLimit
 	}
+	// Sync config.memory_limit → SandboxConfig.MemoryLimit
+	// The edit form saves memory_limit via config_schema, but sandbox reads SandboxConfig.
+	if req.Config != nil {
+		if ml, ok := req.Config["memory_limit"]; ok {
+			switch v := ml.(type) {
+			case float64:
+				ext.SandboxConfig.MemoryLimit = int(v)
+			case int:
+				ext.SandboxConfig.MemoryLimit = v
+			}
+		}
+	}
 	if req.SandboxConfig.NetworkIsolation {
 		ext.SandboxConfig.NetworkIsolation = req.SandboxConfig.NetworkIsolation
 	}

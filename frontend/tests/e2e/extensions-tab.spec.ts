@@ -229,6 +229,40 @@ test.describe('Extensions Tab', () => {
     const found = listResult.find((ext: any) => ext.id === createResult.data.id);
     expect(found).toBeUndefined();
   });
+
+  test('should sync config.memory_limit to sandbox_config on update', async ({ page }) => {
+    // Create a test extension with default memory
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `memlimit-test-${Date.now()}`,
+        type: 'lsp',
+        manifest: { display_name: 'Memory Limit Test', description: '', author: '' },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Update with memory_limit in config (as the frontend edit form sends)
+    const updateResult = await csrfFetch(page, `/api/extensions/${extId}`, {
+      method: 'PUT',
+      body: {
+        config: { memory_limit: 512 },
+      },
+    });
+    expect(updateResult.ok).toBe(true);
+
+    // Verify sandbox_config.memory_limit was synced
+    const getRes = await page.evaluate(async (id) => {
+      const res = await fetch(`/api/extensions/${id}`);
+      return res.json();
+    }, extId);
+    expect(getRes.sandbox_config.memory_limit).toBe(512);
+    expect(getRes.config.memory_limit).toBe(512);
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
 });
 
 // ============================================================

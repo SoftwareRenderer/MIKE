@@ -23,9 +23,7 @@
                 "type": "number",
                 "title": "Memory Limit (MB)",
                 "description": "Maximum memory for the gopls sandbox",
-                "default": 256,
-                "minimum": 64,
-                "maximum": 2048
+                "default": 256
             }
         },
         "required": []
