@@ -16,6 +16,7 @@
         onShowStats,
         onShowConfig,
         hasPortConflict = false,
+        hasReview = false,
     }: {
         currentProject: Project;
         currentBranch: string;
@@ -27,6 +28,7 @@
         onShowStats: () => void;
         onShowConfig: () => void;
         hasPortConflict?: boolean;
+        hasReview?: boolean;
     } = $props();
 
     let isMainBranch = $derived(currentBranch === 'main' || currentBranch === 'master');
@@ -40,6 +42,9 @@
             <line x1="3" y1="12" x2="21" y2="12"/>
             <line x1="3" y1="18" x2="21" y2="18"/>
         </svg>
+        {#if hasReview}
+            <span class="review-dot" aria-hidden="true"></span>
+        {/if}
     </button>
     <button class="icon-btn sandbox-config-btn" class:port-conflict={hasPortConflict} onclick={onOpenSandboxConfig} aria-label="Sandbox configuration" title="Sandbox configuration">
         {#if currentProject.sandbox_enabled}
@@ -180,6 +185,17 @@
     }
     .hamburger {
         display: flex;
+        position: relative;
+    }
+    .review-dot {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #d29922;
+        pointer-events: none;
     }
 
     /* Desktop-only buttons — hidden on mobile */

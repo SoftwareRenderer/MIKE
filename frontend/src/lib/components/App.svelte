@@ -191,6 +191,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     let hasLocalCache = $state(false); // true when server unreachable but cache exists
     let hasProviders = $derived(!!(cfg as Config | null)?.providers?.length);
     let pageTitle = $derived(computePageTitle());
+    let hasReview = $derived(!!(currentProject && projectCounts[(currentProject as unknown as Project).id]?.review > 0));
 
     const isMobileCtx = useIsMobile();
 
@@ -1045,6 +1046,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 {currentBranch}
                 isMobile={isMobileCtx.isMobile}
                 hasPortConflict={portConflict?.project_id === currentProject?.id}
+                {hasReview}
                 onOpenMenu={() => mobileMenuOpen = true}
                 onOpenSandboxConfig={() => currentProject && openSandboxConfig(currentProject)}
                 onOpenExplorerView={() => { showExplorerViewVal = true; updateUrl({ project: currentProject?.id, view: 'explorer' }, false, true); }}
