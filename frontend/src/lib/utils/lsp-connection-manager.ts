@@ -275,6 +275,16 @@ class SharedLSPConnection {
       return;
     }
 
+    // $server/lspReset — clear all channels (extension was rebuilt)
+    if (parsed.method === '$/lspReset') {
+      for (const ch of this.channels.values()) {
+        ch.subscribed = false;
+        ch.handler = null;
+      }
+      this.channels.clear();
+      return;
+    }
+
     // Notification (no id, has method) → deliver to channels in the same workspace
     if (parsed.id == null && parsed.method) {
       this.dispatchNotification(parsed, text);
