@@ -173,8 +173,11 @@ func (s *lspSession) send(ctx context.Context, raw json.RawMessage) ([]byte, err
 		ID *json.RawMessage `json:"id"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.ID == nil {
-		// Notification — just send, no response expected
+		// Notification — just send, no response expected.
+		// Lock around sendJSONRPC to prevent concurrent writes from interleaving.
+		s.mu.Lock()
 		_ = sendJSONRPC(s.stdin, raw)
+		s.mu.Unlock()
 		return nil, nil
 	}
 	idKey := string(*envelope.ID)
@@ -185,8 +188,11 @@ func (s *lspSession) send(ctx context.Context, raw json.RawMessage) ([]byte, err
 	s.pending[idKey] = ch
 	s.pendingMu.Unlock()
 
-	// Send request with Content-Length framing
+	// Send request with Content-Length framing.
+	// Lock around sendJSONRPC to prevent concurrent writes from interleaving.
+	s.mu.Lock()
 	err := sendJSONRPC(s.stdin, raw)
+	s.mu.Unlock()
 	if err != nil {
 		s.pendingMu.Lock()
 		delete(s.pending, idKey)

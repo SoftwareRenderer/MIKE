@@ -25,6 +25,11 @@ func handleEdit(h *handler, conn net.Conn, req *protocol.Request) error {
 		return fmt.Errorf("no edits provided")
 	}
 
+	// Acquire per-file lock to prevent concurrent read-modify-write races.
+	// Only one edit request can read/modify/write a specific file at a time.
+	unlock := h.lockFile(p.Path)
+	defer unlock()
+
 	// Read current file content
 	data, err := os.ReadFile(p.Path)
 	if err != nil {
