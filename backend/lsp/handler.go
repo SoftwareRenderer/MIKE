@@ -639,6 +639,7 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 	var originalClientID string
 	var channelID int64
 	var workspaceKey string
+	var targetWorkspace *workspaceState
 	for _, s := range h.clients {
 		if clientID, ok := s.incomingIDs[backendID]; ok {
 			targetSession = s
@@ -652,14 +653,15 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 			break
 		}
 	}
+	if targetSession != nil {
+		targetWorkspace = h.workspaces[workspaceKey]
+	}
 	h.mu.Unlock()
 
 	if targetSession == nil {
 		log.Printf("[lsp] no client found for backend response id=%s", backendID)
 		return
 	}
-
-	targetWorkspace := h.workspaces[workspaceKey]
 
 	// Check if this is an initialize response — cache it and replay to queued clients
 	var queuedReplay []*queuedInit
@@ -815,6 +817,25 @@ func (h *LSPHandler) sendLSPReady(ctx context.Context, session *ClientSession, c
 	}
 	data, _ := json.Marshal(msg)
 	_ = session.conn.Write(ctx, websocket.MessageText, data)
+}
+
+// BroadcastLSPReset sends a $server/lspReset notification to all active sessions.
+// Tells the frontend to clear stale LSP channels (e.g., after extension rebuild).
+func (h *LSPHandler) BroadcastLSPReset() {
+	msg, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "$/lspReset",
+	})
+	h.mu.Lock()
+	clients := make([]*ClientSession, 0, len(h.clients))
+	for _, s := range h.clients {
+		clients = append(clients, s)
+	}
+	h.mu.Unlock()
+
+	for _, s := range clients {
+		_ = s.conn.Write(context.Background(), websocket.MessageText, msg)
+	}
 }
 
 // itoa converts an int64 to a string without allocation-heavy fmt calls.

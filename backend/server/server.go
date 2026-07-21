@@ -152,6 +152,10 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)
 	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
 	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, s.extLSPMgr)
+	// Wire extension update callback → broadcast LSP reset to frontend
+	s.extHandler.SetOnImageUpdated(func(extID string) {
+		s.lspHandler.BroadcastLSPReset()
+	})
 	// Wire project mutex so GitHandler can serialize project-level git operations.
 	s.gitHandler.SetProjectMutex(s.getProjectMutex)
 	// Wire worktree watcher -> GitHandler diff cache so on-demand file fetches work

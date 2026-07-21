@@ -212,18 +212,6 @@ func (m *ExtensionLSPManager) Release(workspacePath, language string) {
 	log.Printf("[lsp] released extension sandbox for workspace=%s lang=%s", workspacePath, language)
 }
 
-// ClearByExtensionID removes all cached clients for a given extension.
-// Called when the extension sandbox is destroyed (e.g., image rebuild).
-func (m *ExtensionLSPManager) ClearByExtensionID(extID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for key, sc := range m.clients {
-		if sc.extensionID == extID {
-			delete(m.clients, key)
-		}
-	}
-}
-
 // getOrCreateSandbox gets or creates an extension sandbox.
 // Returns the bridge client and a boolean indicating whether a NEW sandbox was created.
 // When reusing an existing sandbox (grace period), newSandbox is false.

@@ -107,11 +107,12 @@ func (t *BuildProgressTracker) Subscribe(extName string) <-chan *BuildProgress {
 
 // ExtensionHandler handles extension API requests.
 type ExtensionHandler struct {
-	store    *ExtensionStore
-	sandbox  *ExtensionSandboxManager
-	registry *RegistryClient
-	config   *ExtensionConfig
-	progress *BuildProgressTracker
+	store         *ExtensionStore
+	sandbox       *ExtensionSandboxManager
+	registry      *RegistryClient
+	config        *ExtensionConfig
+	progress      *BuildProgressTracker
+	onImageUpdated func(extID string) // callback after successful image update
 }
 
 // ExtensionConfig holds configuration for the extension handler.
@@ -129,6 +130,11 @@ func NewExtensionHandler(store *ExtensionStore, sandbox *ExtensionSandboxManager
 		config:   cfg,
 		progress: NewBuildProgressTracker(),
 	}
+}
+
+// SetOnImageUpdated sets a callback invoked after a successful image update.
+func (h *ExtensionHandler) SetOnImageUpdated(fn func(extID string)) {
+	h.onImageUpdated = fn
 }
 
 // HandleList returns all installed extensions with runtime status.
@@ -749,6 +755,11 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 	if err := h.store.SetBuiltAt(id); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to update build timestamp: "+err.Error())
 		return
+	}
+
+	// Notify listeners (e.g., LSP handler to broadcast reset to frontend)
+	if h.onImageUpdated != nil {
+		h.onImageUpdated(id)
 	}
 
 	statuses := h.sandbox.ListRunning()
