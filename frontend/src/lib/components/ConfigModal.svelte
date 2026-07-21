@@ -707,6 +707,11 @@
         max-height: 580px;
     }
 
+    /* Remove top padding so sticky tab-bar reaches the header with no gap */
+    :global(.modal-body) {
+        padding-top: 0 !important;
+    }
+
     /* Tab bar */
     .tab-bar {
         display: flex;
@@ -716,7 +721,7 @@
         top: 0;
         background: var(--color-surface-1);
         z-index: 5;
-        padding-top: 4px;
+        padding-top: 8px;
     }
     .tab-btn {
         padding: 8px 16px;

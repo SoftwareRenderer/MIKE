@@ -27,6 +27,7 @@
     let editingExtension = $state<Extension | null>(null);
     let editConfig = $state<Record<string, any>>({});
     let saving = $state(false);
+    let installing = $state<Set<string>>(new Set());
     let buildProgress = $state<{ ext: string; progress: number; message: string } | null>(null);
 
     // Add extension form
@@ -137,7 +138,9 @@
 
     // Install from registry
     async function handleInstall(name: string) {
+        if (installing.has(name)) return;
         error = '';
+        installing = new Set(installing).add(name);
         buildProgress = { ext: name, progress: 0, message: 'Installing...' };
         try {
             await installExtension(name, registryUrl || undefined);
@@ -147,6 +150,10 @@
         } catch (e: any) {
             error = e.message || 'Failed to install extension';
             buildProgress = null;
+        } finally {
+            const next = new Set(installing);
+            next.delete(name);
+            installing = next;
         }
     }
 
@@ -170,11 +177,12 @@
 
     // Delete extension
     async function handleDelete(id: string, name: string) {
-        const confirmed = dialogStore.confirm(
-            `Delete "${name}"?`,
-            `This will remove the extension and stop its sandbox. This cannot be undone.`,
-            'Delete'
-        );
+        const confirmed = await dialogStore.showConfirm({
+            title: `Delete "${name}"?`,
+            message: `This will remove the extension and stop its sandbox. This cannot be undone.`,
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+        });
         if (!confirmed) return;
 
         error = '';
@@ -608,8 +616,13 @@
                                 {#if extensions.some(e => e.name === entry.name)}
                                     <span class="installed-badge">Installed</span>
                                 {:else}
-                                    <button class="btn btn-primary" onclick={() => handleInstall(entry.name)} disabled={loading}>
-                                        {loading ? 'Installing...' : 'Install'}
+                                    <button class="btn btn-primary" onclick={() => handleInstall(entry.name)} disabled={installing.has(entry.name)}>
+                                        {#if installing.has(entry.name)}
+                                            <span class="spinner"></span>
+                                            Installing...
+                                        {:else}
+                                            Install
+                                        {/if}
                                     </button>
                                 {/if}
                             </div>
@@ -956,6 +969,23 @@
         padding: 0.4rem 0.75rem;
         background: rgba(63, 185, 80, 0.1);
         border-radius: 6px;
+    }
+
+    /* Spinner */
+    .spinner {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        vertical-align: middle;
+        margin-right: 0.35rem;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
     }
 
     /* Registry URL */

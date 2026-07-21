@@ -1,39 +1,34 @@
-# gopls Extension - Go Language Server
-# Runs gopls inside a gVisor sandbox with the sandbox-bridge for LSP forwarding.
+# --- Stage 1: Build Stage ---
+FROM golang:1-alpine AS builder
 
-FROM ubuntu:22.04
-
-# Avoid interactive prompts during package installation
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install Go and build essentials
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Go
-ENV GO_VERSION=1.22.0
-ENV GOPATH=/root/go
-ENV PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
-
-RUN curl -fsSL https://dl.google.com/go/go${GO_VERSION}.linux-amd64.tar.gz \
-    | tar -C /usr/local -xzf -
+# Install build dependencies required by git/Go
+RUN apk add -U git ca-certificates
 
 # Install gopls
 RUN go install golang.org/x/tools/gopls@latest
 
-# Install sandbox-bridge (built from host, copied at build time)
-# The bridge binary is placed in /usr/local/bin/sandbox-bridge
-COPY sandbox-bridge /usr/local/bin/sandbox-bridge
-RUN chmod +x /usr/local/bin/sandbox-bridge
 
-# Working directory
+# --- Stage 2: Minimal Runtime Stage ---
+FROM alpine:latest
+
+# gopls requires the go toolchain for module resolution, diagnostics, etc.
+COPY --from=builder /usr/local/go /usr/local/go
+ENV PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Copy certificates for HTTPS requests made by gopls/bridge
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Copy gopls and sandbox-bridge
+COPY --from=builder /go/bin/gopls /usr/local/bin/gopls
+COPY sandbox/sandbox-bridge /usr/local/bin/sandbox-bridge
+
+RUN chmod +x /usr/local/bin/sandbox-bridge /usr/local/bin/gopls
+
+# Set working directory
 WORKDIR /workspace
 
 # Expose bridge port
 EXPOSE 9999
 
-# Run sandbox-bridge which handles LSP forwarding
+# Run sandbox-bridge
 CMD ["/usr/local/bin/sandbox-bridge"]

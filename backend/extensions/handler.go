@@ -480,6 +480,28 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Build image from Dockerfile if no pre-built image is provided
+	imageRef := entry.Image
+	if imageRef == "" && entry.DockerfileURL != "" {
+		imageRef = fmt.Sprintf("kanban-ext-%s:%s", entry.Name, entry.Version)
+		dockerfileURL := ResolveURL(url, entry.DockerfileURL)
+		dockerfile, err := h.registry.FetchDockerfile(dockerfileURL)
+		if err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch dockerfile: "+err.Error())
+			return
+		}
+		if err := h.registry.BuildImageFromReader(dockerfile, imageRef); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to build image: "+err.Error())
+			return
+		}
+		ext.ContainerConfig.Image = imageRef
+		ext.ImageRef = imageRef
+		if err := h.store.Update(ext.ID, ext); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())
+			return
+		}
+	}
+
 	statuses := h.sandbox.ListRunning()
 	httputil.JSONResponse(w, http.StatusCreated, h.toResponse(ext, statuses))
 }
