@@ -38,12 +38,15 @@
     function handleDragOver(e: DragEvent) {
         e.preventDefault();
         if (!e.dataTransfer) return;
-        const taskId = e.dataTransfer.getData('text/plain');
-        if (taskId && canDrop && !canDrop(taskId, columnId)) {
-            e.dataTransfer.dropEffect = 'none';
-            isDropRejected = true;
-            isOver = false;
-            return;
+        const taskIds = e.dataTransfer.getData('text/plain').split(',');
+        // Reject if any task in the selection cannot be dropped
+        for (const taskId of taskIds) {
+            if (taskId && canDrop && !canDrop(taskId, columnId)) {
+                e.dataTransfer.dropEffect = 'none';
+                isDropRejected = true;
+                isOver = false;
+                return;
+            }
         }
         isDropRejected = false;
         isOver = true;
@@ -56,10 +59,14 @@
 
     function handleDrop(e: DragEvent) {
         isOver = false;
-        const taskId = e.dataTransfer?.getData('text/plain');
-        if (taskId) {
-            if (canDrop && !canDrop(taskId, columnId)) return;
-            onDrop(taskId);
+        const taskIds = (e.dataTransfer?.getData('text/plain') || '').split(',');
+        for (const taskId of taskIds) {
+            if (taskId && canDrop && !canDrop(taskId, columnId)) continue;
+            if (taskId) onDrop(taskId);
+        }
+        // Clear multi-select after a successful drop
+        if (multiSelect && multiSelect.hasSelection) {
+            multiSelect.clear();
         }
     }
 </script>

@@ -37,9 +37,17 @@ export function useBoardDnd(getAllTasks: () => Task[], getProjectId: () => strin
     function handleSectionDragOver(e: DragEvent, sectionId: string) {
         e.preventDefault();
         if (!e.dataTransfer) return;
-        const taskId = e.dataTransfer.getData('text/plain');
+        const taskIds = e.dataTransfer.getData('text/plain').split(',');
+        // Reject if any task in the selection cannot be dropped
+        let rejected = false;
+        for (const taskId of taskIds) {
+            if (taskId && !canDrop(taskId, sectionId)) {
+                rejected = true;
+                break;
+            }
+        }
         const state = sectionDragState.get(sectionId) || { isOver: false, isRejected: false };
-        if (taskId && !canDrop(taskId, sectionId)) {
+        if (rejected) {
             e.dataTransfer.dropEffect = 'none';
             sectionDragState = new Map(sectionDragState).set(sectionId, { isRejected: true, isOver: false });
         } else {
@@ -54,24 +62,26 @@ export function useBoardDnd(getAllTasks: () => Task[], getProjectId: () => strin
     async function handleSectionDrop(e: DragEvent, targetStatus: string) {
         const sectionId = targetStatus;
         sectionDragState = new Map(sectionDragState).set(sectionId, { isOver: false, isRejected: false });
-        const taskId = e.dataTransfer?.getData('text/plain');
-        if (!taskId) return;
-        const task = getAllTasks().find(t => t.id === taskId);
-        if (!task || task.status === targetStatus) return;
-        if (!canDrop(taskId, targetStatus)) {
-            dialogStore.showToast('Cannot move to Backlog: parent task is In Progress', 'error');
-            return;
-        }
-        try {
-            const updated = await moveTask(getProjectId(), taskId, targetStatus);
-            const willConsolidate = task.parent_task_id &&
-                getAllTasks().some(t => t.id === task.parent_task_id && t.status === targetStatus);
-            if (!willConsolidate) {
-                updateTaskInBoard(appStore, taskId, updated);
+        const taskIds = (e.dataTransfer?.getData('text/plain') || '').split(',');
+        for (const taskId of taskIds) {
+            if (!taskId) continue;
+            const task = getAllTasks().find(t => t.id === taskId);
+            if (!task || task.status === targetStatus) continue;
+            if (!canDrop(taskId, targetStatus)) {
+                dialogStore.showToast('Cannot move to Backlog: parent task is In Progress', 'error');
+                continue;
             }
-        } catch (err) {
-            console.error('Failed to move task:', err);
-            dialogStore.showToast('Failed to move task: ' + String(err), 'error');
+            try {
+                const updated = await moveTask(getProjectId(), taskId, targetStatus);
+                const willConsolidate = task.parent_task_id &&
+                    getAllTasks().some(t => t.id === task.parent_task_id && t.status === targetStatus);
+                if (!willConsolidate) {
+                    updateTaskInBoard(appStore, taskId, updated);
+                }
+            } catch (err) {
+                console.error('Failed to move task:', err);
+                dialogStore.showToast('Failed to move task: ' + String(err), 'error');
+            }
         }
     }
 
