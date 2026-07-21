@@ -45,6 +45,7 @@ export interface LSPTransportOptions {
   filePath: string;
   onDisconnected?: () => void;
   onServerInfo?: (name: string, version: string | null) => void;
+  onReady?: () => void; // Called when backend confirms LSP is fully ready
 }
 
 export interface VirtualTransport extends Transport {
@@ -58,6 +59,7 @@ interface Channel {
   lang: string;
   handler: ((value: string) => void) | null;
   onServerInfo?: (name: string, version: string | null) => void;
+  onReady?: () => void;
 }
 
 /**
@@ -89,7 +91,7 @@ class WorkspaceConnection {
 
   requestChannel(options: LSPTransportOptions): Promise<VirtualTransport> {
     const channelId = ++this.nextChannelId;
-    const channel: Channel = { id: channelId, file: options.filePath, lang: detectLanguage(options.filePath), handler: null, onServerInfo: options.onServerInfo };
+    const channel: Channel = { id: channelId, file: options.filePath, lang: detectLanguage(options.filePath), handler: null, onServerInfo: options.onServerInfo, onReady: options.onReady };
     this.channels.set(channelId, channel);
 
     // If connection is already open but not yet subscribed (no file available),
@@ -160,6 +162,17 @@ class WorkspaceConnection {
       parsed = JSON.parse(text);
     } catch {
       for (const ch of this.channels.values()) ch.handler?.(text);
+      return;
+    }
+
+    // $server/lspReady — route to specific channel (or broadcast if no _ch)
+    if (parsed.method === '$/lspReady') {
+      if (parsed._ch != null) {
+        const target = this.channels.get(parsed._ch);
+        target?.onReady?.();
+      } else {
+        for (const ch of this.channels.values()) ch.onReady?.();
+      }
       return;
     }
 

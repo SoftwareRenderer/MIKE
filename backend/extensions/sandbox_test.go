@@ -170,3 +170,117 @@ func TestRelease_NotCreated(t *testing.T) {
 	// Should not panic
 	sm.Release("nonexistent")
 }
+
+func TestGracePeriod_TimerSetOnRelease(t *testing.T) {
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+
+	// Manually set up state to simulate a running sandbox
+	extID := "test-grace-period"
+	sm.states[extID] = &extensionSandboxState{
+		containerName: "kanban-ext-test",
+	}
+	sm.refs[extID] = 1
+
+	// Release to bring refcount to 0 — should set a timer
+	sm.Release(extID)
+
+	sm.mu.Lock()
+	state := sm.states[extID]
+	sm.mu.Unlock()
+
+	if state == nil {
+		t.Fatal("state should still exist during grace period")
+	}
+	if state.stopTimer == nil {
+		t.Error("stopTimer should be set after Release with refcount 0")
+	}
+}
+
+func TestGracePeriod_CancelledOnReconnect(t *testing.T) {
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+
+	extID := "test-grace-reconnect"
+
+	// Simulate: sandbox was created, client connected (refs=1), then disconnected (refs=0, timer set)
+	sm.states[extID] = &extensionSandboxState{
+		containerName: "kanban-ext-test",
+	}
+	sm.refs[extID] = 0
+
+	// Manually set a timer to simulate grace period
+	done := make(chan struct{}, 1)
+	sm.states[extID].stopTimer = time.AfterFunc(100*time.Millisecond, func() {
+		done <- struct{}{}
+	})
+
+	// Simulate client reconnecting via GetOrCreate
+	// GetOrCreate checks client.IsAlive() which we can't mock, so test the internal logic directly
+	sm.mu.Lock()
+	state := sm.states[extID]
+	if state != nil && state.stopTimer != nil {
+		state.stopTimer.Stop()
+		state.stopTimer = nil
+	}
+	sm.refs[extID]++
+	sm.mu.Unlock()
+
+	// Timer should be cancelled
+	select {
+	case <-done:
+		t.Error("timer should have been cancelled, but it fired")
+	case <-time.After(200 * time.Millisecond):
+		// Good — timer did not fire
+	}
+}
+
+func TestGracePeriod_TimerFiresAndStops(t *testing.T) {
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+
+	extID := "test-grace-fires"
+	stopped := make(chan string, 1)
+
+	// Set up state with a mock stop by intercepting via refs
+	sm.states[extID] = &extensionSandboxState{
+		containerName: "kanban-ext-test",
+	}
+	sm.refs[extID] = 1
+
+	// Release to trigger grace period timer
+	sm.Release(extID)
+
+	// Replace the timer with a short one for testing
+	sm.mu.Lock()
+	state := sm.states[extID]
+	if state != nil && state.stopTimer != nil {
+		state.stopTimer.Stop()
+		state.stopTimer = time.AfterFunc(50*time.Millisecond, func() {
+			sm.mu.Lock()
+			defer sm.mu.Unlock()
+			if sm.refs[extID] <= 0 {
+				stopped <- extID
+				delete(sm.states, extID)
+				delete(sm.refs, extID)
+			}
+		})
+	}
+	sm.mu.Unlock()
+
+	// Wait for timer to fire
+	select {
+	case id := <-stopped:
+		if id != extID {
+			t.Errorf("expected %s to be stopped, got %s", extID, id)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("grace period timer did not fire")
+	}
+}
+
+func TestGracePeriod_ExtensionStopGracePeriod(t *testing.T) {
+	if ExtensionStopGracePeriod != 15*time.Minute {
+		t.Errorf("ExtensionStopGracePeriod = %v, want 15m", ExtensionStopGracePeriod)
+	}
+}

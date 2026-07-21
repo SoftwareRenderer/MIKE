@@ -285,19 +285,13 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 	lsp := h.lsp
 	h.mu.Unlock()
 
-	if lsp == nil || lsp.session == nil || lsp.session.isClosed() {
-		// Start LSP server if command is provided (or restart if session was closed)
+	if p.Command != "" {
+		// LSPStart request: (re)start the LSP server.
+		// Always restart to get a fresh session for the new workspace,
+		// since gopls doesn't support re-initialization for a different rootUri.
 		cmd, args := p.Command, p.Args
-		// If no command in this request, try to reuse the stored command from previous start
-		if cmd == "" && lsp != nil && lsp.command != "" {
-			cmd, args = lsp.command, lsp.args
-		}
-		if cmd == "" {
-			_ = h.writeFrame(conn, protocol.NewError(req.MsgID, "lsp server not started"))
-			return
-		}
 
-		// Close old session if it exists but is stale
+		// Close existing session if any
 		if lsp != nil && lsp.session != nil {
 			lsp.session.close()
 		}
@@ -316,6 +310,28 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 		result := protocol.NewResult(req.MsgID, json.RawMessage(`{"status":"started"}`))
 		_ = h.writeFrame(conn, result)
 		return
+	}
+
+	if lsp == nil || lsp.session == nil || lsp.session.isClosed() {
+		// LSPSend request but no session — try to auto-restart with stored command
+		cmd, args := "", []string{}
+		if lsp != nil && lsp.command != "" {
+			cmd, args = lsp.command, lsp.args
+		}
+		if cmd == "" {
+			_ = h.writeFrame(conn, protocol.NewError(req.MsgID, "lsp server not started"))
+			return
+		}
+
+		sess, err := newLSPSession(cmd, args)
+		if err != nil {
+			_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
+			return
+		}
+
+		h.mu.Lock()
+		h.lsp = &lspState{session: sess, command: cmd, args: args}
+		h.mu.Unlock()
 	}
 
 	// Forward raw JSON-RPC to LSP server

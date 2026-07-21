@@ -93,6 +93,7 @@ interface Channel {
   id: number;
   handler: ((value: string) => void) | null;
   onServerInfo?: (name: string, version: string | null) => void;
+  onReady?: () => void;
 }
 
 /**
@@ -106,6 +107,17 @@ function dispatchMessage(channels: Channel[], data: string): void {
   } catch {
     // Not JSON — deliver to all
     for (const ch of channels) ch.handler?.(data);
+    return;
+  }
+
+  // $server/lspReady — route to specific channel (or broadcast if no _ch)
+  if (parsed.method === '$/lspReady') {
+    if (parsed._ch != null) {
+      const target = channels.find(ch => ch.id === parsed._ch);
+      target?.onReady?.();
+    } else {
+      for (const ch of channels) ch.onReady?.();
+    }
     return;
   }
 
@@ -405,6 +417,69 @@ describe('LSP connection manager — message routing', () => {
       const parsed = JSON.parse(received[0][0]);
       expect(parsed.error).toEqual({ code: -32603, message: 'Internal error' });
       expect(received[1]).toHaveLength(0);
+    });
+  });
+
+  describe('$server/lspReady notification', () => {
+    beforeEach(() => setup(3));
+
+    it('calls onReady on targeted channel when _ch hint is present', () => {
+      let readyCalls: number[] = []; // channel IDs that received onReady
+      for (let i = 0; i < channels.length; i++) {
+        const idx = i;
+        channels[i].onReady = () => readyCalls.push(channels[i].id);
+      }
+
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        method: '$/lspReady',
+        _ch: 2,
+      }));
+
+      expect(readyCalls).toEqual([2]); // only channel 2
+    });
+
+    it('broadcasts onReady to all channels when no _ch hint', () => {
+      let readyCalls: number[] = [];
+      for (let i = 0; i < channels.length; i++) {
+        const idx = i;
+        channels[i].onReady = () => readyCalls.push(channels[i].id);
+      }
+
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        method: '$/lspReady',
+      }));
+
+      expect(readyCalls).toEqual([1, 2, 3]); // all channels
+    });
+
+    it('does not deliver $server/lspReady to handler (not a normal LSP message)', () => {
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        method: '$/lspReady',
+        _ch: 1,
+      }));
+
+      // Notification handlers should NOT receive this message
+      expect(received[0]).toHaveLength(0);
+      expect(received[1]).toHaveLength(0);
+      expect(received[2]).toHaveLength(0);
+    });
+
+    it('ignores onReady for unknown channel', () => {
+      let readyCalls: number[] = [];
+      for (let i = 0; i < channels.length; i++) {
+        channels[i].onReady = () => readyCalls.push(channels[i].id);
+      }
+
+      dispatchMessage(channels, JSON.stringify({
+        jsonrpc: '2.0',
+        method: '$/lspReady',
+        _ch: 99, // unknown channel
+      }));
+
+      expect(readyCalls).toEqual([]); // no channel matched
     });
   });
 

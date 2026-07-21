@@ -291,9 +291,12 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 			ws.sentInitialized = true
 			h.mu.Unlock()
 			h.forwardRaw(ctx, session, stripped, workspaceKey)
+			// Notify frontend that LSP is fully ready (after initialized notification forwarded)
+			h.sendLSPReady(ctx, session, channelID)
 		} else {
 			h.mu.Unlock()
 			// Silently drop duplicate "initialized" notifications
+			// $server/lspReady was already sent (by handleInitialize cached path or first channel)
 		}
 		return
 	}
@@ -384,12 +387,18 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 
 	workspaceKey := processKey(sub.Params.Workspace, cfg.Language)
 
+	// Check if workspace already exists (brief lock)
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	ws, ok := h.workspaces[workspaceKey]
+	if ok {
+		ws.clientCount++
+		h.mu.Unlock()
+	} else {
+		h.mu.Unlock()
+	}
+
 	if !ok {
-		// Spawn a new process
+		// Spawn a new process (OUTSIDE lock to avoid blocking other operations)
 		process, err := h.manager.GetOrCreate(sub.Params.Workspace, cfg.Language, cfg)
 		if err != nil {
 			log.Printf("[lsp] client %d: failed to spawn process: %v", session.clientID, err)
@@ -397,15 +406,22 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 			return
 		}
 
-		ws = &workspaceState{
-			process:   process,
-			language:  cfg.Language,
-			cfg:       cfg,
-			clientCount: 1,
+		// Re-acquire lock to register workspace (double-check pattern)
+		h.mu.Lock()
+		// Another subscriber may have created it while we were spawning
+		if existing, ok := h.workspaces[workspaceKey]; ok {
+			existing.clientCount++
+			ws = existing
+		} else {
+			ws = &workspaceState{
+				process:     process,
+				language:    cfg.Language,
+				cfg:         cfg,
+				clientCount: 1,
+			}
+			h.workspaces[workspaceKey] = ws
 		}
-		h.workspaces[workspaceKey] = ws
-	} else {
-		ws.clientCount++
+		h.mu.Unlock()
 	}
 
 	session.workspace = sub.Params.Workspace // store just the path; per-request routing uses workspaceKeys
@@ -428,43 +444,52 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 	ws, ok := h.workspaces[workspaceKey]
 	if !ok {
 		log.Printf("[lsp] client %d: workspaceKey=%s not found, lazy init", session.clientID, workspaceKey)
+		h.mu.Unlock()
 		// Lazy workspace creation: this is the first request for this language.
 		// Look up the server config from the file path and create the workspace.
+		// Do this OUTSIDE the lock to avoid blocking other operations.
 		cfg := h.registry.Lookup(filePath)
 		if cfg == nil {
 			cfg = h.registry.Lookup(session.workspace)
 		}
 		if cfg == nil {
-			h.mu.Unlock()
 			log.Printf("[lsp] client %d: no language server config for file %s (lazy init failed)", session.clientID, filePath)
 			return
 		}
 		process, err := h.manager.GetOrCreate(session.workspace, cfg.Language, cfg)
 		if err != nil {
-			h.mu.Unlock()
 			log.Printf("[lsp] client %d: failed to spawn process for lazy init: %v", session.clientID, err)
 			return
 		}
-		ws = &workspaceState{
-			process:     process,
-			language:    cfg.Language,
-			cfg:         cfg,
-			clientCount: 1,
+		// Re-acquire lock to register workspace (double-check pattern)
+		h.mu.Lock()
+		if existing, ok := h.workspaces[workspaceKey]; ok {
+			ws = existing
+		} else {
+			ws = &workspaceState{
+				process:     process,
+				language:    cfg.Language,
+				cfg:         cfg,
+				clientCount: 1,
+			}
+			h.workspaces[workspaceKey] = ws
+			session.activeWorkspaces[workspaceKey]++
+			log.Printf("[lsp] client %d: lazy-created workspace=%s lang=%s", session.clientID, session.workspace, cfg.Language)
 		}
-		h.workspaces[workspaceKey] = ws
-		session.activeWorkspaces[workspaceKey]++
-		log.Printf("[lsp] client %d: lazy-created workspace=%s lang=%s", session.clientID, session.workspace, cfg.Language)
 	}
 
 	if ws.initialized {
 		// Already initialized — return cached response immediately
+		var cachedResponse json.RawMessage
 		if ws.initResponse != nil {
-			remapped := remapResponseIDWithChannel(ws.initResponse, clientReqID, channelID)
-			if remapped != nil {
-				session.conn.Write(ctx, websocket.MessageText, remapped)
-			}
+			cachedResponse = remapResponseIDWithChannel(ws.initResponse, clientReqID, channelID)
 		}
 		h.mu.Unlock()
+		if cachedResponse != nil {
+			session.conn.Write(ctx, websocket.MessageText, cachedResponse)
+		}
+		// Notify frontend that LSP is ready for this channel
+		h.sendLSPReady(ctx, session, channelID)
 		return
 	}
 
@@ -660,6 +685,8 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 		if qremapped != nil {
 			q.session.conn.Write(context.Background(), websocket.MessageText, qremapped)
 		}
+		// Notify frontend that LSP is ready for this queued channel
+		h.sendLSPReady(context.Background(), q.session, q.channelID)
 	}
 }
 
@@ -767,6 +794,20 @@ func remapResponseIDWithChannel(msg json.RawMessage, clientID string, channelID 
 		return nil
 	}
 	return result
+}
+
+// sendLSPReady sends a $server/lspReady notification to the client.
+// If channelID > 0, includes a _ch hint for multiplex routing.
+func (h *LSPHandler) sendLSPReady(ctx context.Context, session *ClientSession, channelID int64) {
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "$/lspReady",
+	}
+	if channelID > 0 {
+		msg["_ch"] = channelID
+	}
+	data, _ := json.Marshal(msg)
+	_ = session.conn.Write(ctx, websocket.MessageText, data)
 }
 
 // itoa converts an int64 to a string without allocation-heavy fmt calls.

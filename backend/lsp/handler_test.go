@@ -668,3 +668,171 @@ func TestUnknownExtensionRejected(t *testing.T) {
 		t.Error("expected connection to be closed for unknown extension")
 	}
 }
+
+func TestLSPReadyNotification(t *testing.T) {
+	mgr := newMockProcessManager()
+	reg := NewRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+
+	// Connect client and subscribe
+	client := subscribeClient(t, url, "/tmp/test-project", "main.go")
+
+	// Send initialize request
+	client.send(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"processId": 12345,
+			"rootUri":   "file:///tmp/test-project",
+			"capabilities": map[string]any{},
+		},
+	})
+
+	// Give handler time to process
+	time.Sleep(50 * time.Millisecond)
+
+	// Simulate initialize response from server
+	sent := mgr.SentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 sent message (initialize), got %d", len(sent))
+	}
+
+	var initReq map[string]any
+	json.Unmarshal(sent[0], &initReq)
+	backendID := initReq["id"]
+
+	initResponse := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      backendID,
+		"result": map[string]any{
+			"capabilities": map[string]any{
+				"completionProvider": map[string]any{"resolveProvider": true},
+			},
+			"serverInfo": map[string]any{"name": "gopls"},
+		},
+	}
+	respData, _ := json.Marshal(initResponse)
+	mgr.Deliver(respData)
+
+	// Client should receive initialize response
+	resp := client.receiveJSON(t)
+	if resp.ID == nil || resp.ID.String() != "1" {
+		t.Fatalf("expected initialize response with id=1, got id=%v", resp.ID)
+	}
+	if resp.Result == nil {
+		t.Fatal("expected result in initialize response")
+	}
+
+	// Send initialized notification
+	client.send(t, map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "initialized",
+		"params":  map[string]any{},
+	})
+
+	// Client should receive $server/lspReady notification
+	readyMsg := client.receiveJSON(t)
+	if readyMsg.Method != "$/lspReady" {
+		t.Fatalf("expected $server/lspReady notification, got method=%s", readyMsg.Method)
+	}
+}
+
+func TestLSPReadyNotificationCachedResponse(t *testing.T) {
+	mgr := newMockProcessManager()
+	reg := NewRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+
+	// First client: complete full initialize handshake
+	client1 := subscribeClient(t, url, "/tmp/test-project", "main.go")
+
+	client1.send(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"processId":    12345,
+			"rootUri":      "file:///tmp/test-project",
+			"capabilities": map[string]any{},
+		},
+	})
+	time.Sleep(50 * time.Millisecond)
+
+	sent := mgr.SentMessages()
+	var initReq map[string]any
+	json.Unmarshal(sent[0], &initReq)
+	backendID := initReq["id"]
+
+	initResponse := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      backendID,
+		"result": map[string]any{
+			"capabilities": map[string]any{},
+			"serverInfo":  map[string]any{"name": "gopls"},
+		},
+	}
+	mgr.Deliver(json.RawMessage(mustMarshal(t, initResponse)))
+
+	// Client1 receives initialize response
+	resp1 := client1.receiveJSON(t)
+	if resp1.ID == nil || resp1.ID.String() != "1" {
+		t.Fatalf("client1: expected id=1, got %v", resp1.ID)
+	}
+
+	// Client1 sends initialized
+	client1.send(t, map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "initialized",
+		"params":  map[string]any{},
+	})
+	// Client1 receives $server/lspReady
+	ready1 := client1.receiveJSON(t)
+	if ready1.Method != "$/lspReady" {
+		t.Fatalf("client1: expected $server/lspReady, got %s", ready1.Method)
+	}
+
+	// Second client: connects to same workspace, gets cached response
+	client2 := subscribeClient(t, url, "/tmp/test-project", "main.go")
+
+	client2.send(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "initialize",
+		"params": map[string]any{
+			"processId":    99999,
+			"rootUri":      "file:///tmp/test-project",
+			"capabilities": map[string]any{},
+		},
+	})
+
+	// Client2 should receive cached initialize response
+	resp2 := client2.receiveJSON(t)
+	if resp2.ID == nil || resp2.ID.String() != "2" {
+		t.Fatalf("client2: expected id=2, got %v", resp2.ID)
+	}
+	if resp2.Result == nil {
+		t.Fatal("client2: expected cached result")
+	}
+
+	// Client2 should also receive $server/lspReady
+	ready2 := client2.receiveJSON(t)
+	if ready2.Method != "$/lspReady" {
+		t.Fatalf("client2: expected $server/lspReady, got %s", ready2.Method)
+	}
+}
+
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	return data
+}
+

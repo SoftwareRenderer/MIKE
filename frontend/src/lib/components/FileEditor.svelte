@@ -82,6 +82,7 @@
     let fileUri = $state('');
     let lspCompartment = $state(new Compartment());
     let lspAvailable = $state(false);
+    let lspWorkspace = $state(''); // workspace path the LSP client is connected to
 
     // Notify parent when unsaved changes state changes
     $effect(() => {
@@ -370,6 +371,7 @@
         lspClient = null;
         lspReady = false;
         lspError = '';
+        lspWorkspace = '';
         view?.destroy();
         view = null;
         editorReady = false;
@@ -528,8 +530,9 @@
         }
     });
 
-    // Re-create editor when file changes
+    // Re-create editor when file or project changes
     $effect(() => {
+        const _projId = projectId; // track project changes too
         if (filePath) {
             loadFile();
         }
@@ -560,7 +563,8 @@
         const _lspAvail = isLSPAvailable(filePath);
 
         if (!_editorReady || !view || !_projId || !_projPath) return;
-        if (lspClient) return; // already initialized
+        // Re-initialize if workspace changed (e.g., project switch with same file path)
+        if (lspClient && lspWorkspace === _projPath) return;
 
         async function initLSP() {
             // Check if LSP extension is available for this file
@@ -568,8 +572,13 @@
             if (!lspAvailable) return; // fall back to built-in autocompletion
 
             lspConnecting = true;
+            lspReady = false;
             fileUri = `file://${filePath}`;
             try {
+                // Promise resolved when backend sends $server/lspReady notification
+                let resolveReady: () => void;
+                const readyPromise = new Promise<void>(resolve => { resolveReady = resolve; });
+
                 // Request a virtual transport from the shared connection manager.
                 // All editors in the same workspace share one WebSocket.
                 const virtTransport = await requestLSPChannel({
@@ -577,6 +586,7 @@
                     filePath,
                     onDisconnected: () => {
                         lspReady = false;
+                        lspWorkspace = ''; // clear workspace on disconnect
                     },
                     onServerInfo: (name, version) => {
                         lspServerName = name;
@@ -591,6 +601,10 @@
                             lspServerVersion = '';
                         }
                     },
+                    onReady: () => {
+                        lspReady = true;
+                        resolveReady();
+                    },
                 });
                 lspTransport = virtTransport;
 
@@ -602,7 +616,17 @@
                 });
 
                 await lspClient.connect(virtTransport).initializing;
-                lspReady = true;
+
+                // Wait for backend $server/lspReady notification (keeps spinner spinning).
+                // Fallback: if backend doesn't send it within 5s, assume ready (old backend compat).
+                await Promise.race([
+                    readyPromise,
+                    new Promise<void>(resolve => setTimeout(resolve, 5000)),
+                ]);
+                if (!lspReady) {
+                    lspReady = true; // fallback for old backend
+                }
+                lspWorkspace = _projPath!; // track which workspace we're connected to
                 // Derive language name from file extension
                 const ext = filePath.split('.').pop()?.toLowerCase() || '';
                 const langMap: Record<string, string> = {
@@ -645,7 +669,12 @@
 
         async function reconnectLSP() {
             lspConnecting = true;
+            lspReady = false;
             try {
+                // Promise resolved when backend sends $server/lspReady notification
+                let resolveReady: () => void;
+                const readyPromise = new Promise<void>(resolve => { resolveReady = resolve; });
+
                 // Release old transport and get a new one from the shared manager
                 lspTransport?.release();
                 lspTransport = null;
@@ -656,6 +685,7 @@
                     filePath,
                     onDisconnected: () => {
                         lspReady = false;
+                        lspWorkspace = '';
                     },
                     onServerInfo: (name, version) => {
                         lspServerName = name;
@@ -670,6 +700,10 @@
                             lspServerVersion = '';
                         }
                     },
+                    onReady: () => {
+                        lspReady = true;
+                        resolveReady();
+                    },
                 });
                 lspTransport = virtTransport;
 
@@ -681,7 +715,16 @@
                 lspClient = newClient;
 
                 await newClient.connect(virtTransport).initializing;
-                lspReady = true;
+
+                // Wait for backend $server/lspReady notification
+                await Promise.race([
+                    readyPromise,
+                    new Promise<void>(resolve => setTimeout(resolve, 5000)),
+                ]);
+                if (!lspReady) {
+                    lspReady = true; // fallback for old backend
+                }
+                lspWorkspace = _projPath!;
 
                 // Re-attach plugin
                 if (_view && newClient) {
