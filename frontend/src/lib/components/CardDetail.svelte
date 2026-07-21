@@ -382,6 +382,27 @@
                 dialogStore.showToast(`${started} task${started > 1 ? 's' : ''} started`, 'success');
             }
         },
+        async onModelChange(taskIds, providerUrl, modelName, reasoningEffort) {
+            let updated = 0;
+            for (const id of taskIds) {
+                try {
+                    const { updateTask } = await import('$lib/api');
+                    const taskUpdate: Record<string, unknown> = { llama_server_url: providerUrl };
+                    if (modelName) taskUpdate.model_name = modelName;
+                    else taskUpdate.model_name = undefined;
+                    if (reasoningEffort) taskUpdate.reasoning_effort = reasoningEffort;
+                    else taskUpdate.reasoning_effort = undefined;
+                    const result = await updateTask(task.project_id, id, taskUpdate);
+                    updateTaskInBoard(appStore, result.id, result);
+                    updated++;
+                } catch (err) {
+                    dialogStore.showToast(`Failed to update model: ${String(err)}`, 'error');
+                }
+            }
+            if (updated > 0) {
+                dialogStore.showToast(`Model updated for ${updated} task${updated > 1 ? 's' : ''}`, 'success');
+            }
+        },
     });
     let multiSelect = multiSelectActions.multiSelect;
 
