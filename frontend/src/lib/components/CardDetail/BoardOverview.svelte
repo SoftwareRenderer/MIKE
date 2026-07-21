@@ -3,13 +3,13 @@
     import type { Task } from '$lib/types';
     import Card from '../Card.svelte';
     import { sortByActivity } from '$lib/utils/sort-tasks';
+    import { countWithDescendants } from '$lib/utils/task-utils';
     import type { MultiSelect } from '$lib/composables/use-multi-select.svelte';
 
     let {
         sections,
         allTasks,
         consolidatedSubtaskIds,
-        subtaskIds,
         sectionDragState,
         collapsedSections,
         currentTask,
@@ -31,8 +31,7 @@
         sections: Array<{ id: string; title: string }>;
         allTasks: Task[];
         consolidatedSubtaskIds: Set<string>;
-        subtaskIds: Set<string>;
-        sectionDragState: Map<string, { isOver: boolean; isRejected: boolean }>;
+        sectionDragState: Map<string, { isOver: boolean; isRejected: boolean}>;
         collapsedSections: Set<string>;
         currentTask: Task;
         childrenMap: Map<string, Task[]>;
@@ -71,7 +70,8 @@
 
 <div class="task-list">
     {#each sections as section (section.id)}
-        {@const sectionTasks = sortByActivity(allTasks.filter(t => { if (t.status !== section.id) return false; if (consolidatedSubtaskIds.has(t.id)) return false; if (!subtaskIds.has(t.id)) return true; return true; }))}
+        {@const sectionTasks = sortByActivity(allTasks.filter(t => t.status === section.id && !consolidatedSubtaskIds.has(t.id)))}
+        {@const sectionCount = sectionTasks.reduce((sum, t) => sum + countWithDescendants(t.id, section.id, childrenMap), 0)}
         {@const sectionState = sectionDragState.get(section.id) || { isOver: false, isRejected: false }}
         <div
             class="section-group"
@@ -97,14 +97,14 @@
                     {section.title}
                 </span>
                 <div class="header-right">
-                    <span class="section-count">{sectionTasks.length}</span>
+                    <span class="section-count">{sectionCount}</span>
                     {#if section.id === 'backlog'}
                         <span class="add-btn" tabindex="0" role="button" onclick={(e) => { e.stopPropagation(); onShowCreateTask(); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onShowCreateTask(); } }} aria-label="Create a new task" title="Create a new task">
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                         </span>
                     {/if}
-                    {#if section.id === 'done' && sectionTasks.length > 0}
-                        <span class="clear-btn" tabindex="0" role="button" onclick={(e) => { e.stopPropagation(); onClearDone(sectionTasks.length); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClearDone(sectionTasks.length); } }} aria-label={`Clear all ${sectionTasks.length} done tasks`} title={`Clear all ${sectionTasks.length} done tasks`}>
+                    {#if section.id === 'done' && sectionCount > 0}
+                        <span class="clear-btn" tabindex="0" role="button" onclick={(e) => { e.stopPropagation(); onClearDone(sectionTasks.length); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClearDone(sectionTasks.length); } }} aria-label={`Clear all ${sectionCount} done tasks`} title={`Clear all ${sectionCount} done tasks`}>
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                                 <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
