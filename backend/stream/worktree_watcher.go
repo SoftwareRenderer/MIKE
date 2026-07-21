@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +15,7 @@ import (
 	"kanban/backend/git"
 )
 
-// DiffStatsEvent holds the data for a diff stats broadcast.
+// DiffStatsEvent holds data for a diff stats broadcast to clients.
 type DiffStatsEvent struct {
 	ProjectID       string
 	TaskID          string
@@ -28,49 +29,73 @@ type DiffStatsEvent struct {
 	StagedPaths     []string
 }
 
-// diffBroadcastFn broadcasts diff stats to clients.
 type diffBroadcastFn func(event DiffStatsEvent)
-
-// diffCacheUpdateFn is a callback to update the GitHandler's diff cache.
 type diffCacheUpdateFn func(taskID string, taskDiff *git.TaskDiff)
 
-// worktreeInfo tracks the state of a watched worktree.
+// diffJob is a unit of work for the diff worker pool.
+type diffJob struct {
+	taskID    string
+	projectID string
+	baseRef   string
+}
+
 type worktreeInfo struct {
 	projectID   string
 	path        string
 	baseRef     string
-	gitIndexDir string             // directory containing the git index (for worktrees, this is in the main repo)
-	ignoredDirs map[string]struct{} // merged set: hardcoded + git-ignored directory names
+	gitIndexDir string              // git index dir (in main repo for worktrees)
+	ignoredDirs map[string]struct{} // hardcoded + git-ignored directory names
 }
 
-// WorktreeWatcher uses fsnotify to detect file changes in git worktrees.
-// A single shared fsnotify.Watcher monitors all worktree directories.
-// Events are throttled per-task: at most one diff compute/broadcast every 2 seconds.
+// WorktreeWatcher detects file changes in git worktrees via fsnotify.
+// Events are throttled per-task: at most one diff compute/broadcast every 2s.
 type WorktreeWatcher struct {
 	mu          sync.Mutex
 	watcher     *fsnotify.Watcher
-	worktrees   map[string]worktreeInfo // taskID -> info
-	throttles   map[string]*time.Timer  // taskID -> throttle timer (at most 1 per 2s)
-	diffCache   sync.Map                // taskID -> *git.TaskDiff (previous state for delta computation)
+	worktrees   map[string]worktreeInfo
+	throttles   map[string]*time.Timer
+	diffCache   sync.Map
 	broadcast   diffBroadcastFn
-	updateCache diffCacheUpdateFn       // callback to update GitHandler's diffCache
+	updateCache diffCacheUpdateFn
 	worktreeMgr *git.WorktreeManager
+
+	pathCache      map[string]string // dir path -> taskID for O(1) lookup
+	indexDirToTask map[string]string // git index dir -> taskID
+
+	jobCh    chan diffJob      // bounded worker pool
+	doneCh   chan struct{}
+	workerWg sync.WaitGroup
+	inFlight map[string]bool // taskID in pool or being processed
 }
 
-// NewWorktreeWatcher creates a new WorktreeWatcher.
+// NewWorktreeWatcher creates a new WorktreeWatcher with a bounded worker pool.
 func NewWorktreeWatcher(worktreeMgr *git.WorktreeManager, broadcast diffBroadcastFn, updateCache diffCacheUpdateFn) (*WorktreeWatcher, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
-	return &WorktreeWatcher{
-		watcher:     w,
-		worktrees:   make(map[string]worktreeInfo),
-		throttles:   make(map[string]*time.Timer),
-		broadcast:   broadcast,
-		updateCache: updateCache,
-		worktreeMgr: worktreeMgr,
-	}, nil
+	poolSize := runtime.NumCPU() - 1
+	if poolSize < 1 {
+		poolSize = 1
+	}
+	ww := &WorktreeWatcher{
+		watcher:        w,
+		worktrees:      make(map[string]worktreeInfo),
+		throttles:      make(map[string]*time.Timer),
+		broadcast:      broadcast,
+		updateCache:    updateCache,
+		worktreeMgr:    worktreeMgr,
+		pathCache:      make(map[string]string),
+		indexDirToTask: make(map[string]string),
+		jobCh:          make(chan diffJob, poolSize),
+		doneCh:         make(chan struct{}),
+		inFlight:       make(map[string]bool),
+	}
+	for i := 0; i < poolSize; i++ {
+		ww.workerWg.Add(1)
+		go ww.worker()
+	}
+	return ww, nil
 }
 
 // Watch starts monitoring a task's worktree directory for file changes.
@@ -86,15 +111,21 @@ func (ww *WorktreeWatcher) Watch(taskID, projectID, baseRef string) error {
 	// Remove existing watcher if re-watching
 	if info, exists := ww.worktrees[taskID]; exists {
 		_ = ww.watcher.Remove(info.path)
+		delete(ww.pathCache, info.path+string(filepath.Separator))
 		if info.gitIndexDir != "" {
 			_ = ww.watcher.Remove(info.gitIndexDir)
+			delete(ww.indexDirToTask, info.gitIndexDir)
+		}
+		prefix := info.path + string(filepath.Separator)
+		for p := range ww.pathCache {
+			if p == info.path || strings.HasPrefix(p, prefix) {
+				delete(ww.pathCache, p)
+			}
 		}
 	}
 
-	// Discover ignored directories (hardcoded + .gitignore)
 	ignored := loadIgnoredDirs(path)
 
-	// Track worktree info
 	ww.worktrees[taskID] = worktreeInfo{
 		projectID:   projectID,
 		path:        path,
@@ -102,27 +133,25 @@ func (ww *WorktreeWatcher) Watch(taskID, projectID, baseRef string) error {
 		ignoredDirs: ignored,
 	}
 
-	// Add directory to fsnotify watcher (recursive, skipping ignored dirs)
-	if err := ww.addRecursive(path, ignored); err != nil {
+	if err := ww.addRecursive(path, ignored, taskID); err != nil {
 		delete(ww.worktrees, taskID)
+		delete(ww.pathCache, path+string(filepath.Separator))
 		return err
 	}
 
-	// Watch the git index directory to detect stage/unstage operations.
-	// In worktrees, .git is a file pointing to the real index location
-	// (e.g. /repo/.git/worktrees/<task-id>/index). Git atomically replaces
-	// index via write-to-temp + rename, so we watch the parent directory.
+	// Watch git index dir to detect stage/unstage operations.
 	wtInfo := ww.worktrees[taskID]
 	indexDir := resolveGitIndexDir(path)
 	if indexDir != "" {
 		_ = ww.watcher.Add(indexDir)
 		wtInfo.gitIndexDir = indexDir
+		ww.indexDirToTask[indexDir] = taskID
 	} else {
-		// Fallback: for a regular (non-worktree) repo, watch .git/ directly
 		gitDir := filepath.Join(path, ".git")
 		if fi, err := os.Stat(gitDir); err == nil && fi.IsDir() {
 			_ = ww.watcher.Add(gitDir)
 			wtInfo.gitIndexDir = gitDir
+			ww.indexDirToTask[gitDir] = taskID
 		}
 	}
 	ww.worktrees[taskID] = wtInfo
@@ -142,12 +171,19 @@ func (ww *WorktreeWatcher) Unwatch(taskID string) {
 	}
 
 	_ = ww.watcher.Remove(info.path)
+	delete(ww.pathCache, info.path+string(filepath.Separator))
 	if info.gitIndexDir != "" {
 		_ = ww.watcher.Remove(info.gitIndexDir)
+		delete(ww.indexDirToTask, info.gitIndexDir)
+	}
+	prefix := info.path + string(filepath.Separator)
+	for p := range ww.pathCache {
+		if p == info.path || strings.HasPrefix(p, prefix) {
+			delete(ww.pathCache, p)
+		}
 	}
 	delete(ww.worktrees, taskID)
 
-	// Cancel any pending throttle
 	if timer, ok := ww.throttles[taskID]; ok {
 		timer.Stop()
 		delete(ww.throttles, taskID)
@@ -156,21 +192,27 @@ func (ww *WorktreeWatcher) Unwatch(taskID string) {
 	log.Printf("[watcher] task=%s stopped watching", taskID)
 }
 
-// Close stops the watcher and releases resources.
+// Close stops the watcher, worker pool, and releases resources.
 func (ww *WorktreeWatcher) Close() {
 	ww.mu.Lock()
 	defer ww.mu.Unlock()
 
-	// Cancel all pending throttles
 	for _, timer := range ww.throttles {
 		timer.Stop()
 	}
+
+	close(ww.doneCh)
+	ww.workerWg.Wait()
+
+	ww.pathCache = nil
+	ww.indexDirToTask = nil
+	ww.inFlight = nil
 
 	_ = ww.watcher.Close()
 	log.Println("[watcher] closed")
 }
 
-// StartEventLoop runs the fsnotify event loop. Should be called in a goroutine.
+// StartEventLoop runs the fsnotify event loop. Call in a goroutine.
 func (ww *WorktreeWatcher) StartEventLoop() {
 	log.Println("[watcher] event loop started")
 	for {
@@ -190,39 +232,42 @@ func (ww *WorktreeWatcher) StartEventLoop() {
 }
 
 func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
-	// Find which task's worktree this event belongs to
 	ww.mu.Lock()
 
 	var taskID string
-	var info worktreeInfo
-	for id, winfo := range ww.worktrees {
-		// Ensure path ends with / for clean prefix matching
-		prefix := winfo.path
-		if !strings.HasSuffix(prefix, string(filepath.Separator)) {
-			prefix = prefix + string(filepath.Separator)
+	if tid, ok := ww.pathCache[event.Name]; ok {
+		taskID = tid
+	} else if tid, ok := ww.pathCache[event.Name+string(filepath.Separator)]; ok {
+		taskID = tid
+	} else {
+		// Check git index dir (lives outside worktree).
+		indexPrefix := event.Name
+		if i := strings.IndexFunc(event.Name, func(r rune) bool {
+			return r == filepath.Separator
+		}); i >= 0 {
+			indexPrefix = event.Name[:i+1]
 		}
-		// Check if the event path is inside this worktree directory
-		if event.Name == winfo.path || strings.HasPrefix(event.Name, prefix) {
-			taskID = id
-			info = winfo
-			break
-		}
-	}
-
-	if taskID == "" {
-		// Check if this event is from a git index directory.
-		// The index dir lives outside the worktree, so normal prefix matching misses it.
-		for id, winfo := range ww.worktrees {
-			if winfo.gitIndexDir != "" {
-				prefix := winfo.gitIndexDir
-				if !strings.HasSuffix(prefix, string(filepath.Separator)) {
-					prefix += string(filepath.Separator)
-				}
-				if event.Name == winfo.gitIndexDir || strings.HasPrefix(event.Name, prefix) {
-					taskID = id
-					info = winfo
+		if tid, ok := ww.indexDirToTask[indexPrefix]; ok {
+			taskID = tid
+		} else if tid, ok := ww.indexDirToTask[event.Name]; ok {
+			taskID = tid
+		} else {
+			// Walk up directory tree to find a cached parent.
+			dir := filepath.Dir(event.Name)
+			for {
+				if tid, ok := ww.pathCache[dir]; ok {
+					taskID = tid
 					break
 				}
+				if tid, ok := ww.pathCache[dir+string(filepath.Separator)]; ok {
+					taskID = tid
+					break
+				}
+				parent := filepath.Dir(dir)
+				if parent == dir {
+					break
+				}
+				dir = parent
 			}
 		}
 	}
@@ -232,38 +277,38 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 		return
 	}
 
-	// For git index directory events, only react to index file changes
-	// (stage/unstage). Skip HEAD, logs/, refs/, and other metadata.
+	info, exists := ww.worktrees[taskID]
+	if !exists {
+		ww.mu.Unlock()
+		return
+	}
+
+	// For git index events, only react to index file changes (stage/unstage).
 	if info.gitIndexDir != "" && (event.Name == info.gitIndexDir || strings.HasPrefix(event.Name, info.gitIndexDir+string(filepath.Separator))) {
 		base := filepath.Base(event.Name)
 		parent := filepath.Dir(event.Name)
 		if base == "index" {
-			// index file itself — proceed
+			// proceed
 		} else if parent == info.gitIndexDir && !isGitMetadataFile(base) {
-			// Temp file in the index dir (git atomically rewrites index via temp+rename) — proceed
+			// temp file in index dir — proceed
 		} else {
-			// Subdirectory (logs/, refs/) or metadata file — skip
 			ww.mu.Unlock()
 			return
 		}
 	}
 
-	// Skip temporary/backup files (*.swp, *~, .DS_Store, etc.)
 	if git.ShouldIgnoreFile(event.Name) {
 		ww.mu.Unlock()
 		return
 	}
 
-	// Skip events from ignored directories (skip for git index events,
-	// where event.Name is outside the worktree and rel path is unreliable)
 	relPath, _ := filepath.Rel(info.path, event.Name)
 	if !strings.HasPrefix(relPath, "..") && git.ShouldIgnorePath(relPath) {
 		ww.mu.Unlock()
 		return
 	}
 
-	// If a new directory was created inside the worktree, start watching it.
-	// Skip for git index events (outside the worktree).
+	// Watch new directories created inside the worktree.
 	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 && !strings.HasPrefix(relPath, "..") {
 		if absPath, err := filepath.Abs(event.Name); err == nil {
 			if dirInfo, err := filepath.EvalSymlinks(absPath); err == nil {
@@ -271,19 +316,14 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 					basename := filepath.Base(event.Name)
 					if _, ok := info.ignoredDirs[basename]; !ok && !git.ShouldIgnorePath(basename) {
 						_ = ww.watcher.Add(event.Name)
-						_ = ww.addRecursive(event.Name, info.ignoredDirs)
+						_ = ww.addRecursive(event.Name, info.ignoredDirs, taskID)
 					}
 				}
 			}
 		}
 	}
 
-	// Skip remove/rename events for throttle trigger — they still count as changes
-	// but we only need one event to trigger the throttle
-
-	// Throttle: compute and broadcast at most once every 2 seconds.
-	// If a broadcast is already pending for this task, skip — the in-flight
-	// timer will fire within the window.
+	// Throttle: at most one diff compute every 2s per task.
 	if _, exists := ww.throttles[taskID]; exists {
 		ww.mu.Unlock()
 		return
@@ -292,22 +332,52 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	projectID := info.projectID
 	baseRef := info.baseRef
 	timer := time.AfterFunc(2000*time.Millisecond, func() {
-		ww.computeAndBroadcast(taskID, projectID, baseRef)
+		ww.mu.Lock()
+		if t, exists := ww.throttles[taskID]; exists {
+			t.Stop()
+			delete(ww.throttles, taskID)
+		}
+		if ww.inFlight[taskID] {
+			ww.mu.Unlock()
+			return
+		}
+		ww.inFlight[taskID] = true
+		ww.mu.Unlock()
+
+		select {
+		case ww.jobCh <- diffJob{taskID: taskID, projectID: projectID, baseRef: baseRef}:
+		default:
+			ww.mu.Lock()
+			delete(ww.inFlight, taskID)
+			ww.mu.Unlock()
+		}
 	})
 	ww.throttles[taskID] = timer
 	ww.mu.Unlock()
 }
 
-func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string) {
-	// Remove throttle timer
-	ww.mu.Lock()
-	if timer, exists := ww.throttles[taskID]; exists {
-		timer.Stop()
+func (ww *WorktreeWatcher) worker() {
+	defer ww.workerWg.Done()
+	for {
+		select {
+		case job, ok := <-ww.jobCh:
+			if !ok {
+				return
+			}
+			ww.computeAndBroadcast(job.taskID, job.projectID, job.baseRef)
+		case <-ww.doneCh:
+			return
+		}
 	}
-	delete(ww.throttles, taskID)
-	ww.mu.Unlock()
+}
 
-	// Compute diff
+func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string) {
+	defer func() {
+		ww.mu.Lock()
+		delete(ww.inFlight, taskID)
+		ww.mu.Unlock()
+	}()
+
 	diffResult, err := ww.worktreeMgr.GetTaskDiff(taskID, baseRef, "")
 	if err != nil {
 		return
@@ -316,14 +386,13 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	untrackedN := len(diffResult.Untracked)
 	filesN := len(diffResult.Tracked) + untrackedN
 
-	// Compute hash and compare against cached state BEFORE the cache is overwritten.
 	hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
 	if hash != "" {
 		if prevRaw, ok := ww.diffCache.Load(taskID); ok {
 			prevDiff := prevRaw.(*git.TaskDiff)
 			prevHash := ComputeDiffHash(prevDiff.Diff, prevDiff.Untracked, prevDiff.StagedHash)
 			if hash == prevHash {
-				return // nothing changed
+				return
 			}
 		}
 	}
@@ -360,26 +429,21 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	}
 }
 
-// computeDiffDelta compares new file hashes with the cached previous state.
-// Internal files are excluded from the delta and cache.
+// computeDiffDelta compares new file hashes with cached previous state.
+// Internal files are excluded.
 func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.TaskDiff, cache *sync.Map) (changedHashes map[string]string, removedFiles []string) {
-	// Get previous state
 	prevRaw, hasPrev := cache.Load(taskID)
 	prevHashes := map[string]string{}
 	if hasPrev {
-		prevDiff := prevRaw.(*git.TaskDiff)
-		prevHashes = prevDiff.GetPerFileHashes()
+		prevHashes = prevRaw.(*git.TaskDiff).GetPerFileHashes()
 	}
 
-	// Filter out internal paths from new hashes
 	filteredNew := make(map[string]string, len(newHashes))
 	for path, hash := range newHashes {
 		if !isInternalFile(path) {
 			filteredNew[path] = hash
 		}
 	}
-
-	// Filter out internal paths from previous hashes
 	filteredPrev := make(map[string]string, len(prevHashes))
 	for path, hash := range prevHashes {
 		if !isInternalFile(path) {
@@ -387,7 +451,6 @@ func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.T
 		}
 	}
 
-	// Find changed files (new or hash changed)
 	changedHashes = make(map[string]string)
 	for path, newHash := range filteredNew {
 		prevHash, exists := filteredPrev[path]
@@ -395,20 +458,16 @@ func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.T
 			changedHashes[path] = newHash
 		}
 	}
-
-	// Find removed files (in previous but not in new)
 	for path := range filteredPrev {
 		if _, exists := filteredNew[path]; !exists {
 			removedFiles = append(removedFiles, path)
 		}
 	}
 
-	// Update cache
 	cache.Store(taskID, newDiff)
 	return
 }
 
-// countUntrackedLines sums the line counts from untracked file entries.
 func countUntrackedLines(untracked []git.UntrackedFile) int {
 	total := 0
 	for _, u := range untracked {
@@ -417,39 +476,30 @@ func countUntrackedLines(untracked []git.UntrackedFile) int {
 	return total
 }
 
-// loadIgnoredDirs builds a merged set of directory names to ignore.
-// Combines hardcoded well-known directories with directories discovered
-// via git check-ignore (respects .gitignore rules).
+// loadIgnoredDirs merges hardcoded dirs with .gitignore-discovered dirs.
 func loadIgnoredDirs(repoRoot string) map[string]struct{} {
-	// Start with hardcoded list
 	result := make(map[string]struct{})
 	for name := range git.IgnoredDirs() {
 		result[name] = struct{}{}
 	}
 
-	// Discover additional ignored directories via git check-ignore.
-	// Walk immediate subdirectories of the repo root and batch-check them.
 	entries, err := os.ReadDir(repoRoot)
 	if err != nil {
-		return result // not a directory, return hardcoded only
+		return result
 	}
 
 	var dirNames []string
 	for _, entry := range entries {
 		if entry.IsDir() && entry.Name()[0] != '.' && entry.Name() != "git" {
-			// Skip hidden dirs (already handled by hardcoded) and the .git dir itself
-			// Check dirs that aren't already in our hardcoded list
 			if _, ok := result[entry.Name()]; !ok {
 				dirNames = append(dirNames, entry.Name())
 			}
 		}
 	}
-
 	if len(dirNames) == 0 {
 		return result
 	}
 
-	// Batch check via git check-ignore (stdin mode)
 	cmd := exec.Command("git", "check-ignore", "--stdin")
 	cmd.Dir = repoRoot
 	stdin, err := cmd.StdinPipe()
@@ -459,17 +509,15 @@ func loadIgnoredDirs(repoRoot string) map[string]struct{} {
 	var stdout strings.Builder
 	cmd.Stdout = &stdout
 
-	// Write directory names to stdin
 	for _, name := range dirNames {
 		fmt.Fprintln(stdin, name)
 	}
 	_ = stdin.Close()
 
 	if err := cmd.Run(); err != nil {
-		return result // git check-ignore returns non-zero if nothing is ignored
+		return result
 	}
 
-	// Parse output: each line is an ignored path
 	for line := range strings.SplitSeq(stdout.String(), "\n") {
 		name := strings.TrimSpace(line)
 		if name != "" {
@@ -480,13 +528,13 @@ func loadIgnoredDirs(repoRoot string) map[string]struct{} {
 	return result
 }
 
-// resolveGitIndexDir reads the .git file in a worktree to find the
-// directory containing the git index. Returns empty string for regular repos.
+// resolveGitIndexDir finds the git index dir from a worktree's .git file.
+// Returns empty string for regular repos.
 func resolveGitIndexDir(worktreePath string) string {
 	gitFile := filepath.Join(worktreePath, ".git")
 	info, err := os.Stat(gitFile)
 	if err != nil || !info.Mode().IsRegular() {
-		return "" // not a worktree (.git is a directory or missing)
+		return ""
 	}
 	data, err := os.ReadFile(gitFile)
 	if err != nil {
@@ -501,8 +549,6 @@ func resolveGitIndexDir(worktreePath string) string {
 	return ""
 }
 
-// isGitMetadataFile returns true for well-known git metadata files
-// that should not trigger stage/unstage detection.
 func isGitMetadataFile(name string) bool {
 	switch name {
 	case "HEAD", "commondir", "gitdir", "config", "options", "logs", "refs", "objects":
@@ -511,24 +557,23 @@ func isGitMetadataFile(name string) bool {
 	return false
 }
 
-// addRecursive watches a directory and all its existing subdirectories.
-// Skips directories whose basename is in the ignoredDirs set.
-func (ww *WorktreeWatcher) addRecursive(dir string, ignoredDirs map[string]struct{}) error {
-	// Watch the directory itself
+func (ww *WorktreeWatcher) addRecursive(dir string, ignoredDirs map[string]struct{}, taskID string) error {
 	if err := ww.watcher.Add(dir); err != nil {
 		return err
 	}
-	// Walk existing subdirectories and watch them too
+	ww.pathCache[dir] = taskID
+	ww.pathCache[dir+string(filepath.Separator)] = taskID
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip errors, keep watching what we can
+			return nil
 		}
 		if d.IsDir() && path != dir {
-			// Skip ignored directories
 			if _, ok := ignoredDirs[d.Name()]; ok {
 				return filepath.SkipDir
 			}
 			_ = ww.watcher.Add(path)
+			ww.pathCache[path] = taskID
+			ww.pathCache[path+string(filepath.Separator)] = taskID
 		}
 		return nil
 	})
