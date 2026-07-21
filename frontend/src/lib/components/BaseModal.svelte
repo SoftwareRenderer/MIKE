@@ -14,6 +14,10 @@
         toolbar,
         footer,
         children,
+        bodyStyle,
+        headerStyle,
+        footerStyle,
+        modalClass,
     }: {
         title: string;
         width?: string;
@@ -25,12 +29,17 @@
         toolbar?: Snippet<[]>;
         footer?: Snippet<[]>;
         children?: Snippet<[]>;
+        bodyStyle?: string;
+        headerStyle?: string;
+        footerStyle?: string;
+        modalClass?: string;
     } = $props();
 
     let modalEl: HTMLDivElement | null = null;
     let focusTrap: ReturnType<typeof createFocusTrap> | null = null;
     let triggerEl: HTMLElement | null = null;
     let closed = $state(false);
+    let modalClasses = $derived(modalClass ? `modal ${modalClass}` : 'modal');
 
     onMount(() => {
         triggerEl = document.activeElement as HTMLElement;
@@ -61,7 +70,7 @@
 <div class="overlay" style="z-index: {zIndex}" onclick={handleOverlayClick} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions — modal container stops click propagation, not an activation target -->
     <div
-        class="modal"
+        class={modalClasses}
         style="width: {width}"
         onclick={(e) => e.stopPropagation()}
         bind:this={modalEl}
@@ -70,7 +79,7 @@
         aria-labelledby={header ? undefined : 'modal-title'}
         tabindex="-1"
     >
-        <div class="modal-header">
+        <div class="modal-header" style={headerStyle ?? ''}>
             {#if header}
                 {@render header({ title })}
             {:else}
@@ -83,11 +92,11 @@
                 {@render toolbar()}
             </div>
         {/if}
-        <div class="modal-body">
+        <div class="modal-body" style={bodyStyle ?? ''}>
             {@render children?.()}
         </div>
         {#if footer}
-            <div class="modal-footer">
+            <div class="modal-footer" style={footerStyle ?? ''}>
                 {@render footer()}
             </div>
         {/if}
