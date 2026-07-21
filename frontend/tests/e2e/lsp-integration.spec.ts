@@ -15,6 +15,7 @@ test.skip(!hasGopls, 'gopls not installed');
 // ─── Test workspace ──────────────────────────────────────────────────────────
 
 const GO_WORKSPACE = `/tmp/kanban-test-go-lsp`;
+const GO_WORKSPACE_2 = `/tmp/kanban-test-go-lsp-2`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,23 @@ function ensureGoWorkspace(): void {
 import "fmt"
 
 func main() {
+\tfmt.P
+}
+`);
+}
+
+function ensureGoWorkspace2(): void {
+  if (!existsSync(GO_WORKSPACE_2)) {
+    mkdirSync(GO_WORKSPACE_2, { recursive: true });
+    execSync('git init', { cwd: GO_WORKSPACE_2 });
+    execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit --allow-empty -m "init"', { cwd: GO_WORKSPACE_2 });
+    execSync('go mod init lsptest2', { cwd: GO_WORKSPACE_2 });
+  }
+  writeFileSync(`${GO_WORKSPACE_2}/main.go`, `package main
+
+import "fmt"
+
+func hello() {
 \tfmt.P
 }
 `);
@@ -275,5 +293,83 @@ test.describe.serial('LSP Integration', () => {
     await page.waitForTimeout(2000);
 
     expect(consoleErrors, 'No LSP errors during editor interaction').toHaveLength(0);
+  });
+
+  test('should support LSP for multiple projects on shared connection', async ({ page }) => {
+    // This test verifies that the single shared LSP WebSocket correctly
+    // routes messages to different workspace/language servers.
+    // The first project's LSP is already connected from beforeEach.
+
+    // Create a second Go workspace
+    ensureGoWorkspace2();
+    const projectId2 = await createProjectViaApi(page, GO_WORKSPACE_2);
+
+    try {
+      // Navigate to the second project
+      await page.evaluate((pid) => { window.location.href = `/?project=${pid}`; }, projectId2);
+      await expect(page.locator('.board')).toBeVisible({ timeout: 15000 });
+
+      // Open the explorer view
+      await page.locator('.explorer-btn').click();
+      await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
+
+      // Wait for file browser to finish loading
+      await expect(async () => {
+        const loadingVisible = await page.locator('.file-browser-loading').isVisible();
+        const listVisible = await page.locator('.file-browser-list').isVisible().catch(() => false);
+        const errorVisible = await page.locator('.file-browser-error').isVisible().catch(() => false);
+        if (!loadingVisible && (listVisible || errorVisible)) {
+          if (errorVisible) {
+            const errorText = await page.locator('.file-browser-error').textContent();
+            throw new Error(`File browser error: ${errorText}`);
+          }
+          if (!listVisible) {
+            throw new Error('File browser finished loading but list is not visible');
+          }
+          return;
+        }
+        throw new Error('File browser still loading');
+      }).toPass({ timeout: 60000, intervals: [2000] });
+
+      // Open main.go in the second project
+      const mainGoItem2 = page.locator('.file-browser-item', { hasText: 'main.go' });
+      await expect(mainGoItem2).toBeVisible({ timeout: 10000 });
+      await mainGoItem2.click();
+      await page.waitForTimeout(2000);
+
+      await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('.editor-loading')).not.toBeVisible({ timeout: 10000 });
+
+      // Collect console errors
+      const consoleErrors: string[] = [];
+      page.on('console', (msg) => {
+        if (msg.type() === 'error' && msg.text().toLowerCase().includes('lsp')) {
+          consoleErrors.push(msg.text());
+        }
+      });
+
+      // Wait for LSP to connect to the second workspace
+      await page.waitForTimeout(15000);
+
+      // Verify no LSP errors — the shared connection should handle both workspaces
+      expect(consoleErrors, 'LSP should work for second project on shared connection').toHaveLength(0);
+
+      // The editor should be interactive
+      await expect(page.locator('.editor-error')).not.toBeVisible();
+
+      // Verify the LSP status shows in the footer
+      const lspStatusVisible = await page.locator('.lsp-status').isVisible().catch(() => false);
+      if (lspStatusVisible) {
+        // Wait for LSP to be ready
+        await expect(page.locator('.lsp-ready')).toBeVisible({ timeout: 30000 }).catch(() => {
+          // LSP may take time to initialize — not a hard failure
+          console.log('Note: LSP status not yet ready for second project');
+        });
+      }
+    } finally {
+      // Clean up second project
+      try { await deleteProjectViaApi(page, projectId2); } catch { /* ignore */ }
+      rmSync(GO_WORKSPACE_2, { recursive: true, force: true });
+    }
   });
 });

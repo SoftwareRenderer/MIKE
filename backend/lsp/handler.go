@@ -39,11 +39,10 @@ type SubscribeParams struct {
 }
 
 // ClientSession holds the state for a single WebSocket client connected to the LSP handler.
+// Workspace and language are tracked per-channel via _workspace/_lang hints, not per-session.
 type ClientSession struct {
-	conn      *websocket.Conn
+	conn  *websocket.Conn
 	clientID  uint64
-	workspace string
-	language  string
 	// backendRequestID → clientRequestID (incoming responses)
 	incomingIDs map[string]string
 	// backendRequestID → channelID (for multiplex response routing)
@@ -57,10 +56,9 @@ type ClientSession struct {
 
 // queuedInit holds a pending initialize request waiting for the server response.
 type queuedInit struct {
-	session    *ClientSession
-	msg        json.RawMessage
+	session     *ClientSession
 	clientReqID string
-	channelID  int64
+	channelID   int64
 }
 
 // workspaceState tracks per-workspace+language state in the handler.
@@ -248,15 +246,20 @@ func (h *LSPHandler) serverMessageRouter() {
 }
 
 // handleClientMessage processes a message from a WebSocket client.
+// Messages can be workspace/subscribe (to register a channel's workspace) or
+// JSON-RPC requests/notifications (which must carry _workspace hint).
 func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSession, msg json.RawMessage) {
-	// First message must be a subscription
-	if session.workspace == "" {
+	// Check if this is a workspace/subscribe message
+	var sub struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal(msg, &sub); err == nil && sub.Method == "workspace/subscribe" {
 		h.handleSubscription(ctx, session, msg)
 		return
 	}
 
-	// Extract channel ID, language, file path, and strip wrapper
-	channelID, lang, file, stripped := extractHints(msg)
+	// Extract channel ID, workspace, language, file path, and strip wrapper
+	channelID, workspace, lang, file, stripped := extractHints(msg)
 
 	// Parse to check message type
 	var rpc JSONRPCMessage
@@ -265,21 +268,19 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 		return
 	}
 
+	if workspace == "" {
+		log.Printf("[lsp] client %d: message missing _workspace hint", session.clientID)
+		return
+	}
+
 	// Derive workspace key from workspace path + language.
-	// In multiplex mode, _lang hint tells us the language.
-	// Fall back to session.language for non-multiplex clients.
-	workspaceKey := session.workspace
+	// _lang hint tells us the language for per-language routing.
 	routingLang := lang
-	if routingLang == "" {
-		routingLang = session.language
-	}
-	if routingLang != "" {
-		workspaceKey = processKey(session.workspace, routingLang)
-	}
+	workspaceKey := processKey(workspace, routingLang)
 
 	// Handle initialize interception
 	if rpc.Method == "initialize" && rpc.ID != nil {
-		h.handleInitialize(ctx, session, stripped, rpc.ID.String(), channelID, workspaceKey, file)
+		h.handleInitialize(ctx, session, stripped, rpc.ID.String(), channelID, workspace, workspaceKey, file)
 		return
 	}
 
@@ -290,7 +291,7 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 		if ok && !ws.sentInitialized {
 			ws.sentInitialized = true
 			h.mu.Unlock()
-			h.forwardRaw(ctx, session, stripped, workspaceKey)
+			h.forwardRaw(session, stripped, workspaceKey)
 			// Notify frontend that LSP is fully ready (after initialized notification forwarded)
 			h.sendLSPReady(ctx, session, channelID)
 		} else {
@@ -303,25 +304,26 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 
 	// If it's a request (has both id and method), remap the ID
 	if rpc.ID != nil && rpc.Method != "" {
-		h.forwardRequest(ctx, session, stripped, rpc.ID.String(), channelID, workspaceKey)
+		h.forwardRequest(session, stripped, rpc.ID.String(), channelID, workspaceKey)
 		return
 	}
 
 	// Notification or other message — forward as-is
-	h.forwardRaw(ctx, session, stripped, workspaceKey)
+	h.forwardRaw(session, stripped, workspaceKey)
 }
 
-// extractHints extracts _ch (channel ID), _lang (language), and _file (file path)
-// from a message and returns them along with the message with all fields stripped.
-// Returns (0, "", "", original msg) if no _ch field is present.
-func extractHints(msg json.RawMessage) (int64, string, string, json.RawMessage) {
+// extractHints extracts _ch (channel ID), _workspace (workspace path), _lang (language),
+// and _file (file path) from a message and returns them along with the message
+// with all fields stripped.
+// Returns (0, "", "", "", original msg) if no _ch field is present.
+func extractHints(msg json.RawMessage) (int64, string, string, string, json.RawMessage) {
 	var msgMap map[string]any
 	if err := json.Unmarshal(msg, &msgMap); err != nil {
-		return 0, "", "", msg
+		return 0, "", "", "", msg
 	}
 	chRaw, ok := msgMap["_ch"]
 	if !ok {
-		return 0, "", "", msg
+		return 0, "", "", "", msg
 	}
 	var channelID int64
 	switch v := chRaw.(type) {
@@ -331,38 +333,35 @@ func extractHints(msg json.RawMessage) (int64, string, string, json.RawMessage) 
 		var err error
 		channelID, err = v.Int64()
 		if err != nil {
-			return 0, "", "", msg
+			return 0, "", "", "", msg
 		}
 	default:
-		return 0, "", "", msg
+		return 0, "", "", "", msg
 	}
 	delete(msgMap, "_ch")
+	workspace, _ := msgMap["_workspace"].(string)
+	delete(msgMap, "_workspace")
 	lang, _ := msgMap["_lang"].(string)
 	delete(msgMap, "_lang")
 	file, _ := msgMap["_file"].(string)
 	delete(msgMap, "_file")
 	result, err := json.Marshal(msgMap)
 	if err != nil {
-		return 0, "", "", msg
+		return 0, "", "", "", msg
 	}
-	return channelID, lang, file, result
+	return channelID, workspace, lang, file, result
 }
 
 // handleSubscription processes the workspace/subscribe message.
+// A single session can subscribe to multiple workspaces (one per channel).
 func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSession, msg json.RawMessage) {
 	var sub struct {
-		Method string          `json:"method"`
-		Params SubscribeParams `json:"params"`
+		ChannelID int64           `json:"_ch"`
+		Params    SubscribeParams `json:"params"`
 	}
 	if err := json.Unmarshal(msg, &sub); err != nil {
 		log.Printf("[lsp] client %d: invalid subscribe message: %v", session.clientID, err)
 		session.conn.Close(websocket.StatusProtocolError, "invalid subscribe message")
-		return
-	}
-
-	if sub.Method != "workspace/subscribe" {
-		log.Printf("[lsp] client %d: expected workspace/subscribe, got %s", session.clientID, sub.Method)
-		session.conn.Close(websocket.StatusProtocolError, "expected workspace/subscribe")
 		return
 	}
 
@@ -424,11 +423,12 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 		h.mu.Unlock()
 	}
 
-	session.workspace = sub.Params.Workspace // store just the path; per-request routing uses workspaceKeys
-	session.language = cfg.Language
 	session.activeWorkspaces[workspaceKey]++ // track for cleanup on disconnect
-	log.Printf("[lsp] client %d subscribed to workspace=%s lang=%s (clients=%d)",
-		session.clientID, sub.Params.Workspace, cfg.Language, ws.clientCount)
+	log.Printf("[lsp] client %d ch=%d subscribed to workspace=%s lang=%s (clients=%d)",
+		session.clientID, sub.ChannelID, sub.Params.Workspace, cfg.Language, ws.clientCount)
+
+	// Notify frontend that LSP is ready for this channel
+	h.sendLSPReady(ctx, session, sub.ChannelID)
 }
 
 // handleInitialize intercepts initialize requests. Only the first client's
@@ -439,7 +439,7 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 // workspaceKey identifies the (workspace, language) pair for this request.
 // If the workspace doesn't exist yet (e.g., a second language on the same WS),
 // it is created lazily using the file path to look up the server config.
-func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64, workspaceKey string, filePath string) {
+func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64, workspacePath, workspaceKey, filePath string) {
 	h.mu.Lock()
 	ws, ok := h.workspaces[workspaceKey]
 	if !ok {
@@ -450,13 +450,13 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 		// Do this OUTSIDE the lock to avoid blocking other operations.
 		cfg := h.registry.Lookup(filePath)
 		if cfg == nil {
-			cfg = h.registry.Lookup(session.workspace)
+			cfg = h.registry.Lookup(workspacePath)
 		}
 		if cfg == nil {
 			log.Printf("[lsp] client %d: no language server config for file %s (lazy init failed)", session.clientID, filePath)
 			return
 		}
-		process, err := h.manager.GetOrCreate(session.workspace, cfg.Language, cfg)
+		process, err := h.manager.GetOrCreate(workspacePath, cfg.Language, cfg)
 		if err != nil {
 			log.Printf("[lsp] client %d: failed to spawn process for lazy init: %v", session.clientID, err)
 			return
@@ -474,7 +474,7 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 			}
 			h.workspaces[workspaceKey] = ws
 			session.activeWorkspaces[workspaceKey]++
-			log.Printf("[lsp] client %d: lazy-created workspace=%s lang=%s", session.clientID, session.workspace, cfg.Language)
+			log.Printf("[lsp] client %d: lazy-created workspace=%s lang=%s", session.clientID, workspacePath, cfg.Language)
 		}
 	}
 
@@ -497,7 +497,6 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 		// First initialize is in flight — queue this request
 		ws.queuedInitialize = append(ws.queuedInitialize, &queuedInit{
 			session:     session,
-			msg:         msg,
 			clientReqID: clientReqID,
 			channelID:   channelID,
 		})
@@ -510,13 +509,13 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 	h.mu.Unlock()
 
 	merged := mergeInitParams(msg, ws.cfg)
-	h.forwardRequest(ctx, session, merged, clientReqID, channelID, workspaceKey)
+	h.forwardRequest(session, merged, clientReqID, channelID, workspaceKey)
 }
 
 // forwardRequest remaps the request ID and forwards to the language server.
 // channelID is used for multiplex response routing (0 for non-multiplex).
 // workspaceKey identifies the (workspace, language) pair.
-func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64, workspaceKey string) {
+func (h *LSPHandler) forwardRequest(session *ClientSession, msg json.RawMessage, clientReqID string, channelID int64, workspaceKey string) {
 	// Generate a unique backend ID
 	backendID := h.nextBackendID.Add(1)
 	backendIDStr := itoa(backendID)
@@ -553,7 +552,7 @@ func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession,
 
 // forwardRaw forwards a message to the server without ID remapping.
 // workspaceKey identifies the (workspace, language) pair.
-func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg json.RawMessage, workspaceKey string) {
+func (h *LSPHandler) forwardRaw(session *ClientSession, msg json.RawMessage, workspaceKey string) {
 	h.mu.Lock()
 	ws, ok := h.workspaces[workspaceKey]
 	if ok {
@@ -564,10 +563,6 @@ func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg
 	if !ok || ws.process == nil {
 		return
 	}
-
-	// Log the method for debugging
-	var rpc JSONRPCMessage
-	_ = json.Unmarshal(msg, &rpc)
 
 	if err := h.manager.SendToServer(ws.process, msg); err != nil {
 		log.Printf("[lsp] client %d: forward raw failed: %v", session.clientID, err)
@@ -604,12 +599,15 @@ func (h *LSPHandler) routeServerMessage(serverMsg json.RawMessage) {
 	// teardown when a partial read dispatches a truncated body. Silently drop.
 }
 
-// routeNotification broadcasts a server notification to all connected clients.
+// routeNotification routes a server notification to the appropriate clients.
+// Notifications are delivered to all sessions that have active workspaces.
+// Within a session, the client-side dispatcher scopes delivery to channels
+// sharing the same workspace (via the textDocument.uri in the notification).
 func (h *LSPHandler) routeNotification(serverMsg json.RawMessage) {
 	h.mu.Lock()
 	clients := make([]*ClientSession, 0, len(h.clients))
 	for _, s := range h.clients {
-		if s.workspace != "" {
+		if len(s.activeWorkspaces) > 0 {
 			clients = append(clients, s)
 		}
 	}
@@ -630,9 +628,6 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 	var channelID int64
 	var workspaceKey string
 	for _, s := range h.clients {
-		if s.workspace == "" {
-			continue
-		}
 		if clientID, ok := s.incomingIDs[backendID]; ok {
 			targetSession = s
 			originalClientID = clientID
