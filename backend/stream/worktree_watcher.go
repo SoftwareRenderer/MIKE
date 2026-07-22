@@ -20,10 +20,12 @@ type DiffStatsEvent struct {
 	ProjectID       string
 	TaskID          string
 	DiffHash        string
-	ShortStat       string
+	ShortStat       string // full diff shortstat (for logging); do NOT use for card display
 	FilesN          int
 	UntrackedN      int
 	UntrackedLines  int
+	TrackedAdd      int    // additions from truncated manifest (for card display)
+	TrackedDel      int    // deletions from truncated manifest (for card display)
 	ChangedHashes   map[string]string
 	RemovedFiles    []string
 	StagedPaths     []string
@@ -391,8 +393,8 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 		return
 	}
 
-	untrackedN := len(diffResult.Untracked)
-	filesN := len(diffResult.Tracked) + untrackedN
+	trackedN, untrackedN := countManifestFiles(diffResult)
+	filesN := trackedN + untrackedN
 
 	hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
 	if hash != "" {
@@ -412,7 +414,8 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	}
 
 	if diffResult.Diff != "" || untrackedN > 0 {
-		untrackedLines := countUntrackedLines(diffResult.Untracked)
+		untrackedLines := countVisibleUntrackedLines(diffResult.Untracked)
+		trackedAdd, trackedDel := countManifestChanges(diffResult)
 		ww.broadcast(DiffStatsEvent{
 			ProjectID:      projectID,
 			TaskID:         taskID,
@@ -421,6 +424,8 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 			FilesN:         filesN,
 			UntrackedN:     untrackedN,
 			UntrackedLines: untrackedLines,
+			TrackedAdd:     trackedAdd,
+			TrackedDel:     trackedDel,
 			ChangedHashes:  changedHashes,
 			RemovedFiles:   removedFiles,
 			StagedPaths:    diffResult.StagedPaths,
@@ -476,9 +481,52 @@ func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.T
 	return
 }
 
-func countUntrackedLines(untracked []git.UntrackedFile) int {
+// countManifestChanges computes total additions/deletions from the truncated manifest,
+// excluding internal files. This matches what the diff panel displays.
+func countManifestChanges(d *git.TaskDiff) (add, del int) {
+	for path, f := range d.Tracked {
+		if isInternalFile(path) {
+			continue
+		}
+		add += f.Added
+		del += f.Removed
+	}
+	for _, u := range d.Untracked {
+		if isInternalFile(u.Path) {
+			continue
+		}
+		if u.OrigAdded > 0 {
+			add += u.OrigAdded
+		} else {
+			add += len(u.Lines)
+		}
+	}
+	return
+}
+
+// countManifestFiles counts visible files in the manifest (excluding internal files).
+// This matches the file count shown in the diff panel.
+func countManifestFiles(d *git.TaskDiff) (tracked, untracked int) {
+	for path := range d.Tracked {
+		if !isInternalFile(path) {
+			tracked++
+		}
+	}
+	for _, u := range d.Untracked {
+		if !isInternalFile(u.Path) {
+			untracked++
+		}
+	}
+	return
+}
+
+// countVisibleUntrackedLines counts lines in untracked files, excluding internal files.
+func countVisibleUntrackedLines(untracked []git.UntrackedFile) int {
 	total := 0
 	for _, u := range untracked {
+		if isInternalFile(u.Path) {
+			continue
+		}
 		if u.OrigAdded > 0 {
 			total += u.OrigAdded
 		} else {

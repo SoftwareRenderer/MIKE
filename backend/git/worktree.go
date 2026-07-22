@@ -114,6 +114,22 @@ func ShouldIgnoreFile(path string) bool {
 	return false
 }
 
+// IsInternalFile returns true if the path is an internal file that should not
+// appear in the diff panel or card stats (e.g., .git/*, kanban.trace).
+func IsInternalFile(path string) bool {
+	// Check if any path component is .git (handles vendor/lib/.git, .git/index, etc.)
+	for _, part := range strings.Split(path, string(filepath.Separator)) {
+		if part == ".git" {
+			return true
+		}
+	}
+	base := filepath.Base(path)
+	if base == "kanban.trace" || base == "kanban.trace.old" {
+		return true
+	}
+	return false
+}
+
 // WorktreeManager handles git worktree operations.
 type WorktreeManager struct {
 	store       *store.Store

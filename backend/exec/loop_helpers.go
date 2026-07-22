@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"kanban/backend/git"
 	"kanban/backend/llama"
 	"kanban/backend/prompts"
 	kanban_sandbox "kanban/backend/sandbox"
@@ -96,7 +97,12 @@ func (te *TaskExecutor) broadcastDiffIfGitCmd(projectID, taskID string, task *ty
 // already caught the same change. If forkBranch is provided, it resolves the thread
 // to get the fork branch for diff baseline.
 func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *types.Task, state *executionState, forkBranch string) {
-	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, forkBranch)
+	// Use BaseCommit (fixed hash) when available, matches API handler
+	baseline := task.BaseRef
+	if task.BaseCommit != "" {
+		baseline = task.BaseCommit
+	}
+	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, baseline, task.Branch, forkBranch)
 	diffResult, err := te.worktreeMgr.GetTaskDiff(taskID, baseRef, "")
 	if err != nil || (diffResult.Diff == "" && len(diffResult.Untracked) == 0) {
 		return
@@ -108,23 +114,38 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 	}
 	state.lastDiffHash = hash
 	fileHashes := diffResult.GetPerFileHashes()
-	untrackedLines := 0
+	// Compute stats excluding internal files (matches panel display)
+	var untrackedLines, trackedAdd, trackedDel, visibleTracked, visibleUntracked int
+	for path, f := range diffResult.Tracked {
+		if git.IsInternalFile(path) {
+			continue
+		}
+		visibleTracked++
+		trackedAdd += f.Added
+		trackedDel += f.Removed
+	}
 	for _, u := range diffResult.Untracked {
+		if git.IsInternalFile(u.Path) {
+			continue
+		}
+		visibleUntracked++
 		if u.OrigAdded > 0 {
 			untrackedLines += u.OrigAdded
 		} else {
 			untrackedLines += len(u.Lines)
 		}
 	}
-	filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
+	filesN := visibleTracked + visibleUntracked
 	te.appStreamMgr.BroadcastDiffStats(stream.DiffStatsEvent{
 		ProjectID:      projectID,
 		TaskID:         taskID,
 		DiffHash:       hash,
 		ShortStat:      diffResult.ShortStat,
 		FilesN:         filesN,
-		UntrackedN:     len(diffResult.Untracked),
+		UntrackedN:     visibleUntracked,
 		UntrackedLines: untrackedLines,
+		TrackedAdd:     trackedAdd,
+		TrackedDel:     trackedDel,
 		ChangedHashes:  fileHashes,
 		StagedPaths:    diffResult.StagedPaths,
 	})

@@ -841,6 +841,9 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef
 		BaseRef:   baseRef,
 	}
 	for path, f := range d.Tracked {
+		if git.IsInternalFile(path) {
+			continue
+		}
 		_, ok := stagedPaths[path]
 		staged := stagedPaths != nil && ok
 		entry := diffManifestFile{
@@ -860,6 +863,9 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef
 		manifest.Files[path] = entry
 	}
 	for _, u := range d.Untracked {
+		if git.IsInternalFile(u.Path) {
+			continue
+		}
 		// Skip untracked files already in the tracked section
 		// (e.g., new files appear as additions in git diff AND as untracked).
 		if _, exists := manifest.Files[u.Path]; exists {
