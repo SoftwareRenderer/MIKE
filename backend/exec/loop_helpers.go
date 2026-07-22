@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"kanban/backend/git"
 	"kanban/backend/llama"
 	"kanban/backend/prompts"
 	kanban_sandbox "kanban/backend/sandbox"
@@ -96,33 +97,70 @@ func (te *TaskExecutor) broadcastDiffIfGitCmd(projectID, taskID string, task *ty
 // already caught the same change. If forkBranch is provided, it resolves the thread
 // to get the fork branch for diff baseline.
 func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *types.Task, state *executionState, forkBranch string) {
-	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, forkBranch)
+	// Use BaseCommit (fixed hash) when available, matches API handler
+	baseline := task.BaseRef
+	if task.BaseCommit != "" {
+		baseline = task.BaseCommit
+	}
+	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, baseline, task.Branch, forkBranch)
 	diffResult, err := te.worktreeMgr.GetTaskDiff(taskID, baseRef, "")
 	if err != nil || (diffResult.Diff == "" && len(diffResult.Untracked) == 0) {
 		return
 	}
-	hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
+	hash := stream.ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
 	// Skip if hash unchanged — fsnotify already broadcast this state
 	if hash == state.lastDiffHash {
 		return
 	}
 	state.lastDiffHash = hash
 	fileHashes := diffResult.GetPerFileHashes()
-	untrackedLines := 0
-	for _, u := range diffResult.Untracked {
-		untrackedLines += len(u.Lines)
+	// Compute stats excluding internal files (matches panel display)
+	var untrackedLines, trackedAdd, trackedDel, visibleTracked, visibleUntracked int
+	for path, f := range diffResult.Tracked {
+		if git.IsInternalFile(path) {
+			continue
+		}
+		visibleTracked++
+		trackedAdd += f.Added
+		trackedDel += f.Removed
 	}
-	filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
+	for _, u := range diffResult.Untracked {
+		if git.IsInternalFile(u.Path) {
+			continue
+		}
+		visibleUntracked++
+		if u.OrigAdded > 0 {
+			untrackedLines += u.OrigAdded
+		} else {
+			untrackedLines += len(u.Lines)
+		}
+	}
+	filesN := visibleTracked + visibleUntracked
+	// Check if task branch commits are already merged into the target branch.
+	targetBranch := task.BaseRef
+	if strings.HasPrefix(targetBranch, "fatal:") {
+		targetBranch = ""
+	}
+	var alreadyMerged bool
+	if targetBranch != "" && task.Branch != "" {
+		if project, err := te.store.GetProject(projectID); err == nil && project.Path != "" {
+			alreadyMerged = te.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
+		}
+	}
 	te.appStreamMgr.BroadcastDiffStats(stream.DiffStatsEvent{
-		ProjectID:      projectID,
-		TaskID:         taskID,
-		DiffHash:       hash,
-		ShortStat:      diffResult.ShortStat,
-		FilesN:         filesN,
-		UntrackedN:     len(diffResult.Untracked),
-		UntrackedLines: untrackedLines,
-		ChangedHashes:  fileHashes,
-		StagedPaths:    diffResult.StagedPaths,
+		ProjectID:           projectID,
+		TaskID:              taskID,
+		DiffHash:            hash,
+		ShortStat:           diffResult.ShortStat,
+		FilesN:              filesN,
+		UntrackedN:          visibleUntracked,
+		UntrackedLines:      untrackedLines,
+		TrackedAdd:          trackedAdd,
+		TrackedDel:          trackedDel,
+		ChangedHashes:       fileHashes,
+		StagedPaths:         diffResult.StagedPaths,
+		HasCommittedChanges: diffResult.CommittedDiff != "",
+		AlreadyMerged:       alreadyMerged,
 	})
 }
 

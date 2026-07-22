@@ -36,6 +36,8 @@ export interface DiffFile {
     origPath?: string;
     /** Diff rows for this file. Empty for binary/large files. */
     rows: DiffRow[];
+    /** Diff rows committed to branch since baseRef. */
+    committedRows?: DiffRow[];
     /** Count of added lines. */
     added: number;
     /** Count of removed lines. */

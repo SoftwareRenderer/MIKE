@@ -704,7 +704,12 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 		if thread != nil {
 			forkBranch = thread.GitBranch
 		}
-		baseRef, _ = h.worktreeMgr.ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
+		// Use the captured base commit for the original baseline to avoid moving branch pointers.
+		baseline := task.BaseRef
+		if task.BaseCommit != "" {
+			baseline = task.BaseCommit
+		}
+		baseRef, _ = h.worktreeMgr.ResolveDiffBaseline(taskID, baseline, task.Branch, forkBranch)
 	}
 
 	// For stash refs, resolve to the common ancestor (state before stash changes).
@@ -836,6 +841,9 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef
 		BaseRef:   baseRef,
 	}
 	for path, f := range d.Tracked {
+		if git.IsInternalFile(path) {
+			continue
+		}
 		_, ok := stagedPaths[path]
 		staged := stagedPaths != nil && ok
 		entry := diffManifestFile{
@@ -855,17 +863,24 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef
 		manifest.Files[path] = entry
 	}
 	for _, u := range d.Untracked {
+		if git.IsInternalFile(u.Path) {
+			continue
+		}
 		// Skip untracked files already in the tracked section
 		// (e.g., new files appear as additions in git diff AND as untracked).
 		if _, exists := manifest.Files[u.Path]; exists {
 			continue
 		}
+		lineCount := len(u.Lines)
+		if u.OrigAdded > 0 {
+			lineCount = u.OrigAdded
+		}
 		manifest.Files[u.Path] = diffManifestFile{
 			Hash:        git.ComputeUntrackedHash(u),
 			Type:        "untracked",
-			LineCount:   len(u.Lines),
+			LineCount:   lineCount,
 			FileSize:    u.FileSize,
-			Added:       len(u.Lines),
+			Added:       lineCount,
 			Truncated:   u.Truncated,
 			OrigAdded:   u.OrigAdded,
 			IsBinary:    u.IsBinary,
@@ -912,6 +927,9 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 		resp := map[string]any{
 			"rows":      f.Rows,
 			"truncated": f.Truncated,
+		}
+		if len(f.CommittedRows) > 0 {
+			resp["committedRows"] = f.CommittedRows
 		}
 		if f.OrigAdded > 0 {
 			resp["origAdded"] = f.OrigAdded

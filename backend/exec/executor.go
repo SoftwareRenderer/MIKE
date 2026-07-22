@@ -674,7 +674,13 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 			}
 		}
 	}
-	te.appStreamMgr.WatchWorktree(taskID, projectID, task.BaseRef)
+	// Use resolved baseline (same as API handler) so card stats match panel display.
+	// BaseCommit is a fixed commit hash captured at task start; BaseRef is the branch name.
+	watchBaseRef := task.BaseRef
+	if task.BaseCommit != "" {
+		watchBaseRef = task.BaseCommit
+	}
+	te.appStreamMgr.WatchWorktree(taskID, projectID, watchBaseRef)
 
 	// If the task has a current thread with a specific git branch, checkout that branch
 	if task.CurrentThreadID != "" {
@@ -1494,17 +1500,6 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 						var tcMap map[string]any
 						if err2 := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err2 == nil {
 							toolID, _ = tcMap["tool_id"].(string)
-							// Skip request_review — matches buildLLMContext: filter the assistant
-							// and all tool results from that turn.
-							if tcName, ok := tcMap["tool_name"].(string); ok && tcName == "request_review" {
-								for len(messages) > 0 && messages[len(messages)-1].Role == "tool" {
-									messages = messages[:len(messages)-1]
-								}
-								if len(messages) > 0 && messages[len(messages)-1].Role == "assistant" {
-									messages = messages[:len(messages)-1]
-								}
-								continue
-							}
 						}
 					}
 					messages = append(messages, types.ChatMessage{Role: "tool", Content: output, ToolCallID: toolID})

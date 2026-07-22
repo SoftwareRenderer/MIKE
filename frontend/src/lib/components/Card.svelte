@@ -327,7 +327,7 @@
         return unsub;
     });
     let diffStats = $derived($taskDiffStatsStore[task.id] || null);
-    let hasChanges = $derived(!!diffStats?.hash && (diffStats.staged_paths?.length || 0) > 0);
+    let hasChanges = $derived(!!diffStats?.hash && ((diffStats.staged_paths?.length || 0) > 0 || !!diffStats.has_committed_changes));
 
     function togglePicker(e: MouseEvent) {
         e.stopPropagation(); // Prevent card from opening when clicking the model badge

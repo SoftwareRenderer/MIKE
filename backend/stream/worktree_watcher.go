@@ -20,13 +20,17 @@ type DiffStatsEvent struct {
 	ProjectID       string
 	TaskID          string
 	DiffHash        string
-	ShortStat       string
+	ShortStat       string // full diff shortstat (for logging); do NOT use for card display
 	FilesN          int
 	UntrackedN      int
 	UntrackedLines  int
-	ChangedHashes   map[string]string
-	RemovedFiles    []string
-	StagedPaths     []string
+	TrackedAdd      int    // additions from truncated manifest (for card display)
+	TrackedDel      int    // deletions from truncated manifest (for card display)
+	ChangedHashes       map[string]string
+	RemovedFiles        []string
+	StagedPaths         []string
+	HasCommittedChanges bool // committed on branch since baseRef, not yet merged
+	AlreadyMerged       bool // task branch commits already merged into target
 }
 
 type diffBroadcastFn func(event DiffStatsEvent)
@@ -378,19 +382,27 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 		ww.mu.Unlock()
 	}()
 
-	diffResult, err := ww.worktreeMgr.GetTaskDiff(taskID, baseRef, "")
+	task, err := ww.worktreeMgr.GetTaskByTaskID(taskID)
+	headRef := ""
+	if err == nil && task.Status == "done" {
+		headRef = task.BranchTip
+		if headRef == "" {
+			headRef = task.Branch
+		}
+	}
+	diffResult, err := ww.worktreeMgr.GetTaskDiff(taskID, baseRef, headRef)
 	if err != nil {
 		return
 	}
 
-	untrackedN := len(diffResult.Untracked)
-	filesN := len(diffResult.Tracked) + untrackedN
+	trackedN, untrackedN := countManifestFiles(diffResult)
+	filesN := trackedN + untrackedN
 
-	hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
+	hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
 	if hash != "" {
 		if prevRaw, ok := ww.diffCache.Load(taskID); ok {
 			prevDiff := prevRaw.(*git.TaskDiff)
-			prevHash := ComputeDiffHash(prevDiff.Diff, prevDiff.Untracked, prevDiff.StagedHash)
+			prevHash := ComputeDiffHash(prevDiff.Diff, prevDiff.CommittedDiff, prevDiff.Untracked, prevDiff.StagedHash)
 			if hash == prevHash {
 				return
 			}
@@ -403,28 +415,48 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 		ww.updateCache(taskID, diffResult)
 	}
 
-	if diffResult.Diff != "" || untrackedN > 0 {
-		untrackedLines := countUntrackedLines(diffResult.Untracked)
+	// Check if task branch commits are already merged into the target branch.
+	// Uses the target branch name (BaseRef), not the fixed BaseCommit SHA,
+	// so the check reflects the current state of the target branch.
+	ww.mu.Lock()
+	worktreePath := ww.worktrees[taskID].path
+	ww.mu.Unlock()
+	targetBranch := task.BaseRef
+	if strings.HasPrefix(targetBranch, "fatal:") {
+		targetBranch = ""
+	}
+	alreadyMerged := targetBranch != "" && task.Branch != "" &&
+		ww.worktreeMgr.IsMergedInto(worktreePath, task.Branch, targetBranch)
+
+	if diffResult.Diff != "" || untrackedN > 0 || diffResult.CommittedDiff != "" {
+		untrackedLines := countVisibleUntrackedLines(diffResult.Untracked)
+		trackedAdd, trackedDel := countManifestChanges(diffResult)
 		ww.broadcast(DiffStatsEvent{
-			ProjectID:      projectID,
-			TaskID:         taskID,
-			DiffHash:       hash,
-			ShortStat:      diffResult.ShortStat,
-			FilesN:         filesN,
-			UntrackedN:     untrackedN,
-			UntrackedLines: untrackedLines,
-			ChangedHashes:  changedHashes,
-			RemovedFiles:   removedFiles,
-			StagedPaths:    diffResult.StagedPaths,
+			ProjectID:           projectID,
+			TaskID:              taskID,
+			DiffHash:            hash,
+			ShortStat:           diffResult.ShortStat,
+			FilesN:              filesN,
+			UntrackedN:          untrackedN,
+			UntrackedLines:      untrackedLines,
+			TrackedAdd:          trackedAdd,
+			TrackedDel:          trackedDel,
+			ChangedHashes:       changedHashes,
+			RemovedFiles:        removedFiles,
+			StagedPaths:         diffResult.StagedPaths,
+			HasCommittedChanges: diffResult.CommittedDiff != "",
+			AlreadyMerged:       alreadyMerged,
 		})
 		log.Printf("[watcher] task=%s diff changed: %s (untracked: %d files)", taskID, diffResult.ShortStat, untrackedN)
 	} else if len(changedHashes) > 0 || len(removedFiles) > 0 {
 		ww.broadcast(DiffStatsEvent{
-			ProjectID:     projectID,
-			TaskID:        taskID,
-			ChangedHashes: changedHashes,
-			RemovedFiles:  removedFiles,
-			StagedPaths:   diffResult.StagedPaths,
+			ProjectID:           projectID,
+			TaskID:              taskID,
+			ChangedHashes:       changedHashes,
+			RemovedFiles:        removedFiles,
+			StagedPaths:         diffResult.StagedPaths,
+			HasCommittedChanges: diffResult.CommittedDiff != "",
+			AlreadyMerged:       alreadyMerged,
 		})
 	}
 }
@@ -468,10 +500,57 @@ func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.T
 	return
 }
 
-func countUntrackedLines(untracked []git.UntrackedFile) int {
+// countManifestChanges computes total additions/deletions from the truncated manifest,
+// excluding internal files. This matches what the diff panel displays.
+func countManifestChanges(d *git.TaskDiff) (add, del int) {
+	for path, f := range d.Tracked {
+		if isInternalFile(path) {
+			continue
+		}
+		add += f.Added
+		del += f.Removed
+	}
+	for _, u := range d.Untracked {
+		if isInternalFile(u.Path) {
+			continue
+		}
+		if u.OrigAdded > 0 {
+			add += u.OrigAdded
+		} else {
+			add += len(u.Lines)
+		}
+	}
+	return
+}
+
+// countManifestFiles counts visible files in the manifest (excluding internal files).
+// This matches the file count shown in the diff panel.
+func countManifestFiles(d *git.TaskDiff) (tracked, untracked int) {
+	for path := range d.Tracked {
+		if !isInternalFile(path) {
+			tracked++
+		}
+	}
+	for _, u := range d.Untracked {
+		if !isInternalFile(u.Path) {
+			untracked++
+		}
+	}
+	return
+}
+
+// countVisibleUntrackedLines counts lines in untracked files, excluding internal files.
+func countVisibleUntrackedLines(untracked []git.UntrackedFile) int {
 	total := 0
 	for _, u := range untracked {
-		total += len(u.Lines)
+		if isInternalFile(u.Path) {
+			continue
+		}
+		if u.OrigAdded > 0 {
+			total += u.OrigAdded
+		} else {
+			total += len(u.Lines)
+		}
 	}
 	return total
 }
