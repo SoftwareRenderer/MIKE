@@ -277,7 +277,7 @@
                         const firstLoc = locations[0];
                         const uri = firstLoc && 'target' in firstLoc ? firstLoc.target?.uri : firstLoc?.uri;
 
-                        if (!uri) return null;
+                        if (!uri || !uri.startsWith('file://')) return null;
 
                         return {
                             pos,
@@ -513,7 +513,7 @@
                 const uri = location?.uri;
                 const range = location?.range;
 
-                if (!uri || !range) return;
+                if (!uri || !uri.startsWith('file://') || !range) return;
 
                 const targetPath = uri.replace(/^file:\/\//, '');
                 const targetLine = range.start.line + 1;
