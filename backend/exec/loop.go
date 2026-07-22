@@ -351,6 +351,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		systemPrompt:     messages[0].Content,
 		sandboxEnabled:   setup.sandboxEnabled,
 	}
+	// Sync once more to ensure we have the latest DB state (e.g. if messages were added/deleted)
+	lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 
 	for {
 		select {
@@ -492,6 +494,13 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		default:
 		}
 
+		// Clear turn-specific state before each LLM call.
+		lc.prevArgLens = make(map[string]int)
+		lc.finishReason = ""
+		lc.pendingToolCalls = nil
+		lc.assistantContent.Reset()
+		lc.reasoningContent.Reset()
+
 		// Acquire concurrency gate slot before LLM call.
 		_, activeModel := lc.mc.get()
 		concurrency := te.configStore.GetProviderConcurrency(setup.serverURL)
@@ -593,7 +602,11 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					}
 					lc.prevArgLens[tc.ID] = argLen
 					path := extractPathFromArgs(tc.Function.Arguments)
-					flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, prevLen, isNew, lc.sandboxEnabled && isSandboxableTool(tc.Function.Name))
+					actualPrevLen := prevLen
+					if isNew {
+						actualPrevLen = 0
+					}
+					flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, actualPrevLen, isNew, lc.sandboxEnabled && isSandboxableTool(tc.Function.Name))
 				}
 			}
 			// Throttled progress updates for write_file (1 per 2 seconds)
