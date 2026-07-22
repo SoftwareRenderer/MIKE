@@ -136,6 +136,17 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 		}
 	}
 	filesN := visibleTracked + visibleUntracked
+	// Check if task branch commits are already merged into the target branch.
+	targetBranch := task.BaseRef
+	if strings.HasPrefix(targetBranch, "fatal:") {
+		targetBranch = ""
+	}
+	var alreadyMerged bool
+	if targetBranch != "" && task.Branch != "" {
+		if project, err := te.store.GetProject(projectID); err == nil && project.Path != "" {
+			alreadyMerged = te.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
+		}
+	}
 	te.appStreamMgr.BroadcastDiffStats(stream.DiffStatsEvent{
 		ProjectID:           projectID,
 		TaskID:              taskID,
@@ -149,6 +160,7 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 		ChangedHashes:       fileHashes,
 		StagedPaths:         diffResult.StagedPaths,
 		HasCommittedChanges: diffResult.CommittedDiff != "",
+		AlreadyMerged:       alreadyMerged,
 	})
 }
 

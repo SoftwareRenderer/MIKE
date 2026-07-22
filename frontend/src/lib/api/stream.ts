@@ -10,7 +10,7 @@ import { STALE_THRESHOLD_MS, HEARTBEAT_INTERVAL_MS, RECONNECT_MAX_DELAY_MS } fro
 export interface AppStreamCallbacks {
     onProjectCounts?: (counts: Record<string, ProjectCounts>) => void;
     onRefresh?: () => void;
-    onDiffStats?: (task_id: string, hash: string, short_stat: string, files_n: number, untracked_n: number, untracked_lines: number, tracked_add: number, tracked_del: number, file_hashes?: Record<string, string>, removed_files?: string[], staged_paths?: string[], has_committed_changes?: boolean) => void;
+    onDiffStats?: (task_id: string, hash: string, short_stat: string, files_n: number, untracked_n: number, untracked_lines: number, tracked_add: number, tracked_del: number, file_hashes?: Record<string, string>, removed_files?: string[], staged_paths?: string[], has_committed_changes?: boolean, already_merged?: boolean) => void;
     onDiff?: (task_id: string, hash: string, diff?: string, untracked?: Array<{ path: string; diff: string; file_size?: number }>, files?: Record<string, { hash: string; type: string; added?: number; removed?: number; line_count?: number; file_size?: number }>) => void;
     onBranch?: (branch: string) => void;
     onFsEvent?: (op: 'create' | 'delete', path: string) => void;
@@ -153,7 +153,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
                 callbacks.onProjectCounts(msg.data);
             }
             if (msg.type === 'task_diff_stats' && callbacks.onDiffStats) {
-                callbacks.onDiffStats(msg.task_id, msg.hash, msg.short_stat, msg.files_n || 0, msg.untracked_n, msg.untracked_lines, msg.tracked_add || 0, msg.tracked_del || 0, msg.file_hashes, msg.removed_files, msg.staged_paths, msg.has_committed_changes);
+                callbacks.onDiffStats(msg.task_id, msg.hash, msg.short_stat, msg.files_n || 0, msg.untracked_n, msg.untracked_lines, msg.tracked_add || 0, msg.tracked_del || 0, msg.file_hashes, msg.removed_files, msg.staged_paths, msg.has_committed_changes, msg.already_merged);
             }
             if (msg.type === 'task_diff' && callbacks.onDiff) {
                 callbacks.onDiff(msg.task_id, msg.hash || '', msg.diff, msg.untracked || [], msg.files);

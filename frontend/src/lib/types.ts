@@ -361,6 +361,7 @@ export type DiffStatsEntry = {
     removed_files?: string[];
     staged_paths?: string[];
     has_committed_changes?: boolean;
+    already_merged?: boolean;
 };
 
 export type DiffEntry = {

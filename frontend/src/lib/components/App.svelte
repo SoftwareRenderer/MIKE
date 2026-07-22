@@ -397,13 +397,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         projectCounts = counts;
                     },
                     onRefresh: () => refreshBoard(),
-                    onDiffStats: (task_id, hash, short_stat, files_n, untracked_n, untracked_lines, tracked_add, tracked_del, file_hashes, removed_files, staged_paths, has_committed_changes) => {
+                    onDiffStats: (task_id, hash, short_stat, files_n, untracked_n, untracked_lines, tracked_add, tracked_del, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged) => {
                         // Use tracked_add/tracked_del from truncated manifest (matches panel display).
                         // short_stat is from the full diff (before truncation) — kept for backward compat.
                         const additions = tracked_add + (untracked_lines || 0);
                         const deletions = tracked_del;
                         taskDiffStatsContext.update(map => {
-                            map[task_id] = { hash: hash || '', files: files_n, additions, deletions, untracked_n: untracked_n || 0, file_hashes, removed_files, staged_paths, has_committed_changes };
+                            map[task_id] = { hash: hash || '', files: files_n, additions, deletions, untracked_n: untracked_n || 0, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged };
                             return { ...map };
                         });
                     },
