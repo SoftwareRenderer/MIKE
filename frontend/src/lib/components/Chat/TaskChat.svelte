@@ -143,11 +143,12 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let threads: Thread[] = $state([]);
     let activeThreadId = $state('');
 
+    let stopping = $state(false);
     // isLoading: true when LLM is actively streaming tokens OR task is in running state.
     // After page refresh, streamingIds is empty but execution_state preserves running state.
     let streamingIds = getStreamingContext();
     // streamingIds is from context (not appStore), accessed via $derived with context auto-subscription
-    let isLoading = $derived($streamingIds.has(taskId) || taskExecutionState === 'running');
+    let isLoading = $derived(!stopping && ($streamingIds.has(taskId) || taskExecutionState === 'running'));
 
     // Last entry index for regenerate button gating
     let lastEntryIdx = $derived(entries.length - 1);
@@ -783,6 +784,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     }
 
     async function handleStop() {
+        stopping = true;
         markNotStreaming();
         stream.state.awaitingResponse = false;
         // Save the streaming assistant ID before clearing
@@ -802,6 +804,12 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         // so they don't appear as duplicates when the task is restarted
         await loadHistory();
     }
+
+    $effect(() => {
+        if (!($streamingIds.has(taskId) || taskExecutionState === 'running')) {
+            stopping = false;
+        }
+    });
 
     let taskDiffStatsStore = getTaskDiffStatsContext();
     let diffStats = $derived($taskDiffStatsStore[taskId] || null);
