@@ -875,12 +875,23 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		if task.Status == "in_progress" || task.Status == "review" {
 			asm.WatchWorktree(task.ID, projectID, task.BaseRef)
 		}
-		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
+		headRef := ""
+		if task.Status == "done" {
+			headRef = task.BranchTip
+			if headRef == "" {
+				headRef = task.Branch
+			}
+		}
+		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, headRef); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
 			hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
 			// Send compact stats for card UI
 			untrackedLines := 0
 			for _, u := range diffResult.Untracked {
-				untrackedLines += len(u.Lines)
+				if u.OrigAdded > 0 {
+					untrackedLines += u.OrigAdded
+				} else {
+					untrackedLines += len(u.Lines)
+				}
 			}
 			filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
 			statsMsg, _ := json.Marshal(map[string]any{
@@ -935,12 +946,16 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			if _, exists := files[u.Path]; exists {
 				continue
 			}
+			lineCount := len(u.Lines)
+			if u.OrigAdded > 0 {
+				lineCount = u.OrigAdded
+			}
 			entry := map[string]any{
 				"hash":       git.ComputeUntrackedHash(u),
 				"type":       "untracked",
-				"line_count": len(u.Lines),
+				"line_count": lineCount,
 				"file_size":  u.FileSize,
-				"added":      len(u.Lines),
+				"added":       lineCount,
 			}
 			if u.IsBinary {
 				entry["is_binary"] = true

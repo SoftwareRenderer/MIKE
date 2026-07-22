@@ -15,6 +15,7 @@ import (
 
 	"kanban/backend/config"
 	"kanban/backend/store"
+	"kanban/backend/types"
 )
 
 // EmptyTreeHash is the SHA-1 of an empty git tree object.
@@ -125,6 +126,11 @@ type WorktreeManager struct {
 // NewWorktreeManager creates a new WorktreeManager.
 func NewWorktreeManager(store *store.Store, configStore *config.ConfigStore) *WorktreeManager {
 	return &WorktreeManager{store: store, configStore: configStore}
+}
+
+// GetTaskByTaskID retrieves a task by its ID.
+func (wm *WorktreeManager) GetTaskByTaskID(taskID string) (*types.Task, error) {
+	return wm.store.GetTaskByTaskID(taskID)
 }
 
 // getProjectWorktreeMu returns a per-project mutex for serializing worktree creation.
@@ -1404,27 +1410,14 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		// We always check for working-tree changes first. When the working tree is
 		// dirty, using HEAD as baseline ensures deletions of post-target files are
 		// captured (git diff target misses them — file absent on both sides).
-		statusOut, statusErr := wm.gitRunOutput(worktreePath, "status", "--porcelain", "--untracked-files=no")
-		workingTreeClean := statusErr != nil || len(strings.TrimSpace(statusOut)) == 0
-
-		if workingTreeClean {
-			// Working tree is clean — show committed changes since target.
-			// This handles forked threads where changes are committed as snapshots.
-			diffOut, err = wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..HEAD", target))
-			if err != nil {
+		// Get tracked file diff from target to working tree.
+		// This captures both committed changes since target and uncommitted working-tree changes.
+		diffOut, err = wm.gitRunOutput(worktreePath, "diff", target)
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				// Changes exist, diffOut has the output — continue
+			} else {
 				return nil, fmt.Errorf("git diff: %w", err)
-			}
-		} else {
-			// Working tree is dirty — use HEAD as baseline to capture all
-			// working-tree changes (modifications, additions, deletions).
-			// git diff HEAD exits 1 when changes exist — output is still valid.
-			diffOut, err = wm.gitRunOutput(worktreePath, "diff", "HEAD")
-			if err != nil {
-				if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-					// Changes exist, diffOut has the output — continue
-				} else {
-					return nil, fmt.Errorf("git diff: %w", err)
-				}
 			}
 		}
 		shortStat = shortStatFromDiff(diffOut)
