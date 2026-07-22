@@ -36,13 +36,13 @@ interface MockOpenRequest {
     onerror: ((e: any) => void) | null;
 }
 
-class MockDOMStringList implements DOMStringList {
+class MockDOMStringList {
     private _items: string[];
     constructor(items: string[]) { this._items = items; }
     get length() { return this._items.length; }
     item(index: number) { return this._items[index] ?? null; }
     contains(s: string) { return this._items.includes(s); }
-    *[Symbol.iterator]() { return this._items[Symbol.iterator](); }
+    [Symbol.iterator]() { return this._items[Symbol.iterator](); }
 }
 
 function makeRequest(): MockRequest {
@@ -74,7 +74,7 @@ function createMockIndexedDB(): typeof indexedDB {
             if (!db) {
                 const stores = new Map<string, MockStore>();
                 db = {
-                    objectStoreNames: new MockDOMStringList([]),
+                    objectStoreNames: new MockDOMStringList([]) as unknown as DOMStringList,
                     stores,
                     createObjectStore(storeName: string): MockStore {
                         const store: MockStore = {
@@ -93,7 +93,7 @@ function createMockIndexedDB(): typeof indexedDB {
                             delete(key) {
                                 const r = makeRequest();
                                 stores.get(storeName)!.data.delete(key);
-                                fireRequest(r);
+                                fireRequest(r, undefined);
                                 return r;
                             },
                             getAllKeys() {
@@ -103,7 +103,7 @@ function createMockIndexedDB(): typeof indexedDB {
                             },
                         };
                         stores.set(storeName, store);
-                        db.objectStoreNames = new MockDOMStringList([...stores.keys()]);
+                        (db as MockDB).objectStoreNames = new MockDOMStringList([...stores.keys()]) as unknown as DOMStringList;
                         return store;
                     },
                     transaction(storeName, _mode) {
@@ -123,10 +123,10 @@ function createMockIndexedDB(): typeof indexedDB {
                         return tx;
                     },
                 };
-                databases.set(name, db);
+                databases.set(name, db!);
             }
 
-            req.result = db;
+            req.result = db!;
 
             if (isUpgrade) {
                 queueMicrotask(() => {
