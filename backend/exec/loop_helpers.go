@@ -110,7 +110,11 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 	fileHashes := diffResult.GetPerFileHashes()
 	untrackedLines := 0
 	for _, u := range diffResult.Untracked {
-		untrackedLines += len(u.Lines)
+		if u.OrigAdded > 0 {
+			untrackedLines += u.OrigAdded
+		} else {
+			untrackedLines += len(u.Lines)
+		}
 	}
 	filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
 	te.appStreamMgr.BroadcastDiffStats(stream.DiffStatsEvent{

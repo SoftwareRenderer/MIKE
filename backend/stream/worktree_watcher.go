@@ -378,7 +378,15 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 		ww.mu.Unlock()
 	}()
 
-	diffResult, err := ww.worktreeMgr.GetTaskDiff(taskID, baseRef, "")
+	task, err := ww.worktreeMgr.GetTaskByTaskID(taskID)
+	headRef := ""
+	if err == nil && task.Status == "done" {
+		headRef = task.BranchTip
+		if headRef == "" {
+			headRef = task.Branch
+		}
+	}
+	diffResult, err := ww.worktreeMgr.GetTaskDiff(taskID, baseRef, headRef)
 	if err != nil {
 		return
 	}
@@ -471,7 +479,11 @@ func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.T
 func countUntrackedLines(untracked []git.UntrackedFile) int {
 	total := 0
 	for _, u := range untracked {
-		total += len(u.Lines)
+		if u.OrigAdded > 0 {
+			total += u.OrigAdded
+		} else {
+			total += len(u.Lines)
+		}
 	}
 	return total
 }
