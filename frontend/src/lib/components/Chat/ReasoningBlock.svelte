@@ -10,47 +10,47 @@
         isStreaming?: boolean;
         toolCallsLength?: number;
         content?: string;
+        reasoningExpandedOverride?: boolean;
+        onReasoningToggle?: (expanded: boolean) => void;
+        resolvedReasoningOverride?: string;
+        onReasoningResolved?: (content: string) => void;
     }
 
-    let { reasoningContent, hasReasoning = false, messageId, projectId, taskId, isStreaming = false, toolCallsLength = 0, content = '' }: Props = $props();
+    let { reasoningContent, hasReasoning = false, messageId, projectId, taskId, isStreaming = false, toolCallsLength = 0, content = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
 
     // Resolved reasoning content — fetched on-demand when backend suppresses it
-    let resolvedReasoningContent = $state<string | undefined>();
     let reasoningLoading = $state(false);
 
-    /** Effective reasoning content: resolved (fetched) value, or the prop value. */
-    let effectiveReasoning = $derived(resolvedReasoningContent ?? reasoningContent);
+    /** Effective reasoninging content: resolved (fetched) value, or the prop value. */
+    let effectiveReasoning = $derived(resolvedReasoningOverride ?? reasoningContent);
 
     /** Whether to show the reasoning toggle. */
     let showReasoningToggle = $derived(hasReasoning || !!reasoningContent);
 
-    let reasoningUserToggled = $state(false);
-    let reasoningUserValue = $state(false);
     let reasoningExpanded = $derived(
-        reasoningUserToggled
-            ? reasoningUserValue
+        reasoningExpandedOverride !== undefined
+            ? reasoningExpandedOverride
             : (effectiveReasoning === '[HIDDEN]' ? false : !effectiveReasoning || (effectiveReasoning.length <= 200 && !content) || (toolCallsLength > 0 && !content) || (isStreaming && !toolCallsLength))
     );
 
     async function handleReasoningToggle() {
-        if (reasoningExpanded) {
-            reasoningUserToggled = true;
-            reasoningUserValue = false;
+        const nextExpanded = !reasoningExpanded;
+        if (onReasoningToggle) onReasoningToggle(nextExpanded);
+
+        if (!nextExpanded) {
             return;
         }
-        if (effectiveReasoning === '[HIDDEN]' && messageId && projectId && taskId && !resolvedReasoningContent) {
+        if (effectiveReasoning === '[HIDDEN]' && messageId && projectId && taskId && !resolvedReasoningOverride) {
             reasoningLoading = true;
             try {
                 const fullMsg = await getTaskMessageFull(projectId, taskId, messageId);
-                resolvedReasoningContent = fullMsg.reasoning_content;
+                if (onReasoningResolved) onReasoningResolved(fullMsg.reasoning_content || '');
             } catch (e) {
                 console.error('Failed to fetch full reasoning:', e);
             } finally {
                 reasoningLoading = false;
             }
         }
-        reasoningUserToggled = true;
-        reasoningUserValue = true;
     }
 </script>
 

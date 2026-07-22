@@ -59,9 +59,13 @@
         onToggleEditDiff?: (toolId: string, currentExpanded: boolean) => void;
         projectId?: string;
         taskId?: string;
+        reasoningExpandedOverride?: boolean;
+        onReasoningToggle?: (expanded: boolean) => void;
+        resolvedReasoningOverride?: string;
+        onReasoningResolved?: (content: string) => void;
     }
 
-    let { role, content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onEdit, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '' }: Props = $props();
+    let { role, content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onEdit, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
 
     // Edit state
     let isEditing = $state(false);
@@ -426,6 +430,10 @@
                 {isStreaming}
                 toolCallsLength={toolCalls.length}
                 {content}
+                reasoningExpandedOverride={reasoningExpandedOverride}
+                onReasoningToggle={onReasoningToggle}
+                resolvedReasoningOverride={resolvedReasoningOverride}
+                onReasoningResolved={onReasoningResolved}
             />
             <!-- Tool calls within reasoning region always visible -->
             {#each interleavedLayout!.reasoningSegments as seg}
@@ -462,6 +470,10 @@
         {isStreaming}
         toolCallsLength={toolCalls.length}
         {content}
+        reasoningExpandedOverride={reasoningExpandedOverride}
+        onReasoningToggle={onReasoningToggle}
+        resolvedReasoningOverride={resolvedReasoningOverride}
+        onReasoningResolved={onReasoningResolved}
     />
     {#if content}
         <div class="message-bubble assistant-bubble">
