@@ -387,6 +387,59 @@ func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, taskID, diffS
 	return label
 }
 
+// BuildConversationFromTaskMessages converts DB TaskMessages into ChatMessages.
+// It extracts ToolCalls from tool_call messages and merges them into the preceding assistant
+// message, so FormatConversationTurns can render descriptive tool-use lines.
+// Used by commit message generation and checkpoint label generation.
+func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
+	var conversation []types.ChatMessage
+	for _, m := range taskMsgs {
+		if m.Role == "tool_call" {
+			// Merge tool call info into the preceding assistant message
+			if m.ToolCalls != "" && len(conversation) > 0 && conversation[len(conversation)-1].Role == "assistant" {
+				var tcMap map[string]any
+				if err := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err == nil {
+					toolID, _ := tcMap["tool_id"].(string)
+					toolName, _ := tcMap["tool_name"].(string)
+					rawArgs, _ := tcMap["raw_args"].(string)
+					if toolID != "" && toolName != "" {
+						conversation[len(conversation)-1].ToolCalls = append(conversation[len(conversation)-1].ToolCalls, types.ToolCallMsg{
+							ID: toolID,
+							Type: "function",
+							Function: struct {
+								Name      string `json:"name"`
+								Arguments string `json:"arguments"`
+							}{Name: toolName, Arguments: rawArgs},
+						})
+					}
+				}
+			}
+			// Also add a tool result message if available (for status lookup)
+			if m.ToolResult != "" {
+				var resultMap map[string]any
+				if err := json.Unmarshal([]byte(m.ToolResult), &resultMap); err == nil {
+					output, _ := resultMap["output"].(string)
+					toolID := ""
+					if m.ToolCalls != "" {
+						var tcMap map[string]any
+						if err2 := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err2 == nil {
+							toolID, _ = tcMap["tool_id"].(string)
+						}
+					}
+					conversation = append(conversation, types.ChatMessage{Role: "tool", Content: output, ToolCallID: toolID})
+				}
+			}
+			continue
+		}
+		content := m.Content
+		if m.ReasoningContent != "" {
+			content = m.ReasoningContent + "\n" + m.Content
+		}
+		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
+	}
+	return conversation
+}
+
 // GenerateCommitMessageForTask builds a full commit message from task title, summary, and model.
 // Generates one via LLM from conversation + diff. This is the single source of truth for commit
 // message generation across all commit paths (auto-commit, manual commit-and-done).
@@ -401,14 +454,7 @@ func (te *TaskExecutor) GenerateCommitMessageForTask(ctx context.Context, taskID
 		diffStat = "no diff available"
 	}
 	taskMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
-	var conversation []types.ChatMessage
-	for _, m := range taskMsgs {
-		content := m.Content
-		if m.ReasoningContent != "" {
-			content = m.ReasoningContent + "\n" + m.Content
-		}
-		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
-	}
+	conversation := BuildConversationFromTaskMessages(taskMsgs)
 	commitMsg := te.GenerateCommitMessage(ctx, taskID, diffStat, FormatConversationTurns(ExtractLastTurns(conversation, 3)))
 	// GenerateCommitMessage returns "file changes" as a generic fallback when LLM is unavailable.
 	// Use the task title instead for a more useful commit message.
@@ -443,14 +489,7 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 		diffStat = "no diff available"
 	}
 	taskMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
-	var conversation []types.ChatMessage
-	for _, m := range taskMsgs {
-		content := m.Content
-		if m.ReasoningContent != "" {
-			content = m.ReasoningContent + "\n" + m.Content
-		}
-		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
-	}
+	conversation := BuildConversationFromTaskMessages(taskMsgs)
 	turnText := FormatConversationTurns(ExtractLastTurns(conversation, 3))
 	labelMessages := buildCommitMessages(diffStat, turnText)
 
@@ -545,35 +584,39 @@ func ExtractLastTurns(messages []types.ChatMessage, n int) []types.ChatMessage {
 
 // FormatConversationTurns formats a slice of chat messages into readable text.
 func FormatConversationTurns(messages []types.ChatMessage) string {
+	// Map tool IDs to results for status lookup.
+	toolResults := make(map[string]string)
+	for _, m := range messages {
+		if m.Role == "tool" && m.ToolCallID != "" {
+			toolResults[m.ToolCallID] = m.Content
+		}
+	}
+
 	var sb strings.Builder
 	for _, m := range messages {
 		switch m.Role {
 		case "user":
 			sb.WriteString("User: ")
-			sb.WriteString(m.Content)
+			sb.WriteString(strings.TrimRight(m.Content, "\n"))
 			sb.WriteString("\n\n")
 		case "assistant":
 			sb.WriteString("Assistant: ")
 			if m.Content != "" {
-				sb.WriteString(m.Content)
+				sb.WriteString(strings.TrimRight(m.Content, "\n"))
 			}
 			if len(m.ToolCalls) > 0 {
 				for _, tc := range m.ToolCalls {
-					sb.WriteString(fmt.Sprintf("[tool: %s %s]\n", tc.Function.Name, tc.Function.Arguments))
+					action := formatToolAction(tc.Function.Name, tc.Function.Arguments)
+					status := formatToolStatus(tc.ID, toolResults)
+					sb.WriteString(fmt.Sprintf("\nAssistant: (I used the %s tool to %s, which was %s)",
+						tc.Function.Name, action, status))
 				}
 			}
 			sb.WriteString("\n\n")
 		case "tool":
-			// Tool result — include truncated output
-			if m.Content != "" {
-				sb.WriteString("[Tool result]")
-				if len(m.Content) > 500 {
-					sb.WriteString(m.Content[:500] + "...")
-				} else {
-					sb.WriteString(m.Content)
-				}
-				sb.WriteString("\n\n")
-			}
+			// Standalone tool message (no preceding assistant with ToolCalls).
+			// Already incorporated into assistant line when ToolCalls are present.
+			continue
 		}
 	}
 	return sb.String()
