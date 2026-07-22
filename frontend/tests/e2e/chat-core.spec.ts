@@ -106,6 +106,8 @@ test.describe('Chat Core', () => {
 
     await page.locator('.btn-stop').click();
     await expect(page.locator('.btn-send')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.btn-stop')).toBeHidden({ timeout: 10000 });
+  });
   });
 
   test('should stop generation when Escape is pressed in chat input', async ({ page }) => {
