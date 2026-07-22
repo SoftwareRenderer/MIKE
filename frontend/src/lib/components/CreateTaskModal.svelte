@@ -204,12 +204,11 @@
     let selectedUrl = $state('');
     let selectedReasoningEffort = $state('');
     let hasProviders = $derived(providers.length > 0);
-    let isAgentSelected = $derived(() => {
-        if (!selectedUrl) return false;
-        if (selectedUrl === PI_SENTINEL_URL) return true;
-        const p = providers.find(p => p.url === selectedUrl);
-        return p ? isAgentProvider(p) : false;
-    });
+    let isAgentSelected = $derived(
+        !selectedUrl ? false :
+        selectedUrl === PI_SENTINEL_URL ? true :
+        providers.find(p => p.url === selectedUrl) ? isAgentProvider(providers.find(p => p.url === selectedUrl)) : false
+    );
 
     // Config is now reactive via appStore
     let cfg: Config | null = $state(null);
@@ -276,8 +275,10 @@
         selectedModel = modelName;
         selectedUrl = providerUrl;
         selectedReasoningEffort = reasoningEffort || '';
-        // Agent providers always use ideate mode; reset to act when switching away
-        operatingMode = isAgentSelected() ? 'ideate' : 'act';
+        // Agent providers must use ideate mode
+        if (isAgentSelected) {
+            operatingMode = 'ideate';
+        }
     }
 
     async function handleSubmit() {
@@ -393,7 +394,7 @@
         </div>
     {/if}
     <div class="options">
-        {#if !isAgentSelected()}
+        {#if !isAgentSelected}
         <div class="config-row">
             <div class="config-info">
                 <div class="config-text">
