@@ -928,6 +928,9 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 			"rows":      f.Rows,
 			"truncated": f.Truncated,
 		}
+		if len(f.CommittedRows) > 0 {
+			resp["committedRows"] = f.CommittedRows
+		}
 		if f.OrigAdded > 0 {
 			resp["origAdded"] = f.OrigAdded
 		}

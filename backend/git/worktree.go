@@ -832,6 +832,7 @@ type InlineDiffSegment struct {
 type TrackedDiffFile struct {
 	Path        string    `json:"path"`
 	OrigPath    string    `json:"origPath,omitempty"` // original path for renames (a/ path when different from b/)
+	CommittedRows []DiffRow `json:"committedRows,omitempty"` // changes committed to branch since baseRef
 	Rows        []DiffRow `json:"rows"`
 	Added       int       `json:"added"`
 	Removed     int       `json:"removed"`
@@ -849,6 +850,7 @@ type TrackedDiffFile struct {
 // monolithic unified diff string (kept for backward compatibility).
 type TaskDiff struct {
 	Diff              string                      `json:"diff"`
+	CommittedDiff     string                      `json:"-"` // raw diff of committed changes since baseRef (for hash computation)
 	Tracked           map[string]*TrackedDiffFile `json:"-"` // per-file parsed diffs (not JSON-serialized in legacy format)
 	Untracked         []UntrackedFile             `json:"untracked"`
 	ShortStat         string                      `json:"short_stat"`
@@ -869,6 +871,9 @@ func ComputeFileHash(f *TrackedDiffFile) string {
 	var sb strings.Builder
 	for _, row := range f.Rows {
 		fmt.Fprintf(&sb, "%s:%s\n", row.Variant, row.Text)
+	}
+	for _, row := range f.CommittedRows {
+		fmt.Fprintf(&sb, "c:%s:%s\n", row.Variant, row.Text)
 	}
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(sb.String())))
 }
@@ -1414,21 +1419,10 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	} else {
 		// Single-ref diff: working tree vs baseRef.
 		// Checkpoints use stash create+store, so changes stay visible in the working tree.
-		target := "HEAD"
-		if baseRef != "" {
-			target = baseRef
-		}
-
-		// Get tracked file diff.
-		// Two sources of changes:
-		//   1. Working-tree changes (uncommitted): git diff HEAD
-		//   2. Committed changes (since target): git diff target..HEAD
-		// We always check for working-tree changes first. When the working tree is
-		// dirty, using HEAD as baseline ensures deletions of post-target files are
-		// captured (git diff target misses them — file absent on both sides).
-		// Get tracked file diff from target to working tree.
-		// This captures both committed changes since target and uncommitted working-tree changes.
-		diffOut, err = wm.gitRunOutput(worktreePath, "diff", target)
+		// Working-tree diff: always compare against HEAD.
+		// This captures only uncommitted changes (staged + unstaged).
+		// Committed changes are handled separately below.
+		diffOut, err = wm.gitRunOutput(worktreePath, "diff", "HEAD")
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 				// Changes exist, diffOut has the output — continue
@@ -1544,6 +1538,36 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	}
 
 	tracked := parseUnifiedDiffToFiles(diffOut, truncatedFiles, originalStats, annotations)
+	if tracked == nil {
+		tracked = make(map[string]*TrackedDiffFile)
+	}
+	var committedDiff string
+	if baseRef != "" {
+		committedOut, err := wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..HEAD", baseRef))
+		if err == nil && committedOut != "" {
+			committedDiff = committedOut
+			committedOut, committedAnnotations := wm.filterLargeBinaryDiffs(worktreePath, committedOut)
+			committedFiles := parseUnifiedDiffToFiles(committedOut, nil, nil, committedAnnotations)
+			for path, cf := range committedFiles {
+				if tf, ok := tracked[path]; ok {
+					tf.CommittedRows = cf.Rows
+				} else {
+					tracked[path] = &TrackedDiffFile{
+						Path: path,
+						Rows: nil,
+						CommittedRows: cf.Rows,
+						Added: cf.Added,
+						Removed: cf.Removed,
+						FileSize: cf.FileSize,
+						IsBinary: cf.IsBinary,
+						Truncated: cf.Truncated,
+						OrigAdded: cf.OrigAdded,
+						OrigRemoved: cf.OrigRemoved,
+					}
+				}
+			}
+		}
+	}
 
 	// Convert to sorted slice for deterministic WebSocket broadcast.
 	var stagedPathsList []string
@@ -1556,6 +1580,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 
 	return &TaskDiff{
 		Diff:              diffOut,
+		CommittedDiff:     committedDiff,
 		Tracked:           tracked,
 		Untracked:         untracked,
 		ShortStat:         shortStat,

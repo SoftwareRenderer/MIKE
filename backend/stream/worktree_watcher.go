@@ -396,11 +396,11 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 	trackedN, untrackedN := countManifestFiles(diffResult)
 	filesN := trackedN + untrackedN
 
-	hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
+	hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
 	if hash != "" {
 		if prevRaw, ok := ww.diffCache.Load(taskID); ok {
 			prevDiff := prevRaw.(*git.TaskDiff)
-			prevHash := ComputeDiffHash(prevDiff.Diff, prevDiff.Untracked, prevDiff.StagedHash)
+			prevHash := ComputeDiffHash(prevDiff.Diff, prevDiff.CommittedDiff, prevDiff.Untracked, prevDiff.StagedHash)
 			if hash == prevHash {
 				return
 			}
