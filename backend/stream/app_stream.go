@@ -521,10 +521,11 @@ func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 	})
 }
 
-// ComputeDiffHash computes a SHA-256 hash of the diff, untracked files, and staged state.
-func ComputeDiffHash(diff string, untracked []git.UntrackedFile, stagedHash string) string {
+// ComputeDiffHash computes a SHA-256 hash of the diff, committed diff, untracked files, and staged state.
+func ComputeDiffHash(diff string, committedDiff string, untracked []git.UntrackedFile, stagedHash string) string {
 	var hashInput strings.Builder
 	hashInput.WriteString(diff)
+	hashInput.WriteString("\x00committed:" + committedDiff)
 	for _, u := range untracked {
 		hashInput.WriteString(u.Path + strings.Join(u.Lines, "\n"))
 	}
@@ -872,7 +873,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			}
 		}
 		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, headRef); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
-			hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
+			hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
 			// Send compact stats for card UI (exclude internal files to match panel display)
 			var untrackedLines, trackedAdd, trackedDel, visibleTracked, visibleUntracked int
 			for path, f := range diffResult.Tracked {

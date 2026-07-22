@@ -113,8 +113,9 @@
         enrichRows: enrichRowsWithInlineSegments,
     }, () => task.project_id, () => task.id);
     // Derived arrays for DiffViewer (sorted, split by staged status)
-    let stagedFiles = $derived(Object.values(diffCache.state.files).filter(f => f.staged && !diffCache.state.untracked[f.path]));
-    let unstagedFiles = $derived(Object.values(diffCache.state.files).filter(f => !f.staged && !diffCache.state.untracked[f.path]));
+    let stagedFiles = $derived(Object.values(diffCache.state.files).filter(f => f.staged && !diffCache.state.untracked[f.path] && (f.rows?.length > 0 || f.isBinary)));
+    let unstagedFiles = $derived(Object.values(diffCache.state.files).filter(f => !f.staged && !diffCache.state.untracked[f.path] && (f.rows?.length > 0 || f.isBinary)));
+    let committedFiles = $derived(Object.values(diffCache.state.files).filter(f => f.committedRows && f.committedRows.length > 0));
     // Authoritative staged-changes count from DiffCache (source of truth).
     // Passed to TaskChat so the ReviewBar button stays in sync with the diff panel
     // when the user stages/unstages files (optimistic update before WS catch-up).
@@ -808,7 +809,7 @@
                             {/if}
                             {#if DiffViewerComponent}
                                 {@const DiffViewer = DiffViewerComponent}
-                                <DiffViewer stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                                <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
                             {:else}
                                 <div class="diff-viewer-loading">Loading diff viewer...</div>
                             {/if}
