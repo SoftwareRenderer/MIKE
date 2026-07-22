@@ -1494,17 +1494,6 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 						var tcMap map[string]any
 						if err2 := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err2 == nil {
 							toolID, _ = tcMap["tool_id"].(string)
-							// Skip request_review — matches buildLLMContext: filter the assistant
-							// and all tool results from that turn.
-							if tcName, ok := tcMap["tool_name"].(string); ok && tcName == "request_review" {
-								for len(messages) > 0 && messages[len(messages)-1].Role == "tool" {
-									messages = messages[:len(messages)-1]
-								}
-								if len(messages) > 0 && messages[len(messages)-1].Role == "assistant" {
-									messages = messages[:len(messages)-1]
-								}
-								continue
-							}
 						}
 					}
 					messages = append(messages, types.ChatMessage{Role: "tool", Content: output, ToolCallID: toolID})

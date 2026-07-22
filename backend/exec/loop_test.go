@@ -1879,22 +1879,26 @@ func TestBuildLLMContext_FiltersTaskComplete(t *testing.T) {
 
 	result := buildLLMContext(messages)
 
-	// request_review assistant (msg[4]) should be filtered out
-	// system + user + assistant(read_file) + tool + user + assistant = 6
-	if len(result) != 6 {
-		t.Fatalf("expected 6 messages, got %d", len(result))
+	// request_review assistant (msg[4]) should be kept
+	// system + user + assistant(read_file) + tool + assistant(request_review) + user + assistant = 7
+	if len(result) != 7 {
+		t.Fatalf("expected 7 messages, got %d", len(result))
 		for i, m := range result {
 			t.Logf("  [%d] role=%s content=%q toolCalls=%v", i, m.Role, m.Content, m.ToolCalls)
 		}
 	}
 
-	// Verify no request_review tool call in result
+	// Verify request_review tool call is present in result
+	foundRequestReview := false
 	for _, m := range result {
 		for _, tc := range m.ToolCalls {
 			if tc.Function.Name == "request_review" {
-				t.Error("request_review tool call should be filtered out")
+				foundRequestReview = true
 			}
 		}
+	}
+	if !foundRequestReview {
+		t.Error("request_review tool call should be present")
 	}
 }
 
@@ -1913,10 +1917,10 @@ func TestBuildLLMContext_FiltersTaskCompleteWithToolResult(t *testing.T) {
 
 	result := buildLLMContext(messages)
 
-	// request_review assistant (msg[2]) and its tool result (msg[3]) filtered
-	// system + user + user = 3
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(result))
+	// request_review assistant (msg[2]) and its tool result (msg[3]) should be kept
+	// system + user + assistant + tool + user = 5
+	if len(result) != 5 {
+		t.Fatalf("expected 5 messages, got %d", len(result))
 		for i, m := range result {
 			t.Logf("  [%d] role=%s content=%q toolCallID=%q", i, m.Role, m.Content, m.ToolCallID)
 		}
@@ -1968,13 +1972,26 @@ func TestBuildLLMContext_FiltersOnlyTaskCompleteToolCall(t *testing.T) {
 
 	result := buildLLMContext(messages)
 
-	// Assistant with request_review + both tool results filtered
-	// system + user + user = 3
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(result))
+	// Assistant with request_review + both tool results should be kept
+	// system + user + assistant + tool + tool + user = 6
+	if len(result) != 6 {
+		t.Fatalf("expected 6 messages, got %d", len(result))
 		for i, m := range result {
 			t.Logf("  [%d] role=%s content=%q", i, m.Role, m.Content)
 		}
+	}
+
+	// Verify request_review is present
+	foundRequestReview := false
+	for _, m := range result {
+		for _, tc := range m.ToolCalls {
+			if tc.Function.Name == "request_review" {
+				foundRequestReview = true
+			}
+		}
+	}
+	if !foundRequestReview {
+		t.Error("request_review tool call should be present")
 	}
 }
 
