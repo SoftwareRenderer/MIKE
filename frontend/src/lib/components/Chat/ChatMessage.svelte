@@ -37,6 +37,7 @@
         reasoningContent?: string;
         hasReasoning?: boolean;
         isStreaming?: boolean;
+        isOptimistic?: boolean;
         timestamp?: string;
         messageId?: string;
         attachments?: Array<{ mimeType: string; data: string }>;
@@ -60,7 +61,7 @@
         taskId?: string;
     }
 
-    let { role, content, reasoningContent, hasReasoning = false, isStreaming = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onEdit, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '' }: Props = $props();
+    let { role, content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onEdit, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '' }: Props = $props();
 
     // Edit state
     let isEditing = $state(false);
@@ -401,6 +402,7 @@
                     timestampTooltip={timestampInfo.tooltip}
                     hasContent={!!content}
                     {isStreaming}
+                    isOptimistic={isOptimistic}
                     onCopy={handleCopy}
                     onEdit={onEdit ? startEdit : undefined}
                     onRegenerate={onRegenerate}

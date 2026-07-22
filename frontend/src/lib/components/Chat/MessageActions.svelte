@@ -6,6 +6,7 @@
         timestampDisplay?: string;
         hasContent?: boolean;
         isStreaming?: boolean;
+        isOptimistic?: boolean;
         onCopy?: () => void;
         onDelete?: () => void;
         onEdit?: () => void;
@@ -14,7 +15,7 @@
         copied?: boolean;
     }
 
-    let { variant = 'assistant', timestamp, timestampTooltip, timestampDisplay, hasContent = true, isStreaming = false, onCopy, onDelete, onEdit, onRegenerate, onFork, copied = false }: Props = $props();
+    let { variant = 'assistant', timestamp, timestampTooltip, timestampDisplay, hasContent = true, isStreaming = false, isOptimistic = false, onCopy, onDelete, onEdit, onRegenerate, onFork, copied = false }: Props = $props();
 </script>
 
 <div class="message-actions" class:user-actions={variant === 'user'} class:assistant-actions={variant === 'assistant'}>
@@ -56,7 +57,7 @@
                 <span class="check">✓</span>
             </button>
         {/if}
-        {#if onEdit && !isStreaming}
+        {#if onEdit && !isStreaming && !isOptimistic}
             <button class="action-btn" onclick={onEdit} aria-label="Edit message" title="Edit message">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -64,7 +65,7 @@
                 </svg>
             </button>
         {/if}
-        {#if onRegenerate && !isStreaming}
+        {#if onRegenerate && !isStreaming && !isOptimistic}
             <button class="action-btn" onclick={onRegenerate} aria-label="Regenerate response" title="Regenerate response">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M21 2v6h-6"/>
@@ -74,7 +75,7 @@
                 </svg>
             </button>
         {/if}
-        {#if onDelete && !isStreaming}
+        {#if onDelete && !isStreaming && !isOptimistic}
             <button class="action-btn" onclick={onDelete} aria-label="Delete message and all following messages" title="Delete message and all following messages">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>

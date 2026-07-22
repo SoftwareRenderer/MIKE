@@ -282,8 +282,16 @@ export function useVirtualScroll(
     // Attach scroll listener when container is available
     if (typeof window !== 'undefined') {
         $effect(() => {
+            // Watch for changes in the items list.
+            // Accessing items() here ensures this effect re-runs whenever the items change.
+            items();
+            computeVisibleRange();
+        });
+
+        $effect(() => {
             const el = containerRef();
             if (el) {
+
                 el.addEventListener('scroll', onScroll, { passive: true });
                 // Also listen for resize to recompute on container size changes
                 const ro = new ResizeObserver(() => computeVisibleRange());
