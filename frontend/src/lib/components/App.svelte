@@ -259,6 +259,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
         }
 
+        if (taskId) {
+            const task = tasks.find(t => t.id === taskId);
             if (task) {
                 appStore.selectedTask = task;
                 uiStore.showCardDetail = true;
@@ -267,7 +269,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             // Scroll to the task's column when going back via browser back button
             const prevTask = appStore.selectedTask;
             if (prevTask) scrollToColumn = prevTask.status;
-            appStore.selectedTask = null;
             appStore.selectedTask = null;
             uiStore.showCardDetail = false;
         }
