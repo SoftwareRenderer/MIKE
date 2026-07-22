@@ -39,7 +39,7 @@ function addMockLSPExt(name: string, language: string, extensions: string[]) {
         enabled: true,
         running: false,
         installed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        built_at: new Date().toISOString(),
     };
     extensionManager.state.extensions.push(ext);
 }
