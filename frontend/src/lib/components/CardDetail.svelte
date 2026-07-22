@@ -113,15 +113,19 @@
         enrichRows: enrichRowsWithInlineSegments,
     }, () => task.project_id, () => task.id);
     // Derived arrays for DiffViewer (sorted, split by staged status)
-    let stagedFiles = $derived(Object.values(diffCache.state.files).filter(f => f.staged && !diffCache.state.untracked[f.path] && (f.rows?.length > 0 || f.isBinary)));
-    let unstagedFiles = $derived(Object.values(diffCache.state.files).filter(f => !f.staged && !diffCache.state.untracked[f.path] && (f.rows?.length > 0 || f.isBinary)));
-    let committedFiles = $derived(Object.values(diffCache.state.files).filter(f => f.committedRows && f.committedRows.length > 0));
+    // For done tasks, all diff files are shown as "Merged" (no staging/unstaged concept).
+    let isDoneTask = $derived(task.status === 'done');
+    let stagedFiles = $derived(isDoneTask ? [] : Object.values(diffCache.state.files).filter(f => f.staged && !diffCache.state.untracked[f.path] && (f.rows?.length > 0 || f.isBinary)));
+    let unstagedFiles = $derived(isDoneTask ? [] : Object.values(diffCache.state.files).filter(f => !f.staged && !diffCache.state.untracked[f.path] && (f.rows?.length > 0 || f.isBinary)));
+    let committedFiles = $derived(isDoneTask
+        ? Object.values(diffCache.state.files).filter(f => !diffCache.state.untracked[f.path] && (f.rows?.length > 0 || f.isBinary))
+        : Object.values(diffCache.state.files).filter(f => f.committedRows && f.committedRows.length > 0));
     // Authoritative staged-changes count from DiffCache (source of truth).
     // Passed to TaskChat so the ReviewBar button stays in sync with the diff panel
     // when the user stages/unstages files (optimistic update before WS catch-up).
     let hasStagedChanges = $derived(stagedFiles.length > 0);
     let stagedUntracked = $derived([] as { path: string; fileSize?: number; isBinary?: boolean; truncated?: boolean; origAdded?: number; loading?: boolean; file: DiffFile }[]);
-    let unstagedUntracked = $derived(Object.entries(diffCache.state.untracked).map(([path, meta]) => ({
+    let unstagedUntracked = $derived(isDoneTask ? [] : Object.entries(diffCache.state.untracked).map(([path, meta]) => ({
         path,
         ...meta,
         file: diffCache.state.files[path] || { path, rows: [], added: 0, removed: 0 },
@@ -809,7 +813,7 @@
                             {/if}
                             {#if DiffViewerComponent}
                                 {@const DiffViewer = DiffViewerComponent}
-                                <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                                <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} mergedLabel={isDoneTask ? 'Merged' : 'Merged from Subtasks'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
                             {:else}
                                 <div class="diff-viewer-loading">Loading diff viewer...</div>
                             {/if}
