@@ -288,6 +288,116 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         return () => window.removeEventListener('popstate', handlePopState);
     });
 
+    async function initializeAuthSession() {
+        appStream = createAppStream({
+            onProjectCounts: (counts) => {
+                projectCounts = counts;
+            },
+            onRefresh: () => refreshBoard(),
+            onDiffStats: (task_id, hash, short_stat, files_n, untracked_n, untracked_lines, tracked_add, tracked_del, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged) => {
+                const additions = tracked_add + (untracked_lines || 0);
+                const deletions = tracked_del;
+                taskDiffStatsContext.update(map => {
+                    map[task_id] = { hash: hash || '', files: files_n, additions, deletions, untracked_n: untracked_n || 0, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged };
+                    return { ...map };
+                });
+            },
+            onDiff: (task_id, hash, diff, untracked, files) => {
+                taskDiffContext.update(map => {
+                    const hasManifest = files && Object.keys(files).length > 0;
+                    const hasLegacy = diff || (untracked?.length ?? 0) > 0;
+                    if (hasManifest || hasLegacy) {
+                        map[task_id] = { hash, diff, untracked, files, updated_at: Date.now() };
+                    } else {
+                        delete map[task_id];
+                    }
+                    return { ...map };
+                });
+            },
+            onBranch: (branch) => {
+                currentBranch = branch;
+                if (branch && !showExplorerViewVal) {
+                    const params = new URLSearchParams(location.search);
+                    if (params.get('view') === 'explorer') {
+                        showExplorerViewVal = true;
+                    }
+                }
+            },
+            onFsEvent: (op, path) => {
+                if (showExplorerViewVal) {
+                    fsEventQueue = [...fsEventQueue, { op, path }];
+                }
+            },
+            onTaskUpdated: (updatedTask: Task) => {
+                const idx = tasks.findIndex(t => t.id === updatedTask.id);
+                if (idx >= 0) {
+                    tasks = tasks.map((t, i) => i === idx ? updatedTask : t);
+                } else {
+                    tasks = [...tasks.filter(t => t.id !== updatedTask.id), updatedTask];
+                }
+                appStore.board = { ...appStore.board!, tasks };
+                if (appStore.selectedTask?.id === updatedTask.id) {
+                    appStore.selectedTask = updatedTask;
+                }
+            },
+            onTaskDeleted: (task_id: string) => {
+                tasks = tasks.filter(t => t.id !== task_id);
+                appStore.board = { ...appStore.board!, tasks };
+                if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
+                    clearTaskDetail();
+                }
+            },
+            onCommitStatus: (task_id: string, status: 'queued' | 'processing') => {
+                const proj = currentProject;
+                if (proj) {
+                    commitQueueStatusContext.update(map => ({ ...map, [proj.id]: { taskID: task_id, status } }));
+                }
+            },
+            onTaskEvent: (task_id: string, event: StreamEvent) => {
+                if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
+                    taskEventContext.set({ task_id, ...event });
+                }
+            },
+            onConnected: (connected) => {
+                wsConnected = connected;
+                setOfflineStatus(!connected);
+                if (!connected) {
+                    lastSyncedAt = Date.now();
+                    startStaleTick();
+                } else {
+                    stopCountdown();
+                    stopStaleTick();
+                    nextReconnectAt = 0;
+                    countdownSeconds = 0;
+                    if (initialLoadComplete) {
+                        silentRefresh().catch(() => {});
+                    }
+                }
+            },
+            onReconnectScheduled: (nextAttemptAt) => {
+                nextReconnectAt = nextAttemptAt;
+                startCountdown();
+            },
+            onConnectAttempt: () => {
+                stopCountdown();
+                countdownSeconds = 0;
+            },
+            onPortConflict: (project_id, conflicted_ports) => {
+                portConflict = { project_id, ports: conflicted_ports };
+            },
+            onProjectPorts: (ports) => {
+                appStore.projectTerminalPorts = ports;
+            },
+        });
+        setAppStreamRef(appStream);
+        const urlParams = new URLSearchParams(location.search);
+        if (urlParams.get('view') === 'explorer') {
+            showExplorerViewVal = true;
+        }
+        await loadAppData();
+        extensionManager.loadExtensions().catch(() => {});
+    }
+
     async function loadAppData() {
         try {
             // Restore offline action queue from IndexedDB
@@ -379,131 +489,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             if (isAuthenticated) {
                 // Extract CSRF token from session response
                 if (authData.csrf_token) setCsrfToken(authData.csrf_token);
-                // Create app-level WebSocket stream
-                appStream = createAppStream({
-                    onProjectCounts: (counts) => {
-                        projectCounts = counts;
-                    },
-                    onRefresh: () => refreshBoard(),
-                    onDiffStats: (task_id, hash, short_stat, files_n, untracked_n, untracked_lines, tracked_add, tracked_del, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged) => {
-                        // Use tracked_add/tracked_del from truncated manifest (matches panel display).
-                        // short_stat is from the full diff (before truncation) — kept for backward compat.
-                        const additions = tracked_add + (untracked_lines || 0);
-                        const deletions = tracked_del;
-                        taskDiffStatsContext.update(map => {
-                            map[task_id] = { hash: hash || '', files: files_n, additions, deletions, untracked_n: untracked_n || 0, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged };
-                            return { ...map };
-                        });
-                    },
-                    onDiff: (task_id, hash, diff, untracked, files) => {
-                        taskDiffContext.update(map => {
-                            // Manifest format (files map) or legacy format (diff string + untracked array)
-                            const hasManifest = files && Object.keys(files).length > 0;
-                            const hasLegacy = diff || (untracked?.length ?? 0) > 0;
-                            if (hasManifest || hasLegacy) {
-                                map[task_id] = { hash, diff, untracked, files, updated_at: Date.now() };
-                            } else {
-                                delete map[task_id];
-                            }
-                            return { ...map };
-                        });
-                    },
-                    onBranch: (branch) => {
-                        currentBranch = branch;
-                        // Restore explorer view from URL when branch becomes available
-                        if (branch && !showExplorerViewVal) {
-                            const params = new URLSearchParams(location.search);
-                            if (params.get('view') === 'explorer') {
-                                showExplorerViewVal = true;
-                            }
-                        }
-                    },
-                    onFsEvent: (op, path) => {
-                        if (showExplorerViewVal) {
-                            fsEventQueue = [...fsEventQueue, { op, path }];
-                        }
-                    },
-                    onTaskUpdated: (updatedTask: Task) => {
-                        // Replace existing task, or append if it's genuinely new
-                        // (e.g., created via create_task tool call).
-                        // Deduplicate to prevent divergence with appStore.board.tasks patches.
-                        const idx = tasks.findIndex(t => t.id === updatedTask.id);
-                        if (idx >= 0) {
-                            tasks = tasks.map((t, i) => i === idx ? updatedTask : t);
-                        } else {
-                            tasks = [...tasks.filter(t => t.id !== updatedTask.id), updatedTask];
-                        }
-                        appStore.board = { ...appStore.board!, tasks };
-                        // Update appStore.selectedTask so CardDetail's `task` prop refreshes,
-                        // ensuring real-time updates (pause/stop/complete).
-                        if (appStore.selectedTask?.id === updatedTask.id) {
-                            appStore.selectedTask = updatedTask;
-                        }
-                    },
-                    onTaskDeleted: (task_id: string) => {
-                        tasks = tasks.filter(t => t.id !== task_id);
-                        appStore.board = { ...appStore.board!, tasks };
-                        if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
-                            clearTaskDetail();
-                        }
-                    },
-                    onCommitStatus: (task_id: string, status: 'queued' | 'processing') => {
-                        const proj = currentProject;
-                        if (proj) {
-                            commitQueueStatusContext.update(map => ({ ...map, [proj.id]: { taskID: task_id, status } }));
-                        }
-                    },
-                    onTaskEvent: (task_id: string, event: StreamEvent) => {
-                        // Forward task events to the task event store for TaskStream to consume
-                        if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
-                            taskEventContext.set({ task_id, ...event });
-                        }
-                    },
-                    onConnected: (connected) => {
-                        wsConnected = connected;
-                        setOfflineStatus(!connected);
-                        if (!connected) {
-                            // Record the disconnect time so the stale banner counts from now
-                            lastSyncedAt = Date.now();
-                            startStaleTick();
-                        } else {
-                            stopCountdown();
-                            stopStaleTick();
-                            nextReconnectAt = 0;
-                            countdownSeconds = 0;
-                            // Skip refresh on first connect — data was just loaded in onMount.
-                            // Only refresh on reconnection (after a disconnect), where we may
-                            // have missed task_updated/project_counts events during the gap.
-                            if (initialLoadComplete) {
-                                silentRefresh().catch(() => {});
-                            }
-                        }
-                    },
-                    onReconnectScheduled: (nextAttemptAt) => {
-                        nextReconnectAt = nextAttemptAt;
-                        startCountdown();
-                    },
-                    onConnectAttempt: () => {
-                        stopCountdown();
-                        countdownSeconds = 0;
-                    },
-                    onPortConflict: (project_id, conflicted_ports) => {
-                        portConflict = { project_id, ports: conflicted_ports };
-                    },
-                    onProjectPorts: (ports) => {
-                        appStore.projectTerminalPorts = ports;
-                    },
-                });
-                // Expose appStream so TaskChat can subscribe after handler setup
-                setAppStreamRef(appStream);
-                // Restore explorer view state before loadAppData (which calls selectProject)
-                const urlParams = new URLSearchParams(location.search);
-                if (urlParams.get('view') === 'explorer') {
-                    showExplorerViewVal = true;
-                }
-                await loadAppData();
-                // Load installed extensions for LSP discovery
-                extensionManager.loadExtensions().catch(() => {});
+                await initializeAuthSession();
             }
             isLoadingAuth = false;
         } catch (e) {
@@ -970,7 +956,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 {:else if !isAuthenticated}
     <LoginModal onClose={async () => {
         isAuthenticated = true;
-        await loadAppData();
+        await initializeAuthSession();
     }} />
 {:else}
 <!-- WebSocket reconnecting banner -->

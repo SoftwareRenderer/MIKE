@@ -48,13 +48,10 @@
 {/snippet}
 
 <BaseModal title="" width="360px" zIndex={1000} closeOnOverlayClick={false} footer={footer} onClose={() => {}} header={header}>
-    <p class="login-subtitle">Enter your password to continue</p>
-
     {#if error}
         <div class="login-error" role="alert">{error}</div>
     {/if}
 
-    <label for="login-password" class="login-label">Password</label>
     <!-- svelte-ignore a11y_autofocus — intentional focus on login form -->
     <input
         id="login-password"
@@ -100,25 +97,11 @@
         justify-content: stretch;
     }
 
-    .login-label {
-        display: block;
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: var(--color-text-secondary);
-        text-align: center;
-        margin-bottom: 8px;
-    }
     .login-header {
         text-align: center;
     }
-    .login-header h2 {
-        text-align: center;
-    }
 
-    .login-subtitle {
-        margin: 0;
-        font-size: 0.875rem;
-        color: var(--color-text-secondary);
+    .login-header h2 {
         text-align: center;
     }
 
