@@ -8,7 +8,48 @@ import (
 
 var wordTokenRe = regexp.MustCompile(`[a-zA-Z]{2,}`)
 
+// blockDetector tracks raw text blocks within a single streaming response
+// to detect exact repetitions of any block (not just sentences) in real-time.
+type blockDetector struct {
+	buffer string
+	maxLen int
+}
+
+func newBlockDetector() *blockDetector {
+	return &blockDetector{
+		maxLen: 4096,
+	}
+}
+
+func (d *blockDetector) reset() {
+	d.buffer = ""
+}
+
+func (d *blockDetector) check(text string) bool {
+	d.buffer += text
+	if len(d.buffer) > d.maxLen {
+		d.buffer = d.buffer[len(d.buffer)-d.maxLen:]
+	}
+
+	if len(d.buffer) < 30 {
+		return false
+	}
+
+	// Check for repetitions of blocks from 10 to 100 characters.
+	// A loop is detected if the same block repeats 3 times consecutively.
+	for size := 10; size <= len(d.buffer)/3; size++ {
+		block := d.buffer[len(d.buffer)-size:]
+		if len(d.buffer) >= 3*size &&
+			d.buffer[len(d.buffer)-2*size:len(d.buffer)-size] == block &&
+			d.buffer[len(d.buffer)-3*size:len(d.buffer)-2*size] == block {
+			return true
+		}
+	}
+	return false
+}
+
 // phraseDetector tracks sentences/phrases seen within a single streaming response
+
 // to detect exact repetition in real-time.
 type phraseDetector struct {
 	seen    map[string]int // phrase -> occurrence count
@@ -18,7 +59,7 @@ type phraseDetector struct {
 
 // minPhraseWords is the minimum word count for a phrase to be tracked.
 // Phrases shorter than this are ignored to avoid false positives on common short text.
-const minPhraseWords = 8
+const minPhraseWords = 5
 
 // newPhraseDetector creates a new phraseDetector.
 func newPhraseDetector() *phraseDetector {
