@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -22,27 +21,8 @@ import (
 
 var toolCallMarker = []byte(`"event":"tool_call"`)
 
-func isGitPath(path string) bool {
-	if path == ".git" {
-		return true
-	}
-	for _, part := range strings.Split(path, string(filepath.Separator)) {
-		if part == ".git" {
-			return true
-		}
-	}
-	return false
-}
-
 func isInternalFile(path string) bool {
-	if isGitPath(path) {
-		return true
-	}
-	base := filepath.Base(path)
-	if base == "kanban.trace" || base == "kanban.trace.old" {
-		return true
-	}
-	return false
+	return git.IsInternalFile(path)
 }
 
 func filterInternalPathsFromHashes(hashes map[string]string) map[string]string {
@@ -533,6 +513,8 @@ func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 		"files_n":         event.FilesN,
 		"untracked_n":     event.UntrackedN,
 		"untracked_lines": event.UntrackedLines,
+		"tracked_add":     event.TrackedAdd,
+		"tracked_del":     event.TrackedDel,
 		"file_hashes":     filterInternalPathsFromHashes(event.ChangedHashes),
 		"removed_files":   filterInternalPathsFromList(event.RemovedFiles),
 		"staged_paths":    filterInternalPathsFromList(event.StagedPaths),
@@ -707,7 +689,13 @@ func (asm *AppStreamManager) getDiffBaseline(task types.Task) string {
 	if thread != nil {
 		forkBranch = thread.GitBranch
 	}
-	baseRef, _ := asm.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, forkBranch)
+	// Use BaseCommit (fixed hash captured at task start) when available,
+	// falling back to BaseRef (branch name). Matches API handler logic.
+	baseline := task.BaseRef
+	if task.BaseCommit != "" {
+		baseline = task.BaseCommit
+	}
+	baseRef, _ := asm.worktreeMgr.ResolveDiffBaseline(task.ID, baseline, task.Branch, forkBranch)
 	return baseRef
 }
 
@@ -872,8 +860,9 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		}
 		baseRef := asm.getDiffBaseline(task)
 		// Watch worktrees for tasks in active states
+		// Use resolved baseline (same as panel) so card stats match panel display
 		if task.Status == "in_progress" || task.Status == "review" {
-			asm.WatchWorktree(task.ID, projectID, task.BaseRef)
+			asm.WatchWorktree(task.ID, projectID, baseRef)
 		}
 		headRef := ""
 		if task.Status == "done" {
@@ -884,24 +873,38 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		}
 		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, headRef); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
 			hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
-			// Send compact stats for card UI
-			untrackedLines := 0
+			// Send compact stats for card UI (exclude internal files to match panel display)
+			var untrackedLines, trackedAdd, trackedDel, visibleTracked, visibleUntracked int
+			for path, f := range diffResult.Tracked {
+				if isInternalFile(path) {
+					continue
+				}
+				visibleTracked++
+				trackedAdd += f.Added
+				trackedDel += f.Removed
+			}
 			for _, u := range diffResult.Untracked {
+				if isInternalFile(u.Path) {
+					continue
+				}
+				visibleUntracked++
 				if u.OrigAdded > 0 {
 					untrackedLines += u.OrigAdded
 				} else {
 					untrackedLines += len(u.Lines)
 				}
 			}
-			filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
+			filesN := visibleTracked + visibleUntracked
 			statsMsg, _ := json.Marshal(map[string]any{
 				"type":            "task_diff_stats",
 				"task_id":         task.ID,
 				"hash":            hash,
 				"short_stat":      diffResult.ShortStat,
 				"files_n":         filesN,
-				"untracked_n":     len(diffResult.Untracked),
+				"untracked_n":     visibleUntracked,
 				"untracked_lines": untrackedLines,
+				"tracked_add":     trackedAdd,
+				"tracked_del":     trackedDel,
 				"file_hashes":     filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
 				"staged_paths":    filterInternalPathsFromList(diffResult.StagedPaths),
 			})

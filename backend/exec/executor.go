@@ -674,7 +674,13 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 			}
 		}
 	}
-	te.appStreamMgr.WatchWorktree(taskID, projectID, task.BaseRef)
+	// Use resolved baseline (same as API handler) so card stats match panel display.
+	// BaseCommit is a fixed commit hash captured at task start; BaseRef is the branch name.
+	watchBaseRef := task.BaseRef
+	if task.BaseCommit != "" {
+		watchBaseRef = task.BaseCommit
+	}
+	te.appStreamMgr.WatchWorktree(taskID, projectID, watchBaseRef)
 
 	// If the task has a current thread with a specific git branch, checkout that branch
 	if task.CurrentThreadID != "" {
