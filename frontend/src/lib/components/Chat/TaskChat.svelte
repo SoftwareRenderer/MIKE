@@ -92,9 +92,9 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let selectedUrl = $state('');
     let selectedReasoningEffort = $state('');
     let operatingMode = $state('act');
-    // Tracks when handleModelSelect's updateTask is in-flight, so the board store
+    // Tracks when local updates to task config are in-flight, so the board store
     // $effect doesn't overwrite the user's selection with stale DB values.
-    let modelUpdatePending = $state(false);
+    let isUpdatingTask = $state(false);
     let isAgentSelected = $derived(() => {
         if (!selectedUrl) return false;
         if (selectedUrl === PI_SENTINEL_URL) return true;
@@ -236,10 +236,10 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     $effect(() => {
         const boardTask = appStore.board?.tasks.find(t => t.id === taskId);
         if (boardTask) {
-            if (!modelUpdatePending && boardTask.llama_server_url) selectedUrl = boardTask.llama_server_url;
-            if (!modelUpdatePending && boardTask.model_name) selectedModel = boardTask.model_name;
-            if (!modelUpdatePending && boardTask.reasoning_effort) selectedReasoningEffort = boardTask.reasoning_effort;
-            operatingMode = boardTask.operating_mode ?? 'act';
+            if (!isUpdatingTask && boardTask.llama_server_url) selectedUrl = boardTask.llama_server_url;
+            if (!isUpdatingTask && boardTask.model_name) selectedModel = boardTask.model_name;
+            if (!isUpdatingTask && boardTask.reasoning_effort) selectedReasoningEffort = boardTask.reasoning_effort;
+            if (!isUpdatingTask) operatingMode = boardTask.operating_mode ?? 'act';
         }
     });
 
@@ -647,26 +647,31 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
             updates.operating_mode = 'act';
         }
         // Update task with new model/provider
-        modelUpdatePending = true;
+        isUpdatingTask = true;
         try {
             await updateTask(projectId, taskId, updates);
         } catch (e) {
             console.error('Failed to update task model:', e);
         } finally {
-            modelUpdatePending = false;
+            isUpdatingTask = false;
         }
     }
 
-    function handleOperatingModeToggle() {
+    async function handleOperatingModeToggle() {
         const modes = ['act', 'plan', 'ideate'];
         const prevMode = operatingMode;
         const nextIdx = (modes.indexOf(operatingMode) + 1) % modes.length;
         const newMode = modes[nextIdx];
         operatingMode = newMode;
-        updateTask(projectId, taskId, { operating_mode: newMode }).catch((e) => {
+        isUpdatingTask = true;
+        try {
+            await updateTask(projectId, taskId, { operating_mode: newMode });
+        } catch (e) {
             console.error('Failed to update operating mode:', e);
             operatingMode = prevMode;
-        });
+        } finally {
+            isUpdatingTask = false;
+        }
     }
 
     let isSummarizing = $state(false);
