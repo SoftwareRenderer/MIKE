@@ -89,8 +89,7 @@ func (te *TaskExecutor) summarizeContext(ctx context.Context, messages []types.C
 	}, nil
 }
 
-// buildLLMContext filters out summarization messages (summary is in system prompt),
-// assistant messages containing request_review tool calls, plus their orphaned results.
+// buildLLMContext filters out summarization messages (summary is in system prompt).
 // When a summarization message exists, all messages between the system prompt and
 // the last summarization are dropped — their content is captured by the summary
 // in the system prompt. The system message itself is always preserved.
@@ -101,16 +100,6 @@ func buildLLMContext(messages []types.ChatMessage) []types.ChatMessage {
 		if messages[i].Role == "summarization" {
 			lastSummaryIdx = i
 			break
-		}
-	}
-
-	// Collect tool_call_ids from assistants with request_review — their results become orphans.
-	filteredIDs := make(map[string]bool)
-	for _, m := range messages {
-		if m.Role == "assistant" && hasToolCall(m.ToolCalls, "request_review") {
-			for _, tc := range m.ToolCalls {
-				filteredIDs[tc.ID] = true
-			}
 		}
 	}
 
@@ -126,25 +115,9 @@ func buildLLMContext(messages []types.ChatMessage) []types.ChatMessage {
 	}
 	for i := startIdx; i < len(messages); i++ {
 		m := messages[i]
-		if m.Role == "assistant" && hasToolCall(m.ToolCalls, "request_review") {
-			continue
-		}
-		if m.Role == "tool" && filteredIDs[m.ToolCallID] {
-			continue
-		}
 		result = append(result, m)
 	}
 	return result
-}
-
-// hasToolCall checks if any tool call in the slice matches the given name.
-func hasToolCall(toolCalls []types.ToolCallMsg, name string) bool {
-	for _, tc := range toolCalls {
-		if tc.Function.Name == name {
-			return true
-		}
-	}
-	return false
 }
 
 // formatChatHistory formats conversation as plain text for the summarization prompt.
