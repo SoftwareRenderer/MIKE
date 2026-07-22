@@ -941,37 +941,150 @@ func TestFormatConversationTurns_Basic(t *testing.T) {
 
 func TestFormatConversationTurns_WithToolResult(t *testing.T) {
 	messages := []types.ChatMessage{
-		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{Function: struct {
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
 			Name      string `json:"name"`
 			Arguments string `json:"arguments"`
 		}{Name: "read_file", Arguments: `{"path":"foo.txt"}`}}}},
-		{Role: "tool", Content: "file contents"},
+		{Role: "tool", Content: "file contents", ToolCallID: "call_1"},
 	}
 	result := FormatConversationTurns(messages)
 	if result == "" {
 		t.Error("expected non-empty output")
 	}
-	if !strings.Contains(result, "[tool: read_file") {
-		t.Error("expected tool call in output")
+	if !strings.Contains(result, "I used the read_file tool to") {
+		t.Errorf("expected descriptive tool call in output, got: %s", result)
 	}
-	if !strings.Contains(result, "[Tool result]") {
-		t.Error("expected tool result in output")
+	if !strings.Contains(result, "foo.txt") {
+		t.Errorf("expected file path in output, got: %s", result)
+	}
+	// Tool result is incorporated into assistant line, not shown separately
+	if strings.Contains(result, "[Tool result]") {
+		t.Error("tool result should be incorporated into assistant line, not shown separately")
 	}
 }
 
-func TestFormatConversationTurns_TruncatesLongToolResults(t *testing.T) {
+func TestFormatConversationTurns_ToolResultSkipped(t *testing.T) {
+	// Standalone tool messages (without preceding assistant with matching ToolCalls)
+	// are skipped — they're already incorporated into the assistant line.
 	longContent := strings.Repeat("x", 600)
 	messages := []types.ChatMessage{
 		{Role: "tool", Content: longContent},
 	}
 	result := FormatConversationTurns(messages)
-	// Output should be: "[Tool result]" + 500 chars + "..." + "\n\n" = ~511 chars
-	// Full content would be: "[Tool result]" + 600 chars + "\n\n" = ~613 chars
-	if len(result) > 520 {
-		t.Errorf("expected truncated output (~511 chars), got %d chars", len(result))
+	// Tool messages are skipped, so output should be empty
+	if result != "" {
+		t.Errorf("expected empty output for standalone tool message, got %d chars", len(result))
 	}
-	if !strings.Contains(result, "...") {
-		t.Error("expected truncation marker '...' in output")
+}
+
+func TestFormatConversationTurns_TrimsTrailingNewlines(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "user", Content: "Fix the bug\n\n"},
+		{Role: "assistant", Content: "Let me check\n\n\n", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{Name: "read_file", Arguments: `{"path":"foo.go"}`}}}},
+		{Role: "tool", Content: "file contents", ToolCallID: "call_1"},
+		{Role: "assistant", Content: "Done!\n"},
+	}
+	result := FormatConversationTurns(messages)
+	// Should not have stacked blank lines (more than 2 consecutive newlines)
+	if strings.Contains(result, "\n\n\n") {
+		t.Errorf("expected no stacked blank lines, got:\n%q", result)
+	}
+	// Each message block should end with exactly \n\n
+	if !strings.HasSuffix(result, "\n\n") {
+		t.Errorf("expected trailing double newline, got: %q", result[len(result)-5:])
+	}
+}
+
+func TestBuildCommitConversation_MergesToolCallsIntoAssistant(t *testing.T) {
+	taskMsgs := []types.TaskMessage{
+		{Role: "user", Content: "Fix the bug"},
+		{Role: "assistant", Content: "Let me check the file"},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"read_file","args":{"path":"foo.go"},"raw_args":"{\"path\":\"foo.go\"}"}`, ToolResult: `{"output":"file contents","success":true,"duration":10}`},
+		{Role: "assistant", Content: "I see the issue"},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"edit_file","args":{"path":"foo.go"},"raw_args":"{\"path\":\"foo.go\",\"edits\":[...]}"}`, ToolResult: `{"output":"Edited foo.go (1 edit(s) applied)","success":true,"duration":5}`},
+		{Role: "assistant", Content: "Done!"},
+	}
+
+	messages := BuildConversationFromTaskMessages(taskMsgs)
+
+	// Should have: user, assistant(with tool_call), tool(result), assistant(with tool_call), tool(result), assistant
+	if len(messages) != 6 {
+		t.Fatalf("expected 6 messages, got %d", len(messages))
+	}
+
+	// First assistant should have the read_file tool call merged
+	if messages[1].Role != "assistant" || len(messages[1].ToolCalls) != 1 {
+		t.Error("expected first assistant to have merged tool call")
+	}
+	if messages[1].ToolCalls[0].Function.Name != "read_file" {
+		t.Errorf("expected read_file, got %s", messages[1].ToolCalls[0].Function.Name)
+	}
+
+	// Tool result should be a separate "tool" message
+	if messages[2].Role != "tool" || messages[2].ToolCallID != "call_1" {
+		t.Errorf("expected tool result message with call_1, got role=%s toolCallID=%s", messages[2].Role, messages[2].ToolCallID)
+	}
+
+	// Second assistant should have the edit_file tool call merged
+	if messages[3].Role != "assistant" || len(messages[3].ToolCalls) != 1 {
+		t.Error("expected second assistant to have merged tool call")
+	}
+	if messages[3].ToolCalls[0].Function.Name != "edit_file" {
+		t.Errorf("expected edit_file, got %s", messages[3].ToolCalls[0].Function.Name)
+	}
+}
+
+func TestBuildCommitConversation_SkipsToolCallsWithoutAssistant(t *testing.T) {
+	// Edge case: tool_call at the start (no preceding assistant)
+	taskMsgs := []types.TaskMessage{
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"read_file","raw_args":"{}"}`, ToolResult: `{"output":"contents","success":true}`},
+		{Role: "user", Content: "Hello"},
+	}
+
+	messages := BuildConversationFromTaskMessages(taskMsgs)
+
+	// Should have: tool(result), user — tool_call with no assistant is skipped, tool result added
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+	if messages[0].Role != "tool" {
+		t.Errorf("expected tool result, got role=%s", messages[0].Role)
+	}
+}
+
+func TestFormatConversationTurns_FullPipeline(t *testing.T) {
+	// Test the full pipeline: DB messages -> BuildConversationFromTaskMessages -> ExtractLastTurns -> FormatConversationTurns
+	taskMsgs := []types.TaskMessage{
+		{Role: "user", Content: "Fix the login bug"},
+		{Role: "assistant", Content: "Let me check the auth file"},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"read_file","args":{"path":"src/auth.go"},"raw_args":"{\"path\":\"src/auth.go\"}"}`, ToolResult: `{"output":"package auth","success":true,"duration":10}`},
+		{Role: "assistant", Content: "I see the issue. Let me fix it."},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"edit_file","args":{"path":"src/auth.go"},"raw_args":"{\"path\":\"src/auth.go\"}"}`, ToolResult: `{"output":"Edited src/auth.go (1 edit(s) applied)","success":true,"duration":5}`},
+	}
+
+	conversation := BuildConversationFromTaskMessages(taskMsgs)
+	turns := ExtractLastTurns(conversation, 3)
+	result := FormatConversationTurns(turns)
+
+	// Should contain descriptive tool-use lines
+	if !strings.Contains(result, "I used the read_file tool to") {
+		t.Errorf("expected read_file description, got:\n%s", result)
+	}
+	if !strings.Contains(result, "src/auth.go") {
+		t.Errorf("expected file path, got:\n%s", result)
+	}
+	if !strings.Contains(result, "I used the edit_file tool to") {
+		t.Errorf("expected edit_file description, got:\n%s", result)
+	}
+	// Should NOT contain old format
+	if strings.Contains(result, "[tool:") {
+		t.Error("should not contain old [tool: format")
+	}
+	if strings.Contains(result, "[Tool result]") {
+		t.Error("should not contain [Tool result] format")
 	}
 }
 

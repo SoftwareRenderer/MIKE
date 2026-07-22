@@ -554,14 +554,7 @@ func (s *Server) generateCheckpointLabelForFork(ctx context.Context, taskID, pro
 	}
 	// Get conversation up to the checkpoint message
 	taskMsgs, _ := s.store.GetTaskMessages(taskID, task.CurrentThreadID)
-	var conversation []types.ChatMessage
-	for _, m := range taskMsgs {
-		content := m.Content
-		if m.ReasoningContent != "" {
-			content = m.ReasoningContent + "\n" + content
-		}
-		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
-	}
+	conversation := exec.BuildConversationFromTaskMessages(taskMsgs)
 	turnText := exec.FormatConversationTurns(exec.ExtractLastTurns(conversation, 3))
 	label := s.executor.GenerateCheckpointLabel(ctx, taskID, diffStat, turnText)
 	if label != "" && label != "file changes" {
