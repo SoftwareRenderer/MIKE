@@ -1028,7 +1028,6 @@ func TestHandleFSInitGit_EnvVars(t *testing.T) {
 	gitEnvKeys := []string{
 		"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME",
 		"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL",
-		"KANBAN_GIT_AUTHOR_NAME", "KANBAN_GIT_AUTHOR_EMAIL",
 	}
 	saveEnv := func(keys ...string) map[string]string {
 		orig := make(map[string]string)
@@ -1076,16 +1075,13 @@ func TestHandleFSInitGit_EnvVars(t *testing.T) {
 		}
 	})
 
-	t.Run("succeeds with KANBAN env vars", func(t *testing.T) {
+	t.Run("succeeds with fallback identity", func(t *testing.T) {
 		saved := saveEnv(gitEnvKeys...)
 		defer restoreEnv(saved)
 		for _, k := range gitEnvKeys {
 			os.Unsetenv(k)
 		}
-		// KANBAN vars are read at package init time, so this tests the code path
-		// where git.GitAuthorName/Email are already set. If they're empty, falls back
-		// to GIT_* env vars or git config.
-		// For this test, set standard git env vars as fallback
+		// Set standard git env vars as fallback
 		os.Setenv("GIT_COMMITTER_NAME", "Kanban Bot")
 		os.Setenv("GIT_COMMITTER_EMAIL", "bot@kanban.local")
 
