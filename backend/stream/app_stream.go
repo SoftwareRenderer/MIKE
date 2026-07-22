@@ -506,18 +506,19 @@ func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff 
 // BroadcastDiffStats sends compact diff stats to all clients of a project.
 func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 	asm.sendBoardPayload(event.ProjectID, map[string]any{
-		"type":            "task_diff_stats",
-		"task_id":         event.TaskID,
-		"hash":            event.DiffHash,
-		"short_stat":      event.ShortStat,
-		"files_n":         event.FilesN,
-		"untracked_n":     event.UntrackedN,
-		"untracked_lines": event.UntrackedLines,
-		"tracked_add":     event.TrackedAdd,
-		"tracked_del":     event.TrackedDel,
-		"file_hashes":     filterInternalPathsFromHashes(event.ChangedHashes),
-		"removed_files":   filterInternalPathsFromList(event.RemovedFiles),
-		"staged_paths":    filterInternalPathsFromList(event.StagedPaths),
+		"type":                  "task_diff_stats",
+		"task_id":               event.TaskID,
+		"hash":                  event.DiffHash,
+		"short_stat":            event.ShortStat,
+		"files_n":               event.FilesN,
+		"untracked_n":           event.UntrackedN,
+		"untracked_lines":       event.UntrackedLines,
+		"tracked_add":           event.TrackedAdd,
+		"tracked_del":           event.TrackedDel,
+		"file_hashes":           filterInternalPathsFromHashes(event.ChangedHashes),
+		"removed_files":         filterInternalPathsFromList(event.RemovedFiles),
+		"staged_paths":          filterInternalPathsFromList(event.StagedPaths),
+		"has_committed_changes": event.HasCommittedChanges,
 	})
 }
 
@@ -872,7 +873,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				headRef = task.Branch
 			}
 		}
-		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, headRef); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
+		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, headRef); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0 || diffResult.CommittedDiff != "") {
 			hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
 			// Send compact stats for card UI (exclude internal files to match panel display)
 			var untrackedLines, trackedAdd, trackedDel, visibleTracked, visibleUntracked int
@@ -897,17 +898,18 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			}
 			filesN := visibleTracked + visibleUntracked
 			statsMsg, _ := json.Marshal(map[string]any{
-				"type":            "task_diff_stats",
-				"task_id":         task.ID,
-				"hash":            hash,
-				"short_stat":      diffResult.ShortStat,
-				"files_n":         filesN,
-				"untracked_n":     visibleUntracked,
-				"untracked_lines": untrackedLines,
-				"tracked_add":     trackedAdd,
-				"tracked_del":     trackedDel,
-				"file_hashes":     filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
-				"staged_paths":    filterInternalPathsFromList(diffResult.StagedPaths),
+				"type":                  "task_diff_stats",
+				"task_id":               task.ID,
+				"hash":                  hash,
+				"short_stat":            diffResult.ShortStat,
+				"files_n":               filesN,
+				"untracked_n":           visibleUntracked,
+				"untracked_lines":       untrackedLines,
+				"tracked_add":           trackedAdd,
+				"tracked_del":           trackedDel,
+				"file_hashes":           filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
+				"staged_paths":          filterInternalPathsFromList(diffResult.StagedPaths),
+				"has_committed_changes": diffResult.CommittedDiff != "",
 			})
 			client.writeMu.Lock()
 			conn.Write(ctx, websocket.MessageText, statsMsg)

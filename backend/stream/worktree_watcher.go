@@ -26,9 +26,10 @@ type DiffStatsEvent struct {
 	UntrackedLines  int
 	TrackedAdd      int    // additions from truncated manifest (for card display)
 	TrackedDel      int    // deletions from truncated manifest (for card display)
-	ChangedHashes   map[string]string
-	RemovedFiles    []string
-	StagedPaths     []string
+	ChangedHashes       map[string]string
+	RemovedFiles        []string
+	StagedPaths         []string
+	HasCommittedChanges bool // committed on branch since baseRef, not yet merged
 }
 
 type diffBroadcastFn func(event DiffStatsEvent)
@@ -413,31 +414,33 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 		ww.updateCache(taskID, diffResult)
 	}
 
-	if diffResult.Diff != "" || untrackedN > 0 {
+	if diffResult.Diff != "" || untrackedN > 0 || diffResult.CommittedDiff != "" {
 		untrackedLines := countVisibleUntrackedLines(diffResult.Untracked)
 		trackedAdd, trackedDel := countManifestChanges(diffResult)
 		ww.broadcast(DiffStatsEvent{
-			ProjectID:      projectID,
-			TaskID:         taskID,
-			DiffHash:       hash,
-			ShortStat:      diffResult.ShortStat,
-			FilesN:         filesN,
-			UntrackedN:     untrackedN,
-			UntrackedLines: untrackedLines,
-			TrackedAdd:     trackedAdd,
-			TrackedDel:     trackedDel,
-			ChangedHashes:  changedHashes,
-			RemovedFiles:   removedFiles,
-			StagedPaths:    diffResult.StagedPaths,
+			ProjectID:           projectID,
+			TaskID:              taskID,
+			DiffHash:            hash,
+			ShortStat:           diffResult.ShortStat,
+			FilesN:              filesN,
+			UntrackedN:          untrackedN,
+			UntrackedLines:      untrackedLines,
+			TrackedAdd:          trackedAdd,
+			TrackedDel:          trackedDel,
+			ChangedHashes:       changedHashes,
+			RemovedFiles:        removedFiles,
+			StagedPaths:         diffResult.StagedPaths,
+			HasCommittedChanges: diffResult.CommittedDiff != "",
 		})
 		log.Printf("[watcher] task=%s diff changed: %s (untracked: %d files)", taskID, diffResult.ShortStat, untrackedN)
 	} else if len(changedHashes) > 0 || len(removedFiles) > 0 {
 		ww.broadcast(DiffStatsEvent{
-			ProjectID:     projectID,
-			TaskID:        taskID,
-			ChangedHashes: changedHashes,
-			RemovedFiles:  removedFiles,
-			StagedPaths:   diffResult.StagedPaths,
+			ProjectID:           projectID,
+			TaskID:              taskID,
+			ChangedHashes:       changedHashes,
+			RemovedFiles:        removedFiles,
+			StagedPaths:         diffResult.StagedPaths,
+			HasCommittedChanges: diffResult.CommittedDiff != "",
 		})
 	}
 }

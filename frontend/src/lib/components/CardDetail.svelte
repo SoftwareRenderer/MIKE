@@ -123,7 +123,8 @@
     // Authoritative staged-changes count from DiffCache (source of truth).
     // Passed to TaskChat so the ReviewBar button stays in sync with the diff panel
     // when the user stages/unstages files (optimistic update before WS catch-up).
-    let hasStagedChanges = $derived(stagedFiles.length > 0);
+    // Includes both staged index changes and committed-but-unmerged changes.
+    let hasStagedChanges = $derived(stagedFiles.length > 0 || committedFiles.length > 0);
     let stagedUntracked = $derived([] as { path: string; fileSize?: number; isBinary?: boolean; truncated?: boolean; origAdded?: number; loading?: boolean; file: DiffFile }[]);
     let unstagedUntracked = $derived(isDoneTask ? [] : Object.entries(diffCache.state.untracked).map(([path, meta]) => ({
         path,
