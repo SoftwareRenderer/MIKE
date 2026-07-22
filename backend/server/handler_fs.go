@@ -844,18 +844,10 @@ func (s *Server) validateFSPath(path string, r *http.Request) error {
 }
 
 // resolveGitIdentity checks git identity from multiple sources in priority order:
-// 1. KANBAN_GIT_AUTHOR_NAME/EMAIL (via git package vars, set at init)
-// 2. GIT_COMMITTER_NAME/EMAIL env vars
-// 3. GIT_AUTHOR_NAME/EMAIL env vars
-// 4. git config --global fallback
+// 1. GIT_COMMITTER_NAME/EMAIL env vars
+// 2. GIT_AUTHOR_NAME/EMAIL env vars
+// 3. git config --global fallback
 func resolveGitIdentity() (name, email string) {
-	// KANBAN-specific env vars (read at package init, used with -c flags)
-	name = git.GitAuthorName
-	email = git.GitAuthorEmail
-	if name != "" && email != "" {
-		return name, email
-	}
-
 	// Standard git env vars (GIT_COMMITTER takes precedence over GIT_AUTHOR)
 	if name == "" {
 		name = os.Getenv("GIT_COMMITTER_NAME")
@@ -933,7 +925,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		encoded := base64.StdEncoding.EncodeToString([]byte(readmeContent))
 
 		// git init + create README + add + commit in single command
-		// Only add -c flags when KANBAN env vars are set (GitAuthorFlags skips empty values)
+		// Use -c flags to override the commit author identity (if configured in git package)
 		authorFlags := strings.Join(git.GitAuthorFlags(), " ")
 		_, err := s.sandboxMgr.ExecProjectWithInput(project.ID, project.Path, project.Name,
 			"git -C "+sandboxPath+" init && " +
@@ -967,11 +959,11 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 	// Check that git identity is available (env vars or git config)
 	name, email := resolveGitIdentity()
 	if name == "" {
-		JSONError(w, http.StatusBadRequest, "git user.name is not set — set KANBAN_GIT_AUTHOR_NAME, GIT_AUTHOR_NAME, or run: git config --global user.name '<value>'")
+		JSONError(w, http.StatusBadRequest, "git user.name is not set — set GIT_AUTHOR_NAME, or run: git config --global user.name '<value>'")
 		return
 	}
 	if email == "" {
-		JSONError(w, http.StatusBadRequest, "git user.email is not set — set KANBAN_GIT_AUTHOR_EMAIL, GIT_AUTHOR_EMAIL, or run: git config --global user.email '<value>'")
+		JSONError(w, http.StatusBadRequest, "git user.email is not set — set GIT_AUTHOR_EMAIL, or run: git config --global user.email '<value>'")
 		return
 	}
 

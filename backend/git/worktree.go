@@ -25,15 +25,14 @@ const EmptyTreeHash = "4b825dc642cb6eb9a060e54bf899d69f826635b6"
 // hexRe matches a string of exactly 40 hex characters (a git SHA-1).
 var hexRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// Git author identity, configurable via environment variables.
+// Git author identity.
 // When unset, Git uses its configured defaults (from .gitconfig / system config).
 var (
-	GitAuthorName  = os.Getenv("KANBAN_GIT_AUTHOR_NAME")
-	GitAuthorEmail = os.Getenv("KANBAN_GIT_AUTHOR_EMAIL")
+	GitAuthorName  = ""
+	GitAuthorEmail = ""
 )
 
 // GitAuthorFlags returns -c flags to override the commit author identity.
-// Only returns flags when KANBAN_GIT_AUTHOR_NAME or KANBAN_GIT_AUTHOR_EMAIL is set.
 // When neither is set, returns nil so Git uses its configured defaults.
 func GitAuthorFlags() []string {
 	var flags []string
