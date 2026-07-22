@@ -29,12 +29,13 @@
     }
     import ResizeHandle from './ResizeHandle.svelte';
 
-    let { projectId, projectPath, onClose, isMobile, onUpdateFile }: {
+    let { projectId, projectPath, onClose, isMobile, onUpdateFile, onCommitted }: {
         projectId: string;
         projectPath: string;
         onClose: () => void;
         isMobile: boolean;
         onUpdateFile?: (path: string | null) => void;
+        onCommitted?: () => void;
     } = $props();
 
     // Editor mode: when a file is opened from the diff, show editor in place of diff viewer
@@ -281,6 +282,7 @@
         if (!message) return;
         try {
             await commitProject(projectId, message.trim());
+            onCommitted?.();
             onClose();
         } catch (e: any) {
             dialogStore.showToast(e.message || 'Commit failed', 'error');
