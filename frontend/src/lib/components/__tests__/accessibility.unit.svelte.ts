@@ -157,17 +157,17 @@ describe('Accessibility (Section 508 / WCAG 2.1 AA)', () => {
         it('columns have ARIA roles for drag targets', () => {
             const { container } = render(Column, {
                 columnId: 'backlog',
+                title: 'Backlog',
+                color: 'blue',
+                columnColor: 'blue',
                 tasks: [],
                 projectId: 'test-project',
-                projectPath: '/home/test',
                 childrenMap: new Map(),
-                expandedTasks: new Set(),
+                expandedTasks: new Set<string>(),
                 onToggleExpanded: vi.fn(),
                 onCreateChildTask: vi.fn(),
                 onRefreshBoard: vi.fn(),
                 onDragStart: vi.fn(),
-                onDragOver: vi.fn(),
-                onDragLeave: vi.fn(),
                 onDrop: vi.fn(),
             });
 
