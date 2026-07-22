@@ -334,16 +334,6 @@ func (sm *ExtensionSandboxManager) GetOrCreate(extID string) (*sandbox.Client, e
 		sm.mu.Unlock()
 		return client, nil
 	}
-
-	// Check if container is running
-	state := sm.states[extID]
-	if state != nil {
-		running, _ := sm.rt.IsRunning(state.containerName)
-		if running {
-			// Container is running but client is dead, try to reconnect
-			// For now, just return error — caller should call Stop + Start
-		}
-	}
 	sm.mu.Unlock()
 
 	// Not running — caller needs to create and start

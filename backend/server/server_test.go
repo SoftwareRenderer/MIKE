@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -59,7 +60,7 @@ func testServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("create test server: %v", err)
 	}
-	t.Cleanup(func() { s.Shutdown(nil) })
+	t.Cleanup(func() { _ = s.Shutdown(context.TODO()) })
 	return s
 }
 
@@ -227,35 +228,6 @@ func createTestTask(t *testing.T, s *Server, projectID string, prompt string) st
 	}
 	result := mustJSON[map[string]any](t, rr.Body)
 	return result["id"].(string)
-}
-
-// ensureGitRepo initializes a directory as a git repo.
-func ensureGitRepo(t *testing.T, path string) {
-	t.Helper()
-	if _, err := os.Stat(filepath.Join(path, ".git")); os.IsNotExist(err) {
-		// Write a README and init git
-		if err := os.WriteFile(filepath.Join(path, "README.md"), []byte("# Test\n"), 0o644); err != nil {
-			t.Fatalf("write README: %v", err)
-		}
-		// Use git init
-		cmd := exec.Command("git", "init")
-		cmd.Dir = path
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git init: %s: %v", string(out), err)
-		}
-		cmd = exec.Command("git", "config", "user.email", "test@test.com")
-		cmd.Dir = path
-		cmd.Run()
-		cmd = exec.Command("git", "config", "user.name", "Test")
-		cmd.Dir = path
-		cmd.Run()
-		cmd = exec.Command("git", "add", "README.md")
-		cmd.Dir = path
-		cmd.Run()
-		cmd = exec.Command("git", "commit", "-m", "Initial")
-		cmd.Dir = path
-		cmd.Run()
-	}
 }
 
 func TestHandleFSWrite(t *testing.T) {

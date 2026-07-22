@@ -1,7 +1,6 @@
 package store
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -95,19 +94,5 @@ func newReviewComment(id, taskID, filePath, comment string, lineNum int) *types.
 		Resolved:  false,
 		CreatedAt: now,
 		UpdatedAt: now,
-	}
-}
-
-// tempDir returns a temp directory managed by the test.
-func tempDir(t *testing.T) string {
-	t.Helper()
-	return t.TempDir()
-}
-
-// writeTestFile writes content to a file in a directory.
-func writeTestFile(t *testing.T, dir, name, content string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
 	}
 }

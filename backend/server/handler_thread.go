@@ -129,9 +129,8 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "thread_id required")
 		return
 	}
-	// Validate task exists
-	task, err := s.store.GetTask(projectID, taskID)
-	if err != nil {
+	// Validate task exists (pre-lock check, re-fetched after lock below)
+	if _, err := s.store.GetTask(projectID, taskID); err != nil {
 		JSONError(w, http.StatusNotFound, "task not found")
 		return
 	}
@@ -150,7 +149,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	defer mu.Unlock()
 
 	// Re-fetch task after acquiring lock — state may have changed.
-	task, err = s.store.GetTask(projectID, taskID)
+	task, err := s.store.GetTask(projectID, taskID)
 	if err != nil {
 		JSONError(w, http.StatusNotFound, "task not found")
 		return
@@ -252,9 +251,8 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	if req.NewContent != "" {
 		_ = s.executor.StopTask(taskID)
 	}
-	// Validate task exists
-	task, err := s.store.GetTask(projectID, taskID)
-	if err != nil {
+	// Validate task exists (pre-lock check, re-fetched after lock below)
+	if _, err := s.store.GetTask(projectID, taskID); err != nil {
 		JSONError(w, http.StatusNotFound, "task not found")
 		return
 	}
@@ -273,7 +271,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	defer mu.Unlock()
 
 	// Re-fetch task after acquiring lock — state may have changed.
-	task, err = s.store.GetTask(projectID, taskID)
+	task, err := s.store.GetTask(projectID, taskID)
 	if err != nil {
 		JSONError(w, http.StatusNotFound, "task not found")
 		return

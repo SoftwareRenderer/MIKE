@@ -12,48 +12,6 @@ import (
 	"kanban/backend/types"
 )
 
-// --- shellQuote Tests ---
-
-func TestShellQuote_Basic(t *testing.T) {
-	got := shellQuote("hello.txt")
-	want := "'hello.txt'"
-	if got != want {
-		t.Errorf("shellQuote(%q) = %q, want %q", "hello.txt", got, want)
-	}
-}
-
-func TestShellQuote_WithSingleQuote(t *testing.T) {
-	got := shellQuote("it's.txt")
-	want := "'it'\\''s.txt'"
-	if got != want {
-		t.Errorf("shellQuote(%q) = %q, want %q", "it's.txt", got, want)
-	}
-}
-
-func TestShellQuote_WithSpaces(t *testing.T) {
-	got := shellQuote("my file.txt")
-	want := "'my file.txt'"
-	if got != want {
-		t.Errorf("shellQuote(%q) = %q, want %q", "my file.txt", got, want)
-	}
-}
-
-func TestShellQuote_WithPath(t *testing.T) {
-	got := shellQuote("src/main/file.go")
-	want := "'src/main/file.go'"
-	if got != want {
-		t.Errorf("shellQuote(%q) = %q, want %q", "src/main/file.go", got, want)
-	}
-}
-
-func TestShellQuote_Empty(t *testing.T) {
-	got := shellQuote("")
-	want := "''"
-	if got != want {
-		t.Errorf("shellQuote(%q) = %q, want %q", "", got, want)
-	}
-}
-
 // --- isSandboxableTool Tests ---
 
 func TestIsSandboxableTool(t *testing.T) {

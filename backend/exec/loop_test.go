@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -166,56 +164,6 @@ func TestPhraseDetector_IncompleteSentenceAccumulates(t *testing.T) {
 	// Repeat the full sentence to reach threshold
 	if !repeatPhrase(d, "The quick brown fox jumps over the lazy dog.") {
 		t.Error("should detect repetition when incomplete sentence is completed and then repeated")
-	}
-}
-
-// --- Word Set / Jaccard Tests ---
-
-func TestWordSet_Basic(t *testing.T) {
-	words := wordSet("The quick brown fox jumps")
-	if len(words) != 4 { // "the" is a stop word
-		t.Errorf("expected 4 words, got %d", len(words))
-	}
-	if _, ok := words["quick"]; !ok {
-		t.Error("expected 'quick' in word set")
-	}
-	if _, ok := words["the"]; ok {
-		t.Error("should not include stop word 'the'")
-	}
-}
-
-func TestWordSet_CaseInsensitive(t *testing.T) {
-	words := wordSet("Hello HELLO hello")
-	if len(words) != 1 {
-		t.Errorf("expected 1 word, got %d", len(words))
-	}
-}
-
-func TestJaccardIdentical(t *testing.T) {
-	a := map[string]bool{"foo": true, "bar": true, "baz": true}
-	b := map[string]bool{"foo": true, "bar": true, "baz": true}
-	sim := jaccardSimilarity(a, b)
-	if sim != 1.0 {
-		t.Errorf("expected similarity 1.0, got %f", sim)
-	}
-}
-
-func TestJaccardDisjoint(t *testing.T) {
-	a := map[string]bool{"foo": true, "bar": true}
-	b := map[string]bool{"baz": true, "qux": true}
-	sim := jaccardSimilarity(a, b)
-	if sim != 0.0 {
-		t.Errorf("expected similarity 0.0, got %f", sim)
-	}
-}
-
-func TestJaccardPartial(t *testing.T) {
-	a := map[string]bool{"foo": true, "bar": true, "baz": true}
-	b := map[string]bool{"foo": true, "bar": true, "qux": true}
-	sim := jaccardSimilarity(a, b)
-	expected := 2.0 / 4.0 // intersection=2, union=4
-	if sim != expected {
-		t.Errorf("expected similarity %f, got %f", expected, sim)
 	}
 }
 
@@ -825,28 +773,6 @@ func TestIsReadOnlyCommand(t *testing.T) {
 		got := isReadOnlyCommand(tt.cmd)
 		if got != tt.want {
 			t.Errorf("isReadOnlyCommand(%q) = %v, want %v", tt.cmd, got, tt.want)
-		}
-	}
-}
-
-func TestExtractCommandTarget(t *testing.T) {
-	tests := []struct {
-		cmd  string
-		want string
-	}{
-		{"head src/main.go", "src/main.go"},
-		{"cat ./file.txt", "file.txt"},
-		{"grep pattern file.go", "file.go"},
-		{"ls -la /tmp", "/tmp"},
-		{"echo hello > output.txt", "output.txt"},
-		{"git add -A", "."},
-		{"git commit -m msg", "."},
-	}
-
-	for _, tt := range tests {
-		got := extractCommandTarget(tt.cmd)
-		if got != tt.want {
-			t.Errorf("extractCommandTarget(%q) = %q, want %q", tt.cmd, got, tt.want)
 		}
 	}
 }
@@ -1496,59 +1422,6 @@ func TestIsImageFile(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("isImageFile(%q) = %v, want %v", tt.path, got, tt.want)
 		}
-	}
-}
-
-func TestUnstageNewBinaryFilesInDir(t *testing.T) {
-	dir := t.TempDir()
-	_, _ = runGitCommand(dir, "init", "-b", "main")
-	_, _ = runGitCommand(dir, "config", "user.email", "test@test.com")
-	_, _ = runGitCommand(dir, "config", "user.name", "Test")
-
-	// Create initial commit so we have a HEAD
-	_ = os.WriteFile(filepath.Join(dir, "initial.txt"), []byte("initial\n"), 0644)
-	_, _ = runGitCommand(dir, "add", "initial.txt")
-	_, _ = runGitCommand(dir, "commit", "-m", "initial")
-
-	// Create new files: text, image, and binary
-	_ = os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("hello\n"), 0644)
-	_ = os.WriteFile(filepath.Join(dir, "photo.png"), []byte("\x89PNG\r\n\x1a\nfake png"), 0644)
-	_ = os.WriteFile(filepath.Join(dir, "data.bin"), []byte("\x00\x01\x02\x03binary"), 0644)
-
-	// Stage all
-	_, _ = runGitCommand(dir, "add", "-A")
-
-	// Verify all are staged
-	out, _ := runGitCommand(dir, "diff", "--staged", "--name-only", "--diff-filter=A")
-	staged := strings.FieldsFunc(strings.TrimSpace(out), func(r rune) bool { return r == '\n' })
-	if len(staged) != 3 {
-		t.Fatalf("expected 3 staged files, got %d: %v", len(staged), staged)
-	}
-
-	// Unstage binary non-image files
-	unstageNewBinaryFilesInDir(dir)
-
-	// Check what remains staged
-	out, _ = runGitCommand(dir, "diff", "--staged", "--name-only", "--diff-filter=A")
-	staged = strings.FieldsFunc(strings.TrimSpace(out), func(r rune) bool { return r == '\n' })
-
-	// Should have readme.txt and photo.png, but NOT data.bin
-	got := make(map[string]bool)
-	for _, f := range staged {
-		got[f] = true
-	}
-
-	if len(got) != 2 {
-		t.Errorf("expected 2 staged files, got %d: %v", len(got), staged)
-	}
-	if !got["readme.txt"] {
-		t.Error("readme.txt should still be staged")
-	}
-	if !got["photo.png"] {
-		t.Error("photo.png should still be staged (image)")
-	}
-	if got["data.bin"] {
-		t.Error("data.bin should be unstaged (binary, not image)")
 	}
 }
 

@@ -49,20 +49,18 @@ type Server struct {
 	frontendDist      string
 	tlsConfig         *tls.Config
 
-	// worktreeMu serializes all git operations per task.
+	// worktreeMux serializes git operations per task.
 	// Prevents concurrent stash/checkout/branch/reset operations that would
 	// corrupt worktree state if interleaved (e.g., fork+switch, delete+switch).
-	worktreeMu   sync.Mutex
-	worktreeMux  map[string]*sync.Mutex // taskID -> per-task mutex
-	worktreeMuxMu sync.RWMutex          // protects worktreeMux map
+	worktreeMux   map[string]*sync.Mutex // taskID -> per-task mutex
+	worktreeMuxMu sync.RWMutex           // protects worktreeMux map
 
-	// projectMu serializes project-level git operations (stash, checkout, pull, push)
+	// projectMux serializes project-level git operations (stash, checkout, pull, push)
 	// that touch shared state like .git/refs/stash. Multiple tasks in the same
 	// project share the same stash ref, so concurrent stash push/rev-parse/drop
 	// would clobber each other's commit hashes.
-	projectMu   sync.Mutex
-	projectMux  map[string]*sync.Mutex // projectID -> per-project mutex
-	projectMuxMu sync.RWMutex          // protects projectMux map
+	projectMux   map[string]*sync.Mutex // projectID -> per-project mutex
+	projectMuxMu sync.RWMutex           // protects projectMux map
 }
 
 // NewServer creates a new Server instance.

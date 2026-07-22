@@ -317,20 +317,6 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	return false // continue
 }
 
-// persistAssistantMessage creates a task message for an assistant response with stats.
-func persistAssistantMessage(te *TaskExecutor, task *types.Task, assistantMsgID string, assistantText, reasoningContent, activeModel, providerName string, usage *types.ChatUsage, messages []types.ChatMessage, callStartTime time.Time) (promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs int) {
-	promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs = computeStats(usage, messages, assistantText, reasoningContent)
-	_ = te.store.CreateTaskMessage(&types.TaskMessage{
-		ID: assistantMsgID, TaskID: task.ID, ThreadID: task.CurrentThreadID, Role: "assistant",
-		Content: assistantText, ReasoningContent: reasoningContent,
-		ModelName: activeModel, ProviderName: providerName,
-		PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
-		PromptMs: promptMs, PredictedMs: predictedMs,
-		Duration: time.Since(callStartTime).Milliseconds(), CreatedAt: time.Now().UTC(),
-	})
-	return promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs
-}
-
 // setupSandbox creates or reuses a sandbox container and connects to the agent.
 // Returns the image used, the agent client, and any assigned ports.
 // The caller is responsible for creating callbacks from the agent client.

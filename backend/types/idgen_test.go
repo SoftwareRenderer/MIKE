@@ -1,6 +1,7 @@
 package types
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -30,8 +31,8 @@ func TestTaskWordsNoDuplicates(t *testing.T) {
 
 func TestTaskWordsAllLowercase(t *testing.T) {
 	for _, w := range taskWords {
-		if w != w { // sanity
-			t.Errorf("unexpected word: %q", w)
+		if w != strings.ToLower(w) {
+			t.Errorf("word not lowercase: %q", w)
 		}
 	}
 }

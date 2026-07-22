@@ -50,16 +50,6 @@ func unstageNewBinaryFiles(wm *git.WorktreeManager, taskID string) {
 	unstagePaths(wm, taskID, paths)
 }
 
-// unstageNewBinaryFilesInDir is like unstageNewBinaryFiles but uses a directory path.
-func unstageNewBinaryFilesInDir(dir string) {
-	out, err := runGitCommand(dir, "diff", "--staged", "--numstat", "--diff-filter=A")
-	if err != nil || len(strings.TrimSpace(out)) == 0 {
-		return
-	}
-	paths := binaryPathsFromStaged(out)
-	unstagePathsInDir(dir, paths)
-}
-
 // streamFlusher batches token, reasoning, and tool_call WebSocket events
 // and sends them at most once every throttleInterval (100ms).
 // This reduces WebSocket write overhead during fast LLM streaming.

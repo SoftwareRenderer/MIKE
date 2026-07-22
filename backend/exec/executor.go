@@ -1534,10 +1534,6 @@ func estimatePromptTokens(messages []types.ChatMessage) int {
 	return total
 }
 
-func estimateTotalTokens(content, reasoning string) int {
-	return estimateTokensFromText(content) + estimateTokensFromText(reasoning)
-}
-
 // getCompactCh returns the compact channel for a running task, or nil if not found.
 func (te *TaskExecutor) getCompactCh(taskID string) chan chan *pi.CompactResult {
 	te.taskMu.Lock()
