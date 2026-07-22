@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { render, fireEvent } from '@testing-library/svelte';
 
 // Mock svelte transitions
@@ -56,7 +56,7 @@ function createMockTask(id: string, status: string = 'backlog'): Task {
 describe('MultiSelectBar', () => {
     let multiSelect: MultiSelect;
     let tasks: Task[];
-    let onClear: ReturnType<typeof vi.fn>;
+    let onClear: Mock;
 
     beforeEach(() => {
         vi.clearAllMocks();
