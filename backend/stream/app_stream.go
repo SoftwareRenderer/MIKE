@@ -519,6 +519,7 @@ func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 		"removed_files":         filterInternalPathsFromList(event.RemovedFiles),
 		"staged_paths":          filterInternalPathsFromList(event.StagedPaths),
 		"has_committed_changes": event.HasCommittedChanges,
+		"already_merged":        event.AlreadyMerged,
 	})
 }
 
@@ -897,6 +898,17 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				}
 			}
 			filesN := visibleTracked + visibleUntracked
+			// Check if task branch commits are already merged into the target branch.
+			targetBranch := task.BaseRef
+			if strings.HasPrefix(targetBranch, "fatal:") {
+				targetBranch = ""
+			}
+			var alreadyMerged bool
+			if targetBranch != "" && task.Branch != "" {
+				if project, err := asm.store.GetProject(projectID); err == nil && project.Path != "" {
+					alreadyMerged = asm.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
+				}
+			}
 			statsMsg, _ := json.Marshal(map[string]any{
 				"type":                  "task_diff_stats",
 				"task_id":               task.ID,
@@ -910,6 +922,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"file_hashes":           filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
 				"staged_paths":          filterInternalPathsFromList(diffResult.StagedPaths),
 				"has_committed_changes": diffResult.CommittedDiff != "",
+				"already_merged":        alreadyMerged,
 			})
 			client.writeMu.Lock()
 			conn.Write(ctx, websocket.MessageText, statsMsg)

@@ -30,6 +30,7 @@ type DiffStatsEvent struct {
 	RemovedFiles        []string
 	StagedPaths         []string
 	HasCommittedChanges bool // committed on branch since baseRef, not yet merged
+	AlreadyMerged       bool // task branch commits already merged into target
 }
 
 type diffBroadcastFn func(event DiffStatsEvent)
@@ -414,6 +415,19 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 		ww.updateCache(taskID, diffResult)
 	}
 
+	// Check if task branch commits are already merged into the target branch.
+	// Uses the target branch name (BaseRef), not the fixed BaseCommit SHA,
+	// so the check reflects the current state of the target branch.
+	ww.mu.Lock()
+	worktreePath := ww.worktrees[taskID].path
+	ww.mu.Unlock()
+	targetBranch := task.BaseRef
+	if strings.HasPrefix(targetBranch, "fatal:") {
+		targetBranch = ""
+	}
+	alreadyMerged := targetBranch != "" && task.Branch != "" &&
+		ww.worktreeMgr.IsMergedInto(worktreePath, task.Branch, targetBranch)
+
 	if diffResult.Diff != "" || untrackedN > 0 || diffResult.CommittedDiff != "" {
 		untrackedLines := countVisibleUntrackedLines(diffResult.Untracked)
 		trackedAdd, trackedDel := countManifestChanges(diffResult)
@@ -431,6 +445,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 			RemovedFiles:        removedFiles,
 			StagedPaths:         diffResult.StagedPaths,
 			HasCommittedChanges: diffResult.CommittedDiff != "",
+			AlreadyMerged:       alreadyMerged,
 		})
 		log.Printf("[watcher] task=%s diff changed: %s (untracked: %d files)", taskID, diffResult.ShortStat, untrackedN)
 	} else if len(changedHashes) > 0 || len(removedFiles) > 0 {
@@ -441,6 +456,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 			RemovedFiles:        removedFiles,
 			StagedPaths:         diffResult.StagedPaths,
 			HasCommittedChanges: diffResult.CommittedDiff != "",
+			AlreadyMerged:       alreadyMerged,
 		})
 	}
 }

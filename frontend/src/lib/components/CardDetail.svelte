@@ -124,7 +124,13 @@
     // Passed to TaskChat so the ReviewBar button stays in sync with the diff panel
     // when the user stages/unstages files (optimistic update before WS catch-up).
     // Includes both staged index changes and committed-but-unmerged changes.
-    let hasStagedChanges = $derived(stagedFiles.length > 0 || committedFiles.length > 0);
+    // When commits are already merged into the target branch, committed files
+    // don't count — only staged (index) changes matter.
+    // Note: diffStatsMap is declared later (line ~297) but $derived.by evaluates lazily.
+    let hasStagedChanges = $derived.by(() => {
+        const alreadyMerged = diffStatsMap[task.id]?.already_merged ?? false;
+        return stagedFiles.length > 0 || (!alreadyMerged && committedFiles.length > 0);
+    });
     let stagedUntracked = $derived([] as { path: string; fileSize?: number; isBinary?: boolean; truncated?: boolean; origAdded?: number; loading?: boolean; file: DiffFile }[]);
     let unstagedUntracked = $derived(isDoneTask ? [] : Object.entries(diffCache.state.untracked).map(([path, meta]) => ({
         path,
@@ -291,7 +297,7 @@
         return unsub;
     });
     // Sync store to reactive state for $effect tracking
-    let diffStatsMap = $state<Record<string, { hash: string; files: number; additions: number; deletions: number; file_hashes?: Record<string, string>; removed_files?: string[]; staged_paths?: string[] }>>({});
+    let diffStatsMap = $state<Record<string, { hash: string; files: number; additions: number; deletions: number; file_hashes?: Record<string, string>; removed_files?: string[]; staged_paths?: string[]; already_merged?: boolean }>>({});
 
     // Reload diff when task changes (switching tasks via task view keeps CardDetail mounted)
     let previousTaskId = $state<string | null>(null);

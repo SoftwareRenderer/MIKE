@@ -2236,3 +2236,91 @@ func TestStashMessageHelpers_MaxLength(t *testing.T) {
 		t.Errorf("StashMessageForAutoMerge len = %d, want ≤ 50", len(autoMsg))
 	}
 }
+func TestIsMergedInto(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	os.MkdirAll(repoDir, 0o755)
+
+	// Initialize git repo
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "user.name", "Test")
+	writeFile(t, repoDir, "README.md", "# Test\n")
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	// Create a task branch with a commit
+	runGit(t, repoDir, "checkout", "-b", "task-branch")
+	writeFile(t, repoDir, "feature.txt", "feature content\n")
+	runGit(t, repoDir, "add", "feature.txt")
+	runGit(t, repoDir, "commit", "-m", "Add feature")
+
+	// Go back to main
+	runGit(t, repoDir, "checkout", "master")
+
+	wm := &WorktreeManager{}
+
+	// Task branch is NOT merged into main yet
+	if wm.IsMergedInto(repoDir, "task-branch", "master") {
+		t.Error("IsMergedInto should return false when task branch is not merged")
+	}
+
+	// Merge task branch into main
+	runGit(t, repoDir, "merge", "task-branch", "--no-ff", "-m", "Merge task-branch")
+
+	// Task branch IS now merged into main
+	if !wm.IsMergedInto(repoDir, "task-branch", "master") {
+		t.Error("IsMergedInto should return true after merge")
+	}
+
+	// Test with empty branch names
+	if wm.IsMergedInto(repoDir, "", "master") {
+		t.Error("IsMergedInto should return false for empty task branch")
+	}
+	if wm.IsMergedInto(repoDir, "task-branch", "") {
+		t.Error("IsMergedInto should return false for empty target branch")
+	}
+
+	// Test with non-existent branch
+	if wm.IsMergedInto(repoDir, "nonexistent", "master") {
+		t.Error("IsMergedInto should return false for non-existent task branch")
+	}
+}
+
+func TestIsMergedInto_FastForward(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	os.MkdirAll(repoDir, 0o755)
+
+	// Initialize git repo
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "user.name", "Test")
+	writeFile(t, repoDir, "README.md", "# Test\n")
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	// Create a task branch with a commit
+	runGit(t, repoDir, "checkout", "-b", "task-branch")
+	writeFile(t, repoDir, "feature.txt", "feature content\n")
+	runGit(t, repoDir, "add", "feature.txt")
+	runGit(t, repoDir, "commit", "-m", "Add feature")
+
+	// Go back to main
+	runGit(t, repoDir, "checkout", "master")
+
+	wm := &WorktreeManager{}
+
+	// Task branch is NOT merged into main yet
+	if wm.IsMergedInto(repoDir, "task-branch", "master") {
+		t.Error("IsMergedInto should return false when task branch is not merged")
+	}
+
+	// Fast-forward merge
+	runGit(t, repoDir, "merge", "task-branch")
+
+	// After fast-forward, master == task-branch, so task-branch IS an ancestor of master
+	if !wm.IsMergedInto(repoDir, "task-branch", "master") {
+		t.Error("IsMergedInto should return true after fast-forward merge")
+	}
+}

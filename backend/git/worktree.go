@@ -2040,6 +2040,17 @@ func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, fork
 	return strings.TrimSpace(mb), nil
 }
 
+// IsMergedInto checks if the task branch has been merged into the target branch.
+// Uses git merge-base --is-ancestor to check if taskBranch is an ancestor of targetBranch.
+// Returns true if merged, false if not merged or if check fails.
+func (wm *WorktreeManager) IsMergedInto(projectPath, taskBranch, targetBranch string) bool {
+	if taskBranch == "" || targetBranch == "" {
+		return false
+	}
+	cmd := exec.Command("git", "-C", projectPath, "merge-base", "--is-ancestor", taskBranch, targetBranch)
+	return cmd.Run() == nil
+}
+
 // ResetWorktreeTo resets the worktree to a commit or stash hash.
 // For stash hashes (from `git stash push`), applies the stash patch to restore
 // tracked and untracked files. Falls back to `git reset --hard` for regular commits.
