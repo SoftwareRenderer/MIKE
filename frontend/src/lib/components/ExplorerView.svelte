@@ -661,6 +661,10 @@
                 onClose={() => showChanges = false}
                 isMobile={isMobileCtx.isMobile}
                 onUpdateFile={onUpdateFile}
+                onCommitted={() => {
+                    loadCommits();
+                    loadBranches();
+                }}
             />
         </div>
         {:else}
