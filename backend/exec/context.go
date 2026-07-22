@@ -227,12 +227,6 @@ func formatToolStatus(toolCallID string, toolResults map[string]string) string {
 	return "successful"
 }
 
-// shellQuote safely quotes a string for use in a shell command.
-// Uses single quotes and escapes any embedded single quotes.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
 // isSandboxableTool returns true if the tool can run inside a sandbox.
 func isSandboxableTool(name string) bool {
 	switch name {

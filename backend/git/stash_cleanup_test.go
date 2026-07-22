@@ -84,16 +84,6 @@ func countStashEntries(t *testing.T, repoDir string) int {
 	return len(lines)
 }
 
-// stashList returns the raw stash list output.
-func stashList(t *testing.T, repoDir string) string {
-	t.Helper()
-	out, err := exec.Command("git", "-C", repoDir, "stash", "list", "--format=%gd%x00%H%x00%gs").CombinedOutput()
-	if err != nil {
-		t.Fatalf("git stash list: %s: %v", string(out), err)
-	}
-	return string(out)
-}
-
 // stashSubjects returns just the subject lines from the stash list.
 func stashSubjects(t *testing.T, repoDir string) []string {
 	t.Helper()

@@ -1,12 +1,9 @@
 package exec
 
 import (
-	"regexp"
 	"strings"
 	"unicode"
 )
-
-var wordTokenRe = regexp.MustCompile(`[a-zA-Z]{2,}`)
 
 // blockDetector tracks raw text blocks within a single streaming response
 // to detect exact repetitions of any block (not just sentences) in real-time.
@@ -216,98 +213,6 @@ func normalizePhrase(s string) string {
 // wordCount counts the number of words in a phrase.
 func wordCount(s string) int {
 	return len(strings.Fields(s))
-}
-
-// detectTextLoop checks if the text window contains repetitive responses.
-// Fires when 2+ consecutive text-only responses have high similarity.
-func (d *loopDetector) detectTextLoop() bool {
-	if len(d.textWindow) < 2 {
-		return false
-	}
-
-	last := d.textWindow[len(d.textWindow)-1]
-	lastWords := wordSet(last)
-
-	if len(lastWords) < 5 {
-		return false // too short to be meaningful
-	}
-
-	for i := 0; i < len(d.textWindow)-1; i++ {
-		priorWords := wordSet(d.textWindow[i])
-		if jaccardSimilarity(lastWords, priorWords) > 0.6 {
-			return true
-		}
-	}
-
-	return false
-}
-
-// wordSet tokenizes text into a set of meaningful words (lowercased, stop words removed).
-func wordSet(text string) map[string]bool {
-	matches := wordTokenRe.FindAllString(text, -1)
-
-	words := make(map[string]bool)
-	for _, m := range matches {
-		w := strings.ToLower(m)
-		if !isStopWord(w) {
-			words[w] = true
-		}
-	}
-	return words
-}
-
-// jaccardSimilarity computes the Jaccard similarity between two word sets.
-func jaccardSimilarity(a, b map[string]bool) float64 {
-	if len(a) == 0 && len(b) == 0 {
-		return 0
-	}
-
-	intersection := 0
-	for w := range a {
-		if b[w] {
-			intersection++
-		}
-	}
-
-	union := len(a) + len(b) - intersection
-	if union == 0 {
-		return 0
-	}
-	return float64(intersection) / float64(union)
-}
-
-// stopWords is a set of common English stop words to ignore in similarity checks.
-var stopWords = map[string]bool{
-	"the": true, "a": true, "an": true, "is": true, "are": true, "was": true, "were": true,
-	"be": true, "been": true, "being": true, "have": true, "has": true, "had": true,
-	"do": true, "does": true, "did": true, "will": true, "would": true, "could": true,
-	"should": true, "may": true, "might": true, "shall": true, "can": true,
-	"to": true, "of": true, "in": true, "for": true, "on": true, "with": true,
-	"at": true, "by": true, "from": true, "as": true, "into": true, "through": true,
-	"during": true, "before": true, "after": true, "above": true, "below": true,
-	"between": true, "out": true, "off": true, "over": true, "under": true,
-	"and": true, "but": true, "or": true, "nor": true, "not": true, "so": true,
-	"yet": true, "both": true, "either": true, "neither": true,
-	"each": true, "every": true, "all": true, "any": true, "few": true, "more": true,
-	"most": true, "other": true, "some": true, "such": true, "no": true, "only": true,
-	"own": true, "same": true, "than": true, "too": true, "very": true, "just": true,
-	"because": true, "if": true, "when": true, "where": true, "how": true, "what": true,
-	"which": true, "who": true, "whom": true, "this": true, "that": true, "these": true,
-	"those": true, "i": true, "me": true, "my": true, "myself": true, "we": true,
-	"our": true, "you": true, "your": true, "he": true, "him": true, "his": true,
-	"it": true, "its": true, "they": true, "them": true, "their": true,
-	"about": true, "up": true, "then": true, "there": true, "here": true,
-	"also": true, "back": true, "like": true, "new": true, "way": true, "use": true,
-	"uses": true, "used": true, "using": true, "try": true, "trying": true,
-	"need": true, "needs": true, "think": true, "know": true, "see": true,
-	"get": true, "got": true, "going": true, "make": true, "made": true,
-	"want": true, "wanting": true, "let": true, "say": true, "said": true,
-	"says": true, "well": true, "still": true, "even": true, "much": true,
-	"many": true, "since": true, "until": true, "while": true,
-}
-
-func isStopWord(w string) bool {
-	return stopWords[w]
 }
 
 // isSentenceEnd checks if a rune is sentence-ending punctuation.

@@ -208,14 +208,3 @@ func TestAuthSessionWrongMethod(t *testing.T) {
 		t.Fatalf("status = %d; want 401; body: %s", rr.Code, rr.Body.String())
 	}
 }
-
-// extractCookieValue extracts the value portion "NAME=VALUE" from a Set-Cookie header.
-func extractCookieValue(setCookie, name string) string {
-	parts := strings.Split(setCookie, ";")[0]
-	parts = strings.TrimSpace(parts)
-	before, _, ok := strings.Cut(parts, "=")
-	if !ok {
-		return parts
-	}
-	return before
-}

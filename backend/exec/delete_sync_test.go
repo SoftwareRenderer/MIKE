@@ -236,18 +236,14 @@ func TestDeletedSingleMessageNotSentToLLM(t *testing.T) {
 		}
 	}
 
-	// Build initial messages from DB
-	taskMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
-	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "Single Delete Test", false)
-
 	// Simulate user dismissing the error message
 	if err := te.store.DeleteTaskMessageByID("msg-error"); err != nil {
 		t.Fatalf("delete single message: %v", err)
 	}
 
 	// Re-sync from DB (the fix)
-	taskMsgs, _ = te.store.GetTaskMessages(taskID, threadID)
-	messages = buildMessagesFromDB(task, taskMsgs, "/worktree", "Single Delete Test", false)
+	taskMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "Single Delete Test", false)
 
 	// Verify: system + user + assistant = 3 (error removed)
 	if len(messages) != 3 {

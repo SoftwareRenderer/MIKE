@@ -155,37 +155,6 @@ func (sm *SandboxManager) podmanExec(args ...string) ([]byte, error) {
 	return sm.rt.PodmanExec(args...)
 }
 
-// agentBinaryPath resolves the path to the sandbox-bridge binary.
-// Checks KANBAN_AGENT_PATH env var first, then looks next to the executable.
-func agentBinaryPath() (string, error) {
-	if p := os.Getenv("KANBAN_AGENT_PATH"); p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-	// Look next to the running executable
-	exe, err := os.Executable()
-	if err != nil {
-		exe = os.Args[0]
-	}
-	// Check next to executable, then in sandbox/ subdirectory
-	for _, name := range []string{"sandbox-bridge", "sandbox/sandbox-bridge"} {
-		candidate := filepath.Join(filepath.Dir(exe), name)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	// Look in current directory
-	for _, name := range []string{"sandbox-bridge", "sandbox/sandbox-bridge"} {
-		if _, err := os.Stat(name); err == nil {
-			return name, nil
-		}
-	}
-	return "", fmt.Errorf("sandbox-bridge binary not found (checked KANBAN_AGENT_PATH, next to executable, ./, sandbox/)")
-}
-
-
-
 // GetClient returns the agent client for a task.
 // The client communicates directly with the container agent via podman exec pipes.
 func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {

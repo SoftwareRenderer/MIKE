@@ -44,6 +44,9 @@ type SubscribeParams struct {
 type ClientSession struct {
 	conn  *websocket.Conn
 	clientID  uint64
+	// mu protects the session's maps (incomingIDs, channelIDs, workspaceKeys, activeWorkspaces)
+	// from concurrent access by forwardRequest/routeResponse goroutines.
+	mu               sync.Mutex
 	// backendRequestID → clientRequestID (incoming responses)
 	incomingIDs map[string]string
 	// backendRequestID → channelID (for multiplex response routing)
@@ -164,13 +167,22 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 	h.mu.Unlock()
 
 	defer func() {
+		// Snapshot workspace keys under session lock, then process under handler lock
+		// to avoid holding both locks simultaneously.
+		session.mu.Lock()
+		wkKeys := make([]string, 0, len(session.activeWorkspaces))
+		for wk := range session.activeWorkspaces {
+			wkKeys = append(wkKeys, wk)
+		}
+		session.mu.Unlock()
+
 		h.mu.Lock()
 		delete(h.clients, conn)
 
 		// Clean up workspace state on disconnect.
 		// A session can talk to multiple language servers (one per language).
 		// Decrement client count for each workspace the session used.
-		for wk := range session.activeWorkspaces {
+		for _, wk := range wkKeys {
 			if ws, ok := h.workspaces[wk]; ok {
 				ws.clientCount--
 				if ws.clientCount <= 0 {
@@ -424,7 +436,9 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 		h.mu.Unlock()
 	}
 
+	session.mu.Lock()
 	session.activeWorkspaces[workspaceKey]++ // track for cleanup on disconnect
+	session.mu.Unlock()
 	log.Printf("[lsp] client %d ch=%d subscribed to workspace=%s lang=%s (clients=%d)",
 		session.clientID, sub.ChannelID, sub.Params.Workspace, cfg.Language, ws.clientCount)
 
@@ -474,7 +488,9 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 				clientCount: 1,
 			}
 			h.workspaces[workspaceKey] = ws
+			session.mu.Lock()
 			session.activeWorkspaces[workspaceKey]++
+			session.mu.Unlock()
 			log.Printf("[lsp] client %d: lazy-created workspace=%s lang=%s", session.clientID, workspacePath, cfg.Language)
 		}
 	}
@@ -522,11 +538,13 @@ func (h *LSPHandler) forwardRequest(session *ClientSession, msg json.RawMessage,
 	backendIDStr := itoa(backendID)
 
 	// Store the mapping
+	session.mu.Lock()
 	session.incomingIDs[backendIDStr] = clientReqID
 	session.channelIDs[backendIDStr] = channelID
 	session.workspaceKeys[backendIDStr] = workspaceKey
 	// Track that this session uses this workspace (for cleanup on disconnect)
 	session.activeWorkspaces[workspaceKey]++
+	session.mu.Unlock()
 
 	// Remap the id in the JSON
 	remapped := remapRequestID(msg, backendID)
@@ -563,7 +581,9 @@ func (h *LSPHandler) forwardRaw(session *ClientSession, msg json.RawMessage, wor
 	h.mu.Lock()
 	ws, ok := h.workspaces[workspaceKey]
 	if ok {
+		session.mu.Lock()
 		session.activeWorkspaces[workspaceKey]++
+		session.mu.Unlock()
 	}
 	h.mu.Unlock()
 
@@ -619,9 +639,11 @@ func (h *LSPHandler) routeNotification(serverMsg json.RawMessage) {
 	h.mu.Lock()
 	clients := make([]*ClientSession, 0, len(h.clients))
 	for _, s := range h.clients {
+		s.mu.Lock()
 		if len(s.activeWorkspaces) > 0 {
 			clients = append(clients, s)
 		}
+		s.mu.Unlock()
 	}
 	h.mu.Unlock()
 
@@ -641,6 +663,7 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 	var workspaceKey string
 	var targetWorkspace *workspaceState
 	for _, s := range h.clients {
+		s.mu.Lock()
 		if clientID, ok := s.incomingIDs[backendID]; ok {
 			targetSession = s
 			originalClientID = clientID
@@ -650,6 +673,9 @@ func (h *LSPHandler) routeResponse(serverMsg json.RawMessage, backendID string) 
 			delete(s.incomingIDs, backendID)
 			delete(s.channelIDs, backendID)
 			delete(s.workspaceKeys, backendID)
+		}
+		s.mu.Unlock()
+		if targetSession != nil {
 			break
 		}
 	}

@@ -613,7 +613,6 @@ func (c *Client) readEvents() {
 
 		default:
 			// Pass through other events (agent_start, turn_start, etc.)
-			break
 		}
 
 		// Auto-cancel extension UI dialogs (Pi asking user questions)

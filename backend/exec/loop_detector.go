@@ -226,122 +226,6 @@ func (d *loopDetector) phraseDetected() bool {
 	return d.phraseFired
 }
 
-// extractTarget extracts the primary file/target from a tool call.
-func extractTarget(toolName, rawArgs string) string {
-	switch toolName {
-	case "read_file", "write_file", "edit_file":
-		var args map[string]any
-		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
-			if p, ok := args["path"].(string); ok {
-				return normalizeTarget(p)
-			}
-		}
-	case "bash":
-		var args map[string]any
-		if err := json.Unmarshal([]byte(rawArgs), &args); err == nil {
-			if cmd, ok := args["command"].(string); ok {
-				return extractCommandTarget(cmd)
-			}
-		}
-	}
-	return ""
-}
-
-// extractCommandTarget extracts the primary file/target from a shell command.
-// Handles: head file, wc file, grep pattern file, cat file, ls dir, tail file, diff f1 f2,
-// sed file, python script.py, etc.
-func extractCommandTarget(cmd string) string {
-	cmd = strings.TrimSpace(cmd)
-	if cmd == "" {
-		return ""
-	}
-
-	tokens := shellTokens(cmd)
-	if len(tokens) == 0 {
-		return ""
-	}
-
-	// Take only the first command (before any pipe)
-	pipeIdx := -1
-	for i, t := range tokens {
-		if t == "|" {
-			pipeIdx = i
-			break
-		}
-	}
-	if pipeIdx >= 0 {
-		tokens = tokens[:pipeIdx]
-	}
-
-	if len(tokens) < 2 {
-		return ""
-	}
-
-	verb := tokens[0]
-	args := tokens[1:]
-
-	// Filter out flags (tokens starting with -)
-	nonFlags := make([]string, 0, len(args))
-	for _, a := range args {
-		if !strings.HasPrefix(a, "-") && a != ">" && a != ">>" && a != "2>&1" && a != "&&" {
-			nonFlags = append(nonFlags, a)
-		}
-	}
-
-	switch verb {
-	case "head", "tail", "cat", "wc", "stat", "file", "diff":
-		if len(nonFlags) > 0 {
-			return normalizeTarget(nonFlags[0])
-		}
-	case "grep":
-		if len(nonFlags) >= 2 {
-			return normalizeTarget(nonFlags[len(nonFlags)-1])
-		} else if len(nonFlags) == 1 {
-			return normalizeTarget(nonFlags[0])
-		}
-	case "ls":
-		if len(nonFlags) > 0 {
-			return normalizeTarget(nonFlags[0])
-		}
-		return normalizeTarget(".")
-	case "sed":
-		if len(nonFlags) >= 2 {
-			return normalizeTarget(nonFlags[len(nonFlags)-1])
-		}
-	case "python", "python3":
-		if len(nonFlags) > 0 {
-			return normalizeTarget(nonFlags[0])
-		}
-	case "echo", "printf":
-		for i, t := range tokens {
-			if (t == ">" || t == ">>") && i+1 < len(tokens) {
-				return normalizeTarget(tokens[i+1])
-			}
-		}
-	case "mv", "cp":
-		if len(nonFlags) >= 2 {
-			return normalizeTarget(nonFlags[len(nonFlags)-1])
-		}
-	case "git":
-		if len(args) > 0 {
-			subcmd := args[0]
-			switch subcmd {
-			case "add", "rm":
-				if slices.Contains(args, "-A") {
-					return normalizeTarget(".")
-				}
-				if len(nonFlags) > 0 {
-					return normalizeTarget(nonFlags[0])
-				}
-			case "commit", "diff", "status", "log":
-				return normalizeTarget(".")
-			}
-		}
-	}
-
-	return ""
-}
-
 // shellTokens splits a shell command into tokens, handling pipes and redirects.
 func shellTokens(cmd string) []string {
 	var tokens []string
@@ -398,15 +282,6 @@ func shellTokens(cmd string) []string {
 		tokens = append(tokens, current.String())
 	}
 	return tokens
-}
-
-// normalizeTarget normalizes a file path for comparison.
-func normalizeTarget(p string) string {
-	p = strings.TrimSpace(p)
-	for strings.HasPrefix(p, "./") {
-		p = p[2:]
-	}
-	return p
 }
 
 // isReadOnlyCall classifies a tool call as read-only (no state changes) or state-changing.

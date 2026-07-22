@@ -1,7 +1,6 @@
 package exec
 
 import (
-	"os/exec"
 	"strings"
 
 	"kanban/backend/git"
@@ -37,19 +36,4 @@ func unstagePaths(wm *git.WorktreeManager, taskID string, paths []string) {
 	for _, path := range paths {
 		_ = wm.GitRunInWorktree(taskID, append([]string{"reset", "HEAD", "--", path}, git.GitAuthorFlags()...)...)
 	}
-}
-
-// unstagePathsInDir resets paths from staging in a plain directory.
-func unstagePathsInDir(dir string, paths []string) {
-	for _, path := range paths {
-		_, _ = runGitCommand(dir, "reset", "HEAD", "--", path)
-	}
-}
-
-// runGitCommand runs a git command in a directory.
-func runGitCommand(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	return string(out), err
 }
