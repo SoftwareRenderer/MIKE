@@ -807,8 +807,11 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let diffStats = $derived($taskDiffStatsStore[taskId] || null);
     // Prefer the prop from CardDetail (computed from DiffCache, the source of truth).
     // Falls back to WebSocket store for backward compat (e.g., Card.svelte usage).
+    // Includes both staged index changes and committed-but-unmerged changes.
+    // When commits are already merged into the target branch, committed changes
+    // don't count — only staged (index) changes matter.
     let hasStagedChanges = $derived(
-        hasStagedChangesProp ?? (diffStats?.staged_paths || []).length > 0
+        hasStagedChangesProp ?? ((diffStats?.staged_paths || []).length > 0 || (!!diffStats?.has_committed_changes && !diffStats?.already_merged))
     );
 
     async function handleCommitAndDone() {

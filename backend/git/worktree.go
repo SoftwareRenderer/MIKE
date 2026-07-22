@@ -15,6 +15,7 @@ import (
 
 	"kanban/backend/config"
 	"kanban/backend/store"
+	"kanban/backend/types"
 )
 
 // EmptyTreeHash is the SHA-1 of an empty git tree object.
@@ -113,6 +114,22 @@ func ShouldIgnoreFile(path string) bool {
 	return false
 }
 
+// IsInternalFile returns true if the path is an internal file that should not
+// appear in the diff panel or card stats (e.g., .git/*, kanban.trace).
+func IsInternalFile(path string) bool {
+	// Check if any path component is .git (handles vendor/lib/.git, .git/index, etc.)
+	for _, part := range strings.Split(path, string(filepath.Separator)) {
+		if part == ".git" {
+			return true
+		}
+	}
+	base := filepath.Base(path)
+	if base == "kanban.trace" || base == "kanban.trace.old" {
+		return true
+	}
+	return false
+}
+
 // WorktreeManager handles git worktree operations.
 type WorktreeManager struct {
 	store       *store.Store
@@ -125,6 +142,11 @@ type WorktreeManager struct {
 // NewWorktreeManager creates a new WorktreeManager.
 func NewWorktreeManager(store *store.Store, configStore *config.ConfigStore) *WorktreeManager {
 	return &WorktreeManager{store: store, configStore: configStore}
+}
+
+// GetTaskByTaskID retrieves a task by its ID.
+func (wm *WorktreeManager) GetTaskByTaskID(taskID string) (*types.Task, error) {
+	return wm.store.GetTaskByTaskID(taskID)
 }
 
 // getProjectWorktreeMu returns a per-project mutex for serializing worktree creation.
@@ -810,6 +832,7 @@ type InlineDiffSegment struct {
 type TrackedDiffFile struct {
 	Path        string    `json:"path"`
 	OrigPath    string    `json:"origPath,omitempty"` // original path for renames (a/ path when different from b/)
+	CommittedRows []DiffRow `json:"committedRows,omitempty"` // changes committed to branch since baseRef
 	Rows        []DiffRow `json:"rows"`
 	Added       int       `json:"added"`
 	Removed     int       `json:"removed"`
@@ -827,6 +850,7 @@ type TrackedDiffFile struct {
 // monolithic unified diff string (kept for backward compatibility).
 type TaskDiff struct {
 	Diff              string                      `json:"diff"`
+	CommittedDiff     string                      `json:"-"` // raw diff of committed changes since baseRef (for hash computation)
 	Tracked           map[string]*TrackedDiffFile `json:"-"` // per-file parsed diffs (not JSON-serialized in legacy format)
 	Untracked         []UntrackedFile             `json:"untracked"`
 	ShortStat         string                      `json:"short_stat"`
@@ -847,6 +871,9 @@ func ComputeFileHash(f *TrackedDiffFile) string {
 	var sb strings.Builder
 	for _, row := range f.Rows {
 		fmt.Fprintf(&sb, "%s:%s\n", row.Variant, row.Text)
+	}
+	for _, row := range f.CommittedRows {
+		fmt.Fprintf(&sb, "c:%s:%s\n", row.Variant, row.Text)
 	}
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(sb.String())))
 }
@@ -1392,39 +1419,15 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	} else {
 		// Single-ref diff: working tree vs baseRef.
 		// Checkpoints use stash create+store, so changes stay visible in the working tree.
-		target := "HEAD"
-		if baseRef != "" {
-			target = baseRef
-		}
-
-		// Get tracked file diff.
-		// Two sources of changes:
-		//   1. Working-tree changes (uncommitted): git diff HEAD
-		//   2. Committed changes (since target): git diff target..HEAD
-		// We always check for working-tree changes first. When the working tree is
-		// dirty, using HEAD as baseline ensures deletions of post-target files are
-		// captured (git diff target misses them — file absent on both sides).
-		statusOut, statusErr := wm.gitRunOutput(worktreePath, "status", "--porcelain", "--untracked-files=no")
-		workingTreeClean := statusErr != nil || len(strings.TrimSpace(statusOut)) == 0
-
-		if workingTreeClean {
-			// Working tree is clean — show committed changes since target.
-			// This handles forked threads where changes are committed as snapshots.
-			diffOut, err = wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..HEAD", target))
-			if err != nil {
+		// Working-tree diff: always compare against HEAD.
+		// This captures only uncommitted changes (staged + unstaged).
+		// Committed changes are handled separately below.
+		diffOut, err = wm.gitRunOutput(worktreePath, "diff", "HEAD")
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				// Changes exist, diffOut has the output — continue
+			} else {
 				return nil, fmt.Errorf("git diff: %w", err)
-			}
-		} else {
-			// Working tree is dirty — use HEAD as baseline to capture all
-			// working-tree changes (modifications, additions, deletions).
-			// git diff HEAD exits 1 when changes exist — output is still valid.
-			diffOut, err = wm.gitRunOutput(worktreePath, "diff", "HEAD")
-			if err != nil {
-				if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-					// Changes exist, diffOut has the output — continue
-				} else {
-					return nil, fmt.Errorf("git diff: %w", err)
-				}
 			}
 		}
 		shortStat = shortStatFromDiff(diffOut)
@@ -1535,6 +1538,36 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	}
 
 	tracked := parseUnifiedDiffToFiles(diffOut, truncatedFiles, originalStats, annotations)
+	if tracked == nil {
+		tracked = make(map[string]*TrackedDiffFile)
+	}
+	var committedDiff string
+	if baseRef != "" {
+		committedOut, err := wm.gitRunOutput(worktreePath, "diff", fmt.Sprintf("%s..HEAD", baseRef))
+		if err == nil && committedOut != "" {
+			committedDiff = committedOut
+			committedOut, committedAnnotations := wm.filterLargeBinaryDiffs(worktreePath, committedOut)
+			committedFiles := parseUnifiedDiffToFiles(committedOut, nil, nil, committedAnnotations)
+			for path, cf := range committedFiles {
+				if tf, ok := tracked[path]; ok {
+					tf.CommittedRows = cf.Rows
+				} else {
+					tracked[path] = &TrackedDiffFile{
+						Path: path,
+						Rows: nil,
+						CommittedRows: cf.Rows,
+						Added: cf.Added,
+						Removed: cf.Removed,
+						FileSize: cf.FileSize,
+						IsBinary: cf.IsBinary,
+						Truncated: cf.Truncated,
+						OrigAdded: cf.OrigAdded,
+						OrigRemoved: cf.OrigRemoved,
+					}
+				}
+			}
+		}
+	}
 
 	// Convert to sorted slice for deterministic WebSocket broadcast.
 	var stagedPathsList []string
@@ -1547,6 +1580,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 
 	return &TaskDiff{
 		Diff:              diffOut,
+		CommittedDiff:     committedDiff,
 		Tracked:           tracked,
 		Untracked:         untracked,
 		ShortStat:         shortStat,
@@ -2004,6 +2038,17 @@ func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, fork
 		return baseRef, fmt.Errorf("git merge-base: %w", err)
 	}
 	return strings.TrimSpace(mb), nil
+}
+
+// IsMergedInto checks if the task branch has been merged into the target branch.
+// Uses git merge-base --is-ancestor to check if taskBranch is an ancestor of targetBranch.
+// Returns true if merged, false if not merged or if check fails.
+func (wm *WorktreeManager) IsMergedInto(projectPath, taskBranch, targetBranch string) bool {
+	if taskBranch == "" || targetBranch == "" {
+		return false
+	}
+	cmd := exec.Command("git", "-C", projectPath, "merge-base", "--is-ancestor", taskBranch, targetBranch)
+	return cmd.Run() == nil
 }
 
 // ResetWorktreeTo resets the worktree to a commit or stash hash.

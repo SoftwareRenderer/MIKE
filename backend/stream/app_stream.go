@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -22,27 +21,8 @@ import (
 
 var toolCallMarker = []byte(`"event":"tool_call"`)
 
-func isGitPath(path string) bool {
-	if path == ".git" {
-		return true
-	}
-	for _, part := range strings.Split(path, string(filepath.Separator)) {
-		if part == ".git" {
-			return true
-		}
-	}
-	return false
-}
-
 func isInternalFile(path string) bool {
-	if isGitPath(path) {
-		return true
-	}
-	base := filepath.Base(path)
-	if base == "kanban.trace" || base == "kanban.trace.old" {
-		return true
-	}
-	return false
+	return git.IsInternalFile(path)
 }
 
 func filterInternalPathsFromHashes(hashes map[string]string) map[string]string {
@@ -526,23 +506,28 @@ func (asm *AppStreamManager) SetDiffCacheUpdate(fn func(taskID string, taskDiff 
 // BroadcastDiffStats sends compact diff stats to all clients of a project.
 func (asm *AppStreamManager) BroadcastDiffStats(event DiffStatsEvent) {
 	asm.sendBoardPayload(event.ProjectID, map[string]any{
-		"type":            "task_diff_stats",
-		"task_id":         event.TaskID,
-		"hash":            event.DiffHash,
-		"short_stat":      event.ShortStat,
-		"files_n":         event.FilesN,
-		"untracked_n":     event.UntrackedN,
-		"untracked_lines": event.UntrackedLines,
-		"file_hashes":     filterInternalPathsFromHashes(event.ChangedHashes),
-		"removed_files":   filterInternalPathsFromList(event.RemovedFiles),
-		"staged_paths":    filterInternalPathsFromList(event.StagedPaths),
+		"type":                  "task_diff_stats",
+		"task_id":               event.TaskID,
+		"hash":                  event.DiffHash,
+		"short_stat":            event.ShortStat,
+		"files_n":               event.FilesN,
+		"untracked_n":           event.UntrackedN,
+		"untracked_lines":       event.UntrackedLines,
+		"tracked_add":           event.TrackedAdd,
+		"tracked_del":           event.TrackedDel,
+		"file_hashes":           filterInternalPathsFromHashes(event.ChangedHashes),
+		"removed_files":         filterInternalPathsFromList(event.RemovedFiles),
+		"staged_paths":          filterInternalPathsFromList(event.StagedPaths),
+		"has_committed_changes": event.HasCommittedChanges,
+		"already_merged":        event.AlreadyMerged,
 	})
 }
 
-// ComputeDiffHash computes a SHA-256 hash of the diff, untracked files, and staged state.
-func ComputeDiffHash(diff string, untracked []git.UntrackedFile, stagedHash string) string {
+// ComputeDiffHash computes a SHA-256 hash of the diff, committed diff, untracked files, and staged state.
+func ComputeDiffHash(diff string, committedDiff string, untracked []git.UntrackedFile, stagedHash string) string {
 	var hashInput strings.Builder
 	hashInput.WriteString(diff)
+	hashInput.WriteString("\x00committed:" + committedDiff)
 	for _, u := range untracked {
 		hashInput.WriteString(u.Path + strings.Join(u.Lines, "\n"))
 	}
@@ -707,7 +692,13 @@ func (asm *AppStreamManager) getDiffBaseline(task types.Task) string {
 	if thread != nil {
 		forkBranch = thread.GitBranch
 	}
-	baseRef, _ := asm.worktreeMgr.ResolveDiffBaseline(task.ID, task.BaseRef, task.Branch, forkBranch)
+	// Use BaseCommit (fixed hash captured at task start) when available,
+	// falling back to BaseRef (branch name). Matches API handler logic.
+	baseline := task.BaseRef
+	if task.BaseCommit != "" {
+		baseline = task.BaseCommit
+	}
+	baseRef, _ := asm.worktreeMgr.ResolveDiffBaseline(task.ID, baseline, task.Branch, forkBranch)
 	return baseRef
 }
 
@@ -872,27 +863,66 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		}
 		baseRef := asm.getDiffBaseline(task)
 		// Watch worktrees for tasks in active states
+		// Use resolved baseline (same as panel) so card stats match panel display
 		if task.Status == "in_progress" || task.Status == "review" {
-			asm.WatchWorktree(task.ID, projectID, task.BaseRef)
+			asm.WatchWorktree(task.ID, projectID, baseRef)
 		}
-		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0) {
-			hash := ComputeDiffHash(diffResult.Diff, diffResult.Untracked, diffResult.StagedHash)
-			// Send compact stats for card UI
-			untrackedLines := 0
-			for _, u := range diffResult.Untracked {
-				untrackedLines += len(u.Lines)
+		headRef := ""
+		if task.Status == "done" {
+			headRef = task.BranchTip
+			if headRef == "" {
+				headRef = task.Branch
 			}
-			filesN := len(diffResult.Tracked) + len(diffResult.Untracked)
+		}
+		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, headRef); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0 || diffResult.CommittedDiff != "") {
+			hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
+			// Send compact stats for card UI (exclude internal files to match panel display)
+			var untrackedLines, trackedAdd, trackedDel, visibleTracked, visibleUntracked int
+			for path, f := range diffResult.Tracked {
+				if isInternalFile(path) {
+					continue
+				}
+				visibleTracked++
+				trackedAdd += f.Added
+				trackedDel += f.Removed
+			}
+			for _, u := range diffResult.Untracked {
+				if isInternalFile(u.Path) {
+					continue
+				}
+				visibleUntracked++
+				if u.OrigAdded > 0 {
+					untrackedLines += u.OrigAdded
+				} else {
+					untrackedLines += len(u.Lines)
+				}
+			}
+			filesN := visibleTracked + visibleUntracked
+			// Check if task branch commits are already merged into the target branch.
+			targetBranch := task.BaseRef
+			if strings.HasPrefix(targetBranch, "fatal:") {
+				targetBranch = ""
+			}
+			var alreadyMerged bool
+			if targetBranch != "" && task.Branch != "" {
+				if project, err := asm.store.GetProject(projectID); err == nil && project.Path != "" {
+					alreadyMerged = asm.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
+				}
+			}
 			statsMsg, _ := json.Marshal(map[string]any{
-				"type":            "task_diff_stats",
-				"task_id":         task.ID,
-				"hash":            hash,
-				"short_stat":      diffResult.ShortStat,
-				"files_n":         filesN,
-				"untracked_n":     len(diffResult.Untracked),
-				"untracked_lines": untrackedLines,
-				"file_hashes":     filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
-				"staged_paths":    filterInternalPathsFromList(diffResult.StagedPaths),
+				"type":                  "task_diff_stats",
+				"task_id":               task.ID,
+				"hash":                  hash,
+				"short_stat":            diffResult.ShortStat,
+				"files_n":               filesN,
+				"untracked_n":           visibleUntracked,
+				"untracked_lines":       untrackedLines,
+				"tracked_add":           trackedAdd,
+				"tracked_del":           trackedDel,
+				"file_hashes":           filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
+				"staged_paths":          filterInternalPathsFromList(diffResult.StagedPaths),
+				"has_committed_changes": diffResult.CommittedDiff != "",
+				"already_merged":        alreadyMerged,
 			})
 			client.writeMu.Lock()
 			conn.Write(ctx, websocket.MessageText, statsMsg)
@@ -935,12 +965,16 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			if _, exists := files[u.Path]; exists {
 				continue
 			}
+			lineCount := len(u.Lines)
+			if u.OrigAdded > 0 {
+				lineCount = u.OrigAdded
+			}
 			entry := map[string]any{
 				"hash":       git.ComputeUntrackedHash(u),
 				"type":       "untracked",
-				"line_count": len(u.Lines),
+				"line_count": lineCount,
 				"file_size":  u.FileSize,
-				"added":      len(u.Lines),
+				"added":       lineCount,
 			}
 			if u.IsBinary {
 				entry["is_binary"] = true

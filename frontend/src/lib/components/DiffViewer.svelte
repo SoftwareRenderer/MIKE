@@ -8,13 +8,14 @@ import { slide } from 'svelte/transition';
     import '$lib/styles/diff-viewer.css';
 
 
-    let { stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath }: { stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void; selectedPath?: string } = $props();
-    let hasContent = $derived(stagedFiles.length > 0 || unstagedFiles.length > 0 || stagedUntracked.length > 0 || unstagedUntracked.length > 0);
+    let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = 'Merged from Subtasks' }: { committedFiles?: DiffFile[]; stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void; selectedPath?: string; mergedLabel?: string } = $props();
+    let hasContent = $derived(committedFiles.length > 0 || stagedFiles.length > 0 || unstagedFiles.length > 0 || stagedUntracked.length > 0 || unstagedUntracked.length > 0);
 
     // Sort files: directories first (by path), then root files
     let sortedStagedFiles = $derived(sortFilesByPath(stagedFiles));
     let sortedUnstagedFiles = $derived(sortFilesByPath(unstagedFiles));
     let sortedStagedUntracked = $derived(sortUntrackedByPath(stagedUntracked));
+    let sortedCommittedFiles = $derived(sortFilesByPath(committedFiles));
     let sortedUnstagedUntracked = $derived(sortUntrackedByPath(unstagedUntracked));
 
     // Map of file path -> DOM element for scroll-to-file from sidebar
@@ -75,6 +76,11 @@ import { slide } from 'svelte/transition';
 
     /** Get all file paths belonging to a section. */
     function getSectionPaths(id: string): string[] {
+        if (id === 'committed') {
+            const paths: string[] = [];
+            for (const f of sortedCommittedFiles) paths.push(f.path);
+            return paths;
+        }
         if (id === 'staged') {
             const paths: string[] = [];
             for (const f of sortedStagedFiles) paths.push(f.path);
@@ -135,12 +141,13 @@ import { slide } from 'svelte/transition';
 
     // Clean up stale entries: remove paths that no longer exist in the current diff
     $effect(() => {
+        const _committedFiles = committedFiles;
         const _stagedFiles = stagedFiles;
         const _unstagedFiles = unstagedFiles;
         const _stagedUntracked = stagedUntracked;
         const _unstagedUntracked = unstagedUntracked;
         const currentPaths = new Set<string>();
-        for (const f of [..._stagedFiles, ..._unstagedFiles]) currentPaths.add(f.path);
+        for (const f of [..._committedFiles, ..._stagedFiles, ..._unstagedFiles]) currentPaths.add(f.path);
         for (const u of [..._stagedUntracked, ..._unstagedUntracked]) currentPaths.add(u.path);
 
         let changed = false;
@@ -297,7 +304,7 @@ import { slide } from 'svelte/transition';
 
 </script>
 
-{#snippet diffFileEntry(file: DiffFile, isStaged: boolean)}
+{#snippet diffFileEntry(file: DiffFile, isStaged: boolean, showStageBtn: boolean = true)}
     {@const isFileExpanded = isFileOpen(file.path)}
     {@const badge = getStatusBadge(file)}
     <section class="diff-file-section diff-file-enter" use:registerFileSection={file.path}>
@@ -326,7 +333,7 @@ import { slide } from 'svelte/transition';
                 {/if}
             </button>
             <span class="diff-status-badge" style="color: {badge.color}" title={badge.letter === 'M' ? 'Modified' : badge.letter === 'R' ? 'Renamed' : badge.letter === 'D' ? 'Deleted' : 'Added'}>{badge.letter}</span>
-            {#if onStageFile}
+            {#if onStageFile && showStageBtn}
                 <button type="button" class="diff-stage-btn" onclick={() => onStageFile(file.path, !isStaged)} title={isStaged ? 'Unstage changes' : 'Stage changes'}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d={isStaged ? "M4 8h8" : "M8 4v8M4 8h8"} stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                 </button>
@@ -815,6 +822,28 @@ import { slide } from 'svelte/transition';
                 <!-- Unstaged untracked files -->
                 {#each sortedUnstagedUntracked as entry (entry.path)}
                     {@render untrackedFileEntry(entry, false)}
+                {/each}
+            </div>
+        </div>
+        {/if}
+
+        <!-- Merged from Subtasks section -->
+        {#if sortedCommittedFiles.length > 0}
+        <div class="diff-section">
+            <button class="diff-section-header diff-section-merged" type="button" aria-expanded={!isSectionCollapsed('committed')} onclick={() => toggleSection('committed')} title={isSectionCollapsed('committed') ? 'Expand all merged files' : 'Collapse all merged files'}>
+                <svg class="diff-section-chevron" class:expanded={!isSectionCollapsed('committed')} width="12" height="12" viewBox="0 0 16 16" fill="none">
+                    <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="diff-section-title">{mergedLabel}</span>
+                <span class="diff-section-stats">
+                    <span class="diff-added">+{sortedCommittedFiles.reduce((s, f) => s + (f.origAdded ?? f.added ?? 0), 0)}</span>
+                    <span class="diff-removed">-{sortedCommittedFiles.reduce((s, f) => s + (f.origRemoved ?? f.removed ?? 0), 0)}</span>
+                </span>
+                <span class="diff-section-count">{sortedCommittedFiles.length} file{sortedCommittedFiles.length !== 1 ? "s" : ""}</span>
+            </button>
+            <div class="diff-section-body">
+                {#each sortedCommittedFiles as file (file.path)}
+                    {@render diffFileEntry({ ...file, rows: file.committedRows || file.rows }, false, false)}
                 {/each}
             </div>
         </div>

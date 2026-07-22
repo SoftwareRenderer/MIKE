@@ -4,50 +4,6 @@ import (
 	"testing"
 )
 
-// TestIsGitPath verifies the isGitPath helper correctly identifies .git paths.
-func TestIsGitPath(t *testing.T) {
-	tests := []struct {
-		path     string
-		expected bool
-	}{
-		// Normal files — should NOT be filtered
-		{"main.go", false},
-		{"src/main.go", false},
-		{"README.md", false},
-		{"lib/utils.ts", false},
-		{".env", false},
-		{".gitignore", false},
-		{".gitattributes", false},
-		{"docs/.gitkeep", false}, // .gitkeep is not .git dir
-		{"src/.github/config.yml", false}, // .github is not .git
-
-		// .git directory — should be filtered
-		{".git", true},
-		{".git/config", true},
-		{".git/HEAD", true},
-		{".git/objects/pack/abc.pack", true},
-		{".git/refs/heads/main", true},
-		{".git/index", true},
-		{".git/logs/HEAD", true},
-		{".git/worktrees/task-abc/gitdir", true},
-		{".git/FETCH_HEAD", true},
-
-		// Nested .git directories (submodules, worktrees)
-		{"vendor/lib/.git", true},
-		{"vendor/lib/.git/modules/sub", true},
-		{"worktrees/feature/.git/config", true},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.path, func(t *testing.T) {
-			got := isGitPath(tc.path)
-			if got != tc.expected {
-				t.Errorf("isGitPath(%q) = %v, want %v", tc.path, got, tc.expected)
-			}
-		})
-	}
-}
-
 // TestIsInternalFile verifies that internal files (.git + flight recorder) are detected.
 func TestIsInternalFile(t *testing.T) {
 	tests := []struct {
