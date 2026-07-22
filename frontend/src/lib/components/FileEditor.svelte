@@ -273,6 +273,12 @@
                         },
                     });
                     if (result && (Array.isArray(result) ? result.length > 0 : result !== null)) {
+                        const locations = Array.isArray(result) ? result : [result];
+                        const firstLoc = locations[0];
+                        const uri = firstLoc && 'target' in firstLoc ? firstLoc.target?.uri : firstLoc?.uri;
+
+                        if (!uri) return null;
+
                         return {
                             pos,
                             above: true,
@@ -500,10 +506,15 @@
                 },
             });
 
-            if (result && result.length > 0) {
-                const location = result[0];
-                const uri = location.uri;
-                const range = location.range;
+            if (result && (Array.isArray(result) ? result.length > 0 : result !== null)) {
+                const locations = Array.isArray(result) ? result : [result];
+                const loc = locations[0];
+                const location = loc && 'target' in loc ? loc.target : loc;
+                const uri = location?.uri;
+                const range = location?.range;
+
+                if (!uri || !range) return;
+
                 const targetPath = uri.replace(/^file:\/\//, '');
                 const targetLine = range.start.line + 1;
 
