@@ -137,17 +137,18 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 	}
 	filesN := visibleTracked + visibleUntracked
 	te.appStreamMgr.BroadcastDiffStats(stream.DiffStatsEvent{
-		ProjectID:      projectID,
-		TaskID:         taskID,
-		DiffHash:       hash,
-		ShortStat:      diffResult.ShortStat,
-		FilesN:         filesN,
-		UntrackedN:     visibleUntracked,
-		UntrackedLines: untrackedLines,
-		TrackedAdd:     trackedAdd,
-		TrackedDel:     trackedDel,
-		ChangedHashes:  fileHashes,
-		StagedPaths:    diffResult.StagedPaths,
+		ProjectID:           projectID,
+		TaskID:              taskID,
+		DiffHash:            hash,
+		ShortStat:           diffResult.ShortStat,
+		FilesN:              filesN,
+		UntrackedN:          visibleUntracked,
+		UntrackedLines:      untrackedLines,
+		TrackedAdd:          trackedAdd,
+		TrackedDel:          trackedDel,
+		ChangedHashes:       fileHashes,
+		StagedPaths:         diffResult.StagedPaths,
+		HasCommittedChanges: diffResult.CommittedDiff != "",
 	})
 }
 
