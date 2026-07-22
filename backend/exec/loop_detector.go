@@ -88,6 +88,7 @@ type loopDetector struct {
 	textWindow       []string        // recent text-only responses (content, trimmed)
 	loopStreak       int             // consecutive loop detections (reset to 0 on valid turn)
 	phraseDet        *phraseDetector // real-time phrase repetition tracker
+	blockDet         *blockDetector   // real-time block repetition tracker
 	phraseFired      bool            // phrase loop detected during current streaming response
 	hintIndices      []int           // indices in messages slice of injected loop hints
 }
@@ -97,6 +98,7 @@ func newLoopDetector() *loopDetector {
 	return &loopDetector{
 		textWindow: make([]string, 0, 8),
 		phraseDet:  newPhraseDetector(),
+		blockDet:   newBlockDetector(),
 	}
 }
 
@@ -109,6 +111,7 @@ func (d *loopDetector) reset() {
 	d.textWindow = d.textWindow[:0]
 	d.loopStreak = 0
 	d.phraseDet.reset()
+	d.blockDet.reset()
 	d.phraseFired = false
 }
 
@@ -160,6 +163,7 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText,
 	if hasToolCalls {
 		d.resetText()       // tool call breaks text-only streak
 		d.phraseDet.reset() // tool call resets phrase tracker
+		d.blockDet.reset()  // tool call resets block tracker
 
 		// Check each tool call
 		for _, tc := range toolCalls {
@@ -203,11 +207,15 @@ func (d *loopDetector) recordTurn(toolCalls []types.ChatToolCall, assistantText,
 	return LoopNone, "", ""
 }
 
-// checkStreamingText feeds accumulated streaming text into the phrase detector.
+// checkStreamingText feeds accumulated streaming text into the phrase and block detectors.
 // Sets phraseFired flag and returns LoopPhrase if exact phrase repetition is detected.
 func (d *loopDetector) checkStreamingText(text string) LoopType {
 	if d.phraseDet.check(text) {
 		d.phraseFired = true
+		return LoopPhrase
+	}
+	if d.blockDet.check(text) {
+		d.phraseFired = true // Treat block loop as phrase loop for reporting/hints
 		return LoopPhrase
 	}
 	return LoopNone
