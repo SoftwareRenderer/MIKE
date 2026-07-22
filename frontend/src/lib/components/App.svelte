@@ -183,7 +183,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     let portConflict = $state<{ project_id: string; ports: number[] } | null>(null);
     let currentBranch = $state('');
     let urlFileId = $state(new URLSearchParams(location.search).get('file') || '');
-    let selectedTaskVal: Task | null = $state(null);
     let mobileMenuOpen = $state(false);
     let isAuthenticated = $state(false);
     let isLoadingAuth = $state(true);
@@ -202,15 +201,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     });
     $effect(() => { const v = appStore.config; if (v) cfg = v; });
     $effect(() => {
-        const t = appStore.selectedTask;
-        selectedTaskVal = t;
-        if (t && currentProject) {
-            const urlTask = new URLSearchParams(location.search).get('task');
-            if (urlTask !== t.id) {
-                updateUrl({ project: currentProject.id, task: t.id });
-            }
-            if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
-        }
+        const v = appStore.config; if (v) cfg = v;
     });
     $effect(() => { if (taskDiffStatsContext) taskDiffStats = get(taskDiffStatsContext); });
 
@@ -221,7 +212,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     let lastSubKey = '';
     let lastSubStream: ReturnType<typeof createAppStream> | null = null;
     $effect(() => {
-        const taskId = selectedTaskVal?.id;
+        const taskId = appStore.selectedTask?.id;
         const project = currentProject;
         const stream = appStream;
         if (!stream || !project || !taskId) return;
@@ -251,10 +242,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             tasks = [];
             appStore.board = null;
             disconnectBoardStream();
-            selectedTaskVal = null;
             appStore.selectedTask = null;
             uiStore.showCardDetail = false;
-            window.dispatchEvent(new CustomEvent('urlchanged'));
+            window.dispatchEvent(newCustomEvent('urlchanged'));
             return;
         }
 
@@ -269,18 +259,15 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
         }
 
-        if (taskId) {
-            const task = tasks.find(t => t.id === taskId);
             if (task) {
-                selectedTaskVal = task;
                 appStore.selectedTask = task;
                 uiStore.showCardDetail = true;
             }
         } else {
             // Scroll to the task's column when going back via browser back button
-            const prevTask = selectedTaskVal;
+            const prevTask = appStore.selectedTask;
             if (prevTask) scrollToColumn = prevTask.status;
-            selectedTaskVal = null;
+            appStore.selectedTask = null;
             appStore.selectedTask = null;
             uiStore.showCardDetail = false;
         }
@@ -446,17 +433,16 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                             tasks = [...tasks.filter(t => t.id !== updatedTask.id), updatedTask];
                         }
                         appStore.board = { ...appStore.board!, tasks };
-                        // Update selectedTaskVal so CardDetail's `task` prop refreshes,
+                        // Update appStore.selectedTask so CardDetail's `task` prop refreshes,
                         // ensuring real-time updates (pause/stop/complete).
-                        if (selectedTaskVal?.id === updatedTask.id) {
-                            selectedTaskVal = updatedTask;
+                        if (appStore.selectedTask?.id === updatedTask.id) {
                             appStore.selectedTask = updatedTask;
                         }
                     },
                     onTaskDeleted: (task_id: string) => {
                         tasks = tasks.filter(t => t.id !== task_id);
                         appStore.board = { ...appStore.board!, tasks };
-                        if (selectedTaskVal && selectedTaskVal.id === task_id) {
+                        if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
                             clearTaskDetail();
                         }
                     },
@@ -468,7 +454,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     },
                     onTaskEvent: (task_id: string, event: StreamEvent) => {
                         // Forward task events to the task event store for TaskStream to consume
-                        if (selectedTaskVal && selectedTaskVal.id === task_id) {
+                        if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
                             taskEventContext.set({ task_id, ...event });
                         }
                     },
@@ -693,7 +679,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 return;
             }
         }
-        selectedTaskVal = task;
+        appStore.selectedTask = task;
         uiStore.showCardDetail = true;
         appStore.selectedTask = task;
     }
@@ -702,7 +688,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         if (currentProject && appStream) {
             appStream.unsubscribeProject(currentProject.id);
         }
-        // Task unsubscribe is handled by the $effect cleanup when selectedTaskVal changes
+        // Task unsubscribe is handled by the $effect cleanup when appStore.selectedTask changes
     }
 
     async function refreshBoard() {
@@ -715,11 +701,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             tasks = b.tasks || [];
             appStore.board = b;
             // Update selected task reference to point to fresh object from API
-            const task = selectedTaskVal;
+            const task = appStore.selectedTask;
             if (task) {
                 const fresh = tasks.find(t => t.id === task.id);
                 if (fresh) {
-                    selectedTaskVal = fresh;
+                    appStore.selectedTask = fresh;
                     appStore.selectedTask = fresh;
                 }
             }
@@ -750,10 +736,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 tasks = b.tasks || [];
                 appStore.board = b;
                 // Update selected task reference
-                { const sel = selectedTaskVal; if (sel) {
+                { const sel = appStore.selectedTask; if (sel) {
                     const fresh = tasks.find(t => t.id === sel.id);
                     if (fresh) {
-                        selectedTaskVal = fresh;
+                        appStore.selectedTask = fresh;
                         appStore.selectedTask = fresh;
                     }
                 }}
@@ -771,7 +757,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     function clearTaskDetail() {
         // Push URL first so the subscription sees updated URL
         updateUrl({ project: currentProject?.id }, true, true);
-        selectedTaskVal = null;
+        appStore.selectedTask = null;
         appStore.selectedTask = null;
         uiStore.showCardDetail = false;
     }
@@ -791,7 +777,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Update URL with project param
         // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
         const urlTaskId = new URLSearchParams(location.search).get('task');
-        updateUrl({ project: p.id, task: selectedTaskVal?.id || urlTaskId, view: wasExplorerViewOpen ? 'explorer' : null, file: urlFileId || null }, false, true);
+        updateUrl({ project: p.id, task: appStore.selectedTask?.id || urlTaskId, view: wasExplorerViewOpen ? 'explorer' : null, file: urlFileId || null }, false, true);
         if (wasProjectSwitch && wasExplorerViewOpen) {
             queueMicrotask(() => { showExplorerViewVal = true; });
         }
@@ -1002,7 +988,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         Viewing cached data
     </div>
 {/if}
-<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!selectedTaskVal} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
+<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!appStore.selectedTask} class:ws-disconnected={!wsConnected} class:cache-visible={servingFromCache}>
     <!-- Skip navigation link -->
     <a href="#main-content" class="skip-link">Skip to main content</a>
 
@@ -1039,7 +1025,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
         {#if currentProject}
-            {#if !(uiStore.showCardDetail && selectedTaskVal) && !showExplorerViewVal}
+            {#if !(uiStore.showCardDetail && appStore.selectedTask) && !showExplorerViewVal}
             <TopBar
                 currentProject={currentProject}
                 {currentBranch}
@@ -1067,8 +1053,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         onUpdateFile={handleExplorerFileChange}
                         onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
-                {:else if uiStore.showCardDetail && selectedTaskVal}
-                    <CardDetail task={selectedTaskVal} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
+                {:else if uiStore.showCardDetail && appStore.selectedTask}
+                    <CardDetail task={appStore.selectedTask} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
                         if (status) scrollToColumn = status;
                         uiStore.showCardDetail = false;
                         appStore.selectedTask = null;
@@ -1077,7 +1063,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         // Push URL first so the subscription sees updated URL and skips replaceState
                         updateUrl({ project: currentProject?.id, task: t.id }, true, true);
                         if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
-                        selectedTaskVal = t;
+                        appStore.selectedTask = t;
                         appStore.selectedTask = t;
                     }} onRefreshBoard={() => refreshBoard()} onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }} />
                 {:else}
