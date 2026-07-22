@@ -32,12 +32,16 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let sandboxImage = $state('');
     let sandboxDockerfilePath = $state('');
     let forwardPorts = $state<PortForward[]>([]);
+    let editingPortIndex = $state<number | null>(null);
     let newContainerPort = $state('');
     let portError = $state('');
     let portsExpanded = $state(false);
     let hasPendingPort = $derived(String(newContainerPort).trim() !== '');
     // Custom mounts
     let sandboxMounts = $state<SandboxMount[]>([]);
+    let editingMountIndex = $state<number | null>(null);
+
+    $effect(() => { sandboxEnabled = project.sandbox_enabled ?? false; });
 
     $effect(() => { sandboxEnabled = project.sandbox_enabled ?? false; });
     $effect(() => { networkIsolation = project.sandbox_network_isolation ?? false; });
@@ -60,6 +64,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let showDirectoryPicker = $state(false);
     // Environment variables
     let sandboxEnvs = $state<SandboxEnv[]>([]);
+    let editingEnvIndex = $state<number | null>(null);
     let newEnvKey = $state('');
     let newEnvValue = $state('');
     let envError = $state('');
@@ -237,6 +242,18 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     // Port forwarding helpers
+    function editPort(index: number) {
+        editingPortIndex = index;
+        newContainerPort = String(forwardPorts[index].container_port);
+        portError = '';
+    }
+
+    function cancelPortEdit() {
+        editingPortIndex = null;
+        newContainerPort = '';
+        portError = '';
+    }
+
     function addPortForward() {
         portError = '';
         saveWarning = '';
@@ -245,7 +262,12 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             portError = 'Port must be between 1 and 65535';
             return;
         }
-        forwardPorts = [...forwardPorts, { container_port: container }];
+        if (editingPortIndex !== null) {
+            forwardPorts[editingPortIndex].container_port = container;
+            editingPortIndex = null;
+        } else {
+            forwardPorts = [...forwardPorts, { container_port: container }];
+        }
         newContainerPort = '';
     }
 
@@ -254,6 +276,22 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     // Mount helpers
+    function editMount(index: number) {
+        editingMountIndex = index;
+        newMountHostPath = sandboxMounts[index].host_path;
+        newMountContainerPath = sandboxMounts[index].container_path;
+        newMountMode = sandboxMounts[index].mode;
+        mountError = '';
+    }
+
+    function cancelMountEdit() {
+        editingMountIndex = null;
+        newMountHostPath = '';
+        newMountContainerPath = '';
+        newMountMode = 'rw';
+        mountError = '';
+    }
+
     function addMount() {
         mountError = '';
         saveWarning = '';
@@ -265,11 +303,17 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             mountError = 'Container path is required';
             return;
         }
-        sandboxMounts = [...sandboxMounts, {
+        const mount = {
             host_path: newMountHostPath.trim(),
             container_path: newMountContainerPath.trim(),
             mode: newMountMode,
-        }];
+        };
+        if (editingMountIndex !== null) {
+            sandboxMounts[editingMountIndex] = mount;
+            editingMountIndex = null;
+        } else {
+            sandboxMounts = [...sandboxMounts, mount];
+        }
         newMountHostPath = '';
         newMountContainerPath = '';
         newMountMode = 'rw';
@@ -280,6 +324,20 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     }
 
     // Env helpers
+    function editEnv(index: number) {
+        editingEnvIndex = index;
+        newEnvKey = sandboxEnvs[index].key;
+        newEnvValue = sandboxEnvs[index].value;
+        envError = '';
+    }
+
+    function cancelEnvEdit() {
+        editingEnvIndex = null;
+        newEnvKey = '';
+        newEnvValue = '';
+        envError = '';
+    }
+
     function addEnv() {
         envError = '';
         saveWarning = '';
@@ -288,14 +346,23 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             return;
         }
         // Check for duplicate keys
-        if (sandboxEnvs.some(e => e.key === newEnvKey.trim())) {
+        const isDuplicate = sandboxEnvs.some((e, i) => 
+            i !== editingEnvIndex && e.key === newEnvKey.trim()
+        );
+        if (isDuplicate) {
             envError = 'Duplicate variable name: ' + newEnvKey.trim();
             return;
         }
-        sandboxEnvs = [...sandboxEnvs, {
+        const env = {
             key: newEnvKey.trim(),
             value: newEnvValue,
-        }];
+        };
+        if (editingEnvIndex !== null) {
+            sandboxEnvs[editingEnvIndex] = env;
+            editingEnvIndex = null;
+        } else {
+            sandboxEnvs = [...sandboxEnvs, env];
+        }
         newEnvKey = '';
         newEnvValue = '';
     }
@@ -733,7 +800,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             {#if forwardPorts.length > 0}
             <div class="port-list">
                 {#each forwardPorts as port, i}
-                <div class="port-item">
+                <div class="port-item" class:editing={editingPortIndex === i} onclick={() => editPort(i)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && editPort(i)}>
                     <span class="port-mapping">
                         {#if activeHostPorts.has(port.container_port)}
                         <span class="port-host" title="Host port">{activeHostPorts.get(port.container_port)}</span>
@@ -743,7 +810,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         {/if}
                         <span class="port-container" title="Container port">{port.container_port}</span>
                     </span>
-                    <button type="button" class="btn-remove-port" onclick={() => removePortForward(i)} disabled={isLocked} title="Remove">
+                    <button type="button" class="btn-remove-port" onclick={(e) => { e.stopPropagation(); removePortForward(i); }} disabled={isLocked} title="Remove">
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                         </svg>
@@ -760,11 +827,24 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- Add new port forward -->
             <div class="port-add-row">
+                {#if editingPortIndex !== null}
+                    <button type="button" class="btn-cancel-edit" onclick={cancelPortEdit} title="Cancel edit">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                {/if}
                 <input type="number" class="port-input" bind:value={newContainerPort} placeholder="Container port" min="1" max="65535" disabled={isLocked} aria-label="Container port" />
-                <button type="button" class="btn-add-port" class:pending={hasPendingPort} onclick={addPortForward} disabled={isLocked} title="Add port forward">
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                        <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                    </svg>
+                <button type="button" class="btn-add-port" class:pending={hasPendingPort} onclick={addPortForward} disabled={isLocked} title={editingPortIndex !== null ? 'Save port' : 'Add port forward'}>
+                    {#if editingPortIndex !== null}
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                            <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    {:else}
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                            <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                    {/if}
                 </button>
             </div>
 
@@ -804,7 +884,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             {#if sandboxMounts.length > 0}
             <div class="mount-list">
                 {#each sandboxMounts as mount, i}
-                <div class="mount-item">
+                <div class="mount-item" class:editing={editingMountIndex === i} onclick={() => editMount(i)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && editMount(i)}>
                     <div class="mount-info">
                         <span class="mount-path" title={mount.host_path}>{mount.host_path}</span>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -814,7 +894,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                     </div>
                     <div class="mount-actions">
                         <span class="mount-mode" class:mode-rw={mount.mode === 'rw'} class:mode-ro={mount.mode === 'ro'} title={mount.mode === 'rw' ? 'Mount Read/Write' : 'Mount Read-only'}>{mount.mode}</span>
-                        <button type="button" class="btn-remove-mount" onclick={() => removeMount(i)} disabled={isLocked} title="Remove">
+                        <button type="button" class="btn-remove-mount" onclick={(e) => { e.stopPropagation(); removeMount(i); }} disabled={isLocked} title="Remove">
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                         </svg>
@@ -827,6 +907,13 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- Add new mount -->
             <div class="mount-add-row">
+                {#if editingMountIndex !== null}
+                    <button type="button" class="btn-cancel-edit" onclick={cancelMountEdit} title="Cancel edit">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                {/if}
                 <input type="text" class="mount-input mount-input-host" bind:value={newMountHostPath} placeholder="/host/path" disabled={isLocked} aria-label="Host path" />
                 <button type="button" class="btn-browse-mount" onclick={() => showDirectoryPicker = true} disabled={isLocked} title="Browse host directory">
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -847,10 +934,16 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         <span class="radio-text">ro</span>
                     </label>
                 </div>
-                <button type="button" class="btn-add-mount" class:pending={hasPendingMount} onclick={addMount} disabled={isLocked} title="Add mount">
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                        <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                    </svg>
+                <button type="button" class="btn-add-mount" class:pending={hasPendingMount} onclick={addMount} disabled={isLocked} title={editingMountIndex !== null ? 'Save mount' : 'Add mount'}>
+                    {#if editingMountIndex !== null}
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                            <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    {:else}
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                            <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                    {/if}
                 </button>
             </div>
 
@@ -888,13 +981,13 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             {#if sandboxEnvs.length > 0}
             <div class="env-list">
                 {#each sandboxEnvs as env, i}
-                <div class="env-item">
+                <div class="env-item" class:editing={editingEnvIndex === i} onclick={() => editEnv(i)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && editEnv(i)}>
                     <div class="env-info">
                         <span class="env-key" title={env.key}>{env.key}</span>
                         <span class="env-equals">=</span>
                         <span class="env-value" title={env.value}>{env.value || '(empty)'}</span>
                     </div>
-                    <button type="button" class="btn-remove-env" onclick={() => removeEnv(i)} disabled={isLocked} title="Remove">
+                    <button type="button" class="btn-remove-env" onclick={(e) => { e.stopPropagation(); removeEnv(i); }} disabled={isLocked} title="Remove">
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                             <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
                         </svg>
@@ -906,13 +999,26 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
             <!-- Add new env var -->
             <div class="env-add-row">
+                {#if editingEnvIndex !== null}
+                    <button type="button" class="btn-cancel-edit" onclick={cancelEnvEdit} title="Cancel edit">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                {/if}
                 <input type="text" class="env-input env-input-key" bind:value={newEnvKey} placeholder="KEY" disabled={isLocked} aria-label="Variable name" />
                 <span class="env-equals-sign">=</span>
                 <input type="text" class="env-input" bind:value={newEnvValue} placeholder="value" disabled={isLocked} aria-label="Variable value" />
-                <button type="button" class="btn-add-env" class:pending={hasPendingEnv} onclick={addEnv} disabled={isLocked} title="Add variable">
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                        <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                    </svg>
+                <button type="button" class="btn-add-env" class:pending={hasPendingEnv} onclick={addEnv} disabled={isLocked} title={editingEnvIndex !== null ? 'Save variable' : 'Add variable'}>
+                    {#if editingEnvIndex !== null}
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                            <path d="M3 8L6 11L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    {:else}
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                            <path d="M7 2V12M2 7H12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                    {/if}
                 </button>
             </div>
 
@@ -1925,6 +2031,17 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+    }
+
+    .port-item:hover:not(:disabled) {
+        background: var(--color-surface-3);
+    }
+
+    .port-item.editing {
+        border-color: var(--color-accent);
+        background: rgba(136, 192, 208, 0.05);
     }
 
     .port-mapping {
@@ -2085,6 +2202,17 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+    }
+
+    .mount-item:hover:not(:disabled) {
+        background: var(--color-surface-3);
+    }
+
+    .mount-item.editing {
+        border-color: var(--color-accent);
+        background: rgba(136, 192, 208, 0.05);
     }
 
     .mount-info {
@@ -2236,6 +2364,17 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+    }
+
+    .env-item:hover:not(:disabled) {
+        background: var(--color-surface-3);
+    }
+
+    .env-item.editing {
+        border-color: var(--color-accent);
+        background: rgba(136, 192, 208, 0.05);
     }
 
     .env-info {
@@ -2359,7 +2498,27 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         color: #22c55e;
     }
 
-    .btn-add-env:disabled {
+    .btn-cancel-edit {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        transition: background 0.15s, color 0.15s;
+        flex-shrink: 0;
+    }
+
+    .btn-cancel-edit:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+
+    .btn-cancel-edit:disabled {
         opacity: 0.5;
         cursor: not-allowed;
     }
