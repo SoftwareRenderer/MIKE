@@ -604,6 +604,13 @@
         jumpToLine(line);
     }
 
+    // Handle save requests from the tab bar (only when this editor is active)
+    function handleSaveRequest() {
+        if (active) {
+            handleSave();
+        }
+    }
+
     // Jump to targetLine when editor is ready (from diff view click)
     $effect(() => {
         const line = targetLine;
@@ -826,6 +833,7 @@
 
     onMount(() => {
         window.addEventListener('jump-to-line', handleJumpToLine);
+        window.addEventListener('editor-save-request', handleSaveRequest);
     });
 
     onDestroy(() => {
@@ -839,6 +847,7 @@
         lspClient = null;
         view?.destroy();
         window.removeEventListener('jump-to-line', handleJumpToLine);
+        window.removeEventListener('editor-save-request', handleSaveRequest);
     });
 </script>
 
@@ -870,10 +879,7 @@
                 {cursorCol}
                 {lineCount}
                 {charCount}
-                {hasChanges}
                 onFind={openSearchPanel}
-                onSave={handleSave}
-                {saving}
                 lspReady={lspReady}
                 lspConnecting={lspConnecting}
                 {lspError}
