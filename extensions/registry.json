@@ -6,6 +6,7 @@
         "display_name": "Go Language Server",
         "description": "Go language server (gopls) by Google. Provides completions, hover, diagnostics, go-to-definition, and more for Go projects.",
         "author": "Go Team",
+        "homepage": "https://github.com/golang/tools/tree/master/gopls",
         "license_url": "https://github.com/golang/tools/blob/master/LICENSE",
         "dockerfile_url": "gopls/Dockerfile",
         "manifest_url": "gopls/manifest.json"
@@ -17,6 +18,7 @@
         "display_name": "TypeScript/JavaScript Language Server",
         "description": "TypeScript/JavaScript language server. Provides completions, hover, diagnostics, go-to-definition, refactor, and more for TypeScript and JavaScript projects.",
         "author": "Microsoft",
+        "homepage": "https://github.com/typescript-language-server/typescript-language-server",
         "license_url": "https://github.com/typescript-language-server/typescript-language-server/blob/master/LICENSE",
         "dockerfile_url": "typescript-language-server/Dockerfile",
         "manifest_url": "typescript-language-server/manifest.json"
@@ -28,7 +30,8 @@
         "type": "ui",
         "display_name": "GitHub Issue Importer",
         "description": "Imports GitHub issues from URLs in task descriptions.",
-        "author": "Kanban Assistant",
+        "author": "SoftwareRenderer",
+        "homepage": "https://github.com/SoftwareRenderer",
         "manifest_url": "github-issue-importer/manifest.json"
     }
 ]

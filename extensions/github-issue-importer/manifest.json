@@ -1,7 +1,8 @@
 {
     "display_name": "GitHub Issue Importer",
     "description": "Automatically imports GitHub issue content when a URL is pasted into task description",
-    "author": "Kanban",
+    "author": "SoftwareRenderer",
+    "homepage": "https://github.com/SoftwareRenderer",
     "deprecated": false,
     "ui": {
         "module_url": "/extensions/github-issue-importer/GitHubImport.js",
