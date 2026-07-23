@@ -3,7 +3,6 @@
     import type { Config, Provider, Task } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
-    import { importGitHubIssue } from '$lib/api';
     import { appStore, uiStore } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
@@ -11,7 +10,7 @@
     import ToggleSwitch from './ToggleSwitch.svelte';
     import ModeSelect from './ModeSelect.svelte';
     import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
-    import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte.ts';
+    import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
 
     let { projectId, onClose, onTaskCreated, parentId, currentBranch, onOptimisticTaskCreated, onReplaceOptimisticTask }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; currentBranch?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void } = $props();
 
@@ -182,22 +181,7 @@
     }
 
     async function handlePaste(e: ClipboardEvent) {
-        const text = e.clipboardData?.getData('text') || '';
-        const githubIssueRegex = /^https:\/\/github\.com\/[^\/]+\/[^\/]+\/issues\/[0-9]+$/;
-        if (githubIssueRegex.test(text.trim())) {
-            e.preventDefault();
-            loading = true;
-            error = '';
-            try {
-                const content = await importGitHubIssue(text.trim());
-                prompt = content;
-            } catch (e: any) {
-                error = e.message || 'Failed to import GitHub issue';
-                prompt = text; // still paste the URL as fallback
-            } finally {
-                loading = false;
-            }
-        }
+        // Handled by UI extension
     }
 
     function handleFileSelect(e: Event) {
@@ -226,11 +210,12 @@
     let selectedUrl = $state('');
     let selectedReasoningEffort = $state('');
     let hasProviders = $derived(providers.length > 0);
-    let isAgentSelected = $derived(
-        !selectedUrl ? false :
-        selectedUrl === PI_SENTINEL_URL ? true :
-        providers.find(p => p.url === selectedUrl) ? isAgentProvider(providers.find(p => p.url === selectedUrl)) : false
-    );
+    let isAgentSelected = $derived.by(() => {
+        if (!selectedUrl) return false;
+        if (selectedUrl === PI_SENTINEL_URL) return true;
+        const provider = providers.find(p => p.url === selectedUrl);
+        return provider ? isAgentProvider(provider) : false;
+    });
 
     // Config is now reactive via appStore
     let cfg: Config | null = $state(null);

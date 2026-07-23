@@ -1,6 +1,9 @@
 import type { Extension } from '$lib/types';
 
 /** Named injection points where UI extensions can inject content. */
+
+
+/** Named injection points where UI extensions can inject content. */
 export const INJECTION_POINTS = {
     CARD_HEADER: 'card-header',
     CARD_FOOTER: 'card-footer',

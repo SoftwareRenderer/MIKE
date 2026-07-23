@@ -23,12 +23,12 @@
     }
 ,
     {
-        "name": "github-importer",
+        "name": "github-issue-importer",
         "version": "1.0.0",
         "type": "ui",
         "display_name": "GitHub Issue Importer",
         "description": "Imports GitHub issues from URLs in task descriptions.",
         "author": "Kanban Assistant",
-        "manifest_url": "github-importer/manifest.json"
+        "manifest_url": "github-issue-importer/manifest.json"
     }
 ]

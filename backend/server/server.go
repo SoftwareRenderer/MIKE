@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -48,7 +49,6 @@ type Server struct {
 	addr              string
 	frontendDist      string
 	tlsConfig         *tls.Config
-	githubBaseURL     string
 
 	// worktreeMux serializes git operations per task.
 
@@ -89,7 +89,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		addr:         addr,
 		frontendDist: frontendDist,
 		tlsConfig:    tlsCfg,
-		githubBaseURL: "https://api.github.com",
 		worktreeMux:  make(map[string]*sync.Mutex),
 		projectMux:   make(map[string]*sync.Mutex),
 	}
@@ -141,6 +140,9 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	if err := s.extStore.InitSchema(); err != nil {
 		return nil, fmt.Errorf("init extension schema: %w", err)
 	}
+
+	// Bootstrap built-in extensions
+	// (Removed built-in bootstrapping to decouple extensions from core)
 	extRegistry := extensions.NewRegistryClient()
 	s.extSandboxMgr = extensions.NewExtensionSandboxManager(extRegistry, s.extStore)
 	s.extHandler = extensions.NewExtensionHandler(s.extStore, s.extSandboxMgr, extRegistry, &extensions.ExtensionConfig{
