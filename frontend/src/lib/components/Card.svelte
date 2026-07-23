@@ -60,10 +60,8 @@
         // Defer so IndexedDB queue is loaded before check
         queueMicrotask(checkQueuedActions);
         unsubscribeQueue = onQueueChanged(checkQueuedActions);
-        // UI extension injection points
-        uiInjector.renderSlot(INJECTION_POINTS.CARD_HEADER, { component: 'Card', taskId: task.id, projectId });
-        uiInjector.renderSlot(INJECTION_POINTS.CARD_FOOTER, { component: 'Card', taskId: task.id, projectId });
-        uiInjector.renderSlot(INJECTION_POINTS.CARD_ACTIONS, { component: 'Card', taskId: task.id, projectId });
+        // UI extension injection point
+        uiInjector.renderSlot(INJECTION_POINTS.TASK_CARD, { component: 'Card', taskId: task.id, projectId });
     });
     onDestroy(() => {
         unsubscribeQueue?.();

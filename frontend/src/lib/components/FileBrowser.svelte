@@ -131,7 +131,7 @@
             .then(r => r.json())
             .then(data => loadDir(data.home || '/home'))
             .catch(() => loadDir('/home'));
-        uiInjector.renderSlot(INJECTION_POINTS.FILE_BROWSER_TOOLBAR, { component: 'FileBrowser' });
+        uiInjector.renderSlot(INJECTION_POINTS.FILE_BROWSER, { component: 'FileBrowser' });
     });
 
     function formatPath(p: string): string {

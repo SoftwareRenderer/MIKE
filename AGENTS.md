@@ -322,23 +322,17 @@ The Extensions system replaces hardcoded LSP configurations with user-defined an
 
 **LSP Discovery:** `ExtensionRegistry.Lookup()` replaces `lsp.Registry.Lookup()` to dynamically resolve language servers from installed extensions. LSP availability is determined by installed extensions, not a global toggle.
 
-**UI Injection:** Extensions can inject content into named slots. All defined slots are active:
+**UI Injection:** Extensions are activated based on the current scope. When a component mounts, it calls `renderSlot(scope, context)` to activate extensions registered for that scope.
 
-| Slot | Component | Context | Use Case |
-|------|-----------|---------|----------|
-| `create-task-description` | CreateTaskModal | `{ component }` | Enhance task description input (e.g. GitHub import) |
-| `create-task-actions` | CreateTaskModal | `{ component }` | Buttons beside submit (e.g. template generator) |
-| `card-header` | Card | `{ component, taskId, projectId }` | Content above task card |
-| `card-footer` | Card | `{ component, taskId, projectId }` | Content below task card |
-| `card-actions` | Card | `{ component, taskId, projectId }` | Extra action buttons on card |
-| `board-section` | Board | `{ component, projectId }` | Content within board view |
-| `editor-toolbar` | FileEditor | `{ component, filePath, projectId }` | Tools in file editor |
-| `task-chat-header` | TaskChat | `{ component, taskId, projectId }` | Content in chat header |
-| `task-chat-footer` | TaskChat | `{ component, taskId, projectId }` | Content in chat footer |
-| `task-chat-input` | TaskChat | `{ component, taskId, projectId }` | Actions beside chat input |
-| `project-sidebar` | Sidebar | `{ component, projectId }` | Per-project sidebar tools |
-| `settings-tab` | ExtensionsTab | `{ component }` | Extension settings UI |
-| `file-browser-toolbar` | FileBrowser | `{ component }` | File browser tools |
+| Scope | Component | Purpose |
+|---|---|---|
+| `task-card` | `Card.svelte` | Enhance individual task cards (e.g. status badges, custom actions) |
+| `file-editor` | `FileEditor.svelte` | Enhance the code editor (e.g. toolbars, status bars) |
+| `project-board` | `Board.svelte` | Enhance the project board view (e.g. board-level utilities) |
+| `task-chat` | `TaskChat.svelte` | Enhance the chat interface (e.g. input actions, header tools) |
+| `project-sidebar` | `Sidebar.svelte` | Enhance the project sidebar (e.g. project-specific tools) |
+| `file-browser` | `FileBrowser.svelte` | Enhance the project directory selector modal |
+| `create-task` | `CreateTaskModal.svelte` | Enhance the task creation flow (e.g. GitHub issue import) |
 
 ### UI Extensions
 
@@ -363,7 +357,7 @@ extensions/my-extension/
     "deprecated": false,
     "ui": {
         "module_url": "/extensions/my-extension/MyExtension.js",
-        "injection_points": ["create-task-description"]
+        "injection_points": ["create-task"]
     },
     "config_schema": {
         "type": "object",
@@ -387,7 +381,7 @@ export default function init({ component, config }) {
 }
 ```
 
-The context object contains `component` (component name, e.g. `'CreateTaskModal'`) and `config` (extension config from user settings). Additional fields (`taskId`, `projectId`, `filePath`) are available on the `InjectionContext` type but are not currently passed by any component.
+The context object passed to `init` contains `component` (component name, e.g. `'CreateTaskModal'`) and `config` (extension config from user settings). Depending on the scope, additional fields like `taskId`, `projectId`, or `filePath` may be provided.
 
 4. **Register in `extensions/registry.json`:**
 ```json

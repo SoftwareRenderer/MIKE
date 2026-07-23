@@ -274,9 +274,8 @@
             }
         }
 
-        // Load description extensions
-        uiInjector.renderSlot(INJECTION_POINTS.CREATE_TASK_DESCRIPTION, { component: 'CreateTaskModal' });
-        uiInjector.renderSlot(INJECTION_POINTS.CREATE_TASK_ACTIONS, { component: 'CreateTaskModal' });
+        // Load extensions
+        uiInjector.renderSlot(INJECTION_POINTS.CREATE_TASK, { component: 'CreateTaskModal' });
     });
 
 

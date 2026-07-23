@@ -821,7 +821,7 @@
 
     onMount(() => {
         window.addEventListener('jump-to-line', handleJumpToLine);
-        uiInjector.renderSlot(INJECTION_POINTS.EDITOR_TOOLBAR, { component: 'FileEditor', filePath, projectId });
+        uiInjector.renderSlot(INJECTION_POINTS.FILE_EDITOR, { component: 'FileEditor', filePath, projectId });
     });
 
     onDestroy(() => {
