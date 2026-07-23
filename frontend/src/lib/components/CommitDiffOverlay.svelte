@@ -224,6 +224,59 @@ import { slide } from 'svelte/transition';
             return () => document.removeEventListener('click', handleClick);
         }
     });
+
+    // Side-by-side horizontal scroll sync (per-file)
+    // Each file section has its own pair of scroll columns that must sync independently.
+    // bind:this uses object member expressions (svelte-compatible in {#each} loops).
+    let scrollLefts = $state<Record<string, HTMLDivElement | undefined>>({});
+    let scrollRights = $state<Record<string, HTMLDivElement | undefined>>({});
+    let syncingScroll = $state(false);
+    // Store listener references per file for cleanup
+    let scrollListeners = new Map<string, { onLeft: EventListener; onRight: EventListener }>();
+
+    $effect(() => {
+        const _lefts = scrollLefts;
+        const _rights = scrollRights;
+        // Find all keys where both sides are present
+        const readyKeys: string[] = [];
+        for (const key in _lefts) {
+            if (_lefts[key] && _rights[key]) {
+                readyKeys.push(key);
+            }
+        }
+        // Attach listeners to ready pairs
+        for (const key of readyKeys) {
+            if (scrollListeners.has(key)) continue; // already attached
+            const left = _lefts[key]!;
+            const right = _rights[key]!;
+            const onLeftScroll: EventListener = () => {
+                if (syncingScroll) return;
+                syncingScroll = true;
+                right.scrollLeft = left.scrollLeft;
+                syncingScroll = false;
+            };
+            const onRightScroll: EventListener = () => {
+                if (syncingScroll) return;
+                syncingScroll = true;
+                left.scrollLeft = right.scrollLeft;
+                syncingScroll = false;
+            };
+            left.addEventListener('scroll', onLeftScroll);
+            right.addEventListener('scroll', onRightScroll);
+            scrollListeners.set(key, { onLeft: onLeftScroll, onRight: onRightScroll });
+        }
+        return () => {
+            // Cleanup only the listeners added in this effect run
+            for (const key of readyKeys) {
+                const l = scrollListeners.get(key);
+                if (l) {
+                    if (_lefts[key]) _lefts[key]!.removeEventListener('scroll', l.onLeft);
+                    if (_rights[key]) _rights[key]!.removeEventListener('scroll', l.onRight);
+                    scrollListeners.delete(key);
+                }
+            }
+        };
+    });
 </script>
 
 <div class="commit-diff-overlay" role="dialog" tabindex="-1" onkeydown={handleKeydown}>
@@ -387,7 +440,7 @@ import { slide } from 'svelte/transition';
                                     <div class="diff-sbs-columns" role="button" tabindex="0" onclick={() => handleFileClick(file.path)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleFileClick(file.path); } }}>
                                     <!-- Left column (old) -->
                                     <div class="diff-sbs-column diff-sbs-left">
-                                        <div class="diff-sbs-scroll">
+                                        <div class="diff-sbs-scroll" bind:this={scrollLefts[file.path]}>
                                             {#each rows as row}
                                                 <div class="diff-sbs-line" class:removed={row.leftVariant === 'removed'}>
                                                     <span class="diff-line-num">{row.leftLineNum ?? ''}</span>
@@ -400,7 +453,7 @@ import { slide } from 'svelte/transition';
                                     </div>
                                     <!-- Right column (new) -->
                                     <div class="diff-sbs-column diff-sbs-right">
-                                        <div class="diff-sbs-scroll">
+                                        <div class="diff-sbs-scroll" bind:this={scrollRights[file.path]}>
                                             {#each rows as row}
                                                 <div class="diff-sbs-line" class:added={row.rightVariant === 'added'}>
                                                     <span class="diff-line-num">{row.rightLineNum ?? ''}</span>
