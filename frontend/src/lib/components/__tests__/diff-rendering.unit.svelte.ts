@@ -57,4 +57,13 @@ describe('DiffViewer rendering', () => {
         // aria-expanded reflects the expanded state
         expect(source).toContain('aria-expanded');
     });
+
+    it('sorts files by status: modified first, then added, then deleted', () => {
+        // sortFilesByPath uses getStatusBadge to determine status priority
+        expect(source).toContain('getStatusBadge');
+        // Status order: M=0 (modified first), A=1 (added), D=2 (deleted), R=3 (renamed)
+        expect(source).toContain("if (letter === 'M') return 0;");
+        expect(source).toContain("if (letter === 'A') return 1;");
+        expect(source).toContain("if (letter === 'D') return 2;");
+    });
 });
