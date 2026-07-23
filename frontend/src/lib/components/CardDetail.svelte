@@ -159,6 +159,8 @@
     let editorFullscreen = $state(false);
     // Diff viewer fullscreen
     let diffFullscreen = $state(false);
+    // Chat fullscreen
+    let chatFullscreen = $state(false);
 
     function toggleEditorFullscreen() {
         editorFullscreen = !editorFullscreen;
@@ -166,6 +168,10 @@
 
     function toggleDiffFullscreen() {
         diffFullscreen = !diffFullscreen;
+    }
+
+    function toggleChatFullscreen() {
+        chatFullscreen = !chatFullscreen;
     }
 
     function resolveFilePath(relativePath: string): string | null {
@@ -683,7 +689,7 @@
 
 </script>
 
-    <div class="task-detail-page" class:fullscreen={editorFullscreen || diffFullscreen} bind:this={detailEl} tabindex="-1" aria-label="Task detail">
+    <div class="task-detail-page" class:fullscreen={editorFullscreen || diffFullscreen} class:chat-fullscreen={chatFullscreen} bind:this={detailEl} tabindex="-1" aria-label="Task detail">
         <!-- Header -->
         <TaskHeader
             {workspaceDir}
@@ -750,6 +756,8 @@
                             taskExecutionState={task.execution_state}
                             taskTitle={task.title}
                             hasStagedChanges={hasStagedChanges}
+                            onToggleFullscreen={toggleChatFullscreen}
+                            isChatFullscreen={chatFullscreen}
                             onRefreshDiff={(data) => {
                                 // Skip update while loadDiff() is in progress to prevent
                                 // WS diff_changed events from overwriting the cache with
@@ -955,11 +963,50 @@
     .task-detail-page.fullscreen .columns {
         height: 100%;
     }
+    .task-detail-page.fullscreen :global(.resize-handle) {
+        display: none !important;
+    }
     .task-detail-page.fullscreen .column-context,
     .task-detail-page.fullscreen .column-chat {
         display: none !important;
     }
     .task-detail-page.fullscreen .column-diff {
+        width: 100% !important;
+        flex: 1 !important;
+        min-width: 100% !important;
+    }
+
+    /* Chat fullscreen mode */
+    .task-detail-page.chat-fullscreen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1000;
+        margin: 0;
+    }
+    .task-detail-page.chat-fullscreen :global(.header),
+    .task-detail-page.chat-fullscreen :global(.mobile-tab-bar) {
+        display: none !important;
+    }
+    .task-detail-page.chat-fullscreen .columns {
+        height: 100%;
+    }
+    .task-detail-page.chat-fullscreen :global(.resize-handle) {
+        display: none !important;
+    }
+    .task-detail-page.chat-fullscreen :global(.chat-review-bar) {
+        display: none !important;
+    }
+    .task-detail-page.chat-fullscreen :global(.model-selector) {
+        display: none !important;
+    }
+    .task-detail-page.chat-fullscreen .column-context,
+    .task-detail-page.chat-fullscreen .column-diff {
+        display: none !important;
+    }
+    .task-detail-page.chat-fullscreen .column-chat {
         width: 100% !important;
         flex: 1 !important;
         min-width: 100% !important;

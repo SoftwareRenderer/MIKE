@@ -39,6 +39,8 @@
         onRegenerate,
         onNavigateTask,
         onViewChanges,
+        onToggleFullscreen,
+        isChatFullscreen,
         scrollEl,
         onScrollElChange,
         onVirtualListChange,
@@ -75,6 +77,8 @@
         onRegenerate: (entryId: string) => Promise<void>;
         onNavigateTask: (targetTaskId: string) => void;
         onViewChanges?: (commitHash: string) => void;
+        onToggleFullscreen?: () => void;
+        isChatFullscreen?: boolean;
         scrollEl: HTMLElement | null;
         onScrollElChange?: (el: HTMLElement | null) => void;
         onVirtualListChange?: (comp: { scrollToBottom: () => void } | null) => void;
@@ -279,6 +283,15 @@
     {#if entries.length > 0 && computedShowHeader}
         <div class="chat-sticky-header" role="status" aria-live="polite">
             <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title="Scroll to message" aria-label="Scroll to message">{computedStickyMessage}</button>
+            {#if onToggleFullscreen}
+                <button type="button" class="chat-sticky-fullscreen" onclick={onToggleFullscreen} title="Toggle fullscreen" aria-label="Toggle fullscreen">
+                    {#if isChatFullscreen}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    {:else}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    {/if}
+                </button>
+            {/if}
         </div>
     {/if}
 
@@ -464,6 +477,25 @@
     }
     .chat-sticky-bubble:hover {
         background: color-mix(in srgb, var(--color-accent) 28%, transparent);
+    }
+    .chat-sticky-fullscreen {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        margin-right: 6px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 4px;
+        flex-shrink: 0;
+    }
+    .chat-sticky-fullscreen:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
     }
     .chat-empty {
         display: flex;
