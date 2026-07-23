@@ -135,6 +135,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/projects/{projectID}/git/pull", s.gitHandler.HandlePull)
 	s.mux.HandleFunc("/api/projects/{projectID}/git/push", s.gitHandler.HandlePush)
 
+	// GitHub
+	s.mux.HandleFunc("POST /api/github/import-issue", s.handleGitHubImport)
+
 	// Frontend
 	if s.frontendDist != "" {
 		if _, err := os.Stat(s.frontendDist); err == nil {
@@ -144,4 +147,7 @@ func (s *Server) setupRoutes() {
 			}
 		}
 	}
+
+	// Extensions static files
+	s.mux.Handle("/extensions/", http.StripPrefix("/extensions/", http.FileServer(http.Dir("extensions"))))
 }

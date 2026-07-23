@@ -48,8 +48,10 @@ type Server struct {
 	addr              string
 	frontendDist      string
 	tlsConfig         *tls.Config
+	githubBaseURL     string
 
 	// worktreeMux serializes git operations per task.
+
 	// Prevents concurrent stash/checkout/branch/reset operations that would
 	// corrupt worktree state if interleaved (e.g., fork+switch, delete+switch).
 	worktreeMux   map[string]*sync.Mutex // taskID -> per-task mutex
@@ -87,6 +89,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		addr:         addr,
 		frontendDist: frontendDist,
 		tlsConfig:    tlsCfg,
+		githubBaseURL: "https://api.github.com",
 		worktreeMux:  make(map[string]*sync.Mutex),
 		projectMux:   make(map[string]*sync.Mutex),
 	}
