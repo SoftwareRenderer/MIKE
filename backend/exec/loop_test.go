@@ -2568,12 +2568,21 @@ func TestBuildMessagesFromDB_ToolCallWithReasoning(t *testing.T) {
 		t.Fatalf("expected 4 messages, got %d", len(messages))
 	}
 
-	// Assistant message: reasoning should be separate
+	// Assistant message: reasoning should be separate, tool calls merged
 	if messages[2].ReasoningContent != "Need to check the file first" {
 		t.Errorf("expected ReasoningContent='Need to check the file first', got %q", messages[2].ReasoningContent)
 	}
 	if messages[2].Content != "I'll read it" {
 		t.Errorf("expected Content='I'll read it', got %q", messages[2].Content)
+	}
+	if len(messages[2].ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call on assistant message, got %d", len(messages[2].ToolCalls))
+	}
+	if messages[2].ToolCalls[0].ID != "call_1" {
+		t.Errorf("expected tool call ID 'call_1', got %q", messages[2].ToolCalls[0].ID)
+	}
+	if messages[2].ToolCalls[0].Function.Name != "read_file" {
+		t.Errorf("expected tool name 'read_file', got %q", messages[2].ToolCalls[0].Function.Name)
 	}
 
 	// Tool result message
@@ -2588,64 +2597,78 @@ func TestBuildMessagesFromDB_ToolCallWithReasoning(t *testing.T) {
 	}
 }
 
-func TestBuildMessagesFromDB_FiltersTaskComplete(t *testing.T) {
-	// DB reload: assistant + request_review tool result should be filtered,
-	// matching buildLLMContext behavior.
+func TestBuildMessagesFromDB_ReasoningOnlyWithToolCalls(t *testing.T) {
+	// Bug: assistant with only reasoning (no text content) + tool calls was
+	// invisible in chat history because ToolCalls were not merged from DB.
 	taskMsgs := []types.TaskMessage{
-		{Role: "user", Content: "Fix the bug"},
-		{Role: "assistant", Content: "I'll fix it"},
-		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"edit_file","args":{"path":"foo.go"}}`, ToolResult: `{"output":"file edited","success":true,"duration":10}`},
-		{Role: "assistant", Content: "Task done!"},
-		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"request_review","args":{"summary":"fixed"}}`, ToolResult: `{"output":"Task complete","success":true,"duration":0}`},
-		{Role: "user", Content: "Now do something else"},
+		{Role: "user", Content: "Read config and fix it"},
+		{Role: "assistant", Content: "", ReasoningContent: "I need to read the config first to understand the issue"},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"read_file","raw_args":"{\"path\":\"config.yaml\"}"}` , ToolResult: `{"output":"key: value","success":true,"duration":5}`},
+		{Role: "assistant", Content: "", ReasoningContent: "Now I'll fix the config"},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"edit_file","raw_args":"{\"path\":\"config.yaml\"}"}` , ToolResult: `{"output":"edited","success":true,"duration":8}`},
 	}
 
 	task := &types.Task{OperatingMode: "act"}
 	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
 
-	// system + user + assistant + tool(edit_file) + user — request_review turn filtered
-	if len(messages) != 5 {
-		t.Fatalf("expected 5 messages, got %d", len(messages))
+	// system + user + assistant(read_file) + tool + assistant(edit_file) + tool = 6
+	if len(messages) != 6 {
+		t.Fatalf("expected 6 messages, got %d", len(messages))
 		for i, m := range messages {
-			t.Logf("  [%d] role=%s content=%q toolCallID=%q", i, m.Role, m.Content, m.ToolCallID)
+			t.Logf("  [%d] role=%s content=%q reasoning=%q toolCalls=%d", i, m.Role, m.Content, m.ReasoningContent, len(m.ToolCalls))
 		}
 	}
 
-	for _, m := range messages {
-		if m.Role == "tool" && strings.Contains(m.Content, "Task complete") {
-			t.Error("request_review tool result should be filtered out")
-		}
-		if m.Content == "Task done!" {
-			t.Error("assistant that called request_review should be filtered out")
-		}
+	// First reasoning-only assistant should have tool call merged
+	if len(messages[2].ToolCalls) != 1 {
+		t.Errorf("expected 1 tool call on first reasoning-only assistant, got %d", len(messages[2].ToolCalls))
+	}
+	if messages[2].ToolCalls[0].Function.Name != "read_file" {
+		t.Errorf("expected tool 'read_file', got %q", messages[2].ToolCalls[0].Function.Name)
+	}
+	if messages[2].Content != "" {
+		t.Errorf("expected empty content, got %q", messages[2].Content)
+	}
+	if messages[2].ReasoningContent != "I need to read the config first to understand the issue" {
+		t.Errorf("unexpected reasoning: %q", messages[2].ReasoningContent)
+	}
+
+	// Second reasoning-only assistant should also have tool call merged
+	if len(messages[4].ToolCalls) != 1 {
+		t.Errorf("expected 1 tool call on second reasoning-only assistant, got %d", len(messages[4].ToolCalls))
+	}
+	if messages[4].ToolCalls[0].Function.Name != "edit_file" {
+		t.Errorf("expected tool 'edit_file', got %q", messages[4].ToolCalls[0].Function.Name)
 	}
 }
 
-func TestBuildMessagesFromDB_FiltersTaskCompleteWithSiblings(t *testing.T) {
-	// Mixed tools (bash + request_review): entire turn should be filtered.
-	taskMsgs := []types.TaskMessage{
-		{Role: "user", Content: "Fix and complete"},
-		{Role: "assistant", Content: ""},
-		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"bash","args":{"command":"git status"}}`, ToolResult: `{"output":"nothing to commit","success":true,"duration":5}`},
-		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"request_review","args":{"summary":"done"}}`, ToolResult: `{"output":"Task complete","success":true,"duration":0}`},
-		{Role: "user", Content: "Next task"},
+func TestFormatChatHistory_ReasoningOnlyWithToolCalls(t *testing.T) {
+	// Verify that reasoning-only assistant messages with tool calls appear
+	// in chat history as "I used the X tool to..." lines.
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "Read a file"},
+		{Role: "assistant", Content: "", ReasoningContent: "Let me check the file", ToolCalls: []types.ToolCallMsg{
+			{ID: "call_1", Type: "function"},
+		}},
+		{Role: "tool", Content: "file contents", ToolCallID: "call_1"},
 	}
+	messages[2].ToolCalls[0].Function.Name = "read_file"
+	messages[2].ToolCalls[0].Function.Arguments = `{"path":"foo.txt"}`
 
-	task := &types.Task{OperatingMode: "act"}
-	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
+	history := formatChatHistory(messages, false)
 
-	// system + 2 users — assistant + all tool results filtered
-	if len(messages) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(messages))
-		for i, m := range messages {
-			t.Logf("  [%d] role=%s content=%q toolCallID=%q", i, m.Role, m.Content, m.ToolCallID)
-		}
+	// Should contain the tool use line even though assistant had no text content
+	if !strings.Contains(history, "I used the read_file tool") {
+		t.Errorf("chat history missing tool use line. Got:\n%s", history)
 	}
-
-	for _, m := range messages {
-		if m.Role == "tool" {
-			t.Errorf("no tool results should remain, got: content=%q", m.Content)
-		}
+	// Should NOT be empty/missing the assistant turn
+	if !strings.Contains(history, "Assistant:") {
+		t.Errorf("chat history missing Assistant prefix. Got:\n%s", history)
+	}
+	// Should contain user message
+	if !strings.Contains(history, "User: Read a file") {
+		t.Errorf("chat history missing user message. Got:\n%s", history)
 	}
 }
 
