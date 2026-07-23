@@ -5,7 +5,7 @@
     "deprecated": false,
     "ui": {
         "module_url": "/extensions/github-issue-importer/GitHubImport.js",
-        "injection_points": ["create-task-description"]
+        "injection_points": ["create-task"]
     },
     "config_schema": {
         "type": "object",
