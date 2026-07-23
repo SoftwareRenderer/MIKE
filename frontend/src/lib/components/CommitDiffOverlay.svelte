@@ -3,7 +3,7 @@
     import type { DiffFile, DiffRow } from '$lib/types/diff';
     import { parseUnifiedDiff, buildSideBySideRows } from '$lib/utils/diff-parser';
     import type { SideBySideRow } from '$lib/utils/diff-parser';
-    import { highlightLinesAsync } from '$lib/highlighter';
+    import { highlightLinesAsync, escapeHtml } from '$lib/highlighter';
 import { slide } from 'svelte/transition';
 
     interface Props {
@@ -27,7 +27,7 @@ import { slide } from 'svelte/transition';
 
     // Syntax highlight cache: path -> Map<lineText, highlightedHtml>
     // Populated asynchronously via $effect (language packages loaded lazily).
-    let highlightMap: Record<string, Map<string, string>> = {};
+    let highlightMap = $state<Record<string, Map<string, string>>>({});
 
     $effect(() => {
         const _files = diffFiles;
@@ -358,7 +358,7 @@ import { slide } from 'svelte/transition';
                                                             {/each}
                                                         </span>
                                                     {:else}
-                                                        <span class="diff-text">{@html getHighlighted(file.path, row.text ?? '') || row.text}</span>
+                                                        <span class="diff-text">{@html getHighlighted(file.path, row.text ?? '') || escapeHtml(row.text ?? '')}</span>
                                                     {/if}
                                                 </span>
                                             </div>
@@ -392,7 +392,7 @@ import { slide } from 'svelte/transition';
                                                 <div class="diff-sbs-line" class:removed={row.leftVariant === 'removed'}>
                                                     <span class="diff-line-num">{row.leftLineNum ?? ''}</span>
                                                     <span class="diff-line-content">
-                                                        {@html getHighlighted(file.path, row.leftText ?? '') || row.leftText}
+                                                        {@html getHighlighted(file.path, row.leftText ?? '') || escapeHtml(row.leftText ?? '')}
                                                     </span>
                                                 </div>
                                             {/each}
@@ -405,7 +405,7 @@ import { slide } from 'svelte/transition';
                                                 <div class="diff-sbs-line" class:added={row.rightVariant === 'added'}>
                                                     <span class="diff-line-num">{row.rightLineNum ?? ''}</span>
                                                     <span class="diff-line-content">
-                                                        {@html getHighlighted(file.path, row.rightText ?? '') || row.rightText}
+                                                        {@html getHighlighted(file.path, row.rightText ?? '') || escapeHtml(row.rightText ?? '')}
                                                     </span>
                                                 </div>
                                             {/each}
