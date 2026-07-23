@@ -322,7 +322,23 @@ The Extensions system replaces hardcoded LSP configurations with user-defined an
 
 **LSP Discovery:** `ExtensionRegistry.Lookup()` replaces `lsp.Registry.Lookup()` to dynamically resolve language servers from installed extensions. LSP availability is determined by installed extensions, not a global toggle.
 
-**UI Injection:** Extensions can inject content into named slots: `card-header`, `card-footer`, `editor-toolbar`, `board-section`, `task-chat-header`, `task-chat-footer`, `create-task-description`.
+**UI Injection:** Extensions can inject content into named slots. All defined slots are active:
+
+| Slot | Component | Context | Use Case |
+|------|-----------|---------|----------|
+| `create-task-description` | CreateTaskModal | `{ component }` | Enhance task description input (e.g. GitHub import) |
+| `create-task-actions` | CreateTaskModal | `{ component }` | Buttons beside submit (e.g. template generator) |
+| `card-header` | Card | `{ component, taskId, projectId }` | Content above task card |
+| `card-footer` | Card | `{ component, taskId, projectId }` | Content below task card |
+| `card-actions` | Card | `{ component, taskId, projectId }` | Extra action buttons on card |
+| `board-section` | Board | `{ component, projectId }` | Content within board view |
+| `editor-toolbar` | FileEditor | `{ component, filePath, projectId }` | Tools in file editor |
+| `task-chat-header` | TaskChat | `{ component, taskId, projectId }` | Content in chat header |
+| `task-chat-footer` | TaskChat | `{ component, taskId, projectId }` | Content in chat footer |
+| `task-chat-input` | TaskChat | `{ component, taskId, projectId }` | Actions beside chat input |
+| `project-sidebar` | Sidebar | `{ component, projectId }` | Per-project sidebar tools |
+| `settings-tab` | ExtensionsTab | `{ component }` | Extension settings UI |
+| `file-browser-toolbar` | FileBrowser | `{ component }` | File browser tools |
 
 ### UI Extensions
 
@@ -347,7 +363,7 @@ extensions/my-extension/
     "deprecated": false,
     "ui": {
         "module_url": "/extensions/my-extension/MyExtension.js",
-        "injection_points": ["card-footer"]
+        "injection_points": ["create-task-description"]
     },
     "config_schema": {
         "type": "object",
@@ -358,20 +374,20 @@ extensions/my-extension/
 }
 ```
 
-3. **`MyExtension.js`** — ES module exporting an `init` function:
+3. **`MyExtension.js`** — ES module exporting a default `init` function:
 ```js
-export default function init({ component, taskId, projectId, config }) {
+export default function init({ component, config }) {
     // Set up DOM elements, event listeners, etc.
-    const el = document.createElement('div');
-    el.textContent = 'Hello from extension';
-    // Insert into the DOM at the injection point...
+    // The extension manages its own DOM — no Svelte rendering.
 
     // Return a cleanup function (called when extension is disabled/unloaded)
     return () => {
-        el.remove();
+        // teardown
     };
 }
 ```
+
+The context object contains `component` (component name, e.g. `'CreateTaskModal'`) and `config` (extension config from user settings). Additional fields (`taskId`, `projectId`, `filePath`) are available on the `InjectionContext` type but are not currently passed by any component.
 
 4. **Register in `extensions/registry.json`:**
 ```json
@@ -391,7 +407,7 @@ export default function init({ component, taskId, projectId, config }) {
 **Deploying:** Install from registry via Settings → Extensions → "Install from Registry", or create manually via the API (`POST /api/extensions`).
 
 **Key constraints:**
-- Module must export a `default` function accepting `{ component, taskId, projectId, config }`
+- Module must export a `default` function accepting `{ component, config }`
 - Function returns a cleanup `() => void` function
 - No Svelte imports — plain DOM manipulation only
 - CSS is injected via `document.createElement('style')` or inline styles

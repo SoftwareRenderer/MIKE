@@ -1,17 +1,20 @@
 import type { Extension } from '$lib/types';
 
 /** Named injection points where UI extensions can inject content. */
-
-
-/** Named injection points where UI extensions can inject content. */
 export const INJECTION_POINTS = {
     CARD_HEADER: 'card-header',
     CARD_FOOTER: 'card-footer',
+    CARD_ACTIONS: 'card-actions',
     EDITOR_TOOLBAR: 'editor-toolbar',
     BOARD_SECTION: 'board-section',
     TASK_CHAT_HEADER: 'task-chat-header',
     TASK_CHAT_FOOTER: 'task-chat-footer',
+    TASK_CHAT_INPUT: 'task-chat-input',
+    PROJECT_SIDEBAR: 'project-sidebar',
+    SETTINGS_TAB: 'settings-tab',
+    FILE_BROWSER_TOOLBAR: 'file-browser-toolbar',
     CREATE_TASK_DESCRIPTION: 'create-task-description',
+    CREATE_TASK_ACTIONS: 'create-task-actions',
 } as const;
 
 export type InjectionPoint = (typeof INJECTION_POINTS)[keyof typeof INJECTION_POINTS];
@@ -61,10 +64,6 @@ export class UIInjector {
     private modules = new Map<string, any>();
     /** Active JS extension cleanup functions. */
     private cleanups = new Map<string, () => void>();
-    /** Loading state. */
-    loading = $state(false);
-    /** Error state. */
-    error = $state('');
 
     /** Register injections from UI extensions. */
     registerFromExtensions(extensions: Extension[]) {
@@ -127,7 +126,6 @@ export class UIInjector {
                 }
             } catch (e: any) {
                 console.error(`[ui-injector] Failed to activate ${reg.extensionName} at ${point}:`, e);
-                this.error = e.message;
             }
         }
 

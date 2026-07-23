@@ -11,7 +11,7 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
-    import { uiInjector } from '$lib/services/ui-injector.svelte';
+    import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
 
     let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, scrollToColumn }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; scrollToColumn?: string | null } = $props();
     let expandedTasksContext = getExpandedTasksContext();
@@ -84,7 +84,10 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
     });
     let multiSelect = multiSelectActions.multiSelect;
 
-    onMount(() => { multiSelectActions.setup(); });
+    onMount(() => {
+        multiSelectActions.setup();
+        uiInjector.renderSlot(INJECTION_POINTS.BOARD_SECTION, { component: 'Board', projectId });
+    });
 
     // Subtask hierarchy management (expanded state, consolidation, auto-expand)
     let hierarchy = useSubtaskHierarchy(() => tasks, expandedTasksContext, () => undefined);
@@ -255,12 +258,6 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div class="board" bind:this={boardEl} role="region" aria-label="Task board" onclick={(e) => { if (e.target === e.currentTarget) multiSelect.clear(); }} onkeydown={(e) => { if (e.key === 'Escape' && multiSelect.hasSelection) multiSelect.clear(); }}>
     <div class="sr-only" aria-live="polite" aria-atomic="true">{liveAnnouncement}</div>
-    <!-- UI Extension Injection: board-section -->
-    {#if uiInjector.hasContent('board-section')}
-        <div class="board-injection-section">
-            <!-- UI extensions render here -->
-        </div>
-    {/if}
     {#each columns as col}
         <Column
             columnId={col.id}
@@ -304,10 +301,7 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
         overflow-x: auto;
     }
 
-    /* UI Extension Injection */
-    .board-injection-section {
-        flex-shrink: 0;
-    }
+
 
     @media (max-width: 768px) {
         .board {

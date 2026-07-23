@@ -7,6 +7,7 @@ import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
 import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler } from '$lib/services/stream-handler';
+import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { DRAFT_SAVE_DEBOUNCE_MS, SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
 import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
@@ -1198,6 +1199,10 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
             unsubTaskEvent?.();
             window.removeEventListener('visibilitychange', handleTabVisibility);
         };
+        // UI extension injection points
+        uiInjector.renderSlot(INJECTION_POINTS.TASK_CHAT_HEADER, { component: 'TaskChat', taskId, projectId });
+        uiInjector.renderSlot(INJECTION_POINTS.TASK_CHAT_FOOTER, { component: 'TaskChat', taskId, projectId });
+        uiInjector.renderSlot(INJECTION_POINTS.TASK_CHAT_INPUT, { component: 'TaskChat', taskId, projectId });
     });
 
     onDestroy(() => {
