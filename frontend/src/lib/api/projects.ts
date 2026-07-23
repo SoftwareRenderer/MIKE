@@ -15,14 +15,11 @@ import { setBoardCache, getBoardCache, boardCacheKey } from '../storage';
 import { markCached } from './cache';
 import type { ReorderRequest } from '../types';
 
-/** Fetch all projects from the server. Falls back to cached copy on failure or when offline. */
+/** Fetch all projects from the server. Falls back to cached copy on failure.
+ * Always tries the network first — the isOffline flag tracks WebSocket state,
+ * not HTTP availability. On mobile wake (tab resume), the WebSocket may be
+ * disconnected but HTTP still works, so we must not short-circuit to cache. */
 export async function getProjects(): Promise<Project[]> {
-    // When offline, skip network and read cache directly
-    if (getOfflineStatus()) {
-        const cached = await getBoardCache<Project[]>('projects');
-        if (cached) return markCached(cached);
-        throw new Error('No cached projects available');
-    }
     try {
         const res = await apiFetch(`${API_BASE}/projects`);
         if (!res.ok) throw await apiError(res, 'Failed to fetch projects');
@@ -108,14 +105,11 @@ export async function deleteProject(id: string): Promise<void> {
 
 // -- Board endpoints --
 
-/** Fetch the full board state (tasks + columns) for a project. Falls back to cached copy on failure or when offline. */
+/** Fetch the full board state (tasks + columns) for a project. Falls back to cached copy on failure.
+ * Always tries the network first — the isOffline flag tracks WebSocket state,
+ * not HTTP availability. On mobile wake (tab resume), the WebSocket may be
+ * disconnected but HTTP still works, so we must not short-circuit to cache. */
 export async function getBoard(projectId: string): Promise<Board> {
-    // When offline, skip network and read cache directly
-    if (getOfflineStatus()) {
-        const cached = await getBoardCache<Board>(boardCacheKey(projectId));
-        if (cached) return markCached(cached);
-        throw new Error(`No cached board available for project ${projectId}`);
-    }
     try {
         const res = await apiFetch(`${API_BASE}/projects/${projectId}/board`);
         if (!res.ok) throw await apiError(res, 'Failed to fetch board');

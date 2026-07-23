@@ -200,9 +200,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         appStore.persistSidebarCollapsed();
     });
     $effect(() => { const v = appStore.config; if (v) cfg = v; });
-    $effect(() => {
-        const v = appStore.config; if (v) cfg = v;
-    });
     $effect(() => { if (taskDiffStatsContext) taskDiffStats = get(taskDiffStatsContext); });
 
     // Manage task-level WebSocket subscription for real-time streaming events.
@@ -668,7 +665,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
         appStore.selectedTask = task;
         uiStore.showCardDetail = true;
-        appStore.selectedTask = task;
     }
 
     function disconnectBoardStream() {
@@ -692,7 +688,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             if (task) {
                 const fresh = tasks.find(t => t.id === task.id);
                 if (fresh) {
-                    appStore.selectedTask = fresh;
                     appStore.selectedTask = fresh;
                 }
             }
@@ -727,7 +722,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     const fresh = tasks.find(t => t.id === sel.id);
                     if (fresh) {
                         appStore.selectedTask = fresh;
-                        appStore.selectedTask = fresh;
                     }
                 }}
             }
@@ -744,7 +738,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     function clearTaskDetail() {
         // Push URL first so the subscription sees updated URL
         updateUrl({ project: currentProject?.id }, true, true);
-        appStore.selectedTask = null;
         appStore.selectedTask = null;
         uiStore.showCardDetail = false;
     }
@@ -1050,7 +1043,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         // Push URL first so the subscription sees updated URL and skips replaceState
                         updateUrl({ project: currentProject?.id, task: t.id }, true, true);
                         if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
-                        appStore.selectedTask = t;
                         appStore.selectedTask = t;
                     }} onRefreshBoard={() => refreshBoard()} onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }} />
                 {:else}
