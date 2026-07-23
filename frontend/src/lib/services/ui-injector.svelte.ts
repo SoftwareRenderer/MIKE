@@ -49,12 +49,18 @@ export interface InjectionRegistration {
 /**
  * UIInjector manages UI extension injection points.
  * It loads registered UI extensions and renders their content at named slots.
+ *
+ * UI extensions are plain JS modules that export a default `init(ctx)` function.
+ * The function receives context + config, sets up DOM/event listeners,
+ * and returns a cleanup function. No Svelte component rendering needed.
  */
 export class UIInjector {
     /** Registered injections. */
     registrations = $state<InjectionRegistration[]>([]);
     /** Loaded modules (cached). */
     private modules = new Map<string, any>();
+    /** Active JS extension cleanup functions. */
+    private cleanups = new Map<string, () => void>();
     /** Loading state. */
     loading = $state(false);
     /** Error state. */
@@ -62,6 +68,12 @@ export class UIInjector {
 
     /** Register injections from UI extensions. */
     registerFromExtensions(extensions: Extension[]) {
+        // Clean up old extensions
+        for (const cleanup of this.cleanups.values()) {
+            try { cleanup(); } catch {}
+        }
+        this.cleanups.clear();
+
         this.registrations = [];
         for (const ext of extensions) {
             if (!ext.enabled || ext.type !== 'ui' || !ext.manifest.ui) continue;
@@ -89,15 +101,14 @@ export class UIInjector {
     }
 
     /**
-     * Render content for an injection point.
-     * Returns an array of rendered components (as strings for now).
-     * In the full implementation, this would dynamically import and render Svelte components.
+     * Activate extensions for an injection point.
+     * Loads each extension module and calls its `init(ctx)` function.
+     * Returns an empty array — JS extensions manage their own DOM.
      */
     async renderSlot(point: InjectionPoint, context: InjectionContext): Promise<any[]> {
         const regs = this.getRegistrations(point);
         if (regs.length === 0) return [];
 
-        const results = [];
         for (const reg of regs) {
             try {
                 // Load module from cache or fetch
@@ -107,28 +118,29 @@ export class UIInjector {
                     this.modules.set(reg.moduleUrl, mod);
                 }
 
-                // Render the component with context
-                if (mod?.default) {
-                    results.push({
-                        extensionId: reg.extensionId,
-                        extensionName: reg.extensionName,
-                        component: mod.default,
-                        context,
-                        config: reg.config,
-                    });
+                // Call init function (plain JS extension)
+                if (typeof mod?.default === 'function') {
+                    const cleanup = mod.default({ ...context, config: reg.config });
+                    if (typeof cleanup === 'function') {
+                        this.cleanups.set(reg.extensionId, cleanup);
+                    }
                 }
             } catch (e: any) {
-                console.error(`[ui-injector] Failed to render ${reg.extensionName} at ${point}:`, e);
+                console.error(`[ui-injector] Failed to activate ${reg.extensionName} at ${point}:`, e);
                 this.error = e.message;
             }
         }
 
-        return results;
+        return [];
     }
 
     /** Clear loaded modules (for hot reload). */
     clearCache() {
         this.modules.clear();
+        for (const cleanup of this.cleanups.values()) {
+            try { cleanup(); } catch {}
+        }
+        this.cleanups.clear();
     }
 
     /** Check if an injection point has any registrations. */

@@ -450,10 +450,16 @@
                                     </span>
                                 </div>
                                 <div class="ext-status">
-                                    {#if ext.running}
+                                    {#if ext.type === 'ui'}
+                                        {#if ext.enabled}
+                                            <span class="status-badge running">Active</span>
+                                        {:else}
+                                            <span class="status-badge disabled">Disabled</span>
+                                        {/if}
+                                    {:else if ext.running}
                                         <span class="status-badge running">Running</span>
                                     {:else if ext.enabled}
-                                        <span class="status-badge stopped">Stopped</span>
+                                        <span class="status-badge stopped">Idle</span>
                                     {:else}
                                         <span class="status-badge disabled">Disabled</span>
                                     {/if}
@@ -473,6 +479,7 @@
                                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                                     </svg>
                                 </button>
+                                {#if ext.type === 'lsp'}
                                 <button class="btn btn-icon" title="Update Image" onclick={() => handleUpdateImage(ext.id, ext.name)} disabled={updating.has(ext.name)}>
                                     {#if updating.has(ext.name)}
                                         <span class="spinner"></span>
@@ -485,6 +492,7 @@
                                         </svg>
                                     {/if}
                                 </button>
+                                {/if}
                                 <button class="btn btn-icon btn-danger" title="Delete" onclick={() => handleDelete(ext.id, ext.name)}>
                                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                         <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
