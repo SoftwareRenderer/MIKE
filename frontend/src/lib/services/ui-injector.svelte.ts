@@ -8,6 +8,7 @@ export const INJECTION_POINTS = {
     BOARD_SECTION: 'board-section',
     TASK_CHAT_HEADER: 'task-chat-header',
     TASK_CHAT_FOOTER: 'task-chat-footer',
+    CREATE_TASK_DESCRIPTION: 'create-task-description',
 } as const;
 
 export type InjectionPoint = (typeof INJECTION_POINTS)[keyof typeof INJECTION_POINTS];
@@ -38,6 +39,8 @@ export interface InjectionRegistration {
     moduleUrl: string;
     /** Order (lower = rendered first). */
     order: number;
+    /** Extension configuration. */
+    config: any;
 }
 
 /**
@@ -69,6 +72,7 @@ export class UIInjector {
                     point: ui.injection_points[i] as InjectionPoint,
                     moduleUrl: ui.module_url,
                     order: i,
+                    config: ext.config,
                 });
             }
         }
@@ -96,10 +100,7 @@ export class UIInjector {
                 // Load module from cache or fetch
                 let mod = this.modules.get(reg.moduleUrl);
                 if (!mod) {
-                    // In production, this would be a dynamic import
-                    // For now, we log that an injection point is active
-                    console.log(`[ui-injector] Would load module ${reg.moduleUrl} for ${reg.extensionName} at ${point}`);
-                    mod = { default: null };
+                    mod = await import(reg.moduleUrl);
                     this.modules.set(reg.moduleUrl, mod);
                 }
 
@@ -110,6 +111,7 @@ export class UIInjector {
                         extensionName: reg.extensionName,
                         component: mod.default,
                         context,
+                        config: reg.config,
                     });
                 }
             } catch (e: any) {
