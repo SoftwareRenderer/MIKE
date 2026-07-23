@@ -21,4 +21,14 @@
         "dockerfile_url": "typescript-language-server/Dockerfile",
         "manifest_url": "typescript-language-server/manifest.json"
     }
+,
+    {
+        "name": "github-importer",
+        "version": "1.0.0",
+        "type": "ui",
+        "display_name": "GitHub Issue Importer",
+        "description": "Imports GitHub issues from URLs in task descriptions.",
+        "author": "Kanban Assistant",
+        "manifest_url": "github-importer/manifest.json"
+    }
 ]
