@@ -186,6 +186,7 @@ Both servers share a mock LLM on port 9999. Test data dirs, worktrees (`/tmp/kan
 - Config: `frontend/vitest.config.ts` (jsdom environment, `$lib` alias)
 - Test modules:
   - `src/lib/api/__tests__/` — API cache utilities, extensions API
+  - `src/lib/components/__tests__/` — component unit tests
   - `src/lib/services/` — reactive services (DiffCache, StreamState, StreamHandler, extension-manager, ui-injector)
   - `src/lib/composables/__tests__/` — reactive composables (multi-select, sw-update, virtual-scroll)
   - `src/lib/services/__tests__/` — reactive services (`DiffCache`, `StreamState`, `StreamHandler`)
@@ -333,10 +334,11 @@ The Extensions system replaces hardcoded LSP configurations with user-defined an
 All client-side storage goes through `frontend/src/lib/storage.ts`. Never access IndexedDB directly in components.
 All functions are **async** (return `Promise`).
 
-**Single IndexedDB database:** `kanban-storage` (v2) with these object stores:
+**Single IndexedDB database:** `kanban-storage` (v3) with these object stores:
 - `drafts` — draft chat text per task (key: taskId)
 - `editor-drafts` — draft file content per file path (key: path)
 - `editor-history` — undo/redo history per file (key: path)
+- `editor-tabs` — open files, active file, pinned files per project (key: projectId)
 - `collapsed-tasks` — collapsed parent task IDs (single key)
 - `collapsed-sections` — collapsed board section IDs (single key)
 - `collapsed-diff-files` — collapsed diff file paths (single key)
