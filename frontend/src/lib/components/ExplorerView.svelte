@@ -794,7 +794,15 @@
                 <BranchSymbols
                     symbols={symbols}
                     onSymbolClick={(line: number) => {
-                        window.dispatchEvent(new CustomEvent('jump-to-line', { detail: { line } }));
+                        if (isMobileCtx.isMobile) {
+                            activeTab = 'editor';
+                            // Dispatch after tab switch so editor is visible and layout is computed
+                            requestAnimationFrame(() => {
+                                window.dispatchEvent(new CustomEvent('jump-to-line', { detail: { line } }));
+                            });
+                        } else {
+                            window.dispatchEvent(new CustomEvent('jump-to-line', { detail: { line } }));
+                        }
                     }}
                 />
             </div>
