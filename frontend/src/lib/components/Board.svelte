@@ -2,7 +2,7 @@
     import type { Task } from '$lib/types';
     import Column from './Column.svelte';
     import MultiSelectBar from './MultiSelectBar.svelte';
-    import { tick, onMount, onDestroy } from 'svelte';
+    import { tick, onMount } from 'svelte';
     import { moveTask, reorderTasks, clearDoneTasks, deleteTask, startTask } from '$lib/api';
 import { sortByActivity } from '$lib/utils/sort-tasks';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
