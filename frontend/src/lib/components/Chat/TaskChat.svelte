@@ -1074,6 +1074,9 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         unsubViewport = setupViewportListener();
         const handleKeydown = (e: KeyboardEvent) => {
             if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(e.key)) {
+                // Skip if focus is inside an input/textarea — those keys move the cursor, not scroll
+                const target = e.target as HTMLElement;
+                if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
                 markUserInput();
             }
         };
