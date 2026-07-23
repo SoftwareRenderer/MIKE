@@ -1446,11 +1446,14 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 
 	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}
 
-	for _, m := range taskMsgs {
+	i := 0
+	for i < len(taskMsgs) {
+		m := taskMsgs[i]
 		switch m.Role {
 		case "summarization":
 			// buildLLMContext filters these out (summary is in system prompt)
 			messages = append(messages, types.ChatMessage{Role: "summarization", Content: m.Content})
+			i++
 		case "user":
 			if m.Attachments != "" {
 				var atts []struct {
@@ -1480,31 +1483,61 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 						}
 					}
 					messages = append(messages, types.ChatMessage{Role: m.Role, ContentParts: parts})
+					i++
 					continue
 				}
 			}
 			messages = append(messages, types.ChatMessage{Role: m.Role, Content: m.Content})
+			i++
 		case "assistant":
+			// Collect all tool_call messages for this turn (look ahead).
+			i++
+			var turnToolCalls []types.TaskMessage
+			for i < len(taskMsgs) && taskMsgs[i].Role == "tool_call" {
+				turnToolCalls = append(turnToolCalls, taskMsgs[i])
+				i++
+			}
+			// Add assistant message with tool calls merged in.
 			msg := types.ChatMessage{Role: m.Role, Content: m.Content}
 			if m.ReasoningContent != "" {
 				msg.ReasoningContent = m.ReasoningContent
 			}
-			messages = append(messages, msg)
-		case "tool_call":
-			if m.ToolResult != "" {
-				var resultMap map[string]any
-				if err := json.Unmarshal([]byte(m.ToolResult), &resultMap); err == nil {
-					output, _ := resultMap["output"].(string)
-					toolID := ""
-					if m.ToolCalls != "" {
-						var tcMap map[string]any
-						if err2 := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err2 == nil {
-							toolID, _ = tcMap["tool_id"].(string)
+			// Merge tool calls from this turn into the assistant message.
+			for _, tc := range turnToolCalls {
+				var tcMap map[string]any
+				if tc.ToolCalls != "" {
+					if err := json.Unmarshal([]byte(tc.ToolCalls), &tcMap); err == nil {
+						toolID, _ := tcMap["tool_id"].(string)
+						toolName, _ := tcMap["tool_name"].(string)
+						rawArgs, _ := tcMap["raw_args"].(string)
+						if toolID != "" && toolName != "" {
+							msg.ToolCalls = append(msg.ToolCalls, types.ToolCallMsg{ID: toolID, Type: "function"})
+							msg.ToolCalls[len(msg.ToolCalls)-1].Function.Name = toolName
+							msg.ToolCalls[len(msg.ToolCalls)-1].Function.Arguments = rawArgs
 						}
 					}
-					messages = append(messages, types.ChatMessage{Role: "tool", Content: output, ToolCallID: toolID})
 				}
 			}
+			messages = append(messages, msg)
+			// Add tool results for each tool call.
+			for _, tc := range turnToolCalls {
+				if tc.ToolResult != "" {
+					var resultMap map[string]any
+					if err := json.Unmarshal([]byte(tc.ToolResult), &resultMap); err == nil {
+						output, _ := resultMap["output"].(string)
+						toolID := ""
+						if tc.ToolCalls != "" {
+							var tcMap map[string]any
+							if err2 := json.Unmarshal([]byte(tc.ToolCalls), &tcMap); err2 == nil {
+								toolID, _ = tcMap["tool_id"].(string)
+							}
+						}
+						messages = append(messages, types.ChatMessage{Role: "tool", Content: output, ToolCallID: toolID})
+					}
+				}
+			}
+		default:
+			i++
 		}
 	}
 
