@@ -143,6 +143,15 @@
         }).catch(() => {});
     });
     let editorFocused = $state(false);
+    let editorSaving = $state(false);
+
+    function handleEditorSave() {
+        if (editorSaving || !activeFilePath || !unsavedFiles.has(activeFilePath)) return;
+        editorSaving = true;
+        window.dispatchEvent(new CustomEvent('editor-save-request'));
+        // Reset after a short delay — FileEditor clears it on save complete
+        setTimeout(() => { editorSaving = false; }, 5000);
+    }
 
     // Persist unsaved files to IndexedDB (convert Set → array for stable JSON format)
     $effect(() => {
@@ -764,6 +773,8 @@
                             onSelectTab={handleSelectTab}
                             onCloseTab={handleCloseTab}
                             onPinTab={pinTab}
+                            onSave={handleEditorSave}
+                            saving={editorSaving}
                             onToggleFullscreen={toggleEditorFullscreen}
                             mobileFullscreen={editorFullscreen}
                         />

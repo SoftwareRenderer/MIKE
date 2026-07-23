@@ -7,7 +7,7 @@
     }
 
     let { projectId, projectPath, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
-        onSelectTab, onCloseTab, onPinTab, onToggleFullscreen, mobileFullscreen }: {
+        onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen }: {
         projectId: string;
         projectPath?: string;
         openFiles: OpenFile[];
@@ -20,6 +20,8 @@
         onSelectTab: (path: string) => void;
         onCloseTab: (path: string) => void | Promise<void>;
         onPinTab: (path: string) => void;
+        onSave?: () => void;
+        saving?: boolean;
         onToggleFullscreen?: () => void;
         mobileFullscreen?: boolean;
     } = $props();
@@ -118,6 +120,17 @@
                         {:else}
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         {/if}
+                    </button>
+                {/if}
+                {#if onSave}
+                    <button
+                        type="button"
+                        class="editor-save-btn"
+                        disabled={!unsavedFiles.has(activeFilePath) || saving}
+                        onclick={onSave}
+                        title="Save (Ctrl+S)"
+                    >
+                        {saving ? 'Saving...' : 'Save'}
                     </button>
                 {/if}
             </div>
@@ -269,9 +282,33 @@
         border-radius: 4px;
         flex-shrink: 0;
     }
-    .editor-icon-btn:hover {
+    .editor-icon-btn:hover:not(:disabled) {
         background: var(--color-surface-3);
         color: var(--color-text-primary);
+    }
+
+    .editor-save-btn {
+        display: flex;
+        align-items: center;
+        padding: 3px 10px;
+        border: none;
+        border-radius: var(--radius-md);
+        background: var(--color-accent-dark);
+        color: white;
+        cursor: pointer;
+        font-size: 0.75rem;
+        font-family: inherit;
+        font-weight: 500;
+        flex-shrink: 0;
+        transition: opacity 0.15s;
+    }
+    .editor-save-btn:hover:not(:disabled) {
+        opacity: 0.85;
+    }
+    .editor-save-btn:disabled {
+        filter: grayscale(1);
+        opacity: 0.35;
+        cursor: not-allowed;
     }
 
     .editor-panels {

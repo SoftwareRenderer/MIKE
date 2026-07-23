@@ -1,13 +1,10 @@
 <script lang="ts">
-    let { cursorLine, cursorCol, lineCount, charCount, hasChanges, onFind, onSave, saving, lspReady, lspConnecting, lspError, lspLanguage, lspServerName, lspServerVersion }: {
+    let { cursorLine, cursorCol, lineCount, charCount, onFind, lspReady, lspConnecting, lspError, lspLanguage, lspServerName, lspServerVersion }: {
         cursorLine: number;
         cursorCol: number;
         lineCount: number;
         charCount: number;
-        hasChanges: boolean;
         onFind: () => void;
-        onSave?: () => void;
-        saving?: boolean;
         lspReady?: boolean;
         lspConnecting?: boolean;
         lspError?: string;
@@ -62,18 +59,6 @@
         <span class="cursor-info">Ln {cursorLine}, Col {cursorCol}</span>
     </div>
     <div class="footer-right">
-        {#if onSave}
-            <button
-                class="footer-save-btn"
-                class:active={hasChanges}
-                class:saving={saving}
-                disabled={!hasChanges || saving}
-                onclick={onSave}
-                title="Save (Ctrl+S)"
-            >
-                {#if saving}Saving...{:else}Save{/if}
-            </button>
-        {/if}
         <span class="line-info">{lineCount} lines · {charCount} chars</span>
         <button class="footer-find-btn" title="Find (Ctrl+F)" onclick={onFind}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -191,35 +176,5 @@
     .footer-find-btn:hover {
         background: var(--color-surface-4);
         color: var(--color-text-primary);
-    }
-    .footer-save-btn {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        padding: 2px 10px;
-        border: none;
-        border-radius: 4px;
-        background: var(--color-surface-3);
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        font-size: 12px;
-        font-family: inherit;
-        font-weight: 500;
-        flex-shrink: 0;
-        transition: background 0.1s, color 0.1s;
-    }
-    .footer-save-btn.active {
-        background: var(--color-accent-dark);
-        color: white;
-    }
-    .footer-save-btn:hover:not(:disabled) {
-        opacity: 0.9;
-    }
-    .footer-save-btn:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-    }
-    .footer-save-btn.saving {
-        color: var(--color-status-orange);
     }
 </style>
