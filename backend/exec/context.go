@@ -208,7 +208,7 @@ func formatToolAction(name, arguments string) string {
 			return "execute `" + cmd + "`"
 		}
 	case "request_review":
-		return "complete the task"
+		return "request a review"
 	}
 	return "perform an action"
 }
@@ -404,7 +404,7 @@ func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.Cha
 					rawArgs, _ := tcMap["raw_args"].(string)
 					if toolID != "" && toolName != "" {
 						conversation[len(conversation)-1].ToolCalls = append(conversation[len(conversation)-1].ToolCalls, types.ToolCallMsg{
-							ID: toolID,
+							ID:   toolID,
 							Type: "function",
 							Function: struct {
 								Name      string `json:"name"`
