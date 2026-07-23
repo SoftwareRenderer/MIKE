@@ -88,7 +88,7 @@ type loopDetector struct {
 	textWindow       []string        // recent text-only responses (content, trimmed)
 	loopStreak       int             // consecutive loop detections (reset to 0 on valid turn)
 	phraseDet        *phraseDetector // real-time phrase repetition tracker
-	blockDet         *blockDetector   // real-time block repetition tracker
+	blockDet         *blockDetector  // real-time block repetition tracker
 	phraseFired      bool            // phrase loop detected during current streaming response
 	hintIndices      []int           // indices in messages slice of injected loop hints
 }
@@ -370,7 +370,7 @@ func buildHint(loopType LoopType, target string) string {
 	case LoopText:
 		return "You've produced several similar responses without calling any tools. Take action \u2014 call a tool to make progress, or use `request_review` if the task is done."
 	case LoopStatement:
-		return "You made a statement without using a tool. Take action — use `read_file`, `write_file`, `edit_file`, or `bash` to make progress, `ask_question` if clarification/approval is needed, or `request_review` if the task is complete."
+		return "Is the task complete? Use `ask_question` if clarification/approval is needed, or `request_review` if the task is complete. Otherwise use `read_file`, `write_file`, `edit_file`, or `bash` to make progress."
 	case LoopPhrase:
 		return "You repeated yourself in your last response. Continue with a new action or tool call."
 	case LoopReasoningOnly:
