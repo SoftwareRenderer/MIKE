@@ -143,6 +143,8 @@
     });
 
     let titleInput: HTMLInputElement | null = null;
+    // Track the initial operating mode so we can restore it when switching away from agent
+    let initialOperatingMode = $state('act');
 
     $effect(() => {
         setTimeout(() => {
@@ -152,6 +154,7 @@
     });
 
     onMount(async () => {
+        initialOperatingMode = editOperatingMode;
         if (taskHasParent || !projectId) return;
         try {
             const res = await fetch(`/api/projects/${projectId}/git/branches`);
@@ -174,8 +177,8 @@
         if (providerUrl === PI_SENTINEL_URL || (provider && isAgentProvider(provider))) {
             operatingModeDraft = 'ideate';
         } else if (operatingModeDraft === 'ideate') {
-            // Switching away from agent: reset to act
-            operatingModeDraft = 'act';
+            // Switching away from agent: restore the original mode
+            operatingModeDraft = initialOperatingMode;
         }
     }
 

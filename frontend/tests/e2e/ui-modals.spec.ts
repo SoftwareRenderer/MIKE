@@ -654,3 +654,79 @@ test.describe.serial('Edit Task Modal Overlay', () => {
     await expect(modal).not.toBeVisible({ timeout: 5000 });
   });
 });
+
+// ─── Edit Task Modal — Model Change Should Not Reset Operating Mode ───
+
+test.describe.serial('Edit Task Modal Model Change Preserves Mode', () => {
+  let projectId: string;
+  let taskId: string;
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+    projectId = await getProjectId(page);
+  });
+
+  test('should preserve operating mode when switching model in edit modal', async ({ page }) => {
+    // Create a task with 'plan' operating mode
+    const title = `mode-preserve-${Date.now()}`;
+    taskId = await createTaskViaApi(page, projectId, title);
+    expect(taskId).not.toBe('');
+
+    // Update task to have 'plan' operating mode
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}`, {
+      method: 'PUT',
+      body: { operating_mode: 'plan' },
+    });
+
+    // Navigate to the task detail page
+    await navigateToTask(page, taskId);
+    await expect(page.locator('.task-detail-page')).toBeVisible();
+
+    // Find the card for this task in the side panel
+    const card = page.locator('.card.selected');
+    await expect(card).toBeVisible({ timeout: 5000 });
+
+    // Open the edit modal
+    const editButton = card.locator('button[aria-label="Edit task"]');
+    await expect(editButton).toBeVisible();
+    await editButton.click();
+
+    // Verify the EditTaskModal appears
+    const modal = page.locator('.modal[aria-labelledby="modal-title"]');
+    await expect(modal).toBeVisible({ timeout: 5000 });
+
+    // Verify mode selector shows "Plan"
+    const modeBtn = modal.locator('.mode-btn');
+    await expect(modeBtn).toBeVisible();
+    await expect(modeBtn.locator('.mode-label')).toContainText('Plan');
+
+    // Test: switch to ideate mode (simulating agent selection), then change model
+    // The fix ensures that when mode is 'ideate' and model changes, it restores
+    // the initial mode ('plan') instead of hardcoding 'act'
+    await modeBtn.click();
+    const ideateOption = modal.locator('.mode-option.ideate');
+    await expect(ideateOption).toBeVisible();
+    await ideateOption.click();
+    await expect(modeBtn.locator('.mode-label')).toContainText('Ideate');
+
+    // Now change the model - this triggers handleModelSelect
+    // With the fix, mode should restore to 'plan' (initial mode)
+    // Without the fix, mode would reset to 'act'
+    const modelBtn = modal.locator('.model-trigger');
+    if (await modelBtn.isVisible()) {
+      await modelBtn.click();
+      const modelOption = page.locator('.portal-model-dropdown .model-option').first();
+      await expect(modelOption).toBeVisible({ timeout: 5000 });
+      await modelOption.click();
+
+      // Mode should be restored to "Plan" (the initial mode), not "Act"
+      await expect(modeBtn.locator('.mode-label')).toContainText('Plan');
+    }
+
+    // Cancel the modal
+    await page.locator('.modal-footer .btn-secondary').click();
+    await expect(modal).not.toBeVisible({ timeout: 5000 });
+  });
+});
+
