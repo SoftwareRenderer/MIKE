@@ -32,6 +32,7 @@
     let defaultSubtasksAutoMerge = $state(true);
     let defaultOperatingMode = $state('act');
     let defaultMaxFailedTurns = $state(3);
+    let githubToken = $state('');
     let loading = $state(false);
     let error = $state('');
 
@@ -168,6 +169,7 @@
         defaultSubtasksAutoMerge = config?.default_subtasks_auto_merge ?? true;
         defaultOperatingMode = config?.default_operating_mode ?? 'act';
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
+        githubToken = config?.github_token ?? '';
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
         hasChanges = false;
@@ -484,6 +486,7 @@
                 });
             const cfg = await updateConfig({
                 workspace_dir: config?.workspace_dir || '',
+                github_token: githubToken,
                 providers: savedProviders,
                 default_provider: defaultProvider,
                 default_auto_commit: defaultAutoCommit,
@@ -662,6 +665,25 @@
                     </button>                
             </div>
             {/if}
+
+            <div class="section">
+                <h3 class="section-label">GitHub Integration</h3>
+                <div class="config-field">
+                    <label class="field-label" for="config-github-token">GitHub Personal Access Token</label>
+                    <input
+                        id="config-github-token"
+                        type="password"
+                        value={githubToken}
+                        oninput={(e) => {
+                            githubToken = (e.target as HTMLInputElement).value;
+                            markDirty();
+                        }}
+                        class="config-input"
+                        placeholder="ghp_..."
+                    />
+                    <span class="field-help">Used to fetch public/private GitHub issue content. Leave empty for public issues.</span>
+                </div>
+            </div>
 
             <!-- System Info -->
             <div class="section">
