@@ -440,15 +440,57 @@ func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.Cha
 	return conversation
 }
 
+// collectUniqueModels extracts unique model names from task messages, preserving
+// the order of first appearance. Only non-empty model names from assistant messages
+// are collected (user/tool/summarization messages don't carry model attribution).
+func collectUniqueModels(taskMsgs []types.TaskMessage) []string {
+	seen := make(map[string]bool)
+	var models []string
+	for _, m := range taskMsgs {
+		if m.Role != "assistant" || m.ModelName == "" {
+			continue
+		}
+		if !seen[m.ModelName] {
+			seen[m.ModelName] = true
+			models = append(models, m.ModelName)
+		}
+	}
+	return models
+}
+
+// buildCoAuthoredBy formats one or more Co-authored-by trailer lines.
+// Returns an empty string if no models are provided.
+// Output: "\n\nCo-authored-by: model1\nCo-authored-by: model2"
+func buildCoAuthoredBy(models []string) string {
+	if len(models) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\nCo-authored-by: ")
+	for i, m := range models {
+		if i > 0 {
+			sb.WriteString("\nCo-authored-by: ")
+		}
+		sb.WriteString(m)
+	}
+	return sb.String()
+}
+
+// buildCommitMessageWithCoAuthors appends Co-authored-by trailer(s) to a commit message body.
+// Each unique model gets its own Co-authored-by line.
+func buildCommitMessageWithCoAuthors(body string, models []string) string {
+	trailer := buildCoAuthoredBy(models)
+	if trailer == "" {
+		return body
+	}
+	return body + trailer
+}
+
 // GenerateCommitMessageForTask builds a full commit message from task title, summary, and model.
 // Generates one via LLM from conversation + diff. This is the single source of truth for commit
 // message generation across all commit paths (auto-commit, manual commit-and-done).
+// If multiple models contributed to the task, each gets its own Co-authored-by line.
 func (te *TaskExecutor) GenerateCommitMessageForTask(ctx context.Context, taskID string, task *types.Task) string {
-	modelName := task.ModelName
-	if modelName == "" {
-		modelName = "unknown model"
-	}
-
 	diffStat, _ := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
 	if diffStat == "" {
 		diffStat = "no diff available"
@@ -462,7 +504,18 @@ func (te *TaskExecutor) GenerateCommitMessageForTask(ctx context.Context, taskID
 		commitMsg = task.Title
 	}
 
-	return fmt.Sprintf("%s\n\nCo-authored-by: %s", commitMsg, modelName)
+	// Collect all unique models that contributed to this task.
+	models := collectUniqueModels(taskMsgs)
+	// If no models found in messages, fall back to the task's current model.
+	if len(models) == 0 {
+		if task.ModelName != "" {
+			models = []string{task.ModelName}
+		} else {
+			models = []string{"unknown model"}
+		}
+	}
+
+	return buildCommitMessageWithCoAuthors(commitMsg, models)
 }
 
 // SSEFlusher is the interface needed for SSE streaming.
@@ -473,6 +526,7 @@ type SSEFlusher interface {
 
 // StreamCommitMessage generates a commit message via LLM streaming and sends
 // tokens as SSE events. No timeout is applied. Caller must set SSE headers first.
+// If multiple models contributed to the task, each gets its own Co-authored-by line.
 func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *types.Task) {
 	serverURL := task.LlamaServerURL
 	if serverURL == "" || task.ModelName == "" {
@@ -492,6 +546,12 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 	conversation := BuildConversationFromTaskMessages(taskMsgs)
 	turnText := FormatConversationTurns(ExtractLastTurns(conversation, 3))
 	labelMessages := buildCommitMessages(diffStat, turnText)
+
+	// Collect all unique models that contributed to this task.
+	models := collectUniqueModels(taskMsgs)
+	if len(models) == 0 {
+		models = []string{task.ModelName}
+	}
 
 	var sb strings.Builder
 	ctx, cancel := context.WithCancel(context.Background())
@@ -520,7 +580,7 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 						content = "file changes"
 					}
 				}
-				content = fmt.Sprintf("%s\n\nCo-authored-by: %s", content, task.ModelName)
+				content = buildCommitMessageWithCoAuthors(content, models)
 				writeSSE("done", fmt.Sprintf("{\"content\":%q}", content))
 			}
 		},
@@ -542,7 +602,7 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 				content = "file changes"
 			}
 		}
-		content = fmt.Sprintf("%s\n\nCo-authored-by: %s", content, task.ModelName)
+		content = buildCommitMessageWithCoAuthors(content, models)
 		writeSSE("done", fmt.Sprintf("{\"content\":%q}", content))
 	}
 }
