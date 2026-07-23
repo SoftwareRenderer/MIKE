@@ -254,7 +254,18 @@ import { slide } from 'svelte/transition';
 
     /** Sort files by path: files with directory prefix first (alphabetical), then root files. */
     function sortFilesByPath(files: DiffFile[]): DiffFile[] {
+        // Status sort priority: Modified (M) = 0, Added (A) = 1, Deleted (D) = 2, Renamed (R) = 3
+        const statusOrder = (f: DiffFile): number => {
+            const { letter } = getStatusBadge(f);
+            if (letter === 'M') return 0;
+            if (letter === 'A') return 1;
+            if (letter === 'D') return 2;
+            return 3; // R (renamed)
+        };
         return [...files].sort((a, b) => {
+            const aOrder = statusOrder(a);
+            const bOrder = statusOrder(b);
+            if (aOrder !== bOrder) return aOrder - bOrder;
             const aHasDir = a.path.includes('/');
             const bHasDir = b.path.includes('/');
             if (aHasDir && !bHasDir) return -1;
