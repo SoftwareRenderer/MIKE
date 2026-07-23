@@ -103,6 +103,7 @@ type RegistryEntry struct {
 	DisplayName    string `json:"display_name"`
 	Description    string `json:"description"`
 	Author         string `json:"author"`
+	Homepage       string `json:"homepage,omitempty"`
 	LicenseURL     string `json:"license_url,omitempty"`
 	Image          string `json:"image,omitempty"`          // OCI image reference
 	DockerfileURL  string `json:"dockerfile_url,omitempty"` // URL to Dockerfile

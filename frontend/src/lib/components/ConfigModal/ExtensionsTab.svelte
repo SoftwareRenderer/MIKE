@@ -450,8 +450,14 @@
                                 <div class="ext-info">
                                     <span class="ext-name">{ext.manifest.display_name || ext.name}</span>
                                     <span class="ext-meta">
-                                        {formatBuiltAt(ext.built_at)}
-                                        {#if ext.manifest.author} · {ext.manifest.author}{/if}
+                                        {#if ext.type === 'ui'}
+                                            v{ext.version}
+                                        {:else}
+                                            {formatBuiltAt(ext.built_at)}
+                                        {/if}
+                                        {#if ext.manifest.author}
+                                            · {#if ext.manifest.homepage}<a href={ext.manifest.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">{ext.manifest.author}</a>{:else}{ext.manifest.author}{/if}
+                                        {/if}
                                         {#if ext.manifest.license_url} · <a href={ext.manifest.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
                                     </span>
                                 </div>
@@ -656,7 +662,9 @@
                                     <span class="ext-name">{entry.display_name || entry.name}</span>
                                     <span class="ext-meta">
                                         v{entry.version}
-                                        {#if entry.author} · {entry.author}{/if}
+                                        {#if entry.author}
+                                            · {#if entry.homepage}<a href={entry.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">{entry.author}</a>{:else}{entry.author}{/if}
+                                        {/if}
                                         {#if entry.license_url} · <a href={entry.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
                                     </span>
                                 </div>

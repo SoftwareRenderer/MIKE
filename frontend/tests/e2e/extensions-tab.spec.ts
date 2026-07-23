@@ -230,6 +230,142 @@ test.describe('Extensions Tab', () => {
     expect(found).toBeUndefined();
   });
 
+  test('should show version for UI extensions instead of built time', async ({ page }) => {
+    // Create a UI extension
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `ui-version-test-${Date.now()}`,
+        type: 'ui',
+        version: '2.5.3',
+        manifest: { display_name: 'UI Version Test', description: '', author: '' },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Open settings > Extensions tab
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Wait for extension to appear
+    await expect(page.locator('.extension-card')).toContainText('UI Version Test', { timeout: 5000 });
+
+    // Find the extension card and check it shows version, not "Built"
+    const extCard = page.locator('.extension-card').filter({ hasText: 'UI Version Test' });
+    const metaText = await extCard.locator('.ext-meta').textContent();
+    expect(metaText).toContain('v2.5.3');
+    expect(metaText).not.toContain('Built');
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
+  test('should show built time for LSP extensions', async ({ page }) => {
+    // Create an LSP extension
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `lsp-built-test-${Date.now()}`,
+        type: 'lsp',
+        version: '1.0.0',
+        manifest: { display_name: 'LSP Built Test', description: '', author: '' },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Open settings > Extensions tab
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Wait for extension to appear
+    await expect(page.locator('.extension-card')).toContainText('LSP Built Test', { timeout: 5000 });
+
+    // Find the extension card and check it shows built time, not version
+    const extCard = page.locator('.extension-card').filter({ hasText: 'LSP Built Test' });
+    const metaText = await extCard.locator('.ext-meta').textContent();
+    expect(metaText).not.toContain('v1.0.0');
+    // Should contain "Built" text (e.g. "Built just now", "Built 1m ago", etc.)
+    expect(metaText).toContain('Built');
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
+  test('should link author to homepage when provided', async ({ page }) => {
+    const homepage = 'https://example.com/my-ext';
+    // Create a UI extension with homepage
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `homepage-test-${Date.now()}`,
+        type: 'ui',
+        version: '1.0.0',
+        manifest: { display_name: 'Homepage Test', description: '', author: 'Test Author', homepage },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Open settings > Extensions tab
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Wait for extension to appear
+    await expect(page.locator('.extension-card')).toContainText('Homepage Test', { timeout: 5000 });
+
+    // Find the extension card and check the author link
+    const extCard = page.locator('.extension-card').filter({ hasText: 'Homepage Test' });
+    const authorLink = extCard.locator('.ext-link:has-text("Test Author")');
+    await expect(authorLink).toBeVisible();
+    expect(await authorLink.getAttribute('href')).toBe(homepage);
+    expect(await authorLink.getAttribute('target')).toBe('_blank');
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
+  test('should show plain author text when no homepage', async ({ page }) => {
+    // Create an extension without homepage
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `no-homepage-test-${Date.now()}`,
+        type: 'ui',
+        version: '1.0.0',
+        manifest: { display_name: 'No Homepage Test', description: '', author: 'Plain Author' },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Open settings > Extensions tab
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Wait for extension to appear
+    await expect(page.locator('.extension-card')).toContainText('No Homepage Test', { timeout: 5000 });
+
+    // Find the extension card and check author is plain text (no link)
+    const extCard = page.locator('.extension-card').filter({ hasText: 'No Homepage Test' });
+    const authorLink = extCard.locator('.ext-link:has-text("Plain Author")');
+    await expect(authorLink).not.toBeVisible();
+    const metaText = await extCard.locator('.ext-meta').textContent();
+    expect(metaText).toContain('Plain Author');
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
   test('should sync config.memory_limit to sandbox_config on update', async ({ page }) => {
     // Create a test extension with default memory
     const createResult = await csrfFetch(page, '/api/extensions', {
