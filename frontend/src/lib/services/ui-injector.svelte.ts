@@ -2,19 +2,13 @@ import type { Extension } from '$lib/types';
 
 /** Named injection points where UI extensions can inject content. */
 export const INJECTION_POINTS = {
-    CARD_HEADER: 'card-header',
-    CARD_FOOTER: 'card-footer',
-    CARD_ACTIONS: 'card-actions',
-    EDITOR_TOOLBAR: 'editor-toolbar',
-    BOARD_SECTION: 'board-section',
-    TASK_CHAT_HEADER: 'task-chat-header',
-    TASK_CHAT_FOOTER: 'task-chat-footer',
-    TASK_CHAT_INPUT: 'task-chat-input',
+    TASK_CARD: 'task-card',
+    FILE_EDITOR: 'file-editor',
+    PROJECT_BOARD: 'project-board',
+    TASK_CHAT: 'task-chat',
     PROJECT_SIDEBAR: 'project-sidebar',
-    SETTINGS_TAB: 'settings-tab',
-    FILE_BROWSER_TOOLBAR: 'file-browser-toolbar',
-    CREATE_TASK_DESCRIPTION: 'create-task-description',
-    CREATE_TASK_ACTIONS: 'create-task-actions',
+    FILE_BROWSER: 'file-browser',
+    CREATE_TASK: 'create-task',
 } as const;
 
 export type InjectionPoint = (typeof INJECTION_POINTS)[keyof typeof INJECTION_POINTS];

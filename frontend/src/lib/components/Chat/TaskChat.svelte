@@ -1083,6 +1083,8 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         };
         window.addEventListener('keydown', handleKeydown);
 
+        uiInjector.renderSlot(INJECTION_POINTS.TASK_CHAT, { component: 'TaskChat', taskId, projectId });
+
         (async () => {
             // Providers loaded via configStore subscription (no separate fetch needed)
             updateProvidersFromStore();

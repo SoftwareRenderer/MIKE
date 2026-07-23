@@ -86,7 +86,7 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
 
     onMount(() => {
         multiSelectActions.setup();
-        uiInjector.renderSlot(INJECTION_POINTS.BOARD_SECTION, { component: 'Board', projectId });
+        uiInjector.renderSlot(INJECTION_POINTS.PROJECT_BOARD, { component: 'Board', projectId });
     });
 
     // Subtask hierarchy management (expanded state, consolidation, auto-expand)
