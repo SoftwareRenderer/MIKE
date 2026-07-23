@@ -1,5 +1,6 @@
 import type { Extension, RegistryEntry, ExtensionUpdate } from '$lib/types';
 import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension } from '$lib/api';
+import { uiInjector } from './ui-injector.svelte';
 
 /** Runtime status of an extension sandbox. */
 export type ExtensionStatus = 'running' | 'stopped' | 'error' | 'unknown';
@@ -23,6 +24,7 @@ export class ExtensionManager {
         this.state.error = '';
         try {
             this.state.extensions = await listExtensions();
+            uiInjector.registerFromExtensions(this.state.extensions);
         } catch (e: any) {
             this.state.error = e.message || 'Failed to load extensions';
         } finally {

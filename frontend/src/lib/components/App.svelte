@@ -241,7 +241,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             disconnectBoardStream();
             appStore.selectedTask = null;
             uiStore.showCardDetail = false;
-            window.dispatchEvent(newCustomEvent('urlchanged'));
+            window.dispatchEvent(new CustomEvent('urlchanged'));
             return;
         }
 

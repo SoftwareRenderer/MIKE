@@ -1,0 +1,20 @@
+{
+    "display_name": "GitHub Issue Importer",
+    "description": "Automatically imports GitHub issue content when a URL is pasted into task description",
+    "author": "Kanban",
+    "deprecated": false,
+    "ui": {
+        "module_url": "/extensions/github-issue-importer/GitHubImport.svelte",
+        "injection_points": ["create-task-description"]
+    },
+    "config_schema": {
+        "type": "object",
+        "properties": {
+            "github_token": {
+                "type": "string",
+                "title": "GitHub Personal Access Token",
+                "description": "Used to fetch public/private GitHub issue content. Leave empty for public issues."
+            }
+        }
+    },
+}
