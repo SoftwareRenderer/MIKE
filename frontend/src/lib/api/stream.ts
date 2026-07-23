@@ -20,6 +20,7 @@ export interface AppStreamCallbacks {
     onTaskEvent?: (task_id: string, event: StreamEvent) => void; // task-scoped events (tokens, tool calls, etc.)
     onPortConflict?: (project_id: string, conflicted_ports: number[]) => void; // host ports already in use
     onProjectPorts?: (ports: Array<{ host_port: number; container_port: number }>) => void; // project-level terminal port mappings
+    onExtensionChange?: () => void; // extension enabled/disabled/installed/removed
     onConnected?: (connected: boolean) => void; // true on connect, false on disconnect
     onReconnectScheduled?: (nextAttemptAt: number) => void; // epoch ms of next reconnect attempt
     onConnectAttempt?: () => void; // fired when a connection attempt begins
@@ -178,6 +179,9 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
             }
             if (msg.type === 'project_ports' && callbacks.onProjectPorts) {
                 callbacks.onProjectPorts(msg.ports);
+            }
+            if (msg.type === 'extension_change' && callbacks.onExtensionChange) {
+                callbacks.onExtensionChange();
             }
         };
 

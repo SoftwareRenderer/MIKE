@@ -8,6 +8,11 @@ import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, ge
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler } from '$lib/services/stream-handler';
 import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
+    // UI extension injection point — re-render when extensions change
+    $effect(() => {
+        const _v = uiInjector.getPointVersion(INJECTION_POINTS.TASK_CHAT);
+        uiInjector.refreshSlot(INJECTION_POINTS.TASK_CHAT, { component: 'TaskChat', taskId, projectId });
+    });
     import { DRAFT_SAVE_DEBOUNCE_MS, SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
 import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
@@ -1083,8 +1088,6 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         };
         window.addEventListener('keydown', handleKeydown);
 
-        uiInjector.renderSlot(INJECTION_POINTS.TASK_CHAT, { component: 'TaskChat', taskId, projectId });
-
         (async () => {
             // Providers loaded via configStore subscription (no separate fetch needed)
             updateProvidersFromStore();
@@ -1201,10 +1204,6 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
             unsubTaskEvent?.();
             window.removeEventListener('visibilitychange', handleTabVisibility);
         };
-        // UI extension injection points
-        uiInjector.renderSlot(INJECTION_POINTS.TASK_CHAT_HEADER, { component: 'TaskChat', taskId, projectId });
-        uiInjector.renderSlot(INJECTION_POINTS.TASK_CHAT_FOOTER, { component: 'TaskChat', taskId, projectId });
-        uiInjector.renderSlot(INJECTION_POINTS.TASK_CHAT_INPUT, { component: 'TaskChat', taskId, projectId });
     });
 
     onDestroy(() => {

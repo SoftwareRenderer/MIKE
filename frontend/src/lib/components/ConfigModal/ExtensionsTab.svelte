@@ -1,13 +1,11 @@
 <script lang="ts">
     import type { Extension, RegistryEntry, ExtensionUpdate } from '$lib/types';
-    import { onMount } from 'svelte';
     import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage, createExtension, streamBuildProgress } from '$lib/api';
     import type { BuildProgressEvent } from '$lib/api';
     import { getConfig } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
-    import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
 
@@ -47,10 +45,6 @@
         fileExtensions: '',
     });
     let adding = $state(false);
-
-    onMount(() => {
-        uiInjector.renderSlot(INJECTION_POINTS.SETTINGS_TAB, { component: 'ExtensionsTab' });
-    });
 
     // Reset add form
     function resetAddForm() {

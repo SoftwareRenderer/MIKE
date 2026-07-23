@@ -107,12 +107,13 @@ func (t *BuildProgressTracker) Subscribe(extName string) <-chan *BuildProgress {
 
 // ExtensionHandler handles extension API requests.
 type ExtensionHandler struct {
-	store         *ExtensionStore
-	sandbox       *ExtensionSandboxManager
-	registry      *RegistryClient
-	config        *ExtensionConfig
-	progress      *BuildProgressTracker
-	onImageUpdated func(extID string) // callback after successful image update
+	store               *ExtensionStore
+	sandbox             *ExtensionSandboxManager
+	registry            *RegistryClient
+	config              *ExtensionConfig
+	progress            *BuildProgressTracker
+	onImageUpdated      func(extID string)      // callback after successful image update
+	onExtensionChanged  func()                   // callback after any extension change (enable/disable/create/delete)
 }
 
 // ExtensionConfig holds configuration for the extension handler.
@@ -135,6 +136,11 @@ func NewExtensionHandler(store *ExtensionStore, sandbox *ExtensionSandboxManager
 // SetOnImageUpdated sets a callback invoked after a successful image update.
 func (h *ExtensionHandler) SetOnImageUpdated(fn func(extID string)) {
 	h.onImageUpdated = fn
+}
+
+// SetOnExtensionChanged sets a callback invoked after any extension state change.
+func (h *ExtensionHandler) SetOnExtensionChanged(fn func()) {
+	h.onExtensionChanged = fn
 }
 
 // HandleList returns all installed extensions with runtime status.
@@ -225,6 +231,11 @@ func (h *ExtensionHandler) HandleCreate(w http.ResponseWriter, r *http.Request) 
 
 	statuses := h.sandbox.ListRunning()
 	httputil.JSONResponse(w, http.StatusCreated, h.toResponse(ext, statuses))
+
+	// Notify frontend to refresh UI injection slots
+	if h.onExtensionChanged != nil {
+		h.onExtensionChanged()
+	}
 }
 
 // HandleUpdate updates an existing extension.
@@ -367,6 +378,11 @@ func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, r *http.Request, 
 	}
 
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
+
+	// Notify frontend to refresh UI injection slots
+	if h.onExtensionChanged != nil {
+		h.onExtensionChanged()
+	}
 }
 
 // HandleSetEnabled toggles the enabled state of an extension.
@@ -406,6 +422,11 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 	}
 	statuses := h.sandbox.ListRunning()
 	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, statuses))
+
+	// Notify frontend to refresh UI injection slots
+	if h.onExtensionChanged != nil {
+		h.onExtensionChanged()
+	}
 }
 
 // HandleRegistryIndex fetches the registry index.
@@ -555,6 +576,11 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 
 	statuses := h.sandbox.ListRunning()
 	httputil.JSONResponse(w, http.StatusCreated, h.toResponse(ext, statuses))
+
+	// Notify frontend to refresh UI injection slots
+	if h.onExtensionChanged != nil {
+		h.onExtensionChanged()
+	}
 }
 
 // HandleBuildProgress streams build progress via SSE.

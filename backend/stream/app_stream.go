@@ -563,6 +563,15 @@ func (asm *AppStreamManager) BroadcastProjectPorts(projectID string, ports []typ
 	})
 }
 
+// BroadcastExtensionChange sends an extension_change event to all connected clients.
+// This triggers the frontend to reload extensions and refresh UI injection slots.
+func (asm *AppStreamManager) BroadcastExtensionChange() {
+	msg, _ := json.Marshal(map[string]any{
+		"type": "extension_change",
+	})
+	asm.BroadcastAll(msg)
+}
+
 // -- Ring buffer --
 
 func (asm *AppStreamManager) bufferRaw(frame []byte) {

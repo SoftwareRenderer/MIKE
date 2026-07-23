@@ -13,6 +13,11 @@
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
+    // UI extension injection point — re-render when extensions change
+    $effect(() => {
+        const _v = uiInjector.getPointVersion(INJECTION_POINTS.FILE_EDITOR);
+        uiInjector.refreshSlot(INJECTION_POINTS.FILE_EDITOR, { component: 'FileEditor', filePath, projectId });
+    });
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
@@ -821,7 +826,6 @@
 
     onMount(() => {
         window.addEventListener('jump-to-line', handleJumpToLine);
-        uiInjector.renderSlot(INJECTION_POINTS.FILE_EDITOR, { component: 'FileEditor', filePath, projectId });
     });
 
     onDestroy(() => {

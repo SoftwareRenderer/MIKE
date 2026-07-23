@@ -12,6 +12,11 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
+    // UI extension injection point — re-render when extensions change
+    $effect(() => {
+        const _v = uiInjector.getPointVersion(INJECTION_POINTS.PROJECT_BOARD);
+        uiInjector.refreshSlot(INJECTION_POINTS.PROJECT_BOARD, { component: 'Board', projectId });
+    });
 
     let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, scrollToColumn }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; scrollToColumn?: string | null } = $props();
     let expandedTasksContext = getExpandedTasksContext();
@@ -86,7 +91,6 @@ import { sortByActivity } from '$lib/utils/sort-tasks';
 
     onMount(() => {
         multiSelectActions.setup();
-        uiInjector.renderSlot(INJECTION_POINTS.PROJECT_BOARD, { component: 'Board', projectId });
     });
 
     // Subtask hierarchy management (expanded state, consolidation, auto-expand)
