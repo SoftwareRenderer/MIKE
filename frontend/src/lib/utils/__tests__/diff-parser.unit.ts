@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { parseUnifiedDiff, enrichRowsWithInlineSegments, buildDisplayItems, truncatePath, buildSideBySideRows, buildModifiedSegments } from '$lib/utils/diff-parser';
+import { parseUnifiedDiff, enrichRowsWithInlineSegments, buildDisplayItems, truncatePath, buildSideBySideRows, buildModifiedSegments, getStatusBadge } from '$lib/utils/diff-parser';
+import type { DiffFile } from '$lib/types/diff';
+
+function makeDiffFile(overrides: Partial<DiffFile> = {}): DiffFile {
+    return {
+        path: 'test.ts',
+        rows: [],
+        added: 0,
+        removed: 0,
+        ...overrides,
+    };
+}
 
 describe('parseUnifiedDiff', () => {
     it('returns empty array for empty input', () => {
@@ -434,5 +445,72 @@ describe('buildSideBySideRows', () => {
         expect(result[1].rightText).toBe('new2');
         expect(result[2].leftText).toBe('');
         expect(result[2].rightText).toBe('new3');
+    });
+});
+
+describe('getStatusBadge', () => {
+    it('shows R (Renamed) when origPath is set', () => {
+        const badge = getStatusBadge(makeDiffFile({ origPath: 'old.ts' }));
+        expect(badge.letter).toBe('R');
+        expect(badge.color).toBe('#d29922');
+    });
+
+    it('shows D (Deleted) when isDeleted is true', () => {
+        const badge = getStatusBadge(makeDiffFile({ isDeleted: true, removed: 5, added: 0 }));
+        expect(badge.letter).toBe('D');
+        expect(badge.color).toBe('#f85149');
+    });
+
+    it('shows A (Added) when isNewFile is true', () => {
+        const badge = getStatusBadge(makeDiffFile({ isNewFile: true, added: 10, removed: 0 }));
+        expect(badge.letter).toBe('A');
+        expect(badge.color).toBe('#3fb950');
+    });
+
+    it('shows M (Modified) for a file with only removals but NOT actually deleted', () => {
+        // This is the key bug fix: a file with removed > 0 && added === 0
+        // should NOT show "D" unless isDeleted is explicitly true
+        const badge = getStatusBadge(makeDiffFile({ removed: 5, added: 0 }));
+        expect(badge.letter).toBe('M');
+        expect(badge.color).toBe('#569cd6');
+    });
+
+    it('shows M (Modified) for a normal modified file', () => {
+        const badge = getStatusBadge(makeDiffFile({ added: 3, removed: 2 }));
+        expect(badge.letter).toBe('M');
+        expect(badge.color).toBe('#569cd6');
+    });
+
+    it('shows M (Modified) for binary files', () => {
+        const badge = getStatusBadge(makeDiffFile({ isBinary: true, added: 0, removed: 0 }));
+        expect(badge.letter).toBe('M');
+        expect(badge.color).toBe('#569cd6');
+    });
+
+    it('shows M (Modified) for files with only additions but not marked as new', () => {
+        const badge = getStatusBadge(makeDiffFile({ added: 10, removed: 0 }));
+        expect(badge.letter).toBe('M');
+        expect(badge.color).toBe('#569cd6');
+    });
+
+    it('priority: origPath (R) takes precedence over isDeleted', () => {
+        // A renamed file that was deleted at old path and created at new path
+        const badge = getStatusBadge(makeDiffFile({
+            origPath: 'old.ts',
+            isDeleted: true,
+            added: 5,
+            removed: 5,
+        }));
+        expect(badge.letter).toBe('R');
+    });
+
+    it('priority: isDeleted (D) takes precedence over isNewFile', () => {
+        const badge = getStatusBadge(makeDiffFile({
+            isDeleted: true,
+            isNewFile: true,
+            added: 0,
+            removed: 5,
+        }));
+        expect(badge.letter).toBe('D');
     });
 });

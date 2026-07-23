@@ -789,6 +789,8 @@ type diffManifestFile struct {
 	LineCount   int    `json:"line_count,omitempty"` // for untracked files
 	FileSize    int64  `json:"file_size,omitempty"`  // for binary/large files
 	IsBinary    bool   `json:"is_binary,omitempty"`  // true for binary files
+	IsNew       bool   `json:"isNew,omitempty"`      // true when file is newly created
+	IsDeleted   bool   `json:"isDeleted,omitempty"`  // true when file is deleted
 	Staged      bool   `json:"staged,omitempty"`     // true if file is staged in the index
 }
 
@@ -854,6 +856,8 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef
 			Truncated:   f.Truncated,
 			OrigAdded:   f.OrigAdded,
 			OrigRemoved: f.OrigRemoved,
+			IsNew:       f.IsNew,
+			IsDeleted:   f.IsDeleted,
 			Staged:      staged,
 		}
 		if f.FileSize != nil {

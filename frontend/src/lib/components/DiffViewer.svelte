@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { DiffFile, DiffRow } from '$lib/types/diff';
     import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
-    import { buildDisplayItems, truncatePath } from '$lib/utils/diff-parser';
+    import { buildDisplayItems, truncatePath, getStatusBadge } from '$lib/utils/diff-parser';
     import { highlightLinesAsync } from '$lib/highlighter';
     import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
 import { slide } from 'svelte/transition';
@@ -292,16 +292,6 @@ import { slide } from 'svelte/transition';
         }
     }
 
-    /** Compute VS Code-style status letter for a tracked file. */
-    function getStatusBadge(file: DiffFile): { letter: string; color: string } {
-        if (file.origPath) return { letter: 'R', color: '#d29922' }; // Renamed — yellow
-        if (file.isBinary) return { letter: 'M', color: '#569cd6' }; // Binary — blue
-        const added = file.origAdded ?? file.added ?? 0;
-        const removed = file.origRemoved ?? file.removed ?? 0;
-        if (removed > 0 && added === 0) return { letter: 'D', color: '#f85149' }; // Deleted — red
-        return { letter: 'M', color: '#569cd6' }; // Modified — blue
-    }
-
 </script>
 
 {#snippet diffFileEntry(file: DiffFile, isStaged: boolean, showStageBtn: boolean = true)}
@@ -332,7 +322,7 @@ import { slide } from 'svelte/transition';
                     </span>
                 {/if}
             </button>
-            <span class="diff-status-badge" style="color: {badge.color}" title={badge.letter === 'M' ? 'Modified' : badge.letter === 'R' ? 'Renamed' : badge.letter === 'D' ? 'Deleted' : 'Added'}>{badge.letter}</span>
+            <span class="diff-status-badge" style="color: {badge.color}" title={badge.letter === 'M' ? 'Modified' : badge.letter === 'R' ? 'Renamed' : badge.letter === 'D' ? 'Deleted' : badge.letter === 'A' ? 'Added' : 'Modified'}>{badge.letter}</span>
             {#if onStageFile && showStageBtn}
                 <button type="button" class="diff-stage-btn" onclick={() => onStageFile(file.path, !isStaged)} title={isStaged ? 'Unstage changes' : 'Stage changes'}>
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d={isStaged ? "M4 8h8" : "M8 4v8M4 8h8"} stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>

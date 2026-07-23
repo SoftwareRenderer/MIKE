@@ -42,6 +42,8 @@ export interface DiffApiResponse {
         line_count?: number;
         file_size?: number;
         is_binary?: boolean;
+        isNew?: boolean;
+        isDeleted?: boolean;
         staged?: boolean;
     }>;
     short_stat?: string;
@@ -59,6 +61,8 @@ export interface DiffFileApiResponse {
     origRemoved?: number;
     fileSize?: number;
     isBinary?: boolean;
+    isNew?: boolean;
+    isDeleted?: boolean;
 }
 
 /**
@@ -237,6 +241,8 @@ export class DiffCache {
                     removed: entry.removed ?? 0,
                     fileSize: entry.file_size,
                     isBinary: entry.is_binary,
+                    isNewFile: entry.isNew,
+                    isDeleted: entry.isDeleted,
                     truncated: !!entry.truncated,
                     origAdded: entry.origAdded,
                     origRemoved: entry.origRemoved,
@@ -344,7 +350,7 @@ export class DiffCache {
 
     /** Fetch individual files from the manifest. */
     private async fetchChangedFiles(
-        manifest: Record<string, { hash: string; type: string; added?: number; removed?: number; line_count?: number; file_size?: number; is_binary?: boolean; staged?: boolean; truncated?: boolean; origAdded?: number; origRemoved?: number }>,
+        manifest: Record<string, { hash: string; type: string; added?: number; removed?: number; line_count?: number; file_size?: number; is_binary?: boolean; isNew?: boolean; isDeleted?: boolean; staged?: boolean; truncated?: boolean; origAdded?: number; origRemoved?: number }>,
         oldHashes?: Record<string, string>,
     ) {
         const updatedDiff: Record<string, DiffFile> = {};
@@ -371,15 +377,15 @@ export class DiffCache {
                 try {
                     const data = await this._apis.getDiffFile(this._getProjectId(), this._getTaskId(), path);
                     if (data.rows) {
-                        updatedDiff[path] = { path, rows: this._apis.enrichRows(data.rows), committedRows: data.committedRows ? this._apis.enrichRows(data.committedRows) : [], added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: entry.staged };
+                        updatedDiff[path] = { path, rows: this._apis.enrichRows(data.rows), committedRows: data.committedRows ? this._apis.enrichRows(data.committedRows) : [], added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, isNewFile: data.isNew ?? entry.isNew, isDeleted: data.isDeleted ?? entry.isDeleted, staged: entry.staged };
                     } else if (data.lines) {
-                        updatedDiff[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded, staged: entry.staged ?? false };
+                        updatedDiff[path] = { path, rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded, isNewFile: data.isNew ?? entry.isNew, staged: entry.staged ?? false };
                         updatedUntracked[path] = true;
                     } else if (data.committedRows) {
                         // Committed-only file (no working-tree changes)
-                        updatedDiff[path] = { path, rows: [], committedRows: this._apis.enrichRows(data.committedRows), added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: false, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: false };
+                        updatedDiff[path] = { path, rows: [], committedRows: this._apis.enrichRows(data.committedRows), added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: false, origAdded: data.origAdded, origRemoved: data.origRemoved, isNewFile: data.isNew ?? entry.isNew, isDeleted: data.isDeleted ?? entry.isDeleted, staged: false };
                     } else if (data.isBinary || data.fileSize) {
-                        updatedDiff[path] = { path, rows: [], added: entry.added ?? 0, removed: entry.removed ?? 0, fileSize: data.fileSize ?? entry.file_size, isBinary: data.isBinary ?? entry.is_binary, truncated: false, staged: entry.staged };
+                        updatedDiff[path] = { path, rows: [], added: entry.added ?? 0, removed: entry.removed ?? 0, fileSize: data.fileSize ?? entry.file_size, isBinary: data.isBinary ?? entry.is_binary, isNewFile: data.isNew ?? entry.isNew, isDeleted: data.isDeleted ?? entry.isDeleted, truncated: false, staged: entry.staged };
                         if (entry.type === 'untracked') updatedUntracked[path] = true;
                     }
                 } catch (e) {
@@ -435,16 +441,16 @@ export class DiffCache {
                     const isStaged = stagedSet?.has(path) ?? existing?.staged ?? false;
                     if (data.rows) {
                         const rows = this._apis.enrichRows(data.rows);
-                        updatedDiff[path] = { path, rows, committedRows: data.committedRows ? this._apis.enrichRows(data.committedRows) : [], added: rows.filter((r: DiffRow) => r.variant === 'added').length, removed: rows.filter((r: DiffRow) => r.variant === 'removed').length, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, staged: isStaged };
+                        updatedDiff[path] = { path, rows, committedRows: data.committedRows ? this._apis.enrichRows(data.committedRows) : [], added: rows.filter((r: DiffRow) => r.variant === 'added').length, removed: rows.filter((r: DiffRow) => r.variant === 'removed').length, truncated: data.truncated, origAdded: data.origAdded, origRemoved: data.origRemoved, isNewFile: data.isNew, isDeleted: data.isDeleted, staged: isStaged };
                     } else if (data.lines) {
-                        updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded, staged: isStaged };
+                        updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: data.origAdded, isNewFile: data.isNew, staged: isStaged };
                         updatedUntracked[path] = { ...(this.state.untracked[path] || {}), loading: false };
                     } else if (data.committedRows) {
                         // Committed-only file (no working-tree changes)
                         const cr = this._apis.enrichRows(data.committedRows);
-                        updatedDiff[path] = { path, rows: [], committedRows: cr, added: cr.filter((r: DiffRow) => r.variant === 'added').length, removed: cr.filter((r: DiffRow) => r.variant === 'removed').length, truncated: false, staged: false };
+                        updatedDiff[path] = { path, rows: [], committedRows: cr, added: cr.filter((r: DiffRow) => r.variant === 'added').length, removed: cr.filter((r: DiffRow) => r.variant === 'removed').length, truncated: false, isNewFile: data.isNew, isDeleted: data.isDeleted, staged: false };
                     } else if (data.isBinary || data.fileSize) {
-                        updatedDiff[path] = { path, rows: [], added: existing?.added ?? 0, removed: existing?.removed ?? 0, fileSize: data.fileSize, isBinary: data.isBinary, truncated: false, staged: isStaged };
+                        updatedDiff[path] = { path, rows: [], added: existing?.added ?? 0, removed: existing?.removed ?? 0, fileSize: data.fileSize, isBinary: data.isBinary, isNewFile: data.isNew, isDeleted: data.isDeleted, truncated: false, staged: isStaged };
                         if (this.state.untracked[path]) {
                             updatedUntracked[path] = { ...(this.state.untracked[path] || {}), loading: false, fileSize: data.fileSize };
                         }
@@ -514,15 +520,15 @@ export class DiffCache {
                         const isStaged = entry.staged ?? false;
                         if (data.rows) {
                             const rows = this._apis.enrichRows(data.rows);
-                            updatedDiff[path] = { path, rows, committedRows: data.committedRows ? this._apis.enrichRows(data.committedRows) : [], added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: entry.origAdded, origRemoved: entry.origRemoved, staged: isStaged };
+                            updatedDiff[path] = { path, rows, committedRows: data.committedRows ? this._apis.enrichRows(data.committedRows) : [], added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: data.truncated, origAdded: entry.origAdded, origRemoved: entry.origRemoved, isNewFile: data.isNew ?? entry.isNew, isDeleted: data.isDeleted ?? entry.isDeleted, staged: isStaged };
                         } else if (data.lines) {
-                            updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: entry.origAdded, staged: isStaged };
+                            updatedDiff[path] = { path, rows: data.lines.map((line: string, i: number) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })), added: data.lines.length, removed: 0, truncated: !!data.truncated, origAdded: entry.origAdded, isNewFile: data.isNew ?? entry.isNew, staged: isStaged };
                             updatedUntracked[path] = { fileSize: entry.file_size, isBinary: entry.is_binary, truncated: !!entry.truncated, origAdded: entry.origAdded ?? entry.line_count, loading: false };
                         } else if (data.committedRows) {
                             // Committed-only file (no working-tree changes)
-                            updatedDiff[path] = { path, rows: [], committedRows: this._apis.enrichRows(data.committedRows), added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: false, origAdded: entry.origAdded, origRemoved: entry.origRemoved, staged: false };
+                            updatedDiff[path] = { path, rows: [], committedRows: this._apis.enrichRows(data.committedRows), added: entry.added ?? 0, removed: entry.removed ?? 0, truncated: false, origAdded: entry.origAdded, origRemoved: entry.origRemoved, isNewFile: data.isNew ?? entry.isNew, isDeleted: data.isDeleted ?? entry.isDeleted, staged: false };
                         } else if (data.isBinary || data.fileSize) {
-                            updatedDiff[path] = { path, rows: [], added: entry.added ?? 0, removed: entry.removed ?? 0, fileSize: data.fileSize ?? entry.file_size, isBinary: data.isBinary ?? entry.is_binary, truncated: false, staged: isStaged };
+                            updatedDiff[path] = { path, rows: [], added: entry.added ?? 0, removed: entry.removed ?? 0, fileSize: data.fileSize ?? entry.file_size, isBinary: data.isBinary ?? entry.is_binary, isNewFile: data.isNew ?? entry.isNew, isDeleted: data.isDeleted ?? entry.isDeleted, truncated: false, staged: isStaged };
                             if (entry.type === 'untracked') {
                                 updatedUntracked[path] = { fileSize: data.fileSize ?? entry.file_size, isBinary: data.isBinary ?? entry.is_binary, truncated: false, origAdded: 0, loading: false };
                             }
