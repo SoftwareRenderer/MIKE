@@ -183,7 +183,7 @@ import { slide } from 'svelte/transition';
 
     // Syntax highlight cache: plain Map, populated lazily on file expand.
     // Not wrapped in $state — highlighting runs off-main-thread via queueMicrotask.
-    let highlightCache: Map<string, Record<string, string>> = new Map();
+    let highlightCache = $state(new Map<string, Record<string, string>>());
 
     function getHighlight(filePath: string, lineNumber: number | null): string | undefined {
         if (!lineNumber) return undefined;
@@ -204,7 +204,10 @@ import { slide } from 'svelte/transition';
                 hasAny = true;
             }
         });
-        if (hasAny) highlightCache.set(path, cache);
+        if (hasAny) {
+            highlightCache.set(path, cache);
+            highlightCache = new Map(highlightCache);
+        }
     }
 
     /** Pre-populate highlight cache for an untracked file entry. */
@@ -221,7 +224,10 @@ import { slide } from 'svelte/transition';
                 hasAny = true;
             }
         });
-        if (hasAny) highlightCache.set(entry.path, cache);
+        if (hasAny) {
+            highlightCache.set(entry.path, cache);
+            highlightCache = new Map(highlightCache);
+        }
     }
 
     function toggleBlock(id: string) {

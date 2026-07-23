@@ -1,5 +1,6 @@
 <script lang="ts">
     import { marked } from 'marked';
+    import DOMPurify from 'dompurify';
     import { getToolDisplayName } from '$lib/types';
     import { buildModifiedSegments } from '$lib/utils/diff-parser';
     import { slide } from 'svelte/transition';
@@ -358,14 +359,14 @@
     // Rendered markdown for request_review summary
     let renderedSummaryHtml = $derived(
         tc.toolName === 'request_review' && tc.args && tc.args.summary
-            ? (marked.parse(tc.args.summary as string, { async: false }) as string)
+            ? DOMPurify.sanitize(marked.parse(tc.args.summary as string, { async: false }) as string)
             : ''
     );
 
     // Rendered markdown for ask_question
     let renderedQuestionHtml = $derived(
         tc.toolName === 'ask_question' && tc.args && tc.args.question
-            ? (marked.parse(tc.args.question as string, { async: false }) as string)
+            ? DOMPurify.sanitize(marked.parse(tc.args.question as string, { async: false }) as string)
             : ''
     );
 
