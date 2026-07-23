@@ -4,7 +4,7 @@
     "author": "Kanban",
     "deprecated": false,
     "ui": {
-        "module_url": "/extensions/github-issue-importer/GitHubImport.svelte",
+        "module_url": "/extensions/github-issue-importer/GitHubImport.js",
         "injection_points": ["create-task-description"]
     },
     "config_schema": {
@@ -16,5 +16,5 @@
                 "description": "Used to fetch public/private GitHub issue content. Leave empty for public issues."
             }
         }
-    },
+    }
 }
