@@ -15,7 +15,6 @@
     let { projectId, onClose, onTaskCreated, parentId, currentBranch, onOptimisticTaskCreated, onReplaceOptimisticTask }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; currentBranch?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void } = $props();
 
     let prompt = $state('');
-    let descriptionSlots = $state<any[]>([]);
     let autoCommit = $state(false);
 
     let operatingMode = $state('act'); // "act", "plan", or "ideate"
@@ -276,11 +275,8 @@
         }
 
         // Load description extensions
-        uiInjector.renderSlot(INJECTION_POINTS.CREATE_TASK_DESCRIPTION, {
-            component: 'CreateTaskModal'
-        }).then(slots => {
-            descriptionSlots = slots;
-        });
+        uiInjector.renderSlot(INJECTION_POINTS.CREATE_TASK_DESCRIPTION, { component: 'CreateTaskModal' });
+        uiInjector.renderSlot(INJECTION_POINTS.CREATE_TASK_ACTIONS, { component: 'CreateTaskModal' });
     });
 
 
@@ -393,14 +389,6 @@
             </div>
         {/if}
         <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={handleMentionInput} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
-        {#each descriptionSlots as slot}
-            <slot.component
-                {...slot.context}
-                config={slot.config}
-                prompt={prompt}
-                setPrompt={(v: string) => prompt = v}
-            />
-        {/each}
     </label>
     <input type="file" accept="image/*" multiple bind:this={fileInput} onchange={handleFileSelect} style="display:none" />
     {#if hasProviders}

@@ -12,7 +12,7 @@
     import { requestLSPChannel, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
-    import { uiInjector } from '$lib/services/ui-injector.svelte';
+    import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
@@ -821,6 +821,7 @@
 
     onMount(() => {
         window.addEventListener('jump-to-line', handleJumpToLine);
+        uiInjector.renderSlot(INJECTION_POINTS.EDITOR_TOOLBAR, { component: 'FileEditor', filePath, projectId });
     });
 
     onDestroy(() => {
@@ -838,12 +839,6 @@
 </script>
 
 <div class="file-editor" class:has-file={!!filePath} class:active={active}>
-    <!-- UI Extension Injection: editor-toolbar -->
-    {#if uiInjector.hasContent('editor-toolbar')}
-        <div class="editor-injection-toolbar">
-            <!-- UI extensions render here -->
-        </div>
-    {/if}
     {#if filePath}
         <!-- Editor content area -->
         <div class="editor-content">
@@ -896,12 +891,6 @@
     }
     .file-editor.active {
         display: flex;
-    }
-
-    /* UI Extension Injection */
-    .editor-injection-toolbar {
-        padding: 0.25rem 0.5rem;
-        border-bottom: 1px solid var(--color-border-subtle);
     }
 
     .editor-content {
