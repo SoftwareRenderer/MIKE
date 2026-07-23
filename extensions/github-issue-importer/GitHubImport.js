@@ -85,9 +85,10 @@ export default function init({ config }) {
             if (!res.ok) throw new Error(`GitHub API: ${res.statusText}`);
 
             const data = await res.json();
-            const content = `# ${data.title}\n\n${data.body || ''}`;
+            const url = text.trim();
+            const content = `# ${data.title}\n\n${data.body || ''}\n\nReference: ${url}`;
 
-            // Insert content into textarea, preserving existing text
+            // Insert URL + content into textarea, preserving existing text
             const start = textarea.selectionStart;
             const end = textarea.selectionEnd;
             const before = textarea.value.substring(0, start);
