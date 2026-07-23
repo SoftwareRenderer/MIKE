@@ -158,6 +158,10 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	s.extHandler.SetOnImageUpdated(func(extID string) {
 		s.lspHandler.BroadcastLSPReset()
 	})
+	// Wire extension change callback → broadcast to all clients for UI slot refresh
+	s.extHandler.SetOnExtensionChanged(func() {
+		s.appStreamMgr.BroadcastExtensionChange()
+	})
 	// Wire project mutex so GitHandler can serialize project-level git operations.
 	s.gitHandler.SetProjectMutex(s.getProjectMutex)
 	// Wire worktree watcher -> GitHandler diff cache so on-demand file fetches work

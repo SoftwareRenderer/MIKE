@@ -56,11 +56,17 @@ export class UIInjector {
     registrations = $state<InjectionRegistration[]>([]);
     /** Loaded modules (cached). */
     private modules = new Map<string, any>();
-    /** Active JS extension cleanup functions. */
+    /** Active JS extension cleanup functions, keyed by "extensionId::point". */
     private cleanups = new Map<string, () => void>();
+    /** Per-point version counter — incremented when registrations for a point change. */
+    private pointVersions = $state(new Map<InjectionPoint, number>());
 
     /** Register injections from UI extensions. */
     registerFromExtensions(extensions: Extension[]) {
+        // Track which points have changed to bump their version counters
+        const oldPoints = new Set(this.registrations.map(r => r.point));
+        const newPoints = new Set<InjectionPoint>();
+
         // Clean up old extensions
         for (const cleanup of this.cleanups.values()) {
             try { cleanup(); } catch {}
@@ -74,14 +80,28 @@ export class UIInjector {
             if (!ui.injection_points || !ui.module_url) continue;
 
             for (let i = 0; i < ui.injection_points.length; i++) {
+                const point = ui.injection_points[i] as InjectionPoint;
+                newPoints.add(point);
                 this.registrations.push({
                     extensionId: ext.id,
                     extensionName: ext.name,
-                    point: ui.injection_points[i] as InjectionPoint,
+                    point,
                     moduleUrl: ui.module_url,
                     order: i,
                     config: ext.config,
                 });
+            }
+        }
+
+        // Bump version for any point whose registration set changed
+        const allPoints = new Set([...oldPoints, ...newPoints]);
+        for (const point of allPoints) {
+            const hadRegistrations = oldPoints.has(point);
+            const hasRegistrations = newPoints.has(point);
+            if (hadRegistrations !== hasRegistrations) {
+                const versions = new Map(this.pointVersions);
+                versions.set(point, (versions.get(point) || 0) + 1);
+                this.pointVersions = versions;
             }
         }
     }
@@ -115,7 +135,7 @@ export class UIInjector {
                 if (typeof mod?.default === 'function') {
                     const cleanup = mod.default({ ...context, config: reg.config });
                     if (typeof cleanup === 'function') {
-                        this.cleanups.set(reg.extensionId, cleanup);
+                        this.cleanups.set(`${reg.extensionId}::${point}`, cleanup);
                     }
                 }
             } catch (e: any) {
@@ -124,6 +144,32 @@ export class UIInjector {
         }
 
         return [];
+    }
+
+    /**
+     * Get the version counter for a specific injection point.
+     * Components use this in $effect to re-render slots when extensions change.
+     */
+    getPointVersion(point: InjectionPoint): number {
+        return this.pointVersions.get(point) || 0;
+    }
+
+    /**
+     * Refresh an injection point: run cleanups for extensions at that point,
+     * then re-activate extensions with the given context.
+     * Called by components in $effect when getPointVersion() changes.
+     * Note: does NOT bump the version — that's done by registerFromExtensions.
+     */
+    async refreshSlot(point: InjectionPoint, context: InjectionContext): Promise<any[]> {
+        // Run cleanups for this specific point
+        for (const [key, cleanup] of this.cleanups) {
+            if (key.endsWith(`::${point}`)) {
+                try { cleanup(); } catch {}
+                this.cleanups.delete(key);
+            }
+        }
+        // Re-activate
+        return this.renderSlot(point, context);
     }
 
     /** Clear loaded modules (for hot reload). */

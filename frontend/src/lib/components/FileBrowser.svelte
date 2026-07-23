@@ -4,6 +4,11 @@
     import { ensureCsrfToken } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
+    // UI extension injection point — re-render when extensions change
+    $effect(() => {
+        const _v = uiInjector.getPointVersion(INJECTION_POINTS.FILE_BROWSER);
+        uiInjector.refreshSlot(INJECTION_POINTS.FILE_BROWSER, { component: 'FileBrowser' });
+    });
     import homeIcon from '$lib/assets/icons/home.svg?raw';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
@@ -131,7 +136,6 @@
             .then(r => r.json())
             .then(data => loadDir(data.home || '/home'))
             .catch(() => loadDir('/home'));
-        uiInjector.renderSlot(INJECTION_POINTS.FILE_BROWSER, { component: 'FileBrowser' });
     });
 
     function formatPath(p: string): string {

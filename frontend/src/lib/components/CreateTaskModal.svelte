@@ -1,5 +1,10 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    // UI extension injection point — re-render when extensions change
+    $effect(() => {
+        const _v = uiInjector.getPointVersion(INJECTION_POINTS.CREATE_TASK);
+        uiInjector.refreshSlot(INJECTION_POINTS.CREATE_TASK, { component: 'CreateTaskModal' });
+    });
     import type { Config, Provider, Task } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
@@ -273,9 +278,6 @@
                 // Ignore errors
             }
         }
-
-        // Load extensions
-        uiInjector.renderSlot(INJECTION_POINTS.CREATE_TASK, { component: 'CreateTaskModal' });
     });
 
 

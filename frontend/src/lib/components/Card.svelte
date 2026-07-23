@@ -17,6 +17,12 @@
     import { onMount, onDestroy } from 'svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
 
+    // UI extension injection point — re-render when extensions change
+    $effect(() => {
+        const _v = uiInjector.getPointVersion(INJECTION_POINTS.TASK_CARD);
+        uiInjector.refreshSlot(INJECTION_POINTS.TASK_CARD, { component: 'Card', taskId: task.id, projectId });
+    });
+
     let { task, columnId, projectId, childrenMap, expandedTasks, onToggleExpanded, onCreateChildTask, columnColor, inline = true, onSelect, parentSelected = false, showSubtaskBorder = false, onRefreshBoard, multiSelect }: { task: Task; columnId: string; projectId?: string; childrenMap?: Map<string, Task[]>; expandedTasks?: Set<string>; onToggleExpanded?: (taskId: string) => void; onCreateChildTask?: (parentId: string) => void; columnColor?: string; inline?: boolean; onSelect?: (task: Task) => void; parentSelected?: boolean; showSubtaskBorder?: boolean; onRefreshBoard?: () => void; multiSelect?: MultiSelect | null } = $props();
 
     // Track if this task has queued offline actions (for diagonal fade effect)
@@ -60,8 +66,6 @@
         // Defer so IndexedDB queue is loaded before check
         queueMicrotask(checkQueuedActions);
         unsubscribeQueue = onQueueChanged(checkQueuedActions);
-        // UI extension injection point
-        uiInjector.renderSlot(INJECTION_POINTS.TASK_CARD, { component: 'Card', taskId: task.id, projectId });
     });
     onDestroy(() => {
         unsubscribeQueue?.();

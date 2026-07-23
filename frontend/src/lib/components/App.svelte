@@ -385,6 +385,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onProjectPorts: (ports) => {
                 appStore.projectTerminalPorts = ports;
             },
+            onExtensionChange: () => {
+                extensionManager.loadExtensions().catch(() => {});
+            },
         });
         setAppStreamRef(appStream);
         const urlParams = new URLSearchParams(location.search);
@@ -595,6 +598,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 countdownSeconds = 0;
             },
             onPortConflict: () => {},
+            onExtensionChange: () => {
+                extensionManager.loadExtensions().catch(() => {});
+            },
         });
         setAppStreamRef(appStream);
         await loadAppData();

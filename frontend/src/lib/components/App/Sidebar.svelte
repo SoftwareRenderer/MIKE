@@ -1,10 +1,14 @@
 <script lang="ts">
     import type { Project } from '$lib/types';
-    import { onMount } from 'svelte';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
+    // UI extension injection point — re-render when extensions change
+    $effect(() => {
+        const _v = uiInjector.getPointVersion(INJECTION_POINTS.PROJECT_SIDEBAR);
+        uiInjector.refreshSlot(INJECTION_POINTS.PROJECT_SIDEBAR, { component: 'Sidebar', projectId: currentProject?.id });
+    });
 
     let {
         projects,
@@ -37,10 +41,6 @@
         onToggleFullScreen: () => void;
         onAddProject: () => void;
     } = $props();
-
-    onMount(() => {
-        uiInjector.renderSlot(INJECTION_POINTS.PROJECT_SIDEBAR, { component: 'Sidebar', projectId: currentProject?.id });
-    });
 </script>
 
 <aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
