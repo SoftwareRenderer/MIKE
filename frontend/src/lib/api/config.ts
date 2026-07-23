@@ -10,14 +10,11 @@ import { markCached } from './cache';
 
 // -- Configuration endpoints --
 
-/** Fetch the current server configuration (LLM endpoint, model, workspace, providers). Falls back to cached copy on failure or when offline. */
+/** Fetch the current server configuration (LLM endpoint, model, workspace, providers). Falls back to cached copy on failure.
+ * Always tries the network first — the isOffline flag tracks WebSocket state,
+ * not HTTP availability. On mobile wake (tab resume), the WebSocket may be
+ * disconnected but HTTP still works, so we must not short-circuit to cache. */
 export async function getConfig(): Promise<Config> {
-    // When offline, skip network and read cache directly
-    if (getOfflineStatus()) {
-        const cached = await getBoardCache<Config>('config');
-        if (cached) return markCached(cached);
-        throw new Error('No cached config available');
-    }
     try {
         const res = await apiFetch(`${API_BASE}/config`);
         if (!res.ok) throw await apiError(res, 'Failed to fetch config');
