@@ -322,7 +322,80 @@ The Extensions system replaces hardcoded LSP configurations with user-defined an
 
 **LSP Discovery:** `ExtensionRegistry.Lookup()` replaces `lsp.Registry.Lookup()` to dynamically resolve language servers from installed extensions. LSP availability is determined by installed extensions, not a global toggle.
 
-**UI Injection:** Extensions can inject content into named slots: `card-header`, `card-footer`, `editor-toolbar`, `board-section`, `task-chat-header`, `task-chat-footer`.
+**UI Injection:** Extensions can inject content into named slots: `card-header`, `card-footer`, `editor-toolbar`, `board-section`, `task-chat-header`, `task-chat-footer`, `create-task-description`.
+
+### UI Extensions
+
+UI extensions are **plain JavaScript modules** — not Svelte components. Svelte components cannot be dynamically loaded from external bundles (each bundle carries its own Svelte runtime, causing `effect_orphan` errors).
+
+**Creating a UI extension:**
+
+1. Create a directory under `extensions/<name>/` with two files:
+
+```text
+extensions/my-extension/
+├── manifest.json
+└── MyExtension.js
+```
+
+2. **`manifest.json`** — Metadata and injection config:
+```json
+{
+    "display_name": "My Extension",
+    "description": "Does something useful",
+    "author": "Author",
+    "deprecated": false,
+    "ui": {
+        "module_url": "/extensions/my-extension/MyExtension.js",
+        "injection_points": ["card-footer"]
+    },
+    "config_schema": {
+        "type": "object",
+        "properties": {
+            "api_key": { "type": "string", "title": "API Key" }
+        }
+    }
+}
+```
+
+3. **`MyExtension.js`** — ES module exporting an `init` function:
+```js
+export default function init({ component, taskId, projectId, config }) {
+    // Set up DOM elements, event listeners, etc.
+    const el = document.createElement('div');
+    el.textContent = 'Hello from extension';
+    // Insert into the DOM at the injection point...
+
+    // Return a cleanup function (called when extension is disabled/unloaded)
+    return () => {
+        el.remove();
+    };
+}
+```
+
+4. **Register in `extensions/registry.json`:**
+```json
+{
+    "name": "my-extension",
+    "version": "1.0.0",
+    "type": "ui",
+    "display_name": "My Extension",
+    "description": "Does something useful",
+    "author": "Author",
+    "manifest_url": "my-extension/manifest.json"
+}
+```
+
+**Updating:** Edit the `.js` file and `manifest.json` directly. The Go server serves `extensions/` as static files — no build step needed. Browser hard refresh to pick up changes.
+
+**Deploying:** Install from registry via Settings → Extensions → "Install from Registry", or create manually via the API (`POST /api/extensions`).
+
+**Key constraints:**
+- Module must export a `default` function accepting `{ component, taskId, projectId, config }`
+- Function returns a cleanup `() => void` function
+- No Svelte imports — plain DOM manipulation only
+- CSS is injected via `document.createElement('style')` or inline styles
+- `module_url` is a path served by the Go server's static file handler (`/extensions/...`)
 
 **Registry:** URL configurable via `registry_url` in config. Default: `file://./extensions/registry.json`.
 
