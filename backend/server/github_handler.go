@@ -44,6 +44,12 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request) {
 	if token == "" {
 		token = r.Header.Get("X-GitHub-Token")
 	}
+	if token == "" && s.configStore != nil {
+		cfg, err := s.configStore.GetConfig()
+		if err == nil {
+			token = cfg.GitHubToken
+		}
+	}
 
 	formatted, err := s.fetchGitHubIssue(owner, repo, issueNum, token)
 	if err != nil {

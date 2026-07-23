@@ -3,6 +3,7 @@
     import type { Config, Provider, Task } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
+    import { importGitHubIssue } from '$lib/api';
     import { appStore, uiStore } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
@@ -176,6 +177,25 @@
                 e.stopPropagation();
                 closeMention();
                 return;
+            }
+        }
+    }
+
+    async function handlePaste(e: ClipboardEvent) {
+        const text = e.clipboardData?.getData('text') || '';
+        const githubIssueRegex = /^https:\/\/github\.com\/[^\/]+\/[^\/]+\/issues\/[0-9]+$/;
+        if (githubIssueRegex.test(text.trim())) {
+            e.preventDefault();
+            loading = true;
+            error = '';
+            try {
+                const content = await importGitHubIssue(text.trim());
+                prompt = content;
+            } catch (e: any) {
+                error = e.message || 'Failed to import GitHub issue';
+                prompt = text; // still paste the URL as fallback
+            } finally {
+                loading = false;
             }
         }
     }
@@ -387,7 +407,7 @@
                 {/each}
             </div>
         {/if}
-        <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={handleMentionInput} onkeydown={handlePromptKeydown}></textarea>
+        <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={handleMentionInput} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
         {#each descriptionSlots as slot}
             <svelte:component
                 this={slot.component}

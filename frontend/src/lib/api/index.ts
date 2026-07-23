@@ -105,6 +105,9 @@ export {
     commitProject,
 } from './git';
 
+// -- GitHub --
+export { importGitHubIssue } from './github';
+
 // -- Stream --
 export { createAppStream } from './stream';
 export type { AppStream, AppStreamCallbacks } from './stream';

@@ -65,6 +65,13 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		return nil, err
 	}
 	registryURL, _ := cs.store.GetConfigValue("registry_url")
+	githubToken, _ := cs.store.GetConfigValue("github_token")
+	if githubToken != "" {
+		decrypted, err := crypto.Decrypt(githubToken)
+		if err == nil {
+			githubToken = decrypted
+		}
+	}
 	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
 	defaultAutoMergeRaw, _ := cs.store.GetConfigValue("default_auto_merge")
 	defaultSubtasksAutoMergeRaw, _ := cs.store.GetConfigValue("default_subtasks_auto_merge")
@@ -75,6 +82,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		WorkspaceDir:    workspaceDir,
 		DatabasePath:    cs.dbPath,
 		RegistryURL:     registryURL,
+		GitHubToken:     githubToken,
 		Providers:       providers,
 		DefaultProvider: defaultProvider,
 	}
@@ -130,6 +138,15 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	if err := cs.store.SetConfigValue("registry_url", c.RegistryURL); err != nil {
 		return err
 	}
+	if c.GitHubToken != "" {
+		encrypted, err := crypto.Encrypt(c.GitHubToken)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt github token: %w", err)
+		}
+		if err := cs.store.SetConfigValue("github_token", encrypted); err != nil {
+			return err
+		}
+	}
 	if c.DefaultAutoCommit != nil {
 		if err := cs.store.SetConfigValue("default_auto_commit", fmt.Sprintf("%t", *c.DefaultAutoCommit)); err != nil {
 			return err
@@ -163,6 +180,7 @@ type configResponse struct {
 	WorkspaceDir          string           `json:"workspace_dir"`
 	DatabasePath          string           `json:"database_path"`
 	RegistryURL           string           `json:"registry_url"`
+	GitHubToken           string           `json:"github_token"`
 	Providers             []types.Provider `json:"providers"`
 	DefaultProvider       string           `json:"default_provider"`
 	DefaultAutoCommit     *bool            `json:"default_auto_commit"`
@@ -173,7 +191,15 @@ type configResponse struct {
 	EncryptionEnabled     bool             `json:"encryption_enabled"`
 }
 
+func maskedToken(token string) string {
+	if token == "" {
+		return ""
+	}
+	return maskedAPIKey
+}
+
 // maskAPIKeys replaces non-empty API keys with a masked placeholder.
+
 const maskedAPIKey = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // 10 bullets
 
 func maskAPIKeys(providers []types.Provider) {
@@ -200,6 +226,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			WorkspaceDir:          cfg.WorkspaceDir,
 			DatabasePath:          cfg.DatabasePath,
 			RegistryURL:           cfg.RegistryURL,
+			GitHubToken:           maskedToken(cfg.GitHubToken),
 			Providers:             cfg.Providers,
 			DefaultProvider:       cfg.DefaultProvider,
 			DefaultAutoCommit:     cfg.DefaultAutoCommit,
@@ -223,6 +250,12 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// workspace_dir is set at startup via CLI flag / env var — not modifiable at runtime
+		if rurl, ok := updates["registry_url"]; ok {
+			current.RegistryURL = rurl.(string)
+		}
+		if gt, ok := updates["github_token"]; ok {
+			current.GitHubToken = gt.(string)
+		}
 		if providers, ok := updates["providers"]; ok {
 			if providers != nil {
 				providersJSON, _ := json.Marshal(providers)
