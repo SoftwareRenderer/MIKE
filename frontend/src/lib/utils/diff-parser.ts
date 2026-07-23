@@ -2,6 +2,20 @@ import { diffWordsWithSpace } from 'diff';
 import type { ApiDiffRow, DiffFile, DiffRow, InlineDiffSegment } from '$lib/types/diff';
 
 /**
+ * Compute a VS Code-style status badge for a diff file.
+ * Uses explicit flags (isDeleted, isNewFile, origPath) instead of heuristics
+ * to avoid misclassifying files with only removals as "deleted".
+ *
+ * Priority: Renamed (R) > Deleted (D) > Added (A) > Modified (M)
+ */
+export function getStatusBadge(file: DiffFile): { letter: string; color: string } {
+    if (file.origPath) return { letter: 'R', color: '#d29922' };     // Renamed — yellow
+    if (file.isDeleted) return { letter: 'D', color: '#f85149' };    // Deleted — red
+    if (file.isNewFile) return { letter: 'A', color: '#3fb950' };    // Added — green
+    return { letter: 'M', color: '#569cd6' };                        // Modified — blue
+}
+
+/**
  * Parse a raw unified diff (git diff output) into structured DiffFile[] data.
  *
  * Handles the standard unified diff format:

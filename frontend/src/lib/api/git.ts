@@ -116,7 +116,7 @@ export async function getTaskCommits(projectId: string, taskId: string): Promise
 }
 
 /** Fetch the content of a single file (tracked or untracked) from the cached diff. */
-export async function getDiffFile(projectId: string, taskId: string, path: string, options?: { full?: boolean; signal?: AbortSignal }): Promise<{ type?: string; lines?: string[]; line_count?: number; rows?: Array<{ key?: string; lineNumber: number | null; variant: string; text?: string; segments?: Array<{ key: string; text: string; tone: string }> }>; truncated?: boolean; origAdded?: number; origRemoved?: number; isBinary?: boolean; fileSize?: number }> {
+export async function getDiffFile(projectId: string, taskId: string, path: string, options?: { full?: boolean; signal?: AbortSignal }): Promise<{ type?: string; lines?: string[]; line_count?: number; rows?: Array<{ key?: string; lineNumber: number | null; variant: string; text?: string; segments?: Array<{ key: string; text: string; tone: string }> }>; truncated?: boolean; origAdded?: number; origRemoved?: number; isBinary?: boolean; fileSize?: number; isNew?: boolean; isDeleted?: boolean }> {
     const params = new URLSearchParams({ path });
     if (options?.full) params.set('full', '1');
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff/file?${params}`, { signal: options?.signal });
