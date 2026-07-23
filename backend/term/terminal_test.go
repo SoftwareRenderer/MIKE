@@ -7,12 +7,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"kanban/backend/config"
 	"kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/types"
 
+	"github.com/coder/websocket"
 	"github.com/creack/pty"
 )
 
@@ -195,6 +197,149 @@ func TestProjectTerminalStopsContainerOnExit(t *testing.T) {
 		// Session was removed and Stop was called
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for session removal and container stop")
+	}
+}
+
+func TestMultiClientResizeSmallestWidthWins(t *testing.T) {
+	dir := t.TempDir()
+	s, cs := newTestConfigStore(t)
+	mock := newMockSandbox(t)
+	tm := NewTerminalManager(s, cs, mock)
+
+	projID := "test-proj-resize"
+	proj := &types.Project{
+		ID:             projID,
+		Name:           "Test Project",
+		Path:           dir,
+		SandboxEnabled: true,
+	}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	taskID := "resize-task"
+	sess, err := tm.getOrCreate(taskID, taskID, dir, projID)
+	if err != nil {
+		t.Fatalf("getOrCreate: %v", err)
+	}
+
+	// Verify initial PTY size is the default 40x120
+	rows, cols, err := pty.Getsize(sess.ptmx)
+	if err != nil {
+		t.Fatalf("get initial winsize: %v", err)
+	}
+	if cols != 120 || rows != 40 {
+		t.Fatalf("initial size = %dx%d, want 120x40", cols, rows)
+	}
+
+	// Create dummy conn pointers to simulate multiple clients.
+	// Use a non-empty struct so Go doesn't coalesce allocations.
+	type dummyConn struct{ id int }
+	desktop := &dummyConn{id: 1}
+	phone := &dummyConn{id: 2}
+	desktopPtr := (*websocket.Conn)(unsafe.Pointer(desktop))
+	phonePtr := (*websocket.Conn)(unsafe.Pointer(phone))
+
+	// Simulate desktop client resize: 80x200
+	sess.handleResize(desktopPtr, 80, 200)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 200 || rows != 80 {
+		t.Fatalf("after desktop resize = %dx%d, want 200x80", cols, rows)
+	}
+
+	// Simulate phone client resize: 30x100 — smaller width should win
+	sess.handleResize(phonePtr, 30, 100)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 100 {
+		t.Fatalf("after phone resize cols = %d, want 100 (smallest width)", cols)
+	}
+
+	// Desktop resizes again to even wider — should NOT change PTY (phone is still smallest)
+	sess.handleResize(desktopPtr, 50, 300)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 100 {
+		t.Fatalf("after desktop wider resize cols = %d, want 100 (phone still smallest)", cols)
+	}
+
+	// Phone disconnects — desktop size should take over
+	sess.removeConnSize(phonePtr)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 300 {
+		t.Fatalf("after phone disconnect cols = %d, want 300 (desktop now only client)", cols)
+	}
+
+	// Desktop also disconnects — should revert to default
+	sess.removeConnSize(desktopPtr)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 120 {
+		t.Fatalf("after all disconnect cols = %d, want 120 (default)", cols)
+	}
+}
+
+func TestMultiClientResizeMultipleClients(t *testing.T) {
+	dir := t.TempDir()
+	s, cs := newTestConfigStore(t)
+	mock := newMockSandbox(t)
+	tm := NewTerminalManager(s, cs, mock)
+
+	projID := "test-proj-multi"
+	proj := &types.Project{
+		ID:             projID,
+		Name:           "Test Project",
+		Path:           dir,
+		SandboxEnabled: true,
+	}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	taskID := "multi-task"
+	sess, err := tm.getOrCreate(taskID, taskID, dir, projID)
+	if err != nil {
+		t.Fatalf("getOrCreate: %v", err)
+	}
+
+	// Create dummy conn pointers to simulate three clients.
+	// Use a non-empty struct so Go doesn't coalesce allocations.
+	type dummyConn struct{ id int }
+	clientA := &dummyConn{id: 1} // desktop
+	clientB := &dummyConn{id: 2} // tablet
+	clientC := &dummyConn{id: 3} // phone
+
+	aPtr := (*websocket.Conn)(unsafe.Pointer(clientA))
+	bPtr := (*websocket.Conn)(unsafe.Pointer(clientB))
+	cPtr := (*websocket.Conn)(unsafe.Pointer(clientC))
+
+	// Three clients connect with different sizes
+	sess.handleResize(aPtr, 40, 120) // desktop
+	sess.handleResize(bPtr, 30, 80)  // tablet
+	sess.handleResize(cPtr, 20, 40)  // phone
+
+	// PTY should match smallest width (phone: 40 cols)
+	_, cols, _ := pty.Getsize(sess.ptmx)
+	if cols != 40 {
+		t.Fatalf("with 3 clients cols = %d, want 40 (smallest)", cols)
+	}
+
+	// Phone disconnects → tablet should win (80 cols)
+	sess.removeConnSize(cPtr)
+	_, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 80 {
+		t.Fatalf("after phone leaves cols = %d, want 80 (tablet)", cols)
+	}
+
+	// Tablet disconnects → desktop should win (120 cols)
+	sess.removeConnSize(bPtr)
+	_, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 120 {
+		t.Fatalf("after tablet leaves cols = %d, want 120 (desktop)", cols)
+	}
+
+	// Last client disconnects → should revert to default
+	sess.removeConnSize(aPtr)
+	_, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 120 {
+		t.Fatalf("after all leave cols = %d, want 120 (default)", cols)
 	}
 }
 

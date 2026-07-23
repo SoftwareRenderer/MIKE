@@ -29,6 +29,12 @@ const (
 	TerminalBufferSize = 4096
 )
 
+// connSize tracks the terminal dimensions reported by a connected client.
+type connSize struct {
+	rows uint16
+	cols uint16
+}
+
 // taskTerminal holds a persistent PTY session for a single task.
 type taskTerminal struct {
 	cmd        *exec.Cmd
@@ -36,9 +42,65 @@ type taskTerminal struct {
 	shell      *sandbox.ShellProcess // non-nil when running in sandbox
 	mu         sync.Mutex
 	conns      map[*websocket.Conn]bool
+	connSizes  map[*websocket.Conn]connSize // per-client terminal dimensions
 	buf        [][]byte
 	lastActive time.Time
 	onExit     func() // called when shell process exits, to remove session from manager
+}
+
+// defaultTermSize is the fallback PTY size when no clients have reported dimensions.
+const defaultCols = 120
+
+// minCols returns the smallest cols across all connected clients, or defaultCols if none.
+func (t *taskTerminal) minCols() uint16 {
+	min := uint16(0)
+	for _, sz := range t.connSizes {
+		if min == 0 || sz.cols < min {
+			min = sz.cols
+		}
+	}
+	if min == 0 {
+		return defaultCols
+	}
+	return min
+}
+
+// applySize sets the PTY to the given rows/cols if it differs from current size.
+func (t *taskTerminal) applySize(rows, cols uint16) {
+	curRows, curCols, err := pty.Getsize(t.ptmx)
+	if err != nil {
+		log.Printf("terminal getsz error: %v", err)
+		return
+	}
+	if uint16(curRows) == rows && uint16(curCols) == cols {
+		return
+	}
+	if err := pty.Setsize(t.ptmx, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+		log.Printf("terminal resize error: %v", err)
+	}
+}
+
+// handleResize records a client's terminal size and applies the smallest width
+// across all connected clients. This ensures narrow devices (phones) dictate
+// the PTY width so output wraps correctly on all screens.
+func (t *taskTerminal) handleResize(conn *websocket.Conn, rows, cols uint16) {
+	t.mu.Lock()
+	t.connSizes[conn] = connSize{rows: rows, cols: cols}
+	min := t.minCols()
+	// Use rows from the resizing client (most recent), cols from the minimum.
+	t.mu.Unlock()
+	t.applySize(rows, min)
+}
+
+// removeConnSize removes a client's tracked dimensions and re-applies the
+// smallest width among remaining clients.
+func (t *taskTerminal) removeConnSize(conn *websocket.Conn) {
+	t.mu.Lock()
+	delete(t.conns, conn)
+	delete(t.connSizes, conn)
+	min := t.minCols()
+	t.mu.Unlock()
+	t.applySize(40, min)
 }
 
 // sandboxOps is the subset of sandbox.SandboxManager methods used by the terminal manager.
@@ -209,6 +271,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 			ptmx:       shell.Ptmx,
 			shell:      shell,
 			conns:      make(map[*websocket.Conn]bool),
+			connSizes:  make(map[*websocket.Conn]connSize),
 			lastActive: time.Now(),
 		}
 		log.Printf("[terminal] %s started sandbox shell with image %s", sessionKey, imageToUse)
@@ -234,6 +297,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 			cmd:        cmd,
 			ptmx:       ptmx,
 			conns:      make(map[*websocket.Conn]bool),
+			connSizes:  make(map[*websocket.Conn]connSize),
 			lastActive: time.Now(),
 		}
 	}
@@ -499,9 +563,7 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 	}
 
 	defer func() {
-		session.mu.Lock()
-		delete(session.conns, conn)
-		session.mu.Unlock()
+		session.removeConnSize(conn)
 	}()
 
 	// Ping/pong keepalive
@@ -547,10 +609,7 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 		case "input":
 			session.ptmx.Write([]byte(msg.Data))
 		case "resize":
-			sz := &pty.Winsize{Rows: uint16(msg.Rows), Cols: uint16(msg.Cols)}
-			if err := pty.Setsize(session.ptmx, sz); err != nil {
-				log.Printf("terminal resize error: %v", err)
-			}
+			session.handleResize(conn, uint16(msg.Rows), uint16(msg.Cols))
 		}
 	}
 }
