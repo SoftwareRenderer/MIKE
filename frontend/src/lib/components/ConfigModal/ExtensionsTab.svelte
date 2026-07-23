@@ -4,6 +4,7 @@
     import type { BuildProgressEvent } from '$lib/api';
     import { getConfig } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
+    import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
@@ -498,120 +499,106 @@
         </div>
     {/if}
 
-    <!-- Add Extension Form Overlay -->
+    <!-- Add Extension Modal -->
     {#if showAddForm}
-        <div class="edit-overlay" role="button" tabindex="0" onclick={() => { showAddForm = false; resetAddForm(); }} onkeydown={(e) => e.key === 'Enter' && (showAddForm = false)}>
-            <div class="edit-form" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
-                <div class="edit-header">
-                    <h3>Add Extension</h3>
-                    <button class="btn btn-icon" onclick={() => { showAddForm = false; resetAddForm(); }}>&times;</button>
-                </div>
+        {#snippet addFooter()}
+            <button type="button" class="btn-secondary" onclick={() => { showAddForm = false; resetAddForm(); }}>Cancel</button>
+            <button type="button" class="btn-primary" onclick={handleAdd} disabled={adding}>
+                {adding ? 'Adding...' : 'Add'}
+            </button>
+        {/snippet}
 
-                <div class="config-fields">
-                    <div class="config-field">
-                        <label class="field-label" for="add-name">Name *</label>
-                        <input id="add-name" type="text" value={addForm.name} oninput={(e) => addForm.name = (e.target as HTMLInputElement).value} class="config-input" placeholder="gopls" />
-                    </div>
-                    <div class="config-field">
-                        <label class="field-label" for="add-display-name">Display Name *</label>
-                        <input id="add-display-name" type="text" value={addForm.displayName} oninput={(e) => addForm.displayName = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Language Server" />
-                    </div>
-                    <div class="config-field">
-                        <label class="field-label" for="add-type">Type</label>
-                        <select id="add-type" value={addForm.type} onchange={(e) => addForm.type = (e.target as HTMLSelectElement).value as 'lsp' | 'ui'} class="config-input">
-                            <option value="lsp">LSP</option>
-                            <option value="ui">UI</option>
-                        </select>
-                    </div>
-                    <div class="config-field">
-                        <label class="field-label" for="add-description">Description</label>
-                        <input id="add-description" type="text" value={addForm.description} oninput={(e) => addForm.description = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go language server" />
-                    </div>
-                    <div class="config-field">
-                        <label class="field-label" for="add-author">Author</label>
-                        <input id="add-author" type="text" value={addForm.author} oninput={(e) => addForm.author = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Team" />
-                    </div>
-                    <div class="config-field">
-                        <label class="field-label" for="add-license-url">License URL</label>
-                        <input id="add-license-url" type="url" value={addForm.licenseUrl} oninput={(e) => addForm.licenseUrl = (e.target as HTMLInputElement).value} class="config-input" placeholder="https://..." />
-                    </div>
-                    {#if addForm.type === 'lsp'}
-                        <div class="config-field">
-                            <label class="field-label" for="add-language">Language</label>
-                            <input id="add-language" type="text" value={addForm.language} oninput={(e) => addForm.language = (e.target as HTMLInputElement).value} class="config-input" placeholder="go" />
-                        </div>
-                        <div class="config-field">
-                            <label class="field-label" for="add-file-extensions">File Extensions (comma-separated)</label>
-                            <input id="add-file-extensions" type="text" value={addForm.fileExtensions} oninput={(e) => addForm.fileExtensions = (e.target as HTMLInputElement).value} class="config-input" placeholder="go" />
-                        </div>
-                    {/if}
+        <BaseModal title="Add Extension" width="480px" footer={addFooter} onClose={() => { showAddForm = false; resetAddForm(); }}>
+            <div class="config-fields">
+                <div class="config-field">
+                    <label class="field-label" for="add-name">Name *</label>
+                    <input id="add-name" type="text" value={addForm.name} oninput={(e) => addForm.name = (e.target as HTMLInputElement).value} class="config-input" placeholder="gopls" />
                 </div>
-
-                <div class="edit-actions">
-                    <button class="btn btn-secondary" onclick={() => { showAddForm = false; resetAddForm(); }}>Cancel</button>
-                    <button class="btn btn-primary" onclick={handleAdd} disabled={adding}>
-                        {adding ? 'Adding...' : 'Add'}
-                    </button>
+                <div class="config-field">
+                    <label class="field-label" for="add-display-name">Display Name *</label>
+                    <input id="add-display-name" type="text" value={addForm.displayName} oninput={(e) => addForm.displayName = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Language Server" />
                 </div>
+                <div class="config-field">
+                    <label class="field-label" for="add-type">Type</label>
+                    <select id="add-type" value={addForm.type} onchange={(e) => addForm.type = (e.target as HTMLSelectElement).value as 'lsp' | 'ui'} class="config-input">
+                        <option value="lsp">LSP</option>
+                        <option value="ui">UI</option>
+                    </select>
+                </div>
+                <div class="config-field">
+                    <label class="field-label" for="add-description">Description</label>
+                    <input id="add-description" type="text" value={addForm.description} oninput={(e) => addForm.description = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go language server" />
+                </div>
+                <div class="config-field">
+                    <label class="field-label" for="add-author">Author</label>
+                    <input id="add-author" type="text" value={addForm.author} oninput={(e) => addForm.author = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Team" />
+                </div>
+                <div class="config-field">
+                    <label class="field-label" for="add-license-url">License URL</label>
+                    <input id="add-license-url" type="url" value={addForm.licenseUrl} oninput={(e) => addForm.licenseUrl = (e.target as HTMLInputElement).value} class="config-input" placeholder="https://..." />
+                </div>
+                {#if addForm.type === 'lsp'}
+                    <div class="config-field">
+                        <label class="field-label" for="add-language">Language</label>
+                        <input id="add-language" type="text" value={addForm.language} oninput={(e) => addForm.language = (e.target as HTMLInputElement).value} class="config-input" placeholder="go" />
+                    </div>
+                    <div class="config-field">
+                        <label class="field-label" for="add-file-extensions">File Extensions (comma-separated)</label>
+                        <input id="add-file-extensions" type="text" value={addForm.fileExtensions} oninput={(e) => addForm.fileExtensions = (e.target as HTMLInputElement).value} class="config-input" placeholder="go" />
+                    </div>
+                {/if}
             </div>
-        </div>
+        </BaseModal>
     {/if}
 
-    <!-- Edit Form Overlay -->
+    <!-- Edit Extension Modal -->
     {#if editingExtension}
-        <div class="edit-overlay" role="button" tabindex="0" onclick={closeEdit} onkeydown={(e) => e.key === 'Enter' && closeEdit()}>
-            <div class="edit-form" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
-                <div class="edit-header">
-                    <h3>Edit: {editingExtension.manifest.display_name || editingExtension.name}</h3>
-                    <button class="btn btn-icon" onclick={closeEdit}>&times;</button>
-                </div>
+        {#snippet editFooter()}
+            <button type="button" class="btn-secondary" onclick={closeEdit}>Cancel</button>
+            <button type="button" class="btn-primary" onclick={handleSave} disabled={saving}>
+                {saving ? 'Saving...' : 'Save'}
+            </button>
+        {/snippet}
 
-                <!-- Config Schema Fields -->
-                {#if getConfigSchemaFields(editingExtension).length > 0}
-                    <div class="config-fields">
-                        <h4>Configuration</h4>
-                        {#each getConfigSchemaFields(editingExtension) as field}
-                            <div class="config-field">
-                                <label class="field-label" for="edit-config-{field.key}">{field.title}</label>
-                                {#if field.type === 'number'}
-                                    <input
-                                        id="edit-config-{field.key}"
-                                        type="number"
-                                        value={editConfig[field.key] ?? field.default ?? ''}
-                                        oninput={(e) => editConfig[field.key] = Number((e.target as HTMLInputElement).value)}
-                                        class="config-input"
+        <BaseModal title={`Edit: ${editingExtension.manifest.display_name || editingExtension.name}`} width="480px" footer={editFooter} onClose={closeEdit}>
+            <!-- Config Schema Fields -->
+            {#if getConfigSchemaFields(editingExtension).length > 0}
+                <div class="config-fields">
+                    <h4>Configuration</h4>
+                    {#each getConfigSchemaFields(editingExtension) as field}
+                        <div class="config-field">
+                            <label class="field-label" for="edit-config-{field.key}">{field.title}</label>
+                            {#if field.type === 'number'}
+                                <input
+                                    id="edit-config-{field.key}"
+                                    type="number"
+                                    value={editConfig[field.key] ?? field.default ?? ''}
+                                    oninput={(e) => editConfig[field.key] = Number((e.target as HTMLInputElement).value)}
+                                    class="config-input"
+                                />
+                            {:else if field.type === 'boolean'}
+                                <label class="toggle-label">
+                                    <ToggleSwitch
+                                        checked={editConfig[field.key] ?? field.default ?? false}
+                                        onChange={() => editConfig[field.key] = !(editConfig[field.key] ?? field.default ?? false)}
                                     />
-                                {:else if field.type === 'boolean'}
-                                    <label class="toggle-label">
-                                        <ToggleSwitch
-                                            checked={editConfig[field.key] ?? field.default ?? false}
-                                            onChange={() => editConfig[field.key] = !(editConfig[field.key] ?? field.default ?? false)}
-                                        />
-                                    </label>
-                                {:else}
-                                    <input
-                                        id="edit-config-{field.key}"
-                                        type="text"
-                                        value={editConfig[field.key] ?? field.default ?? ''}
-                                        oninput={(e) => editConfig[field.key] = (e.target as HTMLInputElement).value}
-                                        class="config-input"
-                                    />
-                                {/if}
-                            </div>
-                        {/each}
-                    </div>
-                {:else}
-                    <p class="no-schema">No configurable fields for this extension.</p>
-                {/if}
-
-                <div class="edit-actions">
-                    <button class="btn btn-secondary" onclick={closeEdit}>Cancel</button>
-                    <button class="btn btn-primary" onclick={handleSave} disabled={saving}>
-                        {saving ? 'Saving...' : 'Save'}
-                    </button>
+                                </label>
+                            {:else}
+                                <input
+                                    id="edit-config-{field.key}"
+                                    type="text"
+                                    value={editConfig[field.key] ?? field.default ?? ''}
+                                    oninput={(e) => editConfig[field.key] = (e.target as HTMLInputElement).value}
+                                    class="config-input"
+                                />
+                            {/if}
+                        </div>
+                    {/each}
                 </div>
-            </div>
-        </div>
+            {:else}
+                <p class="no-schema">No configurable fields for this extension.</p>
+            {/if}
+        </BaseModal>
     {/if}
 
     <!-- Browse View -->
@@ -1105,41 +1092,6 @@
         color: #8b949e;
     }
 
-    /* Edit form overlay */
-    .edit-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.6);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 100;
-    }
-
-    .edit-form {
-        background: #161b22;
-        border: 1px solid #30363d;
-        border-radius: 12px;
-        padding: 1.5rem;
-        width: 90%;
-        max-width: 480px;
-        max-height: 80vh;
-        overflow-y: auto;
-    }
-
-    .edit-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1.5rem;
-    }
-
-    .edit-header h3 {
-        margin: 0;
-        font-size: 1.1rem;
-        color: #c9d1d9;
-    }
-
     .config-fields {
         display: flex;
         flex-direction: column;
@@ -1181,9 +1133,4 @@
         margin-bottom: 1.5rem;
     }
 
-    .edit-actions {
-        display: flex;
-        gap: 0.5rem;
-        justify-content: flex-end;
-    }
 </style>
