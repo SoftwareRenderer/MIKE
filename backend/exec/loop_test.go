@@ -701,7 +701,7 @@ func TestBuildHint_Statement(t *testing.T) {
 	if hint == "" {
 		t.Fatal("LoopStatement should have a hint message")
 	}
-	expected := "You made a statement without using a tool. Take action — use `read_file`, `write_file`, `edit_file`, or `bash` to make progress, `ask_question` if clarification/approval is needed, or `request_review` if the task is complete."
+	expected := "Is the task complete? Use `ask_question` if clarification/approval is needed, or `request_review` if the task is complete. Otherwise use `read_file`, `write_file`, `edit_file`, or `bash` to make progress."
 	if hint != expected {
 		t.Errorf("unexpected hint: %s", hint)
 	}
@@ -2603,9 +2603,9 @@ func TestBuildMessagesFromDB_ReasoningOnlyWithToolCalls(t *testing.T) {
 	taskMsgs := []types.TaskMessage{
 		{Role: "user", Content: "Read config and fix it"},
 		{Role: "assistant", Content: "", ReasoningContent: "I need to read the config first to understand the issue"},
-		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"read_file","raw_args":"{\"path\":\"config.yaml\"}"}` , ToolResult: `{"output":"key: value","success":true,"duration":5}`},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"read_file","raw_args":"{\"path\":\"config.yaml\"}"}`, ToolResult: `{"output":"key: value","success":true,"duration":5}`},
 		{Role: "assistant", Content: "", ReasoningContent: "Now I'll fix the config"},
-		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"edit_file","raw_args":"{\"path\":\"config.yaml\"}"}` , ToolResult: `{"output":"edited","success":true,"duration":8}`},
+		{Role: "tool_call", ToolCalls: `{"tool_id":"call_2","tool_name":"edit_file","raw_args":"{\"path\":\"config.yaml\"}"}`, ToolResult: `{"output":"edited","success":true,"duration":8}`},
 	}
 
 	task := &types.Task{OperatingMode: "act"}
