@@ -394,8 +394,7 @@
         {/if}
         <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={handleMentionInput} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
         {#each descriptionSlots as slot}
-            <svelte:component
-                this={slot.component}
+            <slot.component
                 {...slot.context}
                 config={slot.config}
                 prompt={prompt}
