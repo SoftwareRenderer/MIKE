@@ -12,7 +12,7 @@ test.describe.serial('ModeSelect component', () => {
     await page.waitForSelector('.card', { timeout: 10000 });
   });
 
-  test('should open mode dropdown showing Act/Plan/Ideate options', async ({ page }) => {
+  test('should open mode dropdown showing Act/Plan/Explore options', async ({ page }) => {
     // Open the Create Task modal
     await page.locator('.add-task-btn').first().click();
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
@@ -31,7 +31,7 @@ test.describe.serial('ModeSelect component', () => {
     // Verify the labels
     await expect(options.nth(0)).toContainText('Act');
     await expect(options.nth(1)).toContainText('Plan');
-    await expect(options.nth(2)).toContainText('Ideate');
+    await expect(options.nth(2)).toContainText('Explore');
 
     // Close modal
     await page.locator('.modal .btn-secondary').click();
@@ -64,7 +64,7 @@ test.describe.serial('ModeSelect component', () => {
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
   });
 
-  test('should switch to Ideate mode', async ({ page }) => {
+  test('should switch to Explore mode', async ({ page }) => {
     // Open the Create Task modal
     await page.locator('.add-task-btn').first().click();
     await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
@@ -73,11 +73,11 @@ test.describe.serial('ModeSelect component', () => {
     await page.locator('.mode-btn').click();
     await expect(page.locator('.mode-dropdown')).toBeVisible({ timeout: 5000 });
 
-    // Select Ideate mode
+    // Select Explore mode
     await page.locator('.mode-option.explore').click();
 
-    // Verify the button now shows "Ideate"
-    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Ideate');
+    // Verify the button now shows "Explore"
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Explore');
 
     // Verify the explore icon is active
     await expect(page.locator('.mode-btn .mode-icon.explore')).toBeVisible();
