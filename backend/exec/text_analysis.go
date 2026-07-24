@@ -32,9 +32,10 @@ func (d *blockDetector) check(text string) bool {
 		return false
 	}
 
-	// Check for repetitions of blocks from 10 to 100 characters.
+	// Check for repetitions of blocks from 22 to 100 characters.
 	// A loop is detected if the same block repeats 3 times consecutively.
-	for size := 10; size <= len(d.buffer)/3; size++ {
+	// Minimum of 22 avoids false positives on short repeated fragments.
+	for size := 22; size <= len(d.buffer)/3; size++ {
 		block := d.buffer[len(d.buffer)-size:]
 		if len(d.buffer) >= 3*size &&
 			d.buffer[len(d.buffer)-2*size:len(d.buffer)-size] == block &&
