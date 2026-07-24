@@ -39,7 +39,7 @@
         "version": "1.0.0",
         "type": "css",
         "display_name": "Light Mode",
-        "description": "Light color scheme for the Kanban UI. Overrides all CSS variables for a light-mode appearance.",
+        "description": "Light color scheme for the Kanban UI.",
         "author": "SoftwareRenderer",
         "homepage": "https://github.com/SoftwareRenderer",
         "manifest_url": "mike-light/manifest.json"
