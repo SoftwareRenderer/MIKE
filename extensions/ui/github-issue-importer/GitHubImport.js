@@ -1,5 +1,5 @@
 /**
- * GitHub Issue Importer — plain JS extension (no Svelte dependency).
+ * GitHub Issue Importer
  *
  * Listens for paste events on the task description textarea and imports
  * GitHub issue content when a GitHub issue URL is pasted.

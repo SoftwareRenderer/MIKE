@@ -5,7 +5,7 @@
     "homepage": "https://github.com/SoftwareRenderer",
     "deprecated": false,
     "ui": {
-        "module_url": "/extensions/github-issue-importer/GitHubImport.js",
+        "module_url": "/extensions/ui/github-issue-importer/GitHubImport.js",
         "injection_points": ["create-task"]
     },
     "config_schema": {

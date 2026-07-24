@@ -5,6 +5,6 @@
     "homepage": "https://github.com/SoftwareRenderer",
     "deprecated": false,
     "css": {
-        "css_url": "/extensions/mike-light/styles.css"
+        "css_url": "/extensions/css/mike-light/styles.css"
     }
 }
