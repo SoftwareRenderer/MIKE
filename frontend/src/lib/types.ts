@@ -182,6 +182,7 @@ export interface Board {
 export interface Config {
     workspace_dir: string;
     database_path: string;
+    version: string;
     providers: Provider[];
     default_provider: string;
     default_auto_commit?: boolean;

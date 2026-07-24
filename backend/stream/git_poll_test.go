@@ -39,7 +39,7 @@ func TestBranchWatcherLifecycle(t *testing.T) {
 	}
 	defer s.Close()
 
-	cfgStore := config.NewConfigStore(s, dbPath)
+	cfgStore := config.NewConfigStore(s, dbPath, "test")
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
@@ -320,7 +320,7 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	}
 	defer s.Close()
 
-	cfgStore := config.NewConfigStore(s, dbPath)
+	cfgStore := config.NewConfigStore(s, dbPath, "test")
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
@@ -414,7 +414,7 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 	}
 	defer s.Close()
 
-	cfgStore := config.NewConfigStore(s, dbPath)
+	cfgStore := config.NewConfigStore(s, dbPath, "test")
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
@@ -529,7 +529,7 @@ func TestWorktreeWatcherWorkerPoolBounds(t *testing.T) {
 	}
 	defer s.Close()
 
-	cfgStore := config.NewConfigStore(s, dbPath)
+	cfgStore := config.NewConfigStore(s, dbPath, "test")
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)

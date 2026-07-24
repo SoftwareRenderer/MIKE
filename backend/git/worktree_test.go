@@ -41,7 +41,7 @@ func setupTestRepo(t *testing.T) (string, string, *store.Store, *config.ConfigSt
 	}
 	t.Cleanup(func() { s.Close() })
 
-	cfgStore := config.NewConfigStore(s, dbPath)
+	cfgStore := config.NewConfigStore(s, dbPath, "test")
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)

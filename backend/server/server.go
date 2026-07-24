@@ -72,7 +72,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		return nil, fmt.Errorf("create store: %w", err)
 	}
 
-	cfgStore := config.NewConfigStore(store, dbPath)
+	cfgStore := config.NewConfigStore(store, dbPath, Version)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("get config: %w", err)

@@ -37,7 +37,7 @@ func setupStashTest(t *testing.T) (string, string, string, *store.Store, *config
 	}
 	t.Cleanup(func() { s.Close() })
 
-	cfgStore := config.NewConfigStore(s, dbPath)
+	cfgStore := config.NewConfigStore(s, dbPath, "test")
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)

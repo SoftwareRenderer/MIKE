@@ -656,7 +656,7 @@
                 <div class="about-header">
                     <div class="about-icon">{@html pwaIcon}</div>
                     <div>
-                        <h3 class="section-label">MIKE: Integrated Kanban Environment</h3>
+                        <h3 class="section-label">MIKE: Integrated Kanban Environment <span class="about-version">{config?.version || 'dev'}</span></h3>
                         <p class="about-description">© 2026 Mike Wren</p>
                         <p class="about-description">
                             <a href="https://github.com/SoftwareRenderer" target="_blank" rel="noopener noreferrer">
@@ -1010,6 +1010,19 @@
         font-size: 0.875rem;
         color: var(--color-text-secondary);
         line-height: 1.6;
+    }
+    .about-version {
+        display: inline-block;
+        font-size: 0.75rem;
+        font-weight: 500;
+        font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
+        text-transform: none;
+        color: var(--color-text-tertiary);
+        background: var(--color-surface-3);
+        padding: 2px 8px;
+        border-radius: 9999px;
+        vertical-align: middle;
+        margin-left: 4px;
     }
 
     </style>

@@ -16,14 +16,15 @@ import (
 
 // ConfigStore wraps Store for config-specific operations.
 type ConfigStore struct {
-	store  *store.Store
-	dbPath string
+	store   *store.Store
+	dbPath  string
+	version string
 }
 
 // NewConfigStore creates a new ConfigStore.
-func NewConfigStore(store *store.Store, dbPath string) *ConfigStore {
+func NewConfigStore(store *store.Store, dbPath, version string) *ConfigStore {
 	abs, _ := filepath.Abs(dbPath)
-	return &ConfigStore{store: store, dbPath: abs}
+	return &ConfigStore{store: store, dbPath: abs, version: version}
 }
 
 // GetConfig retrieves the full server configuration.
@@ -160,17 +161,18 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 
 // configResponse wraps Config with additional metadata for API responses.
 type configResponse struct {
-	WorkspaceDir          string           `json:"workspace_dir"`
-	DatabasePath          string           `json:"database_path"`
-	RegistryURL           string           `json:"registry_url"`
-	Providers             []types.Provider `json:"providers"`
-	DefaultProvider       string           `json:"default_provider"`
-	DefaultAutoCommit     *bool            `json:"default_auto_commit"`
-	DefaultAutoMerge      *bool            `json:"default_auto_merge"`
-	DefaultSubtasksAutoMerge *bool         `json:"default_subtasks_auto_merge"`
-	DefaultOperatingMode   *string         `json:"default_operating_mode"`
-	DefaultMaxFailedTurns *int             `json:"default_max_failed_turns,omitempty"`
-	EncryptionEnabled     bool             `json:"encryption_enabled"`
+	WorkspaceDir           string           `json:"workspace_dir"`
+	DatabasePath           string           `json:"database_path"`
+	RegistryURL            string           `json:"registry_url"`
+	Version                string           `json:"version"`
+	Providers              []types.Provider `json:"providers"`
+	DefaultProvider        string           `json:"default_provider"`
+	DefaultAutoCommit      *bool            `json:"default_auto_commit"`
+	DefaultAutoMerge       *bool            `json:"default_auto_merge"`
+	DefaultSubtasksAutoMerge *bool          `json:"default_subtasks_auto_merge"`
+	DefaultOperatingMode   *string          `json:"default_operating_mode"`
+	DefaultMaxFailedTurns  *int             `json:"default_max_failed_turns,omitempty"`
+	EncryptionEnabled      bool             `json:"encryption_enabled"`
 }
 
 func maskedToken(token string) string {
@@ -205,17 +207,18 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		// Mask API keys before sending to client
 		maskAPIKeys(cfg.Providers)
 		resp := configResponse{
-			WorkspaceDir:          cfg.WorkspaceDir,
-			DatabasePath:          cfg.DatabasePath,
-			RegistryURL:           cfg.RegistryURL,
-			Providers:             cfg.Providers,
-			DefaultProvider:       cfg.DefaultProvider,
-			DefaultAutoCommit:     cfg.DefaultAutoCommit,
-			DefaultAutoMerge:      cfg.DefaultAutoMerge,
+			WorkspaceDir:           cfg.WorkspaceDir,
+			DatabasePath:           cfg.DatabasePath,
+			RegistryURL:            cfg.RegistryURL,
+			Version:                cs.version,
+			Providers:              cfg.Providers,
+			DefaultProvider:        cfg.DefaultProvider,
+			DefaultAutoCommit:      cfg.DefaultAutoCommit,
+			DefaultAutoMerge:       cfg.DefaultAutoMerge,
 			DefaultSubtasksAutoMerge: cfg.DefaultSubtasksAutoMerge,
 			DefaultOperatingMode:   cfg.DefaultOperatingMode,
-			DefaultMaxFailedTurns: cfg.DefaultMaxFailedTurns,
-			EncryptionEnabled:     crypto.IsEnabled(),
+			DefaultMaxFailedTurns:  cfg.DefaultMaxFailedTurns,
+			EncryptionEnabled:      crypto.IsEnabled(),
 		}
 		httputil.JSONResponse(w, http.StatusOK, resp)
 	case http.MethodPut:
@@ -293,17 +296,18 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		// Mask API keys before sending response
 		maskAPIKeys(current.Providers)
 		resp := configResponse{
-			WorkspaceDir:          current.WorkspaceDir,
-			DatabasePath:          current.DatabasePath,
-			RegistryURL:           current.RegistryURL,
-			Providers:             current.Providers,
-			DefaultProvider:       current.DefaultProvider,
-			DefaultAutoCommit:     current.DefaultAutoCommit,
-			DefaultAutoMerge:      current.DefaultAutoMerge,
+			WorkspaceDir:           current.WorkspaceDir,
+			DatabasePath:           current.DatabasePath,
+			RegistryURL:            current.RegistryURL,
+			Version:                cs.version,
+			Providers:              current.Providers,
+			DefaultProvider:        current.DefaultProvider,
+			DefaultAutoCommit:      current.DefaultAutoCommit,
+			DefaultAutoMerge:       current.DefaultAutoMerge,
 			DefaultSubtasksAutoMerge: current.DefaultSubtasksAutoMerge,
 			DefaultOperatingMode:   current.DefaultOperatingMode,
-			DefaultMaxFailedTurns: current.DefaultMaxFailedTurns,
-			EncryptionEnabled:     crypto.IsEnabled(),
+			DefaultMaxFailedTurns:  current.DefaultMaxFailedTurns,
+			EncryptionEnabled:      crypto.IsEnabled(),
 		}
 		httputil.JSONResponse(w, http.StatusOK, resp)
 	default:
