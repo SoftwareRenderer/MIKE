@@ -20,15 +20,15 @@
     /* Borders */
     --color-border: rgba(0, 0, 0, 0.12);
     --color-border-subtle: #d0d7de;
-    --color-border-bright: rgba(0, 0, 0, 0.25);
+    --color-border-bright: #8b949e;
     --color-border-hover: #8b949e;
     --color-border-focus: #0969da;
 
     /* Text */
     --color-text-primary: #1f2328;
     --color-text-secondary: #656d76;
-    --color-text-tertiary: #8c959f;
-    --color-text-muted: #8b949e;
+    --color-text-tertiary: #727272;
+    --color-text-muted: #727272;
     --color-text-inverse: #ffffff;
 
     /* Accent */
@@ -48,7 +48,7 @@
     --color-status-red-bg: rgba(207, 34, 46, 0.1);
     --color-status-purple: #8250df;
     --color-status-yellow: #9a6700;
-    --color-status-amber: #bf8d00;
+    --color-status-amber: #9a6700;
     --color-status-bg-blue: rgba(9, 105, 218, 0.1);
     --color-status-bg-green: rgba(26, 127, 55, 0.1);
     --color-status-bg-orange: rgba(188, 76, 0, 0.1);
@@ -78,7 +78,7 @@
 
     /* Diff */
     --color-diff-add-bg: rgba(26, 127, 55, 0.1);
-    --color-diff-add-text: #1a7f37;
+    --color-diff-add-text: #187532;
     --color-diff-del-bg: rgba(207, 34, 46, 0.1);
     --color-diff-del-text: #cf222e;
     --color-diff-hunk-bg: rgba(9, 105, 218, 0.08);
@@ -91,7 +91,7 @@
     --cm-property: #8250DF;
     --cm-string: #0A3069;
     --cm-number: #0550AE;
-    --cm-comment: #6E7781;
+    --cm-comment: #727272;
     --cm-operator: #CF222E;
     --cm-punctuation: #24292F;
     --cm-class: #953800;
@@ -100,8 +100,8 @@
     --cm-attr-name: #0550AE;
     --cm-attr-value: #0A3069;
     --cm-gutter-bg: #f6f8fa;
-    --cm-gutter-text: #b9babc;
-    --cm-gutter-active: #6e7781;
+    --cm-gutter-text: #727272;
+    --cm-gutter-active: #5c6570;
     --cm-indent-guide: #e8e8e8;
     --cm-cursor: #24292f;
     --cm-search-match: rgba(220, 160, 0, 0.25);
