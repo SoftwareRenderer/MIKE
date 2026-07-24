@@ -1,7 +1,8 @@
 {
     "display_name": "Light Mode",
     "description": "Light color scheme for the Kanban UI. Overrides all CSS variables for a light-mode appearance.",
-    "author": "Kanban",
+    "author": "SoftwareRenderer",
+    "homepage": "https://github.com/SoftwareRenderer",
     "deprecated": false,
     "css": {
         "css_url": "/extensions/mike-light/styles.css"
