@@ -74,13 +74,14 @@ type ConfigSchema struct {
 
 // SchemaProp describes a single property in a config schema.
 type SchemaProp struct {
-	Type        string  `json:"type"`
-	Title       string  `json:"title,omitempty"`
-	Description string  `json:"description,omitempty"`
-	Default     any     `json:"default,omitempty"`
+	Type        string   `json:"type"`
+	Title       string   `json:"title,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Default     any      `json:"default,omitempty"`
 	Minimum     *float64 `json:"minimum,omitempty"`
 	Maximum     *float64 `json:"maximum,omitempty"`
-	Enum        []any   `json:"enum,omitempty"`
+	Enum        []any    `json:"enum,omitempty"`
+	Sensitive   bool     `json:"sensitive,omitempty"` // if true, value is encrypted at rest
 }
 
 // ContainerConfig defines how the extension container is built/run.

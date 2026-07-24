@@ -293,7 +293,7 @@
     }
 
     // Get config schema fields for an extension
-    function getConfigSchemaFields(ext: Extension): Array<{ key: string; title: string; type: string; default?: any }> {
+    function getConfigSchemaFields(ext: Extension): Array<{ key: string; title: string; type: string; default?: any; sensitive?: boolean }> {
         const schema = ext.manifest.config_schema;
         if (!schema || !schema.properties) return [];
         return Object.entries(schema.properties).map(([key, val]: [string, any]) => ({
@@ -301,6 +301,7 @@
             title: val.title || key,
             type: val.type || 'string',
             default: val.default,
+            sensitive: val.sensitive || false,
         }));
     }
 
@@ -590,7 +591,7 @@
                             {:else}
                                 <input
                                     id="edit-config-{field.key}"
-                                    type="text"
+                                    type={field.sensitive ? 'password' : 'text'}
                                     value={editConfig[field.key] ?? field.default ?? ''}
                                     oninput={(e) => editConfig[field.key] = (e.target as HTMLInputElement).value}
                                     class="config-input"
