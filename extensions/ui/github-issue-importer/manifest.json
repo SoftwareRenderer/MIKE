@@ -14,7 +14,8 @@
             "github_token": {
                 "type": "string",
                 "title": "GitHub Personal Access Token",
-                "description": "Used to fetch public/private GitHub issue content. Leave empty for public issues."
+                "description": "Used to fetch public/private GitHub issue content. Leave empty for public issues.",
+                "sensitive": true
             }
         }
     }

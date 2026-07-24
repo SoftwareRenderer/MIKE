@@ -480,3 +480,247 @@ test.describe('TypeScript Language Server Extension', () => {
     expect(tsEntry.manifest_url).toBe('typescript-language-server/manifest.json');
   });
 });
+
+// ============================================================
+// Sensitive Config Encryption
+// ============================================================
+
+test.describe('Sensitive Config Encryption', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+  });
+
+  test('should mask sensitive config values in API response', async ({ page }) => {
+    // Create a UI extension with a sensitive config field
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `sensitive-test-${Date.now()}`,
+        type: 'ui',
+        version: '1.0.0',
+        manifest: {
+          display_name: 'Sensitive Config Test',
+          description: 'Test extension with sensitive config',
+          author: 'Test',
+          config_schema: {
+            type: 'object',
+            properties: {
+              github_token: {
+                type: 'string',
+                title: 'GitHub Token',
+                sensitive: true,
+              },
+              repo_url: {
+                type: 'string',
+                title: 'Repo URL',
+              },
+            },
+          },
+        },
+        config: {
+          github_token: 'ghp_secret-token-12345',
+          repo_url: 'https://github.com/user/repo',
+        },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // API response should mask the sensitive value but show the non-sensitive one
+    expect(createResult.data.config.github_token).not.toBe('ghp_secret-token-12345');
+    expect(createResult.data.config.github_token).toMatch(/•/); // masked with bullets
+    expect(createResult.data.config.repo_url).toBe('https://github.com/user/repo');
+
+    // Verify via GET as well
+    const getResult = await page.evaluate(async (id) => {
+      const res = await fetch(`/api/extensions/${id}`);
+      return res.json();
+    }, extId);
+    expect(getResult.config.github_token).not.toBe('ghp_secret-token-12345');
+    expect(getResult.config.github_token).toMatch(/•/);
+    expect(getResult.config.repo_url).toBe('https://github.com/user/repo');
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
+  test('should preserve sensitive value when masked placeholder sent on update', async ({ page }) => {
+    // Create extension with sensitive config
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `preserve-test-${Date.now()}`,
+        type: 'ui',
+        version: '1.0.0',
+        manifest: {
+          display_name: 'Preserve Test',
+          description: '',
+          author: 'Test',
+          config_schema: {
+            type: 'object',
+            properties: {
+              api_key: { type: 'string', title: 'API Key', sensitive: true },
+              username: { type: 'string', title: 'Username' },
+            },
+          },
+        },
+        config: {
+          api_key: 'super-secret-key',
+          username: 'alice',
+        },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Simulate frontend update: send masked value for api_key + changed username
+    // The masked value is 10 bullets (••••••••••)
+    const maskedValue = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+    const updateResult = await csrfFetch(page, `/api/extensions/${extId}`, {
+      method: 'PUT',
+      body: {
+        config: {
+          api_key: maskedValue, // masked placeholder (user didn't change this field)
+          username: 'bob',       // user changed this
+        },
+      },
+    });
+    expect(updateResult.ok).toBe(true);
+
+    // Verify the original secret was preserved (not overwritten with bullets)
+    const getResult = await page.evaluate(async (id) => {
+      const res = await fetch(`/api/extensions/${id}`);
+      return res.json();
+    }, extId);
+    // The API response still masks the value, so we check it's still masked (not empty)
+    expect(getResult.config.api_key).toMatch(/•/);
+    // And the non-sensitive field was updated
+    expect(getResult.config.username).toBe('bob');
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
+  test('should update sensitive value when new value provided', async ({ page }) => {
+    // Create extension with sensitive config
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `update-secret-${Date.now()}`,
+        type: 'ui',
+        version: '1.0.0',
+        manifest: {
+          display_name: 'Update Secret Test',
+          description: '',
+          author: 'Test',
+          config_schema: {
+            type: 'object',
+            properties: {
+              api_key: { type: 'string', title: 'API Key', sensitive: true },
+            },
+          },
+        },
+        config: {
+          api_key: 'old-secret-key',
+        },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Update with a genuinely new value (not the masked placeholder)
+    const updateResult = await csrfFetch(page, `/api/extensions/${extId}`, {
+      method: 'PUT',
+      body: {
+        config: {
+          api_key: 'new-secret-key',
+        },
+      },
+    });
+    expect(updateResult.ok).toBe(true);
+
+    // Verify the new value is stored (response still masks it)
+    const getResult = await page.evaluate(async (id) => {
+      const res = await fetch(`/api/extensions/${id}`);
+      return res.json();
+    }, extId);
+    expect(getResult.config.api_key).not.toBe('new-secret-key'); // still masked in response
+    expect(getResult.config.api_key).toMatch(/•/);
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
+  test('should preserve sensitive value via UI edit when user makes no changes and saves', async ({ page }) => {
+    // Create a UI extension with a sensitive config field
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `ui-edit-${Date.now()}`,
+        type: 'ui',
+        version: '1.0.0',
+        manifest: {
+          display_name: 'UI Edit Test',
+          description: 'Test extension for UI edit flow',
+          author: 'Test',
+          config_schema: {
+            type: 'object',
+            properties: {
+              github_token: {
+                type: 'string',
+                title: 'GitHub Token',
+                sensitive: true,
+              },
+              repo_url: {
+                type: 'string',
+                title: 'Repo URL',
+              },
+            },
+          },
+        },
+        config: {
+          github_token: 'ghp_real-secret-token',
+          repo_url: 'https://github.com/user/repo',
+        },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Open settings > Extensions tab
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Wait for extension to appear in the installed list
+    await expect(page.locator('.extension-card:has-text("UI Edit Test")')).toBeVisible({ timeout: 10000 });
+
+    // Click the edit button on the extension card
+    await page.locator('.extension-card:has-text("UI Edit Test") button[title="Edit"]').click();
+
+    // Wait for edit modal/dialog to appear (it's a nested modal)
+    // The edit modal has the title "Edit: UI Edit Test"
+    await expect(page.locator('text=Edit: UI Edit Test')).toBeVisible({ timeout: 5000 });
+
+    // Don't change anything — just click Save
+    await page.locator('text=Save').click();
+
+    // Wait for the edit modal to close (title disappears)
+    await expect(page.locator('text=Edit: UI Edit Test')).toBeHidden({ timeout: 5000 });
+
+    // Verify the sensitive value was preserved (not overwritten with bullets)
+    const getResult = await page.evaluate(async (id) => {
+      const res = await fetch(`/api/extensions/${id}`);
+      return res.json();
+    }, extId);
+    // API response masks the value, so we check it's still masked (not empty)
+    expect(getResult.config.github_token).toMatch(/•/);
+    // Non-sensitive field should be unchanged
+    expect(getResult.config.repo_url).toBe('https://github.com/user/repo');
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+});

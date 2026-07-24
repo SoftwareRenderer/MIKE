@@ -6,8 +6,68 @@ import (
 	"fmt"
 	"time"
 
+	"kanban/backend/crypto"
 	"kanban/backend/store"
 )
+
+// encryptConfigValues encrypts sensitive config values based on the manifest's config_schema.
+// Only string values for properties marked as sensitive are encrypted.
+// Non-string values are converted to string for encryption.
+// Returns a new map with encrypted values.
+func encryptConfigValues(config map[string]any, schema *ConfigSchema) map[string]any {
+	if schema == nil || schema.Properties == nil || config == nil {
+		return config
+	}
+
+	result := make(map[string]any, len(config))
+	for k, v := range config {
+		prop, ok := schema.Properties[k]
+		if !ok || !prop.Sensitive {
+			result[k] = v
+			continue
+		}
+		// Convert value to string for encryption
+		strVal := fmt.Sprintf("%v", v)
+		encrypted, err := crypto.Encrypt(strVal)
+		if err != nil {
+			// If encryption fails, store as-is (graceful degradation)
+			result[k] = v
+		} else {
+			result[k] = encrypted
+		}
+	}
+	return result
+}
+
+// decryptConfigValues decrypts sensitive config values based on the manifest's config_schema.
+// Returns a new map with decrypted values.
+func decryptConfigValues(config map[string]any, schema *ConfigSchema) map[string]any {
+	if schema == nil || schema.Properties == nil || config == nil {
+		return config
+	}
+
+	result := make(map[string]any, len(config))
+	for k, v := range config {
+		prop, ok := schema.Properties[k]
+		if !ok || !prop.Sensitive {
+			result[k] = v
+			continue
+		}
+		strVal, okStr := v.(string)
+		if !okStr || strVal == "" {
+			result[k] = v
+			continue
+		}
+		decrypted, err := crypto.Decrypt(strVal)
+		if err != nil {
+			// If decryption fails, leave as-is (may be plain text from before encryption)
+			result[k] = v
+		} else {
+			result[k] = decrypted
+		}
+	}
+	return result
+}
 
 // ExtensionStore provides access to the extensions table.
 type ExtensionStore struct {
@@ -123,6 +183,8 @@ func (es *ExtensionStore) GetByID(id string) (*Extension, error) {
 	} else {
 		ext.Config = map[string]any{}
 	}
+	// Decrypt sensitive config values after loading
+	ext.Config = decryptConfigValues(ext.Config, ext.Manifest.ConfigSchema)
 	if containerConfigJSON.Valid {
 		if err := json.Unmarshal([]byte(containerConfigJSON.String), &ext.ContainerConfig); err != nil {
 			return nil, fmt.Errorf("unmarshal container config: %w", err)
@@ -151,7 +213,9 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
-	configJSON, err := json.Marshal(ext.Config)
+	// Encrypt sensitive config values before storage
+	configToStore := encryptConfigValues(ext.Config, ext.Manifest.ConfigSchema)
+	configJSON, err := json.Marshal(configToStore)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
@@ -189,7 +253,9 @@ func (es *ExtensionStore) Update(id string, ext *Extension) error {
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
-	configJSON, err := json.Marshal(ext.Config)
+	// Encrypt sensitive config values before storage
+	configToStore := encryptConfigValues(ext.Config, ext.Manifest.ConfigSchema)
+	configJSON, err := json.Marshal(configToStore)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
@@ -303,6 +369,8 @@ func scanExtension(s scanner) (*Extension, error) {
 	} else {
 		ext.Config = map[string]any{}
 	}
+	// Decrypt sensitive config values after loading
+	ext.Config = decryptConfigValues(ext.Config, ext.Manifest.ConfigSchema)
 	if containerConfigJSON.Valid {
 		if err := json.Unmarshal([]byte(containerConfigJSON.String), &ext.ContainerConfig); err != nil {
 			return nil, fmt.Errorf("unmarshal container config: %w", err)

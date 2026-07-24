@@ -288,7 +288,30 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	if req.Config != nil {
-		ext.Config = req.Config
+		// Merge config: preserve existing sensitive values when masked placeholder is sent
+		merged := make(map[string]any, len(req.Config))
+		for k, v := range req.Config {
+			strVal, isStr := v.(string)
+			isSensitive := ext.Manifest.ConfigSchema != nil && ext.Manifest.ConfigSchema.Properties[k].Sensitive
+			if isSensitive && isStr && strVal == maskedValue {
+				// Preserve existing value (user didn't change the field)
+				if existing, ok := ext.Config[k]; ok {
+					merged[k] = existing
+					continue
+				}
+				// No existing value — treat empty masked as empty
+				merged[k] = ""
+				continue
+			}
+			merged[k] = v
+		}
+		// Keep existing keys not present in the update
+		for k, v := range ext.Config {
+			if _, exists := merged[k]; !exists {
+				merged[k] = v
+			}
+		}
+		ext.Config = merged
 	}
 	if req.ContainerConfig.Image != "" || req.ContainerConfig.Dockerfile != "" {
 		if req.ContainerConfig.Image != "" {
@@ -900,6 +923,32 @@ type ExtensionUpdate struct {
 	AvailableVersion string `json:"available_version"`
 }
 
+// maskConfig masks sensitive config values based on the manifest's config_schema.
+// Sensitive fields are replaced with a bullet placeholder.
+const maskedValue = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // 10 bullets
+
+func maskConfig(config map[string]any, schema *ConfigSchema) map[string]any {
+	if schema == nil || schema.Properties == nil || config == nil {
+		return config
+	}
+	result := make(map[string]any, len(config))
+	for k, v := range config {
+		prop, ok := schema.Properties[k]
+		if !ok || !prop.Sensitive {
+			result[k] = v
+			continue
+		}
+		// Mask non-empty sensitive values
+		strVal := fmt.Sprintf("%v", v)
+		if strVal != "" {
+			result[k] = maskedValue
+		} else {
+			result[k] = v
+		}
+	}
+	return result
+}
+
 // toResponse converts an Extension to an ExtensionResponse with runtime status.
 func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]ExtensionRuntimeStatus) ExtensionResponse {
 	status, ok := statuses[ext.ID]
@@ -909,7 +958,7 @@ func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]Extens
 		Version:         ext.Version,
 		Type:            ext.Type,
 		Manifest:        ext.Manifest,
-		Config:          ext.Config,
+		Config:          maskConfig(ext.Config, ext.Manifest.ConfigSchema),
 		ContainerConfig: ext.ContainerConfig,
 		SandboxConfig:   ext.SandboxConfig,
 		InstallSource:   ext.InstallSource,
