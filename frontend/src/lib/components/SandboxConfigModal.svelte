@@ -263,7 +263,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             return;
         }
         if (editingPortIndex !== null) {
-            forwardPorts[editingPortIndex].container_port = container;
+            const updated = [...forwardPorts];
+            updated[editingPortIndex] = { container_port: container };
+            forwardPorts = updated;
             editingPortIndex = null;
         } else {
             forwardPorts = [...forwardPorts, { container_port: container }];
@@ -309,7 +311,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             mode: newMountMode,
         };
         if (editingMountIndex !== null) {
-            sandboxMounts[editingMountIndex] = mount;
+            const updated = [...sandboxMounts];
+            updated[editingMountIndex] = mount;
+            sandboxMounts = updated;
             editingMountIndex = null;
         } else {
             sandboxMounts = [...sandboxMounts, mount];
@@ -358,7 +362,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
             value: newEnvValue,
         };
         if (editingEnvIndex !== null) {
-            sandboxEnvs[editingEnvIndex] = env;
+            const updated = [...sandboxEnvs];
+            updated[editingEnvIndex] = env;
+            sandboxEnvs = updated;
             editingEnvIndex = null;
         } else {
             sandboxEnvs = [...sandboxEnvs, env];
