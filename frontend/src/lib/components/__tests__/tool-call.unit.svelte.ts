@@ -16,6 +16,9 @@ vi.mock('$lib/assets/icons/question.svg?raw', () => ({ default: '' }));
 vi.mock('marked', () => ({
     marked: { parse: (text: string) => `<p>${text}</p>` },
 }));
+vi.mock('dompurify', () => ({
+    default: { sanitize: (html: string) => html },
+}));
 vi.mock('$lib/utils/diff-parser', () => ({
     buildModifiedSegments: () => ({ oldSegments: [], newSegments: [] }),
 }));
