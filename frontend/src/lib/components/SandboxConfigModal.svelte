@@ -736,9 +736,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <div class="config-info">
                     <div class="config-icon">
                         {#if sandboxEnabled}
-                            <Icon src={shieldIcon} color="#E6EDF3" width={20} height={20} />
+                            <Icon src={shieldIcon} width={20} height={20} />
                         {:else}
-                            <Icon src={shieldOffIcon} color="#F85149" width={20} height={20} />
+                            <Icon src={shieldOffIcon} color="var(--color-status-red)" width={20} height={20} />
                         {/if}
                     </div>
                     <div class="config-text">
