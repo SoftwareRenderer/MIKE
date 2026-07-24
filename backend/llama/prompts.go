@@ -15,14 +15,14 @@ import (
 // summary is injected into the system prompt.
 // skillsMount is the container mount path for skills (e.g. "/mnt/skills")
 // when running in a sandbox; empty string for non-sandbox mode.
-// operatingMode is "act" (default), "plan", or "ideate".
+// operatingMode is "act" (default), "plan", or "explore".
 func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, operatingMode string) string {
 	var tools []types.ChatTool
 	switch operatingMode {
 	case "plan":
 		tools = GetPlanModeToolDefinitions()
-	case "ideate":
-		tools = GetIdeationModeToolDefinitions()
+	case "explore":
+		tools = GetExploreModeToolDefinitions()
 	default:
 		tools = GetToolDefinitions()
 	}

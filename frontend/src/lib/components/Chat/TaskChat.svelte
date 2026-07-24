@@ -639,7 +639,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
             stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
             stream.state.contextState = { ...stream.state.contextState, used: stream.state.lastPromptTokens };
         }
-        // Agent providers always use ideate mode; reset to act when switching away
+        // Agent providers always use explore mode; reset to act when switching away
         const isAgent = isAgentSelected();
         const updates: Record<string, string | undefined> = {
             model_name: modelName,
@@ -647,9 +647,9 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
             reasoning_effort: reasoningEffort || undefined,
         };
         if (isAgent) {
-            operatingMode = 'ideate';
-            updates.operating_mode = 'ideate';
-        } else if (operatingMode === 'ideate') {
+            operatingMode = 'explore';
+            updates.operating_mode = 'explore';
+        } else if (operatingMode === 'explore') {
             operatingMode = 'act';
             updates.operating_mode = 'act';
         }
@@ -665,7 +665,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     }
 
     async function handleOperatingModeToggle() {
-        const modes = ['act', 'plan', 'ideate'];
+        const modes = ['act', 'plan', 'explore'];
         const prevMode = operatingMode;
         const nextIdx = (modes.indexOf(operatingMode) + 1) % modes.length;
         const newMode = modes[nextIdx];

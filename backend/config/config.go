@@ -90,7 +90,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if defaultOperatingModeRaw != "" {
 		mode := defaultOperatingModeRaw
-		if mode != "act" && mode != "plan" && mode != "ideate" {
+		if mode != "act" && mode != "plan" && mode != "explore" {
 			mode = "act"
 		}
 		cfg.DefaultOperatingMode = &mode
@@ -279,7 +279,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if dom, ok := updates["default_operating_mode"]; ok {
-			if v, ok := dom.(string); ok && (v == "act" || v == "plan" || v == "ideate") {
+			if v, ok := dom.(string); ok && (v == "act" || v == "plan" || v == "explore") {
 				current.DefaultOperatingMode = &v
 			}
 		}

@@ -22,7 +22,7 @@
     let prompt = $state('');
     let autoCommit = $state(false);
 
-    let operatingMode = $state('act'); // "act", "plan", or "ideate"
+    let operatingMode = $state('act'); // "act", "plan", or "explore"
     let autoMerge = $state(false);
     let subtasksAutoMerge = $state(true);
     let loading = $state(false);
@@ -286,9 +286,9 @@
         selectedModel = modelName;
         selectedUrl = providerUrl;
         selectedReasoningEffort = reasoningEffort || '';
-        // Agent providers must use ideate mode
+        // Agent providers must use explore mode
         if (isAgentSelected) {
-            operatingMode = 'ideate';
+            operatingMode = 'explore';
         }
     }
 

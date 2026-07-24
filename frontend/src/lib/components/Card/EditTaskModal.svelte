@@ -172,11 +172,11 @@
         modelDraft = modelName;
         urlDraft = providerUrl;
         effortDraft = reasoningEffort || '';
-        // Agent providers always use ideate mode
+        // Agent providers always use explore mode
         const provider = editProviders.find(p => p.url === providerUrl);
         if (providerUrl === PI_SENTINEL_URL || (provider && isAgentProvider(provider))) {
-            operatingModeDraft = 'ideate';
-        } else if (operatingModeDraft === 'ideate') {
+            operatingModeDraft = 'explore';
+        } else if (operatingModeDraft === 'explore') {
             // Switching away from agent: restore the original mode
             operatingModeDraft = initialOperatingMode;
         }
@@ -195,7 +195,7 @@
     const modeDescription = $derived({
         act: 'AI is required to take formal actions',
         plan: 'AI decomposes work into subtasks on the board, then executes after approval',
-        ideate: 'Free-form brainstorming. AI is not required to take formal actions',
+        explore: 'Free-form exploration and prototyping. AI has read-write access to the worktree but is not required to take formal actions',
     }[operatingModeDraft] || '');
 </script>
 

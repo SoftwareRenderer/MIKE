@@ -76,7 +76,7 @@ export interface Task {
     auto_commit: boolean;
     auto_merge: boolean;
     subtasks_auto_merge: boolean;
-    operating_mode: string; // "act", "plan", or "ideate"
+    operating_mode: string; // "act", "plan", or "explore"
     parent_task_id?: string;
     title_generating: boolean;
     current_thread_id?: string;
@@ -188,7 +188,7 @@ export interface Config {
     default_auto_commit?: boolean;
     default_auto_merge?: boolean;
     default_subtasks_auto_merge?: boolean;
-    default_operating_mode?: string; // "act", "plan", or "ideate"
+    default_operating_mode?: string; // "act", "plan", or "explore"
     default_max_failed_turns?: number;
     encryption_enabled?: boolean;
     registry_url?: string;

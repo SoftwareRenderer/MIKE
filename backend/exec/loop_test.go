@@ -361,15 +361,15 @@ func TestHandleLoopDetected_IdeationModeSuppressesHints(t *testing.T) {
 	e := newTestExecutor(t)
 	now := time.Now().UTC()
 
-	proj := &types.Project{ID: "proj-ideation", Name: "ideation", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	proj := &types.Project{ID: "proj-exploration", Name: "exploration", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
 	_ = e.store.CreateProject(proj)
 	task := &types.Task{
-		ID:            "task-ideation",
+		ID:            "task-exploration",
 		ProjectID:     proj.ID,
 		Title:         "Ideation task",
 		Prompt:        "Brainstorm",
 		Status:        "in_progress",
-		OperatingMode: "ideate",
+		OperatingMode: "explore",
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
@@ -380,25 +380,25 @@ func TestHandleLoopDetected_IdeationModeSuppressesHints(t *testing.T) {
 	detector := newLoopDetector()
 	messages := []types.ChatMessage{{Role: "system", Content: "system prompt"}}
 
-	// With ideation mode, handleLoopDetected should NOT inject hints or terminate
+	// With explore mode, handleLoopDetected should NOT inject hints or terminate
 	for i := 0; i < 5; i++ {
 		terminated := handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopTool, "foo.go", &messages, true)
 		if terminated {
-			t.Fatalf("ideation mode should never terminate (iteration %d)", i+1)
+			t.Fatalf("explore mode should never terminate (iteration %d)", i+1)
 		}
 	}
 	// No hint messages should have been injected
 	if len(messages) != 1 {
 		t.Errorf("expected 1 message (system only), got %d", len(messages))
 	}
-	// Loop streak should be 0 (reset on each call in ideation mode)
+	// Loop streak should be 0 (reset on each call in explore mode)
 	if detector.loopStreak != 0 {
-		t.Errorf("expected loopStreak=0 in ideation mode, got %d", detector.loopStreak)
+		t.Errorf("expected loopStreak=0 in explore mode, got %d", detector.loopStreak)
 	}
 	// Task should still be running
 	taskAfter, _ := e.store.GetTaskByTaskID(task.ID)
 	if taskAfter.ExecutionState == "failed" {
-		t.Error("task should not be in failed state in ideation mode")
+				t.Error("task should not be in failed state in explore mode")
 	}
 }
 

@@ -74,13 +74,13 @@ test.describe.serial('ModeSelect component', () => {
     await expect(page.locator('.mode-dropdown')).toBeVisible({ timeout: 5000 });
 
     // Select Ideate mode
-    await page.locator('.mode-option.ideate').click();
+    await page.locator('.mode-option.explore').click();
 
     // Verify the button now shows "Ideate"
     await expect(page.locator('.mode-btn .mode-label')).toHaveText('Ideate');
 
-    // Verify the ideate icon is active
-    await expect(page.locator('.mode-btn .mode-icon.ideate')).toBeVisible();
+    // Verify the explore icon is active
+    await expect(page.locator('.mode-btn .mode-icon.explore')).toBeVisible();
 
     // Verify dropdown closed after selection
     await expect(page.locator('.mode-dropdown')).not.toBeVisible({ timeout: 5000 });

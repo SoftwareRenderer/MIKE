@@ -306,7 +306,7 @@
                     type="button"
                     class="btn-plan-toggle"
                     class:active={operatingMode === 'plan'}
-                    class:ideate={operatingMode === 'ideate'}
+                    class:explore={operatingMode === 'explore'}
                     onclick={onOperatingModeToggle}
                     title={operatingMode === 'act' ? 'Act mode: AI is required to take formal actions. Click to switch.' : operatingMode === 'plan' ? 'Plan mode: AI decomposes work into subtasks. Click to switch.' : 'Ideate mode: Free-form brainstorming. Storage is mounted read-only. AI is not required to take formal actions. Click to switch.'}
                     aria-label="Toggle operating mode"
@@ -315,7 +315,7 @@
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         {#if operatingMode === 'plan'}
                             <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                        {:else if operatingMode === 'ideate'}
+                        {:else if operatingMode === 'explore'}
                             <path d="M4 6a4 4 0 1 1 8 0c0 2.5-2 3.5-2 3.5v1h-4v-1s-2-1-2-3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
                             <path d="M6 10h4v1.5H6Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
                             <path d="M6.5 12.5h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -323,7 +323,7 @@
                             <path d="M3 8l4 4L13 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                         {/if}
                     </svg>
-                    <span>{operatingMode === 'plan' ? 'Plan' : operatingMode === 'ideate' ? 'Ideate' : 'Act'}</span>
+                    <span>{operatingMode === 'plan' ? 'Plan' : operatingMode === 'explore' ? 'Explore' : 'Act'}</span>
                 </button>
             {/if}
         </div>
@@ -426,7 +426,7 @@
         border-color: var(--color-accent);
         color: #fff;
     }
-    .btn-plan-toggle.ideate {
+    .btn-plan-toggle.explore {
         background: color-mix(in srgb, var(--color-status-yellow) 15%, transparent);
         border-color: var(--color-status-yellow);
         color: var(--color-status-yellow);

@@ -21,7 +21,7 @@
     const modeDescription = $derived({
         act: 'AI is required to take formal actions',
         plan: 'AI decomposes work into subtasks on the board, then executes after approval',
-        ideate: 'Free-form brainstorming. AI is not required to take formal actions',
+        explore: 'Free-form exploration and prototyping. AI has read-write access to the worktree but is not required to take formal actions',
     }[defaultOperatingMode] || '');
 </script>
 
