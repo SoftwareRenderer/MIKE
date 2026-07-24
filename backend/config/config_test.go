@@ -15,7 +15,7 @@ func testConfigStore(t *testing.T) *ConfigStore {
 	if err != nil {
 		t.Fatalf("create test store: %v", err)
 	}
-	return NewConfigStore(db, dir+"/test.db")
+	return NewConfigStore(db, dir+"/test.db", "test")
 }
 
 func TestGetConfig(t *testing.T) {
