@@ -10,6 +10,7 @@
     import TaskDefaults from './ConfigModal/TaskDefaults.svelte';
     import ProviderCard from './ConfigModal/ProviderCard.svelte';
     import ExtensionsTab from './ConfigModal/ExtensionsTab.svelte';
+    import pwaIcon from '$lib/assets/icons/pwa-icon.svg?raw';
 
     let { config, onClose, onSaved, onSignOut }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void> } = $props();
 
@@ -549,7 +550,7 @@
         <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>Providers</button>
         <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>Task Defaults</button>
         <button type="button" class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => activeTab = 'extensions'}>Extensions</button>
-        <button type="button" class="tab-btn" class:active={activeTab === 'general'} onclick={() => activeTab = 'general'}>General</button>
+        <button type="button" class="tab-btn" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>About</button>
     </div>
 
     <!-- Tab Content -->
@@ -649,8 +650,23 @@
             <ExtensionsTab />
         {/if}
 
-        <!-- General Tab -->
-        {#if activeTab === 'general'}
+        <!-- About Tab -->
+        {#if activeTab === 'about'}
+            <div class="section">
+                <div class="about-header">
+                    <div class="about-icon">{@html pwaIcon}</div>
+                    <div>
+                        <h3 class="section-label">MIKE: Integrated Kanban Environment</h3>
+                        <p class="about-description">© 2026 Mike Wren</p>
+                        <p class="about-description">
+                            <a href="https://github.com/SoftwareRenderer" target="_blank" rel="noopener noreferrer">
+                                <span>github.com/SoftwareRenderer</span>
+                            </a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
             {#if appStore.pwaInstallPrompt}
             <div class="section">
                 <h3 class="section-label">Progress Web App</h3>
@@ -659,7 +675,7 @@
                         <path d="M8 2v9M5 8l3 3 3-3M3 12v2h10v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                     Install as PWA
-                </button>                
+                </button>
             </div>
             {/if}
 
@@ -973,5 +989,27 @@
         color: white;
     }
 
+    /* About MIKE section */
+    .about-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+    }
+    .about-icon {
+        width: 48px;
+        height: 48px;
+        flex-shrink: 0;
+    }
+    .about-icon :global(svg) {
+        width: 100%;
+        height: 100%;
+        border-radius: var(--radius-md);
+    }
+    .about-description {
+        margin: 4px 0 0;
+        font-size: 0.875rem;
+        color: var(--color-text-secondary);
+        line-height: 1.6;
+    }
 
     </style>
