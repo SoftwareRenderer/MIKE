@@ -871,7 +871,7 @@ func (te *TaskExecutor) HasRunningTasks(projectID string) bool {
 	te.taskMu.Lock()
 	defer te.taskMu.Unlock()
 	for _, task := range tasks {
-		if state, ok := te.tasks[task.ID]; ok && task.Status == "in_progress" {
+		if _, ok := te.tasks[task.ID]; ok && task.Status == "in_progress" {
 			return true
 		}
 	}
