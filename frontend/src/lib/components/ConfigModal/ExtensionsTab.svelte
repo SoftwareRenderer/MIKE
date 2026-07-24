@@ -667,24 +667,24 @@
                                         {#if entry.license_url} · <a href={entry.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
                                     </span>
                                 </div>
+                                <div class="ext-action">
+                                    {#if extensions.some(e => e.name === entry.name)}
+                                        <span class="installed-badge">Installed</span>
+                                    {:else}
+                                        <button class="btn btn-primary btn-small" onclick={() => handleInstall(entry.name)} disabled={installing.has(entry.name)}>
+                                            {#if installing.has(entry.name)}
+                                                <span class="spinner"></span>
+                                                Installing...
+                                            {:else}
+                                                Install
+                                            {/if}
+                                        </button>
+                                    {/if}
+                                </div>
                             </div>
                             {#if entry.description}
                                 <p class="ext-description">{entry.description}</p>
                             {/if}
-                            <div class="card-actions">
-                                {#if extensions.some(e => e.name === entry.name)}
-                                    <span class="installed-badge">Installed</span>
-                                {:else}
-                                    <button class="btn btn-primary" onclick={() => handleInstall(entry.name)} disabled={installing.has(entry.name)}>
-                                        {#if installing.has(entry.name)}
-                                            <span class="spinner"></span>
-                                            Installing...
-                                        {:else}
-                                            Install
-                                        {/if}
-                                    </button>
-                                {/if}
-                            </div>
                         </div>
                     {/each}
                 </div>
@@ -937,6 +937,12 @@
 
     .ext-status {
         flex-shrink: 0;
+    }
+
+    .ext-action {
+        flex-shrink: 0;
+        display: flex;
+        align-items: flex-start;
     }
 
     .status-badge {
