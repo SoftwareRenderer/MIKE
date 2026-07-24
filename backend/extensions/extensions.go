@@ -36,6 +36,7 @@ type ExtensionManifest struct {
 	Homepage     string        `json:"homepage,omitempty"`
 	LicenseURL   string        `json:"license_url,omitempty"`
 	Deprecated   bool          `json:"deprecated"`
+	Priority     int           `json:"priority"` // loading order: lower values load first (default 0)
 	ConfigSchema *ConfigSchema `json:"config_schema,omitempty"`
 	LSP          *LSPConfig    `json:"lsp,omitempty"`
 	UI           *UIConfig     `json:"ui,omitempty"`

@@ -79,6 +79,89 @@ func TestHandleList_WithExtensions(t *testing.T) {
 	}
 }
 
+func TestHandleList_SortedByPriority(t *testing.T) {
+	h := testHandler(t)
+	// Create extensions with different priorities (insert in random order)
+	extA := makeTestExt("ext-a", "ext-a", ExtensionTypeUI)
+	extA.Manifest.Priority = 10
+	extA.Type = ExtensionTypeUI
+	if err := h.store.Create(extA); err != nil {
+		t.Fatalf("Create(ext-a): %v", err)
+	}
+	extB := makeTestExt("ext-b", "ext-b", ExtensionTypeUI)
+	extB.Manifest.Priority = 0
+	extB.Type = ExtensionTypeUI
+	if err := h.store.Create(extB); err != nil {
+		t.Fatalf("Create(ext-b): %v", err)
+	}
+	extC := makeTestExt("ext-c", "ext-c", ExtensionTypeUI)
+	extC.Manifest.Priority = 5
+	extC.Type = ExtensionTypeUI
+	if err := h.store.Create(extC); err != nil {
+		t.Fatalf("Create(ext-c): %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions", nil)
+	w := httptest.NewRecorder()
+
+	h.HandleList(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+
+	var result []ExtensionResponse
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(result) != 3 {
+		t.Fatalf("result count = %d, want 3", len(result))
+	}
+	// Should be sorted by priority ASC: 0, 5, 10
+	if result[0].Name != "ext-b" {
+		t.Errorf("First = %q (priority %d), want ext-b (priority 0)", result[0].Name, result[0].Manifest.Priority)
+	}
+	if result[1].Name != "ext-c" {
+		t.Errorf("Second = %q (priority %d), want ext-c (priority 5)", result[1].Name, result[1].Manifest.Priority)
+	}
+	if result[2].Name != "ext-a" {
+		t.Errorf("Third = %q (priority %d), want ext-a (priority 10)", result[2].Name, result[2].Manifest.Priority)
+	}
+}
+
+func TestHandleList_SamePriority_SortedByName(t *testing.T) {
+	h := testHandler(t)
+	// Create extensions with same priority
+	for _, name := range []string{"zebra", "alpha", "beta"} {
+		ext := makeTestExt(name, name, ExtensionTypeUI)
+		ext.Manifest.Priority = 0
+		ext.Type = ExtensionTypeUI
+		if err := h.store.Create(ext); err != nil {
+			t.Fatalf("Create(%s): %v", name, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions", nil)
+	w := httptest.NewRecorder()
+
+	h.HandleList(w, req)
+
+	var result []ExtensionResponse
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(result) != 3 {
+		t.Fatalf("result count = %d, want 3", len(result))
+	}
+	// Same priority → sorted by name
+	if result[0].Name != "alpha" {
+		t.Errorf("First = %q, want alpha", result[0].Name)
+	}
+	if result[2].Name != "zebra" {
+		t.Errorf("Last = %q, want zebra", result[2].Name)
+	}
+}
+
 func TestHandleList_WrongMethod(t *testing.T) {
 	h := testHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/extensions", nil)

@@ -200,4 +200,189 @@ describe('UIInjector CSS extension handling', () => {
         // CSS extensions should not create injection registrations
         expect(injector.registrations.length).toBe(0);
     });
+
+    it('UI extension registrations use manifest priority for order', () => {
+        const extLow: Extension = {
+            id: 'ext-low',
+            name: 'ext-low',
+            version: '1.0.0',
+            type: 'ui',
+            enabled: true,
+            manifest: {
+                display_name: 'Low Priority',
+                description: '',
+                author: '',
+                deprecated: false,
+                priority: 0,
+                ui: {
+                    module_url: '/extensions/low.js',
+                    injection_points: ['task-card'],
+                },
+            },
+            config: {},
+            container_config: {},
+            sandbox_config: { network_isolation: false, memory_limit: 0 },
+            running: false,
+            installed_at: '',
+            built_at: '',
+            install_source: 'manual',
+        };
+        const extHigh: Extension = {
+            id: 'ext-high',
+            name: 'ext-high',
+            version: '1.0.0',
+            type: 'ui',
+            enabled: true,
+            manifest: {
+                display_name: 'High Priority',
+                description: '',
+                author: '',
+                deprecated: false,
+                priority: 10,
+                ui: {
+                    module_url: '/extensions/high.js',
+                    injection_points: ['task-card'],
+                },
+            },
+            config: {},
+            container_config: {},
+            sandbox_config: { network_isolation: false, memory_limit: 0 },
+            running: false,
+            installed_at: '',
+            built_at: '',
+            install_source: 'manual',
+        };
+
+        // Register high-priority extension first in the array
+        injector.registerFromExtensions([extHigh, extLow]);
+
+        const regs = injector.getRegistrations('task-card' as any);
+        expect(regs.length).toBe(2);
+        // Lower priority value = loaded first
+        expect(regs[0].extensionName).toBe('ext-low');
+        expect(regs[1].extensionName).toBe('ext-high');
+    });
+
+    it('UI extension with default priority (0) loads before explicit priority 10', () => {
+        const extDefault: Extension = {
+            id: 'ext-default',
+            name: 'ext-default',
+            version: '1.0.0',
+            type: 'ui',
+            enabled: true,
+            manifest: {
+                display_name: 'Default Priority',
+                description: '',
+                author: '',
+                deprecated: false,
+                ui: {
+                    module_url: '/extensions/default.js',
+                    injection_points: ['task-card'],
+                },
+            },
+            config: {},
+            container_config: {},
+            sandbox_config: { network_isolation: false, memory_limit: 0 },
+            running: false,
+            installed_at: '',
+            built_at: '',
+            install_source: 'manual',
+        };
+        const extTen: Extension = {
+            id: 'ext-ten',
+            name: 'ext-ten',
+            version: '1.0.0',
+            type: 'ui',
+            enabled: true,
+            manifest: {
+                display_name: 'Priority 10',
+                description: '',
+                author: '',
+                deprecated: false,
+                priority: 10,
+                ui: {
+                    module_url: '/extensions/ten.js',
+                    injection_points: ['task-card'],
+                },
+            },
+            config: {},
+            container_config: {},
+            sandbox_config: { network_isolation: false, memory_limit: 0 },
+            running: false,
+            installed_at: '',
+            built_at: '',
+            install_source: 'manual',
+        };
+
+        injector.registerFromExtensions([extTen, extDefault]);
+
+        const regs = injector.getRegistrations('task-card' as any);
+        expect(regs.length).toBe(2);
+        expect(regs[0].extensionName).toBe('ext-default');
+        expect(regs[0].order).toBe(0);
+        expect(regs[1].extensionName).toBe('ext-ten');
+        expect(regs[1].order).toBe(10);
+    });
+
+    it('negative priority loads before zero priority', () => {
+        const extNeg: Extension = {
+            id: 'ext-neg',
+            name: 'ext-neg',
+            version: '1.0.0',
+            type: 'ui',
+            enabled: true,
+            manifest: {
+                display_name: 'Negative Priority',
+                description: '',
+                author: '',
+                deprecated: false,
+                priority: -5,
+                ui: {
+                    module_url: '/extensions/neg.js',
+                    injection_points: ['task-card'],
+                },
+            },
+            config: {},
+            container_config: {},
+            sandbox_config: { network_isolation: false, memory_limit: 0 },
+            running: false,
+            installed_at: '',
+            built_at: '',
+            install_source: 'manual',
+        };
+        const extZero: Extension = {
+            id: 'ext-zero',
+            name: 'ext-zero',
+            version: '1.0.0',
+            type: 'ui',
+            enabled: true,
+            manifest: {
+                display_name: 'Zero Priority',
+                description: '',
+                author: '',
+                deprecated: false,
+                priority: 0,
+                ui: {
+                    module_url: '/extensions/zero.js',
+                    injection_points: ['task-card'],
+                },
+            },
+            config: {},
+            container_config: {},
+            sandbox_config: { network_isolation: false, memory_limit: 0 },
+            running: false,
+            installed_at: '',
+            built_at: '',
+            install_source: 'manual',
+        };
+
+        injector.registerFromExtensions([extZero, extNeg]);
+
+        const regs = injector.getRegistrations('task-card' as any);
+        expect(regs.length).toBe(2);
+        expect(regs[0].extensionName).toBe('ext-neg');
+        expect(regs[0].order).toBe(-5);
+        expect(regs[1].extensionName).toBe('ext-zero');
+        expect(regs[1].order).toBe(0);
+    });
 });

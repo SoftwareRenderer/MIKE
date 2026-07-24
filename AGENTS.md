@@ -358,6 +358,7 @@ extensions/my-extension/
     "description": "Does something useful",
     "author": "Author",
     "deprecated": false,
+    "priority": 0,
     "ui": {
         "module_url": "/extensions/my-extension/MyExtension.js",
         "injection_points": ["create-task"]
@@ -370,6 +371,8 @@ extensions/my-extension/
     }
 }
 ```
+
+**Priority** governs extension loading order. Lower values load first (default `0`). An extension with `priority: 10` loads after one with `priority: 0`. Extensions with the same priority are sorted by name.
 
 3. **`MyExtension.js`** — ES module exporting a default `init` function:
 ```js

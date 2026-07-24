@@ -307,6 +307,63 @@ func TestExtension_IsCSS(t *testing.T) {
 	}
 }
 
+func TestManifest_Priority_Default(t *testing.T) {
+	m := ExtensionManifest{DisplayName: "Test"}
+	if m.Priority != 0 {
+		t.Errorf("Priority = %d, want 0 (default)", m.Priority)
+	}
+}
+
+func TestManifest_Priority_Set(t *testing.T) {
+	m := ExtensionManifest{DisplayName: "Test", Priority: 10}
+	if m.Priority != 10 {
+		t.Errorf("Priority = %d, want 10", m.Priority)
+	}
+}
+
+func TestManifest_Priority_Negative(t *testing.T) {
+	m := ExtensionManifest{DisplayName: "Test", Priority: -5}
+	if m.Priority != -5 {
+		t.Errorf("Priority = %d, want -5", m.Priority)
+	}
+}
+
+func TestManifest_Priority_JSONRoundTrip(t *testing.T) {
+	m := ExtensionManifest{
+		DisplayName: "Test",
+		Description: "Desc",
+		Author:      "Author",
+		Deprecated:  false,
+		Priority:    42,
+	}
+
+	jsonBytes, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	var decoded ExtensionManifest
+	if err := json.Unmarshal(jsonBytes, &decoded); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if decoded.Priority != 42 {
+		t.Errorf("Priority after JSON round-trip = %d, want 42", decoded.Priority)
+	}
+}
+
+func TestManifest_Priority_JSONDefault(t *testing.T) {
+	// When priority is omitted in JSON, it should default to 0
+	jsonStr := `{"display_name":"Test","description":"","author":"","deprecated":false}`
+	var m ExtensionManifest
+	if err := json.Unmarshal([]byte(jsonStr), &m); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if m.Priority != 0 {
+		t.Errorf("Priority = %d, want 0 (default from missing field)", m.Priority)
+	}
+}
+
 func TestExtension_HasCSSConfig(t *testing.T) {
 	// CSS type with CSS config
 	cssExt := makeTestExtension(t, ExtensionTypeCSS, "manual")

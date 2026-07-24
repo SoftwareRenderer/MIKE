@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -155,6 +156,14 @@ func (h *ExtensionHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to list extensions: "+err.Error())
 		return
 	}
+
+	// Sort by priority ASC, then by name ASC (lower priority = loads first)
+	sort.Slice(extensions, func(i, j int) bool {
+		if extensions[i].Manifest.Priority != extensions[j].Manifest.Priority {
+			return extensions[i].Manifest.Priority < extensions[j].Manifest.Priority
+		}
+		return extensions[i].Name < extensions[j].Name
+	})
 
 	// Add runtime status
 	statuses := h.sandbox.ListRunning()
