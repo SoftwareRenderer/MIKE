@@ -391,7 +391,7 @@ export type TaskEventData = { task_id: string; type: string; data: any };
 
 // ─── Extension types ───
 
-export type ExtensionType = 'lsp' | 'ui';
+export type ExtensionType = 'lsp' | 'ui' | 'css';
 
 export interface ExtensionManifest {
     display_name: string;
@@ -403,6 +403,7 @@ export interface ExtensionManifest {
     config_schema?: ConfigSchema;
     lsp?: LSPConfig;
     ui?: UIExtensionConfig;
+    css?: CSSExtensionConfig;
 }
 
 export interface LSPConfig {
@@ -416,6 +417,10 @@ export interface LSPConfig {
 export interface UIExtensionConfig {
     module_url: string;
     injection_points: string[];
+}
+
+export interface CSSExtensionConfig {
+    css_url: string; // global stylesheet URL (relative to server root)
 }
 
 export interface ConfigSchema {

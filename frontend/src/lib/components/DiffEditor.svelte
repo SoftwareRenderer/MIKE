@@ -873,7 +873,7 @@
         padding: 0 6px 0 0;
     }
     .editor-content :global(.cm-activeLineGutter) {
-        color: #8B949E;
+        color: var(--color-text-tertiary);
         background: rgba(255,255,255,0.06);
     }
     .editor-content :global(.cm-content) {

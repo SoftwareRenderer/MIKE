@@ -35,7 +35,7 @@
     // Add extension form
     let addForm = $state({
         name: '',
-        type: 'lsp' as 'lsp' | 'ui',
+        type: 'lsp' as 'lsp' | 'ui' | 'css',
         version: '1.0.0',
         displayName: '',
         description: '',
@@ -81,6 +81,10 @@
                     command: addForm.name,
                     extensions: addForm.fileExtensions ? addForm.fileExtensions.split(',').map(s => s.trim()).filter(Boolean) : [],
                     language: addForm.language || addForm.name,
+                };
+            } else if (addForm.type === 'css') {
+                manifest.css = {
+                    css_url: `/extensions/${addForm.name}/styles.css`,
                 };
             }
             await createExtension({
@@ -438,13 +442,13 @@
                     {#each filteredExtensions as ext}
                         <div class="extension-card" class:disabled={!ext.enabled}>
                             <div class="card-header">
-                                <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'}>
-                                    {ext.type === 'lsp' ? 'LSP' : 'UI'}
+                                <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'}>
+                                    {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : 'UI'}
                                 </div>
                                 <div class="ext-info">
                                     <span class="ext-name">{ext.manifest.display_name || ext.name}</span>
                                     <span class="ext-meta">
-                                        {#if ext.type === 'ui'}
+                                        {#if ext.type === 'ui' || ext.type === 'css'}
                                             v{ext.version}
                                         {:else}
                                             {formatBuiltAt(ext.built_at)}
@@ -456,7 +460,7 @@
                                     </span>
                                 </div>
                                 <div class="ext-status">
-                                    {#if ext.type === 'ui'}
+                                    {#if ext.type === 'ui' || ext.type === 'css'}
                                         {#if ext.enabled}
                                             <span class="status-badge running">Active</span>
                                         {:else}
@@ -534,9 +538,10 @@
                 </div>
                 <div class="config-field">
                     <label class="field-label" for="add-type">Type</label>
-                    <select id="add-type" value={addForm.type} onchange={(e) => addForm.type = (e.target as HTMLSelectElement).value as 'lsp' | 'ui'} class="config-input">
+                    <select id="add-type" value={addForm.type} onchange={(e) => addForm.type = (e.target as HTMLSelectElement).value as 'lsp' | 'ui' | 'css'} class="config-input">
                         <option value="lsp">LSP</option>
                         <option value="ui">UI</option>
+                        <option value="css">CSS</option>
                     </select>
                 </div>
                 <div class="config-field">
@@ -649,8 +654,8 @@
                     {#each filteredRegistry as entry}
                         <div class="extension-card registry-card">
                             <div class="card-header">
-                                <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'}>
-                                    {entry.type === 'lsp' ? 'LSP' : 'UI'}
+                                <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'}>
+                                    {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : 'UI'}
                                 </div>
                                 <div class="ext-info">
                                     <span class="ext-name">{entry.display_name || entry.name}</span>
@@ -717,14 +722,14 @@
     .progress-fill {
         height: 100%;
         width: var(--pct, 0);
-        background: #58a6ff;
+        background: var(--color-accent);
         border-radius: 4px;
         transition: width 0.3s ease;
     }
 
     .progress-text {
         font-size: 0.8rem;
-        color: #58a6ff;
+        color: var(--color-accent);
         white-space: nowrap;
     }
 
@@ -733,7 +738,7 @@
         border: 1px solid rgba(248, 81, 73, 0.3);
         border-radius: 6px;
         padding: 0.75rem 1rem;
-        color: #f85149;
+        color: var(--color-status-red);
         cursor: pointer;
         display: flex;
         justify-content: space-between;
@@ -753,14 +758,14 @@
     .view-tabs {
         display: flex;
         gap: 0.5rem;
-        border-bottom: 1px solid #30363d;
+        border-bottom: 1px solid var(--color-border-subtle);
         padding-bottom: 0.5rem;
     }
 
     .view-tab {
         background: none;
         border: none;
-        color: #8b949e;
+        color: var(--color-text-tertiary);
         cursor: pointer;
         font-size: 0.875rem;
         padding: 0.5rem 1rem;
@@ -770,12 +775,12 @@
 
     .view-tab:hover {
         background: rgba(139, 148, 158, 0.1);
-        color: #c9d1d9;
+        color: var(--color-text-primary);
     }
 
     .view-tab.active {
         background: rgba(88, 166, 255, 0.15);
-        color: #58a6ff;
+        color: var(--color-accent);
     }
 
     /* Search */
@@ -786,17 +791,17 @@
 
     .search-input {
         flex: 1;
-        background: #0d1117;
-        border: 1px solid #30363d;
+        background: var(--color-bg-input);
+        border: 1px solid var(--color-border-subtle);
         border-radius: 6px;
         padding: 0.5rem 0.75rem;
-        color: #c9d1d9;
+        color: var(--color-text-primary);
         font-size: 0.875rem;
     }
 
     .search-input:focus {
         outline: none;
-        border-color: #58a6ff;
+        border-color: var(--color-accent);
     }
 
     /* Actions bar */
@@ -817,7 +822,7 @@
     .updates-section h3 {
         margin: 0 0 0.75rem;
         font-size: 0.875rem;
-        color: #58a6ff;
+        color: var(--color-accent);
     }
 
     .update-item {
@@ -833,12 +838,12 @@
 
     .update-name {
         font-weight: 600;
-        color: #c9d1d9;
+        color: var(--color-text-primary);
     }
 
     .update-versions {
         font-size: 0.8rem;
-        color: #8b949e;
+        color: var(--color-text-tertiary);
         margin-left: 0.5rem;
     }
 
@@ -851,15 +856,15 @@
     }
 
     .extension-card {
-        background: #161b22;
-        border: 1px solid #30363d;
+        background: var(--color-bg-card);
+        border: 1px solid var(--color-border-subtle);
         border-radius: 8px;
         padding: 1rem;
         transition: border-color 0.15s;
     }
 
     .extension-card:hover {
-        border-color: #484f58;
+        border-color: var(--color-border-hover);
     }
 
     .extension-card.disabled {
@@ -891,12 +896,17 @@
 
     .ext-lsp {
         background: rgba(63, 185, 80, 0.15);
-        color: #3fb950;
+        color: var(--color-status-green);
     }
 
     .ext-ui {
         background: rgba(163, 113, 247, 0.15);
-        color: #a371f7;
+        color: var(--color-status-purple);
+    }
+
+    .ext-css {
+        background: rgba(227, 179, 65, 0.15);
+        color: var(--color-status-yellow);
     }
 
     .ext-info {
@@ -907,17 +917,17 @@
     .ext-name {
         display: block;
         font-weight: 600;
-        color: #c9d1d9;
+        color: var(--color-text-primary);
         font-size: 0.95rem;
     }
 
     .ext-meta {
         font-size: 0.8rem;
-        color: #8b949e;
+        color: var(--color-text-tertiary);
     }
 
     .ext-link {
-        color: #58a6ff;
+        color: var(--color-accent);
         text-decoration: none;
     }
 
@@ -938,23 +948,23 @@
 
     .status-badge.running {
         background: rgba(63, 185, 80, 0.15);
-        color: #3fb950;
+        color: var(--color-status-green);
     }
 
     .status-badge.stopped {
         background: rgba(139, 148, 158, 0.15);
-        color: #8b949e;
+        color: var(--color-text-tertiary);
     }
 
     .status-badge.disabled {
         background: rgba(248, 81, 73, 0.15);
-        color: #f85149;
+        color: var(--color-status-red);
     }
 
     .ext-description {
         margin: 0 0 0.75rem;
         font-size: 0.85rem;
-        color: #8b949e;
+        color: var(--color-text-tertiary);
         line-height: 1.4;
     }
 
@@ -969,7 +979,7 @@
         align-items: center;
         gap: 0.5rem;
         font-size: 0.85rem;
-        color: #8b949e;
+        color: var(--color-text-tertiary);
     }
 
     .btn {
@@ -987,38 +997,38 @@
     }
 
     .btn-primary {
-        background: #238636;
-        color: #fff;
+        background: var(--color-btn-primary-bg);
+        color: var(--color-btn-text);
     }
 
     .btn-primary:hover:not(:disabled) {
-        background: #2ea043;
+        background: var(--color-btn-primary-hover);
     }
 
     .btn-secondary {
-        background: #21262d;
-        border-color: #30363d;
-        color: #c9d1d9;
+        background: var(--color-btn-secondary-bg);
+        border-color: var(--color-border-subtle);
+        color: var(--color-text-primary);
     }
 
     .btn-secondary:hover:not(:disabled) {
-        background: #30363d;
+        background: var(--color-border-subtle);
     }
 
     .btn-icon {
         background: none;
         border: none;
-        color: #8b949e;
+        color: var(--color-text-tertiary);
         padding: 0.25rem;
         font-size: 1rem;
     }
 
     .btn-icon:hover {
-        color: #c9d1d9;
+        color: var(--color-text-primary);
     }
 
     .btn-danger:hover {
-        color: #f85149;
+        color: var(--color-status-red);
     }
 
     .btn-small {
@@ -1028,7 +1038,7 @@
 
     .installed-badge {
         font-size: 0.8rem;
-        color: #3fb950;
+        color: var(--color-status-green);
         padding: 0.4rem 0.75rem;
         background: rgba(63, 185, 80, 0.1);
         border-radius: 6px;
@@ -1040,7 +1050,7 @@
         width: 12px;
         height: 12px;
         border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: #fff;
+        border-top-color: var(--color-btn-text);
         border-radius: 50%;
         animation: spin 0.6s linear infinite;
         vertical-align: middle;
@@ -1059,7 +1069,7 @@
     .field-label {
         display: block;
         font-size: 0.8rem;
-        color: #8b949e;
+        color: var(--color-text-tertiary);
         margin-bottom: 0.25rem;
     }
 
@@ -1070,24 +1080,24 @@
 
     .url-input {
         flex: 1;
-        background: #0d1117;
-        border: 1px solid #30363d;
+        background: var(--color-bg-input);
+        border: 1px solid var(--color-border-subtle);
         border-radius: 6px;
         padding: 0.5rem 0.75rem;
-        color: #c9d1d9;
+        color: var(--color-text-primary);
         font-size: 0.875rem;
     }
 
     .url-input:focus {
         outline: none;
-        border-color: #58a6ff;
+        border-color: var(--color-accent);
     }
 
     /* Empty state */
     .empty-state {
         text-align: center;
         padding: 3rem 1rem;
-        color: #8b949e;
+        color: var(--color-text-tertiary);
     }
 
     .empty-state p {
@@ -1105,7 +1115,7 @@
     .loading {
         text-align: center;
         padding: 2rem;
-        color: #8b949e;
+        color: var(--color-text-tertiary);
     }
 
     .config-fields {
@@ -1118,7 +1128,7 @@
     .config-fields h4 {
         margin: 0;
         font-size: 0.85rem;
-        color: #8b949e;
+        color: var(--color-text-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
@@ -1130,21 +1140,21 @@
     }
 
     .config-input {
-        background: #0d1117;
-        border: 1px solid #30363d;
+        background: var(--color-bg-input);
+        border: 1px solid var(--color-border-subtle);
         border-radius: 6px;
         padding: 0.5rem 0.75rem;
-        color: #c9d1d9;
+        color: var(--color-text-primary);
         font-size: 0.875rem;
     }
 
     .config-input:focus {
         outline: none;
-        border-color: #58a6ff;
+        border-color: var(--color-accent);
     }
 
     .no-schema {
-        color: #8b949e;
+        color: var(--color-text-tertiary);
         font-size: 0.85rem;
         margin-bottom: 1.5rem;
     }

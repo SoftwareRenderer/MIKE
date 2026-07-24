@@ -95,7 +95,7 @@
     user-select: none;
 }
 .diff-status-badge.diff-status-added {
-    color: #3fb950;
+    color: var(--color-status-green);
 }
 
 /* Stage/unstage button */
@@ -280,53 +280,53 @@
     background: rgba(248,81,73,0.4);
 }
 
-/* Lezer token highlighting — GitHub Dark palette (matches FileEditor) */
+/* Lezer token highlighting — uses CSS vars from app.css (--cm-*) */
 :global(.diff-text .hl-keyword) {
-    color: #F97583;
+    color: var(--cm-keyword);
 }
 :global(.diff-text .hl-constantkeyword) {
-    color: #79C0FF;
+    color: var(--cm-keyword-const);
 }
 :global(.diff-text .hl-definitionvariable),
 :global(.diff-text .hl-variable),
 :global(.diff-text .hl-classname),
 :global(.diff-text .hl-typename) {
-    color: #FFA657;
+    color: var(--cm-class);
 }
 :global(.diff-text .hl-function) {
-    color: #D2A8FF;
+    color: var(--cm-function);
 }
 :global(.diff-text .hl-property),
 :global(.diff-text .hl-attribute) {
-    color: #79C0FF;
+    color: var(--cm-attr-name);
 }
 :global(.diff-text .hl-string),
 :global(.diff-text .hl-attributevalue),
 :global(.diff-text .hl-regexp) {
-    color: #A5D6FF;
+    color: var(--cm-string);
 }
 :global(.diff-text .hl-number) {
-    color: #79C0FF;
+    color: var(--cm-number);
 }
 :global(.diff-text .hl-comment) {
-    color: #8B949E;
+    color: var(--cm-comment);
     font-style: italic;
 }
 :global(.diff-text .hl-operator) {
-    color: #FF7B72;
+    color: var(--cm-operator);
 }
 :global(.diff-text .hl-punctuation) {
-    color: #C9D1D9;
+    color: var(--cm-punctuation);
 }
 :global(.diff-text .hl-tagname) {
-    color: #7EE787;
+    color: var(--cm-tag);
 }
 :global(.diff-text .hl-meta) {
-    color: #C9D1D9;
+    color: var(--cm-variable);
 }
 :global(.diff-text .hl-invalid) {
-    color: #F97583;
-    text-decoration: underline wavy #F97583;
+    color: var(--cm-keyword);
+    text-decoration: underline wavy var(--cm-keyword);
 }
 
 /* Row variants */
@@ -531,7 +531,7 @@
     margin-top: 8px;
 }
 .diff-section-merged {
-    border-left-color: #ffffff;
+    border-left-color: var(--color-btn-text);
     margin-top: 8px;
 }
 .diff-section-unstaged {
@@ -544,7 +544,7 @@
     border-left-color: var(--color-status-yellow, #f0c040);
 }
 .diff-section:has(.diff-section-merged) .diff-file-header {
-    border-left-color: #ffffff;
+    border-left-color: var(--color-btn-text);
 }
 .diff-section-header:hover {
     background: var(--color-surface-3);

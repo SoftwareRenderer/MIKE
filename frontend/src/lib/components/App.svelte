@@ -1208,7 +1208,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         position: fixed;
         inset: 0;
         z-index: 99999;
-        background: #000;
+        background: var(--color-surface-0);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1228,11 +1228,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         align-items: center;
         justify-content: center;
         gap: 1.5rem;
-        background: #000;
+        background: var(--color-surface-0);
     }
 
     .offline-text {
-        color: #99AAB5;
+        color: var(--color-column-backlog);
         font-size: 0.875rem;
         font-family: inherit;
         margin: 0;
@@ -1245,10 +1245,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         align-items: center;
         gap: 0.5rem;
         padding: 0.6rem 1.5rem;
-        border: 1px solid #333;
+        border: 1px solid var(--color-surface-3);
         border-radius: 8px;
-        background: #1a1a1a;
-        color: #d6d3d1;
+        background: var(--color-surface-0);
+        color: var(--color-text-primary);
         cursor: pointer;
         transition: background 0.15s, border-color 0.15s;
     }
@@ -1258,8 +1258,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
 
     .offline-btn:hover {
-        background: #252525;
-        border-color: #555;
+        background: var(--color-surface-2);
+        border-color: var(--color-border-bright);
     }
 
     /* -- Reconnecting banner -- */
@@ -1269,8 +1269,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         left: 0;
         right: 0;
         z-index: 10001;
-        background: #550000;
-        color: #d6d3d1;
+        background: var(--color-alert-bg);
+        color: var(--color-alert-text);
         text-align: center;
         padding: 6px 16px;
         font-size: 0.8125rem;
@@ -1290,7 +1290,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     .reconnecting-btn {
         background: rgba(214, 211, 209, 0.15);
         border: 1px solid rgba(214, 211, 209, 0.3);
-        color: #d6d3d1;
+        color: var(--color-alert-text);
         padding: 2px 10px;
         border-radius: 4px;
         font-size: 0.75rem;
@@ -1306,7 +1306,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         width: 12px;
         height: 12px;
         border: 2px solid rgba(214, 211, 209, 0.3);
-        border-top-color: #d6d3d1;
+        border-top-color: var(--color-alert-text);
         border-radius: 50%;
         animation: spin 0.6s linear infinite;
     }
@@ -1335,8 +1335,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         left: 0;
         right: 0;
         z-index: 10001;
-        background: #550000;
-        color: #d6d3d1;
+        background: var(--color-alert-bg);
+        color: var(--color-alert-text);
         text-align: center;
         padding: 5px 16px;
         font-size: 0.75rem;
@@ -1482,7 +1482,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             display: block;
             position: fixed;
             inset: 0;
-            background: rgba(0,0,0,0.5);
+            background: var(--color-backdrop);
             z-index: 199;
         }
     }

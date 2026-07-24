@@ -12,6 +12,19 @@
     <title>Kanban Board</title>
 </head>
 <body>
+    <!-- Inject cached theme stylesheet before any rendering (zero-flash on return visits) -->
+    <script>
+        try {
+            var _t = localStorage.getItem('kanban-theme-css');
+            if (_t) {
+                var _l = document.createElement('link');
+                _l.rel = 'stylesheet';
+                _l.href = _t;
+                _l.id = 'kanban-theme-stylesheet';
+                document.head.appendChild(_l);
+            }
+        } catch(e) {}
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
 </body>

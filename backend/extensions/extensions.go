@@ -8,6 +8,7 @@ import (
 const (
 	ExtensionTypeLSP = "lsp"
 	ExtensionTypeUI  = "ui"
+	ExtensionTypeCSS = "css"
 )
 
 // Extension represents an installed extension in the system.
@@ -38,6 +39,7 @@ type ExtensionManifest struct {
 	ConfigSchema *ConfigSchema `json:"config_schema,omitempty"`
 	LSP          *LSPConfig    `json:"lsp,omitempty"`
 	UI           *UIConfig     `json:"ui,omitempty"`
+	CSS          *CSSConfig    `json:"css,omitempty"`
 }
 
 // LSPConfig defines LSP-specific extension configuration.
@@ -51,8 +53,15 @@ type LSPConfig struct {
 
 // UIConfig defines UI-specific extension configuration.
 type UIConfig struct {
-	ModuleURL        string   `json:"module_url"`
-	InjectionPoints  []string `json:"injection_points"`
+	ModuleURL       string   `json:"module_url"`
+	InjectionPoints []string `json:"injection_points"`
+}
+
+// CSSConfig defines CSS extension configuration (global stylesheet only).
+// CSS extensions are a separate type from UI extensions — they have no
+// module_url or injection_points, only a css_url.
+type CSSConfig struct {
+	CSSURL string `json:"css_url"` // global stylesheet URL (relative to server root)
 }
 
 // ConfigSchema is a JSON Schema subset for dynamic form rendering.
@@ -120,6 +129,11 @@ func (e *Extension) IsUI() bool {
 	return e.Type == ExtensionTypeUI
 }
 
+// IsCSS returns true if this extension is a CSS extension.
+func (e *Extension) IsCSS() bool {
+	return e.Type == ExtensionTypeCSS
+}
+
 // HasLSPConfig returns true if this extension has LSP configuration.
 func (e *Extension) HasLSPConfig() bool {
 	return e.IsLSP() && e.Manifest.LSP != nil
@@ -128,6 +142,11 @@ func (e *Extension) HasLSPConfig() bool {
 // HasUIConfig returns true if this extension has UI configuration.
 func (e *Extension) HasUIConfig() bool {
 	return e.IsUI() && e.Manifest.UI != nil
+}
+
+// HasCSSConfig returns true if this extension has CSS configuration.
+func (e *Extension) HasCSSConfig() bool {
+	return e.IsCSS() && e.Manifest.CSS != nil
 }
 
 // IsRegistryInstalled returns true if this extension was installed from a registry.

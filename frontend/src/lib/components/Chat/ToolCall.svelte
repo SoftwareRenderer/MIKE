@@ -731,7 +731,7 @@
     }
     .tool-result-summary :global(:not(pre) > code),
     .tool-result-question :global(:not(pre) > code) {
-        background-color: #151515;
+        background-color: var(--color-surface-1);
         padding: 1px 4px;
         border-radius: 3px;
     }

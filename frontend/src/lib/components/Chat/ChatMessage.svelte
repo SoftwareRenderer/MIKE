@@ -811,7 +811,7 @@
         padding: 7px 18px;
         border-radius: var(--radius-md);
         background: var(--color-accent-dark);
-        color: #fff;
+        color: var(--color-btn-text);
         font-size: 0.8125rem;
         font-weight: 500;
         cursor: pointer;

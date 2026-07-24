@@ -145,14 +145,14 @@
         font-weight: 500;
         font-family: var(--font-mono);
         white-space: nowrap;
-        border: 1px solid rgba(139, 92, 246, 0.5);
-        background: rgba(139, 92, 246, 0.2);
-        color: #c4b5fd;
+        border: 1px solid var(--color-branch-border);
+        background: var(--color-branch-bg);
+        color: var(--color-branch-text);
     }
     .branch-badge.main {
-        border-color: rgba(107, 114, 128, 0.5);
-        background: rgba(107, 114, 128, 0.2);
-        color: #d1d5db;
+        border-color: var(--color-branch-main-border);
+        background: var(--color-branch-main-bg);
+        color: var(--color-branch-main-text);
     }
     .actions {
         display: flex;
@@ -179,7 +179,7 @@
     }
 
     .icon-btn.sandbox-config-btn.port-conflict {
-        outline: 2px solid var(--color-status-yellow, #d29922);
+        outline: 2px solid var(--color-status-yellow);
         outline-offset: 1px;
         border-radius: var(--radius-sm);
     }
@@ -194,7 +194,7 @@
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: #d29922;
+        background: var(--color-status-orange);
         pointer-events: none;
     }
 
@@ -215,15 +215,15 @@
             top: 50%;
             right: 8px;
             transform: translateY(-50%);
-            background: #8b5cf6;
-            border-color: #8b5cf6;
+            background: var(--color-branch-solid);
+            border-color: var(--color-branch-solid);
             font-size: 0.6875rem;
             padding: 1px 6px;
             color: #fff;
         }
         .explorer-btn .branch-badge.main {
-            background: #6b7280;
-            border-color: #6b7280;
+            background: var(--color-branch-main-solid);
+            border-color: var(--color-branch-main-solid);
             color: #fff;
         }
     }

@@ -483,14 +483,14 @@
         background: var(--color-surface-3);
     }
     .provider-option-pi {
-        color: #A371F7;
+        color: var(--color-status-purple);
     }
     .provider-option-pi:hover {
         background: rgba(163, 113, 247, 0.08);
     }
     .provider-option-pi.active {
         background: rgba(163, 113, 247, 0.1);
-        color: #A371F7;
+        color: var(--color-status-purple);
     }
     .provider-option.active {
         background: color-mix(in srgb, var(--color-accent) 10%, transparent);

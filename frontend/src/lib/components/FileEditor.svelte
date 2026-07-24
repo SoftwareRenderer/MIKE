@@ -21,7 +21,7 @@
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
-    import { darkTheme, darkSyntax } from '$lib/utils/codemirror-theme';
+    import { darkTheme, darkSyntax, lightTheme, lightSyntax, isLightTheme } from '$lib/utils/codemirror-theme';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
     import { mount, unmount } from 'svelte';
@@ -265,8 +265,8 @@
                 ...foldKeymap,
                 ...completionKeymap,
             ]),
-            darkTheme,
-            darkSyntax,
+            isLightTheme() ? lightTheme : darkTheme,
+            isLightTheme() ? lightSyntax : darkSyntax,
             hoverTooltip(async (view, pos) => {
                 if (!lspClient || !fileUri) return null;
                 try {

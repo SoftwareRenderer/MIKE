@@ -1,6 +1,7 @@
 package extensions
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -253,5 +254,77 @@ func TestSandboxConfig_Defaults(t *testing.T) {
 	}
 	if len(cfg.Capabilities) != 0 {
 		t.Errorf("Capabilities = %v, want empty", cfg.Capabilities)
+	}
+}
+
+func TestCSSConfig_CSSURL(t *testing.T) {
+	cfg := &CSSConfig{
+		CSSURL: "/extensions/mike-light/styles.css",
+	}
+
+	if cfg.CSSURL != "/extensions/mike-light/styles.css" {
+		t.Errorf("CSSURL = %v, want /extensions/mike-light/styles.css", cfg.CSSURL)
+	}
+}
+
+func TestCSSConfig_JSONRoundTrip(t *testing.T) {
+	// Verify that css_url is correctly serialized/deserialized via JSON
+	original := &CSSConfig{
+		CSSURL: "/extensions/mike-light/styles.css",
+	}
+
+	jsonBytes, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	var decoded CSSConfig
+	if err := json.Unmarshal(jsonBytes, &decoded); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if decoded.CSSURL != original.CSSURL {
+		t.Errorf("CSSURL after JSON round-trip = %v, want %v", decoded.CSSURL, original.CSSURL)
+	}
+}
+
+func TestExtension_IsCSS(t *testing.T) {
+	tests := []struct {
+		name string
+		ext  *Extension
+		want bool
+	}{
+		{"css type", makeTestExtension(t, ExtensionTypeCSS, "registry"), true},
+		{"lsp type", makeTestExtension(t, ExtensionTypeLSP, "registry"), false},
+		{"ui type", makeTestExtension(t, ExtensionTypeUI, "registry"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ext.IsCSS(); got != tt.want {
+				t.Errorf("IsCSS() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtension_HasCSSConfig(t *testing.T) {
+	// CSS type with CSS config
+	cssExt := makeTestExtension(t, ExtensionTypeCSS, "manual")
+	cssExt.Manifest.CSS = &CSSConfig{CSSURL: "/theme.css"}
+	if !cssExt.HasCSSConfig() {
+		t.Error("HasCSSConfig() = false, want true")
+	}
+
+	// CSS type without CSS config
+	emptyCSS := makeTestExtension(t, ExtensionTypeCSS, "manual")
+	if emptyCSS.HasCSSConfig() {
+		t.Error("HasCSSConfig() = true, want false (no CSS config)")
+	}
+
+	// UI type with CSS config (should still be false)
+	uiExt := makeTestExtension(t, ExtensionTypeUI, "manual")
+	uiExt.Manifest.CSS = &CSSConfig{CSSURL: "/theme.css"}
+	if uiExt.HasCSSConfig() {
+		t.Error("HasCSSConfig() = true for UI extension, want false")
 	}
 }

@@ -24,7 +24,7 @@
 
     function getBarColor(): string {
         if (isDanger) return 'var(--color-status-red)';
-        if (isOrange) return '#DB5400';
+        if (isOrange) return 'var(--color-status-orange-dark)';
         if (isWarning) return 'var(--color-status-amber, #f59e0b)';
         return 'var(--color-status-green, #3fb950)';
     }
@@ -124,7 +124,7 @@
         transition: color 0.3s ease;
     }
     .usage-text.warning {
-        color: #DB5400;
+        color: var(--color-status-orange-dark);
     }
     .usage-text.danger {
         color: var(--color-status-red);

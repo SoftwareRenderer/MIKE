@@ -323,7 +323,7 @@ Sandbox Isolation is enabled for this project
 
     .mount-mode.mode-rw {
         background: rgba(248, 81, 73, 0.15);
-        color: #FF7575;
+        color: var(--color-status-red);
     }
 
     .mount-mode.mode-ro {
