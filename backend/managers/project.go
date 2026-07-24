@@ -330,9 +330,18 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			req.SandboxMemoryLimit != nil || req.SandboxForwardPorts != nil ||
 			req.SandboxMounts != nil || req.SandboxEnvs != nil ||
 			req.SandboxCapabilities != nil
-		if hasSandboxChange && h.executor != nil && h.executor.HasRunningTasks(id) {
-			httputil.JSONError(w, http.StatusConflict, "cannot modify sandbox settings while tasks are running — stop all tasks first")
-			return
+		// Block sandbox setting changes if any task that is actually "In Progress" is running.
+		// If no "In Progress" tasks are running, we can safely stop any other running executors
+		// (which are stale) and apply the settings.
+		if hasSandboxChange && h.executor != nil {
+			if h.executor.HasRunningTasks(id) {
+				httputil.JSONError(w, http.StatusConflict, "cannot modify sandbox settings while tasks are running — stop all tasks first")
+				return
+			}
+			stopped := h.executor.StopProjectTasks(id)
+			if stopped > 0 {
+				log.Printf("[project] stopped %d stale running tasks in project %s due to sandbox settings change", stopped, id)
+			}
 		}
 		if req.SandboxEnabled != nil {
 			if updateErr := h.store.UpdateProjectSandboxEnabled(id, *req.SandboxEnabled); updateErr != nil {

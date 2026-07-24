@@ -860,22 +860,18 @@ func (te *TaskExecutor) StopProjectTasks(projectID string) int {
 }
 
 // HasRunningTasks returns true if any task in the given project has an active
-// executor with taskStatus == "in_progress". Uses only the in-memory map
-// (no DB call) — taskStatus is stored in executionState at creation time and
-// cleared by StopTask, so there is no race between DB status and map state.
+// executor AND is currently in the "in_progress" column. This ensures that
+// only truly active tasks block sandbox settings changes, while stale
+// executors for tasks that have been moved can be cleaned up automatically.
 func (te *TaskExecutor) HasRunningTasks(projectID string) bool {
 	tasks, err := te.store.GetTasksByProject(projectID)
 	if err != nil {
 		return false
 	}
-	taskIDs := make([]string, 0, len(tasks))
-	for _, task := range tasks {
-		taskIDs = append(taskIDs, task.ID)
-	}
 	te.taskMu.Lock()
 	defer te.taskMu.Unlock()
-	for _, id := range taskIDs {
-		if state, ok := te.tasks[id]; ok && state.taskStatus == "in_progress" {
+	for _, task := range tasks {
+		if state, ok := te.tasks[task.ID]; ok && task.Status == "in_progress" {
 			return true
 		}
 	}
