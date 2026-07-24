@@ -203,7 +203,8 @@
         error = '';
         try {
             await setExtensionEnabled(id, enabled);
-            await loadExtensions();
+            const ext = extensions.find(e => e.id === id);
+            if (ext) ext.enabled = enabled;
         } catch (e: any) {
             error = e.message || 'Failed to update extension';
         }
@@ -370,20 +371,30 @@
 
     <!-- View Tabs -->
     <div class="view-tabs">
-        <button
-            class="view-tab"
-            class:active={activeView === 'installed'}
-            onclick={() => activeView = 'installed'}
-        >
-            Installed ({extensions.length})
-        </button>
-        <button
-            class="view-tab"
-            class:active={activeView === 'browse'}
-            onclick={() => { activeView = 'browse'; if (registryEntries.length === 0) loadRegistry(); }}
-        >
-            Browse Registry
-        </button>
+        <div class="view-tabs-left">
+            <button
+                class="view-tab"
+                class:active={activeView === 'installed'}
+                onclick={() => activeView = 'installed'}
+            >
+                Installed ({extensions.length})
+            </button>
+            <button
+                class="view-tab"
+                class:active={activeView === 'browse'}
+                onclick={() => { activeView = 'browse'; if (registryEntries.length === 0) loadRegistry(); }}
+            >
+                Browse Registry
+            </button>
+        </div>
+        <div class="view-tabs-right">
+            <button class="btn btn-primary" onclick={() => { showAddForm = true; resetAddForm(); }}>
+                + Add Extension
+            </button>
+            <button class="btn btn-secondary" onclick={handleCheckUpdates} disabled={loadingUpdates}>
+                {loadingUpdates ? 'Checking...' : 'Check for Updates'}
+            </button>
+        </div>
     </div>
 
     <!-- Search -->
@@ -400,16 +411,6 @@
     <!-- Installed View -->
     {#if activeView === 'installed'}
         <div class="installed-view">
-            <!-- Actions Bar -->
-            <div class="actions-bar">
-                <button class="btn btn-primary" onclick={() => { showAddForm = true; resetAddForm(); }}>
-                    + Add Extension
-                </button>
-                <button class="btn btn-secondary" onclick={handleCheckUpdates} disabled={loadingUpdates}>
-                    {loadingUpdates ? 'Checking...' : 'Check for Updates'}
-                </button>
-            </div>
-
             <!-- Updates Available -->
             {#if updates.length > 0}
                 <div class="updates-section">
@@ -459,57 +460,41 @@
                                         {#if ext.manifest.license_url} · <a href={ext.manifest.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
                                     </span>
                                 </div>
-                                <div class="ext-status">
-                                    {#if ext.type === 'ui' || ext.type === 'css'}
-                                        {#if ext.enabled}
-                                            <span class="status-badge running">Active</span>
+                                <div class="card-actions">
+                                    <button class="btn btn-icon btn-danger" title="Delete" onclick={() => handleDelete(ext.id, ext.name)}>
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                            <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                    {#if ext.type === 'lsp'}
+                                    <button class="btn btn-icon" title="Update Image" onclick={() => handleUpdateImage(ext.id, ext.name)} disabled={updating.has(ext.name)}>
+                                        {#if updating.has(ext.name)}
+                                            <span class="spinner"></span>
                                         {:else}
-                                            <span class="status-badge disabled">Disabled</span>
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M21 2v6h-6"/>
+                                                <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+                                                <path d="M3 22v-6h6"/>
+                                                <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                                            </svg>
                                         {/if}
-                                    {:else if ext.running}
-                                        <span class="status-badge running">Running</span>
-                                    {:else if ext.enabled}
-                                        <span class="status-badge stopped">Idle</span>
-                                    {:else}
-                                        <span class="status-badge disabled">Disabled</span>
+                                    </button>
                                     {/if}
+                                    {#if ext.type !== 'css'}
+                                    <button class="btn btn-icon" title="Edit" onclick={() => openEdit(ext)}>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                        </svg>
+                                    </button>
+                                    {/if}
+                                    <ToggleSwitch class="card-toggle" checked={ext.enabled} onChange={() => handleToggleEnabled(ext.id, !ext.enabled)} />
                                 </div>
                             </div>
                             {#if ext.manifest.description}
                                 <p class="ext-description">{ext.manifest.description}</p>
                             {/if}
-                            <div class="card-actions">
-                                <label class="toggle-label">
-                                    <ToggleSwitch checked={ext.enabled} onChange={() => handleToggleEnabled(ext.id, !ext.enabled)} />
-                                    <span>Enabled</span>
-                                </label>
-                                <button class="btn btn-icon" title="Edit" onclick={() => openEdit(ext)}>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                                    </svg>
-                                </button>
-                                {#if ext.type === 'lsp'}
-                                <button class="btn btn-icon" title="Update Image" onclick={() => handleUpdateImage(ext.id, ext.name)} disabled={updating.has(ext.name)}>
-                                    {#if updating.has(ext.name)}
-                                        <span class="spinner"></span>
-                                    {:else}
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="M21 2v6h-6"/>
-                                            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-                                            <path d="M3 22v-6h6"/>
-                                            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-                                        </svg>
-                                    {/if}
-                                </button>
-                                {/if}
-                                <button class="btn btn-icon btn-danger" title="Delete" onclick={() => handleDelete(ext.id, ext.name)}>
-                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                        <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                                        <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                                    </svg>
-                                </button>
-                            </div>
                         </div>
                     {/each}
                 </div>
@@ -757,9 +742,22 @@
     /* View tabs */
     .view-tabs {
         display: flex;
+        align-items: center;
+        justify-content: space-between;
         gap: 0.5rem;
         border-bottom: 1px solid var(--color-border-subtle);
         padding-bottom: 0.5rem;
+    }
+
+    .view-tabs-left {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .view-tabs-right {
+        display: flex;
+        gap: 0.5rem;
+        flex-shrink: 0;
     }
 
     .view-tab {
@@ -802,13 +800,6 @@
     .search-input:focus {
         outline: none;
         border-color: var(--color-accent);
-    }
-
-    /* Actions bar */
-    .actions-bar {
-        display: flex;
-        gap: 0.5rem;
-        justify-content: flex-end;
     }
 
     /* Updates section */
@@ -935,8 +926,15 @@
         text-decoration: underline;
     }
 
-    .ext-status {
+    .card-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
         flex-shrink: 0;
+    }
+
+    .card-toggle {
+        margin-left: auto;
     }
 
     .ext-action {
@@ -945,39 +943,11 @@
         align-items: flex-start;
     }
 
-    .status-badge {
-        font-size: 0.75rem;
-        padding: 0.2rem 0.5rem;
-        border-radius: 999px;
-        font-weight: 500;
-    }
-
-    .status-badge.running {
-        background: rgba(63, 185, 80, 0.15);
-        color: var(--color-status-green);
-    }
-
-    .status-badge.stopped {
-        background: rgba(139, 148, 158, 0.15);
-        color: var(--color-text-tertiary);
-    }
-
-    .status-badge.disabled {
-        background: rgba(248, 81, 73, 0.15);
-        color: var(--color-status-red);
-    }
-
     .ext-description {
         margin: 0 0 0.75rem;
         font-size: 0.85rem;
         color: var(--color-text-tertiary);
         line-height: 1.4;
-    }
-
-    .card-actions {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
     }
 
     .toggle-label {
