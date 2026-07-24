@@ -1,6 +1,7 @@
 <script lang="ts">
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import ModeSelect from '../ModeSelect.svelte';
+    import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
 
     let {
         defaultOperatingMode = $bindable('act'),
@@ -18,11 +19,7 @@
         onDirty?: () => void;
     } = $props();
 
-    const modeDescription = $derived({
-        act: 'AI is required to provide structured responses during review, and has read/write access.',
-        plan: 'AI decomposes work into subtasks on the board, and only has read access.',
-        explore: 'AI has read/write access.',
-    }[defaultOperatingMode] || '');
+    const modeDescription = $derived(MODE_DESCRIPTIONS[defaultOperatingMode] || '');
 </script>
 
 <fieldset class="section">

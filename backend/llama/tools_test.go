@@ -53,8 +53,8 @@ func TestGetToolDefinitions_Standard(t *testing.T) {
 	}
 }
 
-func TestGetIdeationModeToolDefinitions(t *testing.T) {
-	tools := GetIdeationModeToolDefinitions()
+func TestGetExploreModeToolDefinitions(t *testing.T) {
+	tools := GetExploreModeToolDefinitions()
 
 	// Should have 9 tools: standard (6) + task management (3)
 	if len(tools) != 9 {
