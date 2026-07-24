@@ -31,12 +31,12 @@ describe('MessageActions rendering', () => {
     });
 
     it('shows edit button for assistant messages when onEdit is provided and not streaming', () => {
-        expect(source).toContain('{#if onEdit && !isStreaming}');
+        expect(source).toContain('{#if onEdit && !isStreaming && !isOptimistic}');
         expect(source).toContain('aria-label="Edit message"');
     });
 
     it('shows regenerate button for assistant messages when onRegenerate is provided', () => {
-        expect(source).toContain('{#if onRegenerate && !isStreaming}');
+        expect(source).toContain('{#if onRegenerate && !isStreaming && !isOptimistic}');
         expect(source).toContain('aria-label="Regenerate response"');
     });
 

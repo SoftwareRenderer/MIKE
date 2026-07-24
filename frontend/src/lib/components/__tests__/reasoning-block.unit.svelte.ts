@@ -45,7 +45,7 @@ describe('ReasoningBlock rendering', () => {
     it('fetches full reasoning content when [HIDDEN]', () => {
         expect(source).toContain('getTaskMessageFull');
         expect(source).toContain('\[HIDDEN\]');
-        expect(source).toContain('resolvedReasoningContent');
+        expect(source).toContain('resolvedReasoningOverride');
     });
 
     it('auto-expands short reasoning without content', () => {
