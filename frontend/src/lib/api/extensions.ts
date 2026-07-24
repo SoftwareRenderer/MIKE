@@ -19,7 +19,7 @@ export async function getExtension(id: string): Promise<Extension> {
 export async function createExtension(data: {
     name: string;
     version?: string;
-    type: 'lsp' | 'ui';
+    type: 'lsp' | 'ui' | 'css';
     manifest?: Record<string, any>;
     config?: Record<string, any>;
     container_config?: Record<string, any>;

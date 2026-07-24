@@ -41,7 +41,7 @@ describe('ContextUsage rendering', () => {
 
     it('shows orange warning when usage exceeds 80%', () => {
         expect(source).toContain('percentage > 80');
-        expect(source).toContain('#DB5400');
+        expect(source).toContain('color-status-orange-dark');
     });
 
     it('shows red danger when usage exceeds 90%', () => {

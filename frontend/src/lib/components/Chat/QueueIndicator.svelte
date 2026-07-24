@@ -46,7 +46,7 @@
         font-size: 0.8rem;
     }
     .awaiting-llm.retry {
-        color: var(--color-warning, #d29922);
+        color: var(--color-warning);
     }
     .spinner {
         display: inline-block;

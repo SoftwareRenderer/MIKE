@@ -1,5 +1,10 @@
 import type { Extension } from '$lib/types';
 
+/** localStorage key for cached theme CSS URL (read by inline script in index.html). */
+const THEME_CSS_KEY = 'kanban-theme-css';
+/** ID of the injected theme <link> element. */
+const THEME_LINK_ID = 'kanban-theme-stylesheet';
+
 /** Named injection points where UI extensions can inject content. */
 export const INJECTION_POINTS = {
     TASK_CARD: 'task-card',
@@ -60,8 +65,10 @@ export class UIInjector {
     private cleanups = new Map<string, () => void>();
     /** Global version counter — incremented on every registration change. */
     private version = $state(0);
+    /** Currently active theme CSS URL (from extension css_url). */
+    private activeCSSUrl = $state<string | null>(null);
 
-    /** Register injections from UI extensions. */
+    /** Register injections from UI extensions and CSS from CSS-type extensions. */
     registerFromExtensions(extensions: Extension[]) {
         // Clean up old extensions
         for (const cleanup of this.cleanups.values()) {
@@ -70,8 +77,21 @@ export class UIInjector {
         this.cleanups.clear();
 
         this.registrations = [];
+        let cssUrl: string | null = null;
+
         for (const ext of extensions) {
-            if (!ext.enabled || ext.type !== 'ui' || !ext.manifest.ui) continue;
+            if (!ext.enabled) continue;
+
+            // CSS-type extensions: inject global stylesheet
+            if (ext.type === 'css' && ext.manifest.css?.css_url) {
+                if (!cssUrl) {
+                    cssUrl = ext.manifest.css.css_url;
+                }
+                continue;
+            }
+
+            // UI-type extensions: register injection points
+            if (ext.type !== 'ui' || !ext.manifest.ui) continue;
             const ui = ext.manifest.ui;
             if (!ui.injection_points || !ui.module_url) continue;
 
@@ -87,8 +107,44 @@ export class UIInjector {
             }
         }
 
+        // Apply or remove global theme stylesheet
+        this.setThemeCSS(cssUrl);
+
         // Bump global version so all $effect watchers re-run
         this.version = this.version + 1;
+    }
+
+    /**
+     * Set the global theme stylesheet from an extension's css_url.
+     * Injects a <link> tag and caches the URL in localStorage for zero-flash reloads.
+     * Pass null to remove any active theme stylesheet.
+     */
+    private setThemeCSS(url: string | null) {
+        if (url === this.activeCSSUrl) return; // no change
+
+        // Remove existing link
+        const existing = document.getElementById(THEME_LINK_ID);
+        if (existing) {
+            existing.remove();
+        }
+
+        if (!url) {
+            this.activeCSSUrl = null;
+            try { localStorage.removeItem(THEME_CSS_KEY); } catch {}
+            return;
+        }
+
+        // Inject new <link> tag
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = url;
+        link.id = THEME_LINK_ID;
+        document.head.appendChild(link);
+
+        // Cache for zero-flash on next page load
+        try { localStorage.setItem(THEME_CSS_KEY, url); } catch {}
+
+        this.activeCSSUrl = url;
     }
 
     /** Get registrations for a specific injection point. */
@@ -164,6 +220,7 @@ export class UIInjector {
             try { cleanup(); } catch {}
         }
         this.cleanups.clear();
+        this.setThemeCSS(null);
     }
 
     /** Check if an injection point has any registrations. */

@@ -173,7 +173,7 @@
         transition: all 0.15s ease;
     }
     .btn-commit-and-done {
-        border-color: #EAB308;
+        border-color: var(--color-status-yellow);
     }
     .btn-commit-done:hover:not(:disabled) {
         background: var(--color-surface-3);

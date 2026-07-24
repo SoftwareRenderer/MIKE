@@ -1467,7 +1467,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .locked-mount-mode.mode-rw {
         background: rgba(248, 81, 73, 0.15);
-        color: #FF7575;
+        color: var(--color-status-red);
     }
 
     .locked-mount-mode.mode-ro {
@@ -1988,7 +1988,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         background: rgba(34, 197, 94, 0.08);
         border: 1px solid rgba(34, 197, 94, 0.3);
         border-radius: var(--radius-md);
-        color: #22c55e;
+        color: var(--color-status-green);
         font-size: 0.8125rem;
         margin-bottom: 12px;
     }
@@ -2162,7 +2162,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     .btn-add-mount.pending {
         background: rgba(34, 197, 94, 0.15);
         border-color: rgba(34, 197, 94, 0.6);
-        color: #22c55e;
+        color: var(--color-status-green);
     }
 
     .btn-add-port:disabled,
@@ -2272,7 +2272,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     .mount-mode.mode-rw {
         background: rgba(248, 81, 73, 0.15);
-        color: #FF7575;
+        color: var(--color-status-red);
     }
 
     .mount-add-row {
@@ -2501,7 +2501,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     .btn-add-env.pending {
         background: rgba(34, 197, 94, 0.15);
         border-color: rgba(34, 197, 94, 0.6);
-        color: #22c55e;
+        color: var(--color-status-green);
     }
 
     .btn-cancel-edit {

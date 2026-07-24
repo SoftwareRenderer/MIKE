@@ -225,10 +225,10 @@
             lineHeight: 1.4,
             fontFamily: '"Noto Sans Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
             theme: {
-                background: '#1F2428',
-                foreground: '#E6EDF3',
-                cursor: '#0084FF',
-                selectionBackground: '#3E464E',
+                background: getComputedStyle(document.documentElement).getPropertyValue('--color-terminal-bg').trim() || '#1F2428',
+                foreground: getComputedStyle(document.documentElement).getPropertyValue('--color-terminal-fg').trim() || '#E6EDF3',
+                cursor: getComputedStyle(document.documentElement).getPropertyValue('--color-terminal-cursor').trim() || '#0084FF',
+                selectionBackground: getComputedStyle(document.documentElement).getPropertyValue('--color-terminal-selection').trim() || '#3E464E',
             },
         });
 
@@ -1023,9 +1023,9 @@
             -webkit-tap-highlight-color: transparent;
         }
         .kb-btn:active {
-            background: #555;
-            border-color: #888;
-            color: #fff;
+            background: var(--color-surface-3);
+            border-color: var(--color-border-bright);
+            color: var(--color-btn-text);
         }
         .kb-mod {
             background: var(--color-surface-4);
@@ -1033,7 +1033,7 @@
         .kb-mod-active {
             background: var(--color-accent-dark) !important;
             border-color: var(--color-accent) !important;
-            color: #fff !important;
+            color: var(--color-btn-text) !important;
         }
         /* Push the terminal viewport up so its bottom doesn't sit behind
            the keyboard panel (~75px tall). flex: 1 + margin-bottom in a

@@ -128,7 +128,7 @@
         padding: 10px 20px;
         border-radius: var(--radius-md);
         background: var(--color-accent-dark);
-        color: #fff;
+        color: var(--color-btn-text);
         font-size: 0.875rem;
         font-weight: 600;
         cursor: pointer;
@@ -147,8 +147,8 @@
         display: inline-block;
         width: 14px;
         height: 14px;
-        border: 2px solid rgba(255,255,255,0.3);
-        border-top-color: #fff;
+        border: 2px solid color-mix(in srgb, var(--color-btn-text) 30%, transparent);
+        border-top-color: var(--color-btn-text);
         border-radius: 50%;
         animation: spin 0.6s linear infinite;
     }

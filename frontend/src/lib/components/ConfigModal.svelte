@@ -805,11 +805,11 @@
         align-items: center;
         gap: 8px;
         line-height: 1;
-        color: #A371F7;
-        border-color: #A371F733;
+        color: var(--color-status-purple);
+        border-color: var(--color-status-purple-subtle);
     }
     .btn-agent:hover {
-        background: #A371F711;
+        background: var(--color-status-purple-faint);
     }
     .btn-agent .chevron {
         transition: transform 0.15s ease;
@@ -837,7 +837,7 @@
         border-radius: var(--radius-sm, 4px);
         border: none;
         background: none;
-        color: #A371F7;
+        color: var(--color-status-purple);
         font-size: 0.8125rem;
         font-family: inherit;
         font-weight: 500;
@@ -934,7 +934,7 @@
         border: 1px solid rgba(210, 153, 34, 0.25);
         border-radius: var(--radius-sm);
         font-size: 0.8rem;
-        color: #d29922;
+        color: var(--color-status-orange);
         line-height: 1.4;
     }
     .no-llm-warning svg {
@@ -942,7 +942,7 @@
         margin-top: 1px;
     }
     .no-llm-warning strong {
-        color: #e3b341;
+        color: var(--color-status-yellow);
     }
 
     .error {

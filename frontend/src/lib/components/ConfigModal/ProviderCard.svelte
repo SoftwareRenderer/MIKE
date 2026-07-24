@@ -282,7 +282,7 @@
     .pi-icon {
         display: flex;
         align-items: center;
-        color: #A371F7;
+        color: var(--color-status-purple);
         flex-shrink: 0;
     }
     .provider-display-name {

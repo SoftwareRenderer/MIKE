@@ -1218,7 +1218,7 @@
         opacity: 0.35;
         transition: width 0.3s ease, opacity 0.15s ease;
         pointer-events: none;
-        background: #009933;
+        background: var(--color-status-green);
     }
     .subtask-progress-bar.is-expanded .subtask-progress-fill {
         opacity: 0.5;
@@ -1233,15 +1233,15 @@
         font-weight: 600;
         font-family: inherit;
         font-variant-numeric: tabular-nums;
-        color: #FAFAFA;
+        color: var(--color-text-primary);
         white-space: nowrap;
         pointer-events: none;
     }
     .subtask-progress-bar.is-expanded .subtask-progress-count {
-        color: #FAFAFA;
+        color: var(--color-text-primary);
     }
     .subtask-progress-bar.is-expanded .subtask-progress-count {
-        color: #FAFAFA;
+        color: var(--color-text-primary);
     }
     .subtask-chevron {
         position: absolute;

@@ -45,7 +45,7 @@
         width: 16px;
         height: 16px;
         border-radius: 50%;
-        background: #E0E0E0;
+        background: var(--color-toggle-knob);
         transition: transform 0.2s ease;
     }
 

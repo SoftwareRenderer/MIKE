@@ -9,33 +9,145 @@ input[type="number"] {
 }
 
 :root {
+    /* Surface palette */
     --color-surface-0: #141414;
     --color-surface-1: #1C1C1C;
     --color-surface-2: #262626;
     --color-surface-3: #313131;
     --color-surface-4: #3C3C3C;
+
+    /* Semantic backgrounds */
+    --color-bg-page: #0d1117;
+    --color-bg-card: #161b22;
+    --color-bg-input: #0d1117;
+    --color-bg-hover: rgba(255, 255, 255, 0.04);
+    --color-bg-active: rgba(255, 255, 255, 0.08);
+    --color-bg-modal-overlay: rgba(0, 0, 0, 0.6);
+    --color-bg-dropdown: #161b22;
+    --color-bg-tooltip: #161b22;
+
+    /* Borders */
     --color-border: rgba(255, 255, 255, 0.1);
+    --color-border-subtle: #21262d;
     --color-border-bright: rgba(255, 255, 255, 0.2);
+    --color-border-hover: #484f58;
+    --color-border-focus: #58a6ff;
+
+    /* Text */
     --color-text-primary: #ECECEC;
     --color-text-secondary: #A0A0A0;
     --color-text-tertiary: #8C8C8C;
+    --color-text-muted: #6e7681;
+    --color-text-inverse: #0d1117;
+
+    /* Accent */
     --color-accent: #0084FF;
     --color-accent-dark: #0066DD;
     --color-accent-hover: #0066DD;
     --color-accent-light: #60a5fa;
+    --color-accent-bg: rgba(88, 166, 255, 0.15);
+    --color-accent-bg-hover: rgba(88, 166, 255, 0.25);
+
+    /* Status colors */
     --color-status-blue: #4C9AFF;
     --color-status-green: #3FB950;
     --color-status-orange: #D29922;
+    --color-status-orange-dark: #DB5400;
     --color-status-red: #F85149;
     --color-status-red-dark: #D4332F;
+    --color-status-red-bg: rgba(248, 81, 73, 0.15);
     --color-status-purple: #A371F7;
     --color-status-yellow: #E3B341;
+    --color-status-amber: #f0c040;
+    --color-warning: #d29922;
+    --color-status-bg-blue: rgba(76, 154, 255, 0.15);
+    --color-status-bg-green: rgba(63, 185, 80, 0.15);
+    --color-status-bg-orange: rgba(210, 153, 34, 0.15);
+    --color-status-bg-purple: rgba(163, 113, 247, 0.15);
+    --color-status-purple-subtle: rgba(163, 113, 247, 0.2);
+    --color-status-purple-faint: rgba(163, 113, 247, 0.07);
+
+    /* Column colors */
     --color-column-backlog: #99AAB5;
     --color-column-in-progress: #4C9AFF;
     --color-column-review: #D29922;
     --color-column-done: #3FB950;
+
+    /* Interactive elements */
+    --color-btn-primary-bg: #238636;
+    --color-btn-primary-hover: #2ea043;
+    --color-btn-secondary-bg: #21262d;
+    --color-btn-secondary-hover: #30363d;
+    --color-btn-danger: #f85149;
+    --color-btn-text: #ffffff;
+    --color-toggle-knob: #E0E0E0;
+
+    /* Selection */
+    --color-selection-bg: #2a4060;
+
+    /* Scrollbar */
+    --color-scrollbar-thumb: #313131;
+    --color-scrollbar-thumb-hover: #3C3C3C;
+
+    /* Diff */
+    --color-diff-add-bg: rgba(63, 185, 80, 0.15);
+    --color-diff-add-text: #3fb950;
+    --color-diff-del-bg: rgba(248, 81, 73, 0.15);
+    --color-diff-del-text: #f85149;
+    --color-diff-hunk-bg: rgba(88, 166, 255, 0.1);
+
+    /* CodeMirror syntax (dark) */
+    --cm-keyword: #F97583;
+    --cm-keyword-const: #79C0FF;
+    --cm-function: #D2A8FF;
+    --cm-variable: #C9D1D9;
+    --cm-property: #D2A8FF;
+    --cm-string: #A5D6FF;
+    --cm-number: #79C0FF;
+    --cm-comment: #8B949E;
+    --cm-operator: #FF7B72;
+    --cm-punctuation: #C9D1D9;
+    --cm-class: #FFA657;
+    --cm-type: #39D2C0;
+    --cm-tag: #7EE787;
+    --cm-attr-name: #79C0FF;
+    --cm-attr-value: #A5D6FF;
+    --cm-gutter-bg: #161b22;
+    --cm-gutter-text: #484F58;
+    --cm-gutter-active: #8B949E;
+    --cm-indent-guide: #21252B;
+    --cm-cursor: #C9D1D9;
+    --cm-search-match: rgba(232, 164, 20, 0.25);
+    --cm-search-match-outline: rgba(232, 164, 20, 0.5);
+    --cm-search-match-selected: rgba(232, 164, 20, 0.4);
+
+    /* Misc */
+    --color-overlay: rgba(0, 0, 0, 0.5);
+    --color-backdrop: rgba(0, 0, 0, 0.4);
+    --color-alert-bg: #550000;
+    --color-alert-text: #d6d3d1;
+
+    /* Branch badge */
+    --color-branch-border: rgba(139, 92, 246, 0.5);
+    --color-branch-bg: rgba(139, 92, 246, 0.2);
+    --color-branch-text: #c4b5fd;
+    --color-branch-main-border: rgba(107, 114, 128, 0.5);
+    --color-branch-main-bg: rgba(107, 114, 128, 0.2);
+    --color-branch-main-text: #d1d5db;
+    --color-branch-solid: #8b5cf6;
+    --color-branch-main-solid: #6b7280;
+
+    /* Terminal */
+    --color-terminal-bg: #1f2428;
+    --color-terminal-fg: #e6edf3;
+    --color-terminal-cursor: #0084FF;
+    --color-terminal-selection: #3e464e;
+
+    /* Fonts */
     --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+    /* Radii */
     --radius-sm: 4px;
     --radius-md: 6px;
     --radius-lg: 8px;
@@ -127,19 +239,19 @@ a:hover {
     background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-    background: var(--color-surface-3);
+    background: var(--color-scrollbar-thumb);
     border-radius: var(--radius-sm);
 }
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-surface-4);
+    background: var(--color-scrollbar-thumb-hover);
 }
 
 /* CodeMirror selection — override browser default bright highlight */
 .cm-editor ::selection,
 .cm-editor ::-moz-selection {
-    background-color: #2a4060 !important;
+    background-color: var(--color-selection-bg) !important;
 }
 .cm-editor .cm-selectionBackground,
 .cm-editor.cm-focused .cm-selectionBackground {
-    background-color: #2a4060 !important;
+    background-color: var(--color-selection-bg) !important;
 }

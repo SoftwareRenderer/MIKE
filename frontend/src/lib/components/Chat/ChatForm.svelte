@@ -424,7 +424,7 @@
     .btn-plan-toggle.active {
         background: color-mix(in srgb, var(--color-accent) 22%, transparent);
         border-color: var(--color-accent);
-        color: #fff;
+        color: var(--color-btn-text);
     }
     .btn-plan-toggle.explore {
         background: color-mix(in srgb, var(--color-status-yellow) 15%, transparent);
