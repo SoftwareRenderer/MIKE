@@ -16,6 +16,7 @@
     import ModeSelect from './ModeSelect.svelte';
     import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
+    import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
 
     let { projectId, onClose, onTaskCreated, parentId, currentBranch, onOptimisticTaskCreated, onReplaceOptimisticTask }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; currentBranch?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void } = $props();
 
@@ -410,15 +411,7 @@
             <div class="config-info">
                 <div class="config-text">
                     <span class="config-label">Operating mode</span>
-                    <span class="config-desc">
-                        {#if operatingMode === 'act'}
-                        AI is required to provide structured responses during review, and has read/write access.
-                        {:else if operatingMode === 'plan'}
-                        AI decomposes work into subtasks on the board, and only has read access.
-                        {:else}
-                        AI has read/write access.
-                        {/if}
-                    </span>
+                    <span class="config-desc">{MODE_DESCRIPTIONS[operatingMode] || ''}</span>
                 </div>
             </div>
             <ModeSelect value={operatingMode} onChange={(m: string) => operatingMode = m} />

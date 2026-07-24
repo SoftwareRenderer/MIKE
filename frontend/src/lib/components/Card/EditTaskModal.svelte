@@ -3,6 +3,7 @@
     import type { Provider } from '$lib/types';
     import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
     import { appStore } from '$lib/stores';
+    import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
     import ModelSelector from '../Chat/ModelSelector.svelte';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import ModeSelect from '../ModeSelect.svelte';
@@ -192,11 +193,7 @@
         onCancel();
     }
 
-    const modeDescription = $derived({
-        act: 'AI is required to provide structured responses during review, and has read/write access.',
-        plan: 'AI decomposes work into subtasks on the board, and only has read access.',
-        explore: 'AI has read/write access.',
-    }[operatingModeDraft] || '');
+    const modeDescription = $derived(MODE_DESCRIPTIONS[operatingModeDraft] || '');
 </script>
 
 {#snippet footer()}
