@@ -248,6 +248,74 @@ describe('DiffCache', () => {
         expect(cache.state.files['has-content.txt'].rows.length).toBe(3);
     });
 
+    it('stageAll iteratively stages each unstaged file', async () => {
+        const apis = makeApis();
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
+            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
+            'c.ts': { path: 'c.ts', rows: [], added: 0, removed: 0, staged: true }, // already staged
+        };
+        await cache.stageAll();
+        expect(cache.state.files['a.ts'].staged).toBe(true);
+        expect(cache.state.files['b.ts'].staged).toBe(true);
+        expect(cache.state.files['c.ts'].staged).toBe(true);
+        expect(apis.stageFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', true);
+        expect(apis.stageFile).toHaveBeenCalledWith('proj-1', 'task-1', 'b.ts', true);
+        expect(apis.stageFile).not.toHaveBeenCalledWith('proj-1', 'task-1', 'c.ts', true);
+    });
+
+    it('unstageAll iteratively unstages each staged file', async () => {
+        const apis = makeApis();
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: true },
+            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: true },
+            'c.ts': { path: 'c.ts', rows: [], added: 0, removed: 0, staged: false },
+        };
+        await cache.unstageAll();
+        expect(cache.state.files['a.ts'].staged).toBe(false);
+        expect(cache.state.files['b.ts'].staged).toBe(false);
+        expect(cache.state.files['c.ts'].staged).toBe(false);
+        expect(apis.stageFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', false);
+        expect(apis.stageFile).toHaveBeenCalledWith('proj-1', 'task-1', 'b.ts', false);
+        expect(apis.stageFile).not.toHaveBeenCalledWith('proj-1', 'task-1', 'c.ts', false);
+    });
+
+    it('stageAll skips individual failures without breaking others', async () => {
+        const stageFn = vi.fn(async (projectId, taskId, path, stage) => {
+            if (path === 'b.ts') throw new Error('fail');
+        });
+        const apis = makeApis({ stageFile: stageFn });
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: false },
+            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: false },
+            'c.ts': { path: 'c.ts', rows: [], added: 0, removed: 0, staged: false },
+        };
+        await cache.stageAll();
+        expect(cache.state.files['a.ts'].staged).toBe(true);
+        expect(cache.state.files['b.ts'].staged).toBe(false); // reverted
+        expect(cache.state.files['c.ts'].staged).toBe(true);
+    });
+
+    it('unstageAll skips individual failures without breaking others', async () => {
+        const stageFn = vi.fn(async (projectId, taskId, path, stage) => {
+            if (path === 'b.ts') throw new Error('fail');
+        });
+        const apis = makeApis({ stageFile: stageFn });
+        const cache = new DiffCache(apis, () => 'proj-1', () => 'task-1');
+        cache.state.files = {
+            'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0, staged: true },
+            'b.ts': { path: 'b.ts', rows: [], added: 0, removed: 0, staged: true },
+            'c.ts': { path: 'c.ts', rows: [], added: 0, removed: 0, staged: true },
+        };
+        await cache.unstageAll();
+        expect(cache.state.files['a.ts'].staged).toBe(false);
+        expect(cache.state.files['b.ts'].staged).toBe(true); // reverted
+        expect(cache.state.files['c.ts'].staged).toBe(false);
+    });
+
     it('getters reflect changes mid-flight for subsequent calls', async () => {
         let resolveDiff: (value: DiffApiResponse) => void;
         let currentProject = 'proj-1';

@@ -592,25 +592,22 @@ export class DiffCache {
         }
     }
 
-    /** Stage all unstaged tracked and untracked files. */
+    /** Stage all unstaged tracked and untracked files. Iteratively applies per-file stage. */
     async stageAll() {
-        const paths = [
-            ...Object.keys(this.state.files).filter(p => !this.state.files[p].staged && !this.state.untracked[p]),
-            ...Object.keys(this.state.untracked),
-        ];
-        for (const path of paths) {
+        for (const path of Object.keys(this.state.files)) {
+            if (this.state.files[path].staged) continue;
             try {
-                await this._apis.stageFile(this._getProjectId(), this._getTaskId(), path, true);
+                await this.stageFile(path, true, () => { this.revertStageFile(path, true); });
             } catch { /* skip */ }
         }
     }
 
-    /** Unstage all staged files. */
+    /** Unstage all staged files. Iteratively applies per-file unstage. */
     async unstageAll() {
-        const paths = Object.keys(this.state.files).filter(p => this.state.files[p].staged);
-        for (const path of paths) {
+        for (const path of Object.keys(this.state.files)) {
+            if (!this.state.files[path].staged) continue;
             try {
-                await this._apis.stageFile(this._getProjectId(), this._getTaskId(), path, false);
+                await this.stageFile(path, false, () => { this.revertStageFile(path, false); });
             } catch { /* skip */ }
         }
     }
