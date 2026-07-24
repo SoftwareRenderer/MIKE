@@ -288,7 +288,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN attachments TEXT DEFAULT NULL`)
 	// Separate merge conflict flag so execution_state can stay "running"
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN has_merge_conflict INTEGER NOT NULL DEFAULT 0`)
-	// Operating mode: act (default), plan, or ideate
+	// Operating mode: act (default), plan, or explore
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN operating_mode TEXT NOT NULL DEFAULT 'act'`)
 	// Cumulative token stats table (survives task deletion)
 	_, _ = s.db.Exec(`

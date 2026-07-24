@@ -297,8 +297,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	var tools []types.ChatTool
 	if setup.task.IsPlanMode() {
 		tools = llama.GetPlanModeToolDefinitions()
-	} else if setup.task.IsIdeationMode() {
-		tools = llama.GetIdeationModeToolDefinitions()
+	} else if setup.task.IsExploreMode() {
+		tools = llama.GetExploreModeToolDefinitions()
 	} else {
 		tools = llama.GetToolDefinitions()
 	}
@@ -436,10 +436,10 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					// Update setup.task reference with latest mode
 					setup.task.OperatingMode = updatedTask.OperatingMode
 									// Update tools if mode affects them
-				if updatedTask.IsPlanMode() {
+				if updatedTask.IsExploreMode() {
+					tools = llama.GetExploreModeToolDefinitions()
+				} else if updatedTask.IsPlanMode() {
 					tools = llama.GetPlanModeToolDefinitions()
-				} else if updatedTask.IsIdeationMode() {
-					tools = llama.GetIdeationModeToolDefinitions()
 				} else {
 					tools = llama.GetToolDefinitions()
 				}
@@ -1122,7 +1122,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				if loopType == LoopTool {
 					target = extractPathFromArgs(toolArgs)
 				}
-				if handleLoopDetected(te, setup.task, setup.projectID, setup.task.ID, lc.detector, loopType, target, &lc.messages, setup.task.IsIdeationMode()) {
+				if handleLoopDetected(te, setup.task, setup.projectID, setup.task.ID, lc.detector, loopType, target, &lc.messages, setup.task.IsExploreMode()) {
 					return
 				}
 			} else {
@@ -1175,16 +1175,16 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				loopType = LoopPhrase
 			}
 			if loopType != LoopNone {
-				if handleLoopDetected(te, setup.task, setup.projectID, setup.task.ID, lc.detector, loopType, "", &lc.messages, setup.task.IsIdeationMode()) {
+				if handleLoopDetected(te, setup.task, setup.projectID, setup.task.ID, lc.detector, loopType, "", &lc.messages, setup.task.IsExploreMode()) {
 					return
 				}
-				if !setup.task.IsIdeationMode() && !setup.task.IsPlanMode() {
+				if !setup.task.IsExploreMode() && !setup.task.IsPlanMode() {
 					// In act mode: loop detected, inject hint, continue
 					setup.task.ExecutionState = "running"
 					te.store.UpdateTask(setup.task)
 					continue
 				}
-				// In ideation/plan mode: text-only responses are valid (brainstorming / planning).
+				// In exploration/plan mode: text-only responses are valid (brainstorming / planning).
 				// Fall through to end the turn.
 			}
 			// Valid text-only response: remove previously injected hints from context
@@ -1261,7 +1261,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 			// Advance loop detector and check max hints (injects hint into messages + DB + WebSocket)
 			lc.detector.recordTurn(nil, "", lc.finishReason)
-			if handleLoopDetected(te, setup.task, setup.projectID, setup.task.ID, lc.detector, LoopReasoningOnly, "", &lc.messages, setup.task.IsIdeationMode()) {
+			if handleLoopDetected(te, setup.task, setup.projectID, setup.task.ID, lc.detector, LoopReasoningOnly, "", &lc.messages, setup.task.IsExploreMode()) {
 				return
 			}
 

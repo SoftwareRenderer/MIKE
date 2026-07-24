@@ -58,7 +58,7 @@ func TestGetIdeationModeToolDefinitions(t *testing.T) {
 
 	// Should have 9 tools: standard (6) + task management (3)
 	if len(tools) != 9 {
-		t.Fatalf("expected 9 tools in ideation mode, got %d", len(tools))
+		t.Fatalf("expected 9 tools in explore mode, got %d", len(tools))
 	}
 
 	toolNames := make(map[string]bool)
@@ -70,7 +70,7 @@ func TestGetIdeationModeToolDefinitions(t *testing.T) {
 	expectedTools := []string{"read_file", "write_file", "edit_file", "bash", "ask_question", "request_review", "create_task", "view_tasks", "edit_task"}
 	for _, name := range expectedTools {
 		if !toolNames[name] {
-			t.Errorf("expected tool %q in ideation mode, not found", name)
+			t.Errorf("expected tool %q in explore mode, not found", name)
 		}
 	}
 }

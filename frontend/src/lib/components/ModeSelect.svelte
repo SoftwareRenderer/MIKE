@@ -4,7 +4,7 @@
     const modes = [
         { value: 'act', label: 'Act', icon: 'check' },
         { value: 'plan', label: 'Plan', icon: 'list' },
-        { value: 'ideate', label: 'Ideate', icon: 'bulb' },
+        { value: 'explore', label: 'Explore', icon: 'bulb' },
     ];
 
     let open = $state(false);
@@ -46,7 +46,7 @@
 
 <div class="mode-select" bind:this={dropdownRef}>
     <button type="button" class="mode-btn" class:open={open} onclick={toggle} onkeydown={(e) => { if (e.key === 'Escape') open = false; }} aria-label="Operating mode" aria-expanded={open}>
-        <span class="mode-icon active" class:act={value === 'act'} class:plan={value === 'plan'} class:ideate={value === 'ideate'}>{@html renderIcon(selected.icon)}</span>
+        <span class="mode-icon active" class:act={value === 'act'} class:plan={value === 'plan'} class:explore={value === 'explore'}>{@html renderIcon(selected.icon)}</span>
         <span class="mode-label">{selected.label}</span>
         <svg class="chevron" width="10" height="10" viewBox="0 0 10 10" fill="none">
             <path d="M2.5 4L5 6.5L7.5 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -61,13 +61,13 @@
                     class:selected={mode.value === value}
                     class:act={mode.value === 'act'}
                     class:plan={mode.value === 'plan'}
-                    class:ideate={mode.value === 'ideate'}
+                    class:explore={mode.value === 'explore'}
                     role="option"
                     aria-selected={mode.value === value}
                     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(mode.value); } }}
                     onclick={() => select(mode.value)}
                 >
-                    <span class="mode-icon" class:active={mode.value === value} class:act={mode.value === 'act'} class:plan={mode.value === 'plan'} class:ideate={mode.value === 'ideate'}>{@html renderIcon(mode.icon)}</span>
+                    <span class="mode-icon" class:active={mode.value === value} class:act={mode.value === 'act'} class:plan={mode.value === 'plan'} class:explore={mode.value === 'explore'}>{@html renderIcon(mode.icon)}</span>
                     <span>{mode.label}</span>
                 </button>
             {/each}
@@ -124,7 +124,7 @@
     .mode-icon.plan.active {
         color: var(--color-accent);
     }
-    .mode-icon.ideate.active {
+    .mode-icon.explore.active {
         color: var(--color-status-yellow);
     }
     .mode-dropdown {
@@ -164,7 +164,7 @@
     .mode-option.plan.selected {
         color: var(--color-accent);
     }
-    .mode-option.ideate.selected {
+    .mode-option.explore.selected {
         color: var(--color-status-yellow);
     }
 </style>

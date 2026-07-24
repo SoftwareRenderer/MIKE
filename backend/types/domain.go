@@ -25,7 +25,7 @@ type Task struct {
 	AutoCommit                bool      `json:"auto_commit"`
 	AutoMerge                 bool      `json:"auto_merge"`
 	SubtasksAutoMerge         bool      `json:"subtasks_auto_merge"` // parent-only: children inherit this as auto_merge
-	OperatingMode             string    `json:"operating_mode"`      // "act" (default), "plan", or "ideate"
+	OperatingMode             string    `json:"operating_mode"`      // "act" (default), "plan", or "explore"
 	ParentTaskID              string    `json:"parent_task_id,omitempty"`
 	TitleGenerating           bool      `json:"title_generating"`
 	CurrentThreadID           string    `json:"current_thread_id,omitempty"`
@@ -40,9 +40,9 @@ func (t *Task) IsPlanMode() bool {
 	return t.OperatingMode == "plan"
 }
 
-// IsIdeationMode returns true if the task is in ideation mode.
-func (t *Task) IsIdeationMode() bool {
-	return t.OperatingMode == "ideate"
+// IsExploreMode returns true if the task is in exploration mode.
+func (t *Task) IsExploreMode() bool {
+	return t.OperatingMode == "explore"
 }
 
 // Board represents the collection of tasks for a project.

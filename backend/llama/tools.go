@@ -153,10 +153,10 @@ func GetPlanModeToolDefinitions() []types.ChatTool {
 	}
 }
 
-// GetIdeationModeToolDefinitions returns the tool set for ideation mode.
+// GetExploreModeToolDefinitions returns the tool set for exploration mode.
 // Same as standard (act) mode plus task management tools (create_task, view_tasks, edit_task).
 // This allows the LLM to brainstorm, prototype code, and organize work into tasks.
-func GetIdeationModeToolDefinitions() []types.ChatTool {
+func GetExploreModeToolDefinitions() []types.ChatTool {
 	return []types.ChatTool{
 		{
 			Type: "function",

@@ -701,13 +701,13 @@ test.describe.serial('Edit Task Modal Model Change Preserves Mode', () => {
     await expect(modeBtn).toBeVisible();
     await expect(modeBtn.locator('.mode-label')).toContainText('Plan');
 
-    // Test: switch to ideate mode (simulating agent selection), then change model
-    // The fix ensures that when mode is 'ideate' and model changes, it restores
+    // Test: switch to explore mode (simulating agent selection), then change model
+    // The fix ensures that when mode is 'explore' and model changes, it restores
     // the initial mode ('plan') instead of hardcoding 'act'
     await modeBtn.click();
-    const ideateOption = modal.locator('.mode-option.ideate');
-    await expect(ideateOption).toBeVisible();
-    await ideateOption.click();
+    const exploreOption = modal.locator('.mode-option.explore');
+    await expect(exploreOption).toBeVisible();
+    await exploreOption.click();
     await expect(modeBtn.locator('.mode-label')).toContainText('Ideate');
 
     // Now change the model - this triggers handleModelSelect

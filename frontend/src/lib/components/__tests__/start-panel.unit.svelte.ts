@@ -34,7 +34,7 @@ describe('StartPanel rendering', () => {
 
     it('shows Ideate mode indicator', () => {
         expect(source).toContain('Ideate');
-        expect(source).toContain('ideate');
+        expect(source).toContain('explore');
     });
 
     it('disables Start Task button while starting', () => {
