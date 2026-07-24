@@ -48,9 +48,9 @@
     </button>
     <button class="icon-btn sandbox-config-btn" class:port-conflict={hasPortConflict} onclick={onOpenSandboxConfig} aria-label="Sandbox configuration" title="Sandbox configuration">
         {#if currentProject.sandbox_enabled}
-            <Icon src={shieldIcon} color="#E6EDF3" width={14} height={14} />
+            <Icon src={shieldIcon} width={14} height={14} />
         {:else}
-            <Icon src={shieldOffIcon} color="#F85149" width={14} height={14} />
+            <Icon src={shieldOffIcon} color="var(--color-status-red)" width={14} height={14} />
         {/if}
     </button>
     <span class="project-title">

@@ -251,11 +251,11 @@
 
     // Icon selection
     let iconInfo = $derived(
-        tc.toolName === 'read_file' ? { src: fileTextIcon, color: '#E6EDF3' } :
-        tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? { src: editIcon, color: '#E6EDF3' } :
-        tc.toolName === 'request_review' ? { src: checkCircleIcon, color: '#E6EDF3' } :
-        tc.toolName === 'ask_question' ? { src: questionIcon, color: '#fff' } :
-        { src: zapIcon, color: '#E6EDF3' }
+        tc.toolName === 'read_file' ? { src: fileTextIcon } :
+        tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? { src: editIcon } :
+        tc.toolName === 'request_review' ? { src: checkCircleIcon } :
+        tc.toolName === 'ask_question' ? { src: questionIcon } :
+        { src: zapIcon }
     );
 
     // Parse create_task result
@@ -385,9 +385,9 @@
     <div class="tool-call-card" style="border-left-color: {tc.isPending ? 'var(--color-accent)' : (tc.success ? 'var(--color-status-green)' : 'var(--color-status-red)')}">
         <div class="tool-call-header">
             {#if tc.sandbox}
-                <Icon class="tool-sandbox-icon" src={shieldGreenIcon} color="#3FB950" width={14} height={14} title="Sandboxed" />
+                <Icon class="tool-sandbox-icon" src={shieldGreenIcon} color="var(--color-status-green)" width={14} height={14} title="Sandboxed" />
             {:else if SANDBOXABLE_TOOLS.has(tc.toolName)}
-                <Icon class="tool-sandbox-icon" src={shieldOffIcon} color="#F85149" width={14} height={14} title="Not sandboxed" />
+                <Icon class="tool-sandbox-icon" src={shieldOffIcon} color="var(--color-status-red)" width={14} height={14} title="Not sandboxed" />
             {/if}
             {#if tc.toolName === 'create_task' || tc.toolName === 'edit_task'}
                 <svg class="tool-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

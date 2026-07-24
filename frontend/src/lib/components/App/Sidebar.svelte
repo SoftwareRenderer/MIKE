@@ -67,11 +67,11 @@
                         {#if isMobile || !collapsed}
                             {#if p.sandbox_enabled}
                                 <span class="sandbox-badge" aria-label="Sandbox enabled (gVisor)" title="Sandbox enabled (gVisor)">
-                                    <Icon src={shieldIcon} color="#E6EDF3" width={14} height={14} />
+                                    <Icon src={shieldIcon} width={14} height={14} />
                                 </span>
                             {:else}
                                 <span class="sandbox-badge sandbox-badge-off" aria-label="Sandbox disabled" title="Sandbox disabled">
-                                    <Icon src={shieldOffIcon} color="#F85149" width={14} height={14} />
+                                    <Icon src={shieldOffIcon} color="var(--color-status-red)" width={14} height={14} />
                                 </span>
                             {/if}
                         {/if}
