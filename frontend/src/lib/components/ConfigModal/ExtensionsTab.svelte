@@ -933,7 +933,7 @@
         flex-shrink: 0;
     }
 
-    .card-toggle {
+    :global(.card-toggle) {
         margin-left: auto;
     }
 
