@@ -300,7 +300,10 @@ The Extensions system replaces hardcoded LSP configurations with user-defined an
 - `frontend/src/lib/services/ui-injector.svelte.ts` — UI injection framework (6 named slots)
 - `frontend/src/lib/components/ConfigModal/ExtensionsTab.svelte` — Settings UI
 - `frontend/src/lib/api/extensions.ts` — API client functions
-- `extensions/gopls/` — gopls extension package (Dockerfile, manifest.json)
+- `extensions/lsp/gopls/` — gopls extension package (Dockerfile, manifest.json)
+- `extensions/ui/github-issue-importer/` — GitHub issue importer UI extension
+- `extensions/css/mike-light/` — Light mode CSS theme
+- `extensions/registry.json` — Default registry index
 - `extensions/registry.json` — Default registry index
 
 **API endpoints:**
