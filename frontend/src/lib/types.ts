@@ -400,6 +400,7 @@ export interface ExtensionManifest {
     homepage?: string;
     license_url?: string;
     deprecated: boolean;
+    priority?: number; // loading order: lower values load first (default 0)
     config_schema?: ConfigSchema;
     lsp?: LSPConfig;
     ui?: UIExtensionConfig;

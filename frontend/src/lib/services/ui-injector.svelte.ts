@@ -101,7 +101,7 @@ export class UIInjector {
                     extensionName: ext.name,
                     point: ui.injection_points[i] as InjectionPoint,
                     moduleUrl: ui.module_url,
-                    order: i,
+                    order: ext.manifest.priority ?? 0,
                     config: ext.config,
                 });
             }
