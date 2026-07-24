@@ -708,7 +708,7 @@ test.describe.serial('Edit Task Modal Model Change Preserves Mode', () => {
     const exploreOption = modal.locator('.mode-option.explore');
     await expect(exploreOption).toBeVisible();
     await exploreOption.click();
-    await expect(modeBtn.locator('.mode-label')).toContainText('Ideate');
+    await expect(modeBtn.locator('.mode-label')).toContainText('Explore');
 
     // Now change the model - this triggers handleModelSelect
     // With the fix, mode should restore to 'plan' (initial mode)

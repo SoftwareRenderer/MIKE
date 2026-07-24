@@ -308,7 +308,7 @@
                     class:active={operatingMode === 'plan'}
                     class:explore={operatingMode === 'explore'}
                     onclick={onOperatingModeToggle}
-                    title={operatingMode === 'act' ? 'Act mode: AI is required to take formal actions. Click to switch.' : operatingMode === 'plan' ? 'Plan mode: AI decomposes work into subtasks. Click to switch.' : 'Ideate mode: Free-form brainstorming. Storage is mounted read-only. AI is not required to take formal actions. Click to switch.'}
+                    title={operatingMode === 'act' ? 'Act mode: AI is required to provide structured responses during review, and has read/write access. Click to switch.' : operatingMode === 'plan' ? 'Plan mode: AI decomposes work into subtasks on the board, and only has read access. Click to switch.' : 'Explore mode: AI has read/write access. Click to switch.'}
                     aria-label="Toggle operating mode"
                     style="margin-left: auto"
                 >

@@ -412,11 +412,11 @@
                     <span class="config-label">Operating mode</span>
                     <span class="config-desc">
                         {#if operatingMode === 'act'}
-                        AI is required to take formal actions
+                        AI is required to provide structured responses during review, and has read/write access.
                         {:else if operatingMode === 'plan'}
-                        AI decomposes work into subtasks on the board, then executes after approval
+                        AI decomposes work into subtasks on the board, and only has read access.
                         {:else}
-                        Free-form brainstorming. AI is not required to take formal actions
+                        AI has read/write access.
                         {/if}
                     </span>
                 </div>

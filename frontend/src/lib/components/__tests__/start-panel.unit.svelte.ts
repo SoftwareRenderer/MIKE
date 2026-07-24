@@ -32,8 +32,8 @@ describe('StartPanel rendering', () => {
         expect(source).toContain('Act');
     });
 
-    it('shows Ideate mode indicator', () => {
-        expect(source).toContain('Ideate');
+    it('shows Explore mode indicator', () => {
+        expect(source).toContain('Explore');
         expect(source).toContain('explore');
     });
 
