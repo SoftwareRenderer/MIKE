@@ -719,8 +719,8 @@
 
     /* Fixed modal size */
     :global(.config-modal) {
-        height: 580px;
-        max-height: 580px;
+        height: 600px;
+        max-height: 600px;
     }
 
     /* Remove top padding so sticky tab-bar reaches the header with no gap */
