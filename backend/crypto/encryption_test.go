@@ -65,21 +65,14 @@ func TestEncryptDecryptNoKey(t *testing.T) {
 	clearEncryptionKey(t)
 
 	plaintext := "sk-test-api-key-12345"
-	encrypted, err := Encrypt(plaintext)
-	if err != nil {
-		t.Fatalf("Encrypt failed without key: %v", err)
-	}
-	// Without key, value is stored as-is
-	if encrypted != plaintext {
-		t.Errorf("without key, Encrypt should return plaintext, got %q", encrypted)
+	_, err := Encrypt(plaintext)
+	if err == nil {
+		t.Fatal("Encrypt should fail without key")
 	}
 
-	decrypted, err := Decrypt(encrypted)
-	if err != nil {
-		t.Fatalf("Decrypt failed without key: %v", err)
-	}
-	if decrypted != plaintext {
-		t.Errorf("without key, Decrypt should return value as-is, got %q", decrypted)
+	_, err = Decrypt(plaintext)
+	if err == nil {
+		t.Fatal("Decrypt should fail without key")
 	}
 }
 
@@ -89,10 +82,8 @@ func TestIsEnabled(t *testing.T) {
 		envVal string
 		want   bool
 	}{
-		{"valid key", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", true},
+		{"valid key", "some-secret-key", true},
 		{"empty", "", false},
-		{"too short", "0123456789abcdef", false},
-		{"invalid hex", "ZZZZ456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", false},
 	}
 
 	for _, tt := range tests {
@@ -141,10 +132,8 @@ func TestValidateKey(t *testing.T) {
 		envVal  string
 		wantErr bool
 	}{
-		{"valid key", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", false},
+		{"valid key", "some-secret-key", false},
 		{"empty", "", true},
-		{"too short", "0123456789abcdef", true},
-		{"invalid hex", "ZZZZ456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", true},
 	}
 
 	for _, tt := range tests {

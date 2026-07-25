@@ -4,8 +4,8 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -22,8 +22,7 @@ func Encrypt(value string) (string, error) {
 
 	key := getEncryptionKey()
 	if key == nil {
-		// No encryption key configured — store as plain text
-		return value, nil
+		return "", fmt.Errorf("crypto: encryption key not configured")
 	}
 
 	block, err := aes.NewCipher(key)
@@ -56,8 +55,7 @@ func Decrypt(encrypted string) (string, error) {
 
 	key := getEncryptionKey()
 	if key == nil {
-		// No encryption key configured — return as plain text
-		return encrypted, nil
+		return "", fmt.Errorf("crypto: encryption key not configured")
 	}
 
 	data, err := base64.StdEncoding.DecodeString(encrypted)
@@ -94,35 +92,24 @@ func IsEnabled() bool {
 	return getEncryptionKey() != nil
 }
 
-// getEncryptionKey reads the ENCRYPTION_KEY env var and returns the raw bytes.
-// Returns nil if the env var is not set or has an invalid format.
+// getEncryptionKey reads the ENCRYPTION_KEY env var and returns a 32-byte key.
+// It uses SHA-256 to derive a consistent 32-byte key from any non-empty input string.
+// Returns nil if the env var is not set.
 func getEncryptionKey() []byte {
 	raw := os.Getenv("ENCRYPTION_KEY")
 	if raw == "" {
 		return nil
 	}
-	key, err := hex.DecodeString(raw)
-	if err != nil || len(key) != 32 {
-		// Invalid key — log a warning but don't fail
-		// (handled at the config save level)
-		return nil
-	}
-	return key
+	hash := sha256.Sum256([]byte(raw))
+	return hash[:]
 }
 
-// ValidateKey checks if the ENCRYPTION_KEY env var is set and has the correct format.
-// Returns an error describing the problem, or nil if valid.
+// ValidateKey checks if the ENCRYPTION_KEY env var is set.
+// Returns an error if the key is empty, or nil if valid.
 func ValidateKey() error {
 	raw := os.Getenv("ENCRYPTION_KEY")
 	if raw == "" {
 		return fmt.Errorf("ENCRYPTION_KEY environment variable is not set")
-	}
-	key, err := hex.DecodeString(raw)
-	if err != nil {
-		return fmt.Errorf("ENCRYPTION_KEY is not valid hex: %w", err)
-	}
-	if len(key) != 32 {
-		return fmt.Errorf("ENCRYPTION_KEY must be 32 bytes (hex-encoded 256-bit key), got %d bytes", len(key))
 	}
 	return nil
 }

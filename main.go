@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"kanban/backend/crypto"
 	"kanban/backend/server"
 	"kanban/backend/tls"
 
@@ -78,6 +79,11 @@ func main() {
 	}
 	if err := os.MkdirAll(effectiveDataDir, 0o755); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
+	}
+
+	// Validate encryption key is set and valid
+	if err := crypto.ValidateKey(); err != nil {
+		log.Fatalf("Configuration error: %v", err)
 	}
 
 	// Start flight recorder for crash diagnostics (always-on, ~1% overhead)
