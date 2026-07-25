@@ -163,13 +163,16 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
 
     // Show "Restart Task" button when task is in_progress, stalled (no active LLM, not queued),
+    // has at least one assistant response (was actually started before),
     // and the last message is from the user (agent hasn't responded yet).
+    // Hidden for "pending" tasks (idle + in_progress, never started — no assistant messages).
     let showRestartButton = $derived(
         taskStatus === 'in_progress' &&
         !isLoading &&
         queuePosition === 0 &&
         entries.length > 0 &&
-        entries[entries.length - 1].role === 'user'
+        entries[entries.length - 1].role === 'user' &&
+        entries.some(e => e.role === 'assistant')
     );
 
     // Show "Resume" button in review bar when the last message is from the user
