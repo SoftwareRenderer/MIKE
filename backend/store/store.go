@@ -61,6 +61,8 @@ func NewStore(dbPath string) (*Store, error) {
 	}
 	// One-time migration: move global default_model to provider-level
 	_ = s.migrateDefaultModelToProviders() // best-effort, ignore errors
+	// One-time migration: convert pi://agent URLs to agent://pi
+	_ = s.migratePiAgentToAgentURL() // best-effort, ignore errors
 	return s, nil
 }
 
@@ -460,6 +462,48 @@ func (s *Store) migrateDefaultModelToProviders() error {
 	// Clear global default_model
 	_, err = s.db.Exec(`DELETE FROM config WHERE key = 'default_model'`)
 	return err
+}
+
+// migratePiAgentToAgentURL migrates legacy pi://agent URLs to agent://pi.
+// This is a one-time, best-effort migration for the agent extension system.
+func (s *Store) migratePiAgentToAgentURL() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Idempotent: check if already done
+	var done int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM config WHERE key = 'migration_pi_to_agent'`).Scan(&done); err != nil {
+		return err
+	}
+	if done > 0 {
+		return nil
+	}
+
+	// 1. Update providers config (JSON in config table)
+	var providersRaw string
+	if err := s.db.QueryRow(`SELECT value FROM config WHERE key = 'providers'`).Scan(&providersRaw); err == nil && providersRaw != "" {
+		var providers []types.Provider
+		if err := json.Unmarshal([]byte(providersRaw), &providers); err == nil {
+			changed := false
+			for i := range providers {
+				if providers[i].URL == "pi://agent" {
+					providers[i].URL = "agent://pi"
+					changed = true
+				}
+			}
+			if changed {
+				data, _ := json.Marshal(providers)
+				s.db.Exec(`INSERT OR REPLACE INTO config (key, value) VALUES ('providers', ?)`, string(data))
+			}
+		}
+	}
+
+	// 2. Update tasks with pi://agent in llama_server_url
+	s.db.Exec(`UPDATE tasks SET llama_server_url = 'agent://pi' WHERE llama_server_url = 'pi://agent'`)
+
+	// Mark migration done
+	s.db.Exec(`INSERT OR IGNORE INTO config (key, value) VALUES ('migration_pi_to_agent', '1')`)
+	return nil
 }
 
 // scanner is the common interface for sql.Row and sql.Rows.

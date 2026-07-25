@@ -42,5 +42,15 @@
         "author": "SoftwareRenderer",
         "homepage": "https://github.com/SoftwareRenderer",
         "manifest_url": "css/mike-light/manifest.json"
+    },
+    {
+        "name": "pi",
+        "version": "1.0.0",
+        "type": "agent",
+        "display_name": "Pi Coding Agent",
+        "description": "Pi Coding Agent — autonomous coding agent with tool use, running in a sandbox container.",
+        "author": "Pi",
+        "homepage": "https://github.com/nicepkg/pi",
+        "manifest_url": "agent/pi/manifest.json"
     }
 ]

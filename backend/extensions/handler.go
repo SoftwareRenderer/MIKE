@@ -209,8 +209,8 @@ func (h *ExtensionHandler) HandleCreate(w http.ResponseWriter, r *http.Request) 
 		httputil.JSONError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if req.Type != ExtensionTypeLSP && req.Type != ExtensionTypeUI {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid type: must be 'lsp' or 'ui'")
+	if !isValidExtensionType(req.Type) {
+		httputil.JSONError(w, http.StatusBadRequest, "invalid type: must be 'lsp', 'ui', 'css', or 'agent'")
 		return
 	}
 	if req.Version == "" {
@@ -921,6 +921,15 @@ type ExtensionUpdate struct {
 	Name             string `json:"name"`
 	CurrentVersion   string `json:"current_version"`
 	AvailableVersion string `json:"available_version"`
+}
+
+// isValidExtensionType returns true if the given type is a valid extension type.
+func isValidExtensionType(t string) bool {
+	switch t {
+	case ExtensionTypeLSP, ExtensionTypeUI, ExtensionTypeCSS, ExtensionTypeAgent:
+		return true
+	}
+	return false
 }
 
 // maskConfig masks sensitive config values based on the manifest's config_schema.

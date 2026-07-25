@@ -334,10 +334,14 @@ func (cs *ConfigStore) GetProviderConcurrency(serverURL string) int {
 }
 
 // IsAgentProvider returns true if the provider matching the given server URL is an agent (non-LLM kind).
-// Also returns true for the pi://agent sentinel URL (Pi coding agent without a registered provider).
+// Also returns true for agent:// URLs (agent extensions).
 // Returns false if no matching provider is found.
 func (cs *ConfigStore) IsAgentProvider(serverURL string) bool {
-	// Handle pi://agent sentinel URL (Pi coding agent without registered provider)
+	// Handle agent:// URLs (agent extensions)
+	if strings.HasPrefix(serverURL, "agent://") {
+		return true
+	}
+	// Handle legacy pi://agent sentinel URL (backward compatibility)
 	if strings.TrimRight(serverURL, "/") == "pi://agent" {
 		return true
 	}

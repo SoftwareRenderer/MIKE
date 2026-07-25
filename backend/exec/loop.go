@@ -24,9 +24,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// PiSentinelURL is the sentinel value for llama_server_url when a task uses Pi.
-const PiSentinelURL = "pi://agent"
-
 // imageExts is the set of file extensions considered image files (allowed in staging).
 var imageExts = map[string]struct{}{
 	".png": {}, ".jpg": {}, ".jpeg": {}, ".gif": {}, ".webp": {}, ".bmp": {},
@@ -227,10 +224,10 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		// For Pi executors, keep the setup.task alive for on-demand compaction.
 		te.taskMu.Lock()
 		if state, exists := te.tasks[setup.task.ID]; exists && state.ctx == setup.ctx {
-			if state.executorType != "pi" {
+			if state.executorType != "agent" {
 				delete(te.tasks, setup.task.ID)
 			} else {
-				// Clear status so HasRunningTasks doesn't count completed Pi tasks
+				// Clear status so HasRunningTasks doesn't count completed agent tasks
 				state.taskStatus = ""
 			}
 		}
@@ -277,11 +274,11 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		_, state.sandboxWrite = makeRootCallbacks(root, setup.worktreePath)
 	}
 
-	// Check if this setup.task uses Pi agent
-	if setup.serverURL == PiSentinelURL {
-		log.Printf("[exec] setup.task=%s detected Pi agent (url=%s), calling executeTaskWithPi", setup.task.ID, setup.serverURL)
-		te.executeTaskWithPi(setup.ctx, setup.task, setup.projectID, setup.project.Name, setup.worktreePath, setup.userMsgChan, setup.summarizeCh, setup.sandboxEnabled, setup.initialContent)
-		log.Printf("[exec] setup.task=%s executeTaskWithPi returned", setup.task.ID)
+	// Check if this setup.task uses an agent provider
+	if te.configStore.IsAgentProvider(setup.serverURL) {
+		log.Printf("[exec] setup.task=%s detected agent provider (url=%s), calling executeTaskWithAgent", setup.task.ID, setup.serverURL)
+		te.executeTaskWithAgent(setup.ctx, setup.task, setup.projectID, setup.project.Name, setup.worktreePath, setup.serverURL, setup.userMsgChan, setup.summarizeCh, setup.sandboxEnabled, setup.initialContent)
+		log.Printf("[exec] setup.task=%s executeTaskWithAgent returned", setup.task.ID)
 		return
 	}
 
@@ -358,9 +355,9 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			newModel := updatedTask.ModelName
 			curURL, curModel := lc.mc.get()
 			if newURL != "" && newURL != curURL || newModel != "" && newModel != curModel {
-				// Skip model switch if target is Pi agent — requires different executor
-				if newURL == PiSentinelURL {
-					log.Printf("[model-switch] setup.task=%s skipping switch to Pi agent (requires executor restart)", setup.task.ID)
+				// Skip model switch if target is agent — requires different executor
+				if te.configStore.IsAgentProvider(newURL) {
+					log.Printf("[model-switch] setup.task=%s skipping switch to agent (requires executor restart)", setup.task.ID)
 				} else {
 					if newURL == "" {
 						newURL = curURL
@@ -475,7 +472,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					// and any deleted messages. Do NOT append — syncMessagesFromDB already includes it.
 					lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 				}
-				if um.ModelName != "" && um.ServerURL != PiSentinelURL {
+				if um.ModelName != "" && !te.configStore.IsAgentProvider(um.ServerURL) {
 					switched := te.applyModelSwitch(lc.mc, setup.task, um.ServerURL, um.ModelName, true, false)
 					lc.client = switched.client
 					lc.providerName = switched.providerName
@@ -1320,7 +1317,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				// and any deleted messages. Do NOT append — syncMessagesFromDB already includes it.
 				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 			}
-			if um.ModelName != "" && um.ServerURL != PiSentinelURL {
+			if um.ModelName != "" && !te.configStore.IsAgentProvider(um.ServerURL) {
 				switched := te.applyModelSwitch(lc.mc, setup.task, um.ServerURL, um.ModelName, true, false)
 				lc.client = switched.client
 				lc.providerName = switched.providerName
@@ -1424,6 +1421,17 @@ func (te *TaskExecutor) gitRun(dir string, args ...string) error {
 	c.Dir = dir
 	_, err := c.CombinedOutput()
 	return err
+}
+
+// failTask sets the task to failed/review state, persists it, broadcasts the
+// update, and sends a WebSocket error event.
+func (te *TaskExecutor) failTask(task *types.Task, projectID, output, code string) {
+	task.ExecutionState = "failed"
+	task.Status = "review"
+	task.Output = output
+	te.store.UpdateTask(task)
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+	te.sendAndPersistError(task.ID, output, code)
 }
 
 func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistantText, reasoningContent string) (promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs int) {

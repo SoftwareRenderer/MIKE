@@ -59,15 +59,4 @@ export async function fetchModels(llamaServerUrl: string, apiKey?: string): Prom
     return res.json();
 }
 
-/** Test Pi coding agent connection by running `pi --version`. */
-export async function testPiConnection(): Promise<{ success: boolean; message: string }> {
-    const res = await apiFetch(`${API_BASE}/config/test-pi-connection`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to test Pi connection');
-    return res.json();
-}
-
 

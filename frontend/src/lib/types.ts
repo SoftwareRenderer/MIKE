@@ -226,12 +226,15 @@ export interface Provider {
     electricity_cost_per_kwh?: number;   // USD per kWh
 }
 
-/** Sentinel URL used when a task uses Pi agent instead of an LLM provider. */
+/** URL prefix for agent providers (e.g., 'agent://pi'). */
+export const AGENT_URL_PREFIX = 'agent://';
+
+/** Legacy sentinel URL for backward compatibility. */
 export const PI_SENTINEL_URL = 'pi://agent';
 
-/** Check if a provider is a Pi agent. */
+/** Check if a provider is an agent (non-LLM kind). */
 export function isAgentProvider(p: Provider): boolean {
-    return p.kind === 'agent';
+    return p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX) || p.url === PI_SENTINEL_URL;
 }
 
 export interface TaskMessage {

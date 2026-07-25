@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"kanban/backend/httputil"
-	"kanban/backend/pi"
 	"kanban/backend/stream"
 	"kanban/backend/types"
 
@@ -358,10 +357,10 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If task is not actively running, we need to send the compact command
-	// directly to the Pi client (not through the event loop's compactCh).
-	if state.piClient != nil {
+	// directly to the agent runner (not through the event loop's compactCh).
+	if state.agentRunner != nil {
 		compactCtx, compactCancel := context.WithTimeout(r.Context(), 120*time.Second)
-		compactResult, err := state.piClient.Compact(compactCtx)
+		compactResult, err := state.agentRunner.Compact(compactCtx)
 		compactCancel()
 		if err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
@@ -372,8 +371,8 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Task is actively running — use the event loop's compact channel.
-	resultCh := make(chan *pi.CompactResult, 1)
-	var compactResult *pi.CompactResult
+	resultCh := make(chan *CompactResult, 1)
+	var compactResult *CompactResult
 	select {
 	case state.compactCh <- resultCh:
 		select {

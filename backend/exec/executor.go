@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/agent"
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/llama"
-	"kanban/backend/pi"
 	"kanban/backend/prompts"
 	sandboxmgr "kanban/backend/sandbox"
 	"kanban/backend/store"
@@ -30,15 +30,16 @@ import (
 
 // TaskExecutor handles task execution endpoints and orchestrates AI task execution.
 type TaskExecutor struct {
-	store        *store.Store
-	configStore  *config.ConfigStore
-	appStreamMgr *stream.AppStreamManager
-	worktreeMgr  *git.WorktreeManager
-	sandboxMgr   *sandboxmgr.SandboxManager
-	commitQueue  *CommitQueue
-	gate         *ConcurrencyGate
-	taskMu       sync.Mutex
-	tasks        map[string]*executionState
+	store         *store.Store
+	configStore   *config.ConfigStore
+	appStreamMgr  *stream.AppStreamManager
+	worktreeMgr   *git.WorktreeManager
+	sandboxMgr    *sandboxmgr.SandboxManager
+	agentRegistry *agent.AgentRegistry
+	commitQueue   *CommitQueue
+	gate          *ConcurrencyGate
+	taskMu        sync.Mutex
+	tasks         map[string]*executionState
 	// Per-task mutexes to serialize worktree access across executors and merges.
 	worktreeMu sync.Map // taskID -> *sync.Mutex
 }
@@ -47,6 +48,12 @@ type summarizeRequest struct {
 	ctx      context.Context // HTTP request context — cancelled when user clicks ✕ or new request arrives
 	resultCh chan error      // receives ok/err from the loop
 	cancel   context.CancelFunc
+}
+
+// CompactResult holds the result of an agent compact command.
+type CompactResult struct {
+	Summary string
+	Error   error
 }
 
 type executionState struct {
@@ -58,12 +65,12 @@ type executionState struct {
 		mu      sync.Mutex
 		request *summarizeRequest // currently active summarize request (nil = none)
 	}
-	compactCh    chan chan *pi.CompactResult // send a channel, receives result from the Pi compaction
-	piClient     *pi.Client                  // Pi RPC client — kept alive after completion for on-demand compaction
-	clientClosed bool                        // true when piClient has been closed (prevents double-close)
+	compactCh    chan chan *CompactResult      // send a channel, receives result from agent compaction
+	agentRunner  *agent.AgentRunner            // Agent runner — kept alive after completion for on-demand compaction
+	runnerClosed bool                          // true when agentRunner has been closed (prevents double-close)
 	projectName  string
 	createdIDs   []string // task IDs created by create_task during this execution
-	executorType string   // "llm" or "pi" — tracks which executor type is active
+	executorType string   // "llm" or "agent" — tracks which executor type is active
 	taskStatus   string   // task status at start; cleared by StopTask so HasRunningTasks can skip it
 	// lastDiffHash tracks the last broadcast diff hash to avoid duplicate broadcasts
 	// when fsnotify already caught the same change.
@@ -105,16 +112,17 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 }
 
 // NewTaskExecutor creates a new TaskExecutor.
-func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandboxmgr.SandboxManager, commitQueue *CommitQueue) *TaskExecutor {
+func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandboxmgr.SandboxManager, agentRegistry *agent.AgentRegistry, commitQueue *CommitQueue) *TaskExecutor {
 	te := &TaskExecutor{
-		store:        store,
-		configStore:  configStore,
-		appStreamMgr: appStreamMgr,
-		worktreeMgr:  worktreeMgr,
-		sandboxMgr:   sandboxMgr,
-		commitQueue:  commitQueue,
-		gate:         NewConcurrencyGate(),
-		tasks:        make(map[string]*executionState),
+		store:         store,
+		configStore:   configStore,
+		appStreamMgr:  appStreamMgr,
+		worktreeMgr:   worktreeMgr,
+		sandboxMgr:    sandboxMgr,
+		agentRegistry: agentRegistry,
+		commitQueue:   commitQueue,
+		gate:          NewConcurrencyGate(),
+		tasks:         make(map[string]*executionState),
 	}
 	te.appStreamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te
@@ -728,17 +736,17 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 
 	te.taskMu.Lock()
-	// Close old Pi client if this task is being restarted (client was kept alive after completion).
-	if oldState, exists := te.tasks[taskID]; exists && oldState.piClient != nil && !oldState.clientClosed {
-		oldState.piClient.Close()
-		oldState.clientClosed = true
+	// Close old agent runner if this task is being restarted (runner was kept alive after completion).
+	if oldState, exists := te.tasks[taskID]; exists && oldState.agentRunner != nil && !oldState.runnerClosed {
+		oldState.agentRunner.Close()
+		oldState.runnerClosed = true
 	}
 	execType := "llm"
 	if te.configStore.IsAgentProvider(serverURL) {
-		execType = "pi"
+		execType = "agent"
 	}
 	doneCh := make(chan struct{})
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan *pi.CompactResult, 16), projectName: project.Name, executorType: execType, taskStatus: task.Status, done: doneCh}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan *CompactResult, 16), projectName: project.Name, executorType: execType, taskStatus: task.Status, done: doneCh}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -813,10 +821,10 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not running")
 	}
-	// Close Pi client if it's still alive (kept after completion for compaction).
-	if state.piClient != nil && !state.clientClosed {
-		state.piClient.Close()
-		state.clientClosed = true
+	// Close agent runner if it's still alive (kept after completion for compaction).
+	if state.agentRunner != nil && !state.runnerClosed {
+		state.agentRunner.Close()
+		state.runnerClosed = true
 	}
 	state.taskStatus = ""
 	state.cancel()
@@ -877,7 +885,7 @@ func (te *TaskExecutor) HasRunningTasks(projectID string) bool {
 func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.UserMessage) {
 	requestedType := "llm"
 	if te.configStore.IsAgentProvider(um.ServerURL) {
-		requestedType = "pi"
+		requestedType = "agent"
 	}
 
 	te.taskMu.Lock()
@@ -1557,7 +1565,7 @@ func estimatePromptTokens(messages []types.ChatMessage) int {
 }
 
 // getCompactCh returns the compact channel for a running task, or nil if not found.
-func (te *TaskExecutor) getCompactCh(taskID string) chan chan *pi.CompactResult {
+func (te *TaskExecutor) getCompactCh(taskID string) chan chan *CompactResult {
 	te.taskMu.Lock()
 	defer te.taskMu.Unlock()
 	if state, ok := te.tasks[taskID]; ok {
