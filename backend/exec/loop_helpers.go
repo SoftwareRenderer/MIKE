@@ -365,7 +365,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 	if !te.sandboxMgr.ContainerIsRunning(task.ID) {
 		piAgentDir := te.configStore.GetAgentConfigDir()
 		var createErr error
-		createErr, assignedPorts = te.sandboxMgr.Create(task.ID, worktreePath, projectName, projectPath, projectID, kanban_sandbox.SandboxOpts{
+		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, projectName, projectPath, projectID, kanban_sandbox.SandboxOpts{
 			BaseImage:        imageToUse,
 			NetworkIsolation: sandboxOpts.NetworkIsolation,
 			MemoryLimit:      sandboxOpts.MemoryLimit,

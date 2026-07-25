@@ -54,11 +54,5 @@ func (p *Provider) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	// Fallback: empty array
-	if err := json.Unmarshal(raw.Models, &[]ModelConfig{}); err == nil {
-		p.Models = []ModelConfig{}
-		return nil
-	}
-
 	return fmt.Errorf("invalid models format")
 }
