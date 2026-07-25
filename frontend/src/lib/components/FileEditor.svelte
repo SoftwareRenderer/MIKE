@@ -269,6 +269,22 @@
             isLightTheme() ? lightSyntax : darkSyntax,
             hoverTooltip(async (view, pos) => {
                 if (!lspClient || !fileUri) return null;
+
+                // Create DOM immediately — button hidden until LSP confirms a valid definition
+                const dom = document.createElement('div');
+                dom.className = 'lsp-def-tooltip';
+                const loadingEl = document.createElement('span');
+                loadingEl.className = 'lsp-def-loading';
+                loadingEl.textContent = '…';
+                dom.appendChild(loadingEl);
+                const btn = document.createElement('button');
+                btn.className = 'btn-go-def';
+                btn.style.display = 'none';
+                btn.textContent = 'Go to Definition';
+                dom.appendChild(btn);
+
+                // Fire LSP request in parallel — tooltip is already visible with loading placeholder
+                let isValid = false;
                 try {
                     const result = await lspClient.request('textDocument/definition', {
                         textDocument: { uri: fileUri },
@@ -281,32 +297,32 @@
                         const locations = Array.isArray(result) ? result : [result];
                         const firstLoc = locations[0];
                         const uri = firstLoc && 'target' in firstLoc ? firstLoc.target?.uri : firstLoc?.uri;
-
-                        if (!uri || !uri.startsWith('file://')) return null;
-
-                        return {
-                            pos,
-                            above: true,
-                            arrows: true,
-                            create: () => {
-                                const dom = document.createElement('div');
-                                dom.className = 'lsp-def-tooltip';
-                                const btn = document.createElement('button');
-                                btn.className = 'btn-go-def';
-                                btn.textContent = 'Go to Definition';
-                                btn.onclick = (e) => {
-                                    e.stopPropagation();
-                                    handleGoToDefinition(pos);
-                                };
-                                dom.appendChild(btn);
-                                return { dom, pos };
-                            },
-                        };
+                        if (uri && uri.startsWith('file://')) {
+                            const defPath = uri.replace('file://', '');
+                            // Only valid if definition is within the project workspace
+                            isValid = projectPath ? defPath.startsWith(projectPath) : false;
+                        }
                     }
                 } catch (e) {
                     console.warn('[lsp] hover definition failed:', e);
                 }
-                return null;
+
+                if (!isValid) return null;
+
+                // Reveal the button, hide the loading placeholder
+                loadingEl.style.display = 'none';
+                btn.style.display = '';
+                btn.onclick = (e) => {
+                    e.stopPropagation();
+                    handleGoToDefinition(pos);
+                };
+
+                return {
+                    pos,
+                    above: true,
+                    arrows: true,
+                    create: () => ({ dom, pos }),
+                };
             }),
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
@@ -934,6 +950,13 @@
 
     :global(.lsp-def-tooltip) {
         display: contents;
+    }
+    :global(.lsp-def-loading) {
+        color: var(--color-text-muted);
+        font-size: 0.75rem;
+        font-style: italic;
+        padding: 2px 6px;
+        user-select: none;
     }
     :global(.cm-tooltip .cm-tooltip-arrow) {
         display: none;
