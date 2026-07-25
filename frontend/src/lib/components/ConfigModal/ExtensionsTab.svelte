@@ -499,7 +499,7 @@
                             {#if ext.type === 'agent'}
                                 <p class="ext-note">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                                    Sandbox images must have this agent installed. An example Dockerfile can be found here: <code>./extensions/agent/{ext.name}/dockerfile-example</code>
+                                    This will add {ext.manifest.display_name} as an option in <code>Providers</code>
                                 </p>
                             {/if}
                         </div>

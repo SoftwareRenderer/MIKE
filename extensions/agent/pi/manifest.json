@@ -8,6 +8,6 @@
         "wasm_module": "pi.wasm",
         "capabilities": ["compact", "session_stats", "extension_ui"],
         "description": "Pi is a full coding agent that handles its own LLM calls, tool execution, and reasoning. When selected, Pi runs inside the task's worktree and manages the entire task lifecycle.",
-        "setup_info": "- **Inherited Config:** Your existing configuration is used when tasks are executed. Therefore all configuration of Pi should be done within Pi itself.\n- **Sandbox:** Your sandbox image must include `pi` on `$PATH`. Pi's config directory (`~/.pi/agent/`) is bind-mounted into the container at `/root/.pi/agent` with read/write access. Pi finds its config at the default location via `HOME=/root`.\n- **Sessions:** Each task gets its own Pi session (named `kanban-{task-id}`) for continuity across restarts."
+        "setup_info": "- **Inherited Config:** Your existing configuration is used when tasks are executed. Therefore all configuration of Pi should be done within Pi itself.\n- **Sandbox:**\n  - Your sandbox image must include `pi` on `$PATH`.\n  - Pi's config directory (`~/.pi/agent/`) is bind-mounted into the container at `/root/.pi/agent` with read/write access.\n  - An example dockerfile can be found in `./extensions/agent/pi/dockerfile-example`.\n- **Sessions:** Each task gets its own Pi session (named `kanban-{task-id}`) for continuity across restarts."
     }
 }
