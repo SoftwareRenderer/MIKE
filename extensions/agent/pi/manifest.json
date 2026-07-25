@@ -1,6 +1,6 @@
 {
     "display_name": "Pi Coding Agent",
-    "description": "Pi Coding Agent — autonomous coding agent with tool use",
+    "description": "Pi Coding Agent — minimal agent harness",
     "author": "Pi",
     "homepage": "https://pi.dev/",
     "license_url": "https://github.com/earendil-works/pi/blob/main/LICENSE",
