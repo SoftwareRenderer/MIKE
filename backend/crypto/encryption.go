@@ -12,8 +12,8 @@ import (
 )
 
 // Encrypt encrypts a plaintext value using AES-256-GCM.
-// The key is read from the ENCRYPTION_KEY environment variable (hex-encoded 32-byte key).
-// If ENCRYPTION_KEY is not set, the value is returned as-is (plain text fallback).
+// The key is read from the MIKE_ENCRYPTION_KEY environment variable (hex-encoded 32-byte key).
+// If MIKE_ENCRYPTION_KEY is not set, the value is returned as-is (plain text fallback).
 // Returns a base64-encoded string of the encrypted data (nonce + ciphertext + auth tag).
 func Encrypt(value string) (string, error) {
 	if value == "" {
@@ -46,8 +46,8 @@ func Encrypt(value string) (string, error) {
 }
 
 // Decrypt decrypts a base64-encoded AES-256-GCM ciphertext.
-// The key is read from the ENCRYPTION_KEY environment variable.
-// If ENCRYPTION_KEY is not set, the value is returned as-is (plain text fallback).
+// The key is read from the MIKE_ENCRYPTION_KEY environment variable.
+// If MIKE_ENCRYPTION_KEY is not set, the value is returned as-is (plain text fallback).
 func Decrypt(encrypted string) (string, error) {
 	if encrypted == "" {
 		return "", nil
@@ -87,16 +87,16 @@ func Decrypt(encrypted string) (string, error) {
 	return string(decrypted), nil
 }
 
-// IsEnabled returns true if the ENCRYPTION_KEY environment variable is set and valid.
+// IsEnabled returns true if the MIKE_ENCRYPTION_KEY environment variable is set and valid.
 func IsEnabled() bool {
 	return getEncryptionKey() != nil
 }
 
-// getEncryptionKey reads the ENCRYPTION_KEY env var and returns a 32-byte key.
+// getEncryptionKey reads the MIKE_ENCRYPTION_KEY env var and returns a 32-byte key.
 // It uses SHA-256 to derive a consistent 32-byte key from any non-empty input string.
 // Returns nil if the env var is not set.
 func getEncryptionKey() []byte {
-	raw := os.Getenv("ENCRYPTION_KEY")
+	raw := os.Getenv("MIKE_ENCRYPTION_KEY")
 	if raw == "" {
 		return nil
 	}
@@ -104,12 +104,12 @@ func getEncryptionKey() []byte {
 	return hash[:]
 }
 
-// ValidateKey checks if the ENCRYPTION_KEY env var is set.
+// ValidateKey checks if the MIKE_ENCRYPTION_KEY env var is set.
 // Returns an error if the key is empty, or nil if valid.
 func ValidateKey() error {
-	raw := os.Getenv("ENCRYPTION_KEY")
+	raw := os.Getenv("MIKE_ENCRYPTION_KEY")
 	if raw == "" {
-		return fmt.Errorf("ENCRYPTION_KEY environment variable is not set")
+		return fmt.Errorf("MIKE_ENCRYPTION_KEY environment variable is not set")
 	}
 	return nil
 }

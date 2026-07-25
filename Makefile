@@ -52,7 +52,7 @@ test-e2e: ## Run e2e tests (Playwright, manages its own server)
 
 .PHONY: run
 run: ## Start dev server (background, no TLS)
-	KANBAN_PASSWORD=test KANBAN_TLS=0 ./kanban &
+	LOGIN_PASSWORD=test KANBAN_TLS=0 ./kanban &
 
 .PHONY: stop
 stop: ## Stop dev server

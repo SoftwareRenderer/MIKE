@@ -18,7 +18,7 @@ import (
 	"kanban/backend/types"
 )
 
-// testPassword is the password used in tests (matches KANBAN_PASSWORD env var).
+// testPassword is the password used in tests (matches LOGIN_PASSWORD env var).
 const testPassword = "test-password-1234"
 
 // testServer creates a Server with a temporary database for testing.
@@ -31,30 +31,30 @@ func testServer(t *testing.T) *Server {
 	os.MkdirAll(worktreesDir, 0o755)
 
 	// Set env var for worktrees dir
-	oldWT := os.Getenv("WORKTREES_DIR")
-	os.Setenv("WORKTREES_DIR", worktreesDir)
+	oldWT := os.Getenv("MIKE_WORKTREES_DIR")
+	os.Setenv("MIKE_WORKTREES_DIR", worktreesDir)
 	t.Cleanup(func() {
 		if oldWT != "" {
-			os.Setenv("WORKTREES_DIR", oldWT)
+			os.Setenv("MIKE_WORKTREES_DIR", oldWT)
 		} else {
-			os.Unsetenv("WORKTREES_DIR")
+			os.Unsetenv("MIKE_WORKTREES_DIR")
 		}
 	})
 
 	// Set env var for auth password
-	oldPW := os.Getenv("KANBAN_PASSWORD")
-	os.Setenv("KANBAN_PASSWORD", testPassword)
+	oldPW := os.Getenv("MIKE_LOGIN_PASSWORD")
+	os.Setenv("MIKE_LOGIN_PASSWORD", testPassword)
 	t.Cleanup(func() {
 		if oldPW != "" {
-			os.Setenv("KANBAN_PASSWORD", oldPW)
+			os.Setenv("MIKE_LOGIN_PASSWORD", oldPW)
 		} else {
-			os.Unsetenv("KANBAN_PASSWORD")
+			os.Unsetenv("MIKE_LOGIN_PASSWORD")
 		}
 	})
 
 	// Disable sandbox startup cleanup to prevent removing containers from
 	// parallel sandbox package tests (they manage their own cleanup via TestMain).
-	os.Setenv("SANDBOX_SKIP_STARTUP_CLEANUP", "1")
+	os.Setenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP", "1")
 
 	s, err := NewServer(dbPath, worktreesDir, ":0", "", nil)
 	if err != nil {

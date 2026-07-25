@@ -15,7 +15,7 @@ func findExtensionsDir(t *testing.T) string {
 	candidates := []string{
 		"../../extensions",                         // from backend/extensions/
 		"../../../../extensions",                   // deeper nesting
-		filepath.Join(os.Getenv("KANBAN_EXTENSIONS"), ""), // env override
+		filepath.Join(os.Getenv("MIKE_EXTENSIONS"), ""), // env override
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {

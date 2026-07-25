@@ -10,7 +10,7 @@ function getConfig() {
 }
 
 function getWorktreePath(projectId: string, taskId: string): string {
-  // Test servers use WORKTREES_DIR=/tmp/kanban-test-worktrees
+  // Test servers use MIKE_WORKTREES_DIR=/tmp/kanban-test-worktrees
   return `/tmp/kanban-test-worktrees/${projectId}/${taskId}`;
 }
 

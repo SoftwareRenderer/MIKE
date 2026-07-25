@@ -26,10 +26,10 @@ func main() {
 	}()
 
 	// CLI flags
-	port := flag.Int("port", 0, "Server listen port (default: $PORT or 3000)")
-	dataDir := flag.String("data-dir", "", "Data directory for DB, TLS certs, trace files (default: $DATA_DIR or ./data)")
-	worktreesDir := flag.String("worktrees-dir", "", "Directory for git worktrees (default: $WORKTREES_DIR or ./worktrees)")
-	noTLS := flag.Bool("no-tls", false, "Disable TLS (plain HTTP); overrides $KANBAN_TLS")
+	port := flag.Int("port", 0, "Server listen port (default: $MIKE_PORT or 3000)")
+	dataDir := flag.String("data-dir", "", "Data directory for DB, TLS certs, trace files (default: $MIKE_DATA_DIR or ./data)")
+	worktreesDir := flag.String("worktrees-dir", "", "Directory for git worktrees (default: $MIKE_WORKTREES_DIR or ./worktrees)")
+	noTLS := flag.Bool("no-tls", false, "Disable TLS (plain HTTP); overrides $MIKE_TLS")
 	tlsCert := flag.String("tls-cert", "", "Path to TLS certificate file (default: auto-generated self-signed)")
 	tlsKey := flag.String("tls-key", "", "Path to TLS private key file")
 	flag.Parse()
@@ -38,7 +38,7 @@ func main() {
 	// Port
 	effectivePort := *port
 	if effectivePort == 0 {
-		if v := os.Getenv("PORT"); v != "" {
+		if v := os.Getenv("MIKE_PORT"); v != "" {
 			fmt.Sscanf(v, "%d", &effectivePort)
 		}
 		if effectivePort == 0 {
@@ -49,7 +49,7 @@ func main() {
 	// Data directory
 	effectiveDataDir := *dataDir
 	if effectiveDataDir == "" {
-		effectiveDataDir = os.Getenv("DATA_DIR")
+		effectiveDataDir = os.Getenv("MIKE_DATA_DIR")
 	}
 	if effectiveDataDir == "" {
 		effectiveDataDir = "./data"
@@ -58,7 +58,7 @@ func main() {
 	// Worktrees directory
 	effectiveWorktreesDir := *worktreesDir
 	if effectiveWorktreesDir == "" {
-		effectiveWorktreesDir = os.Getenv("WORKTREES_DIR")
+				effectiveWorktreesDir = os.Getenv("MIKE_WORKTREES_DIR")
 	}
 	if effectiveWorktreesDir == "" {
 		effectiveWorktreesDir = "./worktrees"
@@ -68,7 +68,7 @@ func main() {
 	dbPath := filepath.Join(effectiveDataDir, "kanban.db")
 
 	// Frontend dist
-	frontendDist := os.Getenv("FRONTEND_DIST")
+	frontendDist := os.Getenv("MIKE_FRONTEND_DIST")
 	if frontendDist == "" {
 		frontendDist = "./frontend/dist"
 	}
@@ -130,9 +130,9 @@ func main() {
 	}()
 
 	// Load TLS configuration
-	// --no-tls flag or KANBAN_TLS=0 env var disables TLS
+	// --no-tls flag or MIKE_TLS=0 env var disables TLS
 	var tlsCfg *tls.Config
-	if *noTLS || os.Getenv("KANBAN_TLS") == "0" {
+	if *noTLS || os.Getenv("MIKE_TLS") == "0" {
 		tlsCfg = tls.LoadDisabled()
 	} else {
 		tlsCfg, err = tls.LoadWithCert(effectiveDataDir, *tlsCert, *tlsKey)

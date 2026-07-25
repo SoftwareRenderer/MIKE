@@ -8,8 +8,8 @@ import (
 
 func TestAgentClient(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {

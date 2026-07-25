@@ -88,9 +88,9 @@ func NewSandboxManager() *SandboxManager {
 	sm.available = sm.checkAvailable()
 	if sm.available {
 		log.Println("[sandbox] gVisor available, sandboxing enabled")
-		// Skip cleanup if SANDBOX_SKIP_STARTUP_CLEANUP is set (e.g. during tests
+		// Skip cleanup if MIKE_SANDBOX_SKIP_STARTUP_CLEANUP is set (e.g. during tests
 		// where TestMain handles cleanup once to avoid races between parallel tests).
-		if os.Getenv("SANDBOX_SKIP_STARTUP_CLEANUP") == "" {
+		if os.Getenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP") == "" {
 			sm.cleanupStaleContainers()
 		}
 	} else {

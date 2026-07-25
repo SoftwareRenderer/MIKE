@@ -534,7 +534,7 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		cfg, cfgErr := s.configStore.GetConfig()
 		if cfgErr == nil && cfg.WorkspaceDir != "" {
 			wtDir := cfg.WorkspaceDir
-			if wtOverride := os.Getenv("WORKTREES_DIR"); wtOverride != "" {
+			if wtOverride := os.Getenv("MIKE_WORKTREES_DIR"); wtOverride != "" {
 				wtDir = wtOverride
 			}
 			cleanWT := filepath.Clean(wtDir)
