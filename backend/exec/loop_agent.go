@@ -180,8 +180,8 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 				te.store.UpdateTask(task)
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Task stopped by user"}})
 				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+				return
 			}
-			return
 		}
 	}
 
