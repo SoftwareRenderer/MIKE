@@ -139,15 +139,7 @@ func waitForFrame(t *testing.T, ch <-chan *protocol.Frame, label string) *protoc
 	return nil // unreachable
 }
 
-// pipePair creates two connected pipe pairs for bidirectional communication.
-// Returns (clientWrite, agentRead, agentWrite, clientRead) where:
-//   - clientWrite → agentRead (client sends requests)
-//   - agentWrite → clientRead (agent sends responses)
-func pipePair() (io.WriteCloser, io.ReadCloser, io.WriteCloser, io.ReadCloser) {
-	clientToAgentPr, clientToAgentPw := io.Pipe() // client writes via pw, agent reads via pr
-	agentToClientPr, agentToClientPw := io.Pipe()  // agent writes via pw, client reads via pr
-	return clientToAgentPw, clientToAgentPr, agentToClientPw, agentToClientPr
-}
+
 
 
 

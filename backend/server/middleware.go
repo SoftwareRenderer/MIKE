@@ -15,7 +15,6 @@ import (
 var (
 	JSONResponse = httputil.JSONResponse
 	JSONError    = httputil.JSONError
-	JSONErrorf   = httputil.JSONErrorf
 )
 
 // Paths that don't require authentication.
