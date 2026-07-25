@@ -885,37 +885,12 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		}
 		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, headRef); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0 || diffResult.CommittedDiff != "") {
 			hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
-			// Send compact stats for card UI (exclude internal files to match panel display)
-			var untrackedLines, trackedAdd, trackedDel, visibleTracked, visibleUntracked int
-			for path, f := range diffResult.Tracked {
-				if isInternalFile(path) {
-					continue
-				}
-				visibleTracked++
-				trackedAdd += f.Added
-				trackedDel += f.Removed
-			}
-			for _, u := range diffResult.Untracked {
-				if isInternalFile(u.Path) {
-					continue
-				}
-				visibleUntracked++
-				if u.OrigAdded > 0 {
-					untrackedLines += u.OrigAdded
-				} else {
-					untrackedLines += len(u.Lines)
-				}
-			}
-			filesN := visibleTracked + visibleUntracked
+			stats := ComputeDiffStats(diffResult, task)
+			filesN := stats.VisibleTracked + stats.VisibleUntracked
 			// Check if task branch commits are already merged into the target branch.
-			targetBranch := task.BaseRef
-			if strings.HasPrefix(targetBranch, "fatal:") {
-				targetBranch = ""
-			}
-			var alreadyMerged bool
-			if targetBranch != "" && task.Branch != "" {
+			if targetBranch, ok := CheckAlreadyMerged(task); ok {
 				if project, err := asm.store.GetProject(projectID); err == nil && project.Path != "" {
-					alreadyMerged = asm.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
+					stats.AlreadyMerged = asm.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
 				}
 			}
 			statsMsg, _ := json.Marshal(map[string]any{
@@ -924,14 +899,14 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				"hash":                  hash,
 				"short_stat":            diffResult.ShortStat,
 				"files_n":               filesN,
-				"untracked_n":           visibleUntracked,
-				"untracked_lines":       untrackedLines,
-				"tracked_add":           trackedAdd,
-				"tracked_del":           trackedDel,
+				"untracked_n":           stats.VisibleUntracked,
+				"untracked_lines":       stats.UntrackedLines,
+				"tracked_add":           stats.TrackedAdd,
+				"tracked_del":           stats.TrackedDel,
 				"file_hashes":           filterInternalPathsFromHashes(diffResult.GetPerFileHashes()),
 				"staged_paths":          filterInternalPathsFromList(diffResult.StagedPaths),
 				"has_committed_changes": diffResult.CommittedDiff != "",
-				"already_merged":        alreadyMerged,
+				"already_merged":        stats.AlreadyMerged,
 			})
 			client.writeMu.Lock()
 			conn.Write(ctx, websocket.MessageText, statsMsg)

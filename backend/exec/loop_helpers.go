@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"kanban/backend/git"
 	"kanban/backend/llama"
 	"kanban/backend/prompts"
 	kanban_sandbox "kanban/backend/sandbox"
@@ -114,37 +113,12 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 	}
 	state.lastDiffHash = hash
 	fileHashes := diffResult.GetPerFileHashes()
-	// Compute stats excluding internal files (matches panel display)
-	var untrackedLines, trackedAdd, trackedDel, visibleTracked, visibleUntracked int
-	for path, f := range diffResult.Tracked {
-		if git.IsInternalFile(path) {
-			continue
-		}
-		visibleTracked++
-		trackedAdd += f.Added
-		trackedDel += f.Removed
-	}
-	for _, u := range diffResult.Untracked {
-		if git.IsInternalFile(u.Path) {
-			continue
-		}
-		visibleUntracked++
-		if u.OrigAdded > 0 {
-			untrackedLines += u.OrigAdded
-		} else {
-			untrackedLines += len(u.Lines)
-		}
-	}
-	filesN := visibleTracked + visibleUntracked
+	stats := stream.ComputeDiffStats(diffResult, *task)
+	filesN := stats.VisibleTracked + stats.VisibleUntracked
 	// Check if task branch commits are already merged into the target branch.
-	targetBranch := task.BaseRef
-	if strings.HasPrefix(targetBranch, "fatal:") {
-		targetBranch = ""
-	}
-	var alreadyMerged bool
-	if targetBranch != "" && task.Branch != "" {
+	if targetBranch, ok := stream.CheckAlreadyMerged(*task); ok {
 		if project, err := te.store.GetProject(projectID); err == nil && project.Path != "" {
-			alreadyMerged = te.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
+			stats.AlreadyMerged = te.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
 		}
 	}
 	te.appStreamMgr.BroadcastDiffStats(stream.DiffStatsEvent{
@@ -153,14 +127,14 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 		DiffHash:            hash,
 		ShortStat:           diffResult.ShortStat,
 		FilesN:              filesN,
-		UntrackedN:          visibleUntracked,
-		UntrackedLines:      untrackedLines,
-		TrackedAdd:          trackedAdd,
-		TrackedDel:          trackedDel,
+		UntrackedN:          stats.VisibleUntracked,
+		UntrackedLines:      stats.UntrackedLines,
+		TrackedAdd:          stats.TrackedAdd,
+		TrackedDel:          stats.TrackedDel,
 		ChangedHashes:       fileHashes,
 		StagedPaths:         diffResult.StagedPaths,
 		HasCommittedChanges: diffResult.CommittedDiff != "",
-		AlreadyMerged:       alreadyMerged,
+		AlreadyMerged:       stats.AlreadyMerged,
 	})
 }
 
