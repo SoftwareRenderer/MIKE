@@ -130,15 +130,6 @@
                         />
                     </div>
                 </div>
-                {#if !encryptionEnabled && provider.api_key && provider.api_key.trim() !== ''}
-                    <div class="encryption-warning">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                            <path d="M8 1L1 14h14L8 1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
-                            <path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                        </svg>
-                        API key stored unencrypted. Set <code>ENCRYPTION_KEY</code> env var to encrypt with AES-256-GCM.
-                    </div>
-                {/if}
 
                 <div class="details-actions">
                     <button type="button" class="btn-fetch" onclick={onFetchModels} disabled={provider.fetchingModels || !provider.url.trim()} title="Fetch available models from this provider">
@@ -392,23 +383,7 @@
         outline: none;
         border-color: var(--color-accent);
     }
-    .encryption-warning {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-top: 8px;
-        padding: 6px 8px;
-        font-size: 0.75rem;
-        color: var(--color-warning);
-        background: rgba(210, 153, 34, 0.1);
-        border-radius: var(--radius-sm);
-    }
-    .encryption-warning code {
-        font-size: 0.6875rem;
-        background: rgba(210, 153, 34, 0.2);
-        padding: 1px 4px;
-        border-radius: 3px;
-    }
+
     .details-actions {
         display: flex;
         gap: 6px;
