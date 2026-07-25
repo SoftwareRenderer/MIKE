@@ -722,7 +722,7 @@
                                 currentBranch={selectedBranch}
                                 commits={commits}
                                 originTip={originTip}
-                                loading={loadingCommits}
+                                loading={loadingCommits || loadingMoreCommits}
                                 hasMore={hasMoreCommits}
                                 onCommitSelected={handleCommitSelected}
                                 onLoadMore={loadMoreCommits}
