@@ -76,14 +76,16 @@
     });
 
     // Lazy-load on scroll
-    let listEl: HTMLDivElement | null = null;
-    let listScrollTop = $state(0);
+    let scrollEl: HTMLElement | null = null;
     let scrollEndFired = $state(false);
 
+    function handleScrollElChange(el: HTMLElement | null) {
+        scrollEl = el;
+    }
+
     function handleListScroll() {
-        if (!listEl || scrollEndFired || loading || !commitDisplays.length) return;
-        listScrollTop = listEl.scrollTop;
-        const { scrollHeight, clientHeight, scrollTop } = listEl;
+        if (!scrollEl || scrollEndFired || loading || !commitDisplays.length) return;
+        const { scrollHeight, clientHeight, scrollTop } = scrollEl;
         if (scrollTop + clientHeight >= scrollHeight - 200) {
             scrollEndFired = true;
             if (hasMore) onLoadMore?.();
@@ -101,13 +103,13 @@
         <span class="git-graph-label">History</span>
     </div>
 
-    <div class="git-graph-list" role="list" aria-label="Commit history" bind:this={listEl} onscroll={handleListScroll}>
-        {#if loading}
+    <div class="git-graph-list" role="list" aria-label="Commit history">
+        {#if loading && commitDisplays.length === 0}
             <div class="git-graph-loading">Loading commits...</div>
         {:else if commitDisplays.length === 0}
             <div class="git-graph-empty">No commits</div>
         {:else}
-            <VirtualList items={commitDisplays} itemHeight={36} minThreshold={50} scrollTop={listScrollTop}>
+            <VirtualList items={commitDisplays} itemHeight={36} minThreshold={0} onscroll={handleListScroll} onScrollElChange={handleScrollElChange}>
                 {#snippet children({ item: d, index: idx })}
                     {@const commit = d.commit}
                     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -210,11 +212,10 @@
 
     .git-graph-list {
         flex: 1;
-        overflow-y: auto;
-        overflow-x: hidden;
         display: flex;
         flex-direction: column;
         min-height: 0;
+        overflow: hidden;
         padding: 4px 0;
     }
 
@@ -230,6 +231,7 @@
         align-items: flex-start;
         gap: 6px;
         padding: 3px 8px;
+        height: 36px;
         cursor: default;
     }
     .git-commit-row:hover {
