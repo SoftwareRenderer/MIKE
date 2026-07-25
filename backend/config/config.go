@@ -175,13 +175,6 @@ type configResponse struct {
 	EncryptionEnabled      bool             `json:"encryption_enabled"`
 }
 
-func maskedToken(token string) string {
-	if token == "" {
-		return ""
-	}
-	return maskedAPIKey
-}
-
 // maskAPIKeys replaces non-empty API keys with a masked placeholder.
 
 const maskedAPIKey = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // 10 bullets
