@@ -15,7 +15,7 @@
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { highlightSelectionMatches } from '@codemirror/search';
-    import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
+    import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax } from '$lib/utils/codemirror-theme';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
@@ -72,9 +72,24 @@
     let lspReady = $state(false);
     let lspConnecting = $state(false); // prevents duplicate connections
     let lspError = $state('');
+    let lspLanguage = $state(''); // language name for display (e.g., "Go", "TypeScript")
+    let lspServerName = $state(''); // server name from LSP (e.g., "gopls")
+    let lspServerVersion = $state(''); // server version from LSP (e.g., "v0.15.0")
     let fileUri = $state('');
     let lspCompartment = $state(new Compartment());
     let lspAvailable = $state(false);
+    let lspWorkspace = $state(''); // workspace path the LSP client is connected to
+
+    // LSP file path: uses the real project path so the language server can find the file.
+    // When filePath is a sandbox or worktree path, fall back to projectPath + displayPath.
+    let lspFilePath = $derived.by(() => {
+        if (!filePath) return '';
+        // If filePath is already under the project path, use it directly
+        if (projectPath && filePath.startsWith(projectPath)) return filePath;
+        // Otherwise construct from projectPath + displayPath (real project path)
+        if (projectPath && displayPath) return `${projectPath}/${displayPath}`;
+        return filePath;
+    });
 
     function getLanguageSupport(path: string) {
         const ext = path.split('.').pop()?.toLowerCase() || '';
@@ -201,6 +216,47 @@
             bracketMatching(),
             closeBrackets(),
             lspCompartment.of(autocompletion()),
+            hoverTooltip(async (view, pos) => {
+                if (!lspClient || !fileUri) return null;
+                try {
+                    const result = await lspClient.request('textDocument/definition', {
+                        textDocument: { uri: fileUri },
+                        position: {
+                            line: view.state.doc.lineAt(pos).number - 1,
+                            character: pos - view.state.doc.lineAt(pos).from,
+                        },
+                    });
+                    if (result && (Array.isArray(result) ? result.length > 0 : result !== null)) {
+                        const locations = Array.isArray(result) ? result : [result];
+                        const firstLoc = locations[0];
+                        const uri = firstLoc && 'target' in firstLoc ? firstLoc.target?.uri : firstLoc?.uri;
+
+                        if (!uri || !uri.startsWith('file://')) return null;
+
+                        return {
+                            pos,
+                            above: true,
+                            arrows: true,
+                            create: () => {
+                                const dom = document.createElement('div');
+                                dom.className = 'lsp-def-tooltip';
+                                const btn = document.createElement('button');
+                                btn.className = 'btn-go-def';
+                                btn.textContent = 'Go to Definition';
+                                btn.onclick = (e) => {
+                                    e.stopPropagation();
+                                    handleGoToDefinition(pos);
+                                };
+                                dom.appendChild(btn);
+                                return { dom, pos };
+                            },
+                        };
+                    }
+                } catch (e) {
+                    console.warn('[lsp] hover definition failed:', e);
+                }
+                return null;
+            }),
             rectangularSelection(),
             crosshairCursor(),
             highlightActiveLine(),
@@ -334,28 +390,60 @@
     });
 
     // Initialize LSP after the file and editor are ready
+    // Track extension manager state so this effect re-runs when extensions are loaded
     $effect(() => {
         const _editorReady = editorReady;
         const _loaded = baselineContentLoaded;
         const _projPath = projectPath;
         const _projId = projectId;
+        // Read extension state to track it as a dependency
+        const _extCount = extensionManager.state.extensions.length;
+        // Use lspFilePath (real project path) for LSP so the server can find the file.
+        // This matters when filePath is a sandbox or worktree path.
+        const _lspFilePath = lspFilePath;
+        // Check LSP availability here (outside async) so effect re-runs when extensions load
+        const _lspAvail = isLSPAvailable(_lspFilePath);
 
         if (!_editorReady || !view || !_projId || !_projPath || _loaded === undefined) return;
-        if (lspClient) return; // already initialized
+        // Re-initialize if workspace changed (e.g., project switch with same file path)
+        if (lspClient && lspWorkspace === _projPath) return;
 
         async function initLSP() {
             // Check if LSP extension is available for this file
-            lspAvailable = isLSPAvailable(filePath);
+            lspAvailable = _lspAvail;
             if (!lspAvailable) return; // fall back to built-in autocompletion
 
             lspConnecting = true;
-            fileUri = `file://${filePath}`;
+            lspReady = false;
+            fileUri = `file://${_lspFilePath}`;
             try {
+                // Promise resolved when backend sends $server/lspReady notification
+                let resolveReady: () => void;
+                const readyPromise = new Promise<void>(resolve => { resolveReady = resolve; });
+
                 const virtTransport = await requestLSPChannel({
                     workspace: _projPath!,
-                    filePath,
+                    filePath: _lspFilePath,
                     onDisconnected: () => {
                         lspReady = false;
+                        lspWorkspace = ''; // clear workspace on disconnect
+                    },
+                    onServerInfo: (name, version) => {
+                        lspServerName = name;
+                        if (version) {
+                            try {
+                                const parsed = JSON.parse(version);
+                                lspServerVersion = parsed.Main?.Version || parsed.Version || version;
+                            } catch {
+                                lspServerVersion = version;
+                            }
+                        } else {
+                            lspServerVersion = '';
+                        }
+                    },
+                    onReady: () => {
+                        lspReady = true;
+                        resolveReady();
                     },
                 });
                 lspTransport = virtTransport;
@@ -363,10 +451,30 @@
                 lspClient = new LSPClient({
                     extensions: languageServerExtensions(),
                     rootUri: `file://${_projPath!}`,
+                    timeout: 30000,
                 });
 
                 await lspClient.connect(virtTransport).initializing;
-                lspReady = true;
+
+                // Wait for backend $server/lspReady notification (keeps spinner spinning).
+                // Fallback: if backend doesn't send it within 5s, assume ready (old backend compat).
+                await Promise.race([
+                    readyPromise,
+                    new Promise<void>(resolve => setTimeout(resolve, 5000)),
+                ]);
+                if (!lspReady) {
+                    lspReady = true; // fallback for old backend
+                }
+                lspWorkspace = _projPath!; // track which workspace we're connected to
+
+                // Derive language name from file extension
+                const ext = _lspFilePath.split('.').pop()?.toLowerCase() || '';
+                const langMap: Record<string, string> = {
+                    go: 'Go', ts: 'TypeScript', tsx: 'TypeScript',
+                    js: 'JavaScript', jsx: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript',
+                    py: 'Python', pyi: 'Python', rs: 'Rust',
+                };
+                lspLanguage = langMap[ext] || ext.toUpperCase();
 
                 // Swap compartment: replace autocompletion() with LSP plugin
                 if (view && lspClient) {
@@ -394,6 +502,7 @@
         const _view = view;
         const _projPath = projectPath;
         const _lspAvailable = lspAvailable;
+        const _lspFilePath = lspFilePath;
 
         // Only reconnect if we previously had a client but it's now disconnected
         if (!_lspClient || !_view || !_projPath || !_lspAvailable) return;
@@ -401,16 +510,40 @@
 
         async function reconnectLSP() {
             lspConnecting = true;
+            lspReady = false;
             try {
+                // Promise resolved when backend sends $server/lspReady notification
+                let resolveReady: () => void;
+                const readyPromise = new Promise<void>(resolve => { resolveReady = resolve; });
+
+                // Release old transport and get a new one from the shared manager
                 lspTransport?.release();
                 lspTransport = null;
                 _lspClient?.disconnect();
 
                 const virtTransport = await requestLSPChannel({
                     workspace: _projPath!,
-                    filePath,
+                    filePath: _lspFilePath,
                     onDisconnected: () => {
                         lspReady = false;
+                        lspWorkspace = '';
+                    },
+                    onServerInfo: (name, version) => {
+                        lspServerName = name;
+                        if (version) {
+                            try {
+                                const parsed = JSON.parse(version);
+                                lspServerVersion = parsed.Main?.Version || parsed.Version || version;
+                            } catch {
+                                lspServerVersion = version;
+                            }
+                        } else {
+                            lspServerVersion = '';
+                        }
+                    },
+                    onReady: () => {
+                        lspReady = true;
+                        resolveReady();
                     },
                 });
                 lspTransport = virtTransport;
@@ -418,12 +551,23 @@
                 const newClient = new LSPClient({
                     extensions: languageServerExtensions(),
                     rootUri: `file://${_projPath!}`,
+                    timeout: 30000,
                 });
                 lspClient = newClient;
 
                 await newClient.connect(virtTransport).initializing;
-                lspReady = true;
 
+                // Wait for backend $server/lspReady notification
+                await Promise.race([
+                    readyPromise,
+                    new Promise<void>(resolve => setTimeout(resolve, 5000)),
+                ]);
+                if (!lspReady) {
+                    lspReady = true; // fallback for old backend
+                }
+                lspWorkspace = _projPath!;
+
+                // Re-attach plugin
                 if (_view && newClient) {
                     _view.dispatch({
                         effects: lspCompartment.reconfigure(newClient.plugin(fileUri)),
@@ -491,6 +635,56 @@
             error = String(e);
         } finally {
             loading = false;
+        }
+    }
+
+    async function handleGoToDefinition(pos: number) {
+        if (!lspClient || !view) return;
+        try {
+            const result = await lspClient.request('textDocument/definition', {
+                textDocument: { uri: fileUri },
+                position: {
+                    line: view.state.doc.lineAt(pos).number - 1,
+                    character: pos - view.state.doc.lineAt(pos).from,
+                },
+            });
+
+            if (result && (Array.isArray(result) ? result.length > 0 : result !== null)) {
+                const locations = Array.isArray(result) ? result : [result];
+                const loc = locations[0];
+                const location = loc && 'target' in loc ? loc.target : loc;
+                const uri = location?.uri;
+                const range = location?.range;
+
+                if (!uri || !uri.startsWith('file://') || !range) return;
+
+                const targetPath = uri.replace(/^file:\/\//, '');
+                const targetLine = range.start.line + 1;
+
+                if (targetPath === lspFilePath) {
+                    // Jump within same file
+                    const totalLines = view.state.doc.lines;
+                    const lineNum = Math.min(targetLine, totalLines);
+                    const lineObj = view.state.doc.line(lineNum);
+                    view.dispatch({ selection: { anchor: lineObj.from, head: lineObj.from } });
+                    view.focus();
+                    requestAnimationFrame(() => {
+                        const scroller = editorEl?.querySelector('.cm-scroller');
+                        if (!scroller) return;
+                        const coords = view?.coordsAtPos(lineObj.from);
+                        if (!coords) return;
+                        const targetScroll = coords.top + scroller.scrollTop - scroller.clientHeight * 0.3;
+                        scroller.scrollTop = Math.max(0, Math.min(targetScroll, scroller.scrollHeight - scroller.clientHeight));
+                    });
+                } else {
+                    // Dispatch to parent — Explorer can open in a new tab
+                    window.dispatchEvent(new CustomEvent('open-file', {
+                        detail: { path: targetPath, line: targetLine },
+                    }));
+                }
+            }
+        } catch (e) {
+            console.warn('[lsp] go to definition failed:', e);
         }
     }
 
@@ -650,8 +844,13 @@
             {cursorCol}
             {lineCount}
             charCount={content.length}
-            {hasChanges}
             onFind={openSearchPanel}
+            lspReady={lspReady}
+            lspConnecting={lspConnecting}
+            {lspError}
+            {lspLanguage}
+            {lspServerName}
+            {lspServerVersion}
         />
     {/if}
 </div>
@@ -878,6 +1077,28 @@
     }
     .editor-content :global(.cm-content) {
         caret-color: var(--color-text-primary);
+    }
+
+    :global(.lsp-def-tooltip) {
+        display: contents;
+    }
+    :global(.cm-tooltip .cm-tooltip-arrow) {
+        display: none;
+    }
+    :global(.btn-go-def) {
+        background: var(--color-accent);
+        color: white;
+        border: none;
+        border-radius: 3px;
+        padding: 2px 6px;
+        cursor: pointer;
+        font-size: 0.7rem;
+        font-weight: 600;
+        transition: opacity 0.15s;
+        margin-bottom: 6px;
+    }
+    :global(.btn-go-def:hover) {
+        opacity: 0.8;
     }
 
     .confirm-overlay {
