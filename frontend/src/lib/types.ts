@@ -232,12 +232,9 @@ export interface Provider {
 /** URL prefix for agent providers (e.g., 'agent://pi'). */
 export const AGENT_URL_PREFIX = 'agent://';
 
-/** Legacy sentinel URL for backward compatibility. */
-export const PI_SENTINEL_URL = 'pi://agent';
-
 /** Check if a provider is an agent (non-LLM kind). */
 export function isAgentProvider(p: Provider): boolean {
-    return p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX) || p.url === PI_SENTINEL_URL;
+    return p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX);
 }
 
 export interface TaskMessage {

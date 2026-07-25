@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
-    import { PI_SENTINEL_URL } from '$lib/types';
+    import { AGENT_URL_PREFIX } from '$lib/types';
 
     interface Props {
         providers: Provider[];
@@ -57,17 +57,21 @@
         providers.filter(p => p.models.length > 0)
     );
 
-    let hasPiProvider = $derived(
-        providers.some(p => p.kind === 'agent' || p.url === PI_SENTINEL_URL)
+    let hasAgentProvider = $derived(
+        providers.some(p => p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX))
     );
 
-    // Total selectable options: LLM providers with models + Pi agent
+    let agentProvider = $derived(
+        providers.find(p => p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX)) || null
+    );
+
+    // Total selectable options: LLM providers with models + agent
     let selectableCount = $derived(
-        activeProviders.length + (hasPiProvider ? 1 : 0)
+        activeProviders.length + (hasAgentProvider ? 1 : 0)
     );
 
-    let isPiSelected = $derived(
-        selectedProviderUrl === PI_SENTINEL_URL
+    let isAgentSelected = $derived(
+        selectedProviderUrl.startsWith(AGENT_URL_PREFIX)
     );
 
     $effect(() => {
@@ -170,11 +174,20 @@
         }
     }
 
-    function selectPiAgent() {
-        selectedProviderUrl = PI_SENTINEL_URL;
+    function selectAgent() {
+        const agentProvider = providers.find(p => p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX));
+        if (!agentProvider) return;
+        selectedProviderUrl = agentProvider.url;
         providerDropdownOpen = false;
         modelDropdownOpen = false;
-        onSelect('pi', 'Pi Coding Agent', PI_SENTINEL_URL);
+        const getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
+        if (agentProvider.default_model && agentProvider.models.some(m => getModelName(m) === agentProvider.default_model)) {
+            onSelect(agentProvider.name, agentProvider.default_model, agentProvider.url);
+        } else if (agentProvider.models.length > 0) {
+            onSelect(agentProvider.name, getModelName(agentProvider.models[0]), agentProvider.url);
+        } else {
+            onSelect(agentProvider.name, agentProvider.display_name || agentProvider.name, agentProvider.url);
+        }
     }
 
     function selectModel(modelName: string, reasoningEffort?: string) {
@@ -303,7 +316,7 @@
                 <path d="M6 8h4M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
             <span class="selector-label">
-                {isPiSelected ? 'Pi Coding Agent' : (selectedProvider?.display_name || selectedProvider?.name || 'Provider')}
+                {isAgentSelected ? (selectedProvider?.display_name || selectedProvider?.name || 'Agent') : (selectedProvider?.display_name || selectedProvider?.name || 'Provider')}
             </span>
             <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -311,7 +324,7 @@
         </button>
     {/if}
 
-    {#if !isPiSelected}
+    {#if !isAgentSelected}
         <button
             type="button"
             class="selector-trigger model-trigger"
@@ -344,15 +357,15 @@
 <!-- Provider dropdown (rendered in shadow DOM to escape overflow clipping) -->
 {#if providerDropdownOpen && providerRect}
     <svelte:element this={"div"} class="portal-provider-dropdown" role="listbox" aria-label="Select provider" style="position:fixed;top:{providerRect.top}px;left:{providerRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
-        {#if hasPiProvider}
-            <button type="button" class="provider-option provider-option-pi" class:active={isPiSelected} onclick={selectPiAgent} role="option" aria-selected={isPiSelected}>
+        {#if hasAgentProvider}
+            <button type="button" class="provider-option provider-option-agent" class:active={isAgentSelected} onclick={selectAgent} role="option" aria-selected={isAgentSelected}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
                     <circle cx="6" cy="9" r="1" fill="currentColor"/>
                     <circle cx="10" cy="9" r="1" fill="currentColor"/>
                 </svg>
-                <span class="provider-name">Pi Coding Agent</span>
-                {#if isPiSelected}
+                <span class="provider-name">{agentProvider?.display_name || agentProvider?.name || 'Agent'}</span>
+                {#if isAgentSelected}
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
@@ -482,13 +495,13 @@
     .provider-option:hover {
         background: var(--color-surface-3);
     }
-    .provider-option-pi {
+    .provider-option-agent {
         color: var(--color-status-purple);
     }
-    .provider-option-pi:hover {
+    .provider-option-agent:hover {
         background: rgba(163, 113, 247, 0.08);
     }
-    .provider-option-pi.active {
+    .provider-option-agent.active {
         background: rgba(163, 113, 247, 0.1);
         color: var(--color-status-purple);
     }

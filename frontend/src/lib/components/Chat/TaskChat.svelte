@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
-    import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
+    import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getTask } from '$lib/api';
 import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
 import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
@@ -103,7 +103,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let isUpdatingTask = $state(false);
     let isAgentSelected = $derived(() => {
         if (!selectedUrl) return false;
-        if (selectedUrl === PI_SENTINEL_URL) return true;
+        if (selectedUrl.startsWith(AGENT_URL_PREFIX)) return true;
         const p = providers.find(p => p.url === selectedUrl);
         return p ? isAgentProvider(p) : false;
     });
@@ -397,8 +397,8 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     /** Look up the context window for the currently selected model. */
     function updateContextLimit() {
         let provider = providers.find(p => p.url === selectedUrl);
-        // Pi agent: selectedUrl is PI_SENTINEL_URL, look up the Pi agent provider
-        if (!provider && selectedUrl === PI_SENTINEL_URL) {
+        // Agent: selectedUrl starts with AGENT_URL_PREFIX, look up the agent provider
+        if (!provider && selectedUrl.startsWith(AGENT_URL_PREFIX)) {
             provider = providers.find(p => isAgentProvider(p));
         }
         if (!provider) {
