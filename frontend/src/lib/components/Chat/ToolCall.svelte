@@ -402,7 +402,7 @@
                     <rect x="2" y="8" width="12" height="4" rx="1"/>
                 </svg>
             {:else}
-                <Icon class="tool-icon" src={iconInfo.src} color={iconInfo.color} width={14} height={14} />
+                <Icon class="tool-icon" src={iconInfo.src} width={14} height={14} />
             {/if}
             <span class="tool-name" title={tc.toolName}>{getToolDisplayName(tc.displayName, tc.toolName)}</span>
             {#if showArgs}

@@ -34,7 +34,6 @@ export {
     resetProjectStats,
     createProject,
     updateProject,
-    buildSandboxImage,
     buildSandboxImageStream,
     deleteProject,
     getBoard,
