@@ -736,10 +736,15 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 
 	te.taskMu.Lock()
-	// Close old agent runner if this task is being restarted (runner was kept alive after completion).
-	if oldState, exists := te.tasks[taskID]; exists && oldState.agentRunner != nil && !oldState.runnerClosed {
-		oldState.agentRunner.Close()
-		oldState.runnerClosed = true
+	// Cancel old executor if this task is being restarted.
+	// For agent executors, the event loop stays alive after completion (for follow-ups).
+	// We must cancel it to prevent duplicate executors.
+	if oldState, exists := te.tasks[taskID]; exists {
+		if oldState.agentRunner != nil && !oldState.runnerClosed {
+			oldState.agentRunner.Close()
+			oldState.runnerClosed = true
+		}
+		oldState.cancel() // cancel old context so its event loop exits
 	}
 	execType := "llm"
 	if te.configStore.IsAgentProvider(serverURL) {

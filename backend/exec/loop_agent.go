@@ -124,10 +124,16 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	// Pi does not persist sessions, so we must replay conversation history on every start.
 	initialPrompt := task.Prompt
 	if initialContent != "" {
-		// Lazy-start (follow-up message): prepend conversation history + new message
-		if len(taskMsgs) > 0 {
-			initialPrompt = buildContextReplay(taskMsgs) + "\n\n--- New message ---\n\n" + initialContent
-			log.Printf("[agent] task=%s lazy-start: replaying %d messages + new message", task.ID, len(taskMsgs))
+		// Lazy-start (follow-up message): the new message is already in taskMsgs
+		// (created by HandleSend before ForwardUserMessage). Exclude it from replay
+		// to avoid duplication — it will be sent as initialContent.
+		replayMsgs := taskMsgs
+		if len(taskMsgs) > 0 && taskMsgs[len(taskMsgs)-1].Content == initialContent {
+			replayMsgs = taskMsgs[:len(taskMsgs)-1]
+		}
+		if len(replayMsgs) > 0 {
+			initialPrompt = buildContextReplay(replayMsgs) + "\n\n--- New message ---\n\n" + initialContent
+			log.Printf("[agent] task=%s lazy-start: replaying %d messages + new message", task.ID, len(replayMsgs))
 		} else {
 			initialPrompt = initialContent
 			log.Printf("[agent] task=%s lazy-start: sending user message as initial prompt", task.ID)
