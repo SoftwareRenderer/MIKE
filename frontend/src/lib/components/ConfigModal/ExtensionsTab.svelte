@@ -496,6 +496,12 @@
                             {#if ext.manifest.description}
                                 <p class="ext-description">{ext.manifest.description}</p>
                             {/if}
+                            {#if ext.type === 'agent'}
+                                <p class="ext-note">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                    Sandbox images must have this agent installed. An example Dockerfile can be found here: <code>./extensions/agent/{ext.name}/dockerfile-example</code>
+                                </p>
+                            {/if}
                         </div>
                     {/each}
                 </div>
@@ -670,6 +676,12 @@
                             </div>
                             {#if entry.description}
                                 <p class="ext-description">{entry.description}</p>
+                            {/if}
+                            {#if entry.type === 'agent'}
+                                <p class="ext-note">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                    The sandbox image must have this agent installed. See <code>./extensions/agent/{entry.name}/dockerfile-example</code> for a reference Dockerfile.
+                                </p>
                             {/if}
                         </div>
                     {/each}
@@ -954,6 +966,28 @@
         font-size: 0.85rem;
         color: var(--color-text-tertiary);
         line-height: 1.4;
+    }
+
+    .ext-note {
+        margin: 0 0 0.5rem;
+        font-size: 0.8rem;
+        color: var(--color-text-tertiary);
+        line-height: 1.4;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.35rem;
+    }
+
+    .ext-note svg {
+        flex-shrink: 0;
+        margin-top: 2px;
+    }
+
+    .ext-note code {
+        background: var(--color-bg-input);
+        padding: 0.1em 0.35em;
+        border-radius: 3px;
+        font-size: 0.78rem;
     }
 
     .toggle-label {
