@@ -28,15 +28,12 @@ type AgentRunner struct {
 	stdin        io.WriteCloser
 	stdout       io.Reader
 	cmd          *exec.Cmd
-	sandboxMgr   *sandboxmgr.SandboxManager
-	taskID       string
-	sandboxEnabled bool
-
 	mu          sync.Mutex
 	closed      bool
 	eventChan   chan Event
 	statsChan   chan SessionStatsData
 	compactChan chan *CompactResult
+	modelUpdated chan struct{}
 	done        chan struct{}
 
 	// model name discovered via get_state
@@ -82,12 +79,10 @@ func NewAgentRunner(ext *extensions.Extension, sandboxMgr *sandboxmgr.SandboxMan
 
 	r := &AgentRunner{
 		adapter:      adapter,
-		sandboxMgr:   sandboxMgr,
-		taskID:       taskID,
-		sandboxEnabled: sandboxEnabled,
 		eventChan:    make(chan Event, 64),
 		statsChan:    make(chan SessionStatsData, 16),
 		compactChan:  make(chan *CompactResult, 4),
+		modelUpdated: make(chan struct{}, 1),
 		done:         make(chan struct{}),
 	}
 
@@ -207,7 +202,6 @@ func (r *AgentRunner) QueryStats(ctx context.Context) SessionStatsData {
 	}
 }
 
-// QueryModel sends a get_state command and waits for model info.
 func (r *AgentRunner) QueryModel(ctx context.Context) string {
 	r.mu.Lock()
 	if !r.closed {
@@ -216,31 +210,17 @@ func (r *AgentRunner) QueryModel(ctx context.Context) string {
 	}
 	r.mu.Unlock()
 
-	// Wait for a status event with model info in RawData
 	timeout := time.NewTimer(3 * time.Second)
 	defer timeout.Stop()
 
-	for {
-		select {
-		case event := <-r.eventChan:
-			if event.Type == EventTypeStatus && event.RawData != nil {
-				if modelName, ok := event.RawData["model_name"].(string); ok && modelName != "" {
-					r.mu.Lock()
-					r.modelName = modelName
-					r.mu.Unlock()
-					return modelName
-				}
-			}
-		case <-timeout.C:
-			r.mu.Lock()
-			name := r.modelName
-			r.mu.Unlock()
-			if name != "" {
-				return name
-			}
-			return "Agent"
-		}
+	select {
+	case <-r.modelUpdated:
+	case <-timeout.C:
+	case <-ctx.Done():
+		return r.ModelName()
 	}
+
+	return r.ModelName()
 }
 
 // ModelName returns the agent model name discovered via get_state.
@@ -381,6 +361,17 @@ func (r *AgentRunner) dispatchEvent(event Event) {
 					}
 					r.mu.Unlock()
 				}
+			}
+		}
+
+		// Update model name if provided
+		if modelName, ok := event.RawData["model_name"].(string); ok && modelName != "" {
+			r.mu.Lock()
+			r.modelName = modelName
+			r.mu.Unlock()
+			select {
+			case r.modelUpdated <- struct{}{}:
+			default:
 			}
 		}
 	}
