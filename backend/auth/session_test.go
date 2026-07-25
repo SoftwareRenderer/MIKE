@@ -19,9 +19,9 @@ func testManager(t *testing.T) *SessionManager {
 	t.Cleanup(func() { s.Close() })
 
 	// Set password env var for the duration of the test
-	old := os.Getenv("KANBAN_PASSWORD")
-	t.Cleanup(func() { os.Setenv("KANBAN_PASSWORD", old) })
-	os.Setenv("KANBAN_PASSWORD", "test-password")
+	old := os.Getenv("MIKE_LOGIN_PASSWORD")
+	t.Cleanup(func() { os.Setenv("MIKE_LOGIN_PASSWORD", old) })
+	os.Setenv("MIKE_LOGIN_PASSWORD", "test-password")
 
 	m, err := NewSessionManager(s)
 	if err != nil {
@@ -31,9 +31,9 @@ func testManager(t *testing.T) *SessionManager {
 }
 
 func TestNewSessionManagerNoPassword(t *testing.T) {
-	old := os.Getenv("KANBAN_PASSWORD")
-	t.Cleanup(func() { os.Setenv("KANBAN_PASSWORD", old) })
-	os.Unsetenv("KANBAN_PASSWORD")
+	old := os.Getenv("MIKE_LOGIN_PASSWORD")
+	t.Cleanup(func() { os.Setenv("MIKE_LOGIN_PASSWORD", old) })
+	os.Unsetenv("MIKE_LOGIN_PASSWORD")
 
 	dir := t.TempDir()
 	s, err := store.NewStore(filepath.Join(dir, "test.db"))
@@ -44,7 +44,7 @@ func TestNewSessionManagerNoPassword(t *testing.T) {
 
 	_, err = NewSessionManager(s)
 	if err == nil {
-		t.Fatal("expected error when KANBAN_PASSWORD is not set")
+		t.Fatal("expected error when MIKE_LOGIN_PASSWORD is not set")
 	}
 }
 

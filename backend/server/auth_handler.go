@@ -17,7 +17,7 @@ const (
 var sessionCookieSecure bool
 
 // handleAuthLogin handles POST /api/auth/login.
-// Accepts {"password": "..."}, validates against KANBAN_PASSWORD,
+// Accepts {"password": "..."}, validates against MIKE_LOGIN_PASSWORD,
 // sets SESSION cookie on success.
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

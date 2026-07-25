@@ -136,30 +136,30 @@ func TestLoad_BackwardCompat_EnvVars(t *testing.T) {
 	_clearTLS()
 	defer _restoreTLS()
 
-	t.Run("KANBAN_TLS=0 disables TLS", func(t *testing.T) {
-		os.Setenv("KANBAN_TLS", "0")
-		defer os.Unsetenv("KANBAN_TLS")
+	t.Run("MIKE_TLS=0 disables TLS", func(t *testing.T) {
+		os.Setenv("MIKE_TLS", "0")
+		defer os.Unsetenv("MIKE_TLS")
 		cfg, err := Load(t.TempDir())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if cfg != nil {
-			t.Fatalf("expected nil config when KANBAN_TLS=0, got %+v", cfg)
+			t.Fatalf("expected nil config when MIKE_TLS=0, got %+v", cfg)
 		}
 	})
 
-	t.Run("KANBAN_TLS_CERT+KEY uses provided certs", func(t *testing.T) {
+	t.Run("MIKE_TLS_CERT+KEY uses provided certs", func(t *testing.T) {
 		dir := t.TempDir()
 		certPath := filepath.Join(dir, "cert.pem")
 		keyPath := filepath.Join(dir, "key.pem")
 		os.WriteFile(certPath, []byte("dummy-cert"), 0o644)
 		os.WriteFile(keyPath, []byte("dummy-key"), 0o600)
 
-		os.Setenv("KANBAN_TLS_CERT", certPath)
-		os.Setenv("KANBAN_TLS_KEY", keyPath)
+		os.Setenv("MIKE_TLS_CERT", certPath)
+		os.Setenv("MIKE_TLS_KEY", keyPath)
 		defer func() {
-			os.Unsetenv("KANBAN_TLS_CERT")
-			os.Unsetenv("KANBAN_TLS_KEY")
+			os.Unsetenv("MIKE_TLS_CERT")
+			os.Unsetenv("MIKE_TLS_KEY")
 		}()
 
 		cfg, err := Load(t.TempDir())
@@ -225,7 +225,7 @@ func TestGenerateSelfSignedCert(t *testing.T) {
 var _savedTLS = make(map[string]string)
 
 func _clearTLS() {
-	for _, env := range []string{"KANBAN_TLS", "KANBAN_TLS_CERT", "KANBAN_TLS_KEY"} {
+	for _, env := range []string{"MIKE_TLS", "MIKE_TLS_CERT", "MIKE_TLS_KEY"} {
 		if v := os.Getenv(env); v != "" {
 			_savedTLS[env] = v
 		}
@@ -234,7 +234,7 @@ func _clearTLS() {
 }
 
 func _restoreTLS() {
-	for _, env := range []string{"KANBAN_TLS", "KANBAN_TLS_CERT", "KANBAN_TLS_KEY"} {
+	for _, env := range []string{"MIKE_TLS", "MIKE_TLS_CERT", "MIKE_TLS_KEY"} {
 		os.Unsetenv(env)
 		if v, ok := _savedTLS[env]; ok {
 			os.Setenv(env, v)

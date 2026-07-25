@@ -81,7 +81,7 @@ func (r *Runtime) IsRunning(name string) (bool, error) {
 
 // GetAgentBinaryPath resolves the path to the sandbox-bridge binary.
 func (r *Runtime) GetAgentBinaryPath() (string, error) {
-	if p := os.Getenv("KANBAN_AGENT_PATH"); p != "" {
+	if p := os.Getenv("MIKE_AGENT_PATH"); p != "" {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}

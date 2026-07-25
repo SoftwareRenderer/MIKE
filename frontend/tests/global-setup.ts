@@ -42,7 +42,7 @@ async function setup(): Promise<void> {
     console.log('[global-setup] Starting test kanban server...');
     kanbanServer = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR], {
         cwd: PROJECT_ROOT,
-        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
+        env: { ...process.env, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_TLS: '0' },
         stdio: 'ignore',
         detached: true,
     });
@@ -72,7 +72,7 @@ async function setup(): Promise<void> {
     }));
     console.log(`[global-setup] Logged in to test server`);
 
-    const useMock = process.env.USE_MOCK_LLM !== '0';
+    const useMock = process.env.MIKE_USE_MOCK_LLM !== '0';
     const mockUrl = `http://localhost:${MOCK_PORT}/v1`;
     if (useMock) {
         const config = await getJson(`${KANBAN_BASE}/api/config`, sessionCookie);
@@ -103,7 +103,7 @@ async function setup(): Promise<void> {
         await waitForServer(MOCK_PORT);
         console.log(`[global-setup] Mock LLM server ready on port ${MOCK_PORT}`);
     } else {
-        console.log('[global-setup] Using real LLM endpoint (USE_MOCK_LLM=0)');
+        console.log('[global-setup] Using real LLM endpoint (MIKE_USE_MOCK_LLM=0)');
     }
 
     // Create test project
@@ -128,7 +128,7 @@ async function setup(): Promise<void> {
     console.log('[global-setup] Starting isolated kanban server...');
     kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR_ISOLATED, '--port', String(KANBAN_PORT_ISOLATED)], {
         cwd: PROJECT_ROOT,
-        env: { ...process.env, WORKTREES_DIR: TEST_WORKTREES, KANBAN_PASSWORD: TEST_PASSWORD, KANBAN_TLS: '0' },
+        env: { ...process.env, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_TLS: '0' },
         stdio: 'ignore',
         detached: true,
     });

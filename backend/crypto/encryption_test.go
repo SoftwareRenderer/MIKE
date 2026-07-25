@@ -8,12 +8,12 @@ import (
 func setEncryptionKey(t *testing.T) {
 	t.Helper()
 	// 32 bytes = 64 hex chars
-	t.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	t.Setenv("MIKE_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 }
 
 func clearEncryptionKey(t *testing.T) {
 	t.Helper()
-	t.Setenv("ENCRYPTION_KEY", "")
+	t.Setenv("MIKE_ENCRYPTION_KEY", "")
 }
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
@@ -88,7 +88,7 @@ func TestIsEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("ENCRYPTION_KEY", tt.envVal)
+			t.Setenv("MIKE_ENCRYPTION_KEY", tt.envVal)
 			if got := IsEnabled(); got != tt.want {
 				t.Errorf("IsEnabled() = %v, want %v", got, tt.want)
 			}
@@ -138,7 +138,7 @@ func TestValidateKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("ENCRYPTION_KEY", tt.envVal)
+			t.Setenv("MIKE_ENCRYPTION_KEY", tt.envVal)
 			err := ValidateKey()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateKey() error = %v, wantErr %v", err, tt.wantErr)

@@ -16,7 +16,7 @@ const (
 	sessionTokenBytes = 32
 	csrfTokenBytes    = 16
 	sessionDuration   = 30 * 24 * time.Hour // 30 days
-	passwordEnv       = "KANBAN_PASSWORD"
+	passwordEnv       = "MIKE_LOGIN_PASSWORD"
 )
 
 var (
@@ -32,7 +32,7 @@ type SessionManager struct {
 }
 
 // NewSessionManager creates a new SessionManager.
-// Returns an error if KANBAN_PASSWORD is not set.
+// Returns an error if MIKE_LOGIN_PASSWORD is not set.
 func NewSessionManager(s *store.Store) (*SessionManager, error) {
 	password := os.Getenv(passwordEnv)
 	if password == "" {

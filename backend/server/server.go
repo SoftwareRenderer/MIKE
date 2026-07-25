@@ -78,7 +78,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		return nil, fmt.Errorf("get config: %w", err)
 	}
 
-	if wtDir := os.Getenv("WORKTREES_DIR"); wtDir != "" {
+	if wtDir := os.Getenv("MIKE_WORKTREES_DIR"); wtDir != "" {
 		cfg.WorkspaceDir = wtDir
 	}
 
@@ -92,16 +92,16 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		projectMux:   make(map[string]*sync.Mutex),
 	}
 
-	// Create session manager — fails if KANBAN_PASSWORD is not set
+	// Create session manager — fails if MIKE_LOGIN_PASSWORD is not set
 	sessionMgr, err := auth.NewSessionManager(store)
 	if err != nil {
-		return nil, fmt.Errorf("create session manager: %w\nSet KANBAN_PASSWORD environment variable to enable authentication", err)
+		return nil, fmt.Errorf("create session manager: %w\nSet MIKE_LOGIN_PASSWORD environment variable to enable authentication", err)
 	}
 	s.sessionMgr = sessionMgr
 
 	// Configure cookie Secure flag.
 	// Auto-enable when TLS is active; also respect explicit env var for reverse proxy setups.
-	sessionCookieSecure = tlsCfg != nil || os.Getenv("KANBAN_SECURE_COOKIES") == "1"
+	sessionCookieSecure = tlsCfg != nil || os.Getenv("MIKE_SECURE_COOKIES") == "1"
 
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
@@ -168,7 +168,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	s.appStreamMgr.SetDiffCacheUpdate(s.gitHandler.UpdateDiffCache)
 
 	// Run garbage collector on startup
-	dryRun := os.Getenv("KANBAN_GC_DRY_RUN") == "1"
+	dryRun := os.Getenv("MIKE_GC_DRY_RUN") == "1"
 	if removed, err := s.executor.WorktreeMgr().GarbageCollect(dryRun); err != nil {
 		log.Printf("[gc] startup error: %v", err)
 	} else if removed > 0 {

@@ -22,7 +22,7 @@ CGO_ENABLED=0 GOOS=linux go build -o sandbox/sandbox-bridge -ldflags="-s -w" ./p
 ```
 
 **Runtime discovery:** The server finds `sandbox-bridge` via (in order):
-1. `KANBAN_AGENT_PATH` environment variable
+1. `MIKE_AGENT_PATH` environment variable
 2. Next to the running executable — `sandbox-bridge` and `sandbox/sandbox-bridge`
 3. Current directory — `sandbox-bridge` and `sandbox/sandbox-bridge`
 
@@ -63,19 +63,28 @@ TLS is **enabled by default** with auto-generated self-signed certificates.
 | Mode | Flag / Env Var | Description |
 |------|----------------|-------------|
 | **Default (HTTPS)** | (none) | Auto-generates self-signed cert in `data/tls/` on first startup |
-| **Custom certs** | `--tls-cert=path --tls-key=path` or `KANBAN_TLS_CERT` + `KANBAN_TLS_KEY` | Uses user-provided certificate and key files |
-| **Disable TLS** | `--no-tls` or `KANBAN_TLS=0` | Plain HTTP, no TLS |
+| **Custom certs** | `--tls-cert=path --tls-key=path` or `MIKE_TLS_CERT` + `MIKE_TLS_KEY` | Uses user-provided certificate and key files |
+| **Disable TLS** | `--no-tls` or `MIKE_TLS=0` | Plain HTTP, no TLS |
+
+### Required Environment Variables
+
+The server requires an encryption key to secure sensitive data (like API keys) in the database. If this is not set, the server will refuse to start.
+
+| Env Var | Description |
+|---------|-------------|
+| `MIKE_ENCRYPTION_KEY` | A non-blank string used to derive the AES-256-GCM encryption key. |
+| `MIKE_LOGIN_PASSWORD` | The master password used for server authentication and session creation. |
 
 ### CLI Flags
 
 | Flag | Env Var | Default | Description |
 |------|---------|---------|-------------|
-| `--port` | `PORT` | `3000` | Server listen port |
-| `--data-dir` | `DATA_DIR` | `./data` | Data directory for DB, TLS certs, trace files |
-| `--worktrees-dir` | `WORKTREES_DIR` | `./worktrees` | Directory for git worktrees |
-| `--no-tls` | `KANBAN_TLS=0` | *(disabled)* | Disable TLS (plain HTTP) |
-| `--tls-cert` | `KANBAN_TLS_CERT` | *(auto-generated)* | Path to TLS certificate file |
-| `--tls-key` | `KANBAN_TLS_KEY` | *(auto-generated)* | Path to TLS private key file |
+| `--port` | `MIKE_PORT` | `3000` | Server listen port |
+| `--data-dir` | `MIKE_DATA_DIR` | `./data` | Data directory for DB, TLS certs, trace files |
+| `--worktrees-dir` | `MIKE_WORKTREES_DIR` | `./worktrees` | Directory for git worktrees |
+| `--no-tls` | `MIKE_TLS=0` | *(disabled)* | Disable TLS (plain HTTP) |
+| `--tls-cert` | `MIKE_TLS_CERT` | *(auto-generated)* | Path to TLS certificate file |
+| `--tls-key` | `MIKE_TLS_KEY` | *(auto-generated)* | Path to TLS private key file |
 
 CLI flags take priority over environment variables.
 
@@ -228,11 +237,11 @@ Both servers share a mock LLM on port 9999. Test data dirs, worktrees (`/tmp/kan
 - Mock server: `frontend/tests/mock-llm.js` (Node.js HTTP server on port 9999)
 - Fixtures: `frontend/tests/fixtures/` — pre-recorded SSE streaming responses
 - Response routing: mock selects fixture based on request body (tools present + message keywords)
-- Disable mock: `USE_MOCK_LLM=0 npx playwright test` (uses real Neptune endpoint)
+- Disable mock: `MIKE_USE_MOCK_LLM=0 npx playwright test` (uses real Neptune endpoint)
 
 #### Recording New Fixtures
 When the LLM behavior changes or new response types are needed:
-1. Set `USE_MOCK_LLM=0` to use the real Neptune endpoint
+1. Set `MIKE_USE_MOCK_LLM=0` to use the real Neptune endpoint
 2. Run the relevant test(s) to capture real LLM responses
 3. Record the SSE stream output (use browser DevTools Network tab or server logs)
 4. Save as JSON array in `frontend/tests/fixtures/` — each entry is one SSE `data:` frame
@@ -569,7 +578,7 @@ await page.route('**/api/projects/*/tasks/*/diff/file*', async (route) => {
 ```
 
 **Key points:**
-- Start server with `KANBAN_PASSWORD=test setsid ./kanban &` + `disown` to keep it alive after the script runs
+- Start server with `MIKE_LOGIN_PASSWORD=test setsid ./kanban &` + `disown` to keep it alive after the script runs
 - Use `page.evaluate()` with CSRF token from `/api/auth/session` for API calls (POST/PUT/DELETE)
 - Use `route.fulfill()` (not `route.respond()`) — the old API was removed in newer Playwright
 - Track timing with `Date.now() - t0` offsets to correlate requests with server events

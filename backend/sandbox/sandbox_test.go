@@ -21,7 +21,7 @@ func TestMain(m *testing.M) {
 	cleanupStaleTestContainers()
 	// Disable per-instance cleanup in NewSandboxManager() to prevent tests
 	// from removing each other's containers when running in parallel.
-	os.Setenv("SANDBOX_SKIP_STARTUP_CLEANUP", "1")
+	os.Setenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP", "1")
 	code := m.Run()
 	cleanupStaleTestContainers()
 	os.Exit(code)
@@ -74,10 +74,10 @@ func cleanOverlayMergedDirs() {
 }
 
 // findAgentBinary locates the sandbox-bridge binary for tests.
-// Checks KANBAN_AGENT_PATH env var, then project root, then build directory.
+// Checks MIKE_AGENT_PATH env var, then project root, then build directory.
 func findAgentBinary(t *testing.T) string {
 	t.Helper()
-	if p := os.Getenv("KANBAN_AGENT_PATH"); p != "" {
+	if p := os.Getenv("MIKE_AGENT_PATH"); p != "" {
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
@@ -113,8 +113,8 @@ func TestIsAvailable(t *testing.T) {
 
 func TestCreateAndStop(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -145,8 +145,8 @@ func TestCreateAndStop(t *testing.T) {
 
 func TestExec(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -198,8 +198,8 @@ func TestExec(t *testing.T) {
 
 func TestExecNotAllowed(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -230,8 +230,8 @@ func TestExecNotAllowed(t *testing.T) {
 
 func TestExecWithInput(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -284,8 +284,8 @@ func TestExecWithInput(t *testing.T) {
 
 func TestCleanupStaleContainers(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -609,8 +609,8 @@ func TestProjectImageName(t *testing.T) {
 
 func TestPiAvailable(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -641,8 +641,8 @@ func TestPiAvailable(t *testing.T) {
 
 func TestStartProcess(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -711,8 +711,8 @@ func TestStartProcess_NonexistentTask(t *testing.T) {
 
 func TestCreateWithMemoryLimit(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -752,8 +752,8 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 
 func TestCreateWithCapabilities(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -795,8 +795,8 @@ func TestCreateWithCapabilities(t *testing.T) {
 
 func TestExecProject_FullConfig(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -841,8 +841,8 @@ func TestExecProject_FullConfig(t *testing.T) {
 
 func TestExecProjectWithInput_FullConfig(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -877,8 +877,8 @@ func TestExecProjectWithInput_FullConfig(t *testing.T) {
 
 func TestExecTask_FullConfig(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -909,8 +909,8 @@ func TestExecTask_FullConfig(t *testing.T) {
 
 func TestExecTaskWithInput_FullConfig(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -943,8 +943,8 @@ func TestExecTaskWithInput_FullConfig(t *testing.T) {
 
 func TestEnsureProjectContainer_RecreatesWhenStopped(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -987,8 +987,8 @@ func TestEnsureProjectContainer_RecreatesWhenStopped(t *testing.T) {
 
 func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -1029,8 +1029,8 @@ func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 
 func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 	agentPath := findAgentBinary(t)
-	os.Setenv("KANBAN_AGENT_PATH", agentPath)
-	defer os.Unsetenv("KANBAN_AGENT_PATH")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
 
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
