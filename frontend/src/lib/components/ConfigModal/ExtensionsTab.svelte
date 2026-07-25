@@ -444,8 +444,8 @@
                     {#each filteredExtensions as ext}
                         <div class="extension-card" class:disabled={!ext.enabled}>
                             <div class="card-header">
-                                <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'}>
-                                    {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : 'UI'}
+                                <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'} class:ext-agent={ext.type === 'agent'}>
+                                    {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : ext.type === 'agent' ? 'AGENT' : 'UI'}
                                 </div>
                                 <div class="ext-info">
                                     <span class="ext-name">{ext.manifest.display_name || ext.name}</span>
@@ -482,7 +482,7 @@
                                         {/if}
                                     </button>
                                     {/if}
-                                    {#if ext.type !== 'css'}
+                                    {#if ext.manifest.config_schema}
                                     <button class="btn btn-icon" title="Edit" onclick={() => openEdit(ext)}>
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -640,8 +640,8 @@
                     {#each filteredRegistry as entry}
                         <div class="extension-card registry-card">
                             <div class="card-header">
-                                <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'}>
-                                    {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : 'UI'}
+                                <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'}>
+                                    {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : entry.type === 'agent' ? 'AGENT' : 'UI'}
                                 </div>
                                 <div class="ext-info">
                                     <span class="ext-name">{entry.display_name || entry.name}</span>
@@ -892,13 +892,18 @@
     }
 
     .ext-ui {
-        background: rgba(163, 113, 247, 0.15);
-        color: var(--color-status-purple);
+        background: rgba(76, 154, 255, 0.15);
+        color: var(--color-status-blue);
     }
 
     .ext-css {
         background: rgba(227, 179, 65, 0.15);
         color: var(--color-status-yellow);
+    }
+
+    .ext-agent {
+        background: rgba(163, 113, 247, 0.15);
+        color: var(--color-status-purple);
     }
 
     .ext-info {
