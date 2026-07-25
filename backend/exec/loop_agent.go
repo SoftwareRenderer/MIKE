@@ -297,6 +297,22 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 					}
 				default:
 					te.handleAgentTurnComplete(task, projectID, task.ID, worktreePath, runner, stopReason, sandboxEnabled, &agentEnded, &totalPromptTokens, &totalPredictedTokens)
+					// Send complete event to clear frontend streaming state.
+					// For normal idle (agentEnded=false), the loop stays alive for follow-ups.
+					// For terminal states (agentEnded=true), the loop exits and sends its own complete.
+					if !agentEnded {
+						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+							"state":            task.ExecutionState,
+							"summary":          "Agent finished",
+							"model_name":       runner.ModelName(),
+							"prompt_tokens":    totalPromptTokens,
+							"predicted_tokens": totalPredictedTokens,
+							"cache_tokens":     0,
+							"prompt_ms":        0,
+							"predicted_ms":     0,
+							"duration":         time.Since(turnStartTime).Milliseconds(),
+						}})
+					}
 				}
 
 			case agent.EventTypeError:
@@ -490,7 +506,10 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 	task.Status = "review"
 	task.Output = fmt.Sprintf("Agent finished (%s)", stopReason)
 	te.store.UpdateTask(task)
-	*agentEnded = true
+	// Don't set agentEnded = true — keep the event loop alive for follow-up messages.
+	// The agent subprocess still has full conversation context.
+	// The loop will wait for: userMsgChan (follow-up), ctx.Done (stop), or process exit.
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 }
 
 // persistAgentTurnEntries persists pre-parsed agent turn entries to the DB.
