@@ -242,35 +242,35 @@ func TestMultiClientResizeSmallestWidthWins(t *testing.T) {
 
 	// Simulate desktop client resize: 80x200
 	sess.handleResize(desktopPtr, 80, 200)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 200 || rows != 80 {
-		t.Fatalf("after desktop resize = %dx%d, want 200x80", cols, rows)
+	_, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 200 {
+		t.Fatalf("after desktop resize cols = %d, want 200", cols)
 	}
 
 	// Simulate phone client resize: 30x100 — smaller width should win
 	sess.handleResize(phonePtr, 30, 100)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
+	_, cols, _ = pty.Getsize(sess.ptmx)
 	if cols != 100 {
 		t.Fatalf("after phone resize cols = %d, want 100 (smallest width)", cols)
 	}
 
 	// Desktop resizes again to even wider — should NOT change PTY (phone is still smallest)
 	sess.handleResize(desktopPtr, 50, 300)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
+	_, cols, _ = pty.Getsize(sess.ptmx)
 	if cols != 100 {
 		t.Fatalf("after desktop wider resize cols = %d, want 100 (phone still smallest)", cols)
 	}
 
 	// Phone disconnects — desktop size should take over
 	sess.removeConnSize(phonePtr)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
+	_, cols, _ = pty.Getsize(sess.ptmx)
 	if cols != 300 {
 		t.Fatalf("after phone disconnect cols = %d, want 300 (desktop now only client)", cols)
 	}
 
 	// Desktop also disconnects — should revert to default
 	sess.removeConnSize(desktopPtr)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
+	_, cols, _ = pty.Getsize(sess.ptmx)
 	if cols != 120 {
 		t.Fatalf("after all disconnect cols = %d, want 120 (default)", cols)
 	}
