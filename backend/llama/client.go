@@ -269,24 +269,27 @@ type ThinkingParams struct {
 	BudgetMessage string
 }
 
+// ChatCompletionOptions holds optional parameters for ChatCompletion.
+type ChatCompletionOptions struct {
+	MaxTokens *int             // MaxTokens caps the response. nil = server default.
+	Thinking  *ThinkingParams  // Thinking overrides reasoning params. nil = client's reasoningEffort.
+}
+
 // ChatCompletion sends a non-streaming chat completion request and returns the usage data and full text response.
 // Used for simple queries like title generation where streaming is not needed.
-// Optional maxTokens sets max_tokens in the request; omit to use server default.
-// Optional thinking overrides reasoning params; nil uses client's reasoningEffort.
-func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatMessage, opts ...any) (*types.ChatUsage, string, error) {
+// Pass nil for opts to use all defaults.
+func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatMessage, opts *ChatCompletionOptions) (*types.ChatUsage, string, error) {
 	if c.baseURL == "" {
 		return nil, "", fmt.Errorf("llama server URL not configured")
 	}
 
 	var maxTokens int
 	var thinking *ThinkingParams
-	for _, o := range opts {
-		switch v := o.(type) {
-		case int:
-			maxTokens = v
-		case *ThinkingParams:
-			thinking = v
+	if opts != nil {
+		if opts.MaxTokens != nil {
+			maxTokens = *opts.MaxTokens
 		}
+		thinking = opts.Thinking
 	}
 
 	url := c.baseURL + "/chat/completions"
