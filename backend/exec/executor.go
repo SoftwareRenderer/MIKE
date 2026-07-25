@@ -154,15 +154,16 @@ type ChatCompletionOpts struct {
 
 // ChatCompletion sends a non-streaming chat request through the concurrency gate.
 func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, opts *ChatCompletionOpts) (*types.ChatUsage, string, error) {
-	var tokens *int
 	reasoningEffort := "off"
-	var thinking *llama.ThinkingParams
+	var llamaOpts *llama.ChatCompletionOptions
 	if opts != nil {
-		tokens = opts.MaxTokens
 		if opts.ReasoningEffort != "" {
 			reasoningEffort = opts.ReasoningEffort
 		}
-		thinking = opts.Thinking
+		llamaOpts = &llama.ChatCompletionOptions{
+			MaxTokens: opts.MaxTokens,
+			Thinking:  opts.Thinking,
+		}
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
@@ -170,15 +171,7 @@ func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName
 	var text string
 	err := te.RunWithGate(ctx, serverURL, func() error {
 		var err error
-		if tokens != nil && thinking != nil {
-			usage, text, err = client.ChatCompletion(ctx, messages, *tokens, thinking)
-		} else if tokens != nil {
-			usage, text, err = client.ChatCompletion(ctx, messages, *tokens)
-		} else if thinking != nil {
-			usage, text, err = client.ChatCompletion(ctx, messages, thinking)
-		} else {
-			usage, text, err = client.ChatCompletion(ctx, messages)
-		}
+		usage, text, err = client.ChatCompletion(ctx, messages, llamaOpts)
 		return err
 	})
 	return usage, text, err
