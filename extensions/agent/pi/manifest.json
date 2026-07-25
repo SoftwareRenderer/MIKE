@@ -1,0 +1,9 @@
+{
+    "display_name": "Pi Coding Agent",
+    "description": "Pi Coding Agent — autonomous coding agent with tool use",
+    "author": "Pi",
+    "agent": {
+        "wasm_module": "pi.wasm",
+        "capabilities": ["compact", "session_stats", "extension_ui"]
+    }
+}

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/agent"
 	"kanban/backend/auth"
 	"kanban/backend/config"
 	"kanban/backend/exec"
@@ -22,6 +23,8 @@ import (
 	"kanban/backend/term"
 	"kanban/backend/tls"
 	"kanban/backend/types"
+
+	_ "kanban/extensions/agent/pi" // triggers init() which registers "pi" adapter
 )
 
 // Server is the main HTTP server.
@@ -125,7 +128,17 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		s.appStreamMgr.BroadcastProjectPorts(projectID, ports)
 	})
 	commitQueue := exec.NewCommitQueue()
-	s.executor = exec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, commitQueue)
+
+	// Extension system
+	s.extStore = extensions.NewExtensionStore(store)
+	if err := s.extStore.InitSchema(); err != nil {
+		return nil, fmt.Errorf("init extension schema: %w", err)
+	}
+
+	// Agent registry — discovers agent extensions and maps agent:// URLs
+	agentRegistry := agent.NewAgentRegistry(s.extStore)
+
+	s.executor = exec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, commitQueue)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)
 	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
 	s.depHandler = managers.NewDependencyHandler(store)
@@ -133,12 +146,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
 	// Wire worktree mutex so GitHandler can serialize per-task git operations.
 	s.gitHandler.SetWorktreeMutex(s.getWorktreeMutex)
-
-	// Extension system
-	s.extStore = extensions.NewExtensionStore(store)
-	if err := s.extStore.InitSchema(); err != nil {
-		return nil, fmt.Errorf("init extension schema: %w", err)
-	}
 
 	// Bootstrap built-in extensions
 	// (Removed built-in bootstrapping to decouple extensions from core)

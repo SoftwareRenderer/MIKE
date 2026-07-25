@@ -1,6 +1,8 @@
 package types
 
-import "time"
+import (
+	"time"
+)
 
 // Task represents a card on the Kanban board.
 type Task struct {
@@ -115,11 +117,6 @@ type Provider struct {
 // Agents are identified by having a non-LLM kind.
 func (p *Provider) IsAgent() bool {
 	return p.EffectiveKind() != ProviderKindLLM
-}
-
-// IsPi returns true if this provider is a Pi coding agent.
-func (p *Provider) IsPi() bool {
-	return p.Kind == ProviderKindAgent || p.URL == "pi://agent"
 }
 
 // EffectiveKind returns the provider kind, defaulting to "llm" for backward compatibility.

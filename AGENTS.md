@@ -223,7 +223,8 @@ Both servers share a mock LLM on port 9999. Test data dirs, worktrees (`/tmp/kan
   - `backend/llama/` — LLM client (~10 tests)
   - `backend/auth/` — auth/session (~10 tests)
   - `backend/tls/` — TLS config (~10 tests)
-  - `backend/pi/` — pi agent integration (~5 tests)
+  - `backend/agent/` — agent runner and registry (~17 tests)
+  - `extensions/agent/pi/` — Pi adapter (~16 tests)
   - `backend/term/` — terminal (~2 tests)
   - `pkg/bridge/` — sandbox bridge protocol and client (~30 tests)
   - `backend/httputil/` — HTTP utilities (no tests)
@@ -312,7 +313,7 @@ The Extensions system replaces hardcoded LSP configurations with user-defined an
 - `extensions/lsp/gopls/` — gopls extension package (Dockerfile, manifest.json)
 - `extensions/ui/github-issue-importer/` — GitHub issue importer UI extension
 - `extensions/css/mike-light/` — Light mode CSS theme
-- `extensions/registry.json` — Default registry index
+- `extensions/agent/pi/` — Pi Coding Agent adapter (Go source → WASM)
 - `extensions/registry.json` — Default registry index
 
 **API endpoints:**
@@ -331,6 +332,7 @@ The Extensions system replaces hardcoded LSP configurations with user-defined an
 **Extension types:**
 - `lsp` — Language Server Protocol servers (run in gVisor sandboxes)
 - `ui` — UI plugins (inject into existing components via slots)
+- `agent` — AI coding agents (run as subprocesses, protocol via WASM adapter)
 
 **LSP Discovery:** `ExtensionRegistry.Lookup()` replaces `lsp.Registry.Lookup()` to dynamically resolve language servers from installed extensions. LSP availability is determined by installed extensions, not a global toggle.
 
@@ -425,6 +427,36 @@ The context object passed to `init` contains `component` (component name, e.g. `
 **Registry:** URL configurable via `registry_url` in config. Default: `file://./extensions/registry.json`.
 
 **Sandbox:** Each LSP extension runs in a dedicated gVisor sandbox. Bridge protocol uses `MethodLSP` (0x0A) for JSON-RPC passthrough.
+
+### Agent Extensions
+
+Agent extensions run AI coding agents (e.g., Pi) as subprocesses. The backend knows **nothing** about agent protocols — all protocol logic lives in the extension via a WASM adapter.
+
+**Flow:** `Backend (executor) ←→ AgentRunner (I/O bridge) ←→ WASM Adapter (protocol) ←→ Agent Process`
+
+**Key files:** `backend/agent/` (interface, runner, loader, registry), `backend/exec/loop_agent.go` (event loop), `extensions/agent/pi/` (Pi adapter)
+
+**Adapter interface** (`AgentAdapter`): `Init(config)`, `SubprocessConfig()`, `EncodeCommand(cmd, data)`, `ParseOutput(bytes) → []Event`, `HandleUIRequest(id, method)`, `Close()`
+
+**Event types:** `token`, `reasoning`, `tool_call`, `tool_result`, `status`, `stats`, `error`, `persist`, `turn_complete`
+
+**Persistence:** Adapter buffers turn state and emits `EventTypePersist` with `[]PersistEntry` (pre-parsed assistant text, reasoning, tool calls/results). Executor iterates entries generically — zero agent-specific persistence in backend.
+
+**URL scheme:** `agent://<name>` (e.g., `agent://pi`). Legacy `pi://agent` supported.
+
+**Creating an agent extension:**
+
+```
+extensions/agent/my-agent/
+├── adapter.go          # Core logic (zero backend/ imports — compiles to WASM)
+├── adapter_native.go   # Native wrapper (build tag !wasm, implements agent.AgentAdapter)
+├── adapter_test.go     # Unit tests (run natively)
+├── wasm/main.go        # WASM exports (build tag wasm, package main, //export directives)
+├── manifest.json       # {"agent": {"wasm_module": "my-agent.wasm"}}
+└── build.sh            # GOOS=wasip1 GOARCH=wasm go build -o ../my-agent.wasm .
+```
+
+Adapter core must have **zero `backend/` imports** (WASM compatibility). Use build tags (`!wasm`/`wasm`) to split native vs WASM code. All data crosses WASM boundary as JSON bytes. `EventTypePersist` is the only path to DB persistence.
 
 ## Common Patterns
 

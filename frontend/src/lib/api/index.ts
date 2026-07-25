@@ -84,7 +84,6 @@ export {
     updateConfig,
     testConnection,
     fetchModels,
-    testPiConnection,
 } from './config';
 
 // -- Git --

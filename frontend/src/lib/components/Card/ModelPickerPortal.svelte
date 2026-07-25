@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
+    import { PI_SENTINEL_URL } from '$lib/types';
 
     let {
         providers,
@@ -19,7 +20,7 @@
         onSelectModel: (url: string, model: string, effort: string) => void;
     } = $props();
 
-    let isAgentActive = $derived(currentUrl === 'pi://agent');
+    let isAgentActive = $derived(currentUrl === PI_SENTINEL_URL);
     let tag = $derived('div');
 </script>
 

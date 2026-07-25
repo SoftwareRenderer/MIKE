@@ -2,7 +2,7 @@
     
     import type { Config, Provider } from '$lib/types';
     import { isAgentProvider, PI_SENTINEL_URL } from '$lib/types';
-    import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi, testPiConnection as testPiConnectionApi } from '$lib/api';
+    import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
@@ -198,12 +198,8 @@
         p.testResult = null;
         try {
             if (p.kind === 'agent') {
-                // Test Pi connection (runs `pi --version`)
-                const result = await testPiConnectionApi();
-                p.testResult = {
-                    success: result.success,
-                    message: result.success ? `Pi available: ${result.message}` : result.message,
-                };
+                // Agent providers don't have a testable connection (binary is checked at runtime)
+                p.testResult = { success: true, message: 'Agent provider — binary checked at runtime' };
             } else {
                 if (!p.url.trim()) { p.testingConnection = false; return; }
                 const defaultModelName = p.default_model ? parseDefaultModel(p.default_model).name : (p.models.find(m => m.name)?.name || '');

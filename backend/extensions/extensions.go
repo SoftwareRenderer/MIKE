@@ -6,9 +6,10 @@ import (
 
 // ExtensionType distinguishes between different kinds of extensions.
 const (
-	ExtensionTypeLSP = "lsp"
-	ExtensionTypeUI  = "ui"
-	ExtensionTypeCSS = "css"
+	ExtensionTypeLSP   = "lsp"
+	ExtensionTypeUI    = "ui"
+	ExtensionTypeCSS   = "css"
+	ExtensionTypeAgent = "agent"
 )
 
 // Extension represents an installed extension in the system.
@@ -41,6 +42,7 @@ type ExtensionManifest struct {
 	LSP          *LSPConfig    `json:"lsp,omitempty"`
 	UI           *UIConfig     `json:"ui,omitempty"`
 	CSS          *CSSConfig    `json:"css,omitempty"`
+	Agent        *AgentConfig  `json:"agent,omitempty"`
 }
 
 // LSPConfig defines LSP-specific extension configuration.
@@ -63,6 +65,14 @@ type UIConfig struct {
 // module_url or injection_points, only a css_url.
 type CSSConfig struct {
 	CSSURL string `json:"css_url"` // global stylesheet URL (relative to server root)
+}
+
+// AgentConfig defines agent-specific extension configuration.
+// The agent adapter (WASM module) handles all protocol details.
+type AgentConfig struct {
+	WasmModule   string        `json:"wasm_module"`              // path to WASM adapter module (relative to extension dir)
+	Capabilities []string      `json:"capabilities,omitempty"`   // e.g., ["compact", "session_stats", "extension_ui"]
+	ConfigSchema *ConfigSchema `json:"config_schema,omitempty"`  // user-configurable options
 }
 
 // ConfigSchema is a JSON Schema subset for dynamic form rendering.
@@ -149,6 +159,16 @@ func (e *Extension) HasUIConfig() bool {
 // HasCSSConfig returns true if this extension has CSS configuration.
 func (e *Extension) HasCSSConfig() bool {
 	return e.IsCSS() && e.Manifest.CSS != nil
+}
+
+// IsAgent returns true if this extension is an agent extension.
+func (e *Extension) IsAgent() bool {
+	return e.Type == ExtensionTypeAgent
+}
+
+// HasAgentConfig returns true if this extension has agent configuration.
+func (e *Extension) HasAgentConfig() bool {
+	return e.IsAgent() && e.Manifest.Agent != nil
 }
 
 // IsRegistryInstalled returns true if this extension was installed from a registry.
