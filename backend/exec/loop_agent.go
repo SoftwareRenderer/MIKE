@@ -127,10 +127,23 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Agent started"}})
 
 	// Send initial prompt to agent.
+	// Pi does not persist sessions, so we must replay conversation history on every start.
 	initialPrompt := task.Prompt
 	if initialContent != "" {
-		initialPrompt = initialContent
-		log.Printf("[agent] task=%s lazy-start: sending user message as initial prompt", task.ID)
+		// Lazy-start (follow-up message): prepend conversation history + new message
+		if len(taskMsgs) > 0 {
+			initialPrompt = buildContextReplay(taskMsgs) + "\n\n--- New message ---\n\n" + initialContent
+			log.Printf("[agent] task=%s lazy-start: replaying %d messages + new message", task.ID, len(taskMsgs))
+		} else {
+			initialPrompt = initialContent
+			log.Printf("[agent] task=%s lazy-start: sending user message as initial prompt", task.ID)
+		}
+	} else if len(taskMsgs) > 1 {
+		// Restart from done/review: replay full conversation history.
+		// The task prompt is already the first message in taskMsgs,
+		// so the replay includes it plus all subsequent messages.
+		initialPrompt = buildContextReplay(taskMsgs)
+		log.Printf("[agent] task=%s restart: replaying %d messages", task.ID, len(taskMsgs))
 	}
 	err = runner.Prompt(ctx, initialPrompt)
 	if err != nil {
@@ -575,6 +588,94 @@ func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID stri
 }
 
 // toStreamEvent converts a generic agent event to a Kanban StreamEvent for WebSocket broadcasting.
+// buildContextReplay builds a text representation of the conversation history
+// for context replay when the Pi agent is restarted without session persistence.
+// The format is a structured transcript that the LLM can understand.
+func buildContextReplay(messages []types.TaskMessage) string {
+	var sb strings.Builder
+	sb.WriteString("<conversation_history>\n")
+	sb.WriteString("The following is the conversation history. Continue from where it left off.\n\n")
+
+	for _, msg := range messages {
+		switch msg.Role {
+		case "user":
+			sb.WriteString("**User**: ")
+			sb.WriteString(msg.Content)
+			sb.WriteString("\n\n")
+
+		case "assistant":
+			if msg.ReasoningContent != "" {
+				sb.WriteString("**Assistant (thinking)**: ")
+				sb.WriteString(msg.ReasoningContent)
+				sb.WriteString("\n\n")
+			}
+			if msg.Content != "" {
+				sb.WriteString("**Assistant**: ")
+				sb.WriteString(msg.Content)
+				sb.WriteString("\n\n")
+			}
+
+		case "tool_call":
+			// Reconstruct tool call + result from JSON
+			if msg.ToolCalls != "" {
+				sb.WriteString("**Tool calls**:\n")
+				var toolCalls []struct {
+					ID          string         `json:"id"`
+					Name        string         `json:"name"`
+					DisplayName string         `json:"display_name"`
+					Args        map[string]any `json:"args"`
+				}
+				if err := json.Unmarshal([]byte(msg.ToolCalls), &toolCalls); err == nil {
+					for _, tc := range toolCalls {
+						name := tc.DisplayName
+						if name == "" {
+							name = tc.Name
+						}
+						sb.WriteString(fmt.Sprintf("- %s(%s)\n", name, tc.ID))
+						argsStr, _ := json.Marshal(tc.Args)
+						sb.WriteString(fmt.Sprintf("  args: %s\n", string(argsStr)))
+					}
+				}
+				sb.WriteString("\n")
+			}
+			if msg.ToolResult != "" {
+				sb.WriteString("**Tool results**:\n")
+				var results []struct {
+					ID      string `json:"id"`
+					Output  string `json:"output"`
+					Success bool   `json:"success"`
+				}
+				if err := json.Unmarshal([]byte(msg.ToolResult), &results); err == nil {
+					for _, r := range results {
+						sb.WriteString(fmt.Sprintf("- %s: ", r.ID))
+						if !r.Success {
+							sb.WriteString("[ERROR] ")
+						}
+						// Truncate long outputs
+						output := r.Output
+						if len(output) > 2000 {
+							output = output[:2000] + "... (truncated)"
+						}
+						sb.WriteString(output)
+						sb.WriteString("\n")
+					}
+				}
+				sb.WriteString("\n")
+			}
+
+		case "summarization":
+			sb.WriteString("**[Context was summarized]**\n")
+			if msg.Content != "" {
+				sb.WriteString(msg.Content)
+				sb.WriteString("\n\n")
+			}
+		}
+	}
+
+	sb.WriteString("</conversation_history>")
+	return sb.String()
+}
+
 func toStreamEvent(event agent.Event, sandbox bool) types.StreamEvent {
 	switch event.Type {
 	case agent.EventTypeToken:

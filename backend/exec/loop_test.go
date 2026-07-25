@@ -3075,3 +3075,80 @@ func TestRemoveDuplicateUserMessage_MixedPlainAndContentParts(t *testing.T) {
 		t.Fatalf("expected 3 messages (mixed types), got %d", len(result))
 	}
 }
+
+func TestBuildContextReplay_Empty(t *testing.T) {
+	result := buildContextReplay(nil)
+	if !strings.Contains(result, "<conversation_history>") {
+		t.Error("expected conversation_history tags")
+	}
+	if !strings.Contains(result, "</conversation_history>") {
+		t.Error("expected closing conversation_history tag")
+	}
+}
+
+func TestBuildContextReplay_UserAndAssistant(t *testing.T) {
+	msgs := []types.TaskMessage{
+		{Role: "user", Content: "Build a todo app"},
+		{Role: "assistant", Content: "Sure, let me create the files."},
+		{Role: "user", Content: "Also add tests"},
+	}
+	result := buildContextReplay(msgs)
+	if !strings.Contains(result, "**User**: Build a todo app") {
+		t.Error("expected first user message")
+	}
+	if !strings.Contains(result, "**Assistant**: Sure, let me create the files.") {
+		t.Error("expected assistant message")
+	}
+	if !strings.Contains(result, "**User**: Also add tests") {
+		t.Error("expected second user message")
+	}
+}
+
+func TestBuildContextReplay_WithReasoning(t *testing.T) {
+	msgs := []types.TaskMessage{
+		{Role: "assistant", ReasoningContent: "Let me think about this...", Content: "Here's the answer."},
+	}
+	result := buildContextReplay(msgs)
+	if !strings.Contains(result, "**Assistant (thinking)**: Let me think about this...") {
+		t.Error("expected reasoning content")
+	}
+	if !strings.Contains(result, "**Assistant**: Here's the answer.") {
+		t.Error("expected assistant content")
+	}
+}
+
+func TestBuildContextReplay_WithToolCalls(t *testing.T) {
+	toolCalls := `[{"id":"call_1","name":"write_file","display_name":"Write File","args":{"path":"test.js","content":"hello"}}]`
+	toolResult := `[{"id":"call_1","output":"File written","success":true}]`
+	msgs := []types.TaskMessage{
+		{Role: "tool_call", ToolCalls: toolCalls, ToolResult: toolResult},
+	}
+	result := buildContextReplay(msgs)
+	if !strings.Contains(result, "**Tool calls**:") {
+		t.Error("expected tool calls section")
+	}
+	if !strings.Contains(result, "Write File") {
+		t.Error("expected tool display name")
+	}
+	if !strings.Contains(result, "**Tool results**:") {
+		t.Error("expected tool results section")
+	}
+	if !strings.Contains(result, "File written") {
+		t.Error("expected tool result output")
+	}
+}
+
+func TestBuildContextReplay_WithSummarization(t *testing.T) {
+	msgs := []types.TaskMessage{
+		{Role: "user", Content: "First message"},
+		{Role: "summarization", Content: "Summary of earlier conversation"},
+		{Role: "user", Content: "After summary"},
+	}
+	result := buildContextReplay(msgs)
+	if !strings.Contains(result, "**[Context was summarized]**") {
+		t.Error("expected summarization marker")
+	}
+	if !strings.Contains(result, "Summary of earlier conversation") {
+		t.Error("expected summary content")
+	}
+}
