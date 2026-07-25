@@ -70,6 +70,8 @@
         url: string;
         api_key: string; // full value when editing, masked ("••••••••••") when loaded from config
         agent_config_dir?: string;
+        agent_description?: string; // agent description text (from manifest)
+        agent_setup_info?: string;  // agent setup instructions (from manifest)
         models: ModelEntry[];
         concurrency: number;
         default_model: string; // per-provider default model
@@ -177,6 +179,21 @@
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
         hasChanges = false;
+        loadAvailableAgents();
+    });
+
+    // Enrich agent providers with manifest data (description, setup_info) when extensions are loaded
+    $effect(() => {
+        if (availableAgents.length === 0) return;
+        for (const p of providers) {
+            if (p.kind !== 'agent') continue;
+            const agentName = p.url.startsWith(AGENT_URL_PREFIX) ? p.url.slice(AGENT_URL_PREFIX.length) : p.name;
+            const ext = availableAgents.find(e => e.name === agentName);
+            if (ext?.manifest.agent) {
+                p.agent_description = ext.manifest.agent.description || '';
+                p.agent_setup_info = ext.manifest.agent.setup_info || '';
+            }
+        }
     });
 
     // Close agent menu when clicking outside
@@ -489,6 +506,7 @@
                         })),
                         concurrency: Math.max(1, p.concurrency || 1),
                         default_model: p.default_model || '',
+                        agent_config_dir: p.agent_config_dir || '',
                         input_price: p.input_price,
                         output_price: p.output_price,
                         cache_read_price: p.cache_read_price,

@@ -19,6 +19,8 @@
         url: string;
         api_key: string;
         agent_config_dir?: string;
+        agent_description?: string;
+        agent_setup_info?: string;
         models: ModelEntry[];
         concurrency: number;
         default_model: string;
@@ -110,7 +112,7 @@
     {#if provider.expanded}
         <div class="provider-details" transition:slide={{ duration: 200 }}>
             {#if provider.kind === 'agent'}
-                <AgentSection />
+                <AgentSection description={provider.agent_description} setupInfo={provider.agent_setup_info} />
             {:else}
                 <!-- LLM Provider Fields -->
                 <div class="url-and-key-row">

@@ -105,6 +105,8 @@ type Provider struct {
 	Concurrency     int           `json:"concurrency"`
 	DefaultModel    string        `json:"default_model"`
 	AgentConfigDir  string        `json:"agent_config_dir,omitempty"` // host path to agent config (e.g., ~/.pi/agent); empty for LLM providers
+	AgentDescription string        `json:"agent_description,omitempty"` // agent description text (from manifest); empty for LLM providers
+	AgentSetupInfo    string        `json:"agent_setup_info,omitempty"`  // agent setup instructions (from manifest); empty for LLM providers
 	InputPrice            float64 `json:"input_price"`                 // USD per 1M input (non-cached) tokens
 	OutputPrice           float64 `json:"output_price"`                // USD per 1M output tokens
 	CacheReadPrice        float64 `json:"cache_read_price"`            // USD per 1M cache-read tokens
