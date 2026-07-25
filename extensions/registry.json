@@ -48,9 +48,10 @@
         "version": "1.0.0",
         "type": "agent",
         "display_name": "Pi Coding Agent",
-        "description": "Pi Coding Agent — autonomous coding agent with tool use, running in a sandbox container.",
+        "description": "Pi Coding Agent — autonomous coding agent with tool use",
         "author": "Pi",
-        "homepage": "https://github.com/nicepkg/pi",
+        "homepage": "https://pi.dev/",
+        "license_url": "https://github.com/earendil-works/pi/blob/main/LICENSE",
         "manifest_url": "agent/pi/manifest.json"
     }
 ]
