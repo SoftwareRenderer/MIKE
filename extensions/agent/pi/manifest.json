@@ -2,6 +2,8 @@
     "display_name": "Pi Coding Agent",
     "description": "Pi Coding Agent — autonomous coding agent with tool use",
     "author": "Pi",
+    "homepage": "https://pi.dev/",
+    "license_url": "https://github.com/earendil-works/pi/blob/main/LICENSE",
     "agent": {
         "wasm_module": "pi.wasm",
         "capabilities": ["compact", "session_stats", "extension_ui"]
