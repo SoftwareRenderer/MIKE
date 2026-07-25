@@ -1,22 +1,18 @@
 package crypto
 
 import (
-	"bytes"
 	"testing"
 )
 
 // setEncryptionKey sets a valid 32-byte hex key for testing and returns a cleanup function.
 func setEncryptionKey(t *testing.T) {
 	t.Helper()
-	// Reset cached key so env var changes take effect
-	resetKeyCache()
 	// 32 bytes = 64 hex chars
 	t.Setenv("MIKE_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 }
 
 func clearEncryptionKey(t *testing.T) {
 	t.Helper()
-	resetKeyCache()
 	t.Setenv("MIKE_ENCRYPTION_KEY", "")
 }
 
@@ -92,7 +88,6 @@ func TestIsEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetKeyCache()
 			t.Setenv("MIKE_ENCRYPTION_KEY", tt.envVal)
 			if got := IsEnabled(); got != tt.want {
 				t.Errorf("IsEnabled() = %v, want %v", got, tt.want)
@@ -143,7 +138,6 @@ func TestValidateKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resetKeyCache()
 			t.Setenv("MIKE_ENCRYPTION_KEY", tt.envVal)
 			err := ValidateKey()
 			if (err != nil) != tt.wantErr {
@@ -174,24 +168,5 @@ func TestEncryptDifferentValuesProduceDifferentCiphertext(t *testing.T) {
 	d2, _ := Decrypt(e2)
 	if d1 != d2 {
 		t.Errorf("decrypted values differ: %q vs %q", d1, d2)
-	}
-}
-
-func TestKeyIsCached(t *testing.T) {
-	resetKeyCache()
-	t.Setenv("MIKE_ENCRYPTION_KEY", "test-caching-key")
-
-	// First call derives and caches the key
-	key1 := getEncryptionKey()
-	if key1 == nil {
-		t.Fatal("expected non-nil key")
-	}
-
-	// Mutate the env var — cached key should NOT change
-	t.Setenv("MIKE_ENCRYPTION_KEY", "different-key")
-	key2 := getEncryptionKey()
-
-	if !bytes.Equal(key1, key2) {
-		t.Error("cached key should not change when env var is mutated")
 	}
 }

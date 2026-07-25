@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sync"
 )
 
 // Encrypt encrypts a plaintext value using AES-256-GCM.
@@ -93,33 +92,16 @@ func IsEnabled() bool {
 	return getEncryptionKey() != nil
 }
 
-var (
-	keyOnce  sync.Once
-	cachedKey []byte
-)
-
-// resetKeyCache clears the cached key for testing purposes.
-// The encryption key never changes at runtime, so this is only used in tests.
-func resetKeyCache() {
-	keyOnce = sync.Once{}
-	cachedKey = nil
-}
-
 // getEncryptionKey reads the MIKE_ENCRYPTION_KEY env var and returns a 32-byte key.
 // It uses SHA-256 to derive a consistent 32-byte key from any non-empty input string.
-// The derived key is cached via sync.Once since the env var never changes at runtime.
 // Returns nil if the env var is not set.
 func getEncryptionKey() []byte {
-	keyOnce.Do(func() {
-		raw := os.Getenv("MIKE_ENCRYPTION_KEY")
-		if raw == "" {
-			cachedKey = nil
-			return
-		}
-		hash := sha256.Sum256([]byte(raw))
-		cachedKey = hash[:]
-	})
-	return cachedKey
+	raw := os.Getenv("MIKE_ENCRYPTION_KEY")
+	if raw == "" {
+		return nil
+	}
+	hash := sha256.Sum256([]byte(raw))
+	return hash[:]
 }
 
 // ValidateKey checks if the MIKE_ENCRYPTION_KEY env var is set.
