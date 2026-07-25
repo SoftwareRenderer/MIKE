@@ -394,7 +394,7 @@ export type TaskEventData = { task_id: string; type: string; data: any };
 
 // ─── Extension types ───
 
-export type ExtensionType = 'lsp' | 'ui' | 'css';
+export type ExtensionType = 'lsp' | 'ui' | 'css' | 'agent';
 
 export interface ExtensionManifest {
     display_name: string;

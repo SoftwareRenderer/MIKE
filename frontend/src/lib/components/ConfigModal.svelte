@@ -1,8 +1,9 @@
 <script lang="ts">
     
-    import type { Config, Provider } from '$lib/types';
-    import { isAgentProvider, PI_SENTINEL_URL } from '$lib/types';
+    import type { Config, Provider, Extension } from '$lib/types';
+    import { isAgentProvider, AGENT_URL_PREFIX } from '$lib/types';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
+    import { listExtensions } from '$lib/api/extensions';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
@@ -126,8 +127,8 @@
     function buildProviders(cfg: Config | null): ProviderDraft[] {
         const oldGlobalDefault = '';
         return (cfg?.providers || []).map(p => {
-            // Detect Pi provider by kind field OR sentinel URL
-            const isAgent = p.kind === 'agent' || p.url === PI_SENTINEL_URL;
+            // Detect agent provider by kind field, agent:// prefix, or legacy sentinel URL
+            const isAgent = p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX);
             const draft: ProviderDraft = {
                 ...p,
                 kind: isAgent ? 'agent' : (p.kind || 'llm'),
@@ -245,6 +246,21 @@
     let agentMenuOpen = $state(false);
     let agentMenuBtn: HTMLButtonElement | null = $state(null);
     let agentMenuRect = $state<{ top: number; left: number } | null>(null);
+    let availableAgents = $state<Extension[]>([]);
+    let agentsLoading = $state(false);
+
+    async function loadAvailableAgents() {
+        if (agentsLoading || availableAgents.length > 0) return;
+        agentsLoading = true;
+        try {
+            const all = await listExtensions();
+            availableAgents = all.filter(e => e.type === 'agent' && e.enabled);
+        } catch {
+            availableAgents = [];
+        } finally {
+            agentsLoading = false;
+        }
+    }
 
     function toggleAgentMenu(e: MouseEvent) {
         e.stopPropagation();
@@ -258,21 +274,21 @@
                 agentMenuRect = { top: r.bottom + 4, left: r.left };
             }
             agentMenuOpen = true;
+            loadAvailableAgents();
         }
     }
 
-    function addAgent() {
-        // Only one Pi agent allowed
+    function addAgent(ext: Extension) {
         if (providers.some(p => p.kind === 'agent')) {
             return;
         }
         agentMenuOpen = false;
         agentMenuRect = null;
         providers.push({
-            name: 'pi',
-            display_name: 'Pi Coding Agent',
+            name: ext.name,
+            display_name: ext.manifest.display_name || ext.name,
             kind: 'agent',
-            url: PI_SENTINEL_URL,
+            url: AGENT_URL_PREFIX + ext.name,
             agent_config_dir: '~/.pi/agent',
             api_key: '',
             models: [],
@@ -569,14 +585,22 @@
                     <!-- Agent selection dropdown -->
                     {#if agentMenuOpen && agentMenuRect}
                         <div class="agent-menu" style="position:fixed;top:{agentMenuRect.top}px;left:{agentMenuRect.left}px;z-index:10001" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') agentMenuOpen = false; }} role="menu" tabindex="-1">
-                            <button type="button" class="agent-menu-item" onclick={addAgent}>
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                    <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
-                                    <circle cx="6" cy="9" r="1" fill="currentColor"/>
-                                    <circle cx="10" cy="9" r="1" fill="currentColor"/>
-                                </svg>
-                                Pi Coding Agent
-                            </button>
+                            {#if agentsLoading}
+                                <div class="agent-menu-item agent-menu-loading">Loading agents...</div>
+                            {:else if availableAgents.length === 0}
+                                <div class="agent-menu-item agent-menu-empty">No agents installed. Install one from Extensions tab.</div>
+                            {:else}
+                                {#each availableAgents as ext}
+                                    <button type="button" class="agent-menu-item" onclick={() => addAgent(ext)}>
+                                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                            <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                                            <circle cx="6" cy="9" r="1" fill="currentColor"/>
+                                            <circle cx="10" cy="9" r="1" fill="currentColor"/>
+                                        </svg>
+                                        {ext.manifest.display_name || ext.name}
+                                    </button>
+                                {/each}
+                            {/if}
                         </div>
                     {/if}
                 </div>
