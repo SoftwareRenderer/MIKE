@@ -210,27 +210,6 @@ func (g *ConcurrencyGate) EstimateWait(providerURL string, currentEntry *queueEn
 	return int((avgSlot * time.Duration(ahead)) / time.Second)
 }
 
-// QueueEntries returns the queue entries for the given provider in FIFO order.
-// Only active (non-cancelled) entries are included.
-func (g *ConcurrencyGate) QueueEntries(providerURL string) []*queueEntry {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	var result []*queueEntry
-	for _, e := range g.queue {
-		if e.provider != providerURL {
-			continue
-		}
-		select {
-		case <-e.done:
-			continue
-		default:
-			result = append(result, e)
-		}
-	}
-	return result
-}
-
 // Close shuts down the gate and releases all waiting goroutines.
 func (g *ConcurrencyGate) Close() {
 	g.mu.Lock()
