@@ -218,6 +218,9 @@ export interface Provider {
     models: ProviderModel[];
     concurrency: number;
     default_model?: string;
+    agent_config_dir?: string; // host path to agent config (e.g., ~/.pi/agent); empty for LLM providers
+    agent_description?: string; // agent description text (from manifest); empty for LLM providers
+    agent_setup_info?: string;  // agent setup instructions (from manifest); empty for LLM providers
     input_price?: number;      // USD per 1M input (non-cached) tokens
     output_price?: number;     // USD per 1M output tokens
     cache_read_price?: number; // USD per 1M cache-read tokens
@@ -408,6 +411,15 @@ export interface ExtensionManifest {
     lsp?: LSPConfig;
     ui?: UIExtensionConfig;
     css?: CSSExtensionConfig;
+    agent?: AgentExtensionConfig;
+}
+
+export interface AgentExtensionConfig {
+    wasm_module: string;
+    capabilities?: string[];
+    description?: string;    // short description shown in provider card
+    setup_info?: string;     // setup instructions shown in provider card
+    config_schema?: ConfigSchema;
 }
 
 export interface LSPConfig {
