@@ -2,7 +2,6 @@ package httputil
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 )
 
@@ -20,7 +19,4 @@ func JSONError(w http.ResponseWriter, status int, message string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-// JSONErrorf sends a JSON error response with formatted message.
-func JSONErrorf(w http.ResponseWriter, status int, format string, args ...any) {
-	JSONError(w, status, fmt.Sprintf(format, args...))
-}
+
