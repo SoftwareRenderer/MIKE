@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -28,7 +26,7 @@ import (
 type AgentRunner struct {
 	adapter      AgentAdapter
 	stdin        io.WriteCloser
-	stdoutBuf    *bufio.Scanner
+	stdout       io.Reader
 	cmd          *exec.Cmd
 	sandboxMgr   *sandboxmgr.SandboxManager
 	taskID       string
@@ -109,7 +107,7 @@ func NewAgentRunner(ext *extensions.Extension, sandboxMgr *sandboxmgr.SandboxMan
 		}
 		r.cmd = ph.Cmd
 		r.stdin = ph.Stdin
-		r.stdoutBuf = bufio.NewScanner(ph.Stdout)
+		r.stdout = ph.Stdout
 	} else {
 		cmd := exec.Command(spCfg.Binary, spCfg.Args...)
 		cmd.Dir = worktreePath
@@ -137,12 +135,8 @@ func NewAgentRunner(ext *extensions.Extension, sandboxMgr *sandboxmgr.SandboxMan
 
 		r.cmd = cmd
 		r.stdin = stdin
-		r.stdoutBuf = bufio.NewScanner(stdout)
+		r.stdout = stdout
 	}
-
-	// Set large buffer for stdout scanner (agent output can be large)
-	buf := make([]byte, 0, 64*1024)
-	r.stdoutBuf.Buffer(buf, 1024*1024)
 
 	// Start stdout reader goroutine
 	go r.readOutput()
@@ -326,20 +320,21 @@ func (r *AgentRunner) readOutput() {
 		}
 	}()
 
-	for r.stdoutBuf.Scan() {
-		line := strings.TrimRight(r.stdoutBuf.Text(), "\r")
-		if len(line) == 0 {
-			continue
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := r.stdout.Read(buf)
+		if n > 0 {
+			events := r.adapter.ParseOutput(buf[:n])
+			for _, event := range events {
+				r.dispatchEvent(event)
+			}
 		}
-
-		events := r.adapter.ParseOutput([]byte(line))
-		for _, event := range events {
-			r.dispatchEvent(event)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("[agent] stdout read error: %v", err)
+			}
+			break
 		}
-	}
-
-	if err := r.stdoutBuf.Err(); err != nil && err != io.EOF {
-		log.Printf("[agent] stdout read error: %v", err)
 	}
 }
 
