@@ -14,6 +14,7 @@
     } = $props();
 
     let lspTooltipVisible = $state(false);
+    let showFileStats = $state(false);
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let lspStatusEl: HTMLButtonElement | null = null;
 
@@ -29,7 +30,7 @@
         {#if lspReady !== undefined}
             <button
                 type="button"
-                class="lsp-status"
+                class="footer-find-btn"
                 bind:this={lspStatusEl}
                 onclick={toggleLspTooltip}
                 aria-label="LSP status"
@@ -56,10 +57,15 @@
                 </div>
             {/if}
         {/if}
-        <span class="cursor-info">Ln {cursorLine}, Col {cursorCol}</span>
+        <button type="button" class="footer-find-btn" onclick={() => { showFileStats = !showFileStats }}>
+            {#if showFileStats}
+                {lineCount} lines · {charCount} chars
+            {:else}
+                Ln {cursorLine}, Col {cursorCol}
+            {/if}
+        </button>
     </div>
     <div class="footer-right">
-        <span class="line-info">{lineCount} lines · {charCount} chars</span>
         <button class="footer-find-btn" title="Find (Ctrl+F)" onclick={onFind}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="11" cy="11" r="8"/>
@@ -93,21 +99,6 @@
         display: flex;
         align-items: center;
         gap: 12px;
-    }
-    .cursor-info {
-        font-family: var(--font-mono);
-    }
-    .lsp-status {
-        font-family: var(--font-mono);
-        cursor: pointer;
-        background: none;
-        border: none;
-        padding: 0;
-        font-size: inherit;
-        color: inherit;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
     }
     .lsp-spinner {
         display: inline-block;
@@ -156,9 +147,6 @@
     .lsp-tooltip-value.lsp-error {
         color: var(--color-status-red);
     }
-    .line-info {
-        font-family: var(--font-mono);
-    }
     .footer-find-btn {
         display: flex;
         align-items: center;
@@ -170,7 +158,7 @@
         color: var(--color-text-secondary);
         cursor: pointer;
         font-size: 12px;
-        font-family: inherit;
+        font-family: var(--font-mono);
         flex-shrink: 0;
     }
     .footer-find-btn:hover {
