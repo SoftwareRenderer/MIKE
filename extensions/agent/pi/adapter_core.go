@@ -90,7 +90,6 @@ type Adapter struct {
 	config        piConfig
 	lineBuffer    string
 	cmdID         int
-	turnToolCalls []persistToolCall
 }
 
 // piConfig holds parsed adapter configuration.
@@ -100,16 +99,6 @@ type piConfig struct {
 	SessionName string
 	DisplayName string
 	Env         []string
-}
-
-// persistToolCall holds a tool call+result pair for turn-end persistence.
-type persistToolCall struct {
-	toolID   string
-	toolName string
-	args     map[string]any
-	rawArgs  string
-	output   string
-	success  bool
 }
 
 // toolDisplayNames maps tool names to human-readable display names.
@@ -168,7 +157,6 @@ func (a *Adapter) Init(config []byte) error {
 	}
 	a.lineBuffer = ""
 	a.cmdID = 0
-	a.turnToolCalls = nil
 	return nil
 }
 
@@ -212,7 +200,6 @@ func (a *Adapter) EncodeCommand(cmd string, data []byte) []byte {
 		c["type"] = "get_state"
 	case "abort":
 		c["type"] = "abort"
-		a.turnToolCalls = nil
 	}
 
 	result, _ := json.Marshal(c)
@@ -262,7 +249,6 @@ func (a *Adapter) HandleUIRequest(id, method string) []byte {
 // Close cleans up adapter state.
 func (a *Adapter) Close() {
 	a.lineBuffer = ""
-	a.turnToolCalls = nil
 }
 
 // parseEvent dispatches a Pi JSONL event to the appropriate parser.
@@ -354,7 +340,6 @@ func (a *Adapter) parseAgentEnd(raw map[string]any) *Event {
 		}
 	}
 	entries := buildPersistEntries(msgs)
-	a.turnToolCalls = nil
 	return &Event{Type: EventTypePersist, PersistEntries: entries}
 }
 
