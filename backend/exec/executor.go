@@ -891,9 +891,25 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 	te.taskMu.Lock()
 	state, exists := te.tasks[taskID]
 	if exists {
+		if state.ctx.Err() != nil {
+			log.Printf("[executor-switch] task=%s executor loop is dead, restarting via lazy-start", taskID)
+			if state.agentRunner != nil && !state.runnerClosed {
+				state.agentRunner.Close()
+				state.runnerClosed = true
+			}
+			state.cancel()
+			delete(te.tasks, taskID)
+			te.taskMu.Unlock()
+			go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL, um.ReasoningEffort, um.Regenerate)
+			return
+		}
 		if state.executorType != requestedType {
 			log.Printf("[executor-switch] task=%s switching from %s to %s", taskID, state.executorType, requestedType)
 			done := state.done
+			if state.agentRunner != nil && !state.runnerClosed {
+				state.agentRunner.Close()
+				state.runnerClosed = true
+			}
 			state.cancel()
 			delete(te.tasks, taskID)
 			te.taskMu.Unlock()
