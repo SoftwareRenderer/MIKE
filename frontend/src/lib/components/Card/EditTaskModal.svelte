@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import type { Provider } from '$lib/types';
-    import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
+    import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { appStore } from '$lib/stores';
     import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
     import ModelSelector from '../Chat/ModelSelector.svelte';
@@ -175,7 +175,7 @@
         effortDraft = reasoningEffort || '';
         // Agent providers always use explore mode
         const provider = editProviders.find(p => p.url === providerUrl);
-        if (providerUrl === PI_SENTINEL_URL || (provider && isAgentProvider(provider))) {
+        if (providerUrl.startsWith(AGENT_URL_PREFIX) || (provider && isAgentProvider(provider))) {
             operatingModeDraft = 'explore';
         } else if (operatingModeDraft === 'explore') {
             // Switching away from agent: restore the original mode

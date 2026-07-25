@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
-    import { PI_SENTINEL_URL } from '$lib/types';
+    import { AGENT_URL_PREFIX } from '$lib/types';
 
     let {
         providers,
@@ -20,7 +20,7 @@
         onSelectModel: (url: string, model: string, effort: string) => void;
     } = $props();
 
-    let isAgentActive = $derived(currentUrl === PI_SENTINEL_URL);
+    let isAgentActive = $derived(currentUrl?.startsWith(AGENT_URL_PREFIX) ?? false);
     let tag = $derived('div');
 </script>
 

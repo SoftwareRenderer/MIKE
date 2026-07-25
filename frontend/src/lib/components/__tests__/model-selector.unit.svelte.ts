@@ -23,9 +23,9 @@ describe('ModelSelector rendering', () => {
         expect(source).toContain('models.length > 0');
     });
 
-    it('detects Pi provider', () => {
-        expect(source).toContain('hasPiProvider');
-        expect(source).toContain('PI_SENTINEL_URL');
+    it('detects agent provider', () => {
+        expect(source).toContain('hasAgentProvider');
+        expect(source).toContain('AGENT_URL_PREFIX');
     });
 
     it('sorts models alphabetically', () => {

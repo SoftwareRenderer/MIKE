@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Task, Provider } from '$lib/types';
-    import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
+    import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
@@ -298,7 +298,7 @@
         const providers = cfg?.providers || [];
         if (providers.length === 0) return { text: null, provider: null, model: null, color: '' };
         // Check if task uses Pi agent
-        if (task.llama_server_url === PI_SENTINEL_URL) {
+        if (task.llama_server_url?.startsWith(AGENT_URL_PREFIX)) {
                                     return { text: 'Pi Coding Agent', provider: null, model: null, color: '#A371F7', isAgent: true };
         }
         // Use task model if set, otherwise fall back to default model
@@ -370,7 +370,7 @@
     async function selectAgent() {
         if (!projectId) return;
         try {
-            const updated = await updateTask(projectId, task.id, { model_name: undefined, llama_server_url: PI_SENTINEL_URL, reasoning_effort: undefined });
+            const updated = await updateTask(projectId, task.id, { model_name: undefined, llama_server_url: AGENT_URL_PREFIX + 'pi', reasoning_effort: undefined });
             task.model_name = updated.model_name;
             task.llama_server_url = updated.llama_server_url;
             task.reasoning_effort = updated.reasoning_effort;
@@ -477,7 +477,7 @@
             isAgentSelected: () => {
                 const url = task.llama_server_url;
                 if (!url) return false;
-                if (url === PI_SENTINEL_URL) return true;
+                if (url.startsWith(AGENT_URL_PREFIX)) return true;
                 const p = providers.find(p => p.url === url);
                 return p ? isAgentProvider(p) : false;
             },

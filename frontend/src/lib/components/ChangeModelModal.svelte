@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
-    import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
+    import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
 
@@ -22,7 +22,7 @@
     let hasProviders = $derived(providers.length > 0);
     let isAgentSelected = $derived(() => {
         if (!selectedUrl) return false;
-        if (selectedUrl === PI_SENTINEL_URL) return true;
+        if (selectedUrl.startsWith(AGENT_URL_PREFIX)) return true;
         const p = providers.find(p => p.url === selectedUrl);
         return p ? isAgentProvider(p) : false;
     });

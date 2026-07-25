@@ -6,7 +6,7 @@
         uiInjector.refreshSlot(INJECTION_POINTS.CREATE_TASK, { component: 'CreateTaskModal' });
     });
     import type { Config, Provider, Task } from '$lib/types';
-    import { PI_SENTINEL_URL, isAgentProvider } from '$lib/types';
+    import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
     import { appStore, uiStore } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
@@ -217,7 +217,7 @@
     let hasProviders = $derived(providers.length > 0);
     let isAgentSelected = $derived.by(() => {
         if (!selectedUrl) return false;
-        if (selectedUrl === PI_SENTINEL_URL) return true;
+        if (selectedUrl.startsWith(AGENT_URL_PREFIX)) return true;
         const provider = providers.find(p => p.url === selectedUrl);
         return provider ? isAgentProvider(provider) : false;
     });
