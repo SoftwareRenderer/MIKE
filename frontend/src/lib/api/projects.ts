@@ -6,7 +6,6 @@ import {
     queueWrite,
     createProjectRaw,
     updateProjectRaw,
-    buildSandboxImageRaw,
     deleteProjectRaw,
     resetProjectStatsRaw,
     reorderTasksRaw,
@@ -81,14 +80,6 @@ export async function updateProject(id: string, updates: { name?: string; sandbo
         return await queueWrite('updateProject', { id, updates }, { id, ...updates } as Project);
     }
     return updateProjectRaw(id, updates);
-}
-
-/** Trigger a sandbox image build for a project. Queued when offline. */
-export async function buildSandboxImage(id: string): Promise<{ status: string; image: string; project: string }> {
-    if (getOfflineStatus()) {
-        return await queueWrite('buildSandboxImage', { id }, { status: 'queued', image: '', project: id });
-    }
-    return buildSandboxImageRaw(id);
 }
 
 /** Trigger a sandbox image build with live progress streaming. */

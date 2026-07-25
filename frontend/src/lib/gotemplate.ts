@@ -268,7 +268,7 @@ const goTemplateParser: StreamParser<GoTemplateState> = {
 /**
  * Language definition for Go templates (.tmpl, .gohtml).
  */
-export const goTemplateLanguage: Language = StreamLanguage.define(goTemplateParser);
+const goTemplateLanguage: Language = StreamLanguage.define(goTemplateParser);
 
 /**
  * LanguageSupport for Go templates.

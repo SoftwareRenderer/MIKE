@@ -537,15 +537,6 @@
 .diff-section-unstaged {
     border-left-color: var(--color-status-yellow, #f0c040);
 }
-.diff-file-header-staged {
-    border-left-color: var(--color-status-green);
-}
-.diff-file-header-unstaged {
-    border-left-color: var(--color-status-yellow, #f0c040);
-}
-.diff-section:has(.diff-section-merged) .diff-file-header {
-    border-left-color: var(--color-btn-text);
-}
 .diff-section-header:hover {
     background: var(--color-surface-3);
 }
@@ -598,10 +589,7 @@
     flex-direction: column;
     gap: 8px;
 }
-/* Tree grouping */
 
-
-/* Directory header */
 
 
 

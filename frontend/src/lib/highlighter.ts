@@ -171,7 +171,7 @@ const goTemplateKeywords = new Set([
     'and', 'or', 'not',
     'eq', 'ne', 'lt', 'le', 'gt', 'ge',
     'printf', 'print', 'println',
-    'len', 'index', 'html', 'js', 'urlquery', 'printf',
+    'len', 'index', 'html', 'js', 'urlquery',
     'slice', 'substr', 'default', 'timeout', 'recover',
 ]);
 
@@ -540,7 +540,7 @@ function extractGoTemplateSymbols(source: string, lineInfo: { lineAt: (pos: numb
         'PrevSection', 'Site', 'Sites', 'All', 'ByTitle', 'ByWeight', 'ByDate',
         'ByLang', 'DefaultContentLanguage', 'Translations', 'AllTranslations',
         'IsTranslated', 'Render', 'Resources', 'Store', 'Meta', 'Keywords',
-        'Description', 'Description', 'Description',
+        'Description',
     ]);
     const fieldRegex = /\.(([a-zA-Z_][a-zA-Z0-9_]*))(?=\s|\||\}|"|'|[,)])/g;
     let fm;

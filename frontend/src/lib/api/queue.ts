@@ -41,8 +41,7 @@ export type ActionType =
     | 'resetWorktree'
     // Config
     | 'updateConfig' | 'resetProjectStats' | 'reloadPrompts'
-    // Sandbox
-    | 'buildSandboxImage';
+
 
 let isOffline = false;
 let actionQueue: QueuedAction[] = [];
@@ -469,9 +468,6 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
         case 'resetProjectStats':
             await resetProjectStatsRaw(p.projectId, p.modelName, p.providerName);
             break;
-        case 'buildSandboxImage':
-            await buildSandboxImageRaw(p.id);
-            break;
         case 'reloadPrompts':
             await reloadPromptsRaw();
             break;
@@ -517,14 +513,6 @@ async function updateProjectRaw(id: string, updates: { name?: string; sandbox_en
         body: JSON.stringify(updates),
     });
     if (!res.ok) throw await apiError(res, 'Failed to update project');
-    return res.json();
-}
-
-async function buildSandboxImageRaw(id: string): Promise<{ status: string; image: string; project: string }> {
-    const res = await apiFetch(`${API_BASE}/projects/${id}/sandbox/build`, {
-        method: 'POST',
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to build sandbox image');
     return res.json();
 }
 
@@ -830,7 +818,6 @@ async function deleteTaskThreadRaw(projectId: string, taskId: string, threadId: 
 export {
     createProjectRaw,
     updateProjectRaw,
-    buildSandboxImageRaw,
     deleteProjectRaw,
     reorderTasksRaw,
     createTaskRaw,
