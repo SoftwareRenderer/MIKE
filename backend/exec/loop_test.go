@@ -998,6 +998,268 @@ func TestFormatConversationTurns_TrimsTrailingNewlines(t *testing.T) {
 	}
 }
 
+// --- isTaskID Tests ---
+
+func TestIsTaskID_Valid(t *testing.T) {
+	validIDs := []string{"frost-amber-quartz", "abc-def-ghi", "a-b-c"}
+	for _, id := range validIDs {
+		if !isTaskID(id) {
+			t.Errorf("expected %q to be a valid task ID", id)
+		}
+	}
+}
+
+func TestIsTaskID_Invalid(t *testing.T) {
+	invalidIDs := []string{"", "foo", "foo-bar", "foo-bar-baz-qux", "-foo-bar", "foo--bar", "foo-bar-"}
+	for _, id := range invalidIDs {
+		if isTaskID(id) {
+			t.Errorf("expected %q to be invalid task ID", id)
+		}
+	}
+}
+
+// --- formatToolAction Tests ---
+
+func TestFormatToolAction_CreateTask(t *testing.T) {
+	result := formatToolAction("create_task", `{"title":"Test task"}`)
+	if result != "create" {
+		t.Errorf("expected 'create', got %q", result)
+	}
+}
+
+func TestFormatToolAction_EditTask(t *testing.T) {
+	result := formatToolAction("edit_task", `{"task_id":"frost-amber-quartz","title":"New title"}`)
+	if result != "edit" {
+		t.Errorf("expected 'edit', got %q", result)
+	}
+}
+
+// --- formatToolResult Tests ---
+
+func TestFormatToolResult_CreateTask_Success(t *testing.T) {
+	toolResults := map[string]string{"call_1": `{"task_id":"frost-amber-quartz","title":"New task"}`}
+	result := formatToolResult("create_task", "call_1", "successful", toolResults)
+	if result != "task ID: frost-amber-quartz, title: New task" {
+		t.Errorf("expected 'task ID: frost-amber-quartz, title: New task', got %q", result)
+	}
+}
+
+func TestFormatToolResult_CreateTask_Success_NoTaskID(t *testing.T) {
+	// Result is not valid JSON
+	toolResults := map[string]string{"call_1": "Task created successfully"}
+	result := formatToolResult("create_task", "call_1", "successful", toolResults)
+	if result != "a task" {
+		t.Errorf("expected 'a task', got %q", result)
+	}
+}
+
+func TestFormatToolResult_CreateTask_Success_TaskIDOnly(t *testing.T) {
+	// JSON result with task_id but no title
+	toolResults := map[string]string{"call_1": `{"task_id":"frost-amber-quartz"}`}
+	result := formatToolResult("create_task", "call_1", "successful", toolResults)
+	if result != "task ID: frost-amber-quartz" {
+		t.Errorf("expected 'task ID: frost-amber-quartz', got %q", result)
+	}
+}
+
+func TestFormatToolResult_CreateTask_Failure(t *testing.T) {
+	toolResults := map[string]string{"call_1": "error: project not found"}
+	result := formatToolResult("create_task", "call_1", "unsuccessful", toolResults)
+	if result != "but was unsuccessful. Error: error: project not found" {
+		t.Errorf("expected 'but was unsuccessful. Error: error: project not found', got %q", result)
+	}
+}
+
+func TestFormatToolResult_EditTask_Success(t *testing.T) {
+	toolResults := map[string]string{"call_1": `{"task_id":"frost-amber-quartz","title":"New title","status":"updated"}`}
+	result := formatToolResult("edit_task", "call_1", "successful", toolResults)
+	if result != "task ID: frost-amber-quartz, title: New title" {
+		t.Errorf("expected 'task ID: frost-amber-quartz, title: New title', got %q", result)
+	}
+}
+
+func TestFormatToolResult_EditTask_Failure(t *testing.T) {
+	toolResults := map[string]string{"call_1": "tool edit_task failed: task frost-amber-quartz not found"}
+	result := formatToolResult("edit_task", "call_1", "unsuccessful", toolResults)
+	if result != "but was unsuccessful. Error: tool edit_task failed: task frost-amber-quartz not found" {
+		t.Errorf("expected error message, got %q", result)
+	}
+}
+
+func TestFormatToolResult_CreateTask_Pending(t *testing.T) {
+	toolResults := map[string]string{}
+	result := formatToolResult("create_task", "call_1", "pending", toolResults)
+	if result != "a task" {
+		t.Errorf("expected 'a task', got %q", result)
+	}
+}
+
+func TestFormatToolResult_OtherTool_Success(t *testing.T) {
+	toolResults := map[string]string{"call_1": "file contents"}
+	result := formatToolResult("read_file", "call_1", "successful", toolResults)
+	if result != "which was successful" {
+		t.Errorf("expected 'which was successful', got %q", result)
+	}
+}
+
+func TestFormatToolResult_OtherTool_Failure(t *testing.T) {
+	toolResults := map[string]string{"call_1": "error: file not found"}
+	result := formatToolResult("read_file", "call_1", "unsuccessful", toolResults)
+	if result != "which was unsuccessful" {
+		t.Errorf("expected 'which was unsuccessful', got %q", result)
+	}
+}
+
+// --- FormatConversationTurns with create_task ---
+
+func TestFormatConversationTurns_CreateTask_Success(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{Name: "create_task", Arguments: `{"title":"New task"}`}}}},
+		{Role: "tool", Content: `{"task_id":"frost-amber-quartz","title":"New task"}`, ToolCallID: "call_1"},
+	}
+	result := FormatConversationTurns(messages)
+	if !strings.Contains(result, "I used the create_task tool to create task ID: frost-amber-quartz, title: New task") {
+		t.Errorf("expected 'create task ID: frost-amber-quartz, title: New task' in output, got: %s", result)
+	}
+	// Should NOT contain the generic "which was successful"
+	if strings.Contains(result, "which was") {
+		t.Errorf("should not contain 'which was' for create_task success, got: %s", result)
+	}
+}
+
+func TestFormatConversationTurns_CreateTask_Failure(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{Name: "create_task", Arguments: `{"title":"New task"}`}}}},
+		{Role: "tool", Content: "error: project not found", ToolCallID: "call_1"},
+	}
+	result := FormatConversationTurns(messages)
+	if !strings.Contains(result, "but was unsuccessful. Error: error: project not found") {
+		t.Errorf("expected error message in output, got: %s", result)
+	}
+}
+
+func TestFormatConversationTurns_EditTask_Success(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{Name: "edit_task", Arguments: `{"task_id":"frost-amber-quartz","title":"New title"}`}}}},
+		{Role: "tool", Content: `{"task_id":"frost-amber-quartz","title":"New title","status":"updated"}`, ToolCallID: "call_1"},
+	}
+	result := FormatConversationTurns(messages)
+	if !strings.Contains(result, "I used the edit_task tool to edit task ID: frost-amber-quartz, title: New title") {
+		t.Errorf("expected 'edit task ID: frost-amber-quartz, title: New title' in output, got: %s", result)
+	}
+}
+
+func TestFormatConversationTurns_EditTask_Failure(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{{ID: "call_1", Function: struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}{Name: "edit_task", Arguments: `{"task_id":"frost-amber-quartz","title":"New title"}`}}}},
+		{Role: "tool", Content: "tool edit_task failed: task frost-amber-quartz not found", ToolCallID: "call_1"},
+	}
+	result := FormatConversationTurns(messages)
+	if !strings.Contains(result, "I used the edit_task tool to edit but was unsuccessful. Error:") {
+		t.Errorf("expected error message in output, got: %s", result)
+	}
+	if !strings.Contains(result, "task frost-amber-quartz not found") {
+		t.Errorf("expected underlying error in output, got: %s", result)
+	}
+}
+
+// --- formatChatHistory with create_task ---
+
+func TestFormatChatHistory_CreateTask_Success(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "Create a new task"},
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
+			{ID: "call_1", Type: "function"},
+		}},
+		{Role: "tool", Content: `{"task_id":"frost-amber-quartz","title":"New task"}`, ToolCallID: "call_1"},
+	}
+	messages[2].ToolCalls[0].Function.Name = "create_task"
+	messages[2].ToolCalls[0].Function.Arguments = `{"title":"New task"}`
+
+	history := formatChatHistory(messages, false)
+
+	if !strings.Contains(history, "I used the create_task tool to create task ID: frost-amber-quartz, title: New task") {
+		t.Errorf("chat history missing task ID and title. Got:\n%s", history)
+	}
+	// Should NOT contain generic "which was successful"
+	if strings.Contains(history, "which was") {
+		t.Errorf("should not contain 'which was' for create_task success, got:\n%s", history)
+	}
+}
+
+func TestFormatChatHistory_CreateTask_Failure(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "Create a task"},
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
+			{ID: "call_1", Type: "function"},
+		}},
+		{Role: "tool", Content: "error: invalid project", ToolCallID: "call_1"},
+	}
+	messages[2].ToolCalls[0].Function.Name = "create_task"
+	messages[2].ToolCalls[0].Function.Arguments = `{"title":"Bad task"}`
+
+	history := formatChatHistory(messages, false)
+
+	if !strings.Contains(history, "but was unsuccessful. Error: error: invalid project") {
+		t.Errorf("chat history missing error message. Got:\n%s", history)
+	}
+}
+
+func TestFormatChatHistory_EditTask_Success(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "Edit a task"},
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
+			{ID: "call_1", Type: "function"},
+		}},
+		{Role: "tool", Content: `{"task_id":"frost-amber-quartz","title":"New title","status":"updated"}`, ToolCallID: "call_1"},
+	}
+	messages[2].ToolCalls[0].Function.Name = "edit_task"
+	messages[2].ToolCalls[0].Function.Arguments = `{"task_id":"frost-amber-quartz","title":"New title"}`
+
+	history := formatChatHistory(messages, false)
+
+	if !strings.Contains(history, "I used the edit_task tool to edit task ID: frost-amber-quartz, title: New title") {
+		t.Errorf("chat history missing task ID and title. Got:\n%s", history)
+	}
+}
+
+func TestFormatChatHistory_EditTask_Failure(t *testing.T) {
+	messages := []types.ChatMessage{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "Edit a task"},
+		{Role: "assistant", Content: "", ToolCalls: []types.ToolCallMsg{
+			{ID: "call_1", Type: "function"},
+		}},
+		{Role: "tool", Content: "tool edit_task failed: task frost-amber-quartz not found", ToolCallID: "call_1"},
+	}
+	messages[2].ToolCalls[0].Function.Name = "edit_task"
+	messages[2].ToolCalls[0].Function.Arguments = `{"task_id":"frost-amber-quartz","title":"New title"}`
+
+	history := formatChatHistory(messages, false)
+
+	if !strings.Contains(history, "I used the edit_task tool to edit but was unsuccessful. Error:") {
+		t.Errorf("chat history missing error message. Got:\n%s", history)
+	}
+	if !strings.Contains(history, "task frost-amber-quartz not found") {
+		t.Errorf("chat history missing underlying error. Got:\n%s", history)
+	}
+}
+
 func TestBuildCommitConversation_MergesToolCallsIntoAssistant(t *testing.T) {
 	taskMsgs := []types.TaskMessage{
 		{Role: "user", Content: "Fix the bug"},
