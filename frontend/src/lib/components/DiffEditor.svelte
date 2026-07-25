@@ -491,6 +491,11 @@
                     py: 'Python', pyi: 'Python', rs: 'Rust',
                 };
                 lspLanguage = langMap[ext] || ext.toUpperCase();
+                // Fallback: some LSP servers (e.g., typescript-language-server) don't
+                // include serverInfo in the initialize response. Use language name.
+                if (!lspServerName) {
+                    lspServerName = lspLanguage;
+                }
 
                 // Swap compartment: replace autocompletion() with LSP plugin
                 if (view && lspClient) {
