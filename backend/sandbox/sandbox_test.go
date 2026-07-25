@@ -125,7 +125,7 @@ func TestCreateAndStop(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-sandbox-task"
 
-	err, _ := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestExec(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-task"
 
-	err, _ := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestExecNotAllowed(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-restricted-task"
 
-	err, _ := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestExecWithInput(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-input-task"
 
-	err, _ := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestCreateWithoutGVisor(t *testing.T) {
 		available: false,
 	}
 
-	err, _ := sm.Create("task-1", t.TempDir(), "test-proj", "", "", SandboxOpts{})
+	_, err := sm.Create("task-1", t.TempDir(), "test-proj", "", "", SandboxOpts{})
 	if err == nil {
 		t.Fatal("expected error when gVisor is unavailable")
 	}
@@ -620,7 +620,7 @@ func TestPiAvailable(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-pi-available-task"
 
-	err, _ := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -652,7 +652,7 @@ func TestStartProcess(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-startprocess-task"
 
-	err, _ := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -723,7 +723,7 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 	taskID := "test-memory-task"
 
 	// Create with 512MB memory limit
-	err, _ := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{MemoryLimit: 512})
+	_, err := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{MemoryLimit: 512})
 	if err != nil {
 		t.Fatalf("create sandbox with memory limit: %v", err)
 	}
@@ -764,7 +764,7 @@ func TestCreateWithCapabilities(t *testing.T) {
 	taskID := "test-capabilities-task"
 
 	// Create with custom capabilities
-	err, _ := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{
+	_, err := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{
 		Capabilities: []string{"CAP_NET_RAW", "CAP_CHOWN"},
 	})
 	if err != nil {
@@ -1009,7 +1009,7 @@ func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 		t.Fatal("host path should not exist before Create")
 	}
 
-	err, _ := sm.Create(taskID, baseDir, "test-proj", "", "", SandboxOpts{SandboxMounts: sandboxMounts})
+	_, err := sm.Create(taskID, baseDir, "test-proj", "", "", SandboxOpts{SandboxMounts: sandboxMounts})
 	if err != nil {
 		t.Fatalf("create sandbox with custom mount: %v", err)
 	}
@@ -1042,7 +1042,7 @@ func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 	taskID := "test-plan-task"
 
 	// Create with plan mode (read-only mount)
-	err, _ := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{PlanMode: true})
+	_, err := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{PlanMode: true})
 	if err != nil {
 		t.Fatalf("create sandbox with plan mode: %v", err)
 	}

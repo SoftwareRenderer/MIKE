@@ -196,39 +196,39 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 // If skillsDir is non-empty, the skills directory is bind-mounted read-only at SkillsMount.
 // If sandboxMounts is non-empty, custom host path bind mounts are added after standard mounts.
 // If sandboxEnvs is non-empty, environment variables are set in the container via -e flags.
-// Returns (error, assignedPorts) where assignedPorts lists the host→container mappings.
-func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath, projectID string, opts SandboxOpts) (error, []types.AssignedPort) {
+// Returns (assignedPorts, error) where assignedPorts lists the host→container mappings.
+func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath, projectID string, opts SandboxOpts) ([]types.AssignedPort, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if !sm.available {
-		return fmt.Errorf("gVisor not available (runsc not installed)"), nil
+		return nil, fmt.Errorf("gVisor not available (runsc not installed)")
 	}
 
 	// Sanitize ID: podman container names must match [a-zA-Z0-9][a-zA-Z0-9_.-]*
 	safeID, err := sm.rt.SanitizeID(taskID)
 	if err != nil {
-		return fmt.Errorf("invalid task ID for sandbox container: %w", err), nil
+		return nil, fmt.Errorf("invalid task ID for sandbox container: %w", err)
 	}
 	containerName := fmt.Sprintf("%s-%s", ContainerNamePrefix, safeID)
 
 	// Check if container already exists
 	exists, err := sm.rt.ContainerExists(containerName)
 	if err != nil {
-		return fmt.Errorf("check container: %w", err), nil
+		return nil, fmt.Errorf("check container: %w", err)
 	}
 	if exists {
 		// Clean up stale container from a previous server run
 		log.Printf("[sandbox] task=%s removing stale container %s", taskID, containerName)
 		if rmErr := sm.rt.RemoveContainer(containerName); rmErr != nil {
-			return fmt.Errorf("remove stale container %s: %w", containerName, rmErr), nil
+			return nil, fmt.Errorf("remove stale container %s: %w", containerName, rmErr)
 		}
 	}
 
 	// Resolve worktree to absolute path
 	absWorktree, err := filepath.Abs(worktreePath)
 	if err != nil {
-		return fmt.Errorf("resolve worktree path: %w", err), nil
+		return nil, fmt.Errorf("resolve worktree path: %w", err)
 	}
 	// Compute mount path: /home/sandbox/<project-name>
 	mountPath := "/home/sandbox/" + projectName
@@ -236,7 +236,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 	// Resolve agent binary path (required)
 	agentPath, err := sm.rt.GetAgentBinaryPath()
 	if err != nil {
-		return fmt.Errorf("sandbox-bridge binary not found: %w", err), nil
+		return nil, fmt.Errorf("sandbox-bridge binary not found: %w", err)
 	}
 
 	// Create container with gVisor runtime
@@ -318,7 +318,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 	if opts.PiAgentDir != "" {
 		absPiDir, err := filepath.Abs(opts.PiAgentDir)
 		if err != nil {
-			return fmt.Errorf("resolve pi agent dir path: %w", err), assignedPorts
+			return nil, fmt.Errorf("resolve pi agent dir path: %w", err)
 		}
 		createArgs = append(createArgs,
 			"-v", absPiDir+":"+PiConfigMount+":rprivate,rw",
@@ -380,14 +380,14 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 
 	out, err := sm.podmanExec(createArgs...)
 	if err != nil {
-		return fmt.Errorf("create container: %w (%s)", err, out), assignedPorts
+		return nil, fmt.Errorf("create container: %w (%s)", err, out)
 	}
 
 	// Copy agent binary into container (before start)
 	cpOut, cpErr := sm.podmanExec("cp", agentPath, containerName+":"+"/sandbox-bridge")
 	if cpErr != nil {
 		_, _ = sm.podmanExec("rm", "-f", containerName)
-		return fmt.Errorf("copy agent to container: %w (%s)", cpErr, cpOut), assignedPorts
+		return nil, fmt.Errorf("copy agent to container: %w (%s)", cpErr, cpOut)
 	}
 
 	// Start the container (needed for exec sessions)
@@ -396,7 +396,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 	if err != nil {
 		// Clean up on start failure
 		_, _ = sm.podmanExec("rm", "-f", containerName)
-		return fmt.Errorf("start container: %w (%s)", err, startOut), assignedPorts
+		return nil, fmt.Errorf("start container: %w (%s)", err, startOut)
 	}
 
 	// Start agent in container via podman exec (stdin/stdout protocol)
@@ -411,13 +411,13 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 	stdin, err := agentCmd.StdinPipe()
 	if err != nil {
 		_, _ = sm.podmanExec("rm", "-f", containerName)
-		return fmt.Errorf("create stdin pipe: %w", err), assignedPorts
+		return nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
 	stdout, err := agentCmd.StdoutPipe()
 	if err != nil {
 		stdin.Close()
 		_, _ = sm.podmanExec("rm", "-f", containerName)
-		return fmt.Errorf("create stdout pipe: %w", err), assignedPorts
+		return nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
 	agentCmd.Stderr = nil // agent logs go to container stderr
 
@@ -425,7 +425,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 		stdin.Close()
 		stdout.Close()
 		_, _ = sm.podmanExec("rm", "-f", containerName)
-		return fmt.Errorf("start agent: %w", err), assignedPorts
+		return nil, fmt.Errorf("start agent: %w", err)
 	}
 
 	sm.active[taskID] = containerName
@@ -433,7 +433,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 	sm.agents[taskID] = &agentConn{cmd: agentCmd, stdin: stdin, stdout: stdout}
 
 	log.Printf("[sandbox] task=%s agent ready", taskID)
-	return nil, assignedPorts
+	return assignedPorts, nil
 }
 
 // Exec runs a command inside the task's sandbox container.
@@ -542,7 +542,7 @@ func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, comma
 func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectName, projectID string, opts SandboxOpts) error {
 	if !sm.ContainerIsRunning(taskID) {
 		_ = sm.Stop(taskID) // clean up stale entry if any
-		if err, _ := sm.Create(taskID, projectPath, projectName, "", projectID, opts); err != nil {
+		if _, err := sm.Create(taskID, projectPath, projectName, "", projectID, opts); err != nil {
 			return fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -567,7 +567,7 @@ func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, projectPat
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err, _ := sm.Create(taskID, worktreePath, projectName, projectPath, "", opts); err != nil {
+		if _, err := sm.Create(taskID, worktreePath, projectName, projectPath, "", opts); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -581,7 +581,7 @@ func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, projectName, p
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if err, _ := sm.Create(taskID, worktreePath, projectName, projectPath, "", opts); err != nil {
+		if _, err := sm.Create(taskID, worktreePath, projectName, projectPath, "", opts); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -601,7 +601,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		}
 		// Create container on demand
 		var err error
-		err, assignedPorts = sm.Create(taskID, worktreePath, projectName, projectPath, projectID, opts)
+		assignedPorts, err = sm.Create(taskID, worktreePath, projectName, projectPath, projectID, opts)
 		if err != nil {
 			return nil, nil, fmt.Errorf("create sandbox container: %w", err)
 		}
@@ -614,7 +614,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		log.Printf("[sandbox] task=%s container %s not running, recreating", taskID, containerName)
 		_ = sm.Stop(taskID)
 		var err error
-		err, assignedPorts = sm.Create(taskID, worktreePath, projectName, projectPath, projectID, opts)
+		assignedPorts, err = sm.Create(taskID, worktreePath, projectName, projectPath, projectID, opts)
 		if err != nil {
 			return nil, nil, fmt.Errorf("recreate sandbox container: %w", err)
 		}
