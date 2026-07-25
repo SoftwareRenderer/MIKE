@@ -164,8 +164,9 @@ func formatChatHistory(messages []types.ChatMessage, skipSummaryMsg bool) string
 				for _, tc := range m.ToolCalls {
 					action := formatToolAction(tc.Function.Name, tc.Function.Arguments)
 					status := formatToolStatus(tc.ID, toolResults)
-					sb.WriteString(fmt.Sprintf("Assistant: (I used the %s tool to %s, which was %s)\n",
-						tc.Function.Name, action, status))
+					result := formatToolResult(tc.Function.Name, tc.ID, status, toolResults)
+					sb.WriteString(fmt.Sprintf("Assistant: (I used the %s tool to %s %s)\n",
+						tc.Function.Name, action, result))
 				}
 			} else if m.Content != "" {
 				sb.WriteString("Assistant: ")
@@ -209,6 +210,10 @@ func formatToolAction(name, arguments string) string {
 		}
 	case "request_review":
 		return "request a review"
+	case "create_task":
+		return "create"
+	case "edit_task":
+		return "edit"
 	}
 	return "perform an action"
 }
@@ -219,12 +224,79 @@ func formatToolStatus(toolCallID string, toolResults map[string]string) string {
 	if !ok {
 		return "pending"
 	}
-	// Check for common error patterns
+	// Check for common error patterns.
+	// Tool errors are wrapped as "tool <name> failed: <msg>" by executeTool.
 	lower := strings.ToLower(output)
-	if strings.HasPrefix(lower, "error") || strings.HasPrefix(lower, "failed") {
+	if strings.HasPrefix(lower, "error") || strings.HasPrefix(lower, "failed") || strings.HasPrefix(lower, "tool ") {
 		return "unsuccessful"
 	}
 	return "successful"
+}
+
+// isTaskID checks if a string matches the task ID format (word-word-word).
+func isTaskID(s string) bool {
+	parts := strings.Split(s, "-")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// extractTaskFields parses a JSON tool result and extracts task_id and title fields.
+// Returns empty strings if parsing fails or fields are missing.
+func extractTaskFields(output string) (taskID, title string) {
+	var result map[string]string
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		return "", ""
+	}
+	return result["task_id"], result["title"]
+}
+
+// formatToolResult returns the descriptive result text for a tool call.
+// For create_task: returns "task ID: [id] - [title]" on success (extracted from JSON result),
+// "but was unsuccessful. Error: [msg]" on failure, or "a task" when result is unknown.
+// For edit_task: returns "task ID: [id] - [title]" on success (extracted from JSON result),
+// "but was unsuccessful. Error: [msg]" on failure.
+// For other tools: returns "which was [status]".
+func formatToolResult(name, toolCallID string, status string, toolResults map[string]string) string {
+	if name == "create_task" {
+		if status == "successful" {
+			taskID, title := extractTaskFields(toolResults[toolCallID])
+			if isTaskID(taskID) {
+				if title != "" {
+					return "task ID: " + taskID + ", title: " + title
+				}
+				return "task ID: " + taskID
+			}
+			return "a task"
+		}
+		if status == "unsuccessful" {
+			return "but was unsuccessful. Error: " + strings.TrimSpace(toolResults[toolCallID])
+		}
+		return "a task"
+	}
+	if name == "edit_task" {
+		if status == "successful" {
+			taskID, title := extractTaskFields(toolResults[toolCallID])
+			if isTaskID(taskID) {
+				if title != "" {
+					return "task ID: " + taskID + ", title: " + title
+				}
+				return "task ID: " + taskID
+			}
+			return "which was " + status
+		}
+		if status == "unsuccessful" {
+			return "but was unsuccessful. Error: " + strings.TrimSpace(toolResults[toolCallID])
+		}
+		return "which was " + status
+	}
+	return "which was " + status
 }
 
 // isSandboxableTool returns true if the tool can run inside a sandbox.
@@ -668,8 +740,9 @@ func FormatConversationTurns(messages []types.ChatMessage) string {
 				for _, tc := range m.ToolCalls {
 					action := formatToolAction(tc.Function.Name, tc.Function.Arguments)
 					status := formatToolStatus(tc.ID, toolResults)
-					sb.WriteString(fmt.Sprintf("\nAssistant: (I used the %s tool to %s, which was %s)",
-						tc.Function.Name, action, status))
+					result := formatToolResult(tc.Function.Name, tc.ID, status, toolResults)
+					sb.WriteString(fmt.Sprintf("\nAssistant: (I used the %s tool to %s %s)",
+						tc.Function.Name, action, result))
 				}
 			}
 			sb.WriteString("\n\n")
