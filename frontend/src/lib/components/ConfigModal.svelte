@@ -570,30 +570,30 @@
 </script>
 
 {#snippet customHeader({ title }: { title: string })}
-    <h2 id="modal-title">{title}</h2>
-    <div class="header-actions">
-        {#if !isMobileCtx.isMobile}
-            <button type="button" class="icon-btn" onclick={toggleModalFullscreen} title="Toggle fullscreen" aria-label="Toggle fullscreen">
-                {#if modalFullscreen}
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                {:else}
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                {/if}
-            </button>
-        {/if}
-        <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
+    <div class="header-wrap">
+        <h2 id="modal-title">{title}</h2>
+        <div class="header-tabs">
+            <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>Providers</button>
+            <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>Task Defaults</button>
+            <button type="button" class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => activeTab = 'extensions'}>Extensions</button>
+            <button type="button" class="tab-btn" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>About</button>
+        </div>
+        <div class="header-actions">
+            {#if !isMobileCtx.isMobile}
+                <button type="button" class="icon-btn" onclick={toggleModalFullscreen} title="Toggle fullscreen" aria-label="Toggle fullscreen">
+                    {#if modalFullscreen}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    {:else}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    {/if}
+                </button>
+            {/if}
+            <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
+        </div>
     </div>
 {/snippet}
 
 <BaseModal title="Settings" width={modalFullscreen ? '100vw' : '720px'} footer={footer} onClose={handleClose} modalClass={modalFullscreen ? 'config-modal fullscreen-modal' : 'config-modal'} header={customHeader}>
-    <!-- Tab Bar -->
-    <div class="tab-bar">
-        <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>Providers</button>
-        <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>Task Defaults</button>
-        <button type="button" class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => activeTab = 'extensions'}>Extensions</button>
-        <button type="button" class="tab-btn" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>About</button>
-    </div>
-
     <!-- Tab Content -->
     <div class="tab-content">
 
@@ -772,21 +772,43 @@
         max-height: 600px;
     }
 
-    /* Remove top padding so sticky tab-bar reaches the header with no gap */
-    :global(.config-modal .modal-body) {
-        padding-top: 0 !important;
+    /* Header wrapper: single flex child in modal-header, single row */
+    .header-wrap {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex: 1;
+        min-width: 0;
+    }
+    .header-wrap h2 {
+        margin: 0;
+        font-size: 1.25rem;
+        font-weight: 600;
+        white-space: nowrap;
     }
 
-    /* Tab bar */
-    .tab-bar {
+    /* Tabs row */
+    .header-tabs {
         display: flex;
         gap: 0;
-        margin-bottom: 16px;
-        position: sticky;
-        top: 0;
-        background: var(--color-surface-1);
-        z-index: 5;
-        padding-top: 8px;
+        flex: 1;
+        min-width: 0;
+    }
+
+    /* Mobile: title + close on top row, tabs below */
+    @media (max-width: 768px) {
+        .header-wrap {
+            flex-wrap: wrap;
+        }
+        .header-tabs {
+            order: 3;
+            flex-basis: 100%;
+            margin-top: 8px;
+        }
+        .header-actions {
+            order: 2;
+            margin-left: auto;
+        }
     }
     .tab-btn {
         padding: 8px 16px;
