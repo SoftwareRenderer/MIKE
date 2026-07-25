@@ -62,6 +62,7 @@
     }
 
     interface ProviderDraft {
+        uid: string; // stable id for {#each} key — never changes after creation
         name: string;
         display_name: string;
         kind: 'llm' | 'agent';
@@ -123,6 +124,7 @@
 
     let providers = $state<ProviderDraft[]>([]);
     let encryptionEnabled = $state(false);
+    let _providerUidCounter = 0;
 
     function buildProviders(cfg: Config | null): ProviderDraft[] {
         const oldGlobalDefault = '';
@@ -130,6 +132,7 @@
             // Detect agent provider by kind field, agent:// prefix, or legacy sentinel URL
             const isAgent = p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX);
             const draft: ProviderDraft = {
+                uid: p.name, // use existing name as stable uid for loaded providers
                 ...p,
                 kind: isAgent ? 'agent' : (p.kind || 'llm'),
                 api_key: p.api_key || '',
@@ -220,6 +223,7 @@
 
     function addProvider() {
         providers.push({
+            uid: `new-${++_providerUidCounter}-${Date.now()}`,
             name: '',
             display_name: '',
             kind: 'llm',
@@ -285,6 +289,7 @@
         agentMenuOpen = false;
         agentMenuRect = null;
         providers.push({
+            uid: `agent-${ext.name}`,
             name: ext.name,
             display_name: ext.manifest.display_name || ext.name,
             kind: 'agent',
@@ -605,7 +610,7 @@
                     {/if}
                 </div>
                 <div class="providers-list">
-                    {#each providers as p, i (p.name)}
+                    {#each providers as p, i (p.uid)}
                         <ProviderCard
                             provider={p}
                             index={i}
