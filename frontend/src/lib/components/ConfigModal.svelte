@@ -5,6 +5,7 @@
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
     import { listExtensions } from '$lib/api/extensions';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
+    import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import BaseModal from './BaseModal.svelte';
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
     import ToggleSwitch from './ToggleSwitch.svelte';
@@ -546,6 +547,13 @@
         }
     }
 
+    // Fullscreen toggle
+    let modalFullscreen = $state(false);
+    const isMobileCtx = useIsMobile();
+    function toggleModalFullscreen() {
+        modalFullscreen = !modalFullscreen;
+    }
+
     // PWA install handler
     async function handlePwaInstall() {
         const promptEvent = appStore.pwaInstallPrompt;
@@ -561,7 +569,23 @@
     }
 </script>
 
-<BaseModal title="Settings" width="720px" footer={footer} onClose={handleClose} modalClass="config-modal">
+{#snippet customHeader({ title }: { title: string })}
+    <h2 id="modal-title">{title}</h2>
+    <div class="header-actions">
+        {#if !isMobileCtx.isMobile}
+            <button type="button" class="icon-btn" onclick={toggleModalFullscreen} title="Toggle fullscreen" aria-label="Toggle fullscreen">
+                {#if modalFullscreen}
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                {:else}
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                {/if}
+            </button>
+        {/if}
+        <button class="close-btn" onclick={handleClose} aria-label="Close" title="Close">✕</button>
+    </div>
+{/snippet}
+
+<BaseModal title="Settings" width={modalFullscreen ? '100vw' : '720px'} footer={footer} onClose={handleClose} modalClass={modalFullscreen ? 'config-modal fullscreen-modal' : 'config-modal'} header={customHeader}>
     <!-- Tab Bar -->
     <div class="tab-bar">
         <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>Providers</button>
@@ -1048,6 +1072,50 @@
         border-radius: 9999px;
         vertical-align: middle;
         margin-left: 4px;
+    }
+
+    /* Hide BaseModal's close button — we render our own in the header snippet */
+    :global(.config-modal > .modal-header > .close-btn) {
+        display: none;
+    }
+
+    /* Header actions (fullscreen toggle + close) */
+    .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .icon-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        transition: background 0.15s, color 0.15s;
+        flex-shrink: 0;
+    }
+    .icon-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+
+    /* Fullscreen modal */
+    :global(.config-modal.fullscreen-modal) {
+        width: 100vw !important;
+        max-width: none;
+        max-height: 100dvh !important;
+        height: 100dvh !important;
+        border-radius: 0;
+        border: none;
+    }
+    :global(.config-modal.fullscreen-modal .modal-body) {
+        padding: 16px 32px;
     }
 
     </style>
