@@ -31,12 +31,6 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			log.Printf("[agent-panic] task=%s recovered from panic: %v", task.ID, r)
 			te.sendAndPersistError(task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
 		}
-		// Keep the task in te.tasks for on-demand compaction (agent runner stays alive).
-		te.taskMu.Lock()
-		if state, exists := te.tasks[task.ID]; exists && state.ctx == ctx {
-			// Don't delete — keep alive for compaction.
-		}
-		te.taskMu.Unlock()
 	}()
 
 	sessionName := fmt.Sprintf("kanban-%s", task.ID)
@@ -309,7 +303,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 						}
 					}
 				default:
-					te.handleAgentTurnComplete(task, projectID, task.ID, worktreePath, runner, stopReason, sandboxEnabled, &agentEnded, &totalPromptTokens, &totalPredictedTokens)
+					te.handleAgentTurnComplete(task, projectID, task.ID, worktreePath, runner, stopReason, &agentEnded)
 					// Send complete event to clear frontend streaming state.
 					// For normal idle (agentEnded=false), the loop stays alive for follow-ups.
 					// For terminal states (agentEnded=true), the loop exits and sends its own complete.
@@ -401,7 +395,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 }
 
 // handleAgentTurnComplete handles post-turn logic after an agent turn completes.
-func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, taskID, worktreePath string, runner *agent.AgentRunner, stopReason string, sandboxEnabled bool, agentEnded *bool, totalPromptTokens, totalPredictedTokens *int) {
+func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, taskID, worktreePath string, runner *agent.AgentRunner, stopReason string, agentEnded *bool) {
 	// Check auto-commit/merge
 	if task.AutoCommit {
 		if task.HasMergeConflict {
@@ -587,7 +581,6 @@ func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID stri
 	return totalPromptTokens, totalPredictedTokens
 }
 
-// toStreamEvent converts a generic agent event to a Kanban StreamEvent for WebSocket broadcasting.
 // buildContextReplay builds a text representation of the conversation history
 // for context replay when the Pi agent is restarted without session persistence.
 // The format is a structured transcript that the LLM can understand.
@@ -676,6 +669,7 @@ func buildContextReplay(messages []types.TaskMessage) string {
 	return sb.String()
 }
 
+// toStreamEvent converts a generic agent event to a Kanban StreamEvent for WebSocket broadcasting.
 func toStreamEvent(event agent.Event, sandbox bool) types.StreamEvent {
 	switch event.Type {
 	case agent.EventTypeToken:
@@ -740,6 +734,4 @@ func toStreamEvent(event agent.Event, sandbox bool) types.StreamEvent {
 		// Pass through unknown events as status
 		return types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Agent: %s", event.Type)}}
 	}
-
-	return types.StreamEvent{}
 }
