@@ -339,7 +339,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 	if !te.sandboxMgr.ContainerIsRunning(task.ID) {
 		agentConfig := te.agentRegistry.GetConfigMount()
 		var createErr error
-		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, projectName, projectPath, projectID, kanban_sandbox.SandboxOpts{
+		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, projectName, projectPath, kanban_sandbox.SandboxOpts{
 			BaseImage:        imageToUse,
 			NetworkIsolation: sandboxOpts.NetworkIsolation,
 			MemoryLimit:      sandboxOpts.MemoryLimit,

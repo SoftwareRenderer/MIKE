@@ -179,23 +179,31 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 }
 
 // Create creates a gVisor sandbox container for a task.
-// The worktree is bind-mounted at /home/sandbox/<projectName> inside the container.
-// When planMode is true, the worktree is mounted read-only (ro); otherwise read-write (rw).
-// If projectPath is non-empty, the .git/ directory is also mounted read-only
-// at the same absolute path (so git can resolve refs, objects, worktree metadata, etc.).
-// If baseImage is empty, the default BaseImage constant is used.
-// If networkIsolation is true, the container is created with --network none.
-// If memoryLimit is > 0, the container is created with --memory=<limit>M.
-// If forwardPorts is non-empty, host ports are auto-assigned via net.Listen(":0")
-// and mapped to container ports via -p flags. Assigned ports are returned.
-// If opts.AgentConfig is non-empty, the agent config directory is bind-mounted
-// into the container. HOME is set to /root so the agent finds its config at the
-// default location inside the container.
-// If skillsDir is non-empty, the skills directory is bind-mounted read-only at SkillsMount.
-// If sandboxMounts is non-empty, custom host path bind mounts are added after standard mounts.
-// If sandboxEnvs is non-empty, environment variables are set in the container via -e flags.
-// Returns (assignedPorts, error) where assignedPorts lists the host→container mappings.
-func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath, projectID string, opts SandboxOpts) ([]types.AssignedPort, error) {
+//
+// Filesystem Mounts:
+//   - Worktree: Bind-mounted at /home/sandbox/<projectName>. Mode is read-only (ro) if planMode is true,
+//     otherwise read-write (rw).
+//   - Git Metadata: If projectPath is non-empty and .git/ exists, it is mounted read-only at the
+//     same absolute path to allow git to resolve refs, objects, and worktree metadata.
+//   - Agent Config: If opts.AgentConfig is provided, it is bind-mounted into the container
+//     (default: /root/.config/agent) and HOME is set to /root.
+//   - Skills: If skillsDir is non-empty, it is bind-mounted read-only at SkillsMount.
+//   - Custom: Any additional mounts in opts.SandboxMounts are added after the standard mounts.
+//
+// Container Configuration:
+//   - Image: Uses opts.BaseImage if provided, otherwise defaults to BaseImage constant.
+//   - Network: Created with --network none if networkIsolation is true.
+//   - Memory: Created with --memory=<limit>M if memoryLimit > 0.
+//   - Environment: User-defined environment variables in opts.SandboxEnvs are set via -e flags.
+//
+// Networking:
+//   - Port Forwarding: For each entry in opts.ForwardPorts, an ephemeral host port is auto-assigned
+//     via net.Listen(":0") and mapped to the container port.
+//
+// Returns:
+//   - (assignedPorts, nil) on success, where assignedPorts lists the host→container mappings.
+//   - (nil, error) on failure.
+func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath string, opts SandboxOpts) ([]types.AssignedPort, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -547,7 +555,7 @@ func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, comma
 func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectName, projectID string, opts SandboxOpts) error {
 	if !sm.ContainerIsRunning(taskID) {
 		_ = sm.Stop(taskID) // clean up stale entry if any
-		if _, err := sm.Create(taskID, projectPath, projectName, "", projectID, opts); err != nil {
+		if _, err := sm.Create(taskID, projectPath, projectName, "", opts); err != nil {
 			return fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -572,7 +580,7 @@ func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, projectPat
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if _, err := sm.Create(taskID, worktreePath, projectName, projectPath, "", opts); err != nil {
+		if _, err := sm.Create(taskID, worktreePath, projectName, projectPath, opts); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -586,7 +594,7 @@ func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, projectName, p
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if _, err := sm.Create(taskID, worktreePath, projectName, projectPath, "", opts); err != nil {
+		if _, err := sm.Create(taskID, worktreePath, projectName, projectPath, opts); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -606,7 +614,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		}
 		// Create container on demand
 		var err error
-		assignedPorts, err = sm.Create(taskID, worktreePath, projectName, projectPath, projectID, opts)
+		assignedPorts, err = sm.Create(taskID, worktreePath, projectName, projectPath, opts)
 		if err != nil {
 			return nil, nil, fmt.Errorf("create sandbox container: %w", err)
 		}
@@ -619,7 +627,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		log.Printf("[sandbox] task=%s container %s not running, recreating", taskID, containerName)
 		_ = sm.Stop(taskID)
 		var err error
-		assignedPorts, err = sm.Create(taskID, worktreePath, projectName, projectPath, projectID, opts)
+		assignedPorts, err = sm.Create(taskID, worktreePath, projectName, projectPath, opts)
 		if err != nil {
 			return nil, nil, fmt.Errorf("recreate sandbox container: %w", err)
 		}

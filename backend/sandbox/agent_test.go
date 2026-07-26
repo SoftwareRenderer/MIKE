@@ -19,7 +19,7 @@ func TestAgentClient(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-agent-client"
 
-	_, err := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
