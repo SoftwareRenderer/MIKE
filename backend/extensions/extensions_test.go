@@ -197,8 +197,9 @@ func TestConfigSchema_Properties(t *testing.T) {
 	maxVal := 2048.0
 	schema := &ConfigSchema{
 		Type: "object",
-		Properties: map[string]SchemaProp{
-			"memoryLimit": {
+		Properties: []SchemaProp{
+			{
+				Key:         "memoryLimit",
 				Type:        "number",
 				Title:       "Memory Limit",
 				Description: "Memory limit in MB",
@@ -206,7 +207,8 @@ func TestConfigSchema_Properties(t *testing.T) {
 				Minimum:     &minVal,
 				Maximum:     &maxVal,
 			},
-			"networkIsolation": {
+			{
+				Key:         "networkIsolation",
 				Type:        "boolean",
 				Title:       "Network Isolation",
 				Description: "Enable network isolation",
@@ -222,7 +224,10 @@ func TestConfigSchema_Properties(t *testing.T) {
 	if len(schema.Properties) != 2 {
 		t.Errorf("Properties count = %v, want 2", len(schema.Properties))
 	}
-	memProp := schema.Properties["memoryLimit"]
+	memProp := schema.GetProperty("memoryLimit")
+	if memProp == nil {
+		t.Fatal("GetProperty(memoryLimit) returned nil")
+	}
 	if memProp.Type != "number" {
 		t.Errorf("memoryLimit.Type = %v, want number", memProp.Type)
 	}
@@ -232,12 +237,52 @@ func TestConfigSchema_Properties(t *testing.T) {
 	if *memProp.Maximum != 2048.0 {
 		t.Errorf("memoryLimit.Maximum = %v, want 2048", *memProp.Maximum)
 	}
-	netProp := schema.Properties["networkIsolation"]
+	netProp := schema.GetProperty("networkIsolation")
+	if netProp == nil {
+		t.Fatal("GetProperty(networkIsolation) returned nil")
+	}
 	if netProp.Type != "boolean" {
 		t.Errorf("networkIsolation.Type = %v, want boolean", netProp.Type)
 	}
 	if len(schema.Required) != 1 || schema.Required[0] != "memoryLimit" {
 		t.Errorf("Required = %v, want [memoryLimit]", schema.Required)
+	}
+}
+
+func TestConfigSchema_JSON_PreservesPropertyOrder(t *testing.T) {
+	jsonData := `{
+		"type": "object",
+		"properties": [
+			{"key": "api_key", "type": "string", "title": "API Key", "sensitive": true},
+			{"key": "memory_limit", "type": "number", "title": "Memory Limit", "default": 256},
+			{"key": "sandbox_mount_mode", "type": "string", "title": "Mount Mode", "default": "rw"}
+		],
+		"required": ["api_key"]
+	}`
+
+	var schema ConfigSchema
+	if err := json.Unmarshal([]byte(jsonData), &schema); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if len(schema.Properties) != 3 {
+		t.Fatalf("Properties count = %d, want 3", len(schema.Properties))
+	}
+
+	expectedOrder := []string{"api_key", "memory_limit", "sandbox_mount_mode"}
+	for i, want := range expectedOrder {
+		if schema.Properties[i].Key != want {
+			t.Errorf("Properties[%d].Key = %q, want %q", i, schema.Properties[i].Key, want)
+		}
+	}
+
+	// Verify GetProperty works
+	prop := schema.GetProperty("memory_limit")
+	if prop == nil {
+		t.Fatal("GetProperty(memory_limit) returned nil")
+	}
+	if prop.Type != "number" {
+		t.Errorf("memory_limit.Type = %v, want number", prop.Type)
 	}
 }
 
@@ -306,12 +351,12 @@ func TestAgentConfig_ResolveSandboxMountTemplates(t *testing.T) {
 			name: "resolve all templates from config_schema defaults",
 			agent: &AgentConfig{
 				ConfigSchema: &ConfigSchema{
-					Properties: map[string]SchemaProp{
-						"sandbox_mount_host_path":      {Default: "~/.pi/agent"},
-						"sandbox_mount_container_path": {Default: "/root/.pi/agent"},
-						"sandbox_mount_mode":           {Default: "rw"},
-						"sandbox_mount_env_key":        {Default: "HOME"},
-						"sandbox_mount_env_value":      {Default: "~/.pi/agent"},
+					Properties: []SchemaProp{
+						{Key: "sandbox_mount_host_path", Default: "~/.pi/agent"},
+						{Key: "sandbox_mount_container_path", Default: "/root/.pi/agent"},
+						{Key: "sandbox_mount_mode", Default: "rw"},
+						{Key: "sandbox_mount_env_key", Default: "HOME"},
+						{Key: "sandbox_mount_env_value", Default: "~/.pi/agent"},
 					},
 				},
 				SandboxMount: &types.AgentConfigMount{
@@ -356,8 +401,8 @@ func TestAgentConfig_ResolveSandboxMountTemplates(t *testing.T) {
 			name: "template for missing property passes through unchanged",
 			agent: &AgentConfig{
 				ConfigSchema: &ConfigSchema{
-					Properties: map[string]SchemaProp{
-						"sandbox_mount_host_path": {Default: "~/.pi/agent"},
+					Properties: []SchemaProp{
+						{Key: "sandbox_mount_host_path", Default: "~/.pi/agent"},
 					},
 				},
 				SandboxMount: &types.AgentConfigMount{

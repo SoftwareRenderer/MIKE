@@ -7,14 +7,15 @@
     "deprecated": false,
     "config_schema": {
         "type": "object",
-        "properties": {
-            "memory_limit": {
+        "properties": [
+            {
+                "key": "memory_limit",
                 "type": "number",
                 "title": "Memory Limit (MB)",
                 "description": "Maximum memory for the gopls sandbox",
                 "default": 256
             }
-        },
+        ],
         "required": []
     },
     "lsp": {

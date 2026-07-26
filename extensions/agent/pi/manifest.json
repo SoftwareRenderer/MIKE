@@ -7,39 +7,44 @@
     "priority": 0,
     "config_schema": {
         "type": "object",
-        "properties": {
-            "sandbox_mount_host_path": {
+        "properties": [
+            {
+                "key": "sandbox_mount_host_path",
                 "type": "string",
                 "title": "Config Mount Host Path",
                 "description": "Host path to the Pi config directory. Override if your config is stored elsewhere.",
                 "default": "~/.pi/agent"
             },
-            "sandbox_mount_container_path": {
+            {
+                "key": "sandbox_mount_container_path",
                 "type": "string",
                 "title": "Config Mount Container Path",
                 "description": "Mount point inside the sandbox container.",
                 "default": "/root/.pi/agent"
             },
-            "sandbox_mount_mode": {
+            {
+                "key": "sandbox_mount_mode",
                 "type": "string",
                 "title": "Config Mount Mode",
                 "description": "Read-write or read-only access to the Pi config directory inside the sandbox container. Read-write is required because Pi writes session files and settings to this directory.",
                 "enum": ["ro", "rw"],
                 "default": "rw"
             },
-            "sandbox_mount_env_key": {
+            {
+                "key": "sandbox_mount_env_key",
                 "type": "string",
                 "title": "Config Mount Env Key",
                 "description": "Environment variable name for the config host path, used in non-sandbox mode. Set to empty to disable.",
                 "default": "HOME"
             },
-            "sandbox_mount_env_value": {
+            {
+                "key": "sandbox_mount_env_value",
                 "type": "string",
                 "title": "Config Mount Env Value",
                 "description": "Environment variable value for the config host path, used in non-sandbox mode.",
                 "default": "~/.pi/agent"
             }
-        }
+        ]
     },
     "agent": {
         "wasm_module": "pi.wasm",

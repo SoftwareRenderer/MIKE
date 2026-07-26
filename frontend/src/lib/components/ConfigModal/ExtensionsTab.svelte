@@ -293,15 +293,16 @@
     }
 
     // Get config schema fields for an extension
-    function getConfigSchemaFields(ext: Extension): Array<{ key: string; title: string; type: string; default?: any; sensitive?: boolean }> {
+    function getConfigSchemaFields(ext: Extension): Array<{ key: string; title: string; type: string; default?: any; sensitive?: boolean; enum?: any[] }> {
         const schema = ext.manifest.config_schema;
         if (!schema || !schema.properties) return [];
-        return Object.entries(schema.properties).map(([key, val]: [string, any]) => ({
-            key,
-            title: val.title || key,
-            type: val.type || 'string',
-            default: val.default,
-            sensitive: val.sensitive || false,
+        return schema.properties.map((p: SchemaProperty) => ({
+            key: p.key,
+            title: p.title || p.key,
+            type: p.type || 'string',
+            default: p.default,
+            sensitive: p.sensitive || false,
+            enum: p.enum,
         }));
     }
 
@@ -587,6 +588,17 @@
                                     oninput={(e) => editConfig[field.key] = Number((e.target as HTMLInputElement).value)}
                                     class="config-input"
                                 />
+                            {:else if field.key === 'sandbox_mount_mode'}
+                                <div class="radio-group radio-group-small">
+                                    <label class="radio-label" class:active={(editConfig[field.key] ?? field.default ?? 'rw') === 'rw'} title="Mount Read/Write">
+                                        <input type="radio" name="mount-mode" value="rw" checked={(editConfig[field.key] ?? field.default ?? 'rw') === 'rw'} onchange={() => editConfig[field.key] = 'rw'} />
+                                        <span class="radio-text">rw</span>
+                                    </label>
+                                    <label class="radio-label" class:active={(editConfig[field.key] ?? field.default ?? 'rw') === 'ro'} title="Mount Read-only">
+                                        <input type="radio" name="mount-mode" value="ro" checked={(editConfig[field.key] ?? field.default ?? 'rw') === 'ro'} onchange={() => editConfig[field.key] = 'ro'} />
+                                        <span class="radio-text">ro</span>
+                                    </label>
+                                </div>
                             {:else if field.type === 'boolean'}
                                 <label class="toggle-label">
                                     <ToggleSwitch
@@ -990,13 +1002,58 @@
         font-size: 0.78rem;
     }
 
-    .toggle-label {
+    /* Radio group (matches SandboxConfigModal) */
+    .radio-group {
+        display: flex;
+        gap: 0;
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-sm, 4px);
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+
+    .radio-label {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        font-size: 0.85rem;
-        color: var(--color-text-tertiary);
+        gap: 4px;
+        padding: 3px 10px;
+        font-size: 0.75rem;
+        color: var(--color-text-secondary, var(--color-text-tertiary));
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+        user-select: none;
     }
+
+    .radio-label:first-child {
+        border-right: 1px solid var(--color-border-subtle);
+    }
+
+    .radio-label.active {
+        background: var(--color-accent-dark, rgba(88, 166, 255, 0.25));
+        color: white;
+    }
+
+    .radio-label:hover:not(.active) {
+        background: var(--color-surface-3, rgba(139, 148, 158, 0.1));
+    }
+
+    .radio-label input[type="radio"] {
+        display: none;
+    }
+
+    .radio-text {
+        white-space: nowrap;
+    }
+
+    .radio-group-small {
+        border-radius: var(--radius-sm, 4px);
+    }
+
+    .radio-group-small .radio-label {
+        padding: 2px 7px;
+        font-size: 0.8125rem;
+    }
+
 
     .btn {
         padding: 0.4rem 0.75rem;

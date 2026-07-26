@@ -446,11 +446,12 @@ export interface CSSExtensionConfig {
 
 export interface ConfigSchema {
     type: string;
-    properties?: Record<string, SchemaProperty>;
+    properties?: SchemaProperty[]; // array to preserve insertion order
     required?: string[];
 }
 
 export interface SchemaProperty {
+    key: string;
     type: string;
     title?: string;
     description?: string;
@@ -458,6 +459,7 @@ export interface SchemaProperty {
     minimum?: number;
     maximum?: number;
     enum?: any[];
+    sensitive?: boolean;
 }
 
 export interface ContainerConfig {

@@ -292,7 +292,7 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		merged := make(map[string]any, len(req.Config))
 		for k, v := range req.Config {
 			strVal, isStr := v.(string)
-			isSensitive := ext.Manifest.ConfigSchema != nil && ext.Manifest.ConfigSchema.Properties[k].Sensitive
+			isSensitive := ext.Manifest.ConfigSchema != nil && ext.Manifest.ConfigSchema.GetProperty(k) != nil && ext.Manifest.ConfigSchema.GetProperty(k).Sensitive
 			if isSensitive && isStr && strVal == maskedValue {
 				// Preserve existing value (user didn't change the field)
 				if existing, ok := ext.Config[k]; ok {
@@ -937,13 +937,13 @@ func isValidExtensionType(t string) bool {
 const maskedValue = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // 10 bullets
 
 func maskConfig(config map[string]any, schema *ConfigSchema) map[string]any {
-	if schema == nil || schema.Properties == nil || config == nil {
+	if schema == nil || len(schema.Properties) == 0 || config == nil {
 		return config
 	}
 	result := make(map[string]any, len(config))
 	for k, v := range config {
-		prop, ok := schema.Properties[k]
-		if !ok || !prop.Sensitive {
+		prop := schema.GetProperty(k)
+		if prop == nil || !prop.Sensitive {
 			result[k] = v
 			continue
 		}
