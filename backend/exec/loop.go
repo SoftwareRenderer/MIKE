@@ -278,7 +278,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	// Check if this setup.task uses an agent provider
 	if te.configStore.IsAgentProvider(setup.serverURL) {
 		log.Printf("[exec] setup.task=%s detected agent provider (url=%s), calling executeTaskWithAgent", setup.task.ID, setup.serverURL)
-		te.executeTaskWithAgent(setup.ctx, setup.task, setup.projectID, setup.project.Name, setup.worktreePath, setup.serverURL, setup.userMsgChan, setup.summarizeCh, setup.sandboxEnabled, setup.initialContent)
+		te.executeTaskWithAgent(setup.ctx, setup.task, setup.projectID, setup.project.Name, setup.worktreePath, setup.serverURL, setup.userMsgChan, setup.sandboxEnabled, setup.initialContent)
 		log.Printf("[exec] setup.task=%s executeTaskWithAgent returned", setup.task.ID)
 		return
 	}

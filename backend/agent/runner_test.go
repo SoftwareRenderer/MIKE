@@ -3,9 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"os"
-	"os/exec"
 	"sync"
 	"testing"
 	"time"
@@ -121,7 +118,7 @@ func TestNewAgentRunner_Host(t *testing.T) {
 		Manifest: extensions.ExtensionManifest{
 			DisplayName: "Test Agent",
 			Agent: &extensions.AgentConfig{
-				WasmModule: "test.wasm",
+				
 			},
 		},
 		Config: map[string]any{},
@@ -167,7 +164,7 @@ func TestAgentRunner_Prompt(t *testing.T) {
 		Name:    "test-prompt",
 		Type:    extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{WasmModule: "test.wasm"},
+			Agent: &extensions.AgentConfig{},
 		},
 	}
 
@@ -205,7 +202,7 @@ func TestAgentRunner_EventChan(t *testing.T) {
 		Name:    "test-events",
 		Type:    extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{WasmModule: "test.wasm"},
+			Agent: &extensions.AgentConfig{},
 		},
 	}
 
@@ -245,7 +242,7 @@ func TestAgentRunner_Close(t *testing.T) {
 		Name:    "test-close",
 		Type:    extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{WasmModule: "test.wasm"},
+			Agent: &extensions.AgentConfig{},
 		},
 	}
 
@@ -277,7 +274,7 @@ func TestAgentRunner_ModelName(t *testing.T) {
 		Name:    "test-model",
 		Type:    extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{WasmModule: "test.wasm"},
+			Agent: &extensions.AgentConfig{},
 		},
 	}
 
@@ -302,7 +299,7 @@ func TestAgentRunner_QueryStats(t *testing.T) {
 		Name:    "test-stats",
 		Type:    extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{WasmModule: "test.wasm"},
+			Agent: &extensions.AgentConfig{},
 		},
 	}
 
@@ -332,8 +329,7 @@ func TestRunnerConfig_Serialization(t *testing.T) {
 		Sandbox:       true,
 		Config:        map[string]any{"key": "value"},
 		AgentManifest: &extensions.AgentConfig{
-			WasmModule:   "pi.wasm",
-			Capabilities: []string{"compact", "session_stats"},
+			
 		},
 	}
 
@@ -355,28 +351,6 @@ func TestRunnerConfig_Serialization(t *testing.T) {
 	}
 }
 
-// Helper: create a simple test subprocess that writes known output.
-func testSubprocessWithOutput(t *testing.T, output string) (*exec.Cmd, io.WriteCloser, io.ReadCloser) {
-	t.Helper()
-	cmd := exec.Command("sh", "-c", "echo '"+output+"'; cat") // echo then cat to keep alive
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatalf("stdin pipe: %v", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatalf("stdout pipe: %v", err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	return cmd, stdin, stdout
-}
-
-// Ensure mockAdapter satisfies the interface at compile time
-func init() {
-	var _ AgentAdapter = (*mockAdapter)(nil)
-}
 
 // TestAdapterRegistry verifies factory registration and lookup.
 func TestAdapterRegistry(t *testing.T) {
@@ -391,7 +365,7 @@ func TestAdapterRegistry(t *testing.T) {
 		Name: "registry-test",
 		Type: extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{WasmModule: "test.wasm"},
+			Agent: &extensions.AgentConfig{},
 		},
 	}
 
@@ -490,6 +464,3 @@ func TestSubprocessConfig_Serialization(t *testing.T) {
 	}
 }
 
-// Test that os and exec imports are used (suppress lint warnings)
-var _ = os.Environ
-var _ = exec.Command

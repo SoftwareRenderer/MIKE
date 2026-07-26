@@ -449,14 +449,71 @@ Agent extensions run AI coding agents (e.g., Pi) as subprocesses. The backend kn
 ```
 extensions/agent/my-agent/
 ├── adapter.go          # Core logic (zero backend/ imports — compiles to WASM)
-├── adapter_native.go   # Native wrapper (build tag !wasm, implements agent.AgentAdapter)
 ├── adapter_test.go     # Unit tests (run natively)
-├── wasm/main.go        # WASM exports (build tag wasm, package main, //export directives)
+├── wasm/main.go        # WASI reactor exports (package main, //go:wasmexport directives)
 ├── manifest.json       # {"agent": {"wasm_module": "my-agent.wasm"}}
-└── build.sh            # GOOS=wasip1 GOARCH=wasm go build -o ../my-agent.wasm .
+└── build.sh            # GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o ../my-agent.wasm ./wasm
 ```
 
-Adapter core must have **zero `backend/` imports** (WASM compatibility). Use build tags (`!wasm`/`wasm`) to split native vs WASM code. All data crosses WASM boundary as JSON bytes. `EventTypePersist` is the only path to DB persistence.
+Adapter core must have **zero `backend/` imports** (WASM compatibility). The `wasm/main.go` wraps the adapter and exports functions via `//go:wasmexport` for the [WASI reactor](https://go.dev/blog/wasmexport) model (`-buildmode=c-shared`, Go 1.24+).
+
+**WASM export rules:**
+- Functions use `int32` for pointers/lengths (WASM is 32-bit)
+- Data crosses the boundary via shared linear memory (`malloc`/`free`/`lastResultLen`)
+- The host calls `_initialize` first (runtime init), then exported functions
+- All user data is JSON-serialized before passing to WASM memory
+- `EventTypePersist` is the only path to DB persistence
+
+**Example `wasm/main.go`:**
+```go
+package main
+
+import (
+    "unsafe"
+    "kanban/extensions/agent/my-agent"
+)
+
+var adapter *myagent.Adapter
+var lastLen int32
+var memPool []byte
+var memOffset int32
+
+//go:wasmexport malloc
+func malloc(size int32) int32 {
+    if memPool == nil {
+        memPool = make([]byte, 16*1024*1024)
+    }
+    ptr := memOffset
+    memOffset += size + 7
+    memOffset &= ^int32(7)
+    return ptr
+}
+
+//go:wasmexport lastResultLen
+func lastResultLen() int32 { return lastLen }
+
+//go:wasmexport Init
+func Init(ptr int32, length int32) int32 {
+    adapter = myagent.NewAdapter()
+    data := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
+    if err := adapter.Init(data); err != nil {
+        return 1
+    }
+    return 0
+}
+
+//go:wasmexport Close
+func Close() {
+    if adapter != nil {
+        adapter.Close()
+        adapter = nil
+    }
+}
+
+func main() {} // not called in reactor mode
+```
+
+The loader (`backend/agent/loader.go`) uses wazero with `WithStartFunctions("_initialize")` and `api.EncodeI32`/`api.DecodeI32` for parameter encoding.
 
 ## Common Patterns
 
