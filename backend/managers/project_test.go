@@ -221,17 +221,17 @@ func TestApplyPricingPowerOnlyNoElectricity(t *testing.T) {
 func TestApplyPricingAgentProviderSkipped(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "agent-model", "pi-agent",
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "agent-model", "my-agent",
 		1000, 500, 100, 1000, 5000)
 
 	// Set up agent provider with power settings (should be ignored)
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			Name:                 "pi-agent",
-			DisplayName:          "Pi Agent",
+			Name:                 "my-agent",
+			DisplayName:          "My Agent",
 			Kind:                 "agent",
-			URL:                  "pi://agent",
+			URL:                  "agent://my-agent",
 			InputPrice:           0,
 			OutputPrice:          0,
 			PowerConsumptionW:    500.0,

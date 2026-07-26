@@ -970,8 +970,8 @@ func TestAgentBlockedWithNetworkIsolation(t *testing.T) {
 	}
 	cfg.Providers = append(cfg.Providers, types.Provider{
 		Name:         "test-agent",
-		Kind:         "pi",
-		URL:          "pi://agent",
+		Kind:         "agent",
+		URL:          "agent://test-agent",
 		Concurrency:  1,
 		DefaultModel: "agent-model",
 	})
@@ -985,7 +985,7 @@ func TestAgentBlockedWithNetworkIsolation(t *testing.T) {
 	}
 
 	// Create a task with the agent provider URL
-	taskID := createTestTaskWithAgent(t, s, projID, "agent-blocked-task", "pi://agent")
+	taskID := createTestTaskWithAgent(t, s, projID, "agent-blocked-task", "agent://test-agent")
 
 	// Try to start the task — should be blocked
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/start", nil)
@@ -1017,8 +1017,8 @@ func TestAgentAllowedWithoutNetworkIsolation(t *testing.T) {
 	}
 	cfg.Providers = append(cfg.Providers, types.Provider{
 		Name:         "test-agent-2",
-		Kind:         "pi",
-		URL:          "pi://agent",
+		Kind:         "agent",
+		URL:          "agent://test-agent-2",
 		Concurrency:  1,
 		DefaultModel: "agent-model",
 	})
@@ -1029,7 +1029,7 @@ func TestAgentAllowedWithoutNetworkIsolation(t *testing.T) {
 	// Network isolation is disabled by default
 
 	// Create a task with the agent provider URL
-	taskID := createTestTaskWithAgent(t, s, projID, "agent-allowed-task", "pi://agent")
+	taskID := createTestTaskWithAgent(t, s, projID, "agent-allowed-task", "agent://test-agent-2")
 
 	// Start the task — should succeed (no network isolation)
 	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/start", nil)

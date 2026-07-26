@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,11 +33,6 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 
 	sessionName := fmt.Sprintf("kanban-%s", task.ID)
 
-	// Normalize legacy pi://agent sentinel to agent://pi
-	if strings.TrimRight(serverURL, "/") == "pi://agent" {
-		serverURL = "agent://pi"
-	}
-
 	// Extract agent name from URL: "agent://pi" -> "pi"
 	agentName := strings.TrimPrefix(serverURL, AgentSentinelPrefix)
 	if agentName == "" || agentName == serverURL {
@@ -59,7 +52,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 
 	if sandboxEnabled {
 		// Pre-flight: check if agent binary exists in the container
-		if !te.sandboxMgr.PiAvailable(task.ID) {
+		if !te.sandboxMgr.BinaryAvailable(task.ID, "pi") {
 			te.failTask(task, projectID, fmt.Sprintf("Agent binary not found in sandbox container for %s", agentName), "agent_not_available")
 			return
 		}
@@ -67,19 +60,10 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		log.Printf("[agent] task=%s creating runner in container (agent=%s, session=%s)", task.ID, agentName, sessionName)
 		runner, err = agent.NewAgentRunner(ext, te.sandboxMgr, task.ID, worktreePath, sessionName, true)
 	} else {
-		// Agent runs on the host — point it at its config directory
-		cwd := worktreePath
-		var env []string
-		agentDir := te.configStore.GetAgentConfigDir()
-		if agentDir == "" {
-			if homeDir, err := os.UserHomeDir(); err == nil {
-				agentDir = filepath.Join(homeDir, ".pi", "agent")
-			}
-		}
-		if agentDir != "" {
-			env = append(env, "PI_CODING_AGENT_DIR="+agentDir)
-		}
-		log.Printf("[agent] task=%s creating runner (cwd=%s, session=%s)", task.ID, cwd, sessionName)
+		// Agent runs on the host.
+		// The adapter's SubprocessConfig() sets config dir env vars from the
+		// extension's config_mount declaration, so no Pi-specific code needed here.
+		log.Printf("[agent] task=%s creating runner (cwd=%s, session=%s)", task.ID, worktreePath, sessionName)
 		runner, err = agent.NewAgentRunner(ext, nil, task.ID, worktreePath, sessionName, false)
 	}
 	if err != nil {
@@ -166,7 +150,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 				return
 			}
 			log.Printf("[agent] task=%s startup event: %s", task.ID, event.Type)
-			if streamEvent := toStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
+			if streamEvent := toStreamEvent(event, sandboxEnabled, runner); streamEvent.Type != "" {
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
 			}
 			switch event.Type {
@@ -271,7 +255,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			}
 
 			// Stream the event to frontend
-			if streamEvent := toStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
+			if streamEvent := toStreamEvent(event, sandboxEnabled, runner); streamEvent.Type != "" {
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
 			}
 
@@ -676,7 +660,7 @@ func buildContextReplay(messages []types.TaskMessage) string {
 }
 
 // toStreamEvent converts a generic agent event to a Kanban StreamEvent for WebSocket broadcasting.
-func toStreamEvent(event agent.Event, sandbox bool) types.StreamEvent {
+func toStreamEvent(event agent.Event, sandbox bool, runner *agent.AgentRunner) types.StreamEvent {
 	switch event.Type {
 	case agent.EventTypeToken:
 		return types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": event.Text}}
@@ -715,7 +699,7 @@ func toStreamEvent(event agent.Event, sandbox bool) types.StreamEvent {
 
 	case agent.EventTypeStats:
 		return types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-			"model_name":       "",
+			"model_name":       runner.ModelName(),
 			"prompt_tokens":    event.Stats.TotalInput,
 			"predicted_tokens": event.Stats.TotalOutput,
 			"context_used":     event.Stats.ContextTokens,

@@ -110,7 +110,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
 	s.sandboxMgr = sandbox.NewSandboxManager()
 	s.boardHandler = managers.NewBoardHandler(store, s.appStreamMgr, cfgStore, s.sandboxMgr)
-	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr)
+	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr, nil) // agentRegistry wired after creation
 	// Wire port assignment callback → store + WebSocket broadcast
 	s.terminalMgr.SetOnPortsAssigned(func(taskID, projectID string, ports []types.AssignedPort) {
 		task, err := store.GetTaskByTaskID(taskID)
@@ -136,9 +136,11 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	}
 
 	// Agent registry — discovers agent extensions and maps agent:// URLs
-	agentRegistry := agent.NewAgentRegistry(s.extStore)
+	agentRegistry := agent.NewAgentRegistry(s.extStore, cfgStore)
 
 	s.executor = exec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, commitQueue)
+	// Wire agent registry to terminal manager (created earlier before agentRegistry was available)
+	s.terminalMgr.SetAgentRegistry(agentRegistry)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)
 	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
 	s.depHandler = managers.NewDependencyHandler(store)
@@ -161,13 +163,14 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)
 	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
 	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, s.extLSPMgr)
+	// Wire extension change callback → reload agent registry + broadcast to all clients
+	s.extHandler.SetOnExtensionChanged(func() {
+		agentRegistry.Reload()
+		s.appStreamMgr.BroadcastExtensionChange()
+	})
 	// Wire extension update callback → broadcast LSP reset to frontend
 	s.extHandler.SetOnImageUpdated(func(extID string) {
 		s.lspHandler.BroadcastLSPReset()
-	})
-	// Wire extension change callback → broadcast to all clients for UI slot refresh
-	s.extHandler.SetOnExtensionChanged(func() {
-		s.appStreamMgr.BroadcastExtensionChange()
 	})
 	// Wire project mutex so GitHandler can serialize project-level git operations.
 	s.gitHandler.SetProjectMutex(s.getProjectMutex)

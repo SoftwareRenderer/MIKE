@@ -607,7 +607,7 @@ func TestProjectImageName(t *testing.T) {
 	}
 }
 
-func TestPiAvailable(t *testing.T) {
+func TestBinaryAvailable(t *testing.T) {
 	agentPath := findAgentBinary(t)
 	os.Setenv("MIKE_AGENT_PATH", agentPath)
 	defer os.Unsetenv("MIKE_AGENT_PATH")
@@ -618,7 +618,7 @@ func TestPiAvailable(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	taskID := "test-pi-available-task"
+	taskID := "test-binary-available-task"
 
 	_, err := sm.Create(taskID, dir, "test-proj", "", "", SandboxOpts{})
 	if err != nil {
@@ -628,14 +628,18 @@ func TestPiAvailable(t *testing.T) {
 		_ = sm.Stop(taskID)
 	})
 
-	// `pi` binary likely doesn't exist in the default ubuntu image
-	// Just verify the check doesn't panic and returns a boolean
-	available := sm.PiAvailable(taskID)
+	// Check for a binary name — verify the check doesn't panic and returns a boolean
+	available := sm.BinaryAvailable(taskID, "pi")
 	t.Logf("pi available in container: %v", available)
 
 	// Test with non-existent task
-	if sm.PiAvailable("nonexistent-task") {
-		t.Error("expected PiAvailable to return false for non-existent task")
+	if sm.BinaryAvailable("nonexistent-task", "pi") {
+		t.Error("expected BinaryAvailable to return false for non-existent task")
+	}
+
+	// Test with empty binary name
+	if sm.BinaryAvailable(taskID, "") {
+		t.Error("expected BinaryAvailable to return false for empty binary name")
 	}
 }
 

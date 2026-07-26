@@ -94,11 +94,13 @@ type Adapter struct {
 
 // piConfig holds parsed adapter configuration.
 type piConfig struct {
-	Binary      string
-	Mode        string
-	SessionName string
-	DisplayName string
-	Env         []string
+	Binary               string
+	Mode                 string
+	SessionName          string
+	DisplayName          string
+	Env                []string
+	ConfigMountHostPath  string // expanded host path from manifest config_mount
+	ConfigMountEnvVar    string // env var name from manifest config_mount
 }
 
 // toolDisplayNames maps tool names to human-readable display names.
@@ -143,17 +145,34 @@ func (a *Adapter) Init(config []byte) error {
 		SessionName string   `json:"session_name"`
 		DisplayName string   `json:"display_name"`
 		Env         []string `json:"env"`
+		AgentManifest *struct {
+			ConfigMount *struct {
+				HostPath      string `json:"host_path"`
+				ContainerPath string `json:"container_path"`
+				Mode          string `json:"mode"`
+				EnvVar        string `json:"env_var"`
+			} `json:"config_mount,omitempty"`
+		} `json:"agent_manifest,omitempty"`
 	}
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return fmt.Errorf("parse config: %w", err)
 	}
 
+	cmHostPath := ""
+	cmEnvVar := ""
+	if cfg.AgentManifest != nil && cfg.AgentManifest.ConfigMount != nil {
+		cmHostPath = cfg.AgentManifest.ConfigMount.HostPath
+		cmEnvVar = cfg.AgentManifest.ConfigMount.EnvVar
+	}
+
 	a.config = piConfig{
-		Binary:      defaultString(cfg.Binary, "pi"),
-		Mode:        defaultString(cfg.Mode, "rpc"),
-		SessionName: cfg.SessionName,
-		DisplayName: defaultString(cfg.DisplayName, "Pi Coding Agent"),
-		Env:         cfg.Env,
+		Binary:              defaultString(cfg.Binary, "pi"),
+		Mode:              defaultString(cfg.Mode, "rpc"),
+		SessionName:         cfg.SessionName,
+		DisplayName:         defaultString(cfg.DisplayName, "Pi Coding Agent"),
+		Env:                 cfg.Env,
+		ConfigMountHostPath: cmHostPath,
+		ConfigMountEnvVar:   cmEnvVar,
 	}
 	a.lineBuffer = ""
 	a.cmdID = 0
@@ -166,10 +185,16 @@ func (a *Adapter) SubprocessConfig() SubprocessConfig {
 	if a.config.SessionName != "" {
 		args = append(args, "--name", a.config.SessionName)
 	}
+	env := a.config.Env
+	// In non-sandbox mode the adapter process runs on the host and needs
+	// the config directory env var so Pi can locate its config.
+	if a.config.ConfigMountHostPath != "" && a.config.ConfigMountEnvVar != "" {
+		env = append(env, a.config.ConfigMountEnvVar+"="+a.config.ConfigMountHostPath)
+	}
 	return SubprocessConfig{
 		Binary: a.config.Binary,
 		Args:   args,
-		Env:    a.config.Env,
+		Env:    env,
 	}
 }
 
@@ -340,7 +365,11 @@ func (a *Adapter) parseAgentEnd(raw map[string]any) *Event {
 		}
 	}
 	entries := buildPersistEntries(msgs)
-	return &Event{Type: EventTypePersist, PersistEntries: entries}
+	return &Event{
+		Type: EventTypePersist,
+		Status: StatusData{State: "idle", Activity: a.config.DisplayName + " finished"},
+		PersistEntries: entries,
+	}
 }
 
 func (a *Adapter) parseResponse(raw map[string]any) *Event {
@@ -367,7 +396,14 @@ func (a *Adapter) parseResponse(raw map[string]any) *Event {
 		if data, ok := raw["data"].(map[string]any); ok {
 			if model, ok := data["model"].(map[string]any); ok {
 				provider, _ := model["provider"].(string)
+				// Pi binary returns model name in "name" and "id" fields (not "modelId")
 				modelID, _ := model["modelId"].(string)
+				if modelID == "" {
+					modelID, _ = model["name"].(string)
+				}
+				if modelID == "" {
+					modelID, _ = model["id"].(string)
+				}
 				if provider != "" && modelID != "" {
 					modelName = provider + "/" + modelID
 				} else if modelID != "" {

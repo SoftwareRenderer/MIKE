@@ -8,6 +8,24 @@
         "wasm_module": "pi.wasm",
         "capabilities": ["compact", "session_stats", "extension_ui"],
         "description": "Pi is a full coding agent that handles its own LLM calls, tool execution, and reasoning. When selected, Pi runs inside the task's worktree and manages the entire task lifecycle.",
-        "setup_info": "- **Inherited Config:** Your existing configuration is used when tasks are executed. Therefore all configuration of Pi should be done within Pi itself.\n- **Sandbox:**\n  - Your sandbox image must include `pi` on `$PATH`.\n  - Pi's config directory (`~/.pi/agent/`) is bind-mounted into the container at `/root/.pi/agent` with read/write access.\n  - An example dockerfile can be found in `./extensions/agent/pi/dockerfile-example`.\n- **Sessions:** Each task gets its own Pi session (named `kanban-{task-id}`) for continuity across restarts."
+        "setup_info": "- **Inherited Config:** Your existing configuration is used when tasks are executed. Therefore all configuration of Pi should be done within Pi itself.\n- **Sandbox:**\n  - Your sandbox image must include `pi` on `$PATH`.\n  - Pi's config directory (`~/.pi/agent/`) is bind-mounted into the container at `/root/.pi/agent` (read-write by default, required for session files).\n  - An example dockerfile can be found in `./extensions/agent/pi/dockerfile-example`.\n- **Sessions:** Each task gets its own Pi session (named `kanban-{task-id}`) for continuity across restarts.",
+        "config_mount": {
+            "host_path": "~/.pi/agent",
+            "container_path": "/root/.pi/agent",
+            "mode": "rw,
+            "env_var": "PI_CODING_AGENT_DIR"
+        },
+        "config_schema": {
+            "type": "object",
+            "properties": {
+                "config_mount_mode": {
+                    "type": "string",
+                    "title": "Config Mount Mode",
+                    "description": "Read-write or read-only access to the Pi config directory inside the sandbox container. Read-write is required because Pi writes session files and settings to this directory.",
+                    "enum": ["ro", "rw"],
+                    "default": "rw
+                }
+            }
+        }
     }
 }

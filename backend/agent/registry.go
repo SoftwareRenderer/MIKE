@@ -2,12 +2,18 @@ package agent
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
 	ext "kanban/backend/extensions"
 	"kanban/backend/types"
 )
+
+// ConfigStore is the interface the registry needs for user-configured agent settings.
+type ConfigStore interface {
+	GetAgentProvider() *types.Provider
+}
 
 // ExtensionStore is the interface the registry needs from the extension store.
 type ExtensionStore interface {
@@ -17,17 +23,19 @@ type ExtensionStore interface {
 // AgentRegistry discovers enabled agent extensions and maps agent://<name> URLs to extensions.
 // Agent extensions auto-register as providers via ToProviders().
 type AgentRegistry struct {
-	mu      sync.RWMutex
-	store   ExtensionStore
-	agents  map[string]*ext.Extension // name -> extension
-	enabled []string                  // names of enabled agents
+	mu          sync.RWMutex
+	store       ExtensionStore
+	configStore ConfigStore
+	agents      map[string]*ext.Extension // name -> extension
+	enabled     []string                  // names of enabled agents
 }
 
 // NewAgentRegistry creates a new registry that discovers agent extensions from the store.
-func NewAgentRegistry(store ExtensionStore) *AgentRegistry {
+func NewAgentRegistry(store ExtensionStore, configStore ConfigStore) *AgentRegistry {
 	r := &AgentRegistry{
-		store:  store,
-		agents: make(map[string]*ext.Extension),
+		store:       store,
+		configStore: configStore,
+		agents:      make(map[string]*ext.Extension),
 	}
 	r.reload()
 	return r
@@ -102,6 +110,75 @@ func (r *AgentRegistry) ToProviders() []types.Provider {
 		providers = append(providers, provider)
 	}
 	return providers
+}
+
+// GetAgentConfigMount returns the config mount for a specific agent extension.
+// It uses the manifest's default config_mount, with overrides from:
+//   - Extension config (runtime override of mode/host_path)
+//   - Provider config (AgentConfigDir override of host_path)
+//
+// The host_path is expanded for leading ~.
+// Returns nil if no config_mount is defined for the extension.
+func (r *AgentRegistry) GetAgentConfigMount(agentName string) *types.AgentConfigMount {
+	r.mu.RLock()
+	ext, ok := r.agents[agentName]
+	r.mu.RUnlock()
+
+	if !ok || !ext.Enabled {
+		return nil
+	}
+
+	def := ext.Manifest.Agent
+	if def == nil || def.ConfigMount == nil {
+		return nil
+	}
+
+	mount := *def.ConfigMount // copy
+
+	// Override mode from extension runtime config
+	if mode, ok := ext.Config["config_mount_mode"].(string); ok && mode != "" {
+		mount.Mode = mode
+	}
+	// Override host_path from extension runtime config
+	if hp, ok := ext.Config["config_mount_host_path"].(string); ok && hp != "" {
+		mount.HostPath = hp
+	}
+
+	// Provider-level override of host_path (AgentConfigDir)
+	if r.configStore != nil {
+		if provider := r.configStore.GetAgentProvider(); provider != nil && provider.AgentConfigDir != "" {
+			mount.HostPath = provider.AgentConfigDir
+		}
+	}
+
+	// Expand leading ~ to home directory
+	if len(mount.HostPath) >= 2 && mount.HostPath[0] == '~' && mount.HostPath[1] == '/' {
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			mount.HostPath = homeDir + mount.HostPath[1:]
+		}
+	}
+
+	// Ensure mode has a value
+	if mount.Mode != "ro" && mount.Mode != "rw" {
+		mount.Mode = "ro"
+	}
+
+	return &mount
+}
+
+// GetConfigMount returns the config mount for the first enabled agent extension.
+// Used by sandbox terminals and FS operations that need to mount agent config
+// for any configured agent (not a specific task's agent).
+// Returns nil if no agent extension with a config_mount is enabled.
+func (r *AgentRegistry) GetConfigMount() *types.AgentConfigMount {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, name := range r.enabled {
+		if mount := r.GetAgentConfigMount(name); mount != nil {
+			return mount
+		}
+	}
+	return nil
 }
 
 // Reload re-scans the extension store for enabled agent extensions.

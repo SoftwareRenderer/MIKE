@@ -396,7 +396,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
 					MemoryLimit:      setup.sandboxOpts.MemoryLimit,
 					ForwardPorts:     setup.sandboxOpts.ForwardPorts,
-					PiAgentDir:       te.configStore.GetAgentConfigDir(),
+					AgentConfig:      te.agentRegistry.GetConfigMount(),
 					SkillsDir:        prompts.SkillsDir(),
 					SandboxMounts:    setup.sandboxOpts.SandboxMounts,
 					SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,

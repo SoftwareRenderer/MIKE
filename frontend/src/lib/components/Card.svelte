@@ -299,7 +299,7 @@
         if (providers.length === 0) return { text: null, provider: null, model: null, color: '' };
         // Check if task uses Pi agent
         if (task.llama_server_url?.startsWith(AGENT_URL_PREFIX)) {
-                                    return { text: 'Pi Coding Agent', provider: null, model: null, color: '#A371F7', isAgent: true };
+                                    return { text: 'Agent', provider: null, model: null, color: '#A371F7', isAgent: true };
         }
         // Use task model if set, otherwise fall back to default model
         const getModelName = (m: string | { name: string }) => typeof m === 'string' ? m : m.name;
@@ -847,13 +847,13 @@
             {/if}
             {#if modelBadge.text}
                 {#if modelBadge.isAgent}
-                    <div class="badge model-badge pi-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
+                    <div class="badge model-badge agent-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-right: 3px">
                             <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
                             <circle cx="6" cy="9" r="1" fill="currentColor"/>
                             <circle cx="10" cy="9" r="1" fill="currentColor"/>
                         </svg>
-                        Pi Coding Agent
+                        Coding Agent
                     </div>
                 {:else}
                     <div class="badge model-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">

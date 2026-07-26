@@ -133,7 +133,7 @@ func TestProjectTerminalStopsContainerOnExit(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock)
+	tm := NewTerminalManager(s, cs, mock, nil)
 
 	// Create a project with sandbox enabled
 	projID := "test-proj-stop"
@@ -204,7 +204,7 @@ func TestMultiClientResizeSmallestWidthWins(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock)
+	tm := NewTerminalManager(s, cs, mock, nil)
 
 	projID := "test-proj-resize"
 	proj := &types.Project{
@@ -280,7 +280,7 @@ func TestMultiClientResizeMultipleClients(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock)
+	tm := NewTerminalManager(s, cs, mock, nil)
 
 	projID := "test-proj-multi"
 	proj := &types.Project{
@@ -347,7 +347,7 @@ func TestTaskTerminalDoesNotStopContainerOnExit(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
 	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock)
+	tm := NewTerminalManager(s, cs, mock, nil)
 
 	// Create a project with sandbox enabled
 	projID := "test-proj-no-stop"

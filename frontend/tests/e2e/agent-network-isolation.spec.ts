@@ -23,12 +23,12 @@ test.describe.serial('Agent + Network Isolation', () => {
     }, projectId);
     expect(projectData.sandbox_network_isolation).toBe(true);
 
-    // Create a task with a Pi agent provider (pi://agent sentinel URL)
+    // Create a task with a agent provider (agent://pi sentinel URL)
     const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
       method: 'POST',
       body: {
         prompt: `agent-network-test-${Date.now()}`,
-        llama_server_url: 'pi://agent',
+        llama_server_url: 'agent://pi',
         model_name: null,
       },
     });
@@ -63,12 +63,12 @@ test.describe.serial('Agent + Network Isolation', () => {
       body: { sandbox_enabled: false, sandbox_network_isolation: false },
     });
 
-    // Create a task with a Pi agent provider
+    // Create a task with a agent provider
     const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
       method: 'POST',
       body: {
         prompt: `agent-allowed-test-${Date.now()}`,
-        llama_server_url: 'pi://agent',
+        llama_server_url: 'agent://pi',
         model_name: null,
       },
     });

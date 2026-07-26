@@ -218,7 +218,7 @@ export interface Provider {
     models: ProviderModel[];
     concurrency: number;
     default_model?: string;
-    agent_config_dir?: string; // host path to agent config (e.g., ~/.pi/agent); empty for LLM providers
+    agent_config_dir?: string; // optional host path override for agent config dir; empty means use extension default
     agent_description?: string; // agent description text (from manifest); empty for LLM providers
     agent_setup_info?: string;  // agent setup instructions (from manifest); empty for LLM providers
     input_price?: number;      // USD per 1M input (non-cached) tokens
@@ -417,6 +417,14 @@ export interface AgentExtensionConfig {
     description?: string;    // short description shown in provider card
     setup_info?: string;     // setup instructions shown in provider card
     config_schema?: ConfigSchema;
+    config_mount?: AgentConfigMount; // default config dir mount into sandbox containers
+}
+
+export interface AgentConfigMount {
+    host_path: string;        // host path to agent config dir
+    container_path: string;  // mount point inside the container
+    mode: string;            // "ro" (default) or "rw"
+    env_var?: string;        // env var name for non-sandbox use
 }
 
 export interface LSPConfig {

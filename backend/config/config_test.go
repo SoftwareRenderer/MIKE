@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"testing"
 
 	"kanban/backend/store"
@@ -62,87 +61,6 @@ func TestUpdateConfigIgnoresWorkspaceDir(t *testing.T) {
 	}
 }
 
-func TestGetAgentConfigDir_NoAgent(t *testing.T) {
-	cs := testConfigStore(t)
-
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
-		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	// no agent configured
-	if got := cs.GetAgentConfigDir(); got != "" {
-		t.Errorf("expected empty string, got %q", got)
-	}
-}
-
-func TestGetAgentConfigDir_PiProvider(t *testing.T) {
-	cs := testConfigStore(t)
-
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
-			{Name: "pi", Kind: "agent", URL: "pi://agent", Concurrency: 1},
-		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	got := cs.GetAgentConfigDir()
-	if got == "" {
-		t.Fatal("expected non-empty agent config dir")
-	}
-	// defaults to ~/.pi/agent
-	homeDir, _ := os.UserHomeDir()
-	expected := homeDir + "/.pi/agent"
-	if got != expected {
-		t.Errorf("expected %q, got %q", expected, got)
-	}
-}
-
-func TestGetAgentConfigDir_PiWithExplicitDir(t *testing.T) {
-	cs := testConfigStore(t)
-
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{Name: "pi", Kind: "agent", URL: "pi://agent", AgentConfigDir: "/custom/pi/config", Concurrency: 1},
-		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	got := cs.GetAgentConfigDir()
-	if got != "/custom/pi/config" {
-		t.Errorf("expected /custom/pi/config, got %q", got)
-	}
-}
-
-func TestGetAgentConfigDir_PiWithTildeDir(t *testing.T) {
-	cs := testConfigStore(t)
-
-	cfg := &types.Config{
-		Providers: []types.Provider{
-			{Name: "pi", Kind: "agent", URL: "pi://agent", AgentConfigDir: "~/.my-pi", Concurrency: 1},
-		},
-	}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	got := cs.GetAgentConfigDir()
-	homeDir, _ := os.UserHomeDir()
-	expected := homeDir + "/.my-pi"
-	if got != expected {
-		t.Errorf("expected %q, got %q", expected, got)
-	}
-}
-
 func TestIsAgentProvider(t *testing.T) {
 	cs := testConfigStore(t)
 
@@ -150,7 +68,7 @@ func TestIsAgentProvider(t *testing.T) {
 	cfg := &types.Config{
 		Providers: []types.Provider{
 			{Name: "llm-provider", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
-			{Name: "pi-agent", Kind: "pi", URL: "pi://agent", Concurrency: 1},
+			{Name: "claude-agent", Kind: "agent", URL: "agent://claude", Concurrency: 1},
 			{Name: "other-agent", Kind: "claude", URL: "https://api.claude.com/v1", Concurrency: 1},
 		},
 	}
@@ -163,9 +81,9 @@ func TestIsAgentProvider(t *testing.T) {
 		t.Error("LLM provider should not be detected as agent")
 	}
 
-	// Pi agent should be detected as agent
-	if !cs.IsAgentProvider("pi://agent") {
-		t.Error("Pi agent should be detected as agent")
+	// agent:// URL should be detected as agent
+	if !cs.IsAgentProvider("agent://claude") {
+		t.Error("agent:// URL should be detected as agent")
 	}
 
 	// Other agent kind should be detected as agent
@@ -173,13 +91,31 @@ func TestIsAgentProvider(t *testing.T) {
 		t.Error("Other agent kind should be detected as agent")
 	}
 
-	// pi://agent sentinel URL should be detected as agent (even without registered provider)
-	if !cs.IsAgentProvider("pi://agent") {
-		t.Error("pi://agent sentinel URL should be detected as agent")
-	}
-
 	// Unknown URL should return false
 	if cs.IsAgentProvider("http://unknown/v1") {
 		t.Error("Unknown URL should not be detected as agent")
+	}
+}
+
+func TestGetAgentProvider(t *testing.T) {
+	cs := testConfigStore(t)
+
+	// No agents configured
+	if p := cs.GetAgentProvider(); p != nil {
+		t.Errorf("expected nil, got %v", p)
+	}
+
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
+			{Name: "my-agent", Kind: "agent", URL: "agent://my-agent", Concurrency: 1},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	if p := cs.GetAgentProvider(); p == nil || p.Name != "my-agent" {
+		t.Errorf("expected my-agent, got %v", p)
 	}
 }
