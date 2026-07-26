@@ -112,14 +112,14 @@ func (r *AgentRegistry) ToProviders() []types.Provider {
 	return providers
 }
 
-// GetAgentConfigMount returns the sandbox mount for a specific agent extension.
-// It reads sandbox_mounts and sandbox_envs arrays from extension config,
+// GetAgentSandbox returns the sandbox config for a specific agent extension.
+// It reads sandbox_mount and sandbox_env arrays from extension config,
 // falling back to manifest defaults. Provider config (AgentConfigDir) can
 // override the host_path of the first mount.
 //
-// The host_path is expanded for leading ~.
+// Host paths are expanded for leading ~.
 // Returns nil if no mounts are configured for the extension.
-func (r *AgentRegistry) GetAgentConfigMount(agentName string) *types.AgentConfigMount {
+func (r *AgentRegistry) GetAgentSandbox(agentName string) *types.AgentSandbox {
 	r.mu.RLock()
 	ext, ok := r.agents[agentName]
 	r.mu.RUnlock()
@@ -133,54 +133,54 @@ func (r *AgentRegistry) GetAgentConfigMount(agentName string) *types.AgentConfig
 		return nil
 	}
 
-	// Start with manifest default mount
-	var mount types.AgentConfigMount
-	if def.SandboxMount != nil {
-		mount = *def.ResolveSandboxMountTemplates(ext.Manifest.ConfigSchema)
+	// Start with resolved manifest defaults
+	var sb types.AgentSandbox
+	if def.Sandbox != nil {
+		resolved := def.ResolveSandboxTemplates(ext.Manifest.ConfigSchema)
+		if resolved != nil {
+			sb = *resolved
+		}
 	}
 
-	// Read sandbox_mounts array from extension config
-	if mountsRaw, ok := ext.Config["sandbox_mounts"]; ok {
+	// Read sandbox_mount array from extension config (overrides manifest)
+	if mountsRaw, ok := ext.Config["sandbox_mount"]; ok {
 		if mounts, err := parseMountArray(mountsRaw); err == nil && len(mounts) > 0 {
-			m := mounts[0]
-			mount.HostPath = m.HostPath
-			mount.ContainerPath = m.ContainerPath
-			mount.Mode = m.Mode
+			sb.Mounts = mounts
 		}
 	}
 
-	// Read sandbox_envs array from extension config
-	if envsRaw, ok := ext.Config["sandbox_envs"]; ok {
+	// Read sandbox_env array from extension config (overrides manifest)
+	if envsRaw, ok := ext.Config["sandbox_env"]; ok {
 		if envs, err := parseEnvArray(envsRaw); err == nil {
-			mount.Envs = envs
+			sb.Envs = envs
 		}
 	}
 
-	// Provider-level override of host_path (AgentConfigDir)
-	if r.configStore != nil {
+	// Provider-level override of host_path on first mount (AgentConfigDir)
+	if r.configStore != nil && len(sb.Mounts) > 0 {
 		if provider := r.configStore.GetAgentProvider(); provider != nil && provider.AgentConfigDir != "" {
-			mount.HostPath = provider.AgentConfigDir
+			sb.Mounts[0].HostPath = provider.AgentConfigDir
 		}
 	}
 
 	// Expand leading ~ to home directory
-	if len(mount.HostPath) >= 2 && mount.HostPath[0] == '~' && mount.HostPath[1] == '/' {
-		if homeDir, err := os.UserHomeDir(); err == nil {
-			mount.HostPath = homeDir + mount.HostPath[1:]
+	for i := range sb.Mounts {
+		if len(sb.Mounts[i].HostPath) >= 2 && sb.Mounts[i].HostPath[0] == '~' && sb.Mounts[i].HostPath[1] == '/' {
+			if homeDir, err := os.UserHomeDir(); err == nil {
+				sb.Mounts[i].HostPath = homeDir + sb.Mounts[i].HostPath[1:]
+			}
+		}
+		if sb.Mounts[i].Mode != "ro" && sb.Mounts[i].Mode != "rw" {
+			sb.Mounts[i].Mode = "ro"
 		}
 	}
 
-	// Ensure mode has a value
-	if mount.Mode != "ro" && mount.Mode != "rw" {
-		mount.Mode = "ro"
-	}
-
-	// Return nil if no host path set
-	if mount.HostPath == "" {
+	// Return nil if no mounts
+	if len(sb.Mounts) == 0 {
 		return nil
 	}
 
-	return &mount
+	return &sb
 }
 
 // parseMountArray parses a JSON array of mount objects from extension config.
@@ -243,16 +243,16 @@ func parseEnvObject(v any) (types.SandboxEnv, error) {
 	return types.SandboxEnv{Key: key, Value: value}, nil
 }
 
-// GetConfigMount returns the config mount for the first enabled agent extension.
+// GetAnyAgentSandbox returns the sandbox config for the first enabled agent extension.
 // Used by sandbox terminals and FS operations that need to mount agent config
 // for any configured agent (not a specific task's agent).
-// Returns nil if no agent extension with a sandbox_mount is enabled.
-func (r *AgentRegistry) GetConfigMount() *types.AgentConfigMount {
+// Returns nil if no agent extension with a sandbox config is enabled.
+func (r *AgentRegistry) GetAnyAgentSandbox() *types.AgentSandbox {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, name := range r.enabled {
-		if mount := r.GetAgentConfigMount(name); mount != nil {
-			return mount
+		if sb := r.GetAgentSandbox(name); sb != nil {
+			return sb
 		}
 	}
 	return nil

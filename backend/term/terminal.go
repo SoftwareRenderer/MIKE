@@ -148,13 +148,13 @@ func (tm *TerminalManager) SetAgentRegistry(ar *agent.AgentRegistry) {
 	tm.agentRegistry = ar
 }
 
-// getAgentConfigMount returns the agent config mount for the current agent, or nil.
+// getAgentSandbox returns the agent sandbox config for the current agent, or nil.
 // agentRegistry is set once during initialization and only read afterwards, so no lock needed.
-func (tm *TerminalManager) getAgentConfigMount() *types.AgentConfigMount {
+func (tm *TerminalManager) getAgentSandbox() *types.AgentSandbox {
 	if tm.agentRegistry == nil {
 		return nil
 	}
-	return tm.agentRegistry.GetConfigMount()
+	return tm.agentRegistry.GetAnyAgentSandbox()
 }
 
 // SetOnPortsAssigned sets a callback invoked when sandbox ports are assigned during terminal shell creation.
@@ -248,8 +248,8 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 				imageToUse = sandbox.BaseImage
 			}
 		}
-		// Mount agent config dir if any coding agent is configured
-		agentConfig := tm.getAgentConfigMount()
+		// Mount agent sandbox if any coding agent is configured
+		agentSandbox := tm.getAgentSandbox()
 		var shell *sandbox.ShellProcess
 		var err error
 		// Both project and task terminals create the container on demand if it doesn't exist.
@@ -265,7 +265,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 			NetworkIsolation: networkIsolation,
 			MemoryLimit:      memoryLimit,
 			ForwardPorts:     forwardPorts,
-			AgentConfig:      agentConfig,
+			AgentSandbox:     agentSandbox,
 			SkillsDir:        prompts.SkillsDir(),
 			SandboxMounts:    sandboxMounts,
 			SandboxEnvs:      sandboxEnvs,

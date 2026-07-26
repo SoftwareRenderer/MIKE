@@ -337,94 +337,76 @@ func TestCSSConfig_JSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestAgentConfig_ResolveSandboxMountTemplates(t *testing.T) {
+func TestAgentConfig_ResolveSandboxTemplates(t *testing.T) {
 	tests := []struct {
-		name     string
-		agent    *AgentConfig
-		wantHost string
-		wantCtn  string
-		wantMode string
-		wantEnv  string
-		wantNil  bool
+		name        string
+		agent       *AgentConfig
+		wantMounts  []types.SandboxMount
+		wantEnvs    []types.SandboxEnv
+		wantNil     bool
 	}{
 		{
-			name: "resolve all templates from config_schema defaults",
+			name: "resolve all templates from config_schema array defaults",
 			agent: &AgentConfig{
 				ConfigSchema: &ConfigSchema{
 					Properties: []SchemaProp{
-						{Key: "sandbox_mount_host_path", Default: "~/.pi/agent"},
-						{Key: "sandbox_mount_container_path", Default: "/root/.pi/agent"},
-						{Key: "sandbox_mount_mode", Default: "rw"},
-						{Key: "sandbox_mount_env_key", Default: "HOME"},
-						{Key: "sandbox_mount_env_value", Default: "~/.pi/agent"},
+						{Key: "sandbox_mount", Default: []any{map[string]any{"host_path": "~/.pi/agent", "container_path": "/root/.pi/agent", "mode": "rw"}}},
+						{Key: "sandbox_env", Default: []any{map[string]any{"key": "HOME", "value": "~/.pi/agent"}}},
 					},
 				},
-				SandboxMount: &types.AgentConfigMount{
-					HostPath:      "{{sandbox_mount_host_path}}",
-					ContainerPath: "{{sandbox_mount_container_path}}",
-					Mode:          "{{sandbox_mount_mode}}",
-					Envs:          []types.SandboxEnv{{Key: "{{sandbox_mount_env_key}}", Value: "{{sandbox_mount_env_value}}"}},
+				Sandbox: &types.AgentSandbox{
+					Mounts: []types.SandboxMount{
+						{HostPath: "{{sandbox_mount_host_path[]}}", ContainerPath: "{{sandbox_mount_container_path[]}}", Mode: "{{sandbox_mount_mode[]}}"},
+					},
+					Envs: []types.SandboxEnv{{Key: "{{sandbox_env_key[]}}", Value: "{{sandbox_env_value[]}}"}},
 				},
 			},
-			wantHost: "~/.pi/agent",
-			wantCtn:  "/root/.pi/agent",
-			wantMode: "rw",
-			wantEnv:  "HOME",
+			wantMounts: []types.SandboxMount{{HostPath: "~/.pi/agent", ContainerPath: "/root/.pi/agent", Mode: "rw"}},
+			wantEnvs:   []types.SandboxEnv{{Key: "HOME", Value: "~/.pi/agent"}},
 		},
 		{
 			name: "literal values pass through unchanged",
 			agent: &AgentConfig{
-				SandboxMount: &types.AgentConfigMount{
-					HostPath:      "/custom/path",
-					ContainerPath: "/custom/container",
-					Mode:          "ro",
-					Envs:          []types.SandboxEnv{{Key: "MY_ENV_VAR", Value: "/custom/path"}},
+				Sandbox: &types.AgentSandbox{
+					Mounts: []types.SandboxMount{{HostPath: "/custom/path", ContainerPath: "/custom/container", Mode: "ro"}},
+					Envs:   []types.SandboxEnv{{Key: "MY_ENV_VAR", Value: "/custom/path"}},
 				},
 			},
-			wantHost: "/custom/path",
-			wantCtn:  "/custom/container",
-			wantMode: "ro",
-			wantEnv:  "MY_ENV_VAR",
+			wantMounts: []types.SandboxMount{{HostPath: "/custom/path", ContainerPath: "/custom/container", Mode: "ro"}},
+			wantEnvs:   []types.SandboxEnv{{Key: "MY_ENV_VAR", Value: "/custom/path"}},
 		},
 		{
 			name: "no config_schema - templates pass through unchanged",
 			agent: &AgentConfig{
-				SandboxMount: &types.AgentConfigMount{
-					HostPath: "{{sandbox_mount_host_path}}",
-					Mode:     "{{sandbox_mount_mode}}",
+				Sandbox: &types.AgentSandbox{
+					Mounts: []types.SandboxMount{{HostPath: "{{sandbox_mount_host_path[]}}", ContainerPath: "/x", Mode: "{{sandbox_mount_mode[]}}"}},
 				},
 			},
-			wantHost: "{{sandbox_mount_host_path}}",
-			wantMode: "{{sandbox_mount_mode}}",
+			wantMounts: []types.SandboxMount{{HostPath: "{{sandbox_mount_host_path[]}}", ContainerPath: "/x", Mode: "{{sandbox_mount_mode[]}}"}},
 		},
 		{
-			name: "template for missing property passes through unchanged",
+			name: "template for missing field passes through unchanged",
 			agent: &AgentConfig{
 				ConfigSchema: &ConfigSchema{
 					Properties: []SchemaProp{
-						{Key: "sandbox_mount_host_path", Default: "~/.pi/agent"},
+						{Key: "sandbox_mount", Default: []any{map[string]any{"host_path": "~/.pi/agent"}}},
 					},
 				},
-				SandboxMount: &types.AgentConfigMount{
-					HostPath:      "{{sandbox_mount_host_path}}",
-					ContainerPath: "{{sandbox_mount_container_path}}",
-					Mode:          "rw",
-					Envs:          nil,
+				Sandbox: &types.AgentSandbox{
+					Mounts: []types.SandboxMount{{HostPath: "{{sandbox_mount_host_path[]}}", ContainerPath: "{{sandbox_mount_container_path[]}}", Mode: "rw"}},
 				},
 			},
-			wantHost: "~/.pi/agent",
-			wantCtn:  "{{sandbox_mount_container_path}}",
-			wantMode: "rw",
+			wantMounts: []types.SandboxMount{{HostPath: "~/.pi/agent", ContainerPath: "{{sandbox_mount_container_path[]}}", Mode: "rw"}},
 		},
 		{
-			name:    "nil agent config returns nil mount",
+			name:    "nil agent config returns nil",
 			agent:   nil,
 			wantNil: true,
 		},
 		{
-			name: "nil sandbox_mount returns nil",
+			name: "nil sandbox returns nil",
 			agent: &AgentConfig{
-				SandboxMount: nil,
+				Sandbox: nil,
 			},
 			wantNil: true,
 		},
@@ -436,31 +418,40 @@ func TestAgentConfig_ResolveSandboxMountTemplates(t *testing.T) {
 			if tt.agent != nil {
 				schema = tt.agent.ConfigSchema
 			}
-			mount := tt.agent.ResolveSandboxMountTemplates(schema)
+			sb := tt.agent.ResolveSandboxTemplates(schema)
 			if tt.wantNil {
-				if mount != nil {
-					t.Errorf("expected nil mount, got %+v", mount)
+				if sb != nil {
+					t.Errorf("expected nil sandbox, got %+v", sb)
 				}
 				return
 			}
-			if mount == nil {
-				t.Fatal("expected non-nil mount")
+			if sb == nil {
+				t.Fatal("expected non-nil sandbox")
 			}
-			if mount.HostPath != tt.wantHost {
-				t.Errorf("HostPath = %q, want %q", mount.HostPath, tt.wantHost)
+			if len(sb.Mounts) != len(tt.wantMounts) {
+				t.Fatalf("Mounts count = %d, want %d", len(sb.Mounts), len(tt.wantMounts))
 			}
-			if mount.ContainerPath != tt.wantCtn {
-				t.Errorf("ContainerPath = %q, want %q", mount.ContainerPath, tt.wantCtn)
-			}
-			if mount.Mode != tt.wantMode {
-				t.Errorf("Mode = %q, want %q", mount.Mode, tt.wantMode)
-			}
-			if tt.wantEnv == "" {
-				if len(mount.Envs) != 0 {
-					t.Errorf("Envs = %+v, want empty", mount.Envs)
+			for i, want := range tt.wantMounts {
+				if sb.Mounts[i].HostPath != want.HostPath {
+					t.Errorf("Mounts[%d].HostPath = %q, want %q", i, sb.Mounts[i].HostPath, want.HostPath)
 				}
-			} else if len(mount.Envs) != 1 || mount.Envs[0].Key != tt.wantEnv {
-				t.Errorf("Envs = %+v, want key %q", mount.Envs, tt.wantEnv)
+				if sb.Mounts[i].ContainerPath != want.ContainerPath {
+					t.Errorf("Mounts[%d].ContainerPath = %q, want %q", i, sb.Mounts[i].ContainerPath, want.ContainerPath)
+				}
+				if sb.Mounts[i].Mode != want.Mode {
+					t.Errorf("Mounts[%d].Mode = %q, want %q", i, sb.Mounts[i].Mode, want.Mode)
+				}
+			}
+			if len(sb.Envs) != len(tt.wantEnvs) {
+				t.Fatalf("Envs count = %d, want %d", len(sb.Envs), len(tt.wantEnvs))
+			}
+			for i, want := range tt.wantEnvs {
+				if sb.Envs[i].Key != want.Key {
+					t.Errorf("Envs[%d].Key = %q, want %q", i, sb.Envs[i].Key, want.Key)
+				}
+				if sb.Envs[i].Value != want.Value {
+					t.Errorf("Envs[%d].Value = %q, want %q", i, sb.Envs[i].Value, want.Value)
+				}
 			}
 		})
 	}
@@ -565,7 +556,7 @@ func TestExtension_HasCSSConfig(t *testing.T) {
 }
 
 // TestPiManifestTemplateResolution loads the actual Pi agent manifest and verifies
-// that {{property}} template references in sandbox_mount are resolved using
+// that {{property}} template references in sandbox are resolved using
 // config_schema defaults end-to-end.
 func TestPiManifestTemplateResolution(t *testing.T) {
 	manifestPath := filepath.Join("..", "..", "extensions", "agent", "pi", "manifest.json")
@@ -585,39 +576,45 @@ func TestPiManifestTemplateResolution(t *testing.T) {
 	if manifest.Agent == nil {
 		t.Fatal("manifest.Agent is nil")
 	}
-	if manifest.Agent.SandboxMount == nil {
-		t.Fatal("manifest.Agent.SandboxMount is nil")
+	if manifest.Agent.Sandbox == nil {
+		t.Fatal("manifest.Agent.Sandbox is nil")
 	}
 
 	// Verify template references are present in the raw manifest
-	if manifest.Agent.SandboxMount.HostPath != "{{sandbox_mount_host_path}}" {
-		t.Errorf("expected template host_path, got %q", manifest.Agent.SandboxMount.HostPath)
+	if len(manifest.Agent.Sandbox.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(manifest.Agent.Sandbox.Mounts))
 	}
-	if manifest.Agent.SandboxMount.ContainerPath != "{{sandbox_mount_container_path}}" {
-		t.Errorf("expected template container_path, got %q", manifest.Agent.SandboxMount.ContainerPath)
+	if manifest.Agent.Sandbox.Mounts[0].HostPath != "{{sandbox_mount_host_path[]}}" {
+		t.Errorf("expected template host_path, got %q", manifest.Agent.Sandbox.Mounts[0].HostPath)
 	}
-	if manifest.Agent.SandboxMount.Mode != "{{sandbox_mount_mode}}" {
-		t.Errorf("expected template mode, got %q", manifest.Agent.SandboxMount.Mode)
+	if manifest.Agent.Sandbox.Mounts[0].ContainerPath != "{{sandbox_mount_container_path[]}}" {
+		t.Errorf("expected template container_path, got %q", manifest.Agent.Sandbox.Mounts[0].ContainerPath)
 	}
-	if len(manifest.Agent.SandboxMount.Envs) != 1 || manifest.Agent.SandboxMount.Envs[0].Key != "{{sandbox_mount_env_key}}" {
-		t.Errorf("expected template env key, got %+v", manifest.Agent.SandboxMount.Envs)
+	if manifest.Agent.Sandbox.Mounts[0].Mode != "{{sandbox_mount_mode[]}}" {
+		t.Errorf("expected template mode, got %q", manifest.Agent.Sandbox.Mounts[0].Mode)
+	}
+	if len(manifest.Agent.Sandbox.Envs) != 1 || manifest.Agent.Sandbox.Envs[0].Key != "{{sandbox_env_key[]}}" {
+		t.Errorf("expected template env key, got %+v", manifest.Agent.Sandbox.Envs)
 	}
 
 	// Resolve templates and verify against config_schema defaults
-	mount := manifest.Agent.ResolveSandboxMountTemplates(manifest.ConfigSchema)
-	if mount == nil {
-		t.Fatal("resolved mount is nil")
+	sb := manifest.Agent.ResolveSandboxTemplates(manifest.ConfigSchema)
+	if sb == nil {
+		t.Fatal("resolved sandbox is nil")
 	}
-	if mount.HostPath != "~/.pi/agent" {
-		t.Errorf("resolved HostPath = %q, want ~/.pi/agent", mount.HostPath)
+	if len(sb.Mounts) != 1 {
+		t.Fatalf("resolved mount count = %d, want 1", len(sb.Mounts))
 	}
-	if mount.ContainerPath != "/root/.pi/agent" {
-		t.Errorf("resolved ContainerPath = %q, want /root/.pi/agent", mount.ContainerPath)
+	if sb.Mounts[0].HostPath != "~/.pi/agent" {
+		t.Errorf("resolved HostPath = %q, want ~/.pi/agent", sb.Mounts[0].HostPath)
 	}
-	if mount.Mode != "rw" {
-		t.Errorf("resolved Mode = %q, want rw", mount.Mode)
+	if sb.Mounts[0].ContainerPath != "/root/.pi/agent" {
+		t.Errorf("resolved ContainerPath = %q, want /root/.pi/agent", sb.Mounts[0].ContainerPath)
 	}
-	if len(mount.Envs) != 1 || mount.Envs[0].Key != "HOME" {
-		t.Errorf("resolved Envs = %+v, want key HOME", mount.Envs)
+	if sb.Mounts[0].Mode != "rw" {
+		t.Errorf("resolved Mode = %q, want rw", sb.Mounts[0].Mode)
+	}
+	if len(sb.Envs) != 1 || sb.Envs[0].Key != "HOME" {
+		t.Errorf("resolved Envs = %+v, want key HOME", sb.Envs)
 	}
 }

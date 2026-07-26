@@ -257,8 +257,8 @@ func TestRegistry_EmptyStore(t *testing.T) {
 	}
 }
 
-// TestRegistry_GetAgentConfigMount tests config mount resolution from manifest.
-func TestRegistry_GetAgentConfigMount(t *testing.T) {
+// TestRegistry_GetAgentSandbox tests sandbox config resolution from manifest.
+func TestRegistry_GetAgentSandbox(t *testing.T) {
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -268,11 +268,11 @@ func TestRegistry_GetAgentConfigMount(t *testing.T) {
 				Config:  map[string]any{},
 				Manifest: ext.ExtensionManifest{
 					Agent: &ext.AgentConfig{
-						SandboxMount: &types.AgentConfigMount{
-							HostPath:      "~/.agent/config",
-							ContainerPath: "/root/agent/config",
-							Mode:          "ro",
-							Envs:          []types.SandboxEnv{{Key: "AGENT_CONFIG_DIR", Value: "~/.agent/config"}},
+						Sandbox: &types.AgentSandbox{
+							Mounts: []types.SandboxMount{
+								{HostPath: "~/.agent/config", ContainerPath: "/root/agent/config", Mode: "ro"},
+							},
+							Envs: []types.SandboxEnv{{Key: "AGENT_CONFIG_DIR", Value: "~/.agent/config"}},
 						},
 					},
 				},
@@ -282,36 +282,39 @@ func TestRegistry_GetAgentConfigMount(t *testing.T) {
 
 	// Without config store: should return manifest defaults with ~ expanded
 	registry := NewAgentRegistry(store, nil)
-	mount := registry.GetAgentConfigMount("pi")
-	if mount == nil {
-		t.Fatal("expected non-nil mount")
+	sb := registry.GetAgentSandbox("pi")
+	if sb == nil {
+		t.Fatal("expected non-nil sandbox")
+	}
+	if len(sb.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(sb.Mounts))
 	}
 	expectedHost := ""
 	if homeDir, err := os.UserHomeDir(); err == nil {
 		expectedHost = homeDir + "/.agent/config"
 	}
-	if mount.HostPath != expectedHost {
-		t.Errorf("HostPath = %q, want %q", mount.HostPath, expectedHost)
+	if sb.Mounts[0].HostPath != expectedHost {
+		t.Errorf("Mounts[0].HostPath = %q, want %q", sb.Mounts[0].HostPath, expectedHost)
 	}
-	if mount.ContainerPath != "/root/agent/config" {
-		t.Errorf("ContainerPath = %q, want /root/agent/config", mount.ContainerPath)
+	if sb.Mounts[0].ContainerPath != "/root/agent/config" {
+		t.Errorf("Mounts[0].ContainerPath = %q, want /root/agent/config", sb.Mounts[0].ContainerPath)
 	}
-	if mount.Mode != "ro" {
-		t.Errorf("Mode = %q, want ro", mount.Mode)
+	if sb.Mounts[0].Mode != "ro" {
+		t.Errorf("Mounts[0].Mode = %q, want ro", sb.Mounts[0].Mode)
 	}
-	if len(mount.Envs) != 1 || mount.Envs[0].Key != "AGENT_CONFIG_DIR" {
-		t.Errorf("Envs = %+v, want key AGENT_CONFIG_DIR", mount.Envs)
+	if len(sb.Envs) != 1 || sb.Envs[0].Key != "AGENT_CONFIG_DIR" {
+		t.Errorf("Envs = %+v, want key AGENT_CONFIG_DIR", sb.Envs)
 	}
 
-	// Disabled agent should return nil
-	mount2 := registry.GetAgentConfigMount("disabled")
-	if mount2 != nil {
+	// Non-existent agent should return nil
+	sb2 := registry.GetAgentSandbox("disabled")
+	if sb2 != nil {
 		t.Error("expected nil for non-existent agent")
 	}
 }
 
-// TestRegistry_GetAgentConfigMountWithOverrides tests config store + extension config overrides.
-func TestRegistry_GetAgentConfigMountWithOverrides(t *testing.T) {
+// TestRegistry_GetAgentSandboxWithOverrides tests extension config overrides.
+func TestRegistry_GetAgentSandboxWithOverrides(t *testing.T) {
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -319,16 +322,16 @@ func TestRegistry_GetAgentConfigMountWithOverrides(t *testing.T) {
 				Type:    ext.ExtensionTypeAgent,
 				Enabled: true,
 				Config: map[string]any{
-					"sandbox_mounts": []any{
+					"sandbox_mount": []any{
 						map[string]any{"host_path": "~/.agent/config", "container_path": "/root/agent/config", "mode": "rw"},
 					},
 				},
 				Manifest: ext.ExtensionManifest{
 					Agent: &ext.AgentConfig{
-						SandboxMount: &types.AgentConfigMount{
-							HostPath:      "~/.default/config",
-							ContainerPath: "/root/default/config",
-							Mode:          "ro",
+						Sandbox: &types.AgentSandbox{
+							Mounts: []types.SandboxMount{
+								{HostPath: "~/.default/config", ContainerPath: "/root/default/config", Mode: "ro"},
+							},
 						},
 					},
 				},
@@ -336,22 +339,29 @@ func TestRegistry_GetAgentConfigMountWithOverrides(t *testing.T) {
 		},
 	}
 
-	// With sandbox_mounts array override: mode should be "rw" and paths from config
+	// With sandbox_mount array override: mode should be "rw" and paths from config
 	registry := NewAgentRegistry(store, nil)
-	mount := registry.GetAgentConfigMount("pi")
-	if mount == nil {
-		t.Fatal("expected non-nil mount")
+	sb := registry.GetAgentSandbox("pi")
+	if sb == nil {
+		t.Fatal("expected non-nil sandbox")
 	}
-	if mount.Mode != "rw" {
-		t.Errorf("Mode = %q, want rw (from extension config)", mount.Mode)
+	if len(sb.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(sb.Mounts))
 	}
-	if mount.HostPath != "/home/mwren/.agent/config" {
-		t.Errorf("HostPath = %q, want expanded home path", mount.HostPath)
+	if sb.Mounts[0].Mode != "rw" {
+		t.Errorf("Mounts[0].Mode = %q, want rw (from extension config)", sb.Mounts[0].Mode)
+	}
+	expectedHost := ""
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		expectedHost = homeDir + "/.agent/config"
+	}
+	if sb.Mounts[0].HostPath != expectedHost {
+		t.Errorf("Mounts[0].HostPath = %q, want %q", sb.Mounts[0].HostPath, expectedHost)
 	}
 }
 
-// TestRegistry_GetAgentConfigMountProviderOverride tests provider-level host_path override.
-func TestRegistry_GetAgentConfigMountProviderOverride(t *testing.T) {
+// TestRegistry_GetAgentSandboxProviderOverride tests provider-level host_path override.
+func TestRegistry_GetAgentSandboxProviderOverride(t *testing.T) {
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -361,10 +371,10 @@ func TestRegistry_GetAgentConfigMountProviderOverride(t *testing.T) {
 				Config:  map[string]any{},
 				Manifest: ext.ExtensionManifest{
 					Agent: &ext.AgentConfig{
-						SandboxMount: &types.AgentConfigMount{
-							HostPath:      "~/.agent/config",
-							ContainerPath: "/root/agent/config",
-							Mode:          "ro",
+						Sandbox: &types.AgentSandbox{
+							Mounts: []types.SandboxMount{
+								{HostPath: "~/.agent/config", ContainerPath: "/root/agent/config", Mode: "ro"},
+							},
 						},
 					},
 				},
@@ -380,17 +390,20 @@ func TestRegistry_GetAgentConfigMountProviderOverride(t *testing.T) {
 		},
 	}
 	registry := NewAgentRegistry(store, configStore)
-	mount := registry.GetAgentConfigMount("pi")
-	if mount == nil {
-		t.Fatal("expected non-nil mount")
+	sb := registry.GetAgentSandbox("pi")
+	if sb == nil {
+		t.Fatal("expected non-nil sandbox")
 	}
-	if mount.HostPath != "/custom/pi/config" {
-		t.Errorf("HostPath = %q, want /custom/pi/config (from provider override)", mount.HostPath)
+	if len(sb.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(sb.Mounts))
+	}
+	if sb.Mounts[0].HostPath != "/custom/pi/config" {
+		t.Errorf("Mounts[0].HostPath = %q, want /custom/pi/config (from provider override)", sb.Mounts[0].HostPath)
 	}
 }
 
-// TestRegistry_GetAgentConfigMountNoManifest tests when extension has no sandbox_mount.
-func TestRegistry_GetAgentConfigMountNoManifest(t *testing.T) {
+// TestRegistry_GetAgentSandboxNoManifest tests when extension has no sandbox.
+func TestRegistry_GetAgentSandboxNoManifest(t *testing.T) {
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -407,14 +420,14 @@ func TestRegistry_GetAgentConfigMountNoManifest(t *testing.T) {
 	}
 
 	registry := NewAgentRegistry(store, nil)
-	mount := registry.GetAgentConfigMount("no-mount-agent")
-	if mount != nil {
-		t.Error("expected nil when no sandbox_mount in manifest")
+	sb := registry.GetAgentSandbox("no-mount-agent")
+	if sb != nil {
+		t.Error("expected nil when no sandbox in manifest")
 	}
 }
 
-// TestRegistry_GetConfigMount tests getting mount for first enabled agent.
-func TestRegistry_GetConfigMount(t *testing.T) {
+// TestRegistry_GetAnyAgentSandbox tests getting sandbox for first enabled agent.
+func TestRegistry_GetAnyAgentSandbox(t *testing.T) {
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -423,9 +436,8 @@ func TestRegistry_GetConfigMount(t *testing.T) {
 				Enabled: true,
 				Manifest: ext.ExtensionManifest{
 					Agent: &ext.AgentConfig{
-						SandboxMount: &types.AgentConfigMount{
-							HostPath: "~/.agent/config",
-							Mode:     "ro",
+						Sandbox: &types.AgentSandbox{
+							Mounts: []types.SandboxMount{{HostPath: "~/.agent/config", ContainerPath: "/x", Mode: "ro"}},
 						},
 					},
 				},
@@ -434,18 +446,18 @@ func TestRegistry_GetConfigMount(t *testing.T) {
 	}
 
 	registry := NewAgentRegistry(store, nil)
-	mount := registry.GetConfigMount()
-	if mount == nil {
-		t.Fatal("expected non-nil mount")
+	sb := registry.GetAnyAgentSandbox()
+	if sb == nil {
+		t.Fatal("expected non-nil sandbox")
 	}
-	if mount.Mode != "ro" {
-		t.Errorf("Mode = %q, want ro", mount.Mode)
+	if len(sb.Mounts) != 1 || sb.Mounts[0].Mode != "ro" {
+		t.Errorf("Mounts[0].Mode = %q, want ro", sb.Mounts[0].Mode)
 	}
 }
 
-// TestRegistry_GetAgentConfigMountTemplates tests that {{property}} template
-// references in sandbox_mount are resolved using config_schema defaults.
-func TestRegistry_GetAgentConfigMountTemplates(t *testing.T) {
+// TestRegistry_GetAgentSandboxTemplates tests that {{property}} template
+// references in sandbox are resolved using config_schema defaults.
+func TestRegistry_GetAgentSandboxTemplates(t *testing.T) {
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -456,20 +468,20 @@ func TestRegistry_GetAgentConfigMountTemplates(t *testing.T) {
 				Manifest: ext.ExtensionManifest{
 					ConfigSchema: &ext.ConfigSchema{
 						Properties: []ext.SchemaProp{
-							{Key: "sandbox_mounts", Type: "mount", Default: []any{
+							{Key: "sandbox_mount", Type: "mount", Default: []any{
 								map[string]any{"host_path": "~/.pi/agent", "container_path": "/root/.pi/agent", "mode": "rw"},
 							}},
-							{Key: "sandbox_envs", Type: "env", Default: []any{
+							{Key: "sandbox_env", Type: "env", Default: []any{
 								map[string]any{"key": "HOME", "value": "~/.pi/agent"},
 							}},
 						},
 					},
 					Agent: &ext.AgentConfig{
-						SandboxMount: &types.AgentConfigMount{
-							HostPath:      "~/.pi/agent",
-							ContainerPath: "/root/.pi/agent",
-							Mode:          "rw",
-							Envs:          []types.SandboxEnv{{Key: "HOME", Value: "~/.pi/agent"}},
+						Sandbox: &types.AgentSandbox{
+							Mounts: []types.SandboxMount{
+								{HostPath: "{{sandbox_mount_host_path[]}}", ContainerPath: "{{sandbox_mount_container_path[]}}", Mode: "{{sandbox_mount_mode[]}}"},
+							},
+							Envs: []types.SandboxEnv{{Key: "{{sandbox_env_key[]}}", Value: "{{sandbox_env_value[]}}"}},
 						},
 					},
 				},
@@ -478,32 +490,35 @@ func TestRegistry_GetAgentConfigMountTemplates(t *testing.T) {
 	}
 
 	registry := NewAgentRegistry(store, nil)
-	mount := registry.GetAgentConfigMount("pi")
-	if mount == nil {
-		t.Fatal("expected non-nil mount")
+	sb := registry.GetAgentSandbox("pi")
+	if sb == nil {
+		t.Fatal("expected non-nil sandbox")
 	}
-	// ~ is expanded to home directory by GetAgentConfigMount
+	if len(sb.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(sb.Mounts))
+	}
+	// ~ is expanded to home directory by GetAgentSandbox
 	expectedHost := "~/.pi/agent"
 	if homeDir, err := os.UserHomeDir(); err == nil {
 		expectedHost = homeDir + "/.pi/agent"
 	}
-	if mount.HostPath != expectedHost {
-		t.Errorf("HostPath = %q, want %q", mount.HostPath, expectedHost)
+	if sb.Mounts[0].HostPath != expectedHost {
+		t.Errorf("Mounts[0].HostPath = %q, want %q", sb.Mounts[0].HostPath, expectedHost)
 	}
-	if mount.ContainerPath != "/root/.pi/agent" {
-		t.Errorf("ContainerPath = %q, want /root/.pi/agent", mount.ContainerPath)
+	if sb.Mounts[0].ContainerPath != "/root/.pi/agent" {
+		t.Errorf("Mounts[0].ContainerPath = %q, want /root/.pi/agent", sb.Mounts[0].ContainerPath)
 	}
-	if mount.Mode != "rw" {
-		t.Errorf("Mode = %q, want rw", mount.Mode)
+	if sb.Mounts[0].Mode != "rw" {
+		t.Errorf("Mounts[0].Mode = %q, want rw", sb.Mounts[0].Mode)
 	}
-	if len(mount.Envs) != 1 || mount.Envs[0].Key != "HOME" {
-		t.Errorf("Envs = %+v, want key HOME", mount.Envs)
+	if len(sb.Envs) != 1 || sb.Envs[0].Key != "HOME" {
+		t.Errorf("Envs = %+v, want key HOME", sb.Envs)
 	}
 }
 
-// TestRegistry_GetAgentConfigMountTemplatesWithOverride tests that runtime config
+// TestRegistry_GetAgentSandboxTemplatesWithOverride tests that runtime config
 // overrides take precedence over resolved template values.
-func TestRegistry_GetAgentConfigMountTemplatesWithOverride(t *testing.T) {
+func TestRegistry_GetAgentSandboxTemplatesWithOverride(t *testing.T) {
 	store := &mockExtensionStore{
 		extensions: []ext.Extension{
 			{
@@ -511,24 +526,23 @@ func TestRegistry_GetAgentConfigMountTemplatesWithOverride(t *testing.T) {
 				Type:    ext.ExtensionTypeAgent,
 				Enabled: true,
 				Config: map[string]any{
-					"sandbox_mounts": []any{
+					"sandbox_mount": []any{
 						map[string]any{"host_path": "/custom/path", "container_path": "/root/.pi/agent", "mode": "ro"},
 					},
 				},
 				Manifest: ext.ExtensionManifest{
 					ConfigSchema: &ext.ConfigSchema{
 						Properties: []ext.SchemaProp{
-							{Key: "sandbox_mounts", Type: "mount", Default: []any{
+							{Key: "sandbox_mount", Type: "mount", Default: []any{
 								map[string]any{"host_path": "~/.pi/agent", "container_path": "/root/.pi/agent", "mode": "rw"},
 							}},
 						},
 					},
 					Agent: &ext.AgentConfig{
-						SandboxMount: &types.AgentConfigMount{
-							HostPath:      "~/.pi/agent",
-							ContainerPath: "/root/.pi/agent",
-							Mode:          "rw",
-							Envs:          nil,
+						Sandbox: &types.AgentSandbox{
+							Mounts: []types.SandboxMount{
+								{HostPath: "{{sandbox_mount_host_path[]}}", ContainerPath: "{{sandbox_mount_container_path[]}}", Mode: "{{sandbox_mount_mode[]}}"},
+							},
 						},
 					},
 				},
@@ -537,21 +551,22 @@ func TestRegistry_GetAgentConfigMountTemplatesWithOverride(t *testing.T) {
 	}
 
 	registry := NewAgentRegistry(store, nil)
-	mount := registry.GetAgentConfigMount("pi")
-	if mount == nil {
-		t.Fatal("expected non-nil mount")
+	sb := registry.GetAgentSandbox("pi")
+	if sb == nil {
+		t.Fatal("expected non-nil sandbox")
+	}
+	if len(sb.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(sb.Mounts))
 	}
 	// Runtime override should take precedence over resolved template
-	if mount.HostPath != "/custom/path" {
-		t.Errorf("HostPath = %q, want /custom/path (from runtime override)", mount.HostPath)
+	if sb.Mounts[0].HostPath != "/custom/path" {
+		t.Errorf("Mounts[0].HostPath = %q, want /custom/path (from runtime override)", sb.Mounts[0].HostPath)
 	}
-	if mount.Mode != "ro" {
-		t.Errorf("Mode = %q, want ro (from runtime override)", mount.Mode)
+	if sb.Mounts[0].Mode != "ro" {
+		t.Errorf("Mounts[0].Mode = %q, want ro (from runtime override)", sb.Mounts[0].Mode)
 	}
-	// Container path comes from sandbox_mounts array config
-	if mount.ContainerPath != "/root/.pi/agent" {
-		t.Errorf("ContainerPath = %q, want /root/.pi/agent (from config)", mount.ContainerPath)
+	// Container path comes from sandbox_mount array config
+	if sb.Mounts[0].ContainerPath != "/root/.pi/agent" {
+		t.Errorf("Mounts[0].ContainerPath = %q, want /root/.pi/agent (from config)", sb.Mounts[0].ContainerPath)
 	}
 }
-
-// TestRegistry_GetAgentConfigMountProviderOverride tests provider-level host_path override.

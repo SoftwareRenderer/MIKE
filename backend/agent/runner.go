@@ -62,11 +62,11 @@ func NewAgentRunner(ext *extensions.Extension, sandboxMgr *sandboxmgr.SandboxMan
 		Config:        ext.Config,
 		AgentManifest: ext.Manifest.Agent,
 	}
-	// Resolve {{property}} template references in sandbox_mount using config_schema defaults
+	// Resolve {{property}} template references in sandbox using config_schema defaults
 	// so the adapter receives concrete values, not template strings.
 	if cfg.AgentManifest != nil {
 		resolved := *cfg.AgentManifest
-		resolved.SandboxMount = cfg.AgentManifest.ResolveSandboxMountTemplates(ext.Manifest.ConfigSchema)
+		resolved.Sandbox = cfg.AgentManifest.ResolveSandboxTemplates(ext.Manifest.ConfigSchema)
 		cfg.AgentManifest = &resolved
 	}
 	cfgBytes, err := json.Marshal(cfg)

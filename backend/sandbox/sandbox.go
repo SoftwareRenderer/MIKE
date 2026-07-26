@@ -44,7 +44,7 @@ type SandboxOpts struct {
 	NetworkIsolation bool
 	MemoryLimit      int
 	ForwardPorts     []types.PortForward
-	AgentConfig      *types.AgentConfigMount // bind-mount for agent config dir into container
+	AgentSandbox     *types.AgentSandbox     // mounts and envs for agent sandbox
 	SkillsDir        string
 	SandboxMounts    []types.SandboxMount
 	SandboxEnvs      []types.SandboxEnv
@@ -185,7 +185,7 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 //     otherwise read-write (rw).
 //   - Git Metadata: If projectPath is non-empty and .git/ exists, it is mounted read-only at the
 //     same absolute path to allow git to resolve refs, objects, and worktree metadata.
-//   - Agent Config: If opts.AgentConfig is provided, it is bind-mounted into the container
+//   - Agent Sandbox: If opts.AgentSandbox is provided, its mounts and envs are applied
 //     (default: /root/.config/agent) and HOME is set to /root.
 //   - Skills: If skillsDir is non-empty, it is bind-mounted read-only at SkillsMount.
 //   - Custom: Any additional mounts in opts.SandboxMounts are added after the standard mounts.
@@ -319,31 +319,32 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath 
 		}
 	}
 
-	// Agent config mount (only when an agent extension is configured)
-	if opts.AgentConfig != nil && opts.AgentConfig.HostPath != "" {
-		absHost, err := filepath.Abs(opts.AgentConfig.HostPath)
-		if err != nil {
-			return nil, fmt.Errorf("resolve agent config host path: %w", err)
+	// Agent sandbox mounts and envs (only when an agent extension is configured)
+	if opts.AgentSandbox != nil {
+		for _, m := range opts.AgentSandbox.Mounts {
+			if m.HostPath == "" || m.ContainerPath == "" {
+				continue
+			}
+			absHost, err := filepath.Abs(m.HostPath)
+			if err != nil {
+				log.Printf("[sandbox] task=%s skipping agent mount: invalid host path %s: %v", taskID, m.HostPath, err)
+				continue
+			}
+			mountMode := m.Mode
+			if mountMode != "ro" && mountMode != "rw" {
+				mountMode = "ro"
+			}
+			createArgs = append(createArgs,
+				"-v", absHost+":"+m.ContainerPath+":rprivate,"+mountMode,
+			)
+			log.Printf("[sandbox] task=%s mounting agent sandbox %s -> %s (%s)", taskID, absHost, m.ContainerPath, mountMode)
 		}
-		mountMode := opts.AgentConfig.Mode
-		if mountMode != "ro" && mountMode != "rw" {
-			mountMode = "ro" // default to read-only
-		}
-		containerPath := opts.AgentConfig.ContainerPath
-		if containerPath == "" {
-			return nil, fmt.Errorf("resolve agent config container path is blank")
-		}
-		createArgs = append(createArgs,
-			"-v", absHost+":"+containerPath+":rprivate,"+mountMode,
-		)
-		// Add agent-specific config environment variables
-		for _, e := range opts.AgentConfig.Envs {
+		for _, e := range opts.AgentSandbox.Envs {
 			if e.Key != "" {
 				createArgs = append(createArgs, "-e", e.Key+"="+e.Value)
 				log.Printf("[sandbox] task=%s setting agent env %s=%s", taskID, e.Key, e.Value)
 			}
 		}
-		log.Printf("[sandbox] task=%s mounting agent config %s -> %s (%s)", taskID, absHost, containerPath, mountMode)
 	}
 
 	// Skills directory mount (read-only, for skill packages)

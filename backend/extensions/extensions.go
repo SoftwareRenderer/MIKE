@@ -1,6 +1,8 @@
 package extensions
 
 import (
+	"strings"
+
 	"kanban/backend/types"
 )
 
@@ -75,47 +77,77 @@ type AgentConfig struct {
 	Description  string                   `json:"description,omitempty"`    // short description shown in provider card (markdown)
 	SetupInfo    string                   `json:"setup_info,omitempty"`     // setup instructions shown in provider card (markdown, newline-separated items)
 	ConfigSchema *ConfigSchema            `json:"config_schema,omitempty"`  // user-configurable options
-	SandboxMount *types.AgentConfigMount `json:"sandbox_mount,omitempty"` // default config dir mount into sandbox containers
+	Sandbox *types.AgentSandbox `json:"sandbox,omitempty"` // default mounts and envs for sandbox containers
 }
 
-// ResolveSandboxMountTemplates resolves {{property_name}} template references
-// in SandboxMount using the default values from the provided ConfigSchema.
+// ResolveSandboxTemplates resolves {{property_name}} template references
+// in Sandbox using the default values from the provided ConfigSchema.
 // This allows config_schema to hold the source-of-truth defaults while
-// sandbox_mount uses template references to the same values.
-// Returns a nil mount if SandboxMount is nil (no copy needed).
-func (a *AgentConfig) ResolveSandboxMountTemplates(schema *ConfigSchema) *types.AgentConfigMount {
-	if a == nil || a.SandboxMount == nil {
+// sandbox uses template references to the same values.
+// Returns a nil sandbox if Sandbox is nil (no copy needed).
+func (a *AgentConfig) ResolveSandboxTemplates(schema *ConfigSchema) *types.AgentSandbox {
+	if a == nil || a.Sandbox == nil {
 		return nil
 	}
-	mount := *a.SandboxMount // copy
+	sb := types.AgentSandbox{
+		Mounts: make([]types.SandboxMount, len(a.Sandbox.Mounts)),
+		Envs:   make([]types.SandboxEnv, len(a.Sandbox.Envs)),
+	}
+	copy(sb.Mounts, a.Sandbox.Mounts)
+	copy(sb.Envs, a.Sandbox.Envs)
 	if schema == nil {
-		return &mount
+		return &sb
 	}
-	mount.HostPath = schema.resolveTemplate(mount.HostPath)
-	mount.ContainerPath = schema.resolveTemplate(mount.ContainerPath)
-	mount.Mode = schema.resolveTemplate(mount.Mode)
-	for i := range mount.Envs {
-		mount.Envs[i].Key = schema.resolveTemplate(mount.Envs[i].Key)
-		mount.Envs[i].Value = schema.resolveTemplate(mount.Envs[i].Value)
+	for i := range sb.Mounts {
+		sb.Mounts[i].HostPath = schema.resolveTemplate(sb.Mounts[i].HostPath)
+		sb.Mounts[i].ContainerPath = schema.resolveTemplate(sb.Mounts[i].ContainerPath)
+		sb.Mounts[i].Mode = schema.resolveTemplate(sb.Mounts[i].Mode)
 	}
-	return &mount
+	for i := range sb.Envs {
+		sb.Envs[i].Key = schema.resolveTemplate(sb.Envs[i].Key)
+		sb.Envs[i].Value = schema.resolveTemplate(sb.Envs[i].Value)
+	}
+	return &sb
 }
 
-// resolveTemplate checks if value is a {{property_name}} template and resolves
-// it to the config_schema property's default value. If no match is found or
-// the value is not a template, the original value is returned unchanged.
+// resolveTemplate checks if value is a {{property_name[]}} template and resolves
+// it to a config_schema array property's default value. The [] suffix signals
+// the property is an array — value comes from the first element.
+// Template names use the pattern {property_key}_{field}[] (e.g. {{sandbox_mount_host_path[]}}
+// → sandbox_mount[0].host_path). If no match is found or the value is not a
+// template, the original value is returned unchanged.
 func (s *ConfigSchema) resolveTemplate(value string) string {
 	if len(value) < 5 || value[0] != '{' || value[1] != '{' || value[len(value)-1] != '}' || value[len(value)-2] != '}' {
 		return value
 	}
 	propName := value[2 : len(value)-2]
-	if prop := s.GetProperty(propName); prop != nil {
-		if prop.Default != nil {
-			if s, ok := prop.Default.(string); ok {
-				return s
+	// Strip trailing [] to get the property reference
+	const arraySuffix = "[]"
+	if !strings.HasSuffix(propName, arraySuffix) {
+		return value
+	}
+	propName = strings.TrimSuffix(propName, arraySuffix)
+
+	for _, prop := range s.Properties {
+		arr, ok := prop.Default.([]any)
+		if !ok || len(arr) == 0 {
+			continue
+		}
+		first, ok := arr[0].(map[string]any)
+		if !ok {
+			continue
+		}
+		prefix := prop.Key + "_"
+		if strings.HasPrefix(propName, prefix) {
+			field := propName[len(prefix):]
+			if v, ok := first[field]; ok {
+				if str, ok := v.(string); ok {
+					return str
+				}
 			}
 		}
 	}
+
 	return value
 }
 
