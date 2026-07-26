@@ -62,7 +62,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	} else {
 		// Agent runs on the host.
 		// The adapter's SubprocessConfig() sets config dir env vars from the
-		// extension's config_mount declaration, so no Pi-specific code needed here.
+		// extension's sandbox_mount declaration, so no Pi-specific code needed here.
 		log.Printf("[agent] task=%s creating runner (cwd=%s, session=%s)", task.ID, worktreePath, sessionName)
 		runner, err = agent.NewAgentRunner(ext, nil, task.ID, worktreePath, sessionName, false)
 	}

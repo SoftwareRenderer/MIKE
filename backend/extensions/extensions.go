@@ -75,7 +75,48 @@ type AgentConfig struct {
 	Description  string                   `json:"description,omitempty"`    // short description shown in provider card (markdown)
 	SetupInfo    string                   `json:"setup_info,omitempty"`     // setup instructions shown in provider card (markdown, newline-separated items)
 	ConfigSchema *ConfigSchema            `json:"config_schema,omitempty"`  // user-configurable options
-	ConfigMount  *types.AgentConfigMount  `json:"config_mount,omitempty"`   // default config dir mount into sandbox containers
+	SandboxMount *types.AgentConfigMount `json:"sandbox_mount,omitempty"` // default config dir mount into sandbox containers
+}
+
+// ResolveSandboxMountTemplates resolves {{property_name}} template references
+// in SandboxMount using the default values from the provided ConfigSchema.
+// This allows config_schema to hold the source-of-truth defaults while
+// sandbox_mount uses template references to the same values.
+// Returns a nil mount if SandboxMount is nil (no copy needed).
+func (a *AgentConfig) ResolveSandboxMountTemplates(schema *ConfigSchema) *types.AgentConfigMount {
+	if a == nil || a.SandboxMount == nil {
+		return nil
+	}
+	mount := *a.SandboxMount // copy
+	if schema == nil {
+		return &mount
+	}
+	mount.HostPath = resolveTemplate(mount.HostPath, schema.Properties)
+	mount.ContainerPath = resolveTemplate(mount.ContainerPath, schema.Properties)
+	mount.Mode = resolveTemplate(mount.Mode, schema.Properties)
+	for i := range mount.Envs {
+		mount.Envs[i].Key = resolveTemplate(mount.Envs[i].Key, schema.Properties)
+		mount.Envs[i].Value = resolveTemplate(mount.Envs[i].Value, schema.Properties)
+	}
+	return &mount
+}
+
+// resolveTemplate checks if value is a {{property_name}} template and resolves
+// it to the config_schema property's default value. If no match is found or
+// the value is not a template, the original value is returned unchanged.
+func resolveTemplate(value string, props map[string]SchemaProp) string {
+	if len(value) < 5 || value[0] != '{' || value[1] != '{' || value[len(value)-1] != '}' || value[len(value)-2] != '}' {
+		return value
+	}
+	propName := value[2 : len(value)-2]
+	if prop, ok := props[propName]; ok {
+		if prop.Default != nil {
+			if s, ok := prop.Default.(string); ok {
+				return s
+			}
+		}
+	}
+	return value
 }
 
 // ConfigSchema is a JSON Schema subset for dynamic form rendering.

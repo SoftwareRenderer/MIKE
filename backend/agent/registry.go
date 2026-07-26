@@ -112,13 +112,13 @@ func (r *AgentRegistry) ToProviders() []types.Provider {
 	return providers
 }
 
-// GetAgentConfigMount returns the config mount for a specific agent extension.
-// It uses the manifest's default config_mount, with overrides from:
-//   - Extension config (runtime override of mode/host_path)
+// GetAgentConfigMount returns the sandbox mount for a specific agent extension.
+// It uses the manifest's default sandbox_mount, with overrides from:
+//   - Extension config (runtime override of mode/host_path/container_path/envs)
 //   - Provider config (AgentConfigDir override of host_path)
 //
 // The host_path is expanded for leading ~.
-// Returns nil if no config_mount is defined for the extension.
+// Returns nil if no sandbox_mount is defined for the extension.
 func (r *AgentRegistry) GetAgentConfigMount(agentName string) *types.AgentConfigMount {
 	r.mu.RLock()
 	ext, ok := r.agents[agentName]
@@ -129,19 +129,30 @@ func (r *AgentRegistry) GetAgentConfigMount(agentName string) *types.AgentConfig
 	}
 
 	def := ext.Manifest.Agent
-	if def == nil || def.ConfigMount == nil {
+	if def == nil || def.SandboxMount == nil {
 		return nil
 	}
 
-	mount := *def.ConfigMount // copy
+	// Resolve {{property}} template references in sandbox_mount using config_schema defaults
+	mount := *def.ResolveSandboxMountTemplates(ext.Manifest.ConfigSchema) // copy
 
 	// Override mode from extension runtime config
-	if mode, ok := ext.Config["config_mount_mode"].(string); ok && mode != "" {
+	if mode, ok := ext.Config["sandbox_mount_mode"].(string); ok && mode != "" {
 		mount.Mode = mode
 	}
 	// Override host_path from extension runtime config
-	if hp, ok := ext.Config["config_mount_host_path"].(string); ok && hp != "" {
+	if hp, ok := ext.Config["sandbox_mount_host_path"].(string); ok && hp != "" {
 		mount.HostPath = hp
+	}
+	// Override container_path from extension runtime config
+	if cp, ok := ext.Config["sandbox_mount_container_path"].(string); ok && cp != "" {
+		mount.ContainerPath = cp
+	}
+	// Override envs from extension runtime config (empty key disables)
+	if ek, ok := ext.Config["sandbox_mount_env_key"].(string); ok && ek != "" {
+		if ev, ok := ext.Config["sandbox_mount_env_value"].(string); ok {
+			mount.Envs = []types.SandboxEnv{{Key: ek, Value: ev}}
+		}
 	}
 
 	// Provider-level override of host_path (AgentConfigDir)
@@ -169,7 +180,7 @@ func (r *AgentRegistry) GetAgentConfigMount(agentName string) *types.AgentConfig
 // GetConfigMount returns the config mount for the first enabled agent extension.
 // Used by sandbox terminals and FS operations that need to mount agent config
 // for any configured agent (not a specific task's agent).
-// Returns nil if no agent extension with a config_mount is enabled.
+// Returns nil if no agent extension with a sandbox_mount is enabled.
 func (r *AgentRegistry) GetConfigMount() *types.AgentConfigMount {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

@@ -417,14 +417,14 @@ export interface AgentExtensionConfig {
     description?: string;    // short description shown in provider card
     setup_info?: string;     // setup instructions shown in provider card
     config_schema?: ConfigSchema;
-    config_mount?: AgentConfigMount; // default config dir mount into sandbox containers
+    sandbox_mount?: AgentConfigMount; // default config dir mount into sandbox containers
 }
 
 export interface AgentConfigMount {
-    host_path: string;        // host path to agent config dir
-    container_path: string;  // mount point inside the container
-    mode: string;            // "ro" (default) or "rw"
-    env_var?: string;        // env var name for non-sandbox use
+    host_path: string;            // host path to agent config dir
+    container_path: string;        // mount point inside the container
+    mode: 'rw' | 'ro';             // "rw" (default) or "ro"
+    envs?: SandboxEnv[];          // env key-value pairs for non-sandbox use
 }
 
 export interface LSPConfig {
