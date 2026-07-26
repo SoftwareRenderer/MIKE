@@ -23,7 +23,7 @@ const AgentSentinelPrefix = "agent://"
 // executeTaskWithAgent runs the task using an agent extension via the generic agent runner.
 // The agent handles its own LLM calls, tool execution, loop detection, and compaction.
 // Kanban only manages the subprocess lifecycle and streams events to the frontend.
-func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL string, userMsgChan chan stream.UserMessage, summarizeCh chan *summarizeRequest, sandboxEnabled bool, initialContent string) {
+func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, initialContent string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[agent-panic] task=%s recovered from panic: %v", task.ID, r)

@@ -100,19 +100,12 @@ type envVar struct {
 
 // piConfig holds parsed adapter configuration.
 type piConfig struct {
-	Binary          string
-	Mode            string
-	SessionName     string
-	DisplayName     string
-	Env             []string
-	SandboxMounts   []sandboxMount // resolved mounts (manifest default + runtime override)
-	SandboxEnvs     []envVar       // resolved env key-value pairs (manifest default + runtime override)
-}
-
-type sandboxMount struct {
-	HostPath      string
-	ContainerPath string
-	Mode          string
+	Binary      string
+	Mode        string
+	SessionName string
+	DisplayName string
+	Env         []string
+	SandboxEnvs []envVar // resolved env key-value pairs (manifest default + runtime override)
 }
 
 // toolDisplayNames maps tool names to human-readable display names.
@@ -176,25 +169,20 @@ func (a *Adapter) Init(config []byte) error {
 		return fmt.Errorf("parse config: %w", err)
 	}
 
-	cmMounts := []sandboxMount{}
 	cmEnvs := []envVar{}
 	if cfg.AgentManifest != nil && cfg.AgentManifest.Sandbox != nil {
-		for _, m := range cfg.AgentManifest.Sandbox.Mount {
-			cmMounts = append(cmMounts, sandboxMount{HostPath: m.HostPath, ContainerPath: m.ContainerPath, Mode: m.Mode})
-		}
 		for _, e := range cfg.AgentManifest.Sandbox.Env {
 			cmEnvs = append(cmEnvs, envVar{Key: e.Key, Value: e.Value})
 		}
 	}
 
 	a.config = piConfig{
-		Binary:        defaultString(cfg.Binary, "pi"),
-		Mode:          defaultString(cfg.Mode, "rpc"),
-		SessionName:   cfg.SessionName,
-		DisplayName:   defaultString(cfg.DisplayName, "Pi Coding Agent"),
-		Env:           cfg.Env,
-		SandboxMounts: cmMounts,
-		SandboxEnvs:   cmEnvs,
+		Binary:      defaultString(cfg.Binary, "pi"),
+		Mode:        defaultString(cfg.Mode, "rpc"),
+		SessionName: cfg.SessionName,
+		DisplayName: defaultString(cfg.DisplayName, "Pi Coding Agent"),
+		Env:         cfg.Env,
+		SandboxEnvs: cmEnvs,
 	}
 	a.lineBuffer = ""
 	a.cmdID = 0

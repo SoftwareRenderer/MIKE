@@ -46,7 +46,7 @@ func TestRegistry_Lookup(t *testing.T) {
 				Enabled: true,
 				Manifest: ext.ExtensionManifest{
 					DisplayName: "My Coding Agent",
-					Agent:       &ext.AgentConfig{WasmModule: "pi.wasm"},
+					Agent:       &ext.AgentConfig{},
 				},
 			},
 			{
@@ -412,7 +412,7 @@ func TestRegistry_GetAgentSandboxNoManifest(t *testing.T) {
 				Enabled: true,
 				Manifest: ext.ExtensionManifest{
 					Agent: &ext.AgentConfig{
-						WasmModule: "test.wasm",
+						
 					},
 				},
 			},
