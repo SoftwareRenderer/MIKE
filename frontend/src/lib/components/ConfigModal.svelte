@@ -182,8 +182,9 @@
         loadAvailableAgents();
     });
 
-    // Enrich agent providers with manifest data (description, setup_info) when extensions are loaded
-    $effect(() => {
+    // Enrich agent providers with manifest data (description, setup_info).
+    // Called after availableAgents is loaded to avoid reactivity loops.
+    function enrichAgentProviders() {
         if (availableAgents.length === 0) return;
         for (const p of providers) {
             if (p.kind !== 'agent') continue;
@@ -194,7 +195,7 @@
                 p.agent_setup_info = ext.manifest.agent.setup_info || '';
             }
         }
-    });
+    }
 
     // Close agent menu when clicking outside
     $effect(() => {
@@ -270,16 +271,19 @@
     let agentMenuRect = $state<{ top: number; left: number } | null>(null);
     let availableAgents = $state<Extension[]>([]);
     let agentsLoading = $state(false);
+    let agentsLoaded = $state(false); // tracks whether fetch has been attempted (guards against re-fetch on empty result)
 
     async function loadAvailableAgents() {
-        if (agentsLoading || availableAgents.length > 0) return;
+        if (agentsLoading || agentsLoaded) return;
         agentsLoading = true;
         try {
             const all = await listExtensions();
             availableAgents = all.filter(e => e.type === 'agent' && e.enabled);
+            enrichAgentProviders();
         } catch {
             availableAgents = [];
         } finally {
+            agentsLoaded = true;
             agentsLoading = false;
         }
     }
