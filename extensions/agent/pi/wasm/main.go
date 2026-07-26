@@ -1,62 +1,38 @@
 // Package main exports Pi adapter functions for wazero WASI reactor runtime.
 // Built with: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared
 //
-// Memory model: the HOST manages all memory allocation via wazero's api.Memory.
-// - Input: host writes data to linear memory, passes (offset, length) to exported functions
-// - Output: module writes results to a shared result buffer; host reads via lastResultPtr/lastResultLen
-//
-// go:wasmexport functions use int32 for pointers/lengths (WASM is 32-bit).
+// Memory model: NO buffers. Pure string passing.
+// - Input: host writes data to linear memory, passes as `string` param
+//   (Go runtime handles (i32 ptr, i32 len))
+// - Output: via //go:wasmimport host callback store_result(string)
+//   No shared buffer.
 package main
 
 import (
 	"encoding/json"
-	"unsafe"
 
 	"kanban/extensions/agent/pi"
 )
 
 var adapter *pi.Adapter
 
-// Shared result buffer — host reads results from here.
-// 1MB should be enough for any single result.
-var resultBuf [1 << 20]byte
-var resultLen int32
-
-//go:wasmexport lastResultPtr
-// Returns the offset of the result buffer in linear memory.
-func lastResultPtr() int32 {
-	return int32(uintptr(unsafe.Pointer(&resultBuf[0])))
-}
-
-//go:wasmexport lastResultLen
-// Returns the length of the last result written to resultBuf.
-func lastResultLen() int32 {
-	return resultLen
-}
-
-// setResult copies data into the shared result buffer.
-// Caller must ensure len(data) <= len(resultBuf).
-func setResult(data []byte) {
-	if len(data) > len(resultBuf) {
-		// Truncate — shouldn't happen for normal results
-		data = data[:len(resultBuf)]
-	}
-	copy(resultBuf[:], data)
-	resultLen = int32(len(data))
-}
+//go:wasmimport env store_result
+//go:noescape
+// Host callback: receives a string (i32 ptr + i32 len) from the WASM module.
+// The host reads the string data from linear memory and stores it.
+func storeResult(data string)
 
 //go:wasmexport Init
-// Config: ptr to JSON bytes in linear memory, len byte count. Returns 0=ok, 1=error.
-func Init(ptr int32, length int32) int32 {
+// config is a JSON string passed from the host. Returns 0 on success, 1 on error.
+func Init(config string) int32 {
 	if adapter != nil {
 		adapter.Close()
 	}
 	adapter = pi.NewAdapter()
-	if ptr == 0 || length == 0 {
+	if len(config) == 0 {
 		return 1
 	}
-	data := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
-	err := adapter.Init(data)
+	err := adapter.Init([]byte(config))
 	if err != nil {
 		return 1
 	}
@@ -64,71 +40,65 @@ func Init(ptr int32, length int32) int32 {
 }
 
 //go:wasmexport SubprocessConfig
-// Writes JSON to result buffer. Length via lastResultLen().
+// Emits JSON of the subprocess config via the store_result callback.
 func SubprocessConfig() {
 	if adapter == nil {
-		resultLen = 0
+		storeResult("")
 		return
 	}
 	cfg := adapter.SubprocessConfig()
 	data, _ := json.Marshal(cfg)
-	setResult(data)
+	storeResult(string(data))
 }
 
 //go:wasmexport EncodeCommand
-// Input: ptr to JSON {"cmd":"...","data":...} in linear memory, len byte count.
-// Writes raw protocol bytes to result buffer. Length via lastResultLen().
-func EncodeCommand(ptr int32, length int32) {
+// req is a JSON string {"cmd":"...","data":...}.
+// Emits encoded protocol bytes via the store_result callback.
+func EncodeCommand(req string) {
 	if adapter == nil {
-		resultLen = 0
+		storeResult("")
 		return
 	}
-	var req struct {
+	var r struct {
 		Cmd  string `json:"cmd"`
 		Data []byte `json:"data"`
 	}
-	if ptr != 0 && length != 0 {
-		raw := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
-		json.Unmarshal(raw, &req)
+	if len(req) > 0 {
+		json.Unmarshal([]byte(req), &r)
 	}
-	result := adapter.EncodeCommand(req.Cmd, req.Data)
-	setResult(result)
+	result := adapter.EncodeCommand(r.Cmd, r.Data)
+	storeResult(string(result))
 }
 
 //go:wasmexport ParseOutput
-// Input: ptr to raw stdout bytes in linear memory, len byte count.
-// Writes JSON event array to result buffer. Length via lastResultLen().
-func ParseOutput(ptr int32, length int32) {
-	var data []byte
-	if ptr != 0 && length != 0 {
-		data = unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
-	}
+// data is raw stdout bytes passed as a string.
+// Emits a JSON array of parsed events via the store_result callback.
+func ParseOutput(data string) {
 	var events []pi.Event
 	if adapter != nil {
-		events = adapter.ParseOutput(data)
+		events = adapter.ParseOutput([]byte(data))
 	}
 	result, _ := json.Marshal(events)
-	setResult(result)
+	storeResult(string(result))
 }
 
 //go:wasmexport HandleUIRequest
-// Input: ptr to JSON {"id":"...","method":"..."} in linear memory, len byte count.
-// Writes response bytes to result buffer. Length via lastResultLen().
-func HandleUIRequest(ptr int32, length int32) {
+// req is a JSON string {"id":"...","method":"..."}.
+// Emits the UI response bytes via the store_result callback.
+func HandleUIRequest(req string) {
 	if adapter == nil {
-		resultLen = 0
+		storeResult("")
 		return
 	}
-	var req struct {
+	var r struct {
 		ID     string `json:"id"`
 		Method string `json:"method"`
 	}
-	if ptr != 0 && length != 0 {
-		raw := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
-		json.Unmarshal(raw, &req)
+	if len(req) > 0 {
+		json.Unmarshal([]byte(req), &r)
 	}
-	result := adapter.HandleUIRequest(req.ID, req.Method)
-	setResult(result)
+	result := adapter.HandleUIRequest(r.ID, r.Method)
+	storeResult(string(result))
 }
 
 //go:wasmexport Close
@@ -139,5 +109,5 @@ func Close() {
 	}
 }
 
-// main is not called in reactor mode (-buildmode=c-shared).
+// main is not called in reactor mode (-buildmode=c-shared produces _initialize).
 func main() {}

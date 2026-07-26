@@ -1,13 +1,16 @@
 package term
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
-	"unsafe"
 
 	"kanban/backend/config"
 	"kanban/backend/sandbox"
@@ -17,6 +20,36 @@ import (
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
 )
+
+// newTestConn creates a real websocket.Conn for testing.
+// Returns a distinct connection each call — suitable as a map key.
+func newTestConn(t *testing.T) *websocket.Conn {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close(websocket.StatusInternalError, "")
+		for {
+			_, _, err := conn.Read(r.Context())
+			if err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	u, _ := url.Parse(server.URL)
+	u.Scheme = "ws"
+	conn, _, err := websocket.Dial(context.Background(), u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	t.Cleanup(func() { conn.Close(websocket.StatusInternalError, "") })
+	return conn
+}
+
 
 // mockSandbox implements sandboxOps for testing without gVisor.
 type mockSandbox struct {
@@ -232,13 +265,9 @@ func TestMultiClientResizeSmallestWidthWins(t *testing.T) {
 		t.Fatalf("initial size = %dx%d, want 120x40", cols, rows)
 	}
 
-	// Create dummy conn pointers to simulate multiple clients.
-	// Use a non-empty struct so Go doesn't coalesce allocations.
-	type dummyConn struct{ id int }
-	desktop := &dummyConn{id: 1}
-	phone := &dummyConn{id: 2}
-	desktopPtr := (*websocket.Conn)(unsafe.Pointer(desktop))
-	phonePtr := (*websocket.Conn)(unsafe.Pointer(phone))
+	// Create real websocket connections to get distinct map keys
+	desktopPtr := newTestConn(t)
+	phonePtr := newTestConn(t)
 
 	// Simulate desktop client resize: 80x200
 	sess.handleResize(desktopPtr, 80, 200)
@@ -299,16 +328,10 @@ func TestMultiClientResizeMultipleClients(t *testing.T) {
 		t.Fatalf("getOrCreate: %v", err)
 	}
 
-	// Create dummy conn pointers to simulate three clients.
-	// Use a non-empty struct so Go doesn't coalesce allocations.
-	type dummyConn struct{ id int }
-	clientA := &dummyConn{id: 1} // desktop
-	clientB := &dummyConn{id: 2} // tablet
-	clientC := &dummyConn{id: 3} // phone
-
-	aPtr := (*websocket.Conn)(unsafe.Pointer(clientA))
-	bPtr := (*websocket.Conn)(unsafe.Pointer(clientB))
-	cPtr := (*websocket.Conn)(unsafe.Pointer(clientC))
+	// Create real websocket connections to get distinct map keys
+	aPtr := newTestConn(t) // desktop
+	bPtr := newTestConn(t) // tablet
+	cPtr := newTestConn(t) // phone
 
 	// Three clients connect with different sizes
 	sess.handleResize(aPtr, 40, 120) // desktop
