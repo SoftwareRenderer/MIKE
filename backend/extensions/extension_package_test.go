@@ -28,7 +28,7 @@ func findExtensionsDir(t *testing.T) string {
 
 func TestExtensionPackage_TypescriptLanguageServer_Manifest(t *testing.T) {
 	extDir := findExtensionsDir(t)
-	manifestPath := filepath.Join(extDir, "typescript-language-server", "manifest.json")
+	manifestPath := filepath.Join(extDir, "lsp", "typescript-language-server", "manifest.json")
 
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -89,7 +89,7 @@ func TestExtensionPackage_TypescriptLanguageServer_Manifest(t *testing.T) {
 
 func TestExtensionPackage_TypescriptLanguageServer_Dockerfile(t *testing.T) {
 	extDir := findExtensionsDir(t)
-	dockerfilePath := filepath.Join(extDir, "typescript-language-server", "Dockerfile")
+	dockerfilePath := filepath.Join(extDir, "lsp", "typescript-language-server", "Dockerfile")
 
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {
@@ -156,11 +156,11 @@ func TestExtensionPackage_TypescriptLanguageServer_RegistryEntry(t *testing.T) {
 	}
 
 	// Verify paths reference the correct subdirectory
-	if found.DockerfileURL != "typescript-language-server/Dockerfile" {
-		t.Errorf("DockerfileURL = %q, want %q", found.DockerfileURL, "typescript-language-server/Dockerfile")
+	if found.DockerfileURL != "lsp/typescript-language-server/Dockerfile" {
+		t.Errorf("DockerfileURL = %q, want %q", found.DockerfileURL, "lsp/typescript-language-server/Dockerfile")
 	}
-	if found.ManifestURL != "typescript-language-server/manifest.json" {
-		t.Errorf("ManifestURL = %q, want %q", found.ManifestURL, "typescript-language-server/manifest.json")
+	if found.ManifestURL != "lsp/typescript-language-server/manifest.json" {
+		t.Errorf("ManifestURL = %q, want %q", found.ManifestURL, "lsp/typescript-language-server/manifest.json")
 	}
 }
 
@@ -171,8 +171,8 @@ func TestExtensionPackage_TypescriptLanguageServer_ResolveURLs(t *testing.T) {
 	// Resolve relative URLs against the registry file
 	baseURL := "file://" + registryPath
 
-	manifestURL := ResolveURL(baseURL, "typescript-language-server/manifest.json")
-	dockerfileURL := ResolveURL(baseURL, "typescript-language-server/Dockerfile")
+	manifestURL := ResolveURL(baseURL, "lsp/typescript-language-server/manifest.json")
+	dockerfileURL := ResolveURL(baseURL, "lsp/typescript-language-server/Dockerfile")
 
 	// Verify resolved paths exist
 	manifestPath := manifestURL[len("file://"):]

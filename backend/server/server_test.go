@@ -56,6 +56,21 @@ func testServer(t *testing.T) *Server {
 	// parallel sandbox package tests (they manage their own cleanup via TestMain).
 	os.Setenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP", "1")
 
+	// Set path to sandbox-bridge binary so tests can create sandbox containers.
+	// Without this, GetAgentBinaryPath() searches relative to the test executable
+	// (in /tmp/go-build/...) and never finds it.
+	oldAgentPath := os.Getenv("MIKE_AGENT_PATH")
+	// Use absolute path since test CWD is backend/server/, not project root.
+	agentPath, _ := filepath.Abs("../../sandbox/sandbox-bridge")
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	t.Cleanup(func() {
+		if oldAgentPath != "" {
+			os.Setenv("MIKE_AGENT_PATH", oldAgentPath)
+		} else {
+			os.Unsetenv("MIKE_AGENT_PATH")
+		}
+	})
+
 	s, err := NewServer(dbPath, worktreesDir, ":0", "", nil)
 	if err != nil {
 		t.Fatalf("create test server: %v", err)
