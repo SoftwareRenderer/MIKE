@@ -262,6 +262,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(agentClient)
 		state.sandboxClient = agentClient
 		state.sandboxOperatingMode = setup.task.OperatingMode
+		state.agentSandboxHash = agentSandboxHash(te.agentRegistry.GetAnyAgentSandbox())
 	} else {
 		// Non-sandbox: use os.Root only for write isolation.
 		// Read uses plain os.ReadFile (no isolation).
@@ -449,6 +450,67 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					}
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Sandbox recreated for mode change (%s)", newOperatingMode)}})
 				}
+			}
+		}
+
+		// Check for agent sandbox config change — recreate sandbox with updated mounts/envs
+		if setup.sandboxEnabled && te.sandboxMgr != nil && te.sandboxMgr.ContainerIsRunning(setup.task.ID) {
+			currentHash := ""
+			te.taskMu.Lock()
+			currentHash = state.agentSandboxHash
+			te.taskMu.Unlock()
+			newHash := agentSandboxHash(te.agentRegistry.GetAnyAgentSandbox())
+			if newHash != "" && newHash != currentHash {
+				log.Printf("[sandbox-config] setup.task=%s agent sandbox config changed, recreating sandbox", setup.task.ID)
+				if err := te.sandboxMgr.Stop(setup.task.ID); err != nil {
+					log.Printf("[sandbox-config] setup.task=%s failed to stop old sandbox: %v", setup.task.ID, err)
+				}
+				var assignedPorts []types.AssignedPort
+				assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, kanban_sandbox.SandboxOpts{
+					BaseImage:        imageToUse,
+					NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
+					MemoryLimit:      setup.sandboxOpts.MemoryLimit,
+					ForwardPorts:     setup.sandboxOpts.ForwardPorts,
+					AgentSandbox:     te.agentRegistry.GetAnyAgentSandbox(),
+					SkillsDir:        prompts.SkillsDir(),
+					SandboxMounts:    setup.sandboxOpts.SandboxMounts,
+					SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
+					Capabilities:     setup.sandboxOpts.Capabilities,
+					PlanMode:         setup.task.IsPlanMode(),
+				})
+				if createErr != nil {
+					log.Printf("[sandbox-config] setup.task=%s failed to recreate sandbox: %v", setup.task.ID, createErr)
+					setup.task.ExecutionState = "failed"
+					setup.task.Status = "review"
+					setup.task.Output = fmt.Sprintf("Failed to recreate sandbox for config change: %v", createErr)
+					te.store.UpdateTask(setup.task)
+					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+					te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Sandbox recreation failed: %v", createErr), "sandbox_recreate_failed")
+					return
+				}
+				newAgentClient, clientErr := te.sandboxMgr.GetClient(setup.task.ID)
+				if clientErr != nil {
+					log.Printf("[sandbox-config] setup.task=%s failed to connect to new sandbox bridge: %v", setup.task.ID, clientErr)
+					setup.task.ExecutionState = "failed"
+					setup.task.Status = "review"
+					setup.task.Output = fmt.Sprintf("Failed to connect to sandbox bridge after config change: %v", clientErr)
+					te.store.UpdateTask(setup.task)
+					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+					te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Agent connection failed after config change: %v", clientErr), "agent_config_failed")
+					return
+				}
+				te.taskMu.Lock()
+				state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(newAgentClient)
+				state.sandboxClient = newAgentClient
+				state.agentSandboxHash = newHash
+				te.taskMu.Unlock()
+				if len(assignedPorts) > 0 {
+					setup.task.AssignedPorts = assignedPorts
+					te.store.UpdateTask(setup.task)
+					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: setup.task.ID, Ports: assignedPorts}})
+				}
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox recreated for extension config change"}})
 			}
 		}
 
