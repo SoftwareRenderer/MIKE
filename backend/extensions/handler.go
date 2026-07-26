@@ -392,6 +392,11 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 
 	statuses := h.sandbox.ListRunning()
 	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, statuses))
+
+	// Notify frontend + reload agent registry so config changes take effect immediately
+	if h.onExtensionChanged != nil {
+		h.onExtensionChanged()
+	}
 }
 
 // HandleDelete removes an extension.

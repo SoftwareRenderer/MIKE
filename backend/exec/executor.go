@@ -90,6 +90,9 @@ type executionState struct {
 	// Operating mode at container creation time — used to detect mode changes
 	// and recreate the container with the correct mount mode (ro vs rw).
 	sandboxOperatingMode string
+	// Agent sandbox config snapshot at container creation time — used to detect
+	// extension config changes and recreate the container.
+	agentSandboxHash string
 	// os.Root handle for non-sandbox write isolation.
 	root *os.Root
 	// Closed by executor defer so ForwardUserMessage type-switch can wait for clean exit.
@@ -1679,4 +1682,14 @@ func slugifyBranchName(title string) string {
 		out = out[:slugMax]
 	}
 	return out
+}
+
+// agentSandboxHash returns a stable string representation of an AgentSandbox
+// for change detection. Returns empty string if nil.
+func agentSandboxHash(sb *types.AgentSandbox) string {
+	if sb == nil {
+		return ""
+	}
+	b, _ := json.Marshal(sb)
+	return string(b)
 }
