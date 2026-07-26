@@ -598,7 +598,7 @@
     </div>
 {/snippet}
 
-<BaseModal title="Settings" width={modalFullscreen ? '100vw' : '720px'} footer={footer} onClose={handleClose} modalClass={modalFullscreen ? 'config-modal fullscreen-modal' : 'config-modal'} header={customHeader}>
+<BaseModal title="Settings" width={modalFullscreen ? '100vw' : '720px'} footer={footer} onClose={handleClose} modalClass={modalFullscreen ? 'config-modal fullscreen-modal' : 'config-modal'} bodyStyle={activeTab === 'extensions' ? 'padding-top: 0;' : undefined} header={customHeader}>
     <!-- Tab Content -->
     <div class="tab-content">
 
@@ -848,6 +848,11 @@
         flex-direction: column;
         gap: 16px;
         padding-bottom: 8px;
+    }
+
+    /* When modal-body padding-top is 0 (extensions tab), restore spacing for other tabs */
+    :global(.modal-body[style*="padding-top: 0"]) .tab-content > :not(.extensions-tab) {
+        padding-top: 8px;
     }
 
     /* Section cards */

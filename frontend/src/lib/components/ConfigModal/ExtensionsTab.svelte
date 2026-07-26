@@ -370,43 +370,46 @@
         </div>
     {/if}
 
-    <!-- View Tabs -->
-    <div class="view-tabs">
-        <div class="view-tabs-left">
-            <button
-                class="view-tab"
-                class:active={activeView === 'installed'}
-                onclick={() => activeView = 'installed'}
-            >
-                Installed ({extensions.length})
-            </button>
-            <button
-                class="view-tab"
-                class:active={activeView === 'browse'}
-                onclick={() => { activeView = 'browse'; if (registryEntries.length === 0) loadRegistry(); }}
-            >
-                Browse Registry
-            </button>
+    <!-- Sticky header: view tabs + search -->
+    <div class="sticky-header">
+        <!-- View Tabs -->
+        <div class="view-tabs">
+            <div class="view-tabs-left">
+                <button
+                    class="view-tab"
+                    class:active={activeView === 'installed'}
+                    onclick={() => activeView = 'installed'}
+                >
+                    Installed ({extensions.length})
+                </button>
+                <button
+                    class="view-tab"
+                    class:active={activeView === 'browse'}
+                    onclick={() => { activeView = 'browse'; if (registryEntries.length === 0) loadRegistry(); }}
+                >
+                    Browse Registry
+                </button>
+            </div>
+            <div class="view-tabs-right">
+                <button class="btn btn-primary" onclick={() => { showAddForm = true; resetAddForm(); }}>
+                    + Add Extension
+                </button>
+                <button class="btn btn-secondary" onclick={handleCheckUpdates} disabled={loadingUpdates}>
+                    {loadingUpdates ? 'Checking...' : 'Check for Updates'}
+                </button>
+            </div>
         </div>
-        <div class="view-tabs-right">
-            <button class="btn btn-primary" onclick={() => { showAddForm = true; resetAddForm(); }}>
-                + Add Extension
-            </button>
-            <button class="btn btn-secondary" onclick={handleCheckUpdates} disabled={loadingUpdates}>
-                {loadingUpdates ? 'Checking...' : 'Check for Updates'}
-            </button>
-        </div>
-    </div>
 
-    <!-- Search -->
-    <div class="search-row">
-        <input
-            type="search"
-            placeholder="Search extensions..."
-            value={searchQuery}
-            oninput={(e) => searchQuery = (e.target as HTMLInputElement).value}
-            class="search-input"
-        />
+        <!-- Search -->
+        <div class="search-row">
+            <input
+                type="search"
+                placeholder="Search extensions..."
+                value={searchQuery}
+                oninput={(e) => searchQuery = (e.target as HTMLInputElement).value}
+                class="search-input"
+            />
+        </div>
     </div>
 
     <!-- Installed View -->
@@ -739,6 +742,14 @@
         gap: 1rem;
     }
 
+    /* Sticky wrapper: view-tabs + search-row, flush with modal-header */
+    .sticky-header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: var(--color-surface-1);
+    }
+
     /* Build progress */
     .build-progress {
         display: flex;
@@ -800,7 +811,7 @@
         justify-content: space-between;
         gap: 0.5rem;
         border-bottom: 1px solid var(--color-border-subtle);
-        padding-bottom: 0.5rem;
+        padding: 0.5rem 0;
     }
 
     .view-tabs-left {
@@ -839,6 +850,7 @@
     .search-row {
         display: flex;
         gap: 0.5rem;
+        padding: 0.25rem 0;
     }
 
     .search-input {
