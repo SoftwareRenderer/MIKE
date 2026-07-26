@@ -337,14 +337,14 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 	// Reuse existing container (lazy-start). Create only if none exists or if stopped/crashed.
 	var assignedPorts []types.AssignedPort
 	if !te.sandboxMgr.ContainerIsRunning(task.ID) {
-		agentConfig := te.agentRegistry.GetConfigMount()
+		agentSandbox := te.agentRegistry.GetAnyAgentSandbox()
 		var createErr error
 		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, projectName, projectPath, kanban_sandbox.SandboxOpts{
 			BaseImage:        imageToUse,
 			NetworkIsolation: sandboxOpts.NetworkIsolation,
 			MemoryLimit:      sandboxOpts.MemoryLimit,
 			ForwardPorts:     sandboxOpts.ForwardPorts,
-			AgentConfig:      agentConfig,
+			AgentSandbox:     agentSandbox,
 			SkillsDir:        prompts.SkillsDir(),
 			SandboxMounts:    sandboxOpts.SandboxMounts,
 			SandboxEnvs:      sandboxOpts.SandboxEnvs,

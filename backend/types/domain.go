@@ -94,12 +94,10 @@ const (
 	ProviderKindAgent = "agent"
 )
 
-// // AgentConfigMount describes how to bind the agent config directory into a sandbox container.,
-type AgentConfigMount struct {
-	HostPath      string        `json:"host_path"`            // host path to agent config dir
-	ContainerPath string        `json:"container_path"`        // mount point inside the container
-	Mode          string        `json:"mode"`                // "rw" or "ro"
-	Envs          []SandboxEnv  `json:"envs,omitempty"`        // env key-value pairs for non-sandbox use
+// AgentSandbox describes mounts and env vars for an agent sandbox container.
+type AgentSandbox struct {
+	Mounts []SandboxMount `json:"mount"`  // bind mounts into the container
+	Envs   []SandboxEnv   `json:"env"`    // env vars for the agent process
 }
 
 // Provider is a named LLM server preset with a list of available models.

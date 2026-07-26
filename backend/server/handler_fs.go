@@ -1115,7 +1115,7 @@ func (s *Server) fsSandboxConfig(project *types.Project) sandbox.SandboxOpts {
 		NetworkIsolation: project.SandboxNetworkIsolation,
 		MemoryLimit:      project.SandboxMemoryLimit,
 		ForwardPorts:     project.ForwardPorts,
-		AgentConfig:      s.executor.AgentRegistry().GetConfigMount(),
+		AgentSandbox:     s.executor.AgentRegistry().GetAnyAgentSandbox(),
 		SkillsDir:        prompts.SkillsDir(),
 		SandboxMounts:    project.SandboxMounts,
 		SandboxEnvs:      project.SandboxEnvs,

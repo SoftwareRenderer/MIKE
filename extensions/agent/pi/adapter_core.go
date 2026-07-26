@@ -100,13 +100,19 @@ type envVar struct {
 
 // piConfig holds parsed adapter configuration.
 type piConfig struct {
-	Binary                string
-	Mode                  string
-	SessionName           string
-	DisplayName           string
-	Env                   []string
-	SandboxMountHostPath  string     // resolved host path (manifest default + runtime override)
-	SandboxMountEnvs      []envVar   // resolved env key-value pairs (manifest default + runtime override)
+	Binary          string
+	Mode            string
+	SessionName     string
+	DisplayName     string
+	Env             []string
+	SandboxMounts   []sandboxMount // resolved mounts (manifest default + runtime override)
+	SandboxEnvs     []envVar       // resolved env key-value pairs (manifest default + runtime override)
+}
+
+type sandboxMount struct {
+	HostPath      string
+	ContainerPath string
+	Mode          string
 }
 
 // toolDisplayNames maps tool names to human-readable display names.
@@ -153,48 +159,42 @@ func (a *Adapter) Init(config []byte) error {
 		Env         []string         `json:"env"`
 		Config      map[string]any   `json:"config,omitempty"`
 		AgentManifest *struct {
-			SandboxMount *struct {
-				HostPath      string `json:"host_path"`
-				ContainerPath string `json:"container_path"`
-				Mode          string `json:"mode"`
-				Envs          []struct {
+			Sandbox *struct {
+				Mount []struct {
+					HostPath      string `json:"host_path"`
+					ContainerPath string `json:"container_path"`
+					Mode          string `json:"mode"`
+				} `json:"mount,omitempty"`
+				Env []struct {
 					Key   string `json:"key"`
 					Value string `json:"value"`
-				} `json:"envs,omitempty"`
-			} `json:"sandbox_mount,omitempty"`
+				} `json:"env,omitempty"`
+			} `json:"sandbox,omitempty"`
 		} `json:"agent_manifest,omitempty"`
 	}
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		return fmt.Errorf("parse config: %w", err)
 	}
 
-	cmHostPath := ""
+	cmMounts := []sandboxMount{}
 	cmEnvs := []envVar{}
-	if cfg.AgentManifest != nil && cfg.AgentManifest.SandboxMount != nil {
-		cmHostPath = cfg.AgentManifest.SandboxMount.HostPath
-		for _, e := range cfg.AgentManifest.SandboxMount.Envs {
+	if cfg.AgentManifest != nil && cfg.AgentManifest.Sandbox != nil {
+		for _, m := range cfg.AgentManifest.Sandbox.Mount {
+			cmMounts = append(cmMounts, sandboxMount{HostPath: m.HostPath, ContainerPath: m.ContainerPath, Mode: m.Mode})
+		}
+		for _, e := range cfg.AgentManifest.Sandbox.Env {
 			cmEnvs = append(cmEnvs, envVar{Key: e.Key, Value: e.Value})
 		}
 	}
 
-	// Apply runtime config overrides for mount path and env
-	if hostPath, ok := cfg.Config["sandbox_mount_host_path"].(string); ok && hostPath != "" {
-		cmHostPath = hostPath
-	}
-	if ek, ok := cfg.Config["sandbox_mount_env_key"].(string); ok && ek != "" {
-		if ev, ok := cfg.Config["sandbox_mount_env_value"].(string); ok {
-			cmEnvs = []envVar{{Key: ek, Value: ev}}
-		}
-	}
-
 	a.config = piConfig{
-		Binary:              defaultString(cfg.Binary, "pi"),
-		Mode:              defaultString(cfg.Mode, "rpc"),
-		SessionName:         cfg.SessionName,
-		DisplayName:         defaultString(cfg.DisplayName, "Pi Coding Agent"),
-		Env:                 cfg.Env,
-		SandboxMountHostPath: cmHostPath,
-		SandboxMountEnvs:     cmEnvs,
+		Binary:        defaultString(cfg.Binary, "pi"),
+		Mode:          defaultString(cfg.Mode, "rpc"),
+		SessionName:   cfg.SessionName,
+		DisplayName:   defaultString(cfg.DisplayName, "Pi Coding Agent"),
+		Env:           cfg.Env,
+		SandboxMounts: cmMounts,
+		SandboxEnvs:   cmEnvs,
 	}
 	a.lineBuffer = ""
 	a.cmdID = 0
@@ -210,7 +210,7 @@ func (a *Adapter) SubprocessConfig() SubprocessConfig {
 	env := a.config.Env
 	// In non-sandbox mode the adapter process runs on the host and needs
 	// the config directory env var so Pi can locate its config.
-	for _, e := range a.config.SandboxMountEnvs {
+	for _, e := range a.config.SandboxEnvs {
 		if e.Key != "" {
 			env = append(env, e.Key+"="+e.Value)
 		}
