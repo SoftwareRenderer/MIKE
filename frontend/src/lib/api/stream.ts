@@ -227,6 +227,7 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
         },
         checkStale,
         subscribeProject: (projectId: string) => {
+            if (subscribedProjects.has(projectId)) return;
             subscribedProjects.add(projectId);
             sendMsg('subscribe_project', { project_id: projectId });
         },
@@ -235,7 +236,9 @@ export function createAppStream(callbacks: AppStreamCallbacks): AppStream {
             sendMsg('unsubscribe_project', { project_id: projectId });
         },
         subscribeTask: (projectId: string, taskId: string) => {
-            subscribedTasks.add(`${projectId}:${taskId}`);
+            const key = `${projectId}:${taskId}`;
+            if (subscribedTasks.has(key)) return;
+            subscribedTasks.add(key);
             sendMsg('subscribe_task', { project_id: projectId, task_id: taskId });
         },
         unsubscribeTask: (projectId: string, taskId: string) => {
