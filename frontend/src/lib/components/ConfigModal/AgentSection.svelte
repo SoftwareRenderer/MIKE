@@ -1,8 +1,18 @@
 <script lang="ts">
     import { marked } from 'marked';
     import DOMPurify from 'dompurify';
+    import { extensionManager } from '$lib/services/extension-manager.svelte';
 
-    let { description = '', setupInfo = '' } = $props();
+    let { agentName = '' } = $props();
+
+    let agentConfig = $derived(
+        extensionManager.state.extensions
+            .find(e => e.name === agentName && e.type === 'agent' && e.enabled)?.manifest.agent
+    );
+
+    let description = $derived(agentConfig?.description || '');
+    let setupInfo = $derived(agentConfig?.setup_info || '');
+    let installed = $derived(!!agentConfig);
 
     let descriptionHtml = $derived.by(() => {
         if (!description) return '';
@@ -15,7 +25,7 @@
     });
 </script>
 
-{#if description || setupInfo}
+{#if installed}
     <div class="agent-info-section">
         {#if description}
             <div class="agent-info-text">
@@ -29,6 +39,14 @@
             </div>
         {/if}
     </div>
+{:else}
+    <div class="agent-info-section agent-info-missing">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M8 1L15 14H1L8 1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            <path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+        Extension is not installed
+    </div>
 {/if}
 
 <style>
@@ -36,6 +54,16 @@
         padding: 12px;
         background: var(--color-surface-2);
         border-radius: var(--radius-md);
+    }
+    .agent-info-missing {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.8125rem;
+        color: var(--color-warning);
+    }
+    .agent-info-missing svg {
+        flex-shrink: 0;
     }
     .agent-info-text {
         font-size: 0.8125rem;

@@ -203,8 +203,7 @@
         error = '';
         try {
             await setExtensionEnabled(id, enabled);
-            const ext = extensions.find(e => e.id === id);
-            if (ext) ext.enabled = enabled;
+            await loadExtensions();
         } catch (e: any) {
             error = e.message || 'Failed to update extension';
         }
@@ -722,7 +721,7 @@
                             {#if entry.type === 'agent'}
                                 <p class="ext-note">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                                    The sandbox image must have this agent installed. See <code>./extensions/agent/{entry.name}/dockerfile-example</code> for a reference Dockerfile.
+                                    This will add {entry.display_name} as an option in <code>Providers</code>
                                 </p>
                             {/if}
                         </div>
