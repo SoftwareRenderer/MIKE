@@ -457,49 +457,60 @@ extensions/agent/my-agent/
 
 Adapter core must have **zero `backend/` imports** (WASM compatibility). The `wasm/main.go` wraps the adapter and exports functions via `//go:wasmexport` for the [WASI reactor](https://go.dev/blog/wasmexport) model (`-buildmode=c-shared`, Go 1.24+).
 
-**WASM export rules:**
-- Functions use `int32` for pointers/lengths (WASM is 32-bit)
-- Data crosses the boundary via shared linear memory (`malloc`/`free`/`lastResultLen`)
+**WASM memory model (zero buffers):**
+- Input: host writes data to WASM linear memory, passes as `string` param
+  (Go runtime maps `string` → `(i32 ptr, i32 len)` automatically)
+- Output: WASM module calls `//go:wasmimport env store_result(string)` host callback
+- The host reads result data from linear memory and delivers it to Go
+- `store_result` fires synchronously during `fn.Call` — before it returns — so
+  a buffered channel (size 1) safely captures the result
+- No shared result buffers, no `malloc`/`lastResultLen`
 - The host calls `_initialize` first (runtime init), then exported functions
 - All user data is JSON-serialized before passing to WASM memory
 - `EventTypePersist` is the only path to DB persistence
+
+**WASM export rules:**
+- `string` params are supported (maps to `(i32, i32)` — ptr + len in linear memory)
+- `string` may be used as a **parameter** only, not as a return value
+- Use `string` params and `//go:wasmimport` callbacks for all data passing — no manual memory management needed
+- `//go:wasmimport` can import host functions (e.g. callbacks for results)
 
 **Example `wasm/main.go`:**
 ```go
 package main
 
 import (
-    "unsafe"
+    "encoding/json"
     "kanban/extensions/agent/my-agent"
 )
 
 var adapter *myagent.Adapter
-var lastLen int32
-var memPool []byte
-var memOffset int32
 
-//go:wasmexport malloc
-func malloc(size int32) int32 {
-    if memPool == nil {
-        memPool = make([]byte, 16*1024*1024)
-    }
-    ptr := memOffset
-    memOffset += size + 7
-    memOffset &= ^int32(7)
-    return ptr
-}
-
-//go:wasmexport lastResultLen
-func lastResultLen() int32 { return lastLen }
+//go:wasmimport env store_result
+//go:noescape
+func storeResult(data string)
 
 //go:wasmexport Init
-func Init(ptr int32, length int32) int32 {
+func Init(config string) int32 {
     adapter = myagent.NewAdapter()
-    data := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
-    if err := adapter.Init(data); err != nil {
+    if len(config) == 0 {
+        return 1
+    }
+    if err := adapter.Init([]byte(config)); err != nil {
         return 1
     }
     return 0
+}
+
+//go:wasmexport SubprocessConfig
+func SubprocessConfig() {
+    if adapter == nil {
+        storeResult("")
+        return
+    }
+    cfg := adapter.SubprocessConfig()
+    data, _ := json.Marshal(cfg)
+    storeResult(string(data))
 }
 
 //go:wasmexport Close

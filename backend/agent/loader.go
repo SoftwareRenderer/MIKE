@@ -20,7 +20,9 @@ import (
 var adapterRegistry = struct {
 	sync.RWMutex
 	factories map[string]AdapterFactory
-}{factories: make(map[string]AdapterFactory)}
+}{
+	factories: make(map[string]AdapterFactory),
+}
 
 // AdapterFactory creates a new AgentAdapter instance.
 type AdapterFactory func() AgentAdapter
@@ -34,14 +36,16 @@ func RegisterAdapterFactory(name string, fn AdapterFactory) {
 }
 
 // wasmAdapter wraps a wazero-loaded WASI reactor module behind the AgentAdapter interface.
-// Memory model: host manages all allocation via api.Memory.
-// Input data is written to linear memory; results are read from a shared buffer.
+// Memory model: NO buffers.
+// - Input: host writes data to linear memory, passes as string param
+// - Output: WASM module calls host-imported store_result(string) callback.
+//   The host reads result data from linear memory and delivers it via resultCh.
+//   Safe because store_result fires synchronously during fn.Call — before it returns.
 type wasmAdapter struct {
-	runtime     wazero.Runtime
-	module      api.Module
-	memory      api.Memory
-	lastResultPtrFn api.Function
-	lastResultLenFn api.Function
+	runtime  wazero.Runtime
+	module   api.Module
+	memory   api.Memory
+	resultCh chan []byte // receives results from store_result host callback
 }
 
 // loadAdapter loads an AgentAdapter for the given extension.
@@ -75,7 +79,7 @@ func loadWasmAdapter(ext *extensions.Extension) (AgentAdapter, error) {
 	ctx := context.Background()
 	runtime := wazero.NewRuntime(ctx)
 
-	// Instantiate WASI for basic system calls (time, etc.)
+	// Register WASI imports.
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, runtime); err != nil {
 		runtime.Close(ctx)
 		return nil, fmt.Errorf("inject wasi: %w", err)
@@ -85,6 +89,32 @@ func loadWasmAdapter(ext *extensions.Extension) (AgentAdapter, error) {
 	if err != nil {
 		runtime.Close(ctx)
 		return nil, fmt.Errorf("compile wasm module: %w", err)
+	}
+
+	// Register host callback: env.store_result
+	// Called by the WASM module to pass results back to the host.
+	resultCh := make(chan []byte, 1)
+	_, err = runtime.NewHostModuleBuilder("env").
+		NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, m api.Module, ptr, length uint32) {
+			if length == 0 {
+				resultCh <- nil
+				return
+			}
+			data, ok := m.Memory().Read(ptr, length)
+			if !ok {
+				resultCh <- nil
+				return
+			}
+			result := make([]byte, length)
+			copy(result, data)
+			resultCh <- result
+		}).
+		Export("store_result").
+		Instantiate(ctx)
+	if err != nil {
+		runtime.Close(ctx)
+		return nil, fmt.Errorf("instantiate env host module: %w", err)
 	}
 
 	// Use _initialize to init Go runtime (reactor mode, -buildmode=c-shared).
@@ -105,11 +135,10 @@ func loadWasmAdapter(ext *extensions.Extension) (AgentAdapter, error) {
 	}
 
 	return &wasmAdapter{
-		runtime:         runtime,
-		module:          inst,
-		memory:          mem,
-		lastResultPtrFn: inst.ExportedFunction("lastResultPtr"),
-		lastResultLenFn: inst.ExportedFunction("lastResultLen"),
+		runtime:  runtime,
+		module:   inst,
+		memory:   mem,
+		resultCh: resultCh,
 	}, nil
 }
 
@@ -132,14 +161,12 @@ func resolveWasmPath(ext *extensions.Extension) string {
 	return candidates[len(candidates)-1]
 }
 
-// writeData writes data to WASM linear memory at a fixed offset (0).
-// Returns the offset (always 0) since the host manages the buffer.
-// inputOffset is a safe offset in WASM linear memory for input data.
-// Low offsets are the WASM text/data section; 1MB is safe scratch space.
-const inputOffset = 1 << 20
+// inputOffset is a safe offset in WASM linear memory for writing string data.
+const inputOffset = 1 << 20 // 1MB
 
-func (a *wasmAdapter) writeData(data []byte) (int32, error) {
-	if len(data) > 1<<20 { // 1MB limit
+// writeString writes data to linear memory at inputOffset and returns the offset.
+func (a *wasmAdapter) writeString(data []byte) (int32, error) {
+	if len(data) > 1<<20 {
 		return 0, fmt.Errorf("input data too large: %d bytes", len(data))
 	}
 	if !a.memory.Write(inputOffset, data) {
@@ -148,9 +175,9 @@ func (a *wasmAdapter) writeData(data []byte) (int32, error) {
 	return inputOffset, nil
 }
 
-// callFn calls an exported WASM function with a byte slice argument.
-// Returns the result data read from the shared result buffer.
-func (a *wasmAdapter) callFn(name string, data []byte) ([]byte, error) {
+// callFnString calls an exported WASM function with a single string parameter.
+// The function writes its result via the store_result host callback.
+func (a *wasmAdapter) callFnString(name string, data []byte) ([]byte, error) {
 	fn := a.module.ExportedFunction(name)
 	if fn == nil {
 		return nil, fmt.Errorf("function %q not exported", name)
@@ -163,7 +190,7 @@ func (a *wasmAdapter) callFn(name string, data []byte) ([]byte, error) {
 			return nil, fmt.Errorf("call %s: %w", name, err)
 		}
 	} else {
-		ptr, err := a.writeData(data)
+		ptr, err := a.writeString(data)
 		if err != nil {
 			return nil, err
 		}
@@ -175,59 +202,16 @@ func (a *wasmAdapter) callFn(name string, data []byte) ([]byte, error) {
 	return a.readResult()
 }
 
-// callFnVoid calls an exported WASM function that returns void (no result data).
-func (a *wasmAdapter) callFnVoid(name string, data []byte) error {
-	fn := a.module.ExportedFunction(name)
-	if fn == nil {
-		return fmt.Errorf("function %q not exported", name)
-	}
-
-	ctx := context.Background()
-
-	if len(data) == 0 {
-		_, err := fn.Call(ctx, api.EncodeI32(0), api.EncodeI32(0))
-		return err
-	}
-
-	ptr, err := a.writeData(data)
-	if err != nil {
-		return err
-	}
-	_, err = fn.Call(ctx, api.EncodeI32(ptr), api.EncodeI32(int32(len(data))))
-	return err
-}
-
-// readResult reads data from the shared result buffer.
+// readResult blocks until the store_result host callback delivers data.
+// This is safe because store_result is called synchronously by the WASM
+// runtime during fn.Call — the callback fires before fn.Call returns.
 func (a *wasmAdapter) readResult() ([]byte, error) {
-	ctx := context.Background()
-
-	// Get result length
-	lenResult, err := a.lastResultLenFn.Call(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("call lastResultLen: %w", err)
+	select {
+	case data := <-a.resultCh:
+		return data, nil
+	case <-context.Background().Done():
+		return nil, fmt.Errorf("context cancelled waiting for result")
 	}
-	length := api.DecodeI32(lenResult[0])
-	if length == 0 {
-		return nil, nil
-	}
-
-	// Get result pointer (base of shared buffer)
-	var ptr uint32
-	if a.lastResultPtrFn != nil {
-		ptrResult, err := a.lastResultPtrFn.Call(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("call lastResultPtr: %w", err)
-		}
-		ptr = uint32(api.DecodeI32(ptrResult[0]))
-	}
-
-	data, ok := a.memory.Read(ptr, uint32(length))
-	if !ok {
-		return nil, fmt.Errorf("memory read failed at offset %d length %d", ptr, length)
-	}
-	result := make([]byte, length)
-	copy(result, data)
-	return result, nil
 }
 
 // Init initializes the adapter with config JSON.
@@ -250,7 +234,7 @@ func (a *wasmAdapter) Init(config []byte) error {
 		return nil
 	}
 
-	ptr, err := a.writeData(config)
+	ptr, err := a.writeString(config)
 	if err != nil {
 		return err
 	}
@@ -266,11 +250,17 @@ func (a *wasmAdapter) Init(config []byte) error {
 
 // SubprocessConfig returns the agent process configuration from the adapter.
 func (a *wasmAdapter) SubprocessConfig() SubprocessConfig {
-	data, err := a.callFn("SubprocessConfig", nil)
-	if err != nil {
+	fn := a.module.ExportedFunction("SubprocessConfig")
+	if fn == nil {
 		return SubprocessConfig{}
 	}
-	if len(data) == 0 {
+	ctx := context.Background()
+	if _, err := fn.Call(ctx); err != nil {
+		return SubprocessConfig{}
+	}
+
+	data, err := a.readResult()
+	if err != nil || len(data) == 0 {
 		return SubprocessConfig{}
 	}
 	var cfg SubprocessConfig
@@ -283,7 +273,7 @@ func (a *wasmAdapter) SubprocessConfig() SubprocessConfig {
 // EncodeCommand encodes a high-level command into protocol bytes.
 func (a *wasmAdapter) EncodeCommand(cmd string, data []byte) []byte {
 	req, _ := json.Marshal(map[string]any{"cmd": cmd, "data": data})
-	result, err := a.callFn("EncodeCommand", req)
+	result, err := a.callFnString("EncodeCommand", req)
 	if err != nil {
 		return nil
 	}
@@ -292,7 +282,7 @@ func (a *wasmAdapter) EncodeCommand(cmd string, data []byte) []byte {
 
 // ParseOutput parses raw agent stdout bytes into events.
 func (a *wasmAdapter) ParseOutput(data []byte) []Event {
-	result, err := a.callFn("ParseOutput", data)
+	result, err := a.callFnString("ParseOutput", data)
 	if err != nil {
 		return nil
 	}
@@ -309,7 +299,7 @@ func (a *wasmAdapter) ParseOutput(data []byte) []Event {
 // HandleUIRequest generates a response for an agent UI request.
 func (a *wasmAdapter) HandleUIRequest(id, method string) []byte {
 	req, _ := json.Marshal(map[string]string{"id": id, "method": method})
-	result, err := a.callFn("HandleUIRequest", req)
+	result, err := a.callFnString("HandleUIRequest", req)
 	if err != nil {
 		return nil
 	}
