@@ -14,11 +14,50 @@ import (
 	"kanban/backend/types"
 )
 
+// AgentProviderLister provides agent provider entries discovered from extensions.
+// The agent.AgentRegistry satisfies this interface (ToProviders() []types.Provider).
+// Defined as an interface to avoid a circular import between config and agent packages.
+type AgentProviderLister interface {
+	ToProviders() []types.Provider
+}
+
 // ConfigStore wraps Store for config-specific operations.
 type ConfigStore struct {
-	store   *store.Store
-	dbPath  string
-	version string
+	store         *store.Store
+	dbPath        string
+	version       string
+	agentRegistry AgentProviderLister // optional — set via SetAgentRegistry
+}
+
+// SetAgentRegistry wires the agent registry so dynamically-discovered agent
+// providers (e.g. agent://pi → 'Pi Coding Agent') are included in the
+// config API response without being persisted to the database.
+func (cs *ConfigStore) SetAgentRegistry(reg AgentProviderLister) {
+	cs.agentRegistry = reg
+}
+
+// agentProviders returns dynamically-discovered agent providers from the
+// agent registry. Returns nil if no registry is wired.
+func (cs *ConfigStore) agentProviders() []types.Provider {
+	if cs.agentRegistry == nil {
+		return nil
+	}
+	return cs.agentRegistry.ToProviders()
+}
+
+// filterPersistedProviders removes agent:// providers from the list so they
+// are not persisted to the database. Agent providers are discovered dynamically
+// at runtime from enabled agent extensions and should not be stored alongside
+// user-configured LLM providers.
+func filterPersistedProviders(providers []types.Provider) []types.Provider {
+	filtered := make([]types.Provider, 0, len(providers))
+	for _, p := range providers {
+		if strings.HasPrefix(p.URL, "agent://") {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	return filtered
 }
 
 // NewConfigStore creates a new ConfigStore.
@@ -188,6 +227,40 @@ func maskAPIKeys(providers []types.Provider) {
 	}
 }
 
+// buildConfigResponse constructs the API response from stored config, merging
+// dynamically-discovered agent providers (from enabled agent extensions) into
+// the providers list. API keys are masked before sending to the client.
+func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
+	providers := cfg.Providers
+	for _, ap := range cs.agentProviders() {
+		found := false
+		for _, ep := range providers {
+			if ep.URL == ap.URL {
+				found = true
+				break
+			}
+		}
+		if !found {
+			providers = append(providers, ap)
+		}
+	}
+	maskAPIKeys(providers)
+	return configResponse{
+		WorkspaceDir:             cfg.WorkspaceDir,
+		DatabasePath:             cfg.DatabasePath,
+		RegistryURL:              cfg.RegistryURL,
+		Version:               cs.version,
+		Providers:             providers,
+		DefaultProvider:       cfg.DefaultProvider,
+		DefaultAutoCommit:     cfg.DefaultAutoCommit,
+		DefaultAutoMerge:      cfg.DefaultAutoMerge,
+		DefaultSubtasksAutoMerge: cfg.DefaultSubtasksAutoMerge,
+		DefaultOperatingMode:  cfg.DefaultOperatingMode,
+		DefaultMaxFailedTurns: cfg.DefaultMaxFailedTurns,
+		EncryptionEnabled:     crypto.IsEnabled(),
+	}
+}
+
 // HandleConfig handles GET and PUT /api/config.
 func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -197,22 +270,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to get config")
 			return
 		}
-		// Mask API keys before sending to client
-		maskAPIKeys(cfg.Providers)
-		resp := configResponse{
-			WorkspaceDir:           cfg.WorkspaceDir,
-			DatabasePath:           cfg.DatabasePath,
-			RegistryURL:            cfg.RegistryURL,
-			Version:                cs.version,
-			Providers:              cfg.Providers,
-			DefaultProvider:        cfg.DefaultProvider,
-			DefaultAutoCommit:      cfg.DefaultAutoCommit,
-			DefaultAutoMerge:       cfg.DefaultAutoMerge,
-			DefaultSubtasksAutoMerge: cfg.DefaultSubtasksAutoMerge,
-			DefaultOperatingMode:   cfg.DefaultOperatingMode,
-			DefaultMaxFailedTurns:  cfg.DefaultMaxFailedTurns,
-			EncryptionEnabled:      crypto.IsEnabled(),
-		}
+		resp := cs.buildConfigResponse(cfg)
 		httputil.JSONResponse(w, http.StatusOK, resp)
 	case http.MethodPut:
 		// Partial update: only update fields that are provided
@@ -249,7 +307,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 							incoming[i].APIKey = &key
 						}
 					}
-					current.Providers = incoming
+					current.Providers = incoming // agent:// providers may be user-configured (ConfigModal); registry providers are merged in buildConfigResponse
 				}
 			}
 		}
@@ -286,22 +344,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to update config")
 			return
 		}
-		// Mask API keys before sending response
-		maskAPIKeys(current.Providers)
-		resp := configResponse{
-			WorkspaceDir:           current.WorkspaceDir,
-			DatabasePath:           current.DatabasePath,
-			RegistryURL:            current.RegistryURL,
-			Version:                cs.version,
-			Providers:              current.Providers,
-			DefaultProvider:        current.DefaultProvider,
-			DefaultAutoCommit:      current.DefaultAutoCommit,
-			DefaultAutoMerge:       current.DefaultAutoMerge,
-			DefaultSubtasksAutoMerge: current.DefaultSubtasksAutoMerge,
-			DefaultOperatingMode:   current.DefaultOperatingMode,
-			DefaultMaxFailedTurns:  current.DefaultMaxFailedTurns,
-			EncryptionEnabled:      crypto.IsEnabled(),
-		}
+		resp := cs.buildConfigResponse(current)
 		httputil.JSONResponse(w, http.StatusOK, resp)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

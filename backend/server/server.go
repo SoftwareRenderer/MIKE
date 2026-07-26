@@ -139,6 +139,9 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 
 	// Agent registry — discovers agent extensions and maps agent:// URLs
 	agentRegistry := agent.NewAgentRegistry(s.extStore, cfgStore)
+	// Wire agent registry to config store so agent providers (e.g. agent://pi →
+	// 'Pi Coding Agent') are included in the /api/config response.
+	cfgStore.SetAgentRegistry(agentRegistry)
 
 	s.executor = exec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, commitQueue)
 	// Wire agent registry to terminal manager (created earlier before agentRegistry was available)

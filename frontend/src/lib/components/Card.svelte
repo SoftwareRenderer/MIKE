@@ -297,9 +297,12 @@
         const cfg = appStore.config;
         const providers = cfg?.providers || [];
         if (providers.length === 0) return { text: null, provider: null, model: null, color: '' };
-        // Check if task uses Pi agent
+        // Check if task uses an agent (e.g. Pi Coding Agent)
         if (task.llama_server_url?.startsWith(AGENT_URL_PREFIX)) {
-                                    return { text: 'Agent', provider: null, model: null, color: '#A371F7', isAgent: true };
+            // Look up the agent provider's display name from the config
+            const agentProvider = providers.find(p => p.url === task.llama_server_url);
+            const agentText = agentProvider?.display_name || 'Coding Agent';
+            return { text: agentText, provider: null, model: null, color: '#A371F7', isAgent: true };
         }
         // Use task model if set, otherwise fall back to default model
         const getModelName = (m: string | { name: string }) => typeof m === 'string' ? m : m.name;
@@ -853,7 +856,7 @@
                             <circle cx="6" cy="9" r="1" fill="currentColor"/>
                             <circle cx="10" cy="9" r="1" fill="currentColor"/>
                         </svg>
-                        Coding Agent
+                        {modelBadge.text}
                     </div>
                 {:else}
                     <div class="badge model-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
