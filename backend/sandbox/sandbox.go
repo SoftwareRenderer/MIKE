@@ -17,8 +17,8 @@ import (
 
 	"github.com/creack/pty"
 
-	sandbox "kanban/pkg/bridge"
 	"kanban/backend/types"
+	sandbox "kanban/pkg/bridge"
 	"kanban/pkg/sandboxruntime"
 )
 
@@ -63,11 +63,11 @@ type agentConn struct {
 type SandboxManager struct {
 	mu            sync.Mutex
 	rt            *sandboxruntime.Runtime
-	active        map[string]string    // taskID -> containerName
-	mountPaths    map[string]string    // taskID -> mount path inside container
-	agents        map[string]*agentConn // taskID -> agent pipes + process
+	active        map[string]string          // taskID -> containerName
+	mountPaths    map[string]string          // taskID -> mount path inside container
+	agents        map[string]*agentConn      // taskID -> agent pipes + process
 	clients       map[string]*sandbox.Client // taskID -> agent client (cached)
-	livenessCache map[string]time.Time // taskID -> last time running was confirmed
+	livenessCache map[string]time.Time       // taskID -> last time running was confirmed
 	available     bool
 }
 
@@ -331,12 +331,18 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath 
 		}
 		containerPath := opts.AgentConfig.ContainerPath
 		if containerPath == "" {
-			containerPath = "/root/.config/agent"
+			return nil, fmt.Errorf("resolve agent config container path is blank")
 		}
 		createArgs = append(createArgs,
 			"-v", absHost+":"+containerPath+":rprivate,"+mountMode,
-			"-e", "HOME=/root",
 		)
+		// Add agent-specific config environment variables
+		for _, e := range opts.AgentConfig.Envs {
+			if e.Key != "" {
+				createArgs = append(createArgs, "-e", e.Key+"="+e.Value)
+				log.Printf("[sandbox] task=%s setting agent env %s=%s", taskID, e.Key, e.Value)
+			}
+		}
 		log.Printf("[sandbox] task=%s mounting agent config %s -> %s (%s)", taskID, absHost, containerPath, mountMode)
 	}
 
@@ -881,7 +887,7 @@ func (sm *SandboxManager) GetContainerPorts(taskID string) ([]types.AssignedPort
 			continue
 		}
 		// Format: "8080/tcp -> 0.0.0.0:12345"
-	parts := strings.Split(line, " -> ")
+		parts := strings.Split(line, " -> ")
 		if len(parts) != 2 {
 			continue
 		}
@@ -1054,7 +1060,7 @@ func (sm *SandboxManager) StopProjectContainers(projectID string, taskIDs []stri
 		_ = sm.Stop(taskID)
 	}
 	// Stop project-level container
-	_ = sm.Stop("proj:"+projectID)
+	_ = sm.Stop("proj:" + projectID)
 }
 
 // Cleanup removes all active sandbox containers.
