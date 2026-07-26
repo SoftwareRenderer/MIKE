@@ -41,6 +41,14 @@ func testServer(t *testing.T) *Server {
 		}
 	})
 
+	// Disable login rate limiting during tests — tests make many rapid login
+	// attempts that would hit the default limit of 5/minute.
+	// Skip if the caller already set MIKE_LOGIN_RATE_LIMIT (e.g., rate limit tests).
+	if os.Getenv("MIKE_LOGIN_RATE_LIMIT") == "" {
+		os.Setenv("MIKE_LOGIN_RATE_LIMIT", "0")
+		t.Cleanup(func() { os.Unsetenv("MIKE_LOGIN_RATE_LIMIT") })
+	}
+
 	// Set env var for auth password
 	oldPW := os.Getenv("MIKE_LOGIN_PASSWORD")
 	os.Setenv("MIKE_LOGIN_PASSWORD", testPassword)

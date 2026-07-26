@@ -342,7 +342,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath 
 		for _, e := range opts.AgentSandbox.Envs {
 			if e.Key != "" {
 				createArgs = append(createArgs, "-e", e.Key+"="+e.Value)
-				log.Printf("[sandbox] task=%s setting agent env %s=%s", taskID, e.Key, e.Value)
+				// Don't log env values — they may contain API keys, tokens, or other secrets.
+				log.Printf("[sandbox] task=%s setting agent env %s", taskID, e.Key)
 			}
 		}
 	}

@@ -498,7 +498,8 @@ func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	c := exec.Command("git", "-C", project.Path, "checkout", req.Branch)
 	if out, err := c.CombinedOutput(); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git checkout failed: %v: %s", err, out))
+		log.Printf("git checkout failed: %v: %s", err, out)
+		httputil.JSONError(w, http.StatusInternalServerError, "git checkout failed")
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"branch": req.Branch})
@@ -520,7 +521,8 @@ func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request) {
 	}
 	c := exec.Command("git", "-C", project.Path, "pull")
 	if out, err := c.CombinedOutput(); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git pull failed: %v: %s", err, out))
+		log.Printf("git pull failed: %v: %s", err, out)
+		httputil.JSONError(w, http.StatusInternalServerError, "git pull failed")
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "pulled"})
@@ -542,7 +544,8 @@ func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
 	}
 	c := exec.Command("git", "-C", project.Path, "push")
 	if out, err := c.CombinedOutput(); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git push failed: %v: %s", err, out))
+		log.Printf("git push failed: %v: %s", err, out)
+		httputil.JSONError(w, http.StatusInternalServerError, "git push failed")
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "pushed"})
@@ -1122,7 +1125,8 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 		// For deleted files, git add records the deletion.
 		cmd := exec.Command("git", "-C", worktreePath, "add", req.Path)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git add failed: %s", string(out)))
+			log.Printf("git add failed: %v: %s", err, out)
+			httputil.JSONError(w, http.StatusInternalServerError, "git add failed")
 			return
 		}
 	} else {
@@ -1130,7 +1134,8 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 		// This restores the working tree to match the index (restores deleted content too).
 		cmd := exec.Command("git", "-C", worktreePath, "reset", "HEAD", "--", req.Path)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git reset failed: %s", string(out)))
+			log.Printf("git reset failed: %v: %s", err, out)
+			httputil.JSONError(w, http.StatusInternalServerError, "git reset failed")
 			return
 		}
 		// If the file was newly added (not previously tracked), remove it from the index.
@@ -1140,10 +1145,10 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
 			// File was deleted — restore from index (HEAD)
 			cmd = exec.Command("git", "-C", worktreePath, "checkout", "HEAD", "--", req.Path)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				// File might not exist in HEAD (new file that was staged then deleted).
-				// In that case, just recreate it empty or skip.
-				_ = out
+			if err := cmd.Run(); err != nil {
+				// File might not be in HEAD (new file that was staged then deleted).
+				// This is expected — just skip silently.
+				_ = err
 			}
 		}
 	}
@@ -1178,13 +1183,15 @@ func (h *GitHandler) HandleProjectStageFile(w http.ResponseWriter, r *http.Reque
 	if req.Stage {
 		cmd := exec.Command("git", "-C", project.Path, "add", req.Path)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git add failed: %s", string(out)))
+			log.Printf("git add failed: %v: %s", err, out)
+			httputil.JSONError(w, http.StatusInternalServerError, "git add failed")
 			return
 		}
 	} else {
 		cmd := exec.Command("git", "-C", project.Path, "reset", "HEAD", "--", req.Path)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git reset failed: %s", string(out)))
+			log.Printf("git reset failed: %v: %s", err, out)
+			httputil.JSONError(w, http.StatusInternalServerError, "git reset failed")
 			return
 		}
 		// Restore deleted file from HEAD if it no longer exists on disk
@@ -1228,7 +1235,8 @@ func (h *GitHandler) HandleProjectCommit(w http.ResponseWriter, r *http.Request)
 	}
 	cmd = exec.Command("git", "-C", project.Path, "commit", "-m", req.Message)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git commit failed: %s", string(out)))
+		log.Printf("git commit failed: %v: %s", err, out)
+		httputil.JSONError(w, http.StatusInternalServerError, "git commit failed")
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "committed"})

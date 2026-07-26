@@ -47,6 +47,7 @@ type Server struct {
 	extHandler        *extensions.ExtensionHandler
 	extLSPMgr         *lsp.ExtensionLSPManager
 	lspHandler        *lsp.LSPHandler
+	loginLimiter      *RateLimiter
 	mux               *http.ServeMux
 	addr              string
 	frontendDist      string
@@ -93,6 +94,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		tlsConfig:    tlsCfg,
 		worktreeMux:  make(map[string]*sync.Mutex),
 		projectMux:   make(map[string]*sync.Mutex),
+		loginLimiter: newLoginRateLimiter(),
 	}
 
 	// Create session manager — fails if MIKE_LOGIN_PASSWORD is not set
@@ -228,6 +230,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	// Clean up all task sandbox containers
 	if s.sandboxMgr != nil {
 		s.sandboxMgr.Cleanup()
+	}
+	if s.loginLimiter != nil {
+		s.loginLimiter.Stop()
 	}
 	return s.store.Close()
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -108,19 +109,20 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		info, statErr := os.Stat(path)
 		if statErr != nil {
 			if os.IsNotExist(statErr) {
-				JSONError(w, http.StatusNotFound, "file not found: "+path)
+				JSONError(w, http.StatusNotFound, safeNotFoundError())
 			} else {
-				JSONError(w, http.StatusNotFound, statErr.Error())
+				JSONError(w, http.StatusNotFound, "file not found")
 			}
 			return
 		}
 		if info.IsDir() {
-			JSONError(w, http.StatusBadRequest, "path is a directory: "+path)
+			JSONError(w, http.StatusBadRequest, "path is a directory")
 			return
 		}
 		content, readErr = os.ReadFile(path)
 		if readErr != nil {
-			JSONError(w, http.StatusInternalServerError, "failed to read file: "+readErr.Error())
+			log.Printf("fs read failed: %v", readErr)
+			JSONError(w, http.StatusInternalServerError, "failed to read file")
 			return
 		}
 	}
@@ -319,11 +321,13 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 	// Host filesystem (worktree is bind-mounted into sandbox)
 	dir := filepath.Dir(req.Path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
+		log.Printf("fs mkdir failed: %v", err)
+		JSONError(w, http.StatusInternalServerError, "create directory failed")
 		return
 	}
 	if err := os.WriteFile(req.Path, []byte(req.Content), 0644); err != nil {
-		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("write file: %v", err))
+		log.Printf("fs write failed: %v", err)
+		JSONError(w, http.StatusInternalServerError, "write file failed")
 		return
 	}
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "written", "path": req.Path})
@@ -421,7 +425,8 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	// Host filesystem (no project or sandbox disabled)
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		JSONError(w, http.StatusNotFound, err.Error())
+		log.Printf("fs readdir failed: %v", err)
+		JSONError(w, http.StatusNotFound, "directory not found")
 		return
 	}
 
@@ -525,7 +530,8 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		_ = task // task exists and belongs to project
 		searchRoot, err = s.executor.WorktreeMgr().WorktreePath(taskID)
 		if err != nil {
-			JSONError(w, http.StatusNotFound, "failed to resolve worktree path: "+err.Error())
+			log.Printf("fs resolve worktree failed: %v", err)
+			JSONError(w, http.StatusNotFound, "failed to resolve worktree path")
 			return
 		}
 		// Worktree path is derived from server-side config — no need for client-side path validation.
@@ -580,7 +586,8 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 
 	// Check that the search root exists
 	if _, statErr := os.Stat(searchRoot); statErr != nil {
-		JSONError(w, http.StatusNotFound, "search root does not exist: "+statErr.Error())
+		log.Printf("fs search root stat failed: %v", statErr)
+		JSONError(w, http.StatusNotFound, "search root does not exist")
 		return
 	}
 
