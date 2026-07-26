@@ -119,3 +119,77 @@ func TestGetAgentProvider(t *testing.T) {
 		t.Errorf("expected my-agent, got %v", p)
 	}
 }
+
+// mockAgentLister implements AgentProviderLister for testing.
+type mockAgentLister struct {
+	providers []types.Provider
+}
+
+func (m *mockAgentLister) ToProviders() []types.Provider {
+	return m.providers
+}
+
+func TestFilterPersistedProviders(t *testing.T) {
+	providers := []types.Provider{
+		{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
+		{Name: "pi", Kind: "agent", URL: "agent://pi", Concurrency: 1},
+		{Name: "other-llm", Kind: "llm", URL: "http://localhost:9090/v1", Concurrency: 2},
+	}
+	filtered := filterPersistedProviders(providers)
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 providers, got %d", len(filtered))
+	}
+	if filtered[0].Name != "llm" || filtered[1].Name != "other-llm" {
+		t.Errorf("agent:// provider was not filtered out")
+	}
+}
+
+func TestBuildConfigResponseMergesAgentProviders(t *testing.T) {
+	cs := testConfigStore(t)
+
+	// Store an LLM provider
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	// No agent registry wired — response should only have stored providers
+	readCfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	resp := cs.buildConfigResponse(readCfg)
+	if len(resp.Providers) != 1 {
+		t.Fatalf("expected 1 provider without agent registry, got %d", len(resp.Providers))
+	}
+
+	// Wire an agent registry that provides 'Pi Coding Agent'
+	cs.SetAgentRegistry(&mockAgentLister{
+		providers: []types.Provider{
+			{Name: "pi", Kind: "agent", DisplayName: "Pi Coding Agent", URL: "agent://pi", Concurrency: 1},
+		},
+		})
+
+	resp = cs.buildConfigResponse(readCfg)
+	if len(resp.Providers) != 2 {
+		t.Fatalf("expected 2 providers with agent registry, got %d", len(resp.Providers))
+	}
+
+	// The agent provider should have the correct display name
+	var found bool
+	for _, p := range resp.Providers {
+		if p.URL == "agent://pi" {
+			if p.DisplayName != "Pi Coding Agent" {
+				t.Errorf("expected display name 'Pi Coding Agent', got '%s'", p.DisplayName)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Error("agent://pi provider not found in response")
+	}
+}
