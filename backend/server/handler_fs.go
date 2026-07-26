@@ -133,7 +133,7 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 	// Compute gutter markers (diff vs HEAD) for non-ref reads
 	var markers map[int][]string
 	if ref == "" {
-		markers = computeGutterMarkers(s, worktreePath, path, project, taskID)
+		markers = computeGutterMarkers(s, worktreePath, path, taskID)
 	}
 	JSONResponse(w, http.StatusOK, fsReadResponse{
 		Content:       string(content),
@@ -143,14 +143,14 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 
 // fsReadResponse is the JSON response for GET /api/fs/read.
 type fsReadResponse struct {
-	Content       string              `json:"content"`
-	GutterMarkers map[int][]string    `json:"gutter_markers,omitempty"`
+	Content       string           `json:"content"`
+	GutterMarkers map[int][]string `json:"gutter_markers,omitempty"`
 }
 
 // computeGutterMarkers runs `git diff HEAD -- <path>` and parses the unified diff
 // into per-line markers indexed by the current (working tree) line number (1-based).
 // Returns nil if the file is untracked, the repo has no commits, or git is unavailable.
-func computeGutterMarkers(s *Server, worktreePath, path string, project *types.Project, taskID string) map[int][]string {
+func computeGutterMarkers(s *Server, worktreePath, path, taskID string) map[int][]string {
 	relPath, err := filepath.Rel(worktreePath, path)
 	if err != nil {
 		return nil
@@ -178,14 +178,14 @@ func parseUnifiedDiff(diff string) map[int][]string {
 		lines = lines[:len(lines)-1]
 	}
 
-	newLine := 0          // current line number in working tree (0-based internally)
+	newLine := 0 // current line number in working tree (0-based internally)
 	hunkOldStart := 0
 	hunkOldCount := 0
 	hunkNewStart := 0
 	hunkNewCount := 0
 	inHunk := false
-	hunkOldPos := 0        // lines consumed from old range
-	hunkNewPos := 0        // lines consumed from new range
+	hunkOldPos := 0 // lines consumed from old range
+	hunkNewPos := 0 // lines consumed from new range
 	var pendingRemovals int
 
 	for _, line := range lines {
@@ -383,7 +383,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		}
 		// Single command: ls -pA marks dirs with trailing /, one entry per line
 		opts := s.fsSandboxConfig(project)
-		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "ls -pA "+sandboxPath, opts)
+		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "ls -pA "+shellQuote(sandboxPath), opts)
 		if err != nil {
 			JSONError(w, http.StatusNotFound, err.Error())
 			return
@@ -578,9 +578,9 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type searchResult struct {
-		Path string `json:"path"` // relative to search root
-		Line int    `json:"line,omitempty"`    // 1-based line number (content search)
-		Text string `json:"text,omitempty"`    // matching line content (content search)
+		Path string `json:"path"`           // relative to search root
+		Line int    `json:"line,omitempty"` // 1-based line number (content search)
+		Text string `json:"text,omitempty"` // matching line content (content search)
 	}
 	var results []searchResult
 
@@ -921,24 +921,24 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		opts := s.fsSandboxConfig(project)
 
 		// Check if already a git repo
-		_, gitErr := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "git -C "+sandboxPath+" rev-parse --git-dir 2>/dev/null", opts)
+		_, gitErr := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "git -C "+shellQuote(sandboxPath)+" rev-parse --git-dir 2>/dev/null", opts)
 		if gitErr == nil {
 			JSONError(w, http.StatusBadRequest, "path is already a git repository")
 			return
 		}
 
 		// Create README.md content
-		readmeContent := "# "+filepath.Base(req.Path)+"\n"
+		readmeContent := "# " + filepath.Base(req.Path) + "\n"
 		encoded := base64.StdEncoding.EncodeToString([]byte(readmeContent))
 
 		// git init + create README + add + commit in single command
 		// Use -c flags to override the commit author identity (if configured in git package)
 		authorFlags := strings.Join(git.GitAuthorFlags(), " ")
 		_, err := s.sandboxMgr.ExecProjectWithInput(project.ID, project.Path, project.Name,
-			"git -C "+sandboxPath+" init && " +
-			"base64 -d > "+filepath.Join(sandboxPath, "README.md")+" && " +
-			"git -C "+sandboxPath+" add README.md && " +
-			"git -C "+sandboxPath+" "+authorFlags+" commit -m 'Initial commit'",
+			"git -C "+shellQuote(sandboxPath)+" init && "+
+				"base64 -d > "+shellQuote(filepath.Join(sandboxPath, "README.md"))+" && "+
+				"git -C "+shellQuote(sandboxPath)+" add README.md && "+
+				"git -C "+shellQuote(sandboxPath)+" "+authorFlags+" commit -m 'Initial commit'",
 			[]byte(encoded+"\n"), opts)
 		if err != nil {
 			JSONError(w, http.StatusInternalServerError, "git commit failed: "+err.Error())
@@ -1048,9 +1048,9 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		// Combined check + mkdir in single command
 		opts := s.fsSandboxConfig(project)
 		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name,
-			"if [ ! -d "+sandboxParent+" ]; then echo 'PARENT_MISSING'; " +
-			"elif [ -e "+sandboxPath+" ]; then echo 'ALREADY_EXISTS'; " +
-			"else mkdir "+sandboxPath+" && echo 'OK'; fi",
+			"if [ ! -d "+shellQuote(sandboxParent)+" ]; then echo 'PARENT_MISSING'; "+
+				"elif [ -e "+shellQuote(sandboxPath)+" ]; then echo 'ALREADY_EXISTS'; "+
+				"else mkdir "+shellQuote(sandboxPath)+" && echo 'OK'; fi",
 			opts)
 		if err != nil {
 			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))

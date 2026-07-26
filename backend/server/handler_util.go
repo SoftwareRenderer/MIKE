@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"kanban/backend/prompts"
 )
@@ -67,4 +68,13 @@ func (s *Server) handleGC(w http.ResponseWriter, r *http.Request) {
 // safeNotFoundError returns a generic not-found message without leaking the path.
 func safeNotFoundError() string {
 	return "file not found"
+}
+
+// shellQuote wraps a string in single quotes for safe use as a single argument
+// in shell commands executed via `sh -c`. It escapes any embedded single quotes
+// using the standard POSIX technique (close quote, escaped quote, reopen quote).
+// This prevents command injection when interpolating paths or other user-derived
+// data into shell command strings.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
