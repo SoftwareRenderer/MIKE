@@ -342,7 +342,6 @@ func (a *wasmAdapter) HandleUIRequest(id, method string) []byte {
 
 // Close releases the wazero runtime and calls the WASM adapter's Close function.
 func (a *wasmAdapter) Close() {
-	// Call the WASM Close function to clean up adapter state (e.g. adapter.Close()).
 	fn := a.module.ExportedFunction(WasmFnClose)
 	if fn != nil {
 		fn.Call(context.Background())

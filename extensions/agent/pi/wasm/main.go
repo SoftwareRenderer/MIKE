@@ -3,7 +3,7 @@
 // Package main exports Pi adapter functions for wazero WASI reactor runtime.
 // Built with: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared
 //
-// Memory model: Zero-buffer string passing via Alloc/Free (per wazero
+// Memory model: Alloc-based string passing via Alloc/Free (per wazero
 // allocation/tinygo/greet.go pattern — Alloc → Write → Call → Free).
 //
 //	Host → WASM (input):  The host calls the module's Alloc(size) to obtain a
