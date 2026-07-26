@@ -15,14 +15,14 @@ import (
 // Non-string values are converted to string for encryption.
 // Returns a new map with encrypted values.
 func encryptConfigValues(config map[string]any, schema *ConfigSchema) map[string]any {
-	if schema == nil || schema.Properties == nil || config == nil {
+	if schema == nil || len(schema.Properties) == 0 || config == nil {
 		return config
 	}
 
 	result := make(map[string]any, len(config))
 	for k, v := range config {
-		prop, ok := schema.Properties[k]
-		if !ok || !prop.Sensitive {
+		prop := schema.GetProperty(k)
+		if prop == nil || !prop.Sensitive {
 			result[k] = v
 			continue
 		}
@@ -42,14 +42,14 @@ func encryptConfigValues(config map[string]any, schema *ConfigSchema) map[string
 // decryptConfigValues decrypts sensitive config values based on the manifest's config_schema.
 // Returns a new map with decrypted values.
 func decryptConfigValues(config map[string]any, schema *ConfigSchema) map[string]any {
-	if schema == nil || schema.Properties == nil || config == nil {
+	if schema == nil || len(schema.Properties) == 0 || config == nil {
 		return config
 	}
 
 	result := make(map[string]any, len(config))
 	for k, v := range config {
-		prop, ok := schema.Properties[k]
-		if !ok || !prop.Sensitive {
+		prop := schema.GetProperty(k)
+		if prop == nil || !prop.Sensitive {
 			result[k] = v
 			continue
 		}

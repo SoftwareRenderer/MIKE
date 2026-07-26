@@ -7,21 +7,23 @@
     "deprecated": false,
     "config_schema": {
         "type": "object",
-        "properties": {
-            "memory_limit": {
+        "properties": [
+            {
+                "key": "memory_limit",
                 "type": "number",
                 "title": "Memory Limit (MB)",
                 "description": "Maximum memory for the TypeScript sandbox",
                 "default": 512
             },
-            "tsserver_log": {
+            {
+                "key": "tsserver_log",
                 "type": "string",
                 "title": "tsserver Log Level",
                 "description": "Logging verbosity for tsserver (off, terse, normal, verbose)",
                 "default": "off",
                 "enum": ["off", "terse", "normal", "verbose"]
             }
-        },
+        ],
         "required": []
     },
     "lsp": {

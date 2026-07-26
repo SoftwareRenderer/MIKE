@@ -91,12 +91,12 @@ func (a *AgentConfig) ResolveSandboxMountTemplates(schema *ConfigSchema) *types.
 	if schema == nil {
 		return &mount
 	}
-	mount.HostPath = resolveTemplate(mount.HostPath, schema.Properties)
-	mount.ContainerPath = resolveTemplate(mount.ContainerPath, schema.Properties)
-	mount.Mode = resolveTemplate(mount.Mode, schema.Properties)
+	mount.HostPath = schema.resolveTemplate(mount.HostPath)
+	mount.ContainerPath = schema.resolveTemplate(mount.ContainerPath)
+	mount.Mode = schema.resolveTemplate(mount.Mode)
 	for i := range mount.Envs {
-		mount.Envs[i].Key = resolveTemplate(mount.Envs[i].Key, schema.Properties)
-		mount.Envs[i].Value = resolveTemplate(mount.Envs[i].Value, schema.Properties)
+		mount.Envs[i].Key = schema.resolveTemplate(mount.Envs[i].Key)
+		mount.Envs[i].Value = schema.resolveTemplate(mount.Envs[i].Value)
 	}
 	return &mount
 }
@@ -104,12 +104,12 @@ func (a *AgentConfig) ResolveSandboxMountTemplates(schema *ConfigSchema) *types.
 // resolveTemplate checks if value is a {{property_name}} template and resolves
 // it to the config_schema property's default value. If no match is found or
 // the value is not a template, the original value is returned unchanged.
-func resolveTemplate(value string, props map[string]SchemaProp) string {
+func (s *ConfigSchema) resolveTemplate(value string) string {
 	if len(value) < 5 || value[0] != '{' || value[1] != '{' || value[len(value)-1] != '}' || value[len(value)-2] != '}' {
 		return value
 	}
 	propName := value[2 : len(value)-2]
-	if prop, ok := props[propName]; ok {
+	if prop := s.GetProperty(propName); prop != nil {
 		if prop.Default != nil {
 			if s, ok := prop.Default.(string); ok {
 				return s
@@ -120,14 +120,29 @@ func resolveTemplate(value string, props map[string]SchemaProp) string {
 }
 
 // ConfigSchema is a JSON Schema subset for dynamic form rendering.
+// Properties is an array to preserve insertion order from manifest.json.
 type ConfigSchema struct {
-	Type       string                 `json:"type"`
-	Properties map[string]SchemaProp  `json:"properties,omitempty"`
-	Required   []string               `json:"required,omitempty"`
+	Type       string       `json:"type"`
+	Properties []SchemaProp `json:"properties,omitempty"`
+	Required   []string     `json:"required,omitempty"`
+}
+
+// GetProperty returns the SchemaProp with the given key, or nil if not found.
+func (s *ConfigSchema) GetProperty(key string) *SchemaProp {
+	if s == nil {
+		return nil
+	}
+	for i := range s.Properties {
+		if s.Properties[i].Key == key {
+			return &s.Properties[i]
+		}
+	}
+	return nil
 }
 
 // SchemaProp describes a single property in a config schema.
 type SchemaProp struct {
+	Key         string   `json:"key"`
 	Type        string   `json:"type"`
 	Title       string   `json:"title,omitempty"`
 	Description string   `json:"description,omitempty"`
