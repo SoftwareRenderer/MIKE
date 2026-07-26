@@ -438,6 +438,128 @@ func TestPersistEntry_Serialization(t *testing.T) {
 	}
 }
 
+// brokenAdapter implements AgentAdapter that returns nil/empty for everything.
+// Used to test nil-safety of the runner.
+type brokenAdapter struct {
+	subprocessConfig SubprocessConfig
+}
+
+func (b *brokenAdapter) Init(config []byte) error {
+	return nil
+}
+
+func (b *brokenAdapter) SubprocessConfig() SubprocessConfig {
+	return b.subprocessConfig
+}
+
+func (b *brokenAdapter) EncodeCommand(cmd string, data []byte) []byte {
+	return nil // simulates a broken/stale adapter
+}
+
+func (b *brokenAdapter) ParseOutput(data []byte) []Event {
+	return nil
+}
+
+func (b *brokenAdapter) HandleUIRequest(id, method string) []byte {
+	return nil
+}
+
+func (b *brokenAdapter) Close() {}
+
+var _ AgentAdapter = (*brokenAdapter)(nil)
+
+// TestNewAgentRunner_BrokenAdapter verifies that NewAgentRunner rejects
+// adapters where Init succeeds but SubprocessConfig returns empty binary.
+func TestNewAgentRunner_BrokenAdapter(t *testing.T) {
+	// Register a factory that returns an adapter with empty subprocess config
+	RegisterAdapterFactory("test-broken", func() AgentAdapter {
+		return &brokenAdapter{}
+	})
+
+	ext := &extensions.Extension{
+		Name:    "test-broken",
+		Type:    extensions.ExtensionTypeAgent,
+		Manifest: extensions.ExtensionManifest{
+			Agent: &extensions.AgentConfig{},
+		},
+	}
+
+	_, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "session", false)
+	if err == nil {
+		t.Fatal("expected error from NewAgentRunner with broken adapter, got nil")
+	}
+	if !containsStr(err.Error(), "empty binary") {
+		t.Errorf("expected 'empty binary' in error, got: %v", err)
+	}
+}
+
+// TestAgentRunner_PromptNilEncode verifies Prompt returns error when
+// EncodeCommand returns nil (broken adapter scenario).
+func TestAgentRunner_PromptNilEncode(t *testing.T) {
+	adapter := &brokenAdapter{subprocessConfig: SubprocessConfig{Binary: "cat"}}
+	RegisterAdapterFactory("test-nil-encode", func() AgentAdapter { return adapter })
+
+	ext := &extensions.Extension{
+		Name:    "test-nil-encode",
+		Type:    extensions.ExtensionTypeAgent,
+		Manifest: extensions.ExtensionManifest{
+			Agent: &extensions.AgentConfig{},
+		},
+	}
+
+	runner, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "session", false)
+	if err != nil {
+		t.Fatalf("NewAgentRunner: %v", err)
+	}
+	defer runner.Close()
+
+	err = runner.Prompt(context.Background(), "hello")
+	if err == nil {
+		t.Fatal("expected error from Prompt with nil EncodeCommand, got nil")
+	}
+	if !containsStr(err.Error(), "nil") {
+		t.Errorf("expected 'nil' in error, got: %v", err)
+	}
+}
+
+// TestAgentRunner_CloseNilEncode verifies Close handles nil EncodeCommand gracefully.
+func TestAgentRunner_CloseNilEncode(t *testing.T) {
+	adapter := &brokenAdapter{subprocessConfig: SubprocessConfig{Binary: "cat"}}
+	RegisterAdapterFactory("test-close-nil", func() AgentAdapter { return adapter })
+
+	ext := &extensions.Extension{
+		Name:    "test-close-nil",
+		Type:    extensions.ExtensionTypeAgent,
+		Manifest: extensions.ExtensionManifest{
+			Agent: &extensions.AgentConfig{},
+		},
+	}
+
+	runner, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "session", false)
+	if err != nil {
+		t.Fatalf("NewAgentRunner: %v", err)
+	}
+
+	// Close should not panic even with nil EncodeCommand
+	runner.Close()
+
+	// Double-close should also be safe
+	runner.Close()
+}
+
+// containsStr is a helper for error message checking.
+func containsStr(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		(len(s) > 0 && func() bool {
+			for i := 0; i <= len(s)-len(substr); i++ {
+				if s[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+			return false
+		}()))
+}
+
 // TestSubprocessConfig_Serialization verifies SubprocessConfig marshals correctly.
 func TestSubprocessConfig_Serialization(t *testing.T) {
 	cfg := SubprocessConfig{

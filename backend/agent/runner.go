@@ -162,6 +162,9 @@ func (r *AgentRunner) Prompt(ctx context.Context, message string, behavior ...st
 	}
 
 	bytes := r.adapter.EncodeCommand(CommandPrompt, dataBytes)
+	if bytes == nil {
+		return fmt.Errorf("adapter EncodeCommand returned nil (adapter may be broken)")
+	}
 	_, err := r.stdin.Write(bytes)
 	return err
 }
@@ -176,7 +179,9 @@ func (r *AgentRunner) Compact(ctx context.Context) (*CompactResult, error) {
 	r.mu.Lock()
 	if !r.closed {
 		bytes := r.adapter.EncodeCommand(CommandCompact, nil)
-		r.stdin.Write(bytes) // best-effort
+		if bytes != nil {
+			r.stdin.Write(bytes) // best-effort
+		}
 	}
 	r.mu.Unlock()
 
@@ -195,7 +200,9 @@ func (r *AgentRunner) QueryStats(ctx context.Context) SessionStatsData {
 	r.mu.Lock()
 	if !r.closed {
 		bytes := r.adapter.EncodeCommand(CommandStats, nil)
-		r.stdin.Write(bytes) // best-effort
+		if bytes != nil {
+			r.stdin.Write(bytes) // best-effort
+		}
 	}
 	r.mu.Unlock()
 
@@ -213,7 +220,9 @@ func (r *AgentRunner) QueryModel(ctx context.Context) string {
 	r.mu.Lock()
 	if !r.closed {
 		bytes := r.adapter.EncodeCommand(CommandGetState, nil)
-		r.stdin.Write(bytes) // best-effort
+		if bytes != nil {
+			r.stdin.Write(bytes) // best-effort
+		}
 	}
 	r.mu.Unlock()
 
@@ -260,7 +269,9 @@ func (r *AgentRunner) Close() {
 	// Send abort command (best-effort)
 	if r.stdin != nil {
 		bytes := r.adapter.EncodeCommand(CommandAbort, nil)
-		r.stdin.Write(bytes)
+		if bytes != nil {
+			r.stdin.Write(bytes) // best-effort
+		}
 		r.stdin.Close()
 	}
 

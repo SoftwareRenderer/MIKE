@@ -245,6 +245,15 @@ func (a *wasmAdapter) Init(config []byte) error {
 	if api.DecodeI32(result[0]) != 0 {
 		return fmt.Errorf("adapter init returned error")
 	}
+
+	// Validate adapter is functional by checking SubprocessConfig returns data.
+	// This catches stale WASM binaries or Init implementations that return 0
+	// but leave the adapter in an unusable state.
+	cfg := a.SubprocessConfig()
+	if cfg.Binary == "" {
+		return fmt.Errorf("adapter init succeeded but SubprocessConfig returned empty binary (stale WASM?)")
+	}
+
 	return nil
 }
 
