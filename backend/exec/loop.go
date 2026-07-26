@@ -391,7 +391,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					}
 					// Create new container with updated mode
 					var assignedPorts []types.AssignedPort
-					assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, setup.projectID, kanban_sandbox.SandboxOpts{
+					assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, kanban_sandbox.SandboxOpts{
 					BaseImage:        imageToUse,
 					NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
 					MemoryLimit:      setup.sandboxOpts.MemoryLimit,
