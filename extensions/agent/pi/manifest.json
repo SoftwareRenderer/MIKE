@@ -9,40 +9,22 @@
         "type": "object",
         "properties": [
             {
-                "key": "sandbox_mount_host_path",
-                "type": "string",
-                "title": "Config Mount Host Path",
-                "description": "Host path to the Pi config directory. Override if your config is stored elsewhere.",
-                "default": "~/.pi/agent"
+                "key": "sandbox_mounts",
+                "type": "mount",
+                "title": "Sandbox Mounts",
+                "description": "Host paths to bind-mount into the sandbox container. Pi's config directory (rw) is required for session files.",
+                "default": [
+                    { "host_path": "~/.pi/agent", "container_path": "/root/.pi/agent", "mode": "rw" }
+                ]
             },
             {
-                "key": "sandbox_mount_container_path",
-                "type": "string",
-                "title": "Config Mount Container Path",
-                "description": "Mount point inside the sandbox container.",
-                "default": "/root/.pi/agent"
-            },
-            {
-                "key": "sandbox_mount_mode",
-                "type": "string",
-                "title": "Config Mount Mode",
-                "description": "Read-write or read-only access to the Pi config directory inside the sandbox container. Read-write is required because Pi writes session files and settings to this directory.",
-                "enum": ["ro", "rw"],
-                "default": "rw"
-            },
-            {
-                "key": "sandbox_mount_env_key",
-                "type": "string",
-                "title": "Config Mount Env Key",
-                "description": "Environment variable name for the config host path, used in non-sandbox mode. Set to empty to disable.",
-                "default": "HOME"
-            },
-            {
-                "key": "sandbox_mount_env_value",
-                "type": "string",
-                "title": "Config Mount Env Value",
-                "description": "Environment variable value for the config host path, used in non-sandbox mode.",
-                "default": "~/.pi/agent"
+                "key": "sandbox_envs",
+                "type": "env",
+                "title": "Environment Variables",
+                "description": "Environment variables passed to the agent process in non-sandbox mode.",
+                "default": [
+                    { "key": "HOME", "value": "/root" }
+                ]
             }
         ]
     },
@@ -50,14 +32,14 @@
         "wasm_module": "pi.wasm",
         "capabilities": ["compact", "session_stats", "extension_ui"],
         "description": "Pi is a full coding agent that handles its own LLM calls, tool execution, and reasoning. When selected, Pi runs inside the task's worktree and manages the entire task lifecycle.",
-        "setup_info": "- **Inherited Config:** Your existing configuration is used when tasks are executed. Therefore all configuration of Pi should be done within Pi itself.\n- **Sandbox:**\n  - Your sandbox image must include `pi` on `$PATH`.\n  - Pi's config directory (`~/.pi/agent/`) is bind-mounted into the container at `/root/.pi/agent` (read-write by default, required for session files).\n  - An example dockerfile can be found in `./extensions/agent/pi/dockerfile-example`.\n- **Sessions:** Each task gets its own Pi session (named `kanban-{task-id}`) for continuity across restarts.",
+        "setup_info": "- **Inherited Config:** Your existing configuration is used when tasks are executed. Therefore all configuration of Pi should be done within Pi itself.\n- **Sandbox:**\n  - Your sandbox image must include `pi` on `$PATH`.\n  - Mounts defined above are bind-mounted into the container.\n  - An example dockerfile can be found in `./extensions/agent/pi/dockerfile-example`.\n- **Sessions:** Each task gets its own Pi session (named `kanban-{task-id}`) for continuity across restarts.",
         "sandbox_mount": {
             "host_path": "{{sandbox_mount_host_path}}",
             "container_path": "{{sandbox_mount_container_path}}",
             "mode": "{{sandbox_mount_mode}}",
             "envs": [
-            {"key": "{{sandbox_mount_env_key}}", "value": "{{sandbox_mount_env_value}}"}
-        ]
+                { "key": "{{sandbox_env_key}}", "value": "{{sandbox_env_value}}" }
+            ]
         }
     }
 }

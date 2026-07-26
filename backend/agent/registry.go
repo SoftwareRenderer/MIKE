@@ -113,12 +113,12 @@ func (r *AgentRegistry) ToProviders() []types.Provider {
 }
 
 // GetAgentConfigMount returns the sandbox mount for a specific agent extension.
-// It uses the manifest's default sandbox_mount, with overrides from:
-//   - Extension config (runtime override of mode/host_path/container_path/envs)
-//   - Provider config (AgentConfigDir override of host_path)
+// It reads sandbox_mounts and sandbox_envs arrays from extension config,
+// falling back to manifest defaults. Provider config (AgentConfigDir) can
+// override the host_path of the first mount.
 //
 // The host_path is expanded for leading ~.
-// Returns nil if no sandbox_mount is defined for the extension.
+// Returns nil if no mounts are configured for the extension.
 func (r *AgentRegistry) GetAgentConfigMount(agentName string) *types.AgentConfigMount {
 	r.mu.RLock()
 	ext, ok := r.agents[agentName]
@@ -129,29 +129,30 @@ func (r *AgentRegistry) GetAgentConfigMount(agentName string) *types.AgentConfig
 	}
 
 	def := ext.Manifest.Agent
-	if def == nil || def.SandboxMount == nil {
+	if def == nil {
 		return nil
 	}
 
-	// Resolve {{property}} template references in sandbox_mount using config_schema defaults
-	mount := *def.ResolveSandboxMountTemplates(ext.Manifest.ConfigSchema) // copy
+	// Start with manifest default mount
+	var mount types.AgentConfigMount
+	if def.SandboxMount != nil {
+		mount = *def.ResolveSandboxMountTemplates(ext.Manifest.ConfigSchema)
+	}
 
-	// Override mode from extension runtime config
-	if mode, ok := ext.Config["sandbox_mount_mode"].(string); ok && mode != "" {
-		mount.Mode = mode
+	// Read sandbox_mounts array from extension config
+	if mountsRaw, ok := ext.Config["sandbox_mounts"]; ok {
+		if mounts, err := parseMountArray(mountsRaw); err == nil && len(mounts) > 0 {
+			m := mounts[0]
+			mount.HostPath = m.HostPath
+			mount.ContainerPath = m.ContainerPath
+			mount.Mode = m.Mode
+		}
 	}
-	// Override host_path from extension runtime config
-	if hp, ok := ext.Config["sandbox_mount_host_path"].(string); ok && hp != "" {
-		mount.HostPath = hp
-	}
-	// Override container_path from extension runtime config
-	if cp, ok := ext.Config["sandbox_mount_container_path"].(string); ok && cp != "" {
-		mount.ContainerPath = cp
-	}
-	// Override envs from extension runtime config (empty key disables)
-	if ek, ok := ext.Config["sandbox_mount_env_key"].(string); ok && ek != "" {
-		if ev, ok := ext.Config["sandbox_mount_env_value"].(string); ok {
-			mount.Envs = []types.SandboxEnv{{Key: ek, Value: ev}}
+
+	// Read sandbox_envs array from extension config
+	if envsRaw, ok := ext.Config["sandbox_envs"]; ok {
+		if envs, err := parseEnvArray(envsRaw); err == nil {
+			mount.Envs = envs
 		}
 	}
 
@@ -174,7 +175,72 @@ func (r *AgentRegistry) GetAgentConfigMount(agentName string) *types.AgentConfig
 		mount.Mode = "ro"
 	}
 
+	// Return nil if no host path set
+	if mount.HostPath == "" {
+		return nil
+	}
+
 	return &mount
+}
+
+// parseMountArray parses a JSON array of mount objects from extension config.
+func parseMountArray(v any) ([]types.SandboxMount, error) {
+	switch src := v.(type) {
+	case []any:
+		var mounts []types.SandboxMount
+		for _, item := range src {
+			m, err := parseMountObject(item)
+			if err != nil {
+				return nil, err
+			}
+			mounts = append(mounts, m)
+		}
+		return mounts, nil
+	default:
+		return nil, fmt.Errorf("expected array, got %T", v)
+	}
+}
+
+func parseMountObject(v any) (types.SandboxMount, error) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return types.SandboxMount{}, fmt.Errorf("expected object, got %T", v)
+	}
+	hp, _ := m["host_path"].(string)
+	cp, _ := m["container_path"].(string)
+	mode, _ := m["mode"].(string)
+	if mode == "" {
+		mode = "rw"
+	}
+	return types.SandboxMount{HostPath: hp, ContainerPath: cp, Mode: mode}, nil
+}
+
+// parseEnvArray parses a JSON array of env objects from extension config.
+func parseEnvArray(v any) ([]types.SandboxEnv, error) {
+	switch src := v.(type) {
+	case []any:
+		var envs []types.SandboxEnv
+		for _, item := range src {
+			e, err := parseEnvObject(item)
+			if err != nil {
+				return nil, err
+			}
+			envs = append(envs, e)
+		}
+		return envs, nil
+	default:
+		return nil, fmt.Errorf("expected array, got %T", v)
+	}
+}
+
+func parseEnvObject(v any) (types.SandboxEnv, error) {
+	e, ok := v.(map[string]any)
+	if !ok {
+		return types.SandboxEnv{}, fmt.Errorf("expected object, got %T", v)
+	}
+	key, _ := e["key"].(string)
+	value, _ := e["value"].(string)
+	return types.SandboxEnv{Key: key, Value: value}, nil
 }
 
 // GetConfigMount returns the config mount for the first enabled agent extension.

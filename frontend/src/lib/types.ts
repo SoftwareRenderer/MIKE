@@ -452,7 +452,7 @@ export interface ConfigSchema {
 
 export interface SchemaProperty {
     key: string;
-    type: string;
+    type: string; // "string", "number", "boolean", "mount", "env"
     title?: string;
     description?: string;
     default?: any;
