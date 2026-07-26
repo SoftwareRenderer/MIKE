@@ -599,7 +599,7 @@ func TestProjectUpdateSandboxMounts(t *testing.T) {
 	req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
 		"sandbox_mounts": []map[string]any{
 			{"host_path": "/data/cache", "container_path": "/mnt/cache", "mode": "rw"},
-			{"host_path": "/etc/config", "container_path": "/etc/config", "mode": "ro"},
+			{"host_path": "/data/config", "container_path": "/mnt/config", "mode": "ro"},
 		},
 	})
 	rr := testResponseAuth(t, s, req)

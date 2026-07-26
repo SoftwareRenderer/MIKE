@@ -21,9 +21,15 @@ import (
 )
 
 func main() {
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
+	// Profiling endpoint — disabled by default. Enable with MIKE_PPROF=1.
+	// Exposes heap/memory/goroutine profiles that could leak sensitive data
+	// (API keys, passwords, etc.) in memory snapshots.
+	if os.Getenv("MIKE_PPROF") == "1" {
+		go func() {
+			log.Println("pprof server starting on localhost:6060")
+			log.Println(http.ListenAndServe("localhost:6060", nil))
+		}()
+	}
 
 	// CLI flags
 	port := flag.Int("port", 0, "Server listen port (default: $MIKE_PORT or 3000)")

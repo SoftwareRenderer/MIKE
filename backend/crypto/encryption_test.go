@@ -1,13 +1,13 @@
 package crypto
 
 import (
+	"strings"
 	"testing"
 )
 
 // setEncryptionKey sets a valid 32-byte hex key for testing and returns a cleanup function.
 func setEncryptionKey(t *testing.T) {
 	t.Helper()
-	// 32 bytes = 64 hex chars
 	t.Setenv("MIKE_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 }
 
@@ -120,7 +120,7 @@ func TestTamperedCiphertext(t *testing.T) {
 func TestDecryptInvalidBase64(t *testing.T) {
 	setEncryptionKey(t)
 
-	_, err := Decrypt("not-valid-base64!!!")
+	_, err := Decrypt("v1:not-valid-base64!!!")
 	if err == nil {
 		t.Fatal("Decrypt should fail on invalid base64")
 	}
@@ -150,7 +150,8 @@ func TestValidateKey(t *testing.T) {
 func TestEncryptDifferentValuesProduceDifferentCiphertext(t *testing.T) {
 	setEncryptionKey(t)
 
-	// Encrypt the same value twice — GCM uses random nonces, so results should differ
+	// Encrypt the same value twice — GCM uses random nonces and PBKDF2 uses random salts,
+	// so results should differ
 	e1, err := Encrypt("same-value")
 	if err != nil {
 		t.Fatalf("Encrypt 1 failed: %v", err)
@@ -160,7 +161,7 @@ func TestEncryptDifferentValuesProduceDifferentCiphertext(t *testing.T) {
 		t.Fatalf("Encrypt 2 failed: %v", err)
 	}
 	if e1 == e2 {
-		t.Fatal("two encryptions of the same value should produce different ciphertext (random nonce)")
+		t.Fatal("two encryptions of the same value should produce different ciphertext (random nonce and salt)")
 	}
 
 	// But both should decrypt to the same value
@@ -168,5 +169,69 @@ func TestEncryptDifferentValuesProduceDifferentCiphertext(t *testing.T) {
 	d2, _ := Decrypt(e2)
 	if d1 != d2 {
 		t.Errorf("decrypted values differ: %q vs %q", d1, d2)
+	}
+}
+
+func TestEncryptUsesV1Format(t *testing.T) {
+	setEncryptionKey(t)
+
+	encrypted, err := Encrypt("test-value")
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+
+	if !strings.HasPrefix(encrypted, "v1:") {
+		t.Fatalf("encryption should use v1: prefix, got: %s", encrypted)
+	}
+}
+
+func TestV1EncryptionRoundTrip(t *testing.T) {
+	setEncryptionKey(t)
+
+	plaintext := "sk-v1-test-key-99999"
+	encrypted, err := Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+
+	// Verify it uses v1 format
+	if !strings.HasPrefix(encrypted, "v1:") {
+		t.Fatalf("expected v1: prefix, got: %s", encrypted)
+	}
+
+	// Decrypt and verify
+	decrypted, err := Decrypt(encrypted)
+	if err != nil {
+		t.Fatalf("Decrypt failed: %v", err)
+	}
+	if decrypted != plaintext {
+		t.Errorf("decrypted = %q, want %q", decrypted, plaintext)
+	}
+}
+
+func TestV1DifferentKeysProduceUnrelatedCiphertext(t *testing.T) {
+	setEncryptionKey(t)
+
+	e1, _ := Encrypt("secret")
+	d1, _ := Decrypt(e1)
+	if d1 != "secret" {
+		t.Fatalf("round trip failed: got %q", d1)
+	}
+
+	// Change the key and verify old ciphertext can't be decrypted
+	t.Setenv("MIKE_ENCRYPTION_KEY", "different-key-12345678901234567890123456789012")
+	_, err := Decrypt(e1)
+	if err == nil {
+		t.Fatal("Decrypt with different key should fail (authentication tag mismatch)")
+	}
+}
+
+func TestDecryptUnrecognizedFormat(t *testing.T) {
+	setEncryptionKey(t)
+
+	// A legacy format string without a version prefix should fail
+	_, err := Decrypt("c29tZXJhbmRoZW1lcnZhbGZvcmJhc2U2NHN0cmluZw==")
+	if err == nil {
+		t.Fatal("Decrypt should fail on unrecognized format (no v1: prefix)")
 	}
 }

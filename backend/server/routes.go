@@ -11,7 +11,12 @@ func (s *Server) setupRoutes() {
 
 	// Health & auth
 	s.mux.HandleFunc("/api/health", s.handleHealth)
-	s.mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
+	// Rate limit login attempts to prevent brute-force attacks (5 attempts/min per IP)
+	if s.loginLimiter != nil {
+		s.mux.Handle("/api/auth/login", RateLimitMiddleware(s.loginLimiter, http.HandlerFunc(s.handleAuthLogin)))
+	} else {
+		s.mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
+	}
 	s.mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("/api/auth/session", s.handleAuthSession)
 	s.mux.HandleFunc("/api/prompts/reload", s.handleReloadPrompts)
