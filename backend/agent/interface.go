@@ -3,24 +3,24 @@ package agent
 // Event represents a generic agent event, JSON-serialized across the WASM boundary.
 // The adapter (extension) produces Events; the runner (backend) streams them to the executor.
 type Event struct {
-	Type           string            `json:"type"`
-	Text           string            `json:"text,omitempty"`           // for EventTypeToken
-	Thinking       string            `json:"thinking,omitempty"`       // for EventTypeReasoning
-	ToolCall       ToolCallData      `json:"tool_call,omitempty"`      // for EventTypeToolCall
-	ToolResult     ToolResultData    `json:"tool_result,omitempty"`    // for EventTypeToolResult
-	Status         StatusData        `json:"status,omitempty"`         // for EventTypeStatus
-	Stats          SessionStatsData  `json:"stats,omitempty"`          // for EventTypeStats
-	PersistEntries []PersistEntry    `json:"persist_entries,omitempty"` // for EventTypePersist
-	RawData        map[string]any    `json:"raw_data,omitempty"`       // adapter-specific extra fields
+	Type           string           `json:"type"`
+	Text           string           `json:"text,omitempty"`            // for EventTypeToken
+	Thinking       string           `json:"thinking,omitempty"`        // for EventTypeReasoning
+	ToolCall       ToolCallData     `json:"tool_call,omitempty"`       // for EventTypeToolCall
+	ToolResult     ToolResultData   `json:"tool_result,omitempty"`     // for EventTypeToolResult
+	Status         StatusData       `json:"status,omitempty"`          // for EventTypeStatus
+	Stats          SessionStatsData `json:"stats,omitempty"`           // for EventTypeStats
+	PersistEntries []PersistEntry   `json:"persist_entries,omitempty"` // for EventTypePersist
+	RawData        map[string]any   `json:"raw_data,omitempty"`        // adapter-specific extra fields
 }
 
 // ToolCallData describes a tool call from the agent.
 type ToolCallData struct {
-	ID           string         `json:"id"`
-	Name         string         `json:"name"`
-	DisplayName  string         `json:"display_name"`
-	Args         map[string]any `json:"args"`
-	RawArgs      string         `json:"raw_args,omitempty"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	DisplayName string         `json:"display_name"`
+	Args        map[string]any `json:"args"`
+	RawArgs     string         `json:"raw_args,omitempty"`
 }
 
 // ToolResultData describes a tool execution result.
@@ -50,7 +50,7 @@ type SessionStatsData struct {
 // PersistEntry is a pre-parsed message for DB persistence.
 // The adapter fills these at turn-end; the executor persists them generically.
 type PersistEntry struct {
-	Role             string `json:"role"`               // "assistant" or "tool_call"
+	Role             string `json:"role"` // "assistant" or "tool_call"
 	Content          string `json:"content,omitempty"`
 	ReasoningContent string `json:"reasoning_content,omitempty"`
 	ModelName        string `json:"model_name,omitempty"`
@@ -58,20 +58,20 @@ type PersistEntry struct {
 	PromptTokens     int    `json:"prompt_tokens,omitempty"`
 	PredictedTokens  int    `json:"predicted_tokens,omitempty"`
 	Duration         int64  `json:"duration,omitempty"`
-	ToolCallsJSON    string `json:"tool_calls_json,omitempty"`    // JSON of tool call data (role=tool_call)
-	ToolResultJSON   string `json:"tool_result_json,omitempty"`   // JSON of tool result data (role=tool_call)
+	ToolCallsJSON    string `json:"tool_calls_json,omitempty"`  // JSON of tool call data (role=tool_call)
+	ToolResultJSON   string `json:"tool_result_json,omitempty"` // JSON of tool result data (role=tool_call)
 }
 
 // Event type constants.
 const (
-	EventTypeToken     = "token"
-	EventTypeReasoning = "reasoning"
-	EventTypeToolCall  = "tool_call"
-	EventTypeToolResult = "tool_result"
-	EventTypeStatus    = "status"
-	EventTypeStats     = "stats"
-	EventTypeError     = "error"
-	EventTypePersist   = "persist"
+	EventTypeToken        = "token"
+	EventTypeReasoning    = "reasoning"
+	EventTypeToolCall     = "tool_call"
+	EventTypeToolResult   = "tool_result"
+	EventTypeStatus       = "status"
+	EventTypeStats        = "stats"
+	EventTypeError        = "error"
+	EventTypePersist      = "persist"
 	EventTypeTurnComplete = "turn_complete"
 )
 
@@ -135,4 +135,6 @@ const (
 	WasmFnParseOutput      = "ParseOutput"
 	WasmFnHandleUIRequest  = "HandleUIRequest"
 	WasmFnClose            = "Close"
+	WasmFnAlloc            = "Alloc"
+	WasmFnFree             = "Free"
 )
