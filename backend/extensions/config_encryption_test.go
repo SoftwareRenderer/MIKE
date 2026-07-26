@@ -368,13 +368,13 @@ func TestConfigEncryption_NonStringSensitiveValue(t *testing.T) {
 // Helper: set a valid ENCRYPTION_KEY for the test
 func setEncryptionKey(t *testing.T) {
 	t.Helper()
-	t.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	t.Setenv("MIKE_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 }
 
 // Helper: clear ENCRYPTION_KEY for the test
 func clearEncryptionKey(t *testing.T) {
 	t.Helper()
-	t.Setenv("ENCRYPTION_KEY", "")
+	t.Setenv("MIKE_ENCRYPTION_KEY", "")
 }
 
 func configContains(s, substr string) bool {
