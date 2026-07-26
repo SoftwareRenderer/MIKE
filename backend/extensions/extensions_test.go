@@ -2,8 +2,12 @@ package extensions
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"kanban/backend/types"
 )
 
 func makeTestExtension(t *testing.T, extType, installSource string) *Extension {
@@ -288,6 +292,135 @@ func TestCSSConfig_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAgentConfig_ResolveSandboxMountTemplates(t *testing.T) {
+	tests := []struct {
+		name     string
+		agent    *AgentConfig
+		wantHost string
+		wantCtn  string
+		wantMode string
+		wantEnv  string
+		wantNil  bool
+	}{
+		{
+			name: "resolve all templates from config_schema defaults",
+			agent: &AgentConfig{
+				ConfigSchema: &ConfigSchema{
+					Properties: map[string]SchemaProp{
+						"sandbox_mount_host_path":      {Default: "~/.pi/agent"},
+						"sandbox_mount_container_path": {Default: "/root/.pi/agent"},
+						"sandbox_mount_mode":           {Default: "rw"},
+						"sandbox_mount_env_key":        {Default: "HOME"},
+						"sandbox_mount_env_value":      {Default: "~/.pi/agent"},
+					},
+				},
+				SandboxMount: &types.AgentConfigMount{
+					HostPath:      "{{sandbox_mount_host_path}}",
+					ContainerPath: "{{sandbox_mount_container_path}}",
+					Mode:          "{{sandbox_mount_mode}}",
+					Envs:          []types.SandboxEnv{{Key: "{{sandbox_mount_env_key}}", Value: "{{sandbox_mount_env_value}}"}},
+				},
+			},
+			wantHost: "~/.pi/agent",
+			wantCtn:  "/root/.pi/agent",
+			wantMode: "rw",
+			wantEnv:  "HOME",
+		},
+		{
+			name: "literal values pass through unchanged",
+			agent: &AgentConfig{
+				SandboxMount: &types.AgentConfigMount{
+					HostPath:      "/custom/path",
+					ContainerPath: "/custom/container",
+					Mode:          "ro",
+					Envs:          []types.SandboxEnv{{Key: "MY_ENV_VAR", Value: "/custom/path"}},
+				},
+			},
+			wantHost: "/custom/path",
+			wantCtn:  "/custom/container",
+			wantMode: "ro",
+			wantEnv:  "MY_ENV_VAR",
+		},
+		{
+			name: "no config_schema - templates pass through unchanged",
+			agent: &AgentConfig{
+				SandboxMount: &types.AgentConfigMount{
+					HostPath: "{{sandbox_mount_host_path}}",
+					Mode:     "{{sandbox_mount_mode}}",
+				},
+			},
+			wantHost: "{{sandbox_mount_host_path}}",
+			wantMode: "{{sandbox_mount_mode}}",
+		},
+		{
+			name: "template for missing property passes through unchanged",
+			agent: &AgentConfig{
+				ConfigSchema: &ConfigSchema{
+					Properties: map[string]SchemaProp{
+						"sandbox_mount_host_path": {Default: "~/.pi/agent"},
+					},
+				},
+				SandboxMount: &types.AgentConfigMount{
+					HostPath:      "{{sandbox_mount_host_path}}",
+					ContainerPath: "{{sandbox_mount_container_path}}",
+					Mode:          "rw",
+					Envs:          nil,
+				},
+			},
+			wantHost: "~/.pi/agent",
+			wantCtn:  "{{sandbox_mount_container_path}}",
+			wantMode: "rw",
+		},
+		{
+			name:    "nil agent config returns nil mount",
+			agent:   nil,
+			wantNil: true,
+		},
+		{
+			name: "nil sandbox_mount returns nil",
+			agent: &AgentConfig{
+				SandboxMount: nil,
+			},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var schema *ConfigSchema
+			if tt.agent != nil {
+				schema = tt.agent.ConfigSchema
+			}
+			mount := tt.agent.ResolveSandboxMountTemplates(schema)
+			if tt.wantNil {
+				if mount != nil {
+					t.Errorf("expected nil mount, got %+v", mount)
+				}
+				return
+			}
+			if mount == nil {
+				t.Fatal("expected non-nil mount")
+			}
+			if mount.HostPath != tt.wantHost {
+				t.Errorf("HostPath = %q, want %q", mount.HostPath, tt.wantHost)
+			}
+			if mount.ContainerPath != tt.wantCtn {
+				t.Errorf("ContainerPath = %q, want %q", mount.ContainerPath, tt.wantCtn)
+			}
+			if mount.Mode != tt.wantMode {
+				t.Errorf("Mode = %q, want %q", mount.Mode, tt.wantMode)
+			}
+			if tt.wantEnv == "" {
+				if len(mount.Envs) != 0 {
+					t.Errorf("Envs = %+v, want empty", mount.Envs)
+				}
+			} else if len(mount.Envs) != 1 || mount.Envs[0].Key != tt.wantEnv {
+				t.Errorf("Envs = %+v, want key %q", mount.Envs, tt.wantEnv)
+			}
+		})
+	}
+}
+
 func TestExtension_IsCSS(t *testing.T) {
 	tests := []struct {
 		name string
@@ -383,5 +516,63 @@ func TestExtension_HasCSSConfig(t *testing.T) {
 	uiExt.Manifest.CSS = &CSSConfig{CSSURL: "/theme.css"}
 	if uiExt.HasCSSConfig() {
 		t.Error("HasCSSConfig() = true for UI extension, want false")
+	}
+}
+
+// TestPiManifestTemplateResolution loads the actual Pi agent manifest and verifies
+// that {{property}} template references in sandbox_mount are resolved using
+// config_schema defaults end-to-end.
+func TestPiManifestTemplateResolution(t *testing.T) {
+	manifestPath := filepath.Join("..", "..", "extensions", "agent", "pi", "manifest.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("manifest not found at %s", manifestPath)
+		}
+		t.Fatalf("read manifest: %v", err)
+	}
+
+	var manifest ExtensionManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+
+	if manifest.Agent == nil {
+		t.Fatal("manifest.Agent is nil")
+	}
+	if manifest.Agent.SandboxMount == nil {
+		t.Fatal("manifest.Agent.SandboxMount is nil")
+	}
+
+	// Verify template references are present in the raw manifest
+	if manifest.Agent.SandboxMount.HostPath != "{{sandbox_mount_host_path}}" {
+		t.Errorf("expected template host_path, got %q", manifest.Agent.SandboxMount.HostPath)
+	}
+	if manifest.Agent.SandboxMount.ContainerPath != "{{sandbox_mount_container_path}}" {
+		t.Errorf("expected template container_path, got %q", manifest.Agent.SandboxMount.ContainerPath)
+	}
+	if manifest.Agent.SandboxMount.Mode != "{{sandbox_mount_mode}}" {
+		t.Errorf("expected template mode, got %q", manifest.Agent.SandboxMount.Mode)
+	}
+	if len(manifest.Agent.SandboxMount.Envs) != 1 || manifest.Agent.SandboxMount.Envs[0].Key != "{{sandbox_mount_env_key}}" {
+		t.Errorf("expected template env key, got %+v", manifest.Agent.SandboxMount.Envs)
+	}
+
+	// Resolve templates and verify against config_schema defaults
+	mount := manifest.Agent.ResolveSandboxMountTemplates(manifest.ConfigSchema)
+	if mount == nil {
+		t.Fatal("resolved mount is nil")
+	}
+	if mount.HostPath != "~/.pi/agent" {
+		t.Errorf("resolved HostPath = %q, want ~/.pi/agent", mount.HostPath)
+	}
+	if mount.ContainerPath != "/root/.pi/agent" {
+		t.Errorf("resolved ContainerPath = %q, want /root/.pi/agent", mount.ContainerPath)
+	}
+	if mount.Mode != "rw" {
+		t.Errorf("resolved Mode = %q, want rw", mount.Mode)
+	}
+	if len(mount.Envs) != 1 || mount.Envs[0].Key != "HOME" {
+		t.Errorf("resolved Envs = %+v, want key HOME", mount.Envs)
 	}
 }
