@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/agent"
 	"kanban/backend/config"
 	"kanban/backend/httputil"
 	"kanban/backend/prompts"
@@ -124,18 +125,36 @@ type TerminalManager struct {
 	store                 *store.Store
 	cfgStore              *config.ConfigStore
 	sandboxMgr            sandboxOps
+	agentRegistry         *agent.AgentRegistry
 	onPortsAssigned       func(taskID, projectID string, ports []types.AssignedPort) // callback when task ports are assigned
 	onProjectPortsAssigned func(projectID string, ports []types.AssignedPort)         // callback when project-level terminal ports are assigned
 }
 
 // NewTerminalManager creates a new TerminalManager.
-func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore, sandboxMgr sandboxOps) *TerminalManager {
+func NewTerminalManager(store *store.Store, cfgStore *config.ConfigStore, sandboxMgr sandboxOps, agentRegistry *agent.AgentRegistry) *TerminalManager {
 	return &TerminalManager{
-		sessions:   make(map[string]*taskTerminal),
-		store:      store,
-		cfgStore:   cfgStore,
-		sandboxMgr: sandboxMgr,
+		sessions:      make(map[string]*taskTerminal),
+		store:         store,
+		cfgStore:      cfgStore,
+		sandboxMgr:    sandboxMgr,
+		agentRegistry: agentRegistry,
 	}
+}
+
+// SetAgentRegistry sets the agent registry after creation (needed because agentRegistry is created after terminalMgr).
+func (tm *TerminalManager) SetAgentRegistry(ar *agent.AgentRegistry) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.agentRegistry = ar
+}
+
+// getAgentConfigMount returns the agent config mount for the current agent, or nil.
+// agentRegistry is set once during initialization and only read afterwards, so no lock needed.
+func (tm *TerminalManager) getAgentConfigMount() *types.AgentConfigMount {
+	if tm.agentRegistry == nil {
+		return nil
+	}
+	return tm.agentRegistry.GetConfigMount()
 }
 
 // SetOnPortsAssigned sets a callback invoked when sandbox ports are assigned during terminal shell creation.
@@ -229,8 +248,8 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 				imageToUse = sandbox.BaseImage
 			}
 		}
-		// Mount agent config dir if any coding agent is configured in Kanban
-		piAgentDir := tm.cfgStore.GetAgentConfigDir()
+		// Mount agent config dir if any coding agent is configured
+		agentConfig := tm.getAgentConfigMount()
 		var shell *sandbox.ShellProcess
 		var err error
 		// Both project and task terminals create the container on demand if it doesn't exist.
@@ -246,7 +265,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 			NetworkIsolation: networkIsolation,
 			MemoryLimit:      memoryLimit,
 			ForwardPorts:     forwardPorts,
-			PiAgentDir:       piAgentDir,
+			AgentConfig:      agentConfig,
 			SkillsDir:        prompts.SkillsDir(),
 			SandboxMounts:    sandboxMounts,
 			SandboxEnvs:      sandboxEnvs,

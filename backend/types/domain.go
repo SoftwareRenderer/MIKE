@@ -94,6 +94,14 @@ const (
 	ProviderKindAgent = "agent"
 )
 
+// // AgentConfigMount describes how to bind the agent config directory into a sandbox container.,
+type AgentConfigMount struct {
+	HostPath      string `json:"host_path"`        // host path to agent config dir
+	ContainerPath string `json:"container_path"`  // mount point inside the container
+	Mode          string `json:"mode"`            // "ro" (default) or "rw"
+	EnvVar        string `json:"env_var,omitempty"` // env var name for non-sandbox use
+}
+
 // Provider is a named LLM server preset with a list of available models.
 type Provider struct {
 	Name            string        `json:"name"`
@@ -104,7 +112,7 @@ type Provider struct {
 	Models          []ModelConfig `json:"models"`
 	Concurrency     int           `json:"concurrency"`
 	DefaultModel    string        `json:"default_model"`
-	AgentConfigDir  string        `json:"agent_config_dir,omitempty"` // host path to agent config (e.g., ~/.pi/agent); empty for LLM providers
+	AgentConfigDir  string        `json:"agent_config_dir,omitempty"` // optional host path override for the agent config dir; empty means use extension default
 	AgentDescription string        `json:"agent_description,omitempty"` // agent description text (from manifest); empty for LLM providers
 	AgentSetupInfo    string        `json:"agent_setup_info,omitempty"`  // agent setup instructions (from manifest); empty for LLM providers
 	InputPrice            float64 `json:"input_price"`                 // USD per 1M input (non-cached) tokens

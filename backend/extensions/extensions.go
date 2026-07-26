@@ -70,11 +70,12 @@ type CSSConfig struct {
 // AgentConfig defines agent-specific extension configuration.
 // The agent adapter (WASM module) handles all protocol details.
 type AgentConfig struct {
-	WasmModule   string        `json:"wasm_module"`              // path to WASM adapter module (relative to extension dir)
-	Capabilities []string      `json:"capabilities,omitempty"`   // e.g., ["compact", "session_stats", "extension_ui"]
-	Description  string        `json:"description,omitempty"`    // short description shown in provider card (markdown)
-	SetupInfo    string        `json:"setup_info,omitempty"`     // setup instructions shown in provider card (markdown, newline-separated items)
-	ConfigSchema *ConfigSchema `json:"config_schema,omitempty"`  // user-configurable options
+	WasmModule   string                   `json:"wasm_module"`              // path to WASM adapter module (relative to extension dir)
+	Capabilities []string                 `json:"capabilities,omitempty"`   // e.g., ["compact", "session_stats", "extension_ui"]
+	Description  string                   `json:"description,omitempty"`    // short description shown in provider card (markdown)
+	SetupInfo    string                   `json:"setup_info,omitempty"`     // setup instructions shown in provider card (markdown, newline-separated items)
+	ConfigSchema *ConfigSchema            `json:"config_schema,omitempty"`  // user-configurable options
+	ConfigMount  *types.AgentConfigMount  `json:"config_mount,omitempty"`   // default config dir mount into sandbox containers
 }
 
 // ConfigSchema is a JSON Schema subset for dynamic form rendering.

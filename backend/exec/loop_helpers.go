@@ -337,14 +337,14 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 	// Reuse existing container (lazy-start). Create only if none exists or if stopped/crashed.
 	var assignedPorts []types.AssignedPort
 	if !te.sandboxMgr.ContainerIsRunning(task.ID) {
-		piAgentDir := te.configStore.GetAgentConfigDir()
+		agentConfig := te.agentRegistry.GetConfigMount()
 		var createErr error
 		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, projectName, projectPath, projectID, kanban_sandbox.SandboxOpts{
 			BaseImage:        imageToUse,
 			NetworkIsolation: sandboxOpts.NetworkIsolation,
 			MemoryLimit:      sandboxOpts.MemoryLimit,
 			ForwardPorts:     sandboxOpts.ForwardPorts,
-			PiAgentDir:       piAgentDir,
+			AgentConfig:      agentConfig,
 			SkillsDir:        prompts.SkillsDir(),
 			SandboxMounts:    sandboxOpts.SandboxMounts,
 			SandboxEnvs:      sandboxOpts.SandboxEnvs,

@@ -31,7 +31,7 @@
             <circle cx="6" cy="9" r="1" fill="currentColor"/>
             <circle cx="10" cy="9" r="1" fill="currentColor"/>
         </svg>
-        <span class="option-name">Pi Coding Agent</span>
+        <span class="option-name">Agent</span>
         {#if isAgentActive}
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         {/if}

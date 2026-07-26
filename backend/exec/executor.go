@@ -44,6 +44,11 @@ type TaskExecutor struct {
 	worktreeMu sync.Map // taskID -> *sync.Mutex
 }
 
+// AgentRegistry returns the agent registry used by this executor.
+func (te *TaskExecutor) AgentRegistry() *agent.AgentRegistry {
+	return te.agentRegistry
+}
+
 type summarizeRequest struct {
 	ctx      context.Context // HTTP request context — cancelled when user clicks ✕ or new request arrives
 	resultCh chan error      // receives ok/err from the loop

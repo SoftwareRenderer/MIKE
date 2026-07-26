@@ -74,7 +74,7 @@
         <div class="provider-title-section">
             <div class="provider-title-main">
                 {#if provider.kind === 'agent'}
-                    <span class="pi-icon" title="Pi coding agent">
+                    <span class="agent-icon" title="Agent">
                         <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
                             <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
                             <circle cx="6" cy="9" r="1" fill="currentColor"/>
@@ -272,7 +272,7 @@
         align-items: center;
         gap: 6px;
     }
-    .pi-icon {
+    .agent-icon {
         display: flex;
         align-items: center;
         color: var(--color-status-purple);

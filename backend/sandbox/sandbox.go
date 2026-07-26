@@ -29,9 +29,6 @@ const (
 	ProjectImagePrefix = "sandbox"
 	// BaseImage is the default container image.
 	BaseImage = "docker.io/library/ubuntu:latest"
-	// PiConfigMount is where ~/.pi/agent/ is bind-mounted inside the container (for Pi agent tasks).
-	// Mounted at /root/.pi/agent so Pi finds it at its default config location.
-	PiConfigMount = "/root/.pi/agent"
 	// SkillsMount is where the prompts/skills/ directory is bind-mounted read-only.
 	SkillsMount = "/mnt/skills"
 	// KeepAliveTimeout is how long to wait for container cleanup.
@@ -47,7 +44,7 @@ type SandboxOpts struct {
 	NetworkIsolation bool
 	MemoryLimit      int
 	ForwardPorts     []types.PortForward
-	PiAgentDir       string
+	AgentConfig      *types.AgentConfigMount // bind-mount for agent config dir into container
 	SkillsDir        string
 	SandboxMounts    []types.SandboxMount
 	SandboxEnvs      []types.SandboxEnv
@@ -191,8 +188,9 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 // If memoryLimit is > 0, the container is created with --memory=<limit>M.
 // If forwardPorts is non-empty, host ports are auto-assigned via net.Listen(":0")
 // and mapped to container ports via -p flags. Assigned ports are returned.
-// If piAgentDir is non-empty, ~/.pi/agent/ is bind-mounted at PiConfigMount
-// (only for Pi agent tasks). Pi finds its config at the default location via HOME=/root.
+// If opts.AgentConfig is non-empty, the agent config directory is bind-mounted
+// into the container. HOME is set to /root so the agent finds its config at the
+// default location inside the container.
 // If skillsDir is non-empty, the skills directory is bind-mounted read-only at SkillsMount.
 // If sandboxMounts is non-empty, custom host path bind mounts are added after standard mounts.
 // If sandboxEnvs is non-empty, environment variables are set in the container via -e flags.
@@ -313,18 +311,25 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath,
 		}
 	}
 
-	// Pi agent config mount (only for Pi tasks)
-	// Mounted at /root/.pi/agent so Pi finds it at its default config location
-	if opts.PiAgentDir != "" {
-		absPiDir, err := filepath.Abs(opts.PiAgentDir)
+	// Agent config mount (only when an agent extension is configured)
+	if opts.AgentConfig != nil && opts.AgentConfig.HostPath != "" {
+		absHost, err := filepath.Abs(opts.AgentConfig.HostPath)
 		if err != nil {
-			return nil, fmt.Errorf("resolve pi agent dir path: %w", err)
+			return nil, fmt.Errorf("resolve agent config host path: %w", err)
+		}
+		mountMode := opts.AgentConfig.Mode
+		if mountMode != "ro" && mountMode != "rw" {
+			mountMode = "ro" // default to read-only
+		}
+		containerPath := opts.AgentConfig.ContainerPath
+		if containerPath == "" {
+			containerPath = "/root/.config/agent"
 		}
 		createArgs = append(createArgs,
-			"-v", absPiDir+":"+PiConfigMount+":rprivate,rw",
+			"-v", absHost+":"+containerPath+":rprivate,"+mountMode,
 			"-e", "HOME=/root",
 		)
-		log.Printf("[sandbox] task=%s mounting pi agent dir %s at %s", taskID, absPiDir, PiConfigMount)
+		log.Printf("[sandbox] task=%s mounting agent config %s -> %s (%s)", taskID, absHost, containerPath, mountMode)
 	}
 
 	// Skills directory mount (read-only, for skill packages)
@@ -494,7 +499,7 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 }
 
 // ProcessHandle holds a running process inside the sandbox (no PTY).
-// Used for JSONL-based processes like Pi Coding Agent.
+// Used for JSONL-based processes like coding agents.
 type ProcessHandle struct {
 	Cmd    *exec.Cmd
 	Stdin  io.WriteCloser
@@ -688,7 +693,7 @@ func (sp *ShellProcess) Close() error {
 
 // StartProcess starts a non-interactive process inside the task's sandbox container.
 // Unlike StartShell, this does not allocate a PTY — it uses plain stdin/stdout pipes.
-// This is suitable for JSONL-based protocols like the Pi Coding Agent RPC mode.
+// This is suitable for JSONL-based protocols like coding agent RPC mode.
 // The caller is responsible for calling Close() on the returned ProcessHandle when done.
 func (sm *SandboxManager) StartProcess(taskID, command string, args []string) (*ProcessHandle, error) {
 	sm.mu.Lock()
@@ -739,9 +744,12 @@ func (sm *SandboxManager) StartProcess(taskID, command string, args []string) (*
 	return ph, nil
 }
 
-// PiAvailable checks if the `pi` binary is available inside the task's sandbox container.
-// Returns true if `which pi` succeeds inside the container.
-func (sm *SandboxManager) PiAvailable(taskID string) bool {
+// BinaryAvailable checks if the given binary is available inside the task's sandbox container.
+// Returns true if `which <binaryName>` succeeds inside the container.
+func (sm *SandboxManager) BinaryAvailable(taskID, binaryName string) bool {
+	if binaryName == "" {
+		return false
+	}
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	sm.mu.Unlock()
@@ -750,7 +758,7 @@ func (sm *SandboxManager) PiAvailable(taskID string) bool {
 		return false
 	}
 
-	_, err := sm.podmanExec("exec", containerName, "which", "pi")
+	_, err := sm.podmanExec("exec", containerName, "which", binaryName)
 	return err == nil
 }
 

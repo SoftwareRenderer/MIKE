@@ -341,10 +341,6 @@ func (cs *ConfigStore) IsAgentProvider(serverURL string) bool {
 	if strings.HasPrefix(serverURL, "agent://") {
 		return true
 	}
-	// Handle legacy pi://agent sentinel URL (backward compatibility)
-	if strings.TrimRight(serverURL, "/") == "pi://agent" {
-		return true
-	}
 	cfg, err := cs.GetConfig()
 	if err != nil {
 		return false

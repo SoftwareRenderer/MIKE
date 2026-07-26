@@ -2,23 +2,23 @@ import { test, expect } from '@playwright/test';
 import { getProjectId, csrfFetch } from './helpers';
 
 test.describe.configure({ mode: 'parallel' });
-test.describe('Pi Coding Agent', () => {
+test.describe('Coding Agent', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
-  test('should create and start a Pi task without crashing', async ({ page }) => {
+  test('should create and start a coding agent task without crashing', async ({ page }) => {
     test.setTimeout(30000);
 
     const projectId = await getProjectId(page);
 
-    // Create a task with Pi Coding Agent (pi://agent sentinel URL)
+    // Create a task with an agent URL
     const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
       method: 'POST',
       body: {
-        prompt: `Pi agent test task ${Date.now()}`,
-        llama_server_url: 'pi://agent',
+        prompt: `Agent test task ${Date.now()}`,
+        llama_server_url: 'agent://pi',
         model_name: null,
       },
     });
@@ -59,7 +59,7 @@ test.describe('Pi Coding Agent', () => {
 
     // Valid states: running (processing), idle/completed (done),
     // failed (timeout or error), stopped (user cancelled), or empty (not started)
-    console.log(`[pi-test] task state: status=${taskData.status}, execution_state=${taskData.execution_state}, output=${taskData.output || '(none)'}`);
+    console.log(`[agent-test] task state: status=${taskData.status}, execution_state=${taskData.execution_state}, output=${taskData.output || '(none)'}`);
     const validStates = ['', 'running', 'idle', 'completed', 'failed', 'stopped'];
     expect(validStates.includes(taskData.execution_state)).toBe(true);
 
