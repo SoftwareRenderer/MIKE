@@ -34,13 +34,14 @@ func RegisterAdapterFactory(name string, fn AdapterFactory) {
 }
 
 // wasmAdapter wraps a wazero-loaded WASI reactor module behind the AgentAdapter interface.
-// Uses shared linear memory and exported functions for communication.
+// Memory model: host manages all allocation via api.Memory.
+// Input data is written to linear memory; results are read from a shared buffer.
 type wasmAdapter struct {
-	runtime   wazero.Runtime
-	module    api.Module
-	memory    api.Memory
-	mallocFn  api.Function
-	lastLenFn api.Function
+	runtime     wazero.Runtime
+	module      api.Module
+	memory      api.Memory
+	lastResultPtrFn api.Function
+	lastResultLenFn api.Function
 }
 
 // loadAdapter loads an AgentAdapter for the given extension.
@@ -103,18 +104,12 @@ func loadWasmAdapter(ext *extensions.Extension) (AgentAdapter, error) {
 		return nil, fmt.Errorf("wasm module has no exported memory")
 	}
 
-	mallocFn := inst.ExportedFunction("malloc")
-	if mallocFn == nil {
-		runtime.Close(ctx)
-		return nil, fmt.Errorf("malloc not exported")
-	}
-
 	return &wasmAdapter{
-		runtime:   runtime,
-		module:    inst,
-		memory:    mem,
-		mallocFn:  mallocFn,
-		lastLenFn: inst.ExportedFunction("lastResultLen"),
+		runtime:         runtime,
+		module:          inst,
+		memory:          mem,
+		lastResultPtrFn: inst.ExportedFunction("lastResultPtr"),
+		lastResultLenFn: inst.ExportedFunction("lastResultLen"),
 	}, nil
 }
 
@@ -137,100 +132,133 @@ func resolveWasmPath(ext *extensions.Extension) string {
 	return candidates[len(candidates)-1]
 }
 
-// writeData allocates memory in WASM and writes data to it. Returns the pointer.
+// writeData writes data to WASM linear memory at a fixed offset (0).
+// Returns the offset (always 0) since the host manages the buffer.
+// inputOffset is a safe offset in WASM linear memory for input data.
+// Low offsets are the WASM text/data section; 1MB is safe scratch space.
+const inputOffset = 1 << 20
+
 func (a *wasmAdapter) writeData(data []byte) (int32, error) {
-	ctx := context.Background()
-	result, err := a.mallocFn.Call(ctx, api.EncodeI32(int32(len(data))))
-	if err != nil {
-		return 0, fmt.Errorf("malloc: %w", err)
+	if len(data) > 1<<20 { // 1MB limit
+		return 0, fmt.Errorf("input data too large: %d bytes", len(data))
 	}
-	ptr := api.DecodeI32(result[0])
-	if ptr == 0 {
-		return 0, fmt.Errorf("malloc returned null")
+	if !a.memory.Write(inputOffset, data) {
+		return 0, fmt.Errorf("memory write failed for %d bytes", len(data))
 	}
-	if !a.memory.Write(uint32(ptr), data) {
-		return 0, fmt.Errorf("memory write failed at offset %d", ptr)
-	}
-	return ptr, nil
+	return inputOffset, nil
 }
 
 // callFn calls an exported WASM function with a byte slice argument.
-// Returns the result pointer (data written to WASM memory).
-func (a *wasmAdapter) callFn(name string, data []byte) (int32, error) {
+// Returns the result data read from the shared result buffer.
+func (a *wasmAdapter) callFn(name string, data []byte) ([]byte, error) {
 	fn := a.module.ExportedFunction(name)
 	if fn == nil {
-		return 0, fmt.Errorf("function %q not exported", name)
+		return nil, fmt.Errorf("function %q not exported", name)
 	}
 
 	ctx := context.Background()
 
 	if len(data) == 0 {
-		result, err := fn.Call(ctx, api.EncodeI32(0), api.EncodeI32(0))
-		if err != nil {
-			return 0, fmt.Errorf("call %s: %w", name, err)
+		if _, err := fn.Call(ctx, api.EncodeI32(0), api.EncodeI32(0)); err != nil {
+			return nil, fmt.Errorf("call %s: %w", name, err)
 		}
-		return api.DecodeI32(result[0]), nil
+	} else {
+		ptr, err := a.writeData(data)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := fn.Call(ctx, api.EncodeI32(ptr), api.EncodeI32(int32(len(data)))); err != nil {
+			return nil, fmt.Errorf("call %s: %w", name, err)
+		}
+	}
+
+	return a.readResult()
+}
+
+// callFnVoid calls an exported WASM function that returns void (no result data).
+func (a *wasmAdapter) callFnVoid(name string, data []byte) error {
+	fn := a.module.ExportedFunction(name)
+	if fn == nil {
+		return fmt.Errorf("function %q not exported", name)
+	}
+
+	ctx := context.Background()
+
+	if len(data) == 0 {
+		_, err := fn.Call(ctx, api.EncodeI32(0), api.EncodeI32(0))
+		return err
 	}
 
 	ptr, err := a.writeData(data)
 	if err != nil {
-		return 0, err
+		return err
 	}
-
-	result, err := fn.Call(ctx, api.EncodeI32(ptr), api.EncodeI32(int32(len(data))))
-	if err != nil {
-		return 0, fmt.Errorf("call %s: %w", name, err)
-	}
-
-	return api.DecodeI32(result[0]), nil
+	_, err = fn.Call(ctx, api.EncodeI32(ptr), api.EncodeI32(int32(len(data))))
+	return err
 }
 
-// callFnNoArgs calls an exported WASM function with no arguments.
-func (a *wasmAdapter) callFnNoArgs(name string) (int32, error) {
-	fn := a.module.ExportedFunction(name)
-	if fn == nil {
-		return 0, fmt.Errorf("function %q not exported", name)
-	}
-
+// readResult reads data from the shared result buffer.
+func (a *wasmAdapter) readResult() ([]byte, error) {
 	ctx := context.Background()
-	result, err := fn.Call(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("call %s: %w", name, err)
-	}
 
-	return api.DecodeI32(result[0]), nil
-}
-
-// readResult reads data from WASM memory using the result pointer and lastResultLen.
-func (a *wasmAdapter) readResult(ptr int32) []byte {
-	if ptr == 0 {
-		return nil
-	}
-	ctx := context.Background()
-	lenResult, err := a.lastLenFn.Call(ctx)
+	// Get result length
+	lenResult, err := a.lastResultLenFn.Call(ctx)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("call lastResultLen: %w", err)
 	}
 	length := api.DecodeI32(lenResult[0])
 	if length == 0 {
-		return nil
+		return nil, nil
 	}
-	data, ok := a.memory.Read(uint32(ptr), uint32(length))
+
+	// Get result pointer (base of shared buffer)
+	var ptr uint32
+	if a.lastResultPtrFn != nil {
+		ptrResult, err := a.lastResultPtrFn.Call(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("call lastResultPtr: %w", err)
+		}
+		ptr = uint32(api.DecodeI32(ptrResult[0]))
+	}
+
+	data, ok := a.memory.Read(ptr, uint32(length))
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("memory read failed at offset %d length %d", ptr, length)
 	}
 	result := make([]byte, length)
 	copy(result, data)
-	return result
+	return result, nil
 }
 
 // Init initializes the adapter with config JSON.
 func (a *wasmAdapter) Init(config []byte) error {
-	result, err := a.callFn("Init", config)
+	fn := a.module.ExportedFunction("Init")
+	if fn == nil {
+		return fmt.Errorf("function Init not exported")
+	}
+
+	ctx := context.Background()
+
+	if len(config) == 0 {
+		result, err := fn.Call(ctx, api.EncodeI32(0), api.EncodeI32(0))
+		if err != nil {
+			return fmt.Errorf("call Init: %w", err)
+		}
+		if api.DecodeI32(result[0]) != 0 {
+			return fmt.Errorf("adapter init returned error")
+		}
+		return nil
+	}
+
+	ptr, err := a.writeData(config)
 	if err != nil {
 		return err
 	}
-	if result != 0 {
+	result, err := fn.Call(ctx, api.EncodeI32(ptr), api.EncodeI32(int32(len(config))))
+	if err != nil {
+		return fmt.Errorf("call Init: %w", err)
+	}
+	if api.DecodeI32(result[0]) != 0 {
 		return fmt.Errorf("adapter init returned error")
 	}
 	return nil
@@ -238,11 +266,10 @@ func (a *wasmAdapter) Init(config []byte) error {
 
 // SubprocessConfig returns the agent process configuration from the adapter.
 func (a *wasmAdapter) SubprocessConfig() SubprocessConfig {
-	ptr, err := a.callFnNoArgs("SubprocessConfig")
+	data, err := a.callFn("SubprocessConfig", nil)
 	if err != nil {
 		return SubprocessConfig{}
 	}
-	data := a.readResult(ptr)
 	if len(data) == 0 {
 		return SubprocessConfig{}
 	}
@@ -256,25 +283,24 @@ func (a *wasmAdapter) SubprocessConfig() SubprocessConfig {
 // EncodeCommand encodes a high-level command into protocol bytes.
 func (a *wasmAdapter) EncodeCommand(cmd string, data []byte) []byte {
 	req, _ := json.Marshal(map[string]any{"cmd": cmd, "data": data})
-	ptr, err := a.callFn("EncodeCommand", req)
+	result, err := a.callFn("EncodeCommand", req)
 	if err != nil {
 		return nil
 	}
-	return a.readResult(ptr)
+	return result
 }
 
 // ParseOutput parses raw agent stdout bytes into events.
 func (a *wasmAdapter) ParseOutput(data []byte) []Event {
-	ptr, err := a.callFn("ParseOutput", data)
+	result, err := a.callFn("ParseOutput", data)
 	if err != nil {
 		return nil
 	}
-	jsonData := a.readResult(ptr)
-	if len(jsonData) == 0 {
+	if len(result) == 0 {
 		return nil
 	}
 	var events []Event
-	if err := json.Unmarshal(jsonData, &events); err != nil {
+	if err := json.Unmarshal(result, &events); err != nil {
 		return nil
 	}
 	return events
@@ -283,11 +309,11 @@ func (a *wasmAdapter) ParseOutput(data []byte) []Event {
 // HandleUIRequest generates a response for an agent UI request.
 func (a *wasmAdapter) HandleUIRequest(id, method string) []byte {
 	req, _ := json.Marshal(map[string]string{"id": id, "method": method})
-	ptr, err := a.callFn("HandleUIRequest", req)
+	result, err := a.callFn("HandleUIRequest", req)
 	if err != nil {
 		return nil
 	}
-	return a.readResult(ptr)
+	return result
 }
 
 // Close releases the wazero runtime.

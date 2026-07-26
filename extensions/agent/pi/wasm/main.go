@@ -1,12 +1,11 @@
 // Package main exports Pi adapter functions for wazero WASI reactor runtime.
 // Built with: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared
 //
-// The -buildmode=c-shared flag produces a WASI reactor with _initialize
-// instead of _start. The host calls _initialize first, then exported functions.
-// main() is not called.
+// Memory model: the HOST manages all memory allocation via wazero's api.Memory.
+// - Input: host writes data to linear memory, passes (offset, length) to exported functions
+// - Output: module writes results to a shared result buffer; host reads via lastResultPtr/lastResultLen
 //
-// > go:wasmexport functions use int32 for pointers/lengths (WASM is 32-bit).
-// Data is passed via shared linear memory.
+// go:wasmexport functions use int32 for pointers/lengths (WASM is 32-bit).
 package main
 
 import (
@@ -17,42 +16,37 @@ import (
 )
 
 var adapter *pi.Adapter
-var lastLen int32 // length of last data-returning result
 
-// Memory allocation in WASM linear memory.
-var memPool []byte
-var memOffset int32
+// Shared result buffer — host reads results from here.
+// 1MB should be enough for any single result.
+var resultBuf [1 << 20]byte
+var resultLen int32
 
-const poolSize = 16 * 1024 * 1024 // 16MB pool
-
-//go:wasmexport malloc
-func malloc(size int32) int32 {
-	if memPool == nil {
-		memPool = make([]byte, poolSize)
-		memOffset = 0
-	}
-	ptr := memOffset
-	memOffset += size + 7
-	memOffset &= ^int32(7) // align to 8 bytes
-	if memOffset > poolSize {
-		return 0
-	}
-	return ptr
-}
-
-//go:wasmexport free
-func free(ptr int32) {
-	// No-op for bump allocator
+//go:wasmexport lastResultPtr
+// Returns the offset of the result buffer in linear memory.
+func lastResultPtr() int32 {
+	return int32(uintptr(unsafe.Pointer(&resultBuf[0])))
 }
 
 //go:wasmexport lastResultLen
+// Returns the length of the last result written to resultBuf.
 func lastResultLen() int32 {
-	return lastLen
+	return resultLen
 }
 
-// Config: ptr to JSON bytes, len byte count. Returns 0=ok, 1=error.
-//
+// setResult copies data into the shared result buffer.
+// Caller must ensure len(data) <= len(resultBuf).
+func setResult(data []byte) {
+	if len(data) > len(resultBuf) {
+		// Truncate — shouldn't happen for normal results
+		data = data[:len(resultBuf)]
+	}
+	copy(resultBuf[:], data)
+	resultLen = int32(len(data))
+}
+
 //go:wasmexport Init
+// Config: ptr to JSON bytes in linear memory, len byte count. Returns 0=ok, 1=error.
 func Init(ptr int32, length int32) int32 {
 	if adapter != nil {
 		adapter.Close()
@@ -69,39 +63,25 @@ func Init(ptr int32, length int32) int32 {
 	return 0
 }
 
-// Returns pointer to JSON bytes in linear memory. Length via lastResultLen().
-//
 //go:wasmexport SubprocessConfig
-func SubprocessConfig() int32 {
+// Writes JSON to result buffer. Length via lastResultLen().
+func SubprocessConfig() {
 	if adapter == nil {
-		lastLen = 0
-		return 0
+		resultLen = 0
+		return
 	}
 	cfg := adapter.SubprocessConfig()
 	data, _ := json.Marshal(cfg)
-	if len(data) == 0 {
-		lastLen = 0
-		return 0
-	}
-	ptr := malloc(int32(len(data)))
-	if ptr == 0 {
-		lastLen = 0
-		return 0
-	}
-	dest := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), len(data))
-	copy(dest, data)
-	lastLen = int32(len(data))
-	return ptr
+	setResult(data)
 }
 
-// Input: ptr to JSON {"cmd":"...","data":...}, len byte count.
-// Returns pointer to raw protocol bytes. Length via lastResultLen().
-//
 //go:wasmexport EncodeCommand
-func EncodeCommand(ptr int32, length int32) int32 {
+// Input: ptr to JSON {"cmd":"...","data":...} in linear memory, len byte count.
+// Writes raw protocol bytes to result buffer. Length via lastResultLen().
+func EncodeCommand(ptr int32, length int32) {
 	if adapter == nil {
-		lastLen = 0
-		return 0
+		resultLen = 0
+		return
 	}
 	var req struct {
 		Cmd  string `json:"cmd"`
@@ -112,61 +92,32 @@ func EncodeCommand(ptr int32, length int32) int32 {
 		json.Unmarshal(raw, &req)
 	}
 	result := adapter.EncodeCommand(req.Cmd, req.Data)
-	if len(result) == 0 {
-		lastLen = 0
-		return 0
-	}
-	outPtr := malloc(int32(len(result)))
-	if outPtr == 0 {
-		lastLen = 0
-		return 0
-	}
-	dest := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(outPtr))), len(result))
-	copy(dest, result)
-	lastLen = int32(len(result))
-	return outPtr
+	setResult(result)
 }
 
-// Input: ptr to raw stdout bytes, len byte count.
-// Returns pointer to JSON event array. Length via lastResultLen().
-//
 //go:wasmexport ParseOutput
-func ParseOutput(ptr int32, length int32) int32 {
-	if adapter == nil {
-		result, _ := json.Marshal([]any{})
-		outPtr := malloc(int32(len(result)))
-		if outPtr == 0 {
-			lastLen = 0
-			return 0
-		}
-		copy(unsafe.Slice((*byte)(unsafe.Pointer(uintptr(outPtr))), len(result)), result)
-		lastLen = int32(len(result))
-		return outPtr
-	}
+// Input: ptr to raw stdout bytes in linear memory, len byte count.
+// Writes JSON event array to result buffer. Length via lastResultLen().
+func ParseOutput(ptr int32, length int32) {
 	var data []byte
 	if ptr != 0 && length != 0 {
 		data = unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
 	}
-	events := adapter.ParseOutput(data)
-	result, _ := json.Marshal(events)
-	outPtr := malloc(int32(len(result)))
-	if outPtr == 0 {
-		lastLen = 0
-		return 0
+	var events []pi.Event
+	if adapter != nil {
+		events = adapter.ParseOutput(data)
 	}
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(uintptr(outPtr))), len(result)), result)
-	lastLen = int32(len(result))
-	return outPtr
+	result, _ := json.Marshal(events)
+	setResult(result)
 }
 
-// Input: ptr to JSON {"id":"...","method":"..."}, len byte count.
-// Returns pointer to response bytes. Length via lastResultLen().
-//
 //go:wasmexport HandleUIRequest
-func HandleUIRequest(ptr int32, length int32) int32 {
+// Input: ptr to JSON {"id":"...","method":"..."} in linear memory, len byte count.
+// Writes response bytes to result buffer. Length via lastResultLen().
+func HandleUIRequest(ptr int32, length int32) {
 	if adapter == nil {
-		lastLen = 0
-		return 0
+		resultLen = 0
+		return
 	}
 	var req struct {
 		ID     string `json:"id"`
@@ -177,19 +128,7 @@ func HandleUIRequest(ptr int32, length int32) int32 {
 		json.Unmarshal(raw, &req)
 	}
 	result := adapter.HandleUIRequest(req.ID, req.Method)
-	if len(result) == 0 {
-		lastLen = 0
-		return 0
-	}
-	outPtr := malloc(int32(len(result)))
-	if outPtr == 0 {
-		lastLen = 0
-		return 0
-	}
-	dest := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(outPtr))), len(result))
-	copy(dest, result)
-	lastLen = int32(len(result))
-	return outPtr
+	setResult(result)
 }
 
 //go:wasmexport Close
