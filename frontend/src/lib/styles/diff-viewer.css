@@ -492,6 +492,22 @@
     color: var(--color-text-secondary);
     font-size: 0.75rem;
 }
+.diff-loading-center {
+    flex: 1;
+}
+
+/* Loading banner — shown at top of diff panel during refresh (e.g. thread switch) */
+.diff-loading-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 12px;
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+    background: var(--color-surface-1);
+    border-bottom: 1px solid var(--color-border);
+}
 .diff-loading-spinner {
     width: 14px;
     height: 14px;

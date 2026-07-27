@@ -8,7 +8,7 @@ import { slide } from 'svelte/transition';
     import '$lib/styles/diff-viewer.css';
 
 
-    let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = 'Merged from Subtasks' }: { committedFiles?: DiffFile[]; stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void; selectedPath?: string; mergedLabel?: string } = $props();
+    let { committedFiles = [], stagedFiles = [], unstagedFiles = [], stagedUntracked = [], unstagedUntracked = [], loading = false, onExpandFile, onExpandUntracked, onLineClick, onStageFile, onStageAll, onUnstageAll, selectedPath, mergedLabel = 'Merged from Subtasks' }: { committedFiles?: DiffFile[]; stagedFiles: DiffFile[]; unstagedFiles: DiffFile[]; stagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; unstagedUntracked?: Array<{ path: string; fileSize?: number; isBinary?: boolean; file: DiffFile; truncated?: boolean; origAdded?: number; loading?: boolean }>; loading?: boolean; onExpandFile?: (path: string) => void; onExpandUntracked?: (path: string) => void; onLineClick?: (filePath: string, lineNumber: number) => void; onStageFile?: (path: string, stage: boolean) => void; onStageAll?: () => void; onUnstageAll?: () => void; selectedPath?: string; mergedLabel?: string } = $props();
     let hasContent = $derived(committedFiles.length > 0 || stagedFiles.length > 0 || unstagedFiles.length > 0 || stagedUntracked.length > 0 || unstagedUntracked.length > 0);
 
     // Sort files: directories first (by path), then root files
@@ -763,15 +763,30 @@ import { slide } from 'svelte/transition';
 
 {#if !hasContent}
     <div class="diff-empty">
-        <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
-            <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
-            <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
-        </svg>
-        <p>No changes since last commit</p>
+        {#if loading}
+            <div class="diff-loading diff-loading-center">
+                <div class="diff-loading-spinner"></div>
+                <span>Loading changes...</span>
+            </div>
+        {:else}
+            <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
+                <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
+                <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.3"/>
+            </svg>
+            <p>No changes since last commit</p>
+        {/if}
     </div>
 {:else}
     <div class="diff-scroll">
         <div class="diff-content-wrapper">
+
+        <!-- Loading banner (shown when refreshing, e.g. thread switch) -->
+        {#if loading}
+        <div class="diff-loading-banner">
+            <div class="diff-loading-spinner"></div>
+            <span>Loading changes...</span>
+        </div>
+        {/if}
 
         <!-- Staged section -->
         {#if stagedCount > 0}
