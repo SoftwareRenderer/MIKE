@@ -19,6 +19,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"unsafe"
 
@@ -117,7 +118,7 @@ func Init(config string) int32 {
 	if len(config) == 0 {
 		return 1
 	}
-	if err := adapter.Init([]byte(config)); err != nil {
+	if err := adapter.Init(context.Background(), []byte(config)); err != nil {
 		return 1
 	}
 	return 0
@@ -132,7 +133,7 @@ func SubprocessConfig() {
 		storeResult("")
 		return
 	}
-	cfg := adapter.SubprocessConfig()
+	cfg := adapter.SubprocessConfig(context.Background())
 	data, _ := json.Marshal(cfg)
 	storeResult(string(data))
 }
@@ -147,7 +148,7 @@ func EncodeCommand(cmd string, data string) {
 		storeResult("")
 		return
 	}
-	result := adapter.EncodeCommand(cmd, []byte(data))
+	result := adapter.EncodeCommand(context.Background(), cmd, []byte(data))
 	storeResult(string(result))
 }
 
@@ -161,7 +162,7 @@ func ParseOutput(data string) {
 		storeResult("[]")
 		return
 	}
-	events := adapter.ParseOutput([]byte(data))
+	events := adapter.ParseOutput(context.Background(), []byte(data))
 	if events == nil {
 		events = []agent.Event{}
 	}
@@ -179,7 +180,7 @@ func HandleUIRequest(id string, method string) {
 		storeResult("")
 		return
 	}
-	result := adapter.HandleUIRequest(id, method)
+	result := adapter.HandleUIRequest(context.Background(), id, method)
 	storeResult(string(result))
 }
 

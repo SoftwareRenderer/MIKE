@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -47,9 +48,17 @@ func RegisterAdapterFactory(name string, fn agent.AdapterFactory) {
 //	  store_result(data string) callback, which reads the string from
 //	  linear memory and delivers it via resultCh. Safe because the
 //	  callback fires synchronously during fn.Call — before it returns.
+//
+// Concurrency: wazero modules and the WASM module's bump allocator (memOffset)
+// are NOT safe for concurrent use. All exported function calls must be
+// serialized via mu. This is critical because AgentRunner.readOutput calls
+// ParseOutput without holding r.mu, while Prompt/Compact/etc. call
+// EncodeCommand while holding r.mu — concurrent calls would corrupt the
+// bump allocator, overwrite resultCh, and crash the WASM module.
 type wasmAdapter struct {
-	runtime  wazero.Runtime
-	module   api.Module
+	mu      sync.Mutex
+	runtime wazero.Runtime
+	module  api.Module
 	memory   api.Memory
 	resultCh chan []byte // receives results from store_result host callback
 }
@@ -208,13 +217,24 @@ func (a *wasmAdapter) freeString(ptr int32) {
 // Each string is allocated via the module's Alloc function, written to linear
 // memory, then passed as (ptr, length) parameters to the function.
 // Results are delivered via the store_result host callback and read via readResult.
-func (a *wasmAdapter) callFnStrings(name string, strs ...string) ([]byte, error) {
+// ctx is used for cancellation of fn.Call and for waiting on the result callback.
+//
+// The mutex serializes all WASM calls because the module's bump allocator
+// (memOffset), resultCh (capacity 1), and wazero module are not concurrency-safe.
+func (a *wasmAdapter) callFnStrings(ctx context.Context, name string, strs ...string) ([]byte, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.callFnStringsLocked(ctx, name, strs...)
+}
+
+// callFnStringsLocked is the unlocked version of callFnStrings. Callers that
+// already hold a.mu (e.g. Init) must use this to avoid a re-entrant deadlock.
+func (a *wasmAdapter) callFnStringsLocked(ctx context.Context, name string, strs ...string) ([]byte, error) {
 	fn := a.module.ExportedFunction(name)
 	if fn == nil {
 		return nil, fmt.Errorf("function %q not exported", name)
 	}
 
-	ctx := context.Background()
 	var ptrs []int32
 	var args []uint64
 
@@ -237,21 +257,31 @@ func (a *wasmAdapter) callFnStrings(name string, strs ...string) ([]byte, error)
 	}()
 
 	if _, err := fn.Call(ctx, args...); err != nil {
+		// Drain any leftover result from the store_result callback that may have
+		// been sent before the error. Without this, resultCh (capacity 1) stays
+		// full and the next callFnStrings invocation deadlocks when store_result
+		// blocks on the full channel.
+		select {
+		case <-a.resultCh:
+		default:
+		}
 		return nil, fmt.Errorf("call %s: %w", name, err)
 	}
 
-	return a.readResult()
+	return a.readResult(ctx)
 }
 
-// readResult blocks until the store_result host callback delivers data.
+// readResult blocks until the store_result host callback delivers data or ctx is cancelled.
 // This is safe because store_result is called synchronously by the WASM
 // runtime during fn.Call — the callback fires before fn.Call returns.
-func (a *wasmAdapter) readResult() ([]byte, error) {
+// If the WASM module fails to call store_result, ctx.Done() provides the
+// cancellation escape hatch (previously used context.Background() which never fires).
+func (a *wasmAdapter) readResult(ctx context.Context) ([]byte, error) {
 	select {
 	case data := <-a.resultCh:
 		return data, nil
-	case <-context.Background().Done():
-		return nil, fmt.Errorf("context cancelled waiting for result")
+	case <-ctx.Done():
+		return nil, fmt.Errorf("adapter call cancelled while waiting for result: %w", ctx.Err())
 	}
 }
 
@@ -259,13 +289,15 @@ func (a *wasmAdapter) readResult() ([]byte, error) {
 // Init returns int32 (0=success, 1=error) directly — not via store_result.
 // The config is passed as a single string parameter: the host calls Alloc,
 // writes the config, then passes (ptr, len) to the Init function.
-func (a *wasmAdapter) Init(config []byte) error {
+// ctx is used for cancellation during initialization and the validation call.
+func (a *wasmAdapter) Init(ctx context.Context, config []byte) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	fn := a.module.ExportedFunction(agent.WasmFnInit)
 	if fn == nil {
 		return fmt.Errorf("function %s not exported", agent.WasmFnInit)
 	}
-
-	ctx := context.Background()
 
 	// Alloc + write the config string (even empty, passes (0,0) as empty string).
 	ptr, err := a.allocString(config)
@@ -284,8 +316,16 @@ func (a *wasmAdapter) Init(config []byte) error {
 
 	// Validate adapter is functional by checking SubprocessConfig returns data.
 	// This catches stale WASM binaries or Init implementations that return 0
-	// but leave the adapter in an unusable state.
-	cfg := a.SubprocessConfig()
+	// but leave the adapter in an unusable state. Call callFnStringsLocked
+	// directly since we already hold a.mu.
+	cfgData, err := a.callFnStringsLocked(ctx, agent.WasmFnSubprocessConfig)
+	if err != nil {
+		return fmt.Errorf("validate SubprocessConfig: %w", err)
+	}
+	var cfg agent.SubprocessConfig
+	if len(cfgData) > 0 {
+		json.Unmarshal(cfgData, &cfg)
+	}
 	if cfg.Binary == "" {
 		return fmt.Errorf("adapter init succeeded but SubprocessConfig returned empty binary (stale WASM?)")
 	}
@@ -295,13 +335,16 @@ func (a *wasmAdapter) Init(config []byte) error {
 
 // SubprocessConfig returns the agent process configuration from the adapter.
 // SubprocessConfig takes no parameters; the result is delivered via store_result.
-func (a *wasmAdapter) SubprocessConfig() agent.SubprocessConfig {
-	data, err := a.callFnStrings(agent.WasmFnSubprocessConfig)
+// ctx is used for cancellation during the store_result callback wait.
+func (a *wasmAdapter) SubprocessConfig(ctx context.Context) agent.SubprocessConfig {
+	data, err := a.callFnStrings(ctx, agent.WasmFnSubprocessConfig)
 	if err != nil || len(data) == 0 {
+		log.Printf("[wasm-adapter] SubprocessConfig failed: %v", err)
 		return agent.SubprocessConfig{}
 	}
 	var cfg agent.SubprocessConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
+		log.Printf("[wasm-adapter] SubprocessConfig unmarshal failed: %v", err)
 		return agent.SubprocessConfig{}
 	}
 	return cfg
@@ -310,22 +353,27 @@ func (a *wasmAdapter) SubprocessConfig() agent.SubprocessConfig {
 // EncodeCommand encodes a high-level command into protocol bytes.
 // cmd and data are passed as separate string parameters directly to the
 // WASM function (no JSON wrapper), matching the wazero string-passing pattern.
-func (a *wasmAdapter) EncodeCommand(cmd string, data []byte) []byte {
-	result, err := a.callFnStrings(agent.WasmFnEncodeCommand, cmd, string(data))
+// ctx is used for cancellation during the store_result callback wait.
+func (a *wasmAdapter) EncodeCommand(ctx context.Context, cmd string, data []byte) []byte {
+	result, err := a.callFnStrings(ctx, agent.WasmFnEncodeCommand, cmd, string(data))
 	if err != nil {
+		log.Printf("[wasm-adapter] EncodeCommand(%q) failed: %v", cmd, err)
 		return nil
 	}
 	return result
 }
 
 // ParseOutput parses raw agent stdout bytes into events.
-func (a *wasmAdapter) ParseOutput(data []byte) []agent.Event {
-	result, err := a.callFnStrings(agent.WasmFnParseOutput, string(data))
+// ctx is used for cancellation during the store_result callback wait.
+func (a *wasmAdapter) ParseOutput(ctx context.Context, data []byte) []agent.Event {
+	result, err := a.callFnStrings(ctx, agent.WasmFnParseOutput, string(data))
 	if err != nil || len(result) == 0 {
+		log.Printf("[wasm-adapter] ParseOutput failed: %v", err)
 		return nil
 	}
 	var events []agent.Event
 	if err := json.Unmarshal(result, &events); err != nil {
+		log.Printf("[wasm-adapter] ParseOutput unmarshal failed: %v", err)
 		return nil
 	}
 	return events
@@ -334,16 +382,22 @@ func (a *wasmAdapter) ParseOutput(data []byte) []agent.Event {
 // HandleUIRequest generates a response for an agent UI request.
 // id and method are passed as separate string parameters directly to the
 // WASM function (no JSON wrapper), matching the wazero string-passing pattern.
-func (a *wasmAdapter) HandleUIRequest(id, method string) []byte {
-	result, err := a.callFnStrings(agent.WasmFnHandleUIRequest, id, method)
+// ctx is used for cancellation during the store_result callback wait.
+func (a *wasmAdapter) HandleUIRequest(ctx context.Context, id, method string) []byte {
+	result, err := a.callFnStrings(ctx, agent.WasmFnHandleUIRequest, id, method)
 	if err != nil {
+		log.Printf("[wasm-adapter] HandleUIRequest(%q, %q) failed: %v", id, method, err)
 		return nil
 	}
 	return result
 }
 
 // Close releases the wazero runtime and calls the WASM adapter's Close function.
+// The mutex prevents Close from racing with concurrent callFnStrings/Init calls.
 func (a *wasmAdapter) Close() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	fn := a.module.ExportedFunction(agent.WasmFnClose)
 	if fn != nil {
 		fn.Call(context.Background())

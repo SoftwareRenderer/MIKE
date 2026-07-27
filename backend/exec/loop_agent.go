@@ -59,13 +59,13 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		}
 
 		log.Printf("[agent] task=%s creating runner in container (agent=%s, session=%s)", task.ID, agentName, sessionName)
-		runner, err = agent.NewAgentRunner(ext, te.sandboxMgr, task.ID, worktreePath, sessionName, true)
+		runner, err = agent.NewAgentRunner(ctx, ext, te.sandboxMgr, task.ID, worktreePath, sessionName, true)
 	} else {
 		// Agent runs on the host.
 		// The adapter's SubprocessConfig() sets config dir env vars from the
 		// extension's sandbox_mount declaration, so no Pi-specific code needed here.
 		log.Printf("[agent] task=%s creating runner (cwd=%s, session=%s)", task.ID, worktreePath, sessionName)
-		runner, err = agent.NewAgentRunner(ext, nil, task.ID, worktreePath, sessionName, false)
+		runner, err = agent.NewAgentRunner(ctx, ext, nil, task.ID, worktreePath, sessionName, false)
 	}
 	if err != nil {
 		te.failTask(task, projectID, fmt.Sprintf("Failed to start agent: %v", err), "agent_start_failed")
@@ -263,7 +263,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			switch event.Type {
 			case pkgagent.EventTypePersist:
 				// Persist pre-parsed messages from adapter
-				pt, ptok := te.persistAgentTurnEntries(projectID, task.ID, task.CurrentThreadID, event.PersistEntries, turnStartTime)
+				pt, ptok := te.persistAgentTurnEntries(projectID, task.ID, task.CurrentThreadID, event.PersistEntries, turnStartTime, sandboxEnabled)
 				totalPromptTokens += pt
 				totalPredictedTokens += ptok
 
@@ -513,7 +513,10 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 // persistAgentTurnEntries persists pre-parsed agent turn entries to the DB.
 // This is a generic function that works with any agent adapter — it only iterates
 // PersistEntry objects and creates TaskMessage rows.
-func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID string, entries []pkgagent.PersistEntry, startTime time.Time) (totalPromptTokens, totalPredictedTokens int) {
+// The sandbox flag is injected into tool_call ToolCallsJSON so the frontend
+// can display the sandbox icon correctly after page refresh (the adapter
+// doesn't know about sandbox mode — this mirrors the non-agent loop).
+func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID string, entries []pkgagent.PersistEntry, startTime time.Time, sandbox bool) (totalPromptTokens, totalPredictedTokens int) {
 	if len(entries) == 0 {
 		return 0, 0
 	}
@@ -539,25 +542,35 @@ func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID stri
 			totalPredictedTokens += entry.PredictedTokens
 
 		case "tool_call":
-			// entry.ToolCallsJSON contains the tool call data
-			// entry.ToolResultJSON contains the tool result data
+			// Inject sandbox field into ToolCallsJSON so it persists to the DB
+			// and survives page refresh. The adapter doesn't know about sandbox
+			// mode, so we add it here (mirrors the non-agent loop at loop.go:914).
+			toolCallsJSON := entry.ToolCallsJSON
+			var toolCallData map[string]any
+
+			if toolCallsJSON != "" {
+				if err := json.Unmarshal([]byte(toolCallsJSON), &toolCallData); err == nil {
+					toolCallData["sandbox"] = sandbox
+					if modified, err := json.Marshal(toolCallData); err == nil {
+						toolCallsJSON = string(modified)
+					}
+				}
+			}
+
 			te.store.CreateTaskMessage(&types.TaskMessage{
 				ID:         uuid.New().String(),
 				TaskID:     taskID,
 				ThreadID:   threadID,
 				Role:       "tool_call",
 				Content:    "",
-				ToolCalls:  entry.ToolCallsJSON,
+				ToolCalls:  toolCallsJSON,
 				ToolResult: entry.ToolResultJSON,
 				CreatedAt:  time.Now().UTC(),
 			})
 
-			// Send tool_call WS event
-			if entry.ToolCallsJSON != "" {
-				var toolCallData map[string]any
-				if err := json.Unmarshal([]byte(entry.ToolCallsJSON), &toolCallData); err == nil {
-					te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToolCall, Data: toolCallData})
-				}
+			// Send tool_call WS event (now includes sandbox field)
+			if toolCallData != nil {
+				te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToolCall, Data: toolCallData})
 			}
 			// Send tool_result WS event
 			if entry.ToolResultJSON != "" {
