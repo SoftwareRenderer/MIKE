@@ -210,17 +210,35 @@
         selectedProviderUrl = agentProvider.url;
         providerDropdownOpen = false;
         modelDropdownOpen = false;
-        // Trigger agent model fetch immediately
-        fetchAgentModels(agentProvider.url);
         const getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
+        // If agent has static models, select one immediately
         if (agentProvider.default_model && agentProvider.models.some(m => getModelName(m) === agentProvider.default_model)) {
             onSelect(agentProvider.name, agentProvider.default_model, agentProvider.url);
         } else if (agentProvider.models.length > 0) {
             onSelect(agentProvider.name, getModelName(agentProvider.models[0]), agentProvider.url);
-        } else {
-            onSelect(agentProvider.name, agentProvider.display_name || agentProvider.name, agentProvider.url);
         }
+        // Trigger agent model fetch — auto-select handled by $effect below
+        fetchAgentModels(agentProvider.url);
     }
+
+    // Auto-select a model when agent models are fetched
+    $effect(() => {
+        if (agentModels.length > 0 && isAgentSelected) {
+            const agentProvider = providers.find(p => p.url === selectedProviderUrl);
+            if (!agentProvider) return;
+            // Prefer default_model if it matches a fetched model
+            if (agentProvider.default_model && agentModels.some(m => m.name === agentProvider.default_model)) {
+                if (currentModel !== agentProvider.default_model) {
+                    onSelect(agentProvider.name, agentProvider.default_model, agentProvider.url);
+                }
+                return;
+            }
+            // Fallback: first fetched model (only if nothing valid selected)
+            if (!currentModel || currentModel === (agentProvider.display_name || agentProvider.name)) {
+                onSelect(agentProvider.name, agentModels[0].name, agentProvider.url);
+            }
+        }
+    });
 
     function selectModel(modelName: string, reasoningEffort?: string) {
         if (!selectedProvider) return;
@@ -431,9 +449,6 @@
                     {@const isActive = m.name === currentModel}
                     <button type="button" class="model-option" class:active={isActive} onclick={() => selectModel(m.name)} role="option" aria-selected={isActive}>
                         <span class="option-name">{m.name}</span>
-                        {#if m.context_window}
-                            <span class="effort-badge">{m.context_window / 1000}k</span>
-                        {/if}
                         {#if isActive}
                             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
