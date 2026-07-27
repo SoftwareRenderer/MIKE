@@ -118,7 +118,6 @@ var toolDisplayNames = map[string]string{
 	"request_review": "Request Review",
 	"ask_question":   "Ask Question",
 	"create_task":    "Create Task",
-	"final_answer":   "Final Answer",
 }
 
 // piToolNameMap maps Pi's tool names to Kanban tool names.
