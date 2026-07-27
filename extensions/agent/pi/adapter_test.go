@@ -11,11 +11,11 @@ func TestAdapter_Init(t *testing.T) {
 
 	// Valid config
 	cfg, _ := json.Marshal(map[string]any{
-		"binary":         "pi",
-		"mode":           "rpc",
-		"session_name":   "test-session",
-		"display_name":   "Test Agent",
-		"env":            []string{"PI_DIR=/tmp"},
+		"binary":       "pi",
+		"mode":         "rpc",
+		"session_name": "test-session",
+		"display_name": "Test Agent",
+		"env":          []string{"PI_DIR=/tmp"},
 	})
 	if err := a.Init(cfg); err != nil {
 		t.Fatalf("Init: %v", err)
@@ -319,8 +319,8 @@ func TestAdapter_ToolNameMapping(t *testing.T) {
 
 func TestAdapter_DisplayNameMapping(t *testing.T) {
 	tests := []struct {
-		name  string
-		want  string
+		name string
+		want string
 	}{
 		{"read_file", "Read File"},
 		{"bash", "Bash"},
@@ -346,4 +346,184 @@ func TestAdapter_Close(t *testing.T) {
 	}
 }
 
+// --- Model name discovery and persistence tests ---
 
+func TestAdapter_GetState_DiscoversModelName(t *testing.T) {
+	a := NewAdapter()
+	a.Init([]byte(`{}`))
+
+	// Pi binary returns model info via get_state response with provider + name
+	input := `{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","name":"gpt-4o","modelId":"gpt-4o"}}}
+`
+	events := a.ParseOutput([]byte(input))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Type != EventTypeStatus {
+		t.Fatalf("Type = %q, want %q", events[0].Type, EventTypeStatus)
+	}
+	if mn, ok := events[0].RawData["model_name"].(string); !ok || mn != "openai/gpt-4o" {
+		t.Errorf("model_name = %q, want %q", mn, "openai/gpt-4o")
+	}
+
+	// The adapter should have stored the model name internally
+	if a.modelName != "openai/gpt-4o" {
+		t.Errorf("adapter.modelName = %q, want %q", a.modelName, "openai/gpt-4o")
+	}
+}
+
+func TestAdapter_GetState_DiscoversModelName_NoProvider(t *testing.T) {
+	a := NewAdapter()
+	a.Init([]byte(`{}`))
+
+	// get_state response with modelId only (no provider)
+	input := `{"type":"response","command":"get_state","success":true,"data":{"model":{"name":"claude-3"}}}
+`
+	events := a.ParseOutput([]byte(input))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if mn, ok := events[0].RawData["model_name"].(string); !ok || mn != "claude-3" {
+		t.Errorf("model_name = %q, want %q", mn, "claude-3")
+	}
+	if a.modelName != "claude-3" {
+		t.Errorf("adapter.modelName = %q, want %q", a.modelName, "claude-3")
+	}
+}
+
+func TestAdapter_GetState_EmptyModel(t *testing.T) {
+	a := NewAdapter()
+	a.Init([]byte(`{}`))
+
+	// get_state response with no model info
+	input := `{"type":"response","command":"get_state","success":true,"data":{}}
+`
+	events := a.ParseOutput([]byte(input))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	// model_name should be empty string in the event
+	if mn, ok := events[0].RawData["model_name"].(string); !ok || mn != "" {
+		t.Errorf("model_name = %q, want empty", mn)
+	}
+	// adapter.modelName should also be empty (will fall back to "pi")
+	if a.modelName != "" {
+		t.Errorf("adapter.modelName = %q, want empty", a.modelName)
+	}
+}
+
+// TestAdapter_AgentEnd_PersistsDiscoveredModelName verifies that when get_state
+// has already been called (model name discovered), agent_end persists that
+// model name instead of hardcoding "pi".
+func TestAdapter_AgentEnd_PersistsDiscoveredModelName(t *testing.T) {
+	a := NewAdapter()
+	a.Init([]byte(`{}`))
+
+	// First, discover the model via get_state
+	getStateInput := `{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","name":"gpt-4o"}}}
+`
+	a.ParseOutput([]byte(getStateInput))
+
+	// Now, agent_end should persist the discovered model name
+	agentEndInput := `{"type":"agent_end","stopReason":"stop","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":100,"output":10}}]}
+`
+	events := a.ParseOutput([]byte(agentEndInput))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Type != EventTypePersist {
+		t.Fatalf("Type = %q, want %q", events[0].Type, EventTypePersist)
+	}
+	if len(events[0].PersistEntries) != 1 {
+		t.Fatalf("PersistEntries len = %d, want 1", len(events[0].PersistEntries))
+	}
+	entry := events[0].PersistEntries[0]
+	if entry.ModelName != "openai/gpt-4o" {
+		t.Errorf("PersistEntry.ModelName = %q, want %q", entry.ModelName, "openai/gpt-4o")
+	}
+	if entry.ProviderName != "Pi Coding Agent" {
+		t.Errorf("PersistEntry.ProviderName = %q, want %q", entry.ProviderName, "Pi Coding Agent")
+	}
+}
+
+// TestAdapter_AgentEnd_FallsBackToPiWhenNoModel verifies that when get_state
+// hasn't been called, agent_end falls back to "pi" as the model name.
+func TestAdapter_AgentEnd_FallsBackToPiWhenNoModel(t *testing.T) {
+	a := NewAdapter()
+	a.Init([]byte(`{}`))
+
+	// agent_end without prior get_state — should fall back to "pi"
+	agentEndInput := `{"type":"agent_end","stopReason":"stop","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":50,"output":5}}]}
+`
+	events := a.ParseOutput([]byte(agentEndInput))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Type != EventTypePersist {
+		t.Fatalf("Type = %q, want %q", events[0].Type, EventTypePersist)
+	}
+	if len(events[0].PersistEntries) != 1 {
+		t.Fatalf("PersistEntries len = %d, want 1", len(events[0].PersistEntries))
+	}
+	entry := events[0].PersistEntries[0]
+	if entry.ModelName != "pi" {
+		t.Errorf("PersistEntry.ModelName = %q, want %q (fallback)", entry.ModelName, "pi")
+	}
+}
+
+// TestAdapter_AgentEnd_ExtractsModelFromEvent verifies that the adapter can
+// extract model info from the agent_end event itself when get_state hasn't run.
+func TestAdapter_AgentEnd_ExtractsModelFromEvent(t *testing.T) {
+	a := NewAdapter()
+	a.Init([]byte(`{}`))
+
+	// agent_end with a top-level model field
+	agentEndInput := `{"type":"agent_end","stopReason":"stop","model":"anthropic/claude-3","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":50,"output":5}}]}
+`
+	events := a.ParseOutput([]byte(agentEndInput))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Type != EventTypePersist {
+		t.Fatalf("Type = %q, want %q", events[0].Type, EventTypePersist)
+	}
+	if len(events[0].PersistEntries) != 1 {
+		t.Fatalf("PersistEntries len = %d, want 1", len(events[0].PersistEntries))
+	}
+	entry := events[0].PersistEntries[0]
+	if entry.ModelName != "anthropic/claude-3" {
+		t.Errorf("PersistEntry.ModelName = %q, want %q", entry.ModelName, "anthropic/claude-3")
+	}
+}
+
+// TestAdapter_AgentEnd_ExtractsModelFromMessage verifies that the adapter can
+// extract model info from per-message model field in agent_end.
+func TestAdapter_AgentEnd_ExtractsModelFromMessage(t *testing.T) {
+	a := NewAdapter()
+	a.Init([]byte(`{}`))
+
+	// agent_end with per-message model field
+	agentEndInput := `{"type":"agent_end","stopReason":"stop","messages":[{"role":"assistant","model":"bedrock/anthropic.claude-3","content":[{"type":"text","text":"done"}],"usage":{"input":50,"output":5}}]}
+`
+	events := a.ParseOutput([]byte(agentEndInput))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Type != EventTypePersist {
+		t.Fatalf("Type = %q, want %q", events[0].Type, EventTypePersist)
+	}
+	if len(events[0].PersistEntries) != 1 {
+		t.Fatalf("PersistEntries len = %d, want 1", len(events[0].PersistEntries))
+	}
+	entry := events[0].PersistEntries[0]
+	if entry.ModelName != "bedrock/anthropic.claude-3" {
+		t.Errorf("PersistEntry.ModelName = %q, want %q", entry.ModelName, "bedrock/anthropic.claude-3")
+	}
+}

@@ -3,18 +3,10 @@
 // Package main exports Pi adapter functions for wazero WASI reactor runtime.
 // Built with: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared
 //
-// Memory model: Alloc-based string passing via Alloc/Free (per wazero
-// allocation/tinygo/greet.go pattern — Alloc → Write → Call → Free).
-//
-//	Host → WASM (input):  The host calls the module's Alloc(size) to obtain a
-//	  WASM linear memory offset, writes data there via api.Memory.Write, then
-//	  passes (offset, size) as a `string` parameter to the exported function.
-//	  The Go compiler maps `string` → (i32 ptr, i32 len) automatically.
-//
-//	WASM → host (output): The module calls the host-imported
-//	  store_result(data string) callback, which reads the string from
-//	  linear memory and delivers it to the host. Safe because the
-//	  callback fires synchronously during fn.Call — before it returns.
+// Memory model:
+//   Host → WASM: Host calls Alloc(size) -> writes data -> calls exported function.
+//     Go maps `string` parameters to (i32 ptr, i32 len) automatically.
+//   WASM → Host: Module calls store_result(string) callback synchronously.
 package main
 
 import (
@@ -38,30 +30,19 @@ func storeResult(data string)
 // Host → WASM input passing: bump allocator in a pre-allocated buffer.
 // ---------------------------------------------------------------------------
 
-// allocBuffer is a pre-allocated byte slice in Go's heap (which lives in
-// WASM linear memory for the wasip1 target). The host writes input data
-// to offsets within this buffer via api.Memory.Write, then passes those
-// offsets to exported WASM functions as string parameters.
+// allocBuffer is a 1 MiB pre-allocated buffer to avoid immediate memory growth
+// crashes during startup (initial linear memory is ~2.7 MiB). 
 //
-// The buffer is never GC-collected (it's a package-level global), and Go's
-// GC is non-moving, so offsets returned by Alloc remain valid for the
-// lifetime of the module.
-var allocBuffer = make([]byte, 4*1024*1024) // 4 MiB — ample for all input sizes
+// The host writes input data here via Alloc(), then passes the offset to 
+// exported functions. Buffer resets on overflow; safe as allocations are 
+// short-lived (valid only for one fn.Call).
+var allocBuffer = make([]byte, 1*1024*1024) // 1 MiB
 
 // allocOffset is the current write offset within allocBuffer (bump allocator).
 var allocOffset int32
 
-// Alloc allocates `size` bytes from allocBuffer and returns the WASM
-// linear memory offset where the host should write data.
-//
-// The host writes input data to this offset using api.Memory.Write, then
-// passes (offset, size) as a `string` parameter to the exported WASM
-// function. The Go compiler maps the `string` parameter to (i32 ptr, i32 len),
-// which references the same linear memory the host wrote to.
-//
-// Returns 0 if size is invalid or the buffer cannot satisfy the request
-// (the buffer resets on overflow — safe because allocations are short-lived,
-// valid only during a single fn.Call).
+// Alloc allocates `size` bytes from allocBuffer and returns the linear memory offset.
+// Returns 0 if size is invalid or exceeds buffer capacity.
 //
 //go:wasmexport Alloc
 func Alloc(size int32) int32 {
@@ -77,17 +58,13 @@ func Alloc(size int32) int32 {
 	return ptr
 }
 
-// Free is a no-op for the bump allocator. Allocations remain valid until
-// the buffer resets (on the next Alloc that would overflow). Since every
-// allocation is consumed during the immediately following fn.Call (before
-// the next Alloc), stale data is never read.
+// Free is a no-op for the bump allocator.
 //
 //go:wasmexport Free
 func Free(_ int32) {}
 
 // ---------------------------------------------------------------------------
-// Exported functions — each takes `string` parameters (host writes via Alloc)
-// and returns results via the store_result host callback.
+// Exported functions — use `string` parameters and return via store_result.
 // ---------------------------------------------------------------------------
 
 //go:wasmexport Init
@@ -116,9 +93,7 @@ func SubprocessConfig() {
 	storeResult(string(data))
 }
 
-// cmd is the command name (e.g. "prompt", "compact").
-// data is the command-specific JSON payload (may be empty string).
-// Emits encoded protocol bytes via store_result.
+// cmd is the command name; data is the JSON payload.
 //
 //go:wasmexport EncodeCommand
 func EncodeCommand(cmd string, data string) {
@@ -130,8 +105,7 @@ func EncodeCommand(cmd string, data string) {
 	storeResult(string(result))
 }
 
-// data is raw agent stdout bytes (passed as a string).
-// Emits a JSON array of parsed events via store_result.
+// data is raw agent stdout bytes. Emits parsed events as JSON array.
 //
 //go:wasmexport ParseOutput
 func ParseOutput(data string) {
@@ -147,9 +121,7 @@ func ParseOutput(data string) {
 	storeResult(string(result))
 }
 
-// id is the UI request identifier.
-// method is the extension method to handle.
-// Emits the UI response bytes via store_result.
+// id is the UI request ID; method is the extension method.
 //
 //go:wasmexport HandleUIRequest
 func HandleUIRequest(id string, method string) {

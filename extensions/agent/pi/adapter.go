@@ -87,9 +87,10 @@ type SubprocessConfig struct {
 
 // Adapter implements the agent.AgentAdapter interface for Pi's JSONL protocol.
 type Adapter struct {
-	config        piConfig
-	lineBuffer    string
-	cmdID         int
+	config     piConfig
+	lineBuffer string
+	cmdID      int
+	modelName  string // discovered via get_state or agent_end; used for persistence
 }
 
 // envVar is a single environment variable key-value pair.
@@ -145,12 +146,12 @@ func NewAdapter() *Adapter {
 // Init initializes the adapter with config JSON.
 func (a *Adapter) Init(config []byte) error {
 	var cfg struct {
-		Binary      string   `json:"binary"`
-		Mode        string   `json:"mode"`
-		SessionName string   `json:"session_name"`
-		DisplayName string   `json:"display_name"`
-		Env         []string         `json:"env"`
-		Config      map[string]any   `json:"config,omitempty"`
+		Binary        string         `json:"binary"`
+		Mode          string         `json:"mode"`
+		SessionName   string         `json:"session_name"`
+		DisplayName   string         `json:"display_name"`
+		Env           []string       `json:"env"`
+		Config        map[string]any `json:"config,omitempty"`
 		AgentManifest *struct {
 			Sandbox *struct {
 				Mount []struct {
@@ -186,6 +187,7 @@ func (a *Adapter) Init(config []byte) error {
 	}
 	a.lineBuffer = ""
 	a.cmdID = 0
+	a.modelName = ""
 	return nil
 }
 
@@ -363,7 +365,7 @@ func (a *Adapter) parseToolEnd(raw map[string]any) *Event {
 		}
 	}
 	return &Event{
-		Type: EventTypeToolResult,
+		Type:       EventTypeToolResult,
 		ToolResult: ToolResultData{ID: toolCallID, Output: output, Success: !isError},
 	}
 }
@@ -376,10 +378,19 @@ func (a *Adapter) parseAgentEnd(raw map[string]any) *Event {
 			msgs = append(msgs, mm)
 		}
 	}
-	entries := buildPersistEntries(msgs)
+
+	// The agent_end event may carry a top-level model field — use it if we
+	// haven't already discovered a model name via get_state.
+	if a.modelName == "" {
+		if mn, ok := extractModelNameFromEvent(raw); ok {
+			a.modelName = mn
+		}
+	}
+
+	entries := a.buildPersistEntries(msgs)
 	return &Event{
-		Type: EventTypePersist,
-		Status: StatusData{State: "idle", Activity: a.config.DisplayName + " finished"},
+		Type:           EventTypePersist,
+		Status:         StatusData{State: "idle", Activity: a.config.DisplayName + " finished"},
 		PersistEntries: entries,
 	}
 }
@@ -423,6 +434,9 @@ func (a *Adapter) parseResponse(raw map[string]any) *Event {
 				}
 			}
 		}
+		// Store the discovered model name so it can be used when persisting
+		// assistant messages via buildPersistEntries (instead of hardcoding "pi").
+		a.modelName = modelName
 		return &Event{Type: EventTypeStatus, RawData: map[string]any{"model_name": modelName}}
 	}
 	return nil
@@ -432,14 +446,51 @@ func (a *Adapter) parseUIRequest(raw map[string]any) *Event {
 	method, _ := raw["method"].(string)
 	extID, _ := raw["id"].(string)
 	return &Event{
-		Type:   EventTypeStatus,
-		Status: StatusData{State: "running", Activity: fmt.Sprintf("Pi requested: %s", method)},
+		Type:    EventTypeStatus,
+		Status:  StatusData{State: "running", Activity: fmt.Sprintf("Pi requested: %s", method)},
 		RawData: map[string]any{"ui_request_method": method, "ui_request_id": extID},
 	}
 }
 
+// extractModelNameFromEvent tries to find a model name in an agent_end event
+// or an individual assistant message. Checks common field names that the Pi
+// binary may populate.
+func extractModelNameFromEvent(raw map[string]any) (string, bool) {
+	// Top-level model field on the event
+	if mn, ok := raw["model"].(string); ok && mn != "" {
+		return mn, true
+	}
+	if mn, ok := raw["modelName"].(string); ok && mn != "" {
+		return mn, true
+	}
+	// Per-message model field on assistant messages
+	msgs, _ := raw["messages"].([]any)
+	for _, m := range msgs {
+		msg, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		if role, _ := msg["role"].(string); role == "assistant" {
+			if mn, ok := msg["model"].(string); ok && mn != "" {
+				return mn, true
+			}
+		}
+	}
+	return "", false
+}
+
+// modelNameOrDefault returns the discovered model name, falling back to "pi"
+// when the model name hasn't been discovered yet (e.g. get_state timed out).
+func (a *Adapter) modelNameOrDefault() string {
+	if a.modelName != "" {
+		return a.modelName
+	}
+	return "pi"
+}
+
 // buildPersistEntries parses Pi assistant messages into PersistEntry objects.
-func buildPersistEntries(messages []map[string]any) []PersistEntry {
+func (a *Adapter) buildPersistEntries(messages []map[string]any) []PersistEntry {
+	modelName := a.modelNameOrDefault()
 	toolResults := make(map[string]map[string]any)
 	for _, msg := range messages {
 		role, _ := msg["role"].(string)
@@ -463,7 +514,7 @@ func buildPersistEntries(messages []map[string]any) []PersistEntry {
 		text, reasoning, toolCalls, pt, ptok := parseAssistantMessage(msg)
 		entries = append(entries, PersistEntry{
 			Role: "assistant", Content: text, ReasoningContent: reasoning,
-			ModelName: "pi", ProviderName: "Pi Coding Agent",
+			ModelName: modelName, ProviderName: "Pi Coding Agent",
 			PromptTokens: pt, PredictedTokens: ptok,
 		})
 		for _, tc := range toolCalls {
@@ -478,7 +529,7 @@ func buildPersistEntries(messages []map[string]any) []PersistEntry {
 			tcData := map[string]any{
 				"tool_id": tid, "tool_name": kanbanName,
 				"tool_display_name": getToolDisplayName(kanbanName),
-				"args": targs, "raw_args": string(argsJSON),
+				"args":              targs, "raw_args": string(argsJSON),
 			}
 			tcJSON, _ := json.Marshal(tcData)
 			rj := []byte(`{"output":"","success":true}`)

@@ -85,7 +85,11 @@ func loadWasmAdapter(ext *extensions.Extension) (AgentAdapter, error) {
 	}
 
 	ctx := context.Background()
-	runtime := wazero.NewRuntime(ctx)
+	runtime := wazero.NewRuntimeWithConfig(ctx,
+		wazero.NewRuntimeConfig().
+			WithMemoryLimitPages(512). // 32 MiB max — ensures safety while providing headroom for persistence spikes
+			WithMemoryCapacityFromMax(true), // Size memory to the module's declared max, not just initial
+	)
 
 	// Register WASI imports.
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, runtime); err != nil {
