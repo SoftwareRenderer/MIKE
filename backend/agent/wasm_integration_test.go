@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"kanban/backend/extensions"
@@ -68,12 +71,12 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 	}
 	cfgBytes, _ := json.Marshal(cfg)
 
-	if err := adapter.Init(cfgBytes); err != nil {
+	if err := adapter.Init(context.Background(), cfgBytes); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 
 	// --- SubprocessConfig ---
-	spCfg := adapter.SubprocessConfig()
+	spCfg := adapter.SubprocessConfig(context.Background())
 	if spCfg.Binary != "pi" {
 		t.Errorf("Binary = %q, want %q", spCfg.Binary, "pi")
 	}
@@ -88,7 +91,7 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 	}
 
 	// --- EncodeCommand: compact ---
-	compactCmd := adapter.EncodeCommand(agent.CommandCompact, nil)
+	compactCmd := adapter.EncodeCommand(context.Background(), agent.CommandCompact, nil)
 	if len(compactCmd) == 0 {
 		t.Fatal("EncodeCommand(compact) returned empty")
 	}
@@ -98,7 +101,7 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 
 	// --- EncodeCommand: prompt with behavior ---
 	promptData, _ := json.Marshal(map[string]any{"message": "hello", "behavior": "steer"})
-	promptCmd := adapter.EncodeCommand(agent.CommandPrompt, promptData)
+	promptCmd := adapter.EncodeCommand(context.Background(), agent.CommandPrompt, promptData)
 	if !strings.Contains(string(promptCmd), `"type":"prompt"`) {
 		t.Errorf("prompt: expected type prompt, got %s", string(promptCmd))
 	}
@@ -110,7 +113,7 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 	}
 
 	// --- EncodeCommand: get_state ---
-	stateCmd := adapter.EncodeCommand(agent.CommandGetState, nil)
+	stateCmd := adapter.EncodeCommand(context.Background(), agent.CommandGetState, nil)
 	if !strings.Contains(string(stateCmd), `"type":"get_state"`) {
 		t.Errorf("get_state: expected type, got %s", string(stateCmd))
 	}
@@ -118,7 +121,7 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 	// --- ParseOutput: text delta ---
 	textInput := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello world"}}
 `)
-	events := adapter.ParseOutput(textInput)
+	events := adapter.ParseOutput(context.Background(), textInput)
 	if len(events) != 1 {
 		t.Fatalf("text delta: got %d events, want 1", len(events))
 	}
@@ -129,7 +132,7 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 	// --- ParseOutput: thinking delta ---
 	thinkInput := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"let me think"}}
 `)
-	events = adapter.ParseOutput(thinkInput)
+	events = adapter.ParseOutput(context.Background(), thinkInput)
 	if len(events) != 1 || events[0].Type != agent.EventTypeReasoning {
 		t.Fatalf("thinking delta: unexpected events %+v", events)
 	}
@@ -141,7 +144,7 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 	toolInput := []byte(`{"type":"tool_execution_start","toolName":"read","toolCallId":"call-1","args":{"path":"test.go"}}
 {"type":"tool_execution_end","toolName":"read","toolCallId":"call-1","isError":false,"result":{"content":[{"type":"text","text":"# test.go"}]}}
 `)
-	events = adapter.ParseOutput(toolInput)
+	events = adapter.ParseOutput(context.Background(), toolInput)
 	if len(events) != 2 {
 		t.Fatalf("tool execution: got %d events, want 2", len(events))
 	}
@@ -167,7 +170,7 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 	// --- ParseOutput: agent_end with persistence ---
 	agentEndInput := []byte(`{"type":"agent_end","stopReason":"stop","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":100,"output":10}}]}
 `)
-	events = adapter.ParseOutput(agentEndInput)
+	events = adapter.ParseOutput(context.Background(), agentEndInput)
 	if len(events) != 1 || events[0].Type != agent.EventTypePersist {
 		t.Fatalf("agent_end: unexpected events %+v", events)
 	}
@@ -187,13 +190,13 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 
 	// --- ParseOutput: partial line buffering ---
 	partial := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hel`)
-	events = adapter.ParseOutput(partial)
+	events = adapter.ParseOutput(context.Background(), partial)
 	if len(events) != 0 {
 		t.Errorf("partial line: expected 0 events, got %d", len(events))
 	}
 	rest := []byte(`lo"}}
 `)
-	events = adapter.ParseOutput(rest)
+	events = adapter.ParseOutput(context.Background(), rest)
 	if len(events) != 1 {
 		t.Fatalf("completed line: expected 1 event, got %d", len(events))
 	}
@@ -205,7 +208,7 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 	multiInput := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"}}
 {"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":" world"}}
 `)
-	events = adapter.ParseOutput(multiInput)
+	events = adapter.ParseOutput(context.Background(), multiInput)
 	if len(events) != 2 {
 		t.Fatalf("multi-line: got %d events, want 2", len(events))
 	}
@@ -215,7 +218,7 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 
 	// --- ParseOutput: session stats ---
 	statsInput := []byte(`{"type":"response","command":"get_session_stats","success":true,"data":{"tokens":{"input":1000,"output":500,"cacheRead":100,"cacheWrite":50},"contextUsage":{"tokens":2000,"contextWindow":8000,"percent":25}}}` + "\n")
-	events = adapter.ParseOutput(statsInput)
+	events = adapter.ParseOutput(context.Background(), statsInput)
 	if len(events) != 1 || events[0].Type != agent.EventTypeStats {
 		t.Fatalf("stats: unexpected events %+v", events)
 	}
@@ -227,7 +230,7 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 	}
 
 	// --- HandleUIRequest ---
-	resp := adapter.HandleUIRequest("req-123", "confirm_action")
+	resp := adapter.HandleUIRequest(context.Background(), "req-123", "confirm_action")
 	if !strings.Contains(string(resp), `"extension_ui_response"`) {
 		t.Errorf("ui response: missing type, got %s", string(resp))
 	}
@@ -239,6 +242,71 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 	}
 }
 
+// TestWasmPiAdapter_ConcurrentAccess verifies that the wasmAdapter mutex
+// prevents concurrent calls from corrupting the WASM module state.
+// This simulates the race between readOutput's ParseOutput and Prompt's
+// EncodeCommand that caused unsafe.Slice: len out of range crashes.
+func TestWasmPiAdapter_ConcurrentAccess(t *testing.T) {
+	adapter := loadPiWasm(t)
+
+	cfg := RunnerConfig{ExtensionName: "pi", SessionName: "conc-test", WorktreePath: t.TempDir()}
+	cfgBytes, _ := json.Marshal(cfg)
+	if err := adapter.Init(context.Background(), cfgBytes); err != nil {
+		 t.Fatalf("Init: %v", err)
+	}
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	errors := make(chan error, 20)
+
+	// Simulate concurrent ParseOutput (from readOutput goroutine) and
+	// EncodeCommand (from Prompt goroutine) calls
+	for i := 0; i < 10; i++ {
+		 wg.Add(1)
+		 go func(i int) {
+			 defer wg.Done()
+			 data := []byte(fmt.Sprintf(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"turn-%d"}}`, i) + "\n")
+			 events := adapter.ParseOutput(ctx, data)
+			 if len(events) != 1 {
+				 errors <- fmt.Errorf("goroutine %d: ParseOutput got %d events, want 1", i, len(events))
+				 return
+			 }
+			 if events[0].Text != fmt.Sprintf("turn-%d", i) {
+				 errors <- fmt.Errorf("goroutine %d: text = %q, want %q", i, events[0].Text, fmt.Sprintf("turn-%d", i))
+				 return
+			 }
+		 }(i)
+	}
+
+	for i := 0; i < 10; i++ {
+		 wg.Add(1)
+		 go func(i int) {
+			 defer wg.Done()
+			 cmd := adapter.EncodeCommand(ctx, agent.CommandPrompt, nil)
+			 if len(cmd) == 0 {
+				 errors <- fmt.Errorf("goroutine %d: EncodeCommand returned empty", i)
+				 return
+			 }
+		 }(i)
+	}
+
+	// Also interleave HandleUIRequest and SubprocessConfig calls
+	for i := 0; i < 5; i++ {
+		 wg.Add(1)
+		 go func(i int) {
+			 defer wg.Done()
+			 adapter.HandleUIRequest(ctx, fmt.Sprintf("req-%d", i), "confirm")
+			 adapter.SubprocessConfig(ctx)
+		 }(i)
+	}
+
+	wg.Wait()
+	close(errors)
+	for err := range errors {
+		 t.Error(err)
+	}
+	}
+
 // TestWasmPiAdapter_GetStateModelDiscovery verifies that the WASM module
 // correctly discovers the model name via get_state response and persists it
 // in subsequent agent_end events.
@@ -247,14 +315,14 @@ func TestWasmPiAdapter_GetStateModelDiscovery(t *testing.T) {
 
 	cfg := RunnerConfig{ExtensionName: "pi", SessionName: "test", WorktreePath: t.TempDir()}
 	cfgBytes, _ := json.Marshal(cfg)
-	if err := adapter.Init(cfgBytes); err != nil {
+	if err := adapter.Init(context.Background(), cfgBytes); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 
 	// get_state with provider + name
 	getStateInput := []byte(`{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","name":"gpt-4o"}}}
 `)
-	events := adapter.ParseOutput(getStateInput)
+	events := adapter.ParseOutput(context.Background(), getStateInput)
 	if len(events) != 1 || events[0].Type != agent.EventTypeStatus {
 		t.Fatalf("get_state: unexpected events %+v", events)
 	}
@@ -265,7 +333,7 @@ func TestWasmPiAdapter_GetStateModelDiscovery(t *testing.T) {
 	// After get_state, agent_end should persist the discovered model name
 	agentEndInput := []byte(`{"type":"agent_end","stopReason":"stop","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":50,"output":5}}]}
 `)
-	events = adapter.ParseOutput(agentEndInput)
+	events = adapter.ParseOutput(context.Background(), agentEndInput)
 	if len(events) != 1 || events[0].Type != agent.EventTypePersist {
 		t.Fatalf("agent_end: unexpected events %+v", events)
 	}
@@ -285,7 +353,7 @@ func TestWasmPiAdapter_ToolNameMapping(t *testing.T) {
 
 	cfg := RunnerConfig{ExtensionName: "pi", SessionName: "test", WorktreePath: t.TempDir()}
 	cfgBytes, _ := json.Marshal(cfg)
-	adapter.Init(cfgBytes)
+	adapter.Init(context.Background(), cfgBytes)
 
 	tests := []struct {
 		piTool      string
@@ -305,7 +373,7 @@ func TestWasmPiAdapter_ToolNameMapping(t *testing.T) {
 		t.Run(tt.piTool, func(t *testing.T) {
 			input := []byte(`{"type":"tool_execution_start","toolName":"` + tt.piTool + `","toolCallId":"cid","args":{}}
 `)
-			events := adapter.ParseOutput(input)
+			events := adapter.ParseOutput(context.Background(), input)
 			if len(events) != 1 || events[0].Type != agent.EventTypeToolCall {
 				t.Fatalf("unexpected events: %+v", events)
 			}
@@ -334,12 +402,12 @@ func TestWasmPiAdapter_AllocPattern(t *testing.T) {
 		WorktreePath:  t.TempDir(),
 	}
 	cfgBytes, _ := json.Marshal(cfg)
-	if err := adapter.Init(cfgBytes); err != nil {
+	if err := adapter.Init(context.Background(), cfgBytes); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 
 	// SubprocessConfig exercises Alloc(0) → store_result callback
-	spCfg := adapter.SubprocessConfig()
+	spCfg := adapter.SubprocessConfig(context.Background())
 	if spCfg.Binary != "pi" {
 		t.Errorf("Binary = %q, want pi", spCfg.Binary)
 	}

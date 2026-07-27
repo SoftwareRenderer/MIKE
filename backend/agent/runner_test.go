@@ -52,20 +52,20 @@ func (m *mockAdapter) SetParseResponse(input string, events []agent.Event) {
 	m.parseResponses[input] = events
 }
 
-func (m *mockAdapter) Init(config []byte) error {
+func (m *mockAdapter) Init(_ context.Context, config []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.initConfig = config
 	return nil
 }
 
-func (m *mockAdapter) SubprocessConfig() agent.SubprocessConfig {
+func (m *mockAdapter) SubprocessConfig(_ context.Context) agent.SubprocessConfig {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.subprocessConfig
 }
 
-func (m *mockAdapter) EncodeCommand(cmd string, data []byte) []byte {
+func (m *mockAdapter) EncodeCommand(_ context.Context, cmd string, data []byte) []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if resp, ok := m.encodeResponses[cmd]; ok {
@@ -78,7 +78,7 @@ func (m *mockAdapter) EncodeCommand(cmd string, data []byte) []byte {
 	return []byte("{}\n")
 }
 
-func (m *mockAdapter) ParseOutput(data []byte) []agent.Event {
+func (m *mockAdapter) ParseOutput(_ context.Context, data []byte) []agent.Event {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if events, ok := m.parseResponses[string(data)]; ok {
@@ -87,7 +87,7 @@ func (m *mockAdapter) ParseOutput(data []byte) []agent.Event {
 	return nil
 }
 
-func (m *mockAdapter) HandleUIRequest(id, method string) []byte {
+func (m *mockAdapter) HandleUIRequest(_ context.Context, id, method string) []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := id + ":" + method
@@ -125,7 +125,7 @@ func TestNewAgentRunner_Host(t *testing.T) {
 		Config: map[string]any{},
 	}
 
-	runner, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "test-session", false)
+	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "test-session", false)
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestAgentRunner_Prompt(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestAgentRunner_EventChan(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestAgentRunner_Close(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestAgentRunner_ModelName(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestAgentRunner_QueryStats(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -445,23 +445,23 @@ type brokenAdapter struct {
 	subprocessConfig agent.SubprocessConfig
 }
 
-func (b *brokenAdapter) Init(config []byte) error {
+func (b *brokenAdapter) Init(_ context.Context, config []byte) error {
 	return nil
 }
 
-func (b *brokenAdapter) SubprocessConfig() agent.SubprocessConfig {
+func (b *brokenAdapter) SubprocessConfig(_ context.Context) agent.SubprocessConfig {
 	return b.subprocessConfig
 }
 
-func (b *brokenAdapter) EncodeCommand(cmd string, data []byte) []byte {
+func (b *brokenAdapter) EncodeCommand(_ context.Context, cmd string, data []byte) []byte {
 	return nil // simulates a broken/stale adapter
 }
 
-func (b *brokenAdapter) ParseOutput(data []byte) []agent.Event {
+func (b *brokenAdapter) ParseOutput(_ context.Context, data []byte) []agent.Event {
 	return nil
 }
 
-func (b *brokenAdapter) HandleUIRequest(id, method string) []byte {
+func (b *brokenAdapter) HandleUIRequest(_ context.Context, id, method string) []byte {
 	return nil
 }
 
@@ -485,7 +485,7 @@ func TestNewAgentRunner_BrokenAdapter(t *testing.T) {
 		},
 	}
 
-	_, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "session", false)
+	_, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
 	if err == nil {
 		t.Fatal("expected error from NewAgentRunner with broken adapter, got nil")
 	}
@@ -508,7 +508,7 @@ func TestAgentRunner_PromptNilEncode(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestAgentRunner_CloseNilEncode(t *testing.T) {
 		},
 	}
 
-	runner, err := NewAgentRunner(ext, nil, "test-task", t.TempDir(), "session", false)
+	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
 	if err != nil {
 		t.Fatalf("NewAgentRunner: %v", err)
 	}

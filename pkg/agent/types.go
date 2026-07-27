@@ -1,5 +1,7 @@
 package agent
 
+import "context"
+
 // Event represents a generic agent event, JSON-serialized across the WASM boundary.
 // The adapter (extension) produces Events; the runner (backend) streams them to the executor.
 type Event struct {
@@ -97,25 +99,30 @@ type SubprocessConfig struct {
 // The adapter owns ALL protocol logic: command encoding, output parsing, state management.
 type AgentAdapter interface {
 	// Init initializes the adapter with extension config JSON.
-	Init(config []byte) error
+	// ctx is used for cancellation during initialization.
+	Init(ctx context.Context, config []byte) error
 
 	// SubprocessConfig returns the agent or process configuration.
 	// The runner spawns this binary with these args/env.
-	SubprocessConfig() SubprocessConfig
+	// ctx is used for cancellation during the subprocess config lookup.
+	SubprocessConfig(ctx context.Context) SubprocessConfig
 
 	// EncodeCommand encodes a high-level command into protocol bytes for agent stdin.
 	// cmd is one of CommandPrompt, CommandCompact, CommandStats, CommandGetState, CommandAbort.
 	// data is command-specific JSON (e.g., {"message":"...","behavior":"..."} for prompt).
-	EncodeCommand(cmd string, data []byte) []byte
+	// ctx is used for cancellation during encoding.
+	EncodeCommand(ctx context.Context, cmd string, data []byte) []byte
 
 	// ParseOutput parses raw agent stdout bytes into structured events.
 	// The adapter maintains state across calls (e.g., line buffering, turn state).
 	// Returns multiple events if multiple protocol messages are in the input.
-	ParseOutput(data []byte) []Event
+	// ctx is used for cancellation during parsing.
+	ParseOutput(ctx context.Context, data []byte) []Event
 
 	// HandleUIRequest generates response bytes for an agent UI request (e.g., cancel a dialog).
 	// Returns nil if no response should be sent.
-	HandleUIRequest(id, method string) []byte
+	// ctx is used for cancellation during handling.
+	HandleUIRequest(ctx context.Context, id, method string) []byte
 
 	// Close cleans up adapter state.
 	Close()

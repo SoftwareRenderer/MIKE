@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -271,6 +272,7 @@ func (r *AgentRegistry) reload() {
 	// Must be called with r.mu held (write lock)
 	extList, err := r.store.GetByType(ext.ExtensionTypeAgent)
 	if err != nil {
+		log.Printf("[agent-registry] failed to query agent extensions: %v", err)
 		return
 	}
 

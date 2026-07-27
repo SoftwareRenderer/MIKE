@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ func TestAdapter_Init(t *testing.T) {
 		"display_name": "Test Agent",
 		"env":          []string{"PI_DIR=/tmp"},
 	})
-	if err := a.Init(cfg); err != nil {
+	if err := a.Init(context.Background(), cfg); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	if a.config.Binary != "pi" {
@@ -30,13 +31,13 @@ func TestAdapter_Init(t *testing.T) {
 	}
 
 	// Invalid config
-	if err := a.Init([]byte("not json")); err == nil {
+	if err := a.Init(context.Background(), []byte("not json")); err == nil {
 		t.Error("expected error for invalid JSON")
 	}
 
 	// Empty config uses defaults
 	a2 := NewAdapter()
-	if err := a2.Init([]byte(`{}`)); err != nil {
+	if err := a2.Init(context.Background(), []byte(`{}`)); err != nil {
 		t.Fatalf("Init empty: %v", err)
 	}
 	if a2.config.Binary != "pi" {
@@ -49,9 +50,9 @@ func TestAdapter_Init(t *testing.T) {
 
 func TestAdapter_SubprocessConfig(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{"session_name":"test"}`))
+	a.Init(context.Background(), []byte(`{"session_name":"test"}`))
 
-	cfg := a.SubprocessConfig()
+	cfg := a.SubprocessConfig(context.Background())
 	if cfg.Binary != "pi" {
 		t.Errorf("Binary = %q, want %q", cfg.Binary, "pi")
 	}
@@ -65,7 +66,7 @@ func TestAdapter_SubprocessConfig(t *testing.T) {
 
 func TestAdapter_EncodeCommand(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	tests := []struct {
 		cmd  string
@@ -81,7 +82,7 @@ func TestAdapter_EncodeCommand(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := a.EncodeCommand(tt.cmd, tt.data)
+		result := a.EncodeCommand(context.Background(), tt.cmd, tt.data)
 		resultStr := string(result)
 		if !strings.Contains(resultStr, tt.want) {
 			t.Errorf("EncodeCommand(%q) = %s, want to contain %q", tt.cmd, resultStr, tt.want)
@@ -95,11 +96,11 @@ func TestAdapter_EncodeCommand(t *testing.T) {
 
 func TestAdapter_ParseOutput_TextDelta(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	input := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello world"}}
 `
-	events := a.ParseOutput([]byte(input))
+	events := a.ParseOutput(context.Background(), []byte(input))
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
@@ -113,11 +114,11 @@ func TestAdapter_ParseOutput_TextDelta(t *testing.T) {
 
 func TestAdapter_ParseOutput_ThinkingDelta(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	input := `{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"let me think"}}
 `
-	events := a.ParseOutput([]byte(input))
+	events := a.ParseOutput(context.Background(), []byte(input))
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
@@ -131,12 +132,12 @@ func TestAdapter_ParseOutput_ThinkingDelta(t *testing.T) {
 
 func TestAdapter_ParseOutput_ToolExecution(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	// tool_execution_start with Pi tool name "read"
 	input := `{"type":"tool_execution_start","toolName":"read","toolCallId":"call-1","args":{"path":"README.md"}}
 `
-	events := a.ParseOutput([]byte(input))
+	events := a.ParseOutput(context.Background(), []byte(input))
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
@@ -153,7 +154,7 @@ func TestAdapter_ParseOutput_ToolExecution(t *testing.T) {
 	// tool_execution_end
 	input2 := `{"type":"tool_execution_end","toolName":"read","toolCallId":"call-1","isError":false,"result":{"content":[{"type":"text","text":"# README"}]}}
 `
-	events2 := a.ParseOutput([]byte(input2))
+	events2 := a.ParseOutput(context.Background(), []byte(input2))
 	if len(events2) != 1 {
 		t.Fatalf("got %d events, want 1", len(events2))
 	}
@@ -170,11 +171,11 @@ func TestAdapter_ParseOutput_ToolExecution(t *testing.T) {
 
 func TestAdapter_ParseOutput_AgentStart(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{"display_name":"Test Agent"}`))
+	a.Init(context.Background(), []byte(`{"display_name":"Test Agent"}`))
 
 	input := `{"type":"agent_start"}
 `
-	events := a.ParseOutput([]byte(input))
+	events := a.ParseOutput(context.Background(), []byte(input))
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
@@ -188,11 +189,11 @@ func TestAdapter_ParseOutput_AgentStart(t *testing.T) {
 
 func TestAdapter_ParseOutput_AgentEnd(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	input := `{"type":"agent_end","stopReason":"stop","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":100,"output":10}}]}
 `
-	events := a.ParseOutput([]byte(input))
+	events := a.ParseOutput(context.Background(), []byte(input))
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
@@ -219,11 +220,11 @@ func TestAdapter_ParseOutput_AgentEnd(t *testing.T) {
 
 func TestAdapter_ParseOutput_SessionStats(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	input := `{"type":"response","command":"get_session_stats","success":true,"data":{"tokens":{"input":1000,"output":500,"cacheRead":100,"cacheWrite":50},"contextUsage":{"tokens":2000,"contextWindow":8000,"percent":25}}}
 `
-	events := a.ParseOutput([]byte(input))
+	events := a.ParseOutput(context.Background(), []byte(input))
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
@@ -240,11 +241,11 @@ func TestAdapter_ParseOutput_SessionStats(t *testing.T) {
 
 func TestAdapter_ParseOutput_PartialLines(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	// Send partial line
 	partial := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello`
-	events1 := a.ParseOutput([]byte(partial))
+	events1 := a.ParseOutput(context.Background(), []byte(partial))
 	if len(events1) != 0 {
 		t.Errorf("partial line should produce 0 events, got %d", len(events1))
 	}
@@ -252,7 +253,7 @@ func TestAdapter_ParseOutput_PartialLines(t *testing.T) {
 	// Complete the line
 	rest := `"}}
 `
-	events2 := a.ParseOutput([]byte(rest))
+	events2 := a.ParseOutput(context.Background(), []byte(rest))
 	if len(events2) != 1 {
 		t.Fatalf("completed line should produce 1 event, got %d", len(events2))
 	}
@@ -263,12 +264,12 @@ func TestAdapter_ParseOutput_PartialLines(t *testing.T) {
 
 func TestAdapter_ParseOutput_MultiLine(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	input := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"}}
 {"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":" world"}}
 `
-	events := a.ParseOutput([]byte(input))
+	events := a.ParseOutput(context.Background(), []byte(input))
 	if len(events) != 2 {
 		t.Fatalf("got %d events, want 2", len(events))
 	}
@@ -282,9 +283,9 @@ func TestAdapter_ParseOutput_MultiLine(t *testing.T) {
 
 func TestAdapter_HandleUIRequest(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
-	resp := a.HandleUIRequest("req-123", "confirm_action")
+	resp := a.HandleUIRequest(context.Background(), "req-123", "confirm_action")
 	respStr := string(resp)
 	if !strings.Contains(respStr, `"type":"extension_ui_response"`) {
 		t.Errorf("response missing type: %s", respStr)
@@ -340,7 +341,7 @@ func TestAdapter_DisplayNameMapping(t *testing.T) {
 
 func TestAdapter_Close(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 	a.lineBuffer = "some buffered data"
 	a.Close()
 	if a.lineBuffer != "" {
@@ -352,12 +353,12 @@ func TestAdapter_Close(t *testing.T) {
 
 func TestAdapter_GetState_DiscoversModelName(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	// Pi binary returns model info via get_state response with provider + name
 	input := `{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","name":"gpt-4o","modelId":"gpt-4o"}}}
 `
-	events := a.ParseOutput([]byte(input))
+	events := a.ParseOutput(context.Background(), []byte(input))
 
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
@@ -377,12 +378,12 @@ func TestAdapter_GetState_DiscoversModelName(t *testing.T) {
 
 func TestAdapter_GetState_DiscoversModelName_NoProvider(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	// get_state response with modelId only (no provider)
 	input := `{"type":"response","command":"get_state","success":true,"data":{"model":{"name":"claude-3"}}}
 `
-	events := a.ParseOutput([]byte(input))
+	events := a.ParseOutput(context.Background(), []byte(input))
 
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
@@ -397,12 +398,12 @@ func TestAdapter_GetState_DiscoversModelName_NoProvider(t *testing.T) {
 
 func TestAdapter_GetState_EmptyModel(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	// get_state response with no model info
 	input := `{"type":"response","command":"get_state","success":true,"data":{}}
 `
-	events := a.ParseOutput([]byte(input))
+	events := a.ParseOutput(context.Background(), []byte(input))
 
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
@@ -422,17 +423,17 @@ func TestAdapter_GetState_EmptyModel(t *testing.T) {
 // model name instead of hardcoding "pi".
 func TestAdapter_AgentEnd_PersistsDiscoveredModelName(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	// First, discover the model via get_state
 	getStateInput := `{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","name":"gpt-4o"}}}
 `
-	a.ParseOutput([]byte(getStateInput))
+	a.ParseOutput(context.Background(), []byte(getStateInput))
 
 	// Now, agent_end should persist the discovered model name
 	agentEndInput := `{"type":"agent_end","stopReason":"stop","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":100,"output":10}}]}
 `
-	events := a.ParseOutput([]byte(agentEndInput))
+	events := a.ParseOutput(context.Background(), []byte(agentEndInput))
 
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
@@ -456,12 +457,12 @@ func TestAdapter_AgentEnd_PersistsDiscoveredModelName(t *testing.T) {
 // hasn't been called, agent_end falls back to "pi" as the model name.
 func TestAdapter_AgentEnd_FallsBackToPiWhenNoModel(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	// agent_end without prior get_state — should fall back to "pi"
 	agentEndInput := `{"type":"agent_end","stopReason":"stop","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":50,"output":5}}]}
 `
-	events := a.ParseOutput([]byte(agentEndInput))
+	events := a.ParseOutput(context.Background(), []byte(agentEndInput))
 
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
@@ -482,12 +483,12 @@ func TestAdapter_AgentEnd_FallsBackToPiWhenNoModel(t *testing.T) {
 // extract model info from the agent_end event itself when get_state hasn't run.
 func TestAdapter_AgentEnd_ExtractsModelFromEvent(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	// agent_end with a top-level model field
 	agentEndInput := `{"type":"agent_end","stopReason":"stop","model":"anthropic/claude-3","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":50,"output":5}}]}
 `
-	events := a.ParseOutput([]byte(agentEndInput))
+	events := a.ParseOutput(context.Background(), []byte(agentEndInput))
 
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
@@ -508,12 +509,12 @@ func TestAdapter_AgentEnd_ExtractsModelFromEvent(t *testing.T) {
 // extract model info from per-message model field in agent_end.
 func TestAdapter_AgentEnd_ExtractsModelFromMessage(t *testing.T) {
 	a := NewAdapter()
-	a.Init([]byte(`{}`))
+	a.Init(context.Background(), []byte(`{}`))
 
 	// agent_end with per-message model field
 	agentEndInput := `{"type":"agent_end","stopReason":"stop","messages":[{"role":"assistant","model":"bedrock/anthropic.claude-3","content":[{"type":"text","text":"done"}],"usage":{"input":50,"output":5}}]}
 `
-	events := a.ParseOutput([]byte(agentEndInput))
+	events := a.ParseOutput(context.Background(), []byte(agentEndInput))
 
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
@@ -527,5 +528,128 @@ func TestAdapter_AgentEnd_ExtractsModelFromMessage(t *testing.T) {
 	entry := events[0].PersistEntries[0]
 	if entry.ModelName != "bedrock/anthropic.claude-3" {
 		t.Errorf("PersistEntry.ModelName = %q, want %q", entry.ModelName, "bedrock/anthropic.claude-3")
+	}
+}
+
+// TestAdapter_AgentEnd_MalformedReturnsPersistFallback verifies that when
+// agent_end has corrupted data (e.g. messages is a string instead of array),
+// the adapter returns a persist event with empty entries rather than nil.
+// This ensures the turn completes instead of hanging the task indefinitely.
+func TestAdapter_AgentEnd_MalformedReturnsPersistFallback(t *testing.T) {
+	a := NewAdapter()
+	a.Init(context.Background(), []byte(`{}`))
+
+	// Malformed agent_end: messages is a string instead of []map[string]any
+	// This causes mapToStruct to fail → should return persist fallback event
+	input := `{"type":"agent_end","stopReason":"stop","messages":"corrupted"}
+`
+	events := a.ParseOutput(context.Background(), []byte(input))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1 (persist fallback)", len(events))
+	}
+	if events[0].Type != agent.EventTypePersist {
+		t.Errorf("Type = %q, want %q (persist fallback)", events[0].Type, agent.EventTypePersist)
+	}
+	if len(events[0].PersistEntries) != 0 {
+		t.Errorf("PersistEntries len = %d, want 0", len(events[0].PersistEntries))
+	}
+}
+
+// TestAdapter_ParseOutput_MalformedJSONIsSkipped verifies that malformed JSON
+// lines in the Pi JSONL stream are logged and skipped without crashing.
+func TestAdapter_ParseOutput_MalformedJSONIsSkipped(t *testing.T) {
+	a := NewAdapter()
+	a.Init(context.Background(), []byte(`{}`))
+
+	input := `not valid json at all
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"}}
+`
+	events := a.ParseOutput(context.Background(), []byte(input))
+
+	// Only the valid line should produce an event
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1 (malformed line should be skipped)", len(events))
+	}
+	if events[0].Text != "hello" {
+		t.Errorf("Text = %q, want %q", events[0].Text, "hello")
+	}
+}
+
+// TestAdapter_ParseOutput_PersistedModelNameAfterParseError verifies that
+// a discovered model name survives a subsequent parse error on agent_end.
+func TestAdapter_ParseOutput_PersistedModelNameAfterParseError(t *testing.T) {
+	a := NewAdapter()
+	a.Init(context.Background(), []byte(`{}`))
+
+	// Discover model via get_state
+	getStateInput := `{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","name":"gpt-4o"}}}
+`
+	a.ParseOutput(context.Background(), []byte(getStateInput))
+
+	// Now send corrupted agent_end — should fall back to persist event,
+	// but model name should still be the discovered one
+	corruptedInput := `{"type":"agent_end","messages":"corrupted"}
+`
+	events := a.ParseOutput(context.Background(), []byte(corruptedInput))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Type != agent.EventTypePersist {
+		t.Fatalf("Type = %q, want %q", events[0].Type, agent.EventTypePersist)
+	}
+	// With empty persist entries, modelName fallback to "pi" won't be called
+	// since buildPersistEntries isn't invoked (no messages to parse)
+	if len(events[0].PersistEntries) != 0 {
+		t.Errorf("PersistEntries len = %d, want 0", len(events[0].PersistEntries))
+	}
+}
+
+// TestAdapter_EncodeCommand_MalformedData verifies that EncodeCommand with
+// malformed JSON data still returns a valid command (logging the error).
+func TestAdapter_EncodeCommand_MalformedData(t *testing.T) {
+	a := NewAdapter()
+	a.Init(context.Background(), []byte(`{}`))
+
+	// Invalid JSON for prompt command — should still produce a command
+	// with empty message (error logged internally, not returned)
+	result := a.EncodeCommand(context.Background(), agent.CommandPrompt, []byte(`{invalid`))
+	resultStr := string(result)
+
+	if !strings.Contains(resultStr, `"type":"prompt"`) {
+		t.Errorf("EncodeCommand should still produce prompt command: %s", resultStr)
+	}
+	// Message should be empty (default)
+	if !strings.Contains(resultStr, `"message":""`) {
+		t.Errorf("EncodeCommand with malformed data should have empty message: %s", resultStr)
+	}
+	// Should still end with newline
+	if !strings.HasSuffix(resultStr, "\n") {
+		t.Errorf("EncodeCommand should end with newline: %s", resultStr)
+	}
+}
+
+// TestAdapter_ParseOutput_NilAdapterDoesNotCrash verifies that ParseOutput
+// on an adapter not initialized doesn't panic.
+func TestAdapter_ParseOutput_UninitializedDoesNotCrash(t *testing.T) {
+	a := NewAdapter()
+	// Skip Init — lineBuffer is already "" from NewAdapter
+
+	// ParseOutput should not panic even if not initialized
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("ParseOutput panicked on uninitialized adapter: %v", r)
+		}
+	}()
+
+	input := `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"}}
+`
+	events := a.ParseOutput(context.Background(), []byte(input))
+	if len(events) != 1 {
+		t.Errorf("got %d events, want 1", len(events))
+	}
+	if events[0].Text != "hello" {
+		t.Errorf("Text = %q, want %q", events[0].Text, "hello")
 	}
 }

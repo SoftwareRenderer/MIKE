@@ -5,8 +5,10 @@
 package pi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"kanban/pkg/agent"
@@ -106,7 +108,9 @@ func NewAdapter() *Adapter {
 }
 
 // Init initializes the adapter with config JSON.
-func (a *Adapter) Init(config []byte) error {
+// ctx is accepted for interface compliance; the pure adapter does no I/O
+// during initialization, so it is not used.
+func (a *Adapter) Init(_ context.Context, config []byte) error {
 	var cfg struct {
 		Binary        string         `json:"binary"`
 		Mode          string         `json:"mode"`
@@ -154,7 +158,9 @@ func (a *Adapter) Init(config []byte) error {
 }
 
 // SubprocessConfig returns the agent process configuration.
-func (a *Adapter) SubprocessConfig() agent.SubprocessConfig {
+// ctx is accepted for interface compliance; the pure adapter does no I/O
+// during config lookup, so it is not used.
+func (a *Adapter) SubprocessConfig(_ context.Context) agent.SubprocessConfig {
 	args := []string{"--mode", a.config.Mode}
 	if a.config.SessionName != "" {
 		args = append(args, "--name", a.config.SessionName)
@@ -175,7 +181,9 @@ func (a *Adapter) SubprocessConfig() agent.SubprocessConfig {
 }
 
 // EncodeCommand encodes a high-level command into Pi JSONL protocol bytes.
-func (a *Adapter) EncodeCommand(cmd string, data []byte) []byte {
+// ctx is accepted for interface compliance; the pure adapter does no I/O
+// during encoding, so it is not used.
+func (a *Adapter) EncodeCommand(_ context.Context, cmd string, data []byte) []byte {
 	a.cmdID++
 	c := map[string]any{"id": fmt.Sprintf("%s-%d", cmd, a.cmdID)}
 
@@ -186,7 +194,9 @@ func (a *Adapter) EncodeCommand(cmd string, data []byte) []byte {
 			Behavior string `json:"behavior"`
 		}
 		if data != nil {
-			json.Unmarshal(data, &d)
+			if err := json.Unmarshal(data, &d); err != nil {
+				log.Printf("[pi-adapter] EncodeCommand: failed to unmarshal prompt data: %v", err)
+			}
 		}
 		c["type"] = "prompt"
 		c["message"] = d.Message
@@ -208,7 +218,9 @@ func (a *Adapter) EncodeCommand(cmd string, data []byte) []byte {
 }
 
 // ParseOutput parses raw Pi JSONL stdout bytes into generic agent events.
-func (a *Adapter) ParseOutput(data []byte) []agent.Event {
+// ctx is accepted for interface compliance; the pure adapter does no I/O
+// during parsing, so it is not used.
+func (a *Adapter) ParseOutput(_ context.Context, data []byte) []agent.Event {
 	a.lineBuffer += string(data)
 	var events []agent.Event
 
@@ -225,6 +237,7 @@ func (a *Adapter) ParseOutput(data []byte) []agent.Event {
 
 		var raw map[string]any
 		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			log.Printf("[pi-adapter] ParseOutput: failed to parse JSON line (%d bytes): %v", len(line), err)
 			continue
 		}
 
@@ -237,7 +250,9 @@ func (a *Adapter) ParseOutput(data []byte) []agent.Event {
 }
 
 // HandleUIRequest generates a response for an agent UI request.
-func (a *Adapter) HandleUIRequest(id, method string) []byte {
+// ctx is accepted for interface compliance; the pure adapter does no I/O
+// during handling, so it is not used.
+func (a *Adapter) HandleUIRequest(_ context.Context, id, method string) []byte {
 	resp := map[string]any{
 		"type":      "extension_ui_response",
 		"id":        id,
@@ -277,6 +292,7 @@ func (a *Adapter) parseEvent(eventType string, raw map[string]any) *agent.Event 
 func (a *Adapter) parseMessageUpdate(raw map[string]any) *agent.Event {
 	var mu piMessageUpdate
 	if err := mapToStruct(raw, &mu); err != nil {
+		log.Printf("[pi-adapter] parseMessageUpdate: %v", err)
 		return nil
 	}
 	etype := mu.AssistantMessageEvent.Type
@@ -293,6 +309,7 @@ func (a *Adapter) parseMessageUpdate(raw map[string]any) *agent.Event {
 func (a *Adapter) parseToolStart(raw map[string]any) *agent.Event {
 	var te piToolExecution
 	if err := mapToStruct(raw, &te); err != nil {
+		log.Printf("[pi-adapter] parseToolStart: %v", err)
 		return nil
 	}
 	kanbanName := mapPiToolName(te.ToolName)
@@ -309,6 +326,7 @@ func (a *Adapter) parseToolStart(raw map[string]any) *agent.Event {
 func (a *Adapter) parseToolEnd(raw map[string]any) *agent.Event {
 	var te piToolExecution
 	if err := mapToStruct(raw, &te); err != nil {
+		log.Printf("[pi-adapter] parseToolEnd: %v", err)
 		return nil
 	}
 	var output string
@@ -334,7 +352,14 @@ func (a *Adapter) parseToolEnd(raw map[string]any) *agent.Event {
 func (a *Adapter) parseAgentEnd(raw map[string]any) *agent.Event {
 	var ae piAgentEnd
 	if err := mapToStruct(raw, &ae); err != nil {
-		return nil
+		log.Printf("[pi-adapter] parseAgentEnd: %v", err)
+		// Return a persist event with empty entries so the turn completes.
+		// Without this fallback, the task would hang indefinitely waiting for a
+		// persist event that never arrives (see agent_end handling in loop_agent.go).
+		return &agent.Event{
+			Type:   agent.EventTypePersist,
+			Status: agent.StatusData{State: "idle", Activity: a.config.DisplayName + " finished (parse error)"},
+		}
 	}
 
 	// The agent_end event may carry a top-level model field — use it if we
@@ -356,6 +381,7 @@ func (a *Adapter) parseAgentEnd(raw map[string]any) *agent.Event {
 func (a *Adapter) parseResponse(raw map[string]any) *agent.Event {
 	var resp piResponse
 	if err := mapToStruct(raw, &resp); err != nil {
+		log.Printf("[pi-adapter] parseResponse: %v", err)
 		return nil
 	}
 	if !resp.Success && resp.Error != "" {
@@ -401,6 +427,7 @@ func (a *Adapter) parseResponse(raw map[string]any) *agent.Event {
 func (a *Adapter) parseUIRequest(raw map[string]any) *agent.Event {
 	var ur piUIRequest
 	if err := mapToStruct(raw, &ur); err != nil {
+		log.Printf("[pi-adapter] parseUIRequest: %v", err)
 		return nil
 	}
 	return &agent.Event{

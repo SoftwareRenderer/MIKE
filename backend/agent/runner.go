@@ -54,7 +54,8 @@ type RunnerConfig struct {
 // NewAgentRunner creates a new agent runner.
 // It loads the WASM adapter, initializes it, spawns the agent subprocess,
 // and starts the stdout reader goroutine.
-func NewAgentRunner(ext *extensions.Extension, sandboxMgr *sandboxmgr.SandboxManager, taskID, worktreePath, sessionName string, sandboxEnabled bool) (*AgentRunner, error) {
+// ctx is used for cancellation during adapter initialization.
+func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *sandboxmgr.SandboxManager, taskID, worktreePath, sessionName string, sandboxEnabled bool) (*AgentRunner, error) {
 	cfg := RunnerConfig{
 		ExtensionName: ext.Name,
 		SessionName:   sessionName,
@@ -80,7 +81,7 @@ func NewAgentRunner(ext *extensions.Extension, sandboxMgr *sandboxmgr.SandboxMan
 	if err != nil {
 		return nil, fmt.Errorf("load adapter: %w", err)
 	}
-	if err := adapter.Init(cfgBytes); err != nil {
+	if err := adapter.Init(ctx, cfgBytes); err != nil {
 		adapter.Close()
 		return nil, fmt.Errorf("init adapter: %w", err)
 	}
@@ -95,7 +96,7 @@ func NewAgentRunner(ext *extensions.Extension, sandboxMgr *sandboxmgr.SandboxMan
 	}
 
 	// Get subprocess config from adapter
-	spCfg := adapter.SubprocessConfig()
+	spCfg := adapter.SubprocessConfig(ctx)
 	if spCfg.Binary == "" {
 		adapter.Close()
 		return nil, fmt.Errorf("adapter returned empty binary name")
@@ -142,7 +143,14 @@ func NewAgentRunner(ext *extensions.Extension, sandboxMgr *sandboxmgr.SandboxMan
 	}
 
 	// Start stdout reader goroutine
-	go r.readOutput()
+	// readCtx is cancelled when the runner closes (r.done closed), providing
+	// cancellation for ParseOutput and HandleUIRequest calls in the reader.
+	readCtx, readCancel := context.WithCancel(context.Background())
+	go func() {
+		<-r.done
+		readCancel()
+	}()
+	go r.readOutput(readCtx)
 
 	log.Printf("[agent] runner started (binary=%s, pid=%d, session=%s)", spCfg.Binary, r.PID(), sessionName)
 	return r, nil
@@ -162,7 +170,7 @@ func (r *AgentRunner) Prompt(ctx context.Context, message string, behavior ...st
 		return fmt.Errorf("agent runner closed")
 	}
 
-	bytes := r.adapter.EncodeCommand(pkgagent.CommandPrompt, dataBytes)
+	bytes := r.adapter.EncodeCommand(ctx, pkgagent.CommandPrompt, dataBytes)
 	if bytes == nil {
 		return fmt.Errorf("adapter EncodeCommand returned nil (adapter may be broken)")
 	}
@@ -179,7 +187,7 @@ func (r *AgentRunner) EventChan() <-chan pkgagent.Event {
 func (r *AgentRunner) Compact(ctx context.Context) (*pkgagent.CompactResult, error) {
 	r.mu.Lock()
 	if !r.closed {
-		bytes := r.adapter.EncodeCommand(pkgagent.CommandCompact, nil)
+		bytes := r.adapter.EncodeCommand(ctx, pkgagent.CommandCompact, nil)
 		if bytes != nil {
 			r.stdin.Write(bytes) // best-effort
 		}
@@ -200,7 +208,7 @@ func (r *AgentRunner) Compact(ctx context.Context) (*pkgagent.CompactResult, err
 func (r *AgentRunner) QueryStats(ctx context.Context) pkgagent.SessionStatsData {
 	r.mu.Lock()
 	if !r.closed {
-		bytes := r.adapter.EncodeCommand(pkgagent.CommandStats, nil)
+		bytes := r.adapter.EncodeCommand(ctx, pkgagent.CommandStats, nil)
 		if bytes != nil {
 			r.stdin.Write(bytes) // best-effort
 		}
@@ -220,7 +228,7 @@ func (r *AgentRunner) QueryStats(ctx context.Context) pkgagent.SessionStatsData 
 func (r *AgentRunner) QueryModel(ctx context.Context) string {
 	r.mu.Lock()
 	if !r.closed {
-		bytes := r.adapter.EncodeCommand(pkgagent.CommandGetState, nil)
+		bytes := r.adapter.EncodeCommand(ctx, pkgagent.CommandGetState, nil)
 		if bytes != nil {
 			r.stdin.Write(bytes) // best-effort
 		}
@@ -267,9 +275,11 @@ func (r *AgentRunner) Close() {
 	}
 	r.closed = true
 
-	// Send abort command (best-effort)
+	// Send abort command (best-effort) with a short timeout context
 	if r.stdin != nil {
-		bytes := r.adapter.EncodeCommand(pkgagent.CommandAbort, nil)
+		abortCtx, abortCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		bytes := r.adapter.EncodeCommand(abortCtx, pkgagent.CommandAbort, nil)
+		abortCancel()
 		if bytes != nil {
 			r.stdin.Write(bytes) // best-effort
 		}
@@ -307,7 +317,9 @@ func (r *AgentRunner) Close() {
 }
 
 // readOutput reads raw bytes from agent stdout and feeds them to the adapter.
-func (r *AgentRunner) readOutput() {
+// ctx is cancelled when the runner closes, providing cancellation for ParseOutput
+// and HandleUIRequest calls.
+func (r *AgentRunner) readOutput(ctx context.Context) {
 	// Close event channel when stdout is exhausted (process exited)
 	defer func() {
 		close(r.eventChan)
@@ -323,9 +335,9 @@ func (r *AgentRunner) readOutput() {
 	for {
 		n, err := r.stdout.Read(buf)
 		if n > 0 {
-			events := r.adapter.ParseOutput(buf[:n])
+			events := r.adapter.ParseOutput(ctx, buf[:n])
 			for _, event := range events {
-				r.dispatchEvent(event)
+				r.dispatchEvent(ctx, event)
 			}
 		}
 		if err != nil {
@@ -338,7 +350,8 @@ func (r *AgentRunner) readOutput() {
 }
 
 // dispatchEvent routes events to the appropriate channel.
-func (r *AgentRunner) dispatchEvent(event pkgagent.Event) {
+// ctx is used for cancellation of HandleUIRequest calls.
+func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 	// Route stats to dedicated channel
 	if event.Type == pkgagent.EventTypeStats {
 		select {
@@ -372,7 +385,7 @@ func (r *AgentRunner) dispatchEvent(event pkgagent.Event) {
 	if event.Type == pkgagent.EventTypeStatus && event.RawData != nil {
 		if method, ok := event.RawData["ui_request_method"].(string); ok && method != "" {
 			if uiID, ok := event.RawData["ui_request_id"].(string); ok {
-				respBytes := r.adapter.HandleUIRequest(uiID, method)
+				respBytes := r.adapter.HandleUIRequest(ctx, uiID, method)
 				if respBytes != nil && r.stdin != nil {
 					r.mu.Lock()
 					if !r.closed {

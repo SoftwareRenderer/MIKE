@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"kanban/backend/config"
 	"kanban/backend/git"
+	pkgagent "kanban/pkg/agent"
 	"kanban/backend/store"
 	"kanban/backend/stream"
 	"kanban/backend/types"
@@ -489,4 +491,99 @@ func TestSlugifyBranchName_MaxLength(t *testing.T) {
 	if len(slug) > maxBranchName-len("task/") {
 		t.Errorf("slug len = %d (%q), want <= %d", len(slug), slug, maxBranchName-len("task/"))
 	}
+}
+
+// TestPersistAgentTurnEntries_SandboxField verifies that the sandbox field
+// is injected into stored ToolCallsJSON for tool_call entries, so the frontend
+// can display the correct sandbox icon after page refresh.
+func TestPersistAgentTurnEntries_SandboxField(t *testing.T) {
+	e, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "test-sandbox-persist"
+	threadID := "test-thread"
+
+	// Create the task in the DB
+	task := &types.Task{ID: taskID, ProjectID: projectID, CurrentThreadID: threadID, Branch: "main"}
+	if err := e.store.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	testPayload := pkgagentPersistEntry(
+		"read_file",
+		`{"path":"README.md"}`,
+	)
+
+	// Persist with sandbox=true
+	e.persistAgentTurnEntries(projectID, taskID, threadID, []pkgagent.PersistEntry{
+		{Role: "tool_call", ToolCallsJSON: testPayload},
+	}, time.Now(), true)
+
+	msgs, err := e.store.GetTaskMessages(taskID, threadID)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	var toolCallMsg *types.TaskMessage
+	for i := range msgs {
+		if msgs[i].Role == "tool_call" {
+			toolCallMsg = &msgs[i]
+			break
+		}
+	}
+	if toolCallMsg == nil {
+		t.Fatal("expected a tool_call message")
+	}
+
+	// Verify sandbox field is present and true
+	var tcData map[string]any
+	if err := json.Unmarshal([]byte(toolCallMsg.ToolCalls), &tcData); err != nil {
+		t.Fatalf("unmarshal tool calls: %v", err)
+	}
+	if sandbox, ok := tcData["sandbox"].(bool); !ok || !sandbox {
+		t.Errorf("expected sandbox=true in stored ToolCallsJSON, got: %v", tcData["sandbox"])
+	}
+	if tcData["tool_name"] != "read_file" {
+		t.Errorf("expected tool_name=read_file, got: %v", tcData["tool_name"])
+	}
+
+	// Now persist with sandbox=false
+	e.persistAgentTurnEntries(projectID, taskID, threadID, []pkgagent.PersistEntry{
+		{Role: "tool_call", ToolCallsJSON: pkgagentPersistEntry("bash", `{"command":"ls"}`)},
+	}, time.Now(), false)
+
+	msgs2, err := e.store.GetTaskMessages(taskID, threadID)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	var bashMsg *types.TaskMessage
+	for i := range msgs2 {
+		if msgs2[i].Role == "tool_call" && msgs2[i].ToolCalls != "" {
+			var d map[string]any
+			if json.Unmarshal([]byte(msgs2[i].ToolCalls), &d) == nil && d["tool_name"] == "bash" {
+				bashMsg = &msgs2[i]
+				break
+			}
+		}
+	}
+	if bashMsg == nil {
+		t.Fatal("expected a bash tool_call message")
+	}
+	var bashData map[string]any
+	if err := json.Unmarshal([]byte(bashMsg.ToolCalls), &bashData); err != nil {
+		t.Fatalf("unmarshal bash tool calls: %v", err)
+	}
+	if sandbox, ok := bashData["sandbox"].(bool); !ok || sandbox {
+		t.Errorf("expected sandbox=false in stored ToolCallsJSON, got: %v", bashData["sandbox"])
+	}
+}
+
+// pkgagentPersistEntry builds a ToolCallsJSON string for testing.
+func pkgagentPersistEntry(toolName, argsJSON string) string {
+	data := map[string]any{
+		"tool_id":           "call-test",
+		"tool_name":         toolName,
+		"tool_display_name": toolName,
+		"args":              nil,
+		"raw_args":          argsJSON,
+	}
+	b, _ := json.Marshal(data)
+	return string(b)
 }
