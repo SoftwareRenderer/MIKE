@@ -13,23 +13,21 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
 	"kanban/backend/extensions"
+	"kanban/pkg/agent"
 )
 
 // adapterRegistry holds registered adapter factories.
 // Used by tests to inject mock adapters. Production uses WASM loading.
 var adapterRegistry = struct {
 	sync.RWMutex
-	factories map[string]AdapterFactory
+	factories map[string]agent.AdapterFactory
 }{
-	factories: make(map[string]AdapterFactory),
+	factories: make(map[string]agent.AdapterFactory),
 }
-
-// AdapterFactory creates a new AgentAdapter instance.
-type AdapterFactory func() AgentAdapter
 
 // RegisterAdapterFactory registers an adapter factory for an extension name.
 // Used by tests to inject mock adapters.
-func RegisterAdapterFactory(name string, fn AdapterFactory) {
+func RegisterAdapterFactory(name string, fn agent.AdapterFactory) {
 	adapterRegistry.Lock()
 	defer adapterRegistry.Unlock()
 	adapterRegistry.factories[name] = fn
@@ -58,7 +56,7 @@ type wasmAdapter struct {
 
 // loadAdapter loads an AgentAdapter for the given extension.
 // It first checks for a registered factory (test mocks), then falls back to WASM.
-func loadAdapter(ext *extensions.Extension) (AgentAdapter, error) {
+func loadAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 	adapterRegistry.RLock()
 	factory, ok := adapterRegistry.factories[ext.Name]
 	adapterRegistry.RUnlock()
@@ -73,7 +71,7 @@ func loadAdapter(ext *extensions.Extension) (AgentAdapter, error) {
 // The module is built with -buildmode=c-shared which produces _initialize
 // instead of _start. The host calls _initialize to set up the Go runtime,
 // then calls exported functions.
-func loadWasmAdapter(ext *extensions.Extension) (AgentAdapter, error) {
+func loadWasmAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 	if ext.Manifest.Agent == nil || ext.Manifest.Agent.WasmModule == "" {
 		return nil, fmt.Errorf("extension %q has no wasm_module configured", ext.Name)
 	}
@@ -180,17 +178,17 @@ func (a *wasmAdapter) allocString(data []byte) (int32, error) {
 	if len(data) == 0 {
 		return 0, nil
 	}
-	allocFn := a.module.ExportedFunction(WasmFnAlloc)
+	allocFn := a.module.ExportedFunction(agent.WasmFnAlloc)
 	if allocFn == nil {
-		return 0, fmt.Errorf("function %s not exported", WasmFnAlloc)
+		return 0, fmt.Errorf("function %s not exported", agent.WasmFnAlloc)
 	}
 	results, err := allocFn.Call(context.Background(), api.EncodeI32(int32(len(data))))
 	if err != nil {
-		return 0, fmt.Errorf("call %s: %w", WasmFnAlloc, err)
+		return 0, fmt.Errorf("call %s: %w", agent.WasmFnAlloc, err)
 	}
 	ptr := api.DecodeI32(results[0])
 	if ptr == 0 {
-		return 0, fmt.Errorf("%s returned 0 (buffer exhausted, size=%d)", WasmFnAlloc, len(data))
+		return 0, fmt.Errorf("%s returned 0 (buffer exhausted, size=%d)", agent.WasmFnAlloc, len(data))
 	}
 	if !a.memory.Write(uint32(ptr), data) {
 		return 0, fmt.Errorf("memory write failed at offset %d for %d bytes", ptr, len(data))
@@ -200,7 +198,7 @@ func (a *wasmAdapter) allocString(data []byte) (int32, error) {
 
 // freeString frees WASM memory allocated by allocString via the module's Free function.
 func (a *wasmAdapter) freeString(ptr int32) {
-	freeFn := a.module.ExportedFunction(WasmFnFree)
+	freeFn := a.module.ExportedFunction(agent.WasmFnFree)
 	if freeFn != nil {
 		freeFn.Call(context.Background(), api.EncodeI32(ptr))
 	}
@@ -262,9 +260,9 @@ func (a *wasmAdapter) readResult() ([]byte, error) {
 // The config is passed as a single string parameter: the host calls Alloc,
 // writes the config, then passes (ptr, len) to the Init function.
 func (a *wasmAdapter) Init(config []byte) error {
-	fn := a.module.ExportedFunction(WasmFnInit)
+	fn := a.module.ExportedFunction(agent.WasmFnInit)
 	if fn == nil {
-		return fmt.Errorf("function %s not exported", WasmFnInit)
+		return fmt.Errorf("function %s not exported", agent.WasmFnInit)
 	}
 
 	ctx := context.Background()
@@ -278,7 +276,7 @@ func (a *wasmAdapter) Init(config []byte) error {
 
 	result, err := fn.Call(ctx, api.EncodeI32(ptr), api.EncodeI32(int32(len(config))))
 	if err != nil {
-		return fmt.Errorf("call %s: %w", WasmFnInit, err)
+		return fmt.Errorf("call %s: %w", agent.WasmFnInit, err)
 	}
 	if api.DecodeI32(result[0]) != 0 {
 		return fmt.Errorf("adapter init returned error")
@@ -297,14 +295,14 @@ func (a *wasmAdapter) Init(config []byte) error {
 
 // SubprocessConfig returns the agent process configuration from the adapter.
 // SubprocessConfig takes no parameters; the result is delivered via store_result.
-func (a *wasmAdapter) SubprocessConfig() SubprocessConfig {
-	data, err := a.callFnStrings(WasmFnSubprocessConfig)
+func (a *wasmAdapter) SubprocessConfig() agent.SubprocessConfig {
+	data, err := a.callFnStrings(agent.WasmFnSubprocessConfig)
 	if err != nil || len(data) == 0 {
-		return SubprocessConfig{}
+		return agent.SubprocessConfig{}
 	}
-	var cfg SubprocessConfig
+	var cfg agent.SubprocessConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return SubprocessConfig{}
+		return agent.SubprocessConfig{}
 	}
 	return cfg
 }
@@ -313,7 +311,7 @@ func (a *wasmAdapter) SubprocessConfig() SubprocessConfig {
 // cmd and data are passed as separate string parameters directly to the
 // WASM function (no JSON wrapper), matching the wazero string-passing pattern.
 func (a *wasmAdapter) EncodeCommand(cmd string, data []byte) []byte {
-	result, err := a.callFnStrings(WasmFnEncodeCommand, cmd, string(data))
+	result, err := a.callFnStrings(agent.WasmFnEncodeCommand, cmd, string(data))
 	if err != nil {
 		return nil
 	}
@@ -321,12 +319,12 @@ func (a *wasmAdapter) EncodeCommand(cmd string, data []byte) []byte {
 }
 
 // ParseOutput parses raw agent stdout bytes into events.
-func (a *wasmAdapter) ParseOutput(data []byte) []Event {
-	result, err := a.callFnStrings(WasmFnParseOutput, string(data))
+func (a *wasmAdapter) ParseOutput(data []byte) []agent.Event {
+	result, err := a.callFnStrings(agent.WasmFnParseOutput, string(data))
 	if err != nil || len(result) == 0 {
 		return nil
 	}
-	var events []Event
+	var events []agent.Event
 	if err := json.Unmarshal(result, &events); err != nil {
 		return nil
 	}
@@ -337,7 +335,7 @@ func (a *wasmAdapter) ParseOutput(data []byte) []Event {
 // id and method are passed as separate string parameters directly to the
 // WASM function (no JSON wrapper), matching the wazero string-passing pattern.
 func (a *wasmAdapter) HandleUIRequest(id, method string) []byte {
-	result, err := a.callFnStrings(WasmFnHandleUIRequest, id, method)
+	result, err := a.callFnStrings(agent.WasmFnHandleUIRequest, id, method)
 	if err != nil {
 		return nil
 	}
@@ -346,7 +344,7 @@ func (a *wasmAdapter) HandleUIRequest(id, method string) []byte {
 
 // Close releases the wazero runtime and calls the WASM adapter's Close function.
 func (a *wasmAdapter) Close() {
-	fn := a.module.ExportedFunction(WasmFnClose)
+	fn := a.module.ExportedFunction(agent.WasmFnClose)
 	if fn != nil {
 		fn.Call(context.Background())
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"kanban/backend/agent"
+	pkgagent "kanban/pkg/agent"
 	"kanban/backend/git"
 	"kanban/backend/prompts"
 	"kanban/backend/stream"
@@ -154,14 +155,14 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
 			}
 			switch event.Type {
-			case agent.EventTypeStatus:
+			case pkgagent.EventTypeStatus:
 				if event.Status.State == "running" {
 					startupValidated = true
 				}
-			case agent.EventTypePersist:
+			case pkgagent.EventTypePersist:
 				// agent_end produced persist entries — startup validated
 				startupValidated = true
-			case agent.EventTypeError:
+			case pkgagent.EventTypeError:
 				te.failTask(task, projectID, fmt.Sprintf("Agent error: %v", event.RawData), "agent_error")
 				return
 			}
@@ -260,7 +261,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			}
 
 			switch event.Type {
-			case agent.EventTypePersist:
+			case pkgagent.EventTypePersist:
 				// Persist pre-parsed messages from adapter
 				pt, ptok := te.persistAgentTurnEntries(projectID, task.ID, task.CurrentThreadID, event.PersistEntries, turnStartTime)
 				totalPromptTokens += pt
@@ -312,13 +313,13 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 					}
 				}
 
-			case agent.EventTypeError:
+			case pkgagent.EventTypeError:
 				if event.RawData != nil {
 					msg, _ := event.RawData["message"].(string)
 					log.Printf("[agent] task=%s error: %s", task.ID, msg)
 				}
 
-			case agent.EventTypeStatus:
+			case pkgagent.EventTypeStatus:
 				if event.Status.State == "idle" && event.Status.Activity != "" {
 					stopReason = "stop"
 				}
@@ -512,7 +513,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 // persistAgentTurnEntries persists pre-parsed agent turn entries to the DB.
 // This is a generic function that works with any agent adapter — it only iterates
 // PersistEntry objects and creates TaskMessage rows.
-func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID string, entries []agent.PersistEntry, startTime time.Time) (totalPromptTokens, totalPredictedTokens int) {
+func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID string, entries []pkgagent.PersistEntry, startTime time.Time) (totalPromptTokens, totalPredictedTokens int) {
 	if len(entries) == 0 {
 		return 0, 0
 	}
@@ -660,15 +661,15 @@ func buildContextReplay(messages []types.TaskMessage) string {
 }
 
 // toStreamEvent converts a generic agent event to a Kanban StreamEvent for WebSocket broadcasting.
-func toStreamEvent(event agent.Event, sandbox bool, runner *agent.AgentRunner) types.StreamEvent {
+func toStreamEvent(event pkgagent.Event, sandbox bool, runner *agent.AgentRunner) types.StreamEvent {
 	switch event.Type {
-	case agent.EventTypeToken:
+	case pkgagent.EventTypeToken:
 		return types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": event.Text}}
 
-	case agent.EventTypeReasoning:
+	case pkgagent.EventTypeReasoning:
 		return types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": event.Thinking}}
 
-	case agent.EventTypeToolCall:
+	case pkgagent.EventTypeToolCall:
 		return types.StreamEvent{Type: types.WSTypeToolCall, Data: map[string]any{
 			"tool_id":           event.ToolCall.ID,
 			"tool_name":         event.ToolCall.Name,
@@ -678,7 +679,7 @@ func toStreamEvent(event agent.Event, sandbox bool, runner *agent.AgentRunner) t
 			"sandbox":           sandbox,
 		}}
 
-	case agent.EventTypeToolResult:
+	case pkgagent.EventTypeToolResult:
 		return types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{
 			"tool_id":  event.ToolResult.ID,
 			"success":  event.ToolResult.Success,
@@ -686,7 +687,7 @@ func toStreamEvent(event agent.Event, sandbox bool, runner *agent.AgentRunner) t
 			"sandbox":  sandbox,
 		}}
 
-	case agent.EventTypeStatus:
+	case pkgagent.EventTypeStatus:
 		state := "running"
 		activity := "Agent running"
 		if event.Status.State != "" {
@@ -697,7 +698,7 @@ func toStreamEvent(event agent.Event, sandbox bool, runner *agent.AgentRunner) t
 		}
 		return types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": state, "activity": activity}}
 
-	case agent.EventTypeStats:
+	case pkgagent.EventTypeStats:
 		return types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
 			"model_name":       runner.ModelName(),
 			"prompt_tokens":    event.Stats.TotalInput,
@@ -707,7 +708,7 @@ func toStreamEvent(event agent.Event, sandbox bool, runner *agent.AgentRunner) t
 			"context_percent":  event.Stats.ContextPercent,
 		}}
 
-	case agent.EventTypeError:
+	case pkgagent.EventTypeError:
 		msg := ""
 		code := "agent_error"
 		if event.RawData != nil {

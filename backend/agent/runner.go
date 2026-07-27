@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"kanban/backend/extensions"
+	pkgagent "kanban/pkg/agent"
 	sandboxmgr "kanban/backend/sandbox"
 )
 
@@ -22,17 +23,17 @@ import (
 // Data flow:
 //
 //	Backend ──Prompt()──► Runner ──EncodeCommand()──► Adapter ──bytes──► Agent stdin
-//	Agent stdout ──bytes──► Adapter ──ParseOutput()──► Events ──► Runner ──► Backend
+//	Agent stdout ──bytes──► Adapter ──ParseOutput()──► pkgagent.Events ──► Runner ──► Backend
 type AgentRunner struct {
-	adapter      AgentAdapter
+	adapter      pkgagent.AgentAdapter
 	stdin        io.WriteCloser
 	stdout       io.Reader
 	cmd          *exec.Cmd
 	mu          sync.Mutex
 	closed      bool
-	eventChan   chan Event
-	statsChan   chan SessionStatsData
-	compactChan chan *CompactResult
+	eventChan   chan pkgagent.Event
+	statsChan   chan pkgagent.SessionStatsData
+	compactChan chan *pkgagent.CompactResult
 	modelUpdated chan struct{}
 	done        chan struct{}
 
@@ -86,9 +87,9 @@ func NewAgentRunner(ext *extensions.Extension, sandboxMgr *sandboxmgr.SandboxMan
 
 	r := &AgentRunner{
 		adapter:      adapter,
-		eventChan:    make(chan Event, 64),
-		statsChan:    make(chan SessionStatsData, 16),
-		compactChan:  make(chan *CompactResult, 4),
+		eventChan:    make(chan pkgagent.Event, 64),
+		statsChan:    make(chan pkgagent.SessionStatsData, 16),
+		compactChan:  make(chan *pkgagent.CompactResult, 4),
 		modelUpdated: make(chan struct{}, 1),
 		done:         make(chan struct{}),
 	}
@@ -161,7 +162,7 @@ func (r *AgentRunner) Prompt(ctx context.Context, message string, behavior ...st
 		return fmt.Errorf("agent runner closed")
 	}
 
-	bytes := r.adapter.EncodeCommand(CommandPrompt, dataBytes)
+	bytes := r.adapter.EncodeCommand(pkgagent.CommandPrompt, dataBytes)
 	if bytes == nil {
 		return fmt.Errorf("adapter EncodeCommand returned nil (adapter may be broken)")
 	}
@@ -170,15 +171,15 @@ func (r *AgentRunner) Prompt(ctx context.Context, message string, behavior ...st
 }
 
 // EventChan returns the channel for receiving agent events.
-func (r *AgentRunner) EventChan() <-chan Event {
+func (r *AgentRunner) EventChan() <-chan pkgagent.Event {
 	return r.eventChan
 }
 
 // Compact sends a compact command and waits for the result.
-func (r *AgentRunner) Compact(ctx context.Context) (*CompactResult, error) {
+func (r *AgentRunner) Compact(ctx context.Context) (*pkgagent.CompactResult, error) {
 	r.mu.Lock()
 	if !r.closed {
-		bytes := r.adapter.EncodeCommand(CommandCompact, nil)
+		bytes := r.adapter.EncodeCommand(pkgagent.CommandCompact, nil)
 		if bytes != nil {
 			r.stdin.Write(bytes) // best-effort
 		}
@@ -196,10 +197,10 @@ func (r *AgentRunner) Compact(ctx context.Context) (*CompactResult, error) {
 }
 
 // QueryStats sends a session stats query and waits for the response.
-func (r *AgentRunner) QueryStats(ctx context.Context) SessionStatsData {
+func (r *AgentRunner) QueryStats(ctx context.Context) pkgagent.SessionStatsData {
 	r.mu.Lock()
 	if !r.closed {
-		bytes := r.adapter.EncodeCommand(CommandStats, nil)
+		bytes := r.adapter.EncodeCommand(pkgagent.CommandStats, nil)
 		if bytes != nil {
 			r.stdin.Write(bytes) // best-effort
 		}
@@ -210,16 +211,16 @@ func (r *AgentRunner) QueryStats(ctx context.Context) SessionStatsData {
 	case stats := <-r.statsChan:
 		return stats
 	case <-ctx.Done():
-		return SessionStatsData{}
+		return pkgagent.SessionStatsData{}
 	case <-time.After(3 * time.Second):
-		return SessionStatsData{}
+		return pkgagent.SessionStatsData{}
 	}
 }
 
 func (r *AgentRunner) QueryModel(ctx context.Context) string {
 	r.mu.Lock()
 	if !r.closed {
-		bytes := r.adapter.EncodeCommand(CommandGetState, nil)
+		bytes := r.adapter.EncodeCommand(pkgagent.CommandGetState, nil)
 		if bytes != nil {
 			r.stdin.Write(bytes) // best-effort
 		}
@@ -268,7 +269,7 @@ func (r *AgentRunner) Close() {
 
 	// Send abort command (best-effort)
 	if r.stdin != nil {
-		bytes := r.adapter.EncodeCommand(CommandAbort, nil)
+		bytes := r.adapter.EncodeCommand(pkgagent.CommandAbort, nil)
 		if bytes != nil {
 			r.stdin.Write(bytes) // best-effort
 		}
@@ -337,9 +338,9 @@ func (r *AgentRunner) readOutput() {
 }
 
 // dispatchEvent routes events to the appropriate channel.
-func (r *AgentRunner) dispatchEvent(event Event) {
+func (r *AgentRunner) dispatchEvent(event pkgagent.Event) {
 	// Route stats to dedicated channel
-	if event.Type == EventTypeStats {
+	if event.Type == pkgagent.EventTypeStats {
 		select {
 		case r.statsChan <- event.Stats:
 		default:
@@ -349,9 +350,9 @@ func (r *AgentRunner) dispatchEvent(event Event) {
 	}
 
 	// Route compact responses to dedicated channel
-	if event.Type == EventTypeStatus && event.RawData != nil {
+	if event.Type == pkgagent.EventTypeStatus && event.RawData != nil {
 		if cmd, ok := event.RawData["command"].(string); ok && cmd == "compact" {
-			result := &CompactResult{}
+			result := &pkgagent.CompactResult{}
 			if event.RawData["summary"] != nil {
 				result.Summary = fmt.Sprintf("%v", event.RawData["summary"])
 			}
@@ -368,7 +369,7 @@ func (r *AgentRunner) dispatchEvent(event Event) {
 	}
 
 	// Route UI requests through adapter
-	if event.Type == EventTypeStatus && event.RawData != nil {
+	if event.Type == pkgagent.EventTypeStatus && event.RawData != nil {
 		if method, ok := event.RawData["ui_request_method"].(string); ok && method != "" {
 			if uiID, ok := event.RawData["ui_request_id"].(string); ok {
 				respBytes := r.adapter.HandleUIRequest(uiID, method)

@@ -92,12 +92,6 @@ type SubprocessConfig struct {
 	Env    []string `json:"env,omitempty"`
 }
 
-// CompactResult holds the result of a compaction request.
-type CompactResult struct {
-	Summary string
-	Err     error
-}
-
 // AgentAdapter is the interface between the runner (backend) and the adapter (WASM extension).
 // The runner loads a WASM module and wraps its exports behind this interface.
 // The adapter owns ALL protocol logic: command encoding, output parsing, state management.
@@ -105,7 +99,7 @@ type AgentAdapter interface {
 	// Init initializes the adapter with extension config JSON.
 	Init(config []byte) error
 
-	// SubprocessConfig returns the agent process configuration.
+	// SubprocessConfig returns the agent or process configuration.
 	// The runner spawns this binary with these args/env.
 	SubprocessConfig() SubprocessConfig
 
@@ -125,6 +119,15 @@ type AgentAdapter interface {
 
 	// Close cleans up adapter state.
 	Close()
+}
+
+// AdapterFactory creates a new AgentAdapter instance.
+type AdapterFactory func() AgentAdapter
+
+// CompactResult holds the result of a compaction request.
+type CompactResult struct {
+	Summary string
+	Err     error
 }
 
 // WASM function names that the adapter module must export.
