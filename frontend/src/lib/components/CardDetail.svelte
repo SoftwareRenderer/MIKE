@@ -828,7 +828,7 @@
                             {/if}
                             {#if DiffViewerComponent}
                                 {@const DiffViewer = DiffViewerComponent}
-                                <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} mergedLabel={isDoneTask ? 'Merged' : 'Merged from Subtasks'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                                <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? 'Merged' : 'Merged from Subtasks'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
                             {:else}
                                 <div class="diff-viewer-loading">Loading diff viewer...</div>
                             {/if}
