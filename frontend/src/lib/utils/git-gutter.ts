@@ -203,6 +203,12 @@ export function gitGutter() {
                 this.container.appendChild(this.canvas);
                 view.dom.appendChild(this.container);
                 this.position(view);
+
+                // Schedule an initial positioning and redraw after the first render pass.
+                requestAnimationFrame(() => {
+                    this.position(view);
+                    this.redraw(view);
+                });
             }
 
             position(view: EditorView) {
@@ -242,11 +248,11 @@ export function gitGutter() {
                 if (update.geometryChanged || update.viewportChanged) {
                     this.position(update.view);
                 }
-                // Redraw whenever the gutter recomputes markers (version change)
-                // or on doc/viewport changes
+                
                 const versionChanged = state.mapVersion !== this.lastVersion;
                 if (versionChanged) this.lastVersion = state.mapVersion;
-                if (versionChanged || update.docChanged || update.viewportChanged) {
+                
+                if (versionChanged || update.docChanged || update.viewportChanged || update.geometryChanged) {
                     // Double rAF: wait for gutter lineMarker to run, then redraw
                     requestAnimationFrame(() => requestAnimationFrame(() => this.redraw(update.view)));
                 }
@@ -258,7 +264,11 @@ export function gitGutter() {
         },
         {
             eventHandlers: {
-                resize: () => true,
+                resize: (event, view) => {
+                    this.position(view);
+                    this.redraw(view);
+                    return true;
+                },
             },
         }
     );
