@@ -332,6 +332,7 @@
                                 isPending={meta.cpState?.isPending || false}
                                 commitLabel={meta.cpState?.commitLabel || undefined}
                                 commitHash={meta.cpState?.commitHash || meta.cpThread?.checkpoint_commit_hash || undefined}
+                                checkpointIndex={meta.checkpointIndex}
                                 onViewChanges={onViewChanges}
                             />
                         </div>

@@ -2085,63 +2085,6 @@ func (wm *WorktreeManager) ResetWorktreeTo(taskID, hash string) error {
 	return nil
 }
 
-// ResolveStashParent finds the state BEFORE a stash checkpoint's changes.
-// Uses the previous stash entry (stash@{N+1} in list order) which contains
-// accumulated changes from all prior checkpoints. Falls back to stash^
-// (HEAD at stash time) if no previous entry exists.
-// Only considers stash entries belonging to the same branch (task).
-// Returns the original headRef if not found in stash list.
-func (wm *WorktreeManager) ResolveStashParent(taskID, baseRef, headRef string) (string, error) {
-	if headRef == "" {
-		return "", nil
-	}
-	worktreePath, err := wm.WorktreePath(taskID)
-	if err != nil {
-		return headRef, err
-	}
-
-	task, err := wm.store.GetTaskByTaskID(taskID)
-	if err != nil {
-		return headRef, nil
-	}
-	branchMarker := " " + task.Branch + ":"
-
-	entries, err := wm.listStashEntries(worktreePath)
-	if err != nil {
-		return headRef, nil
-	}
-
-	var branchEntries []string
-	for _, e := range entries {
-		if strings.Contains(e.Subject, branchMarker) {
-			branchEntries = append(branchEntries, e.Hash)
-		}
-	}
-
-	// Find headRef in branch entries and return the next one (previous checkpoint)
-	for i, hash := range branchEntries {
-		if hash == headRef {
-			if i+1 < len(branchEntries) {
-				return branchEntries[i+1], nil
-			}
-			// No previous entry — fall back to HEAD at stash time
-			parent, err := wm.gitRunOutput(worktreePath, "rev-parse", headRef+"^")
-			if err == nil {
-				return strings.TrimSpace(parent), nil
-			}
-			break
-		}
-	}
-
-	// Stash not found in list (e.g., dropped after commit-and-done).
-	// Fall back to HEAD at stash time (first parent of the stash commit).
-	parent, err := wm.gitRunOutput(worktreePath, "rev-parse", headRef+"^")
-	if err == nil {
-		return strings.TrimSpace(parent), nil
-	}
-	return headRef, nil
-}
-
 // branchExistsInRepo checks if a branch exists in the given git repo.
 func (wm *WorktreeManager) branchExistsInRepo(repoPath, branchName string) bool {
 	_, err := wm.gitRunOutput(repoPath, "rev-parse", "--verify", branchName)
@@ -2178,6 +2121,82 @@ func (wm *WorktreeManager) listStashEntries(repoPath string) ([]StashEntry, erro
 		})
 	}
 	return entries, nil
+}
+
+// GetLatestStashHash returns the commit hash of the most recent stash entry
+// for a task's worktree. Returns empty string if no stashes exist.
+func (wm *WorktreeManager) GetLatestStashHash(taskID string) (string, error) {
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return "", err
+	}
+	task, err := wm.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		return "", nil
+	}
+	branchMarker := " " + task.Branch + ":"
+
+	entries, err := wm.listStashEntries(worktreePath)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Subject, branchMarker) {
+			return e.Hash, nil
+		}
+	}
+	// Fallback: return any stash if task-specific ones not found
+	if len(entries) > 0 {
+		return entries[0].Hash, nil
+	}
+	return "", nil
+}
+
+// GetStashByCheckpointIndex returns the stash hash for a given checkpoint index.
+// Checkpoint indices are 0-based, oldest first (matching UI order).
+// Stash list is newest first (stash@{0} is newest), so we reverse the mapping:
+// checkpointIndex 0 (oldest) -> last stash entry
+// checkpointIndex N (newest) -> stash@{0} if N matches
+func (wm *WorktreeManager) GetStashByCheckpointIndex(taskID string, checkpointIdx int) (string, error) {
+	if checkpointIdx < 0 {
+		return "", nil
+	}
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return "", err
+	}
+	task, err := wm.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		return "", nil
+	}
+	branchMarker := " " + task.Branch + ":"
+
+	entries, err := wm.listStashEntries(worktreePath)
+	if err != nil {
+		return "", err
+	}
+
+	// Filter to task-specific stashes
+	var branchEntries []StashEntry
+	for _, e := range entries {
+		if strings.Contains(e.Subject, branchMarker) {
+			branchEntries = append(branchEntries, e)
+		}
+	}
+	if len(branchEntries) == 0 {
+		branchEntries = entries // fallback to all stashes
+	}
+
+	// Stash list is newest first (stash@{0} is newest = branchEntries[0]).
+	// Checkpoint indices are oldest first (checkpointIdx 0 = oldest).
+	// So checkpointIdx 0 maps to branchEntries[len-1] (oldest stash).
+	// checkpointIdx N maps to branchEntries[len-1-N].
+	totalStashes := len(branchEntries)
+	stashIdx := totalStashes - 1 - checkpointIdx
+	if stashIdx >= 0 && stashIdx < totalStashes {
+		return branchEntries[stashIdx].Hash, nil
+	}
+	return "", nil
 }
 
 // PushStash pushes worktree changes as a stash with a labeled message and

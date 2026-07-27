@@ -415,7 +415,7 @@ test.describe.serial('Task Stash/Unstash', () => {
     await page.waitForSelector('.card', { timeout: 10000 });
   });
 
-  test('first checkpoint shows empty diff, second shows first checkpoint changes', async ({ page }) => {
+  test('checkpoint diff includes changes at that checkpoint', async ({ page }) => {
     const info = getTaskInfo();
     if (!info) {
       await expect(page.locator('.board')).toBeVisible();
@@ -443,27 +443,29 @@ test.describe.serial('Task Stash/Unstash', () => {
       }, { pid: projectId, tid: taskId });
     }).toPass({ timeout: 3000 });
 
+    // First checkpoint: shows changes AT checkpoint 1 (includes check1)
     const diff1 = JSON.parse(execSync(
       `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash1Hash}"`,
       { encoding: 'utf-8' }
     ));
     expect(diff1.diff).toContain('real-file');
-    expect(diff1.diff).not.toContain('check1');
+    expect(diff1.diff).toContain('check1');
 
+    // Second checkpoint: shows changes AT checkpoint 2 (includes check1 + check2)
     const diff2 = JSON.parse(execSync(
       `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash2Hash}"`,
       { encoding: 'utf-8' }
     ));
     expect(diff2.diff).toContain('real-file');
     expect(diff2.diff).toContain('check1');
-    expect(diff2.diff).not.toContain('check2');
+    expect(diff2.diff).toContain('check2');
 
     execSync(`cd ${worktreeDir} && git stash clear`);
     const baseRef = execSync(`cd ${worktreeDir} && git rev-parse HEAD~1`, { encoding: 'utf-8' }).trim();
     execSync(`cd ${worktreeDir} && git reset --hard ${baseRef}`);
   });
 
-  test('single checkpoint with no prior commits shows empty diff', async ({ page }) => {
+  test('single checkpoint shows its own changes', async ({ page }) => {
     const info = getTaskInfo();
     if (!info) {
       await expect(page.locator('.board')).toBeVisible();
@@ -480,12 +482,12 @@ test.describe.serial('Task Stash/Unstash', () => {
       `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stashHash}"`,
       { encoding: 'utf-8' }
     ));
-    expect(diff.diff.trim()).toBe('');
+    expect(diff.diff).toContain('only-check');
 
     execSync(`cd ${worktreeDir} && git stash clear`);
   });
 
-  test('View Changes API resolves previous stash correctly', async ({ page }) => {
+  test('View Changes API shows changes at each checkpoint', async ({ page }) => {
     const info = getTaskInfo();
     if (!info) {
       await expect(page.locator('.board')).toBeVisible();
@@ -514,23 +516,23 @@ test.describe.serial('Task Stash/Unstash', () => {
       }, { pid: projectId, tid: taskId });
     }).toPass({ timeout: 3000 });
 
+    // Checkpoint 1: includes user-file (committed) + check1 (at this checkpoint)
     const diff1 = JSON.parse(execSync(
       `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash1}"`,
       { encoding: 'utf-8' }
     ));
-    console.log('Checkpoint 1 diff files:', diff1.diff.split('\n').filter(l => l.startsWith('+++') || l.startsWith('---')).join(', '));
     expect(diff1.diff).toContain('user-file');
-    expect(diff1.diff).not.toContain('check1');
+    expect(diff1.diff).toContain('check1');
     expect(diff1.diff).not.toContain('check2');
 
+    // Checkpoint 2: includes user-file + check1 + check2 (all accumulated)
     const diff2 = JSON.parse(execSync(
       `curl -s "http://localhost:3000/api/projects/${projectId}/tasks/${taskId}/diff?head=${stash2}"`,
       { encoding: 'utf-8' }
     ));
-    console.log('Checkpoint 2 diff files:', diff2.diff.split('\n').filter(l => l.startsWith('+++') || l.startsWith('---')).join(', '));
     expect(diff2.diff).toContain('user-file');
     expect(diff2.diff).toContain('check1');
-    expect(diff2.diff).not.toContain('check2');
+    expect(diff2.diff).toContain('check2');
 
     execSync(`cd ${worktreeDir} && git stash clear`);
     const baseRef = execSync(`cd ${worktreeDir} && git rev-parse HEAD~1`, { encoding: 'utf-8' }).trim();

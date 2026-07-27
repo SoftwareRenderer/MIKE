@@ -34,6 +34,7 @@ export function trimEntriesForRegenerate(entries: ChatEntry[], entryIndex: numbe
 export interface EntryMeta {
     cpState: CheckpointState | null;
     cpThread: Thread | null;
+    checkpointIndex: number; // 0-based index among checkpoints (oldest first)
     isLastUserMessage: boolean;
 }
 

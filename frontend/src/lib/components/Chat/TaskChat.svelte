@@ -193,15 +193,22 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         const streaming = isLoading;
         const cpStateMap = buildCheckpointStateMap(entries, pendingCheckpoints, checkpointLabels, checkpointCommitHashes);
         const activeThread = threads.find(t => t.is_active);
+        // Count all checkpoints (oldest first) for stash index mapping.
+        // Even checkpoints without commitHash get an index — the backend resolves
+        // to the matching stash by index when headRef equals baseRef.
+        let cpIdx = 0;
         for (let i = 0; i < entries.length; i++) {
             const entry = entries[i];
+            const cpState = entry.role === 'user' ? (cpStateMap.get(i) ?? null) : null;
+            const idx = cpState ? cpIdx++ : -1;
             metas[i] = entry.role === 'user'
                 ? {
-                    cpState: cpStateMap.get(i) ?? null,
+                    cpState,
                     cpThread: threads.length > 0 ? getCheckpointThreadsUtil(entry, threads, activeThread, i === 0) : null,
+                    checkpointIndex: idx,
                     isLastUserMessage: lastUserMessageIds.has(entry.id) && !streaming,
                 }
-                : { cpState: null, cpThread: null, isLastUserMessage: false };
+                : { cpState: null, cpThread: null, checkpointIndex: -1, isLastUserMessage: false };
         }
         // Force tracking of checkpointHashesVersion so meta rebuilds on checkpoint changes
         void checkpointHashesVersion;
