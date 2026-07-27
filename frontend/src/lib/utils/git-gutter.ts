@@ -2,6 +2,8 @@ import {
     EditorView,
     gutter,
     GutterMarker,
+    ViewPlugin,
+    ViewUpdate,
 } from '@codemirror/view';
 import { mergeMarkers } from './diff-gutter';
 
@@ -114,6 +116,7 @@ export interface GitGutterState {
     baselineContent: string;
     current: string;
     map: Map<number, ('added' | 'modified' | 'removed')[]>;
+    mapVersion: number; // incremented whenever map is recomputed
 }
 
 /** CodeMirror extension for VS Code-style git gutter indicators.
@@ -132,7 +135,7 @@ export interface GitGutterState {
  *   state.baselineContent = newContent;
  */
 export function gitGutter() {
-    const state: GitGutterState = { initialMarkers: null, baselineContent: '', current: '', map: new Map() };
+    const state: GitGutterState = { initialMarkers: null, baselineContent: '', current: '', map: new Map(), mapVersion: 0 };
 
     const gutterDef = gutter({
         class: 'cm-gitGutter',
@@ -150,6 +153,7 @@ export function gitGutter() {
                     map.set(ln, types as ('added' | 'modified' | 'removed')[]);
                 }
                 state.map = map;
+                state.mapVersion++;
             }
 
             const types = state.map.get(ln);
@@ -182,5 +186,109 @@ export function gitGutter() {
         },
     });
 
-    return { extension: [gutterDef, theme], state };
+    // Scrollbar annotation — canvas overlay showing colored marks for changed lines
+    // Tracks mapVersion to detect when gutter recomputes markers
+    const scrollbarAnnotation = ViewPlugin.fromClass(
+        class {
+            container: HTMLElement;
+            canvas: HTMLCanvasElement;
+            lastVersion = -1;
+
+            constructor(view: EditorView) {
+                this.container = document.createElement('div');
+                this.container.className = 'cm-scrollbarAnnotation';
+                this.canvas = document.createElement('canvas');
+                this.canvas.width = 12;
+                this.canvas.height = 1;
+                this.container.appendChild(this.canvas);
+                view.dom.appendChild(this.container);
+                this.position(view);
+            }
+
+            position(view: EditorView) {
+                const scroller = view.scrollDOM;
+                const scrollerRect = scroller.getBoundingClientRect();
+                const viewRect = view.dom.getBoundingClientRect();
+                this.container.style.left = `${scrollerRect.right - viewRect.left - 14}px`;
+                this.container.style.top = `${scrollerRect.top - viewRect.top}px`;
+                this.container.style.height = `${scrollerRect.height}px`;
+                this.canvas.height = scrollerRect.height;
+                this.canvas.width = 12;
+            }
+
+            redraw(view: EditorView) {
+                const ctx = this.canvas.getContext('2d');
+                if (!ctx) return;
+                const totalLines = view.state.doc.lines;
+                if (totalLines === 0) return;
+                ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                const colorMap: Record<string, string> = {
+                    added: 'rgba(63,185,80,0.6)',
+                    modified: 'rgba(88,166,255,0.6)',
+                    removed: 'rgba(248,81,73,0.6)',
+                };
+                for (const [ln, types] of state.map) {
+                    for (const t of types) {
+                        const fraction = (ln - 0.5) / totalLines;
+                        const y = fraction * this.canvas.height;
+                        const lineHeight = (1 / totalLines) * this.canvas.height;
+                        ctx.fillStyle = colorMap[t] || colorMap.added;
+                        ctx.fillRect(0, Math.max(0, y), 10, Math.max(1, lineHeight - 0.5));
+                    }
+                }
+            }
+
+            update(update: ViewUpdate) {
+                if (update.geometryChanged || update.viewportChanged) {
+                    this.position(update.view);
+                }
+                // Redraw whenever the gutter recomputes markers (version change)
+                // or on doc/viewport changes
+                const versionChanged = state.mapVersion !== this.lastVersion;
+                if (versionChanged) this.lastVersion = state.mapVersion;
+                if (versionChanged || update.docChanged || update.viewportChanged) {
+                    // Double rAF: wait for gutter lineMarker to run, then redraw
+                    requestAnimationFrame(() => requestAnimationFrame(() => this.redraw(update.view)));
+                }
+            }
+
+            destroy() {
+                this.container.remove();
+            }
+        },
+        {
+            eventHandlers: {
+                resize: () => true,
+            },
+        }
+    );
+
+    // CSS for the scrollbar annotation container and custom editor scrollbar
+    const scrollbarTheme = EditorView.baseTheme({
+        '.cm-scrollbarAnnotation': {
+            position: 'absolute',
+            top: '0',
+            right: '0',
+            pointerEvents: 'none',
+            zIndex: '20',
+        },
+        '.cm-scroller': {
+            overflow: 'auto',
+        },
+        '.cm-scroller::-webkit-scrollbar': {
+            width: '12px',
+        },
+        '.cm-scroller::-webkit-scrollbar-track': {
+            background: 'transparent',
+        },
+        '.cm-scroller::-webkit-scrollbar-thumb': {
+            background: 'var(--color-surface-3)',
+            borderRadius: '6px',
+        },
+        '.cm-scroller::-webkit-scrollbar-thumb:hover': {
+            background: 'var(--color-surface-4)',
+        },
+    });
+
+    return { extension: [gutterDef, theme, scrollbarAnnotation, scrollbarTheme], state };
 }
