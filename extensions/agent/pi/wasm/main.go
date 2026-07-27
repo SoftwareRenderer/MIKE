@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"kanban/extensions/agent/pi"
+	"kanban/pkg/agent"
 )
 
 var adapter *pi.Adapter
@@ -115,7 +116,7 @@ func ParseOutput(data string) {
 	}
 	events := adapter.ParseOutput([]byte(data))
 	if events == nil {
-		events = []pi.Event{}
+		events = []agent.Event{}
 	}
 	result, _ := json.Marshal(events)
 	storeResult(string(result))

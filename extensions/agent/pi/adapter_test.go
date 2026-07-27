@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"kanban/pkg/agent"
 )
 
 func TestAdapter_Init(t *testing.T) {
@@ -101,8 +103,8 @@ func TestAdapter_ParseOutput_TextDelta(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Type != EventTypeToken {
-		t.Errorf("Type = %q, want %q", events[0].Type, EventTypeToken)
+	if events[0].Type != agent.EventTypeToken {
+		t.Errorf("Type = %q, want %q", events[0].Type, agent.EventTypeToken)
 	}
 	if events[0].Text != "hello world" {
 		t.Errorf("Text = %q, want %q", events[0].Text, "hello world")
@@ -119,7 +121,7 @@ func TestAdapter_ParseOutput_ThinkingDelta(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Type != EventTypeReasoning {
+	if events[0].Type != agent.EventTypeReasoning {
 		t.Errorf("Type = %q", events[0].Type)
 	}
 	if events[0].Thinking != "let me think" {
@@ -138,8 +140,8 @@ func TestAdapter_ParseOutput_ToolExecution(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Type != EventTypeToolCall {
-		t.Errorf("Type = %q, want %q", events[0].Type, EventTypeToolCall)
+	if events[0].Type != agent.EventTypeToolCall {
+		t.Errorf("Type = %q, want %q", events[0].Type, agent.EventTypeToolCall)
 	}
 	if events[0].ToolCall.Name != "read_file" {
 		t.Errorf("ToolCall.Name = %q, want read_file (mapped from read)", events[0].ToolCall.Name)
@@ -155,7 +157,7 @@ func TestAdapter_ParseOutput_ToolExecution(t *testing.T) {
 	if len(events2) != 1 {
 		t.Fatalf("got %d events, want 1", len(events2))
 	}
-	if events2[0].Type != EventTypeToolResult {
+	if events2[0].Type != agent.EventTypeToolResult {
 		t.Errorf("Type = %q", events2[0].Type)
 	}
 	if !events2[0].ToolResult.Success {
@@ -176,7 +178,7 @@ func TestAdapter_ParseOutput_AgentStart(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Type != EventTypeStatus {
+	if events[0].Type != agent.EventTypeStatus {
 		t.Errorf("Type = %q", events[0].Type)
 	}
 	if events[0].Status.State != "running" {
@@ -194,8 +196,8 @@ func TestAdapter_ParseOutput_AgentEnd(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Type != EventTypePersist {
-		t.Errorf("Type = %q, want %q", events[0].Type, EventTypePersist)
+	if events[0].Type != agent.EventTypePersist {
+		t.Errorf("Type = %q, want %q", events[0].Type, agent.EventTypePersist)
 	}
 	if len(events[0].PersistEntries) != 1 {
 		t.Fatalf("PersistEntries len = %d, want 1", len(events[0].PersistEntries))
@@ -225,8 +227,8 @@ func TestAdapter_ParseOutput_SessionStats(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Type != EventTypeStats {
-		t.Errorf("Type = %q, want %q", events[0].Type, EventTypeStats)
+	if events[0].Type != agent.EventTypeStats {
+		t.Errorf("Type = %q, want %q", events[0].Type, agent.EventTypeStats)
 	}
 	if events[0].Stats.TotalInput != 1000 {
 		t.Errorf("TotalInput = %d", events[0].Stats.TotalInput)
@@ -360,8 +362,8 @@ func TestAdapter_GetState_DiscoversModelName(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Type != EventTypeStatus {
-		t.Fatalf("Type = %q, want %q", events[0].Type, EventTypeStatus)
+	if events[0].Type != agent.EventTypeStatus {
+		t.Fatalf("Type = %q, want %q", events[0].Type, agent.EventTypeStatus)
 	}
 	if mn, ok := events[0].RawData["model_name"].(string); !ok || mn != "openai/gpt-4o" {
 		t.Errorf("model_name = %q, want %q", mn, "openai/gpt-4o")
@@ -435,8 +437,8 @@ func TestAdapter_AgentEnd_PersistsDiscoveredModelName(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Type != EventTypePersist {
-		t.Fatalf("Type = %q, want %q", events[0].Type, EventTypePersist)
+	if events[0].Type != agent.EventTypePersist {
+		t.Fatalf("Type = %q, want %q", events[0].Type, agent.EventTypePersist)
 	}
 	if len(events[0].PersistEntries) != 1 {
 		t.Fatalf("PersistEntries len = %d, want 1", len(events[0].PersistEntries))
@@ -464,8 +466,8 @@ func TestAdapter_AgentEnd_FallsBackToPiWhenNoModel(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Type != EventTypePersist {
-		t.Fatalf("Type = %q, want %q", events[0].Type, EventTypePersist)
+	if events[0].Type != agent.EventTypePersist {
+		t.Fatalf("Type = %q, want %q", events[0].Type, agent.EventTypePersist)
 	}
 	if len(events[0].PersistEntries) != 1 {
 		t.Fatalf("PersistEntries len = %d, want 1", len(events[0].PersistEntries))
@@ -490,8 +492,8 @@ func TestAdapter_AgentEnd_ExtractsModelFromEvent(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Type != EventTypePersist {
-		t.Fatalf("Type = %q, want %q", events[0].Type, EventTypePersist)
+	if events[0].Type != agent.EventTypePersist {
+		t.Fatalf("Type = %q, want %q", events[0].Type, agent.EventTypePersist)
 	}
 	if len(events[0].PersistEntries) != 1 {
 		t.Fatalf("PersistEntries len = %d, want 1", len(events[0].PersistEntries))
@@ -516,8 +518,8 @@ func TestAdapter_AgentEnd_ExtractsModelFromMessage(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Type != EventTypePersist {
-		t.Fatalf("Type = %q, want %q", events[0].Type, EventTypePersist)
+	if events[0].Type != agent.EventTypePersist {
+		t.Fatalf("Type = %q, want %q", events[0].Type, agent.EventTypePersist)
 	}
 	if len(events[0].PersistEntries) != 1 {
 		t.Fatalf("PersistEntries len = %d, want 1", len(events[0].PersistEntries))

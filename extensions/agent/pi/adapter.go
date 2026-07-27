@@ -8,127 +8,60 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"kanban/pkg/agent"
 )
 
-// Event types (match backend/agent/interface.go by JSON wire format).
-const (
-	EventTypeToken        = "token"
-	EventTypeReasoning    = "reasoning"
-	EventTypeToolCall     = "tool_call"
-	EventTypeToolResult   = "tool_result"
-	EventTypeStatus       = "status"
-	EventTypeStats        = "stats"
-	EventTypeError        = "error"
-	EventTypePersist      = "persist"
-	EventTypeTurnComplete = "turn_complete"
-)
-
-// Event types and structs match backend/agent/interface.go by JSON wire format.
-type Event struct {
-	Type           string           `json:"type"`
-	Text           string           `json:"text,omitempty"`
-	Thinking       string           `json:"thinking,omitempty"`
-	ToolCall       ToolCallData     `json:"tool_call,omitempty"`
-	ToolResult     ToolResultData   `json:"tool_result,omitempty"`
-	Status         StatusData       `json:"status,omitempty"`
-	Stats          SessionStatsData `json:"stats,omitempty"`
-	PersistEntries []PersistEntry   `json:"persist_entries,omitempty"`
-	RawData        map[string]any   `json:"raw_data,omitempty"`
+// Pi Protocol Data Structs
+type piMessageUpdate struct {
+	AssistantMessageEvent struct {
+		Type  string `json:"type"`
+		Delta string `json:"delta"`
+	} `json:"assistantMessageEvent"`
 }
 
-type ToolCallData struct {
-	ID          string         `json:"id"`
-	Name        string         `json:"name"`
-	DisplayName string         `json:"display_name"`
-	Args        map[string]any `json:"args"`
-	RawArgs     string         `json:"raw_args,omitempty"`
+type piToolExecution struct {
+	ToolName   string                 `json:"toolName"`
+	ToolCallID string                 `json:"toolCallId"`
+	Args       map[string]any         `json:"args"`
+	IsError    bool                   `json:"isError"`
+	Result     map[string]any         `json:"result"`
 }
 
-type ToolResultData struct {
-	ID      string `json:"id"`
-	Output  string `json:"output"`
-	Success bool   `json:"success"`
+type piAgentEnd struct {
+	Model    string                   `json:"model"`
+	ModelName string                  `json:"modelName"`
+	Messages []map[string]any         `json:"messages"`
 }
 
-type StatusData struct {
-	State    string `json:"state"`
-	Activity string `json:"activity"`
+type piResponse struct {
+	Command string         `json:"command"`
+	Success bool           `json:"success"`
+	Error   string         `json:"error"`
+	Data    map[string]any `json:"data"`
 }
 
-type SessionStatsData struct {
-	ContextTokens   int     `json:"context_tokens"`
-	ContextWindow   int     `json:"context_window"`
-	ContextPercent  float64 `json:"context_percent"`
-	TotalInput      int     `json:"total_input"`
-	TotalOutput     int     `json:"total_output"`
-	TotalCacheRead  int     `json:"total_cache_read"`
-	TotalCacheWrite int     `json:"total_cache_write"`
+type piUIRequest struct {
+	Method string `json:"method"`
+	ID     string `json:"id"`
 }
 
-type PersistEntry struct {
-	Role             string `json:"role"`
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
-	ModelName        string `json:"model_name,omitempty"`
-	ProviderName     string `json:"provider_name,omitempty"`
-	PromptTokens     int    `json:"prompt_tokens,omitempty"`
-	PredictedTokens  int    `json:"predicted_tokens,omitempty"`
-	Duration         int64  `json:"duration,omitempty"`
-	ToolCallsJSON    string `json:"tool_calls_json,omitempty"`
-	ToolResultJSON   string `json:"tool_result_json,omitempty"`
+// Tool Definition
+type toolDef struct {
+	piName      string
+	kanbanName  string
+	displayName string
 }
 
-// SubprocessConfig is the adapter's subprocess configuration type.
-type SubprocessConfig struct {
-	Binary string   `json:"binary"`
-	Args   []string `json:"args"`
-	Env    []string `json:"env,omitempty"`
-}
-
-// Adapter implements the agent.AgentAdapter interface for Pi's JSONL protocol.
-type Adapter struct {
-	config     piConfig
-	lineBuffer string
-	cmdID      int
-	modelName  string // discovered via get_state or agent_end; used for persistence
-}
-
-// envVar is a single environment variable key-value pair.
-type envVar struct {
-	Key   string
-	Value string
-}
-
-// piConfig holds parsed adapter configuration.
-type piConfig struct {
-	Binary      string
-	Mode        string
-	SessionName string
-	DisplayName string
-	Env         []string
-	SandboxEnvs []envVar // resolved env key-value pairs (manifest default + runtime override)
-}
-
-// toolDisplayNames maps tool names to human-readable display names.
-var toolDisplayNames = map[string]string{
-	"read_file":      "Read File",
-	"write_file":     "Write File",
-	"edit_file":      "Edit File",
-	"bash":           "Bash",
-	"request_review": "Request Review",
-	"ask_question":   "Ask Question",
-	"create_task":    "Create Task",
-}
-
-// piToolNameMap maps Pi's tool names to Kanban tool names.
-var piToolNameMap = map[string]string{
-	"read":           "read_file",
-	"write":          "write_file",
-	"edit":           "edit_file",
-	"bash":           "bash",
-	"request_review": "request_review",
-	"final_answer":   "request_review",
-	"ask_question":   "ask_question",
+var piTools = []toolDef{
+	{"read", "read_file", "Read File"},
+	{"write", "write_file", "Write File"},
+	{"edit", "edit_file", "Edit File"},
+	{"bash", "bash", "Bash"},
+	{"request_review", "request_review", "Request Review"},
+	{"final_answer", "request_review", "Request Review"},
+	{"ask_question", "ask_question", "Ask Question"},
+	{"create_task", "create_task", "Create Task"},
 }
 
 // NewAdapter creates a new Pi protocol adapter.
@@ -191,7 +124,7 @@ func (a *Adapter) Init(config []byte) error {
 }
 
 // SubprocessConfig returns the agent process configuration.
-func (a *Adapter) SubprocessConfig() SubprocessConfig {
+func (a *Adapter) SubprocessConfig() agent.SubprocessConfig {
 	args := []string{"--mode", a.config.Mode}
 	if a.config.SessionName != "" {
 		args = append(args, "--name", a.config.SessionName)
@@ -204,7 +137,7 @@ func (a *Adapter) SubprocessConfig() SubprocessConfig {
 			env = append(env, e.Key+"="+e.Value)
 		}
 	}
-	return SubprocessConfig{
+	return agent.SubprocessConfig{
 		Binary: a.config.Binary,
 		Args:   args,
 		Env:    env,
@@ -245,9 +178,9 @@ func (a *Adapter) EncodeCommand(cmd string, data []byte) []byte {
 }
 
 // ParseOutput parses raw Pi JSONL stdout bytes into generic agent events.
-func (a *Adapter) ParseOutput(data []byte) []Event {
+func (a *Adapter) ParseOutput(data []byte) []agent.Event {
 	a.lineBuffer += string(data)
-	var events []Event
+	var events []agent.Event
 
 	for {
 		idx := strings.IndexByte(a.lineBuffer, '\n')
@@ -290,7 +223,7 @@ func (a *Adapter) Close() {
 }
 
 // parseEvent dispatches a Pi JSONL event to the appropriate parser.
-func (a *Adapter) parseEvent(eventType string, raw map[string]any) *Event {
+func (a *Adapter) parseEvent(eventType string, raw map[string]any) *agent.Event {
 	switch eventType {
 	case "message_update":
 		return a.parseMessageUpdate(raw)
@@ -299,7 +232,7 @@ func (a *Adapter) parseEvent(eventType string, raw map[string]any) *Event {
 	case "tool_execution_end":
 		return a.parseToolEnd(raw)
 	case "agent_start":
-		return &Event{Type: EventTypeStatus, Status: StatusData{State: "running", Activity: a.config.DisplayName + " started"}}
+		return &agent.Event{Type: agent.EventTypeStatus, Status: agent.StatusData{State: "running", Activity: a.config.DisplayName + " started"}}
 	case "agent_end":
 		return a.parseAgentEnd(raw)
 	case "response":
@@ -307,51 +240,50 @@ func (a *Adapter) parseEvent(eventType string, raw map[string]any) *Event {
 	case "extension_ui_request":
 		return a.parseUIRequest(raw)
 	default:
-		return &Event{Type: EventTypeStatus, Status: StatusData{State: "running", Activity: fmt.Sprintf("Pi: %s", eventType)}}
+		return &agent.Event{Type: agent.EventTypeStatus, Status: agent.StatusData{State: "running", Activity: fmt.Sprintf("Pi: %s", eventType)}}
 	}
 }
 
-func (a *Adapter) parseMessageUpdate(raw map[string]any) *Event {
-	ame, ok := raw["assistantMessageEvent"].(map[string]any)
-	if !ok {
+func (a *Adapter) parseMessageUpdate(raw map[string]any) *agent.Event {
+	var mu piMessageUpdate
+	if err := mapToStruct(raw, &mu); err != nil {
 		return nil
 	}
-	etype, _ := ame["type"].(string)
-	delta, _ := ame["delta"].(string)
+	etype := mu.AssistantMessageEvent.Type
+	delta := mu.AssistantMessageEvent.Delta
 	switch etype {
 	case "text_delta":
-		return &Event{Type: EventTypeToken, Text: delta}
+		return &agent.Event{Type: agent.EventTypeToken, Text: delta}
 	case "thinking_delta":
-		return &Event{Type: EventTypeReasoning, Thinking: delta}
+		return &agent.Event{Type: agent.EventTypeReasoning, Thinking: delta}
 	}
 	return nil
 }
 
-func (a *Adapter) parseToolStart(raw map[string]any) *Event {
-	toolName, _ := raw["toolName"].(string)
-	toolCallID, _ := raw["toolCallId"].(string)
-	args, _ := raw["args"].(map[string]any)
-	argsCopy := make(map[string]any, len(args))
-	for k, v := range args {
-		argsCopy[k] = v
+func (a *Adapter) parseToolStart(raw map[string]any) *agent.Event {
+	var te piToolExecution
+	if err := mapToStruct(raw, &te); err != nil {
+		return nil
 	}
-	kanbanName := mapPiToolName(toolName)
-	rawArgs, _ := json.Marshal(argsCopy)
-	return &Event{
-		Type: EventTypeToolCall,
-		ToolCall: ToolCallData{
-			ID: toolCallID, Name: kanbanName, DisplayName: getToolDisplayName(kanbanName),
-			Args: argsCopy, RawArgs: string(rawArgs),
+	kanbanName := mapPiToolName(te.ToolName)
+	rawArgs, _ := json.Marshal(te.Args)
+	return &agent.Event{
+		Type: agent.EventTypeToolCall,
+		ToolCall: agent.ToolCallData{
+			ID: te.ToolCallID, Name: kanbanName, DisplayName: getToolDisplayName(kanbanName),
+			Args: te.Args, RawArgs: string(rawArgs),
 		},
 	}
 }
 
-func (a *Adapter) parseToolEnd(raw map[string]any) *Event {
-	toolCallID, _ := raw["toolCallId"].(string)
-	isError, _ := raw["isError"].(bool)
+func (a *Adapter) parseToolEnd(raw map[string]any) *agent.Event {
+	var te piToolExecution
+	if err := mapToStruct(raw, &te); err != nil {
+		return nil
+	}
 	var output string
-	if result, ok := raw["result"].(map[string]any); ok {
-		if content, ok := result["content"].([]any); ok {
+	if te.Result != nil {
+		if content, ok := te.Result["content"].([]any); ok {
 			var texts []string
 			for _, item := range content {
 				if cm, ok := item.(map[string]any); ok && cm["type"] == "text" {
@@ -363,19 +295,16 @@ func (a *Adapter) parseToolEnd(raw map[string]any) *Event {
 			output = strings.Join(texts, "\n")
 		}
 	}
-	return &Event{
-		Type:       EventTypeToolResult,
-		ToolResult: ToolResultData{ID: toolCallID, Output: output, Success: !isError},
+	return &agent.Event{
+		Type:       agent.EventTypeToolResult,
+		ToolResult: agent.ToolResultData{ID: te.ToolCallID, Output: output, Success: !te.IsError},
 	}
 }
 
-func (a *Adapter) parseAgentEnd(raw map[string]any) *Event {
-	messages, _ := raw["messages"].([]any)
-	var msgs []map[string]any
-	for _, m := range messages {
-		if mm, ok := m.(map[string]any); ok {
-			msgs = append(msgs, mm)
-		}
+func (a *Adapter) parseAgentEnd(raw map[string]any) *agent.Event {
+	var ae piAgentEnd
+	if err := mapToStruct(raw, &ae); err != nil {
+		return nil
 	}
 
 	// The agent_end event may carry a top-level model field — use it if we
@@ -386,45 +315,45 @@ func (a *Adapter) parseAgentEnd(raw map[string]any) *Event {
 		}
 	}
 
-	entries := a.buildPersistEntries(msgs)
-	return &Event{
-		Type:           EventTypePersist,
-		Status:         StatusData{State: "idle", Activity: a.config.DisplayName + " finished"},
+	entries := a.buildPersistEntries(ae.Messages)
+	return &agent.Event{
+		Type:           agent.EventTypePersist,
+		Status:         agent.StatusData{State: "idle", Activity: a.config.DisplayName + " finished"},
 		PersistEntries: entries,
 	}
 }
 
-func (a *Adapter) parseResponse(raw map[string]any) *Event {
-	command, _ := raw["command"].(string)
-	success, _ := raw["success"].(bool)
-	errMsg, _ := raw["error"].(string)
-	if !success && errMsg != "" {
-		return &Event{Type: EventTypeError, RawData: map[string]any{"message": errMsg, "code": "pi_rpc_error", "command": command}}
+func (a *Adapter) parseResponse(raw map[string]any) *agent.Event {
+	var resp piResponse
+	if err := mapToStruct(raw, &resp); err != nil {
+		return nil
 	}
-	if command == "get_session_stats" {
-		return &Event{Type: EventTypeStats, Stats: parseSessionStats(raw)}
+	if !resp.Success && resp.Error != "" {
+		return &agent.Event{Type: agent.EventTypeError, RawData: map[string]any{"message": resp.Error, "code": "pi_rpc_error", "command": resp.Command}}
 	}
-	if command == "compact" {
+	if resp.Command == "get_session_stats" {
+		return &agent.Event{Type: agent.EventTypeStats, Stats: parseSessionStats(resp.Data)}
+	}
+	if resp.Command == "compact" {
 		summary := ""
-		if data, ok := raw["data"].(map[string]any); ok {
-			if s, ok := data["summary"].(string); ok {
+		if resp.Data != nil {
+			if s, ok := resp.Data["summary"].(string); ok {
 				summary = s
 			}
 		}
-		return &Event{Type: EventTypeStatus, RawData: map[string]any{"command": "compact", "summary": summary, "success": success}}
+		return &agent.Event{Type: agent.EventTypeStatus, RawData: map[string]any{"command": "compact", "summary": summary, "success": resp.Success}}
 	}
-	if command == "get_state" {
+	if resp.Command == "get_state" {
 		var modelName string
-		if data, ok := raw["data"].(map[string]any); ok {
-			if model, ok := data["model"].(map[string]any); ok {
+		if resp.Data != nil {
+			if model, ok := resp.Data["model"].(map[string]any); ok {
 				provider, _ := model["provider"].(string)
-				// Pi binary returns model name in "name" and "id" fields (not "modelId")
-				modelID, _ := model["modelId"].(string)
-				if modelID == "" {
-					modelID, _ = model["name"].(string)
-				}
+				modelID, _ := model["name"].(string)
 				if modelID == "" {
 					modelID, _ = model["id"].(string)
+				}
+				if modelID == "" {
+					modelID, _ = model["modelId"].(string)
 				}
 				if provider != "" && modelID != "" {
 					modelName = provider + "/" + modelID
@@ -433,21 +362,21 @@ func (a *Adapter) parseResponse(raw map[string]any) *Event {
 				}
 			}
 		}
-		// Store the discovered model name so it can be used when persisting
-		// assistant messages via buildPersistEntries (instead of hardcoding "pi").
 		a.modelName = modelName
-		return &Event{Type: EventTypeStatus, RawData: map[string]any{"model_name": modelName}}
+		return &agent.Event{Type: agent.EventTypeStatus, RawData: map[string]any{"model_name": modelName}}
 	}
 	return nil
 }
 
-func (a *Adapter) parseUIRequest(raw map[string]any) *Event {
-	method, _ := raw["method"].(string)
-	extID, _ := raw["id"].(string)
-	return &Event{
-		Type:    EventTypeStatus,
-		Status:  StatusData{State: "running", Activity: fmt.Sprintf("Pi requested: %s", method)},
-		RawData: map[string]any{"ui_request_method": method, "ui_request_id": extID},
+func (a *Adapter) parseUIRequest(raw map[string]any) *agent.Event {
+	var ur piUIRequest
+	if err := mapToStruct(raw, &ur); err != nil {
+		return nil
+	}
+	return &agent.Event{
+		Type:    agent.EventTypeStatus,
+		Status:  agent.StatusData{State: "running", Activity: fmt.Sprintf("Pi requested: %s", ur.Method)},
+		RawData: map[string]any{"ui_request_method": ur.Method, "ui_request_id": ur.ID},
 	}
 }
 
@@ -455,14 +384,12 @@ func (a *Adapter) parseUIRequest(raw map[string]any) *Event {
 // or an individual assistant message. Checks common field names that the Pi
 // binary may populate.
 func extractModelNameFromEvent(raw map[string]any) (string, bool) {
-	// Top-level model field on the event
 	if mn, ok := raw["model"].(string); ok && mn != "" {
 		return mn, true
 	}
 	if mn, ok := raw["modelName"].(string); ok && mn != "" {
 		return mn, true
 	}
-	// Per-message model field on assistant messages
 	msgs, _ := raw["messages"].([]any)
 	for _, m := range msgs {
 		msg, ok := m.(map[string]any)
@@ -488,7 +415,7 @@ func (a *Adapter) modelNameOrDefault() string {
 }
 
 // buildPersistEntries parses Pi assistant messages into PersistEntry objects.
-func (a *Adapter) buildPersistEntries(messages []map[string]any) []PersistEntry {
+func (a *Adapter) buildPersistEntries(messages []map[string]any) []agent.PersistEntry {
 	modelName := a.modelNameOrDefault()
 	toolResults := make(map[string]map[string]any)
 	for _, msg := range messages {
@@ -504,14 +431,14 @@ func (a *Adapter) buildPersistEntries(messages []map[string]any) []PersistEntry 
 		toolResults[tid] = map[string]any{"output": extractToolResultText(msg), "success": !isError}
 	}
 
-	var entries []PersistEntry
+	var entries []agent.PersistEntry
 	for _, msg := range messages {
 		role, _ := msg["role"].(string)
 		if role != "assistant" {
 			continue
 		}
 		text, reasoning, toolCalls, pt, ptok := parseAssistantMessage(msg)
-		entries = append(entries, PersistEntry{
+		entries = append(entries, agent.PersistEntry{
 			Role: "assistant", Content: text, ReasoningContent: reasoning,
 			ModelName: modelName, ProviderName: "Pi Coding Agent",
 			PromptTokens: pt, PredictedTokens: ptok,
@@ -535,7 +462,7 @@ func (a *Adapter) buildPersistEntries(messages []map[string]any) []PersistEntry 
 			if r, ok := toolResults[tid]; ok {
 				rj, _ = json.Marshal(r)
 			}
-			entries = append(entries, PersistEntry{
+			entries = append(entries, agent.PersistEntry{
 				Role: "tool_call", ToolCallsJSON: string(tcJSON), ToolResultJSON: string(rj),
 			})
 		}
@@ -593,9 +520,8 @@ func extractToolResultText(msg map[string]any) string {
 	return ""
 }
 
-func parseSessionStats(raw map[string]any) SessionStatsData {
-	var s SessionStatsData
-	data, _ := raw["data"].(map[string]any)
+func parseSessionStats(data map[string]any) agent.SessionStatsData {
+	var s agent.SessionStatsData
 	if tokens, ok := data["tokens"].(map[string]any); ok {
 		if v, ok := tokens["input"].(float64); ok {
 			s.TotalInput = int(v)
@@ -625,15 +551,19 @@ func parseSessionStats(raw map[string]any) SessionStatsData {
 }
 
 func mapPiToolName(piName string) string {
-	if k, ok := piToolNameMap[piName]; ok {
-		return k
+	for _, t := range piTools {
+		if t.piName == piName {
+			return t.kanbanName
+		}
 	}
 	return piName
 }
 
 func getToolDisplayName(name string) string {
-	if d, ok := toolDisplayNames[name]; ok {
-		return d
+	for _, t := range piTools {
+		if t.kanbanName == name {
+			return t.displayName
+		}
 	}
 	if name == "" {
 		return name
@@ -646,4 +576,34 @@ func defaultString(v, d string) string {
 		return d
 	}
 	return v
+}
+
+// mapToStruct is a helper to convert map[string]any to a struct via JSON.
+func mapToStruct(m map[string]any, target any) error {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, target)
+}
+
+type piConfig struct {
+	Binary      string
+	Mode        string
+	SessionName string
+	DisplayName string
+	Env         []string
+	SandboxEnvs []envVar // resolved env key-value pairs (manifest default + runtime override)
+}
+
+type envVar struct {
+	Key   string
+	Value string
+}
+
+type Adapter struct {
+	config     piConfig
+	lineBuffer string
+	cmdID      int
+	modelName  string // discovered via get_state or agent_end; used for persistence
 }

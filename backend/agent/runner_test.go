@@ -8,15 +8,16 @@ import (
 	"time"
 
 	"kanban/backend/extensions"
+	"kanban/pkg/agent"
 )
 
-// mockAdapter implements AgentAdapter for testing.
+// mockAdapter implements agent.AgentAdapter for testing.
 type mockAdapter struct {
 	mu               sync.Mutex
 	initConfig       []byte
-	subprocessConfig SubprocessConfig
+	subprocessConfig agent.SubprocessConfig
 	encodeResponses  map[string][]byte // cmd -> bytes
-	parseResponses   map[string][]Event // input bytes key -> events
+	parseResponses   map[string][]agent.Event // input bytes key -> events
 	uiResponses      map[string][]byte  // "id:method" -> bytes
 	closed           bool
 }
@@ -24,16 +25,16 @@ type mockAdapter struct {
 func newMockAdapter() *mockAdapter {
 	return &mockAdapter{
 		encodeResponses: make(map[string][]byte),
-		parseResponses:  make(map[string][]Event),
+		parseResponses:  make(map[string][]agent.Event),
 		uiResponses:     make(map[string][]byte),
-		subprocessConfig: SubprocessConfig{
+		subprocessConfig: agent.SubprocessConfig{
 			Binary: "cat", // harmless binary for testing pipes
 			Args:   []string{},
 		},
 	}
 }
 
-func (m *mockAdapter) SetSubprocessConfig(cfg SubprocessConfig) {
+func (m *mockAdapter) SetSubprocessConfig(cfg agent.SubprocessConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.subprocessConfig = cfg
@@ -45,7 +46,7 @@ func (m *mockAdapter) SetEncodeResponse(cmd string, bytes []byte) {
 	m.encodeResponses[cmd] = bytes
 }
 
-func (m *mockAdapter) SetParseResponse(input string, events []Event) {
+func (m *mockAdapter) SetParseResponse(input string, events []agent.Event) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.parseResponses[input] = events
@@ -58,7 +59,7 @@ func (m *mockAdapter) Init(config []byte) error {
 	return nil
 }
 
-func (m *mockAdapter) SubprocessConfig() SubprocessConfig {
+func (m *mockAdapter) SubprocessConfig() agent.SubprocessConfig {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.subprocessConfig
@@ -77,7 +78,7 @@ func (m *mockAdapter) EncodeCommand(cmd string, data []byte) []byte {
 	return []byte("{}\n")
 }
 
-func (m *mockAdapter) ParseOutput(data []byte) []Event {
+func (m *mockAdapter) ParseOutput(data []byte) []agent.Event {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if events, ok := m.parseResponses[string(data)]; ok {
@@ -102,14 +103,14 @@ func (m *mockAdapter) Close() {
 	m.closed = true
 }
 
-// TestMockAdapter_VerifiesInterface ensures mockAdapter implements AgentAdapter.
-var _ AgentAdapter = (*mockAdapter)(nil)
+// TestMockAdapter_VerifiesInterface ensures mockAdapter implements agent.AgentAdapter.
+var _ agent.AgentAdapter = (*mockAdapter)(nil)
 
 // TestNewAgentRunner_Host verifies runner creation in host mode.
 func TestNewAgentRunner_Host(t *testing.T) {
 	// Register a mock factory
 	adapter := newMockAdapter()
-	RegisterAdapterFactory("test-agent", func() AgentAdapter { return adapter })
+	RegisterAdapterFactory("test-agent", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
 		Name:    "test-agent",
@@ -152,13 +153,13 @@ func TestAgentRunner_Prompt(t *testing.T) {
 	// Use a mock adapter that returns known bytes for prompt command
 	adapter := newMockAdapter()
 	// Set subprocess to a process that echoes stdin to stdout
-	adapter.SetSubprocessConfig(SubprocessConfig{
+	adapter.SetSubprocessConfig(agent.SubprocessConfig{
 		Binary: "cat",
 		Args:   []string{},
 	})
-	adapter.SetEncodeResponse(CommandPrompt, []byte("test-prompt-command\n"))
+	adapter.SetEncodeResponse(agent.CommandPrompt, []byte("test-prompt-command\n"))
 
-	RegisterAdapterFactory("test-prompt", func() AgentAdapter { return adapter })
+	RegisterAdapterFactory("test-prompt", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
 		Name:    "test-prompt",
@@ -185,18 +186,18 @@ func TestAgentRunner_Prompt(t *testing.T) {
 func TestAgentRunner_EventChan(t *testing.T) {
 	adapter := newMockAdapter()
 	// Set up a parse response for a known input
-	testEvents := []Event{
-		{Type: EventTypeToken, Text: "hello"},
-		{Type: EventTypeReasoning, Thinking: "let me think"},
+	testEvents := []agent.Event{
+		{Type: agent.EventTypeToken, Text: "hello"},
+		{Type: agent.EventTypeReasoning, Thinking: "let me think"},
 	}
 	adapter.SetParseResponse("test-input", testEvents)
 	// Use a subprocess that outputs known data
-	adapter.SetSubprocessConfig(SubprocessConfig{
+	adapter.SetSubprocessConfig(agent.SubprocessConfig{
 		Binary: "echo",
 		Args:   []string{"test-input"},
 	})
 
-	RegisterAdapterFactory("test-events", func() AgentAdapter { return adapter })
+	RegisterAdapterFactory("test-events", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
 		Name:    "test-events",
@@ -220,7 +221,7 @@ func TestAgentRunner_EventChan(t *testing.T) {
 	for {
 		select {
 		case event := <-runner.EventChan():
-			if event.Type == EventTypeToken && event.Text == "hello" {
+			if event.Type == agent.EventTypeToken && event.Text == "hello" {
 				eventReceived = true
 			}
 		case <-ctx.Done():
@@ -236,7 +237,7 @@ done:
 // TestAgentRunner_Close verifies graceful shutdown.
 func TestAgentRunner_Close(t *testing.T) {
 	adapter := newMockAdapter()
-	RegisterAdapterFactory("test-close", func() AgentAdapter { return adapter })
+	RegisterAdapterFactory("test-close", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
 		Name:    "test-close",
@@ -268,7 +269,7 @@ func TestAgentRunner_Close(t *testing.T) {
 // TestAgentRunner_ModelName verifies model name discovery.
 func TestAgentRunner_ModelName(t *testing.T) {
 	adapter := newMockAdapter()
-	RegisterAdapterFactory("test-model", func() AgentAdapter { return adapter })
+	RegisterAdapterFactory("test-model", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
 		Name:    "test-model",
@@ -293,7 +294,7 @@ func TestAgentRunner_ModelName(t *testing.T) {
 // TestAgentRunner_QueryStats verifies stats query.
 func TestAgentRunner_QueryStats(t *testing.T) {
 	adapter := newMockAdapter()
-	RegisterAdapterFactory("test-stats", func() AgentAdapter { return adapter })
+	RegisterAdapterFactory("test-stats", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
 		Name:    "test-stats",
@@ -355,7 +356,7 @@ func TestRunnerConfig_Serialization(t *testing.T) {
 // TestAdapterRegistry verifies factory registration and lookup.
 func TestAdapterRegistry(t *testing.T) {
 	called := false
-	RegisterAdapterFactory("registry-test", func() AgentAdapter {
+	RegisterAdapterFactory("registry-test", func() agent.AgentAdapter {
 		called = true
 		return newMockAdapter()
 	})
@@ -383,15 +384,15 @@ func TestAdapterRegistry(t *testing.T) {
 // TestEventTypes verifies event type constants are non-empty and unique.
 func TestEventTypes(t *testing.T) {
 	types := []string{
-		EventTypeToken,
-		EventTypeReasoning,
-		EventTypeToolCall,
-		EventTypeToolResult,
-		EventTypeStatus,
-		EventTypeStats,
-		EventTypeError,
-		EventTypePersist,
-		EventTypeTurnComplete,
+		agent.EventTypeToken,
+		agent.EventTypeReasoning,
+		agent.EventTypeToolCall,
+		agent.EventTypeToolResult,
+		agent.EventTypeStatus,
+		agent.EventTypeStats,
+		agent.EventTypeError,
+		agent.EventTypePersist,
+		agent.EventTypeTurnComplete,
 	}
 	seen := make(map[string]bool)
 	for _, typ := range types {
@@ -405,9 +406,9 @@ func TestEventTypes(t *testing.T) {
 	}
 }
 
-// TestPersistEntry_Serialization verifies PersistEntry marshals correctly.
+// TestPersistEntry_Serialization verifies agent.PersistEntry marshals correctly.
 func TestPersistEntry_Serialization(t *testing.T) {
-	entry := PersistEntry{
+	entry := agent.PersistEntry{
 		Role:             "assistant",
 		Content:          "Hello world",
 		ReasoningContent: "Let me think...",
@@ -422,7 +423,7 @@ func TestPersistEntry_Serialization(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded PersistEntry
+	var decoded agent.PersistEntry
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -438,17 +439,17 @@ func TestPersistEntry_Serialization(t *testing.T) {
 	}
 }
 
-// brokenAdapter implements AgentAdapter that returns nil/empty for everything.
+// brokenAdapter implements agent.AgentAdapter that returns nil/empty for everything.
 // Used to test nil-safety of the runner.
 type brokenAdapter struct {
-	subprocessConfig SubprocessConfig
+	subprocessConfig agent.SubprocessConfig
 }
 
 func (b *brokenAdapter) Init(config []byte) error {
 	return nil
 }
 
-func (b *brokenAdapter) SubprocessConfig() SubprocessConfig {
+func (b *brokenAdapter) SubprocessConfig() agent.SubprocessConfig {
 	return b.subprocessConfig
 }
 
@@ -456,7 +457,7 @@ func (b *brokenAdapter) EncodeCommand(cmd string, data []byte) []byte {
 	return nil // simulates a broken/stale adapter
 }
 
-func (b *brokenAdapter) ParseOutput(data []byte) []Event {
+func (b *brokenAdapter) ParseOutput(data []byte) []agent.Event {
 	return nil
 }
 
@@ -466,13 +467,13 @@ func (b *brokenAdapter) HandleUIRequest(id, method string) []byte {
 
 func (b *brokenAdapter) Close() {}
 
-var _ AgentAdapter = (*brokenAdapter)(nil)
+var _ agent.AgentAdapter = (*brokenAdapter)(nil)
 
 // TestNewAgentRunner_BrokenAdapter verifies that NewAgentRunner rejects
-// adapters where Init succeeds but SubprocessConfig returns empty binary.
+// adapters where Init succeeds but agent.SubprocessConfig returns empty binary.
 func TestNewAgentRunner_BrokenAdapter(t *testing.T) {
 	// Register a factory that returns an adapter with empty subprocess config
-	RegisterAdapterFactory("test-broken", func() AgentAdapter {
+	RegisterAdapterFactory("test-broken", func() agent.AgentAdapter {
 		return &brokenAdapter{}
 	})
 
@@ -496,8 +497,8 @@ func TestNewAgentRunner_BrokenAdapter(t *testing.T) {
 // TestAgentRunner_PromptNilEncode verifies Prompt returns error when
 // EncodeCommand returns nil (broken adapter scenario).
 func TestAgentRunner_PromptNilEncode(t *testing.T) {
-	adapter := &brokenAdapter{subprocessConfig: SubprocessConfig{Binary: "cat"}}
-	RegisterAdapterFactory("test-nil-encode", func() AgentAdapter { return adapter })
+	adapter := &brokenAdapter{subprocessConfig: agent.SubprocessConfig{Binary: "cat"}}
+	RegisterAdapterFactory("test-nil-encode", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
 		Name:    "test-nil-encode",
@@ -524,8 +525,8 @@ func TestAgentRunner_PromptNilEncode(t *testing.T) {
 
 // TestAgentRunner_CloseNilEncode verifies Close handles nil EncodeCommand gracefully.
 func TestAgentRunner_CloseNilEncode(t *testing.T) {
-	adapter := &brokenAdapter{subprocessConfig: SubprocessConfig{Binary: "cat"}}
-	RegisterAdapterFactory("test-close-nil", func() AgentAdapter { return adapter })
+	adapter := &brokenAdapter{subprocessConfig: agent.SubprocessConfig{Binary: "cat"}}
+	RegisterAdapterFactory("test-close-nil", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
 		Name:    "test-close-nil",
@@ -560,9 +561,9 @@ func containsStr(s, substr string) bool {
 		}()))
 }
 
-// TestSubprocessConfig_Serialization verifies SubprocessConfig marshals correctly.
+// TestSubprocessConfig_Serialization verifies agent.SubprocessConfig marshals correctly.
 func TestSubprocessConfig_Serialization(t *testing.T) {
-	cfg := SubprocessConfig{
+	cfg := agent.SubprocessConfig{
 		Binary: "pi",
 		Args:   []string{"--mode", "rpc", "--name", "test"},
 		Env:    []string{"PI_DIR=/tmp/pi"},
@@ -573,7 +574,7 @@ func TestSubprocessConfig_Serialization(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	var decoded SubprocessConfig
+	var decoded agent.SubprocessConfig
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
