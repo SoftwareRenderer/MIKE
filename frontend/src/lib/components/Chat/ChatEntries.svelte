@@ -93,33 +93,33 @@
     // Text: ~20px per line (explicit \n or wrapped ~70 chars).
     // Tool calls: header + args + result, estimated from data.
     function getEstimatedHeight(entry: ChatEntry, _index: number): number {
-        if (entry.role === 'error') return estimateTextHeight(entry.content, 40);
-        if (entry.role === 'summarization') return estimateTextHeight(entry.content, 60);
-        if (entry.role === 'merge_resolution') return estimateTextHeight(entry.content, 50);
+        const padding = 24;
+        if (entry.role === 'error') return padding + estimateTextHeight(entry.content, 50);
+        if (entry.role === 'summarization') return padding + estimateTextHeight(entry.content, 70);
+        if (entry.role === 'merge_resolution') return padding + estimateTextHeight(entry.content, 60);
         if (entry.role === 'user') {
-            let h = estimateTextHeight(entry.content, 35);
+            let h = padding + estimateTextHeight(entry.content, 60);
             if (entry.attachments?.length) h += entry.attachments.length * 80;
             return h;
         }
         // assistant
-        let h = 30; // header/actions
-        h += estimateTextHeight(entry.content, 20);
-        if (entry.reasoningContent) h += estimateTextHeight(entry.reasoningContent, 40);
-        else if (entry.hasReasoning) h += 60;
+        let h = padding + 50; // padding + actions/stats base
+        h += estimateTextHeight(entry.content, 40);
+        if (entry.reasoningContent) h += estimateTextHeight(entry.reasoningContent, 60);
+        else if (entry.hasReasoning) h += 80;
         for (const tc of entry.toolCalls || []) {
-            h += 30; // header
-            h += 30; // args (collapsed for many tools)
+            h += 60; // header + args
             if (tc.toolName === 'edit_file') {
                 // edit_file has a diff toggle + optional expanded diff
                 h += estimateEditDiffHeight(tc);
             } else if (tc.result) {
-                h += estimateTextHeight(tc.result, 35);
+                h += estimateTextHeight(tc.result, 50);
             } else if (tc.isPending) {
                 h += 30;
             }
         }
         if (entry.isStreaming) h += 20;
-        if (entry.stats) h += 24;
+        if (entry.stats) h += 30;
         return h;
     }
 
