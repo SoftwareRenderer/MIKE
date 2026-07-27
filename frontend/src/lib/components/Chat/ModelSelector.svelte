@@ -216,6 +216,10 @@
             onSelect(agentProvider.name, agentProvider.default_model, agentProvider.url);
         } else if (agentProvider.models.length > 0) {
             onSelect(agentProvider.name, getModelName(agentProvider.models[0]), agentProvider.url);
+        } else {
+            // No static models — call onSelect with placeholder so parent updates selectedUrl.
+            // Real model auto-selected by $effect below when dynamic models are fetched.
+            onSelect(agentProvider.name, agentProvider.display_name || agentProvider.name, agentProvider.url);
         }
         // Trigger agent model fetch — auto-select handled by $effect below
         fetchAgentModels(agentProvider.url);

@@ -194,6 +194,14 @@
     }
 
     const modeDescription = $derived(MODE_DESCRIPTIONS[operatingModeDraft] || '');
+
+    // Check if current draft URL is an agent provider (updates when user switches providers)
+    const isAgentDraft = $derived.by(() => {
+        if (!urlDraft) return false;
+        if (urlDraft.startsWith(AGENT_URL_PREFIX)) return true;
+        const p = editProviders.find(p => p.url === urlDraft);
+        return p ? isAgentProvider(p) : false;
+    });
 </script>
 
 {#snippet footer()}
@@ -225,7 +233,7 @@
                     />
                 </div>
             {/if}
-            {#if !isAgentSelected()}
+            {#if !isAgentDraft}
             <div class="options">
                 <div class="config-row">
                     <div class="config-info">
