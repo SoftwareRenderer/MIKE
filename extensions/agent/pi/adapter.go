@@ -21,17 +21,17 @@ type piMessageUpdate struct {
 }
 
 type piToolExecution struct {
-	ToolName   string                 `json:"toolName"`
-	ToolCallID string                 `json:"toolCallId"`
-	Args       map[string]any         `json:"args"`
-	IsError    bool                   `json:"isError"`
-	Result     map[string]any         `json:"result"`
+	ToolName   string         `json:"toolName"`
+	ToolCallID string         `json:"toolCallId"`
+	Args       map[string]any `json:"args"`
+	IsError    bool           `json:"isError"`
+	Result     map[string]any `json:"result"`
 }
 
 type piAgentEnd struct {
-	Model    string                   `json:"model"`
-	ModelName string                  `json:"modelName"`
-	Messages []map[string]any         `json:"messages"`
+	Model     string           `json:"model"`
+	ModelName string           `json:"modelName"`
+	Messages  []map[string]any `json:"messages"`
 }
 
 type piResponse struct {
@@ -64,7 +64,37 @@ var piTools = []toolDef{
 	{"create_task", "create_task", "Create Task"},
 }
 
-// NewAdapter creates a new Pi protocol adapter.
+// piConfig holds the resolved adapter configuration after Init parses
+// the raw config JSON. It combines user-provided values with defaults
+// and sandbox environment variables from the extension manifest.
+
+type piConfig struct {
+	Binary      string
+	Mode        string
+	SessionName string
+	DisplayName string
+	Env         []string
+	SandboxEnvs []envVar // resolved env key-value pairs from manifest sandbox config
+}
+
+// envVar is a resolved key-value pair for sandbox environment variables.
+type envVar struct {
+	Key   string
+	Value string
+}
+
+// Adapter implements the agent.AgentAdapter interface for the Pi Coding Agent.
+// It maintains state across calls: a line buffer for JSONL parsing, a command
+// counter for request IDs, and the discovered model name for persistence.
+
+type Adapter struct {
+	config     piConfig
+	lineBuffer string // accumulates partial JSONL lines across ParseOutput calls
+	cmdID      int    // monotonically increasing counter for command request IDs
+	modelName  string // discovered via get_state or agent_end; used for persistence
+}
+
+// NewAdapter creates a new Pi protocol adapter with default configuration.
 func NewAdapter() *Adapter {
 	return &Adapter{
 		config: piConfig{
@@ -150,7 +180,7 @@ func (a *Adapter) EncodeCommand(cmd string, data []byte) []byte {
 	c := map[string]any{"id": fmt.Sprintf("%s-%d", cmd, a.cmdID)}
 
 	switch cmd {
-	case "prompt":
+	case agent.CommandPrompt:
 		var d struct {
 			Message  string `json:"message"`
 			Behavior string `json:"behavior"`
@@ -163,13 +193,13 @@ func (a *Adapter) EncodeCommand(cmd string, data []byte) []byte {
 		if d.Behavior != "" {
 			c["streamingBehavior"] = d.Behavior
 		}
-	case "compact":
+	case agent.CommandCompact:
 		c["type"] = "compact"
-	case "stats":
+	case agent.CommandStats:
 		c["type"] = "get_session_stats"
-	case "get_state":
+	case agent.CommandGetState:
 		c["type"] = "get_state"
-	case "abort":
+	case agent.CommandAbort:
 		c["type"] = "abort"
 	}
 
@@ -585,25 +615,4 @@ func mapToStruct(m map[string]any, target any) error {
 		return err
 	}
 	return json.Unmarshal(b, target)
-}
-
-type piConfig struct {
-	Binary      string
-	Mode        string
-	SessionName string
-	DisplayName string
-	Env         []string
-	SandboxEnvs []envVar // resolved env key-value pairs (manifest default + runtime override)
-}
-
-type envVar struct {
-	Key   string
-	Value string
-}
-
-type Adapter struct {
-	config     piConfig
-	lineBuffer string
-	cmdID      int
-	modelName  string // discovered via get_state or agent_end; used for persistence
 }
