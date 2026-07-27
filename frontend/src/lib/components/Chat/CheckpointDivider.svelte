@@ -12,10 +12,11 @@
         isPending?: boolean;
         commitLabel?: string;
         commitHash?: string;
-        onViewChanges?: (commitHash: string) => void;
+        checkpointIndex?: number;
+        onViewChanges?: (commitHash: string, checkpointIndex?: number) => void;
     }
 
-    let { timestamp, threadId, threads, activeThreadId, onSwitch, isSwitching = false, isPending = false, commitLabel, commitHash, onViewChanges }: Props = $props();
+    let { timestamp, threadId, threads, activeThreadId, onSwitch, isSwitching = false, isPending = false, commitLabel, commitHash, checkpointIndex, onViewChanges }: Props = $props();
 
     // Filter threads to only show those relevant at this checkpoint
     let relevantThreads = $derived(threads.filter(t => {
@@ -43,7 +44,7 @@
         </span>
         <div class="divider-actions">
             {#if onViewChanges && commitHash}
-                <button class="view-changes-btn" onclick={() => onViewChanges(commitHash || '')} title="View changes up to this checkpoint">
+                <button class="view-changes-btn" onclick={() => onViewChanges(commitHash || '', checkpointIndex)} title="View changes up to this checkpoint">
                     <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M4 5h1M4 7h1M4 9h1" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M11 5h1M11 7l1 1M11 9l1-1" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
             {/if}

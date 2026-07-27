@@ -242,10 +242,10 @@
     }
 
     /** Handle "View Changes" from a checkpoint divider — opens its own panel.
-     * Shows changes between origin and the state RIGHT BEFORE the checkpoint.
-     * Backend resolves stash refs to their common ancestor with baseRef.
+     * Shows changes between origin and the state AT the checkpoint
+     * (all accumulated changes up to and including this checkpoint).
      * Toggles closed if the same checkpoint is clicked again. */
-    async function handleViewChanges(commitHash: string) {
+    async function handleViewChanges(commitHash: string, checkpointIndex?: number) {
         if (isMobileCtx.isMobile) { activeTab = 'checkpoint'; onActiveTabChange?.('checkpoint'); }
         // Toggle: if same checkpoint is already open, close it
         if (checkpointDiffOpen && checkpointDiffHash === commitHash) {
@@ -259,7 +259,7 @@
         checkpointDiffUntracked = [];
         try {
             const headRef = commitHash || undefined;
-            const result = await getTaskDiff(task.project_id, task.id, { headRef });
+            const result = await getTaskDiff(task.project_id, task.id, { headRef, checkpointIndex });
             const truncatedSet = new Set(result.truncated_files || []);
             const origStats = result.original_file_stats || {};
             checkpointDiffFiles = parseUnifiedDiff(result.diff).filter(f => !f.path.split('/').pop()?.match(/\..*\.swp$/)).map(f => ({
