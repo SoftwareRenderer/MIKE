@@ -103,6 +103,10 @@ func (m *mockAdapter) Close() {
 	m.closed = true
 }
 
+func (m *mockAdapter) ListModels(_ context.Context) []agent.AgentModel {
+	return nil
+}
+
 // TestMockAdapter_VerifiesInterface ensures mockAdapter implements agent.AgentAdapter.
 var _ agent.AgentAdapter = (*mockAdapter)(nil)
 
@@ -370,9 +374,9 @@ func TestAdapterRegistry(t *testing.T) {
 		},
 	}
 
-	adapter, err := loadAdapter(ext)
+	adapter, err := LoadAdapter(ext)
 	if err != nil {
-		t.Fatalf("loadAdapter: %v", err)
+		t.Fatalf("LoadAdapter: %v", err)
 	}
 	adapter.Close()
 
@@ -466,6 +470,10 @@ func (b *brokenAdapter) HandleUIRequest(_ context.Context, id, method string) []
 }
 
 func (b *brokenAdapter) Close() {}
+
+func (b *brokenAdapter) ListModels(_ context.Context) []agent.AgentModel {
+	return nil
+}
 
 var _ agent.AgentAdapter = (*brokenAdapter)(nil)
 

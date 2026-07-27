@@ -700,6 +700,9 @@ func toStreamEvent(event pkgagent.Event, sandbox bool, runner *agent.AgentRunner
 			"sandbox":  sandbox,
 		}}
 
+	case pkgagent.EventTypeModels:
+		return types.StreamEvent{Type: types.WSTypeModels, Data: map[string]any{"models": event.RawData["models"]}}
+
 	case pkgagent.EventTypeStatus:
 		state := "running"
 		activity := "Agent running"

@@ -2,19 +2,22 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"kanban/backend/agent"
 	"kanban/backend/auth"
 	"kanban/backend/config"
-	"kanban/backend/exec"
+	kanbanexec "kanban/backend/exec"
 	"kanban/backend/extensions"
 	"kanban/backend/git"
+	"kanban/backend/httputil"
 	"kanban/backend/lsp"
 	"kanban/backend/managers"
 	"kanban/backend/sandbox"
@@ -23,8 +26,6 @@ import (
 	"kanban/backend/term"
 	"kanban/backend/tls"
 	"kanban/backend/types"
-
-	_ "kanban/extensions/agent/pi" // triggers init() which registers "pi" adapter
 )
 
 // Server is the main HTTP server.
@@ -39,9 +40,10 @@ type Server struct {
 	depHandler        *managers.DependencyHandler
 	reviewHandler     *managers.ReviewHandler
 	gitHandler        *managers.GitHandler
-	executor          *exec.TaskExecutor
+	executor          *kanbanexec.TaskExecutor
 	terminalMgr       *term.TerminalManager
 	sandboxMgr        *sandbox.SandboxManager
+	agentRegistry     *agent.AgentRegistry
 	extStore          *extensions.ExtensionStore
 	extSandboxMgr     *extensions.ExtensionSandboxManager
 	extHandler        *extensions.ExtensionHandler
@@ -129,7 +131,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	s.terminalMgr.SetOnProjectPortsAssigned(func(projectID string, ports []types.AssignedPort) {
 		s.appStreamMgr.BroadcastProjectPorts(projectID, ports)
 	})
-	commitQueue := exec.NewCommitQueue()
+	commitQueue := kanbanexec.NewCommitQueue()
 
 	// Extension system
 	s.extStore = extensions.NewExtensionStore(store)
@@ -139,11 +141,12 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 
 	// Agent registry — discovers agent extensions and maps agent:// URLs
 	agentRegistry := agent.NewAgentRegistry(s.extStore, cfgStore)
+	s.agentRegistry = agentRegistry
 	// Wire agent registry to config store so agent providers (e.g. agent://pi →
 	// 'Pi Coding Agent') are included in the /api/config response.
 	cfgStore.SetAgentRegistry(agentRegistry)
 
-	s.executor = exec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, commitQueue)
+	s.executor = kanbanexec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, commitQueue)
 	// Wire agent registry to terminal manager (created earlier before agentRegistry was available)
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)
@@ -201,6 +204,74 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 }
 
 // Serve starts the HTTP server.
+// handleFetchModels handles POST /api/config/fetch-models.
+// It supports both standard OpenAI-compatible LLM servers and Pi agent extensions.
+func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req config.FetchModelsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.LlamaServerURL == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "llama_server_url is required")
+		return
+	}
+
+	if strings.HasPrefix(req.LlamaServerURL, "agent://") {
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+
+		agentName := strings.TrimPrefix(req.LlamaServerURL, "agent://")
+		ext := s.agentRegistry.LookupByName(agentName)
+		if ext == nil {
+			httputil.JSONError(w, http.StatusNotFound, fmt.Sprintf("Agent %q not found", agentName))
+			return
+		}
+
+		// Load the adapter and ask it for available models
+		adapter, err := agent.LoadAdapter(ext)
+		if err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to load agent adapter: %v", err))
+			return
+		}
+		defer adapter.Close()
+
+		// Initialize the adapter with minimal config (just enough for SubprocessConfig)
+		initCfg, _ := json.Marshal(map[string]any{
+			"extension_name": ext.Name,
+			"session_name":   "fetch-models-probe",
+			"worktree_path":  os.TempDir(),
+			"sandbox":        false,
+			"config":         ext.Config,
+		})
+		if err := adapter.Init(ctx, initCfg); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to init agent adapter: %v", err))
+			return
+		}
+
+		agentModels := adapter.ListModels(ctx)
+		var fetchedModels []config.FetchedModel
+		for _, m := range agentModels {
+			fetchedModels = append(fetchedModels, config.FetchedModel{
+				Name:          m.Name,
+				ContextWindow: m.ContextWindow,
+			})
+		}
+
+		httputil.JSONResponse(w, http.StatusOK, config.FetchModelsResponse{Models: fetchedModels})
+		return
+	}
+
+	// Fallback to standard LLM fetching.
+	result := s.configStore.FetchModels(req)
+	httputil.JSONResponse(w, http.StatusOK, result)
+}
+
 func (s *Server) Serve() error {
 	srv := &http.Server{
 		Addr:              s.addr,
