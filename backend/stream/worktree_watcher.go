@@ -52,7 +52,7 @@ type worktreeInfo struct {
 }
 
 // WorktreeWatcher detects file changes in git worktrees via fsnotify.
-// Events are throttled per-task: at most one diff compute/broadcast every 2s.
+// Events are throttled per-task: at most one diff compute/broadcast every 1s.
 type WorktreeWatcher struct {
 	mu          sync.Mutex
 	watcher     *fsnotify.Watcher
@@ -327,7 +327,7 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 		}
 	}
 
-	// Throttle: at most one diff compute every 2s per task.
+	// Throttle: at most one diff compute every 1s per task.
 	if _, exists := ww.throttles[taskID]; exists {
 		ww.mu.Unlock()
 		return
@@ -335,7 +335,7 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 
 	projectID := info.projectID
 	baseRef := info.baseRef
-	timer := time.AfterFunc(2000*time.Millisecond, func() {
+	timer := time.AfterFunc(1000*time.Millisecond, func() {
 		ww.mu.Lock()
 		if t, exists := ww.throttles[taskID]; exists {
 			t.Stop()
