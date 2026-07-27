@@ -72,10 +72,6 @@
     /* Selection */
     --color-selection-bg: #0969da33;
 
-    /* Scrollbar */
-    --color-scrollbar-thumb: #d0d7de;
-    --color-scrollbar-thumb-hover: #8b949e;
-
     /* Diff */
     --color-diff-add-bg: rgba(26, 127, 55, 0.1);
     --color-diff-add-text: #187532;
@@ -139,14 +135,6 @@
 body {
     background: var(--color-surface-0);
     color: var(--color-text-primary);
-}
-
-/* Light theme scrollbar */
-::-webkit-scrollbar-thumb {
-    background: var(--color-scrollbar-thumb);
-}
-::-webkit-scrollbar-thumb:hover {
-    background: var(--color-scrollbar-thumb-hover);
 }
 
 /* Light theme selection */

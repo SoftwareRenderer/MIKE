@@ -85,10 +85,6 @@ input[type="number"] {
     /* Selection */
     --color-selection-bg: #2a4060;
 
-    /* Scrollbar */
-    --color-scrollbar-thumb: #313131;
-    --color-scrollbar-thumb-hover: #3C3C3C;
-
     /* Diff */
     --color-diff-add-bg: rgba(63, 185, 80, 0.15);
     --color-diff-add-text: #3fb950;
@@ -228,22 +224,6 @@ a:hover {
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
     }
-}
-
-/* Scrollbar styling */
-::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-::-webkit-scrollbar-track {
-    background: transparent;
-}
-::-webkit-scrollbar-thumb {
-    background: var(--color-scrollbar-thumb);
-    border-radius: var(--radius-sm);
-}
-::-webkit-scrollbar-thumb:hover {
-    background: var(--color-scrollbar-thumb-hover);
 }
 
 /* CodeMirror selection — override browser default bright highlight */
