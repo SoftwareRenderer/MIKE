@@ -77,7 +77,7 @@ func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *
 	}
 
 	// Load and initialize the WASM adapter
-	adapter, err := loadAdapter(ext)
+	adapter, err := LoadAdapter(ext)
 	if err != nil {
 		return nil, fmt.Errorf("load adapter: %w", err)
 	}
@@ -246,6 +246,22 @@ func (r *AgentRunner) QueryModel(ctx context.Context) string {
 	}
 
 	return r.ModelName()
+}
+
+// SendCommand sends a high-level command to the agent.
+func (r *AgentRunner) SendCommand(ctx context.Context, cmd string, data []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return fmt.Errorf("agent runner closed")
+	}
+
+	bytes := r.adapter.EncodeCommand(ctx, cmd, data)
+	if bytes == nil {
+		return fmt.Errorf("adapter EncodeCommand returned nil")
+	}
+	_, err := r.stdin.Write(bytes)
+	return err
 }
 
 // ModelName returns the agent model name discovered via get_state.

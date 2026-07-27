@@ -209,6 +209,8 @@ func (a *Adapter) EncodeCommand(_ context.Context, cmd string, data []byte) []by
 		c["type"] = "get_session_stats"
 	case agent.CommandGetState:
 		c["type"] = "get_state"
+	case agent.CommandGetAvailableModels:
+		c["type"] = "get_available_models"
 	case agent.CommandAbort:
 		c["type"] = "abort"
 	}
@@ -398,6 +400,9 @@ func (a *Adapter) parseResponse(raw map[string]any) *agent.Event {
 			}
 		}
 		return &agent.Event{Type: agent.EventTypeStatus, RawData: map[string]any{"command": "compact", "summary": summary, "success": resp.Success}}
+	}
+	if resp.Command == "get_available_models" {
+		return &agent.Event{Type: agent.EventTypeModels, RawData: map[string]any{"models": resp.Data["models"]}}
 	}
 	if resp.Command == "get_state" {
 		var modelName string

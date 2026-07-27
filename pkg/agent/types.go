@@ -73,6 +73,7 @@ const (
 	EventTypeStatus       = "status"
 	EventTypeStats        = "stats"
 	EventTypeError        = "error"
+	EventTypeModels        = "models"
 	EventTypePersist      = "persist"
 	EventTypeTurnComplete = "turn_complete"
 )
@@ -83,6 +84,7 @@ const (
 	CommandCompact  = "compact"
 	CommandStats    = "stats"
 	CommandGetState = "get_state"
+	CommandGetAvailableModels = "get_available_models"
 	CommandAbort    = "abort"
 )
 
@@ -92,6 +94,12 @@ type SubprocessConfig struct {
 	Binary string   `json:"binary"`
 	Args   []string `json:"args"`
 	Env    []string `json:"env,omitempty"`
+}
+
+// AgentModel describes a model available from an agent.
+type AgentModel struct {
+	Name          string `json:"name"`
+	ContextWindow *int   `json:"context_window,omitempty"`
 }
 
 // AgentAdapter is the interface between the runner (backend) and the adapter (WASM extension).
@@ -123,6 +131,12 @@ type AgentAdapter interface {
 	// Returns nil if no response should be sent.
 	// ctx is used for cancellation during handling.
 	HandleUIRequest(ctx context.Context, id, method string) []byte
+
+	// ListModels returns the list of models available from the agent.
+	// The adapter is responsible for discovering models (e.g., via CLI flags or RPC).
+	// Returns an empty list if model discovery is not supported.
+	// ctx is used for cancellation during the discovery process.
+	ListModels(ctx context.Context) []AgentModel
 
 	// Close cleans up adapter state.
 	Close()

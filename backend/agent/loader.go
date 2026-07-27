@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/tetratelabs/wazero"
@@ -63,9 +66,9 @@ type wasmAdapter struct {
 	resultCh chan []byte // receives results from store_result host callback
 }
 
-// loadAdapter loads an AgentAdapter for the given extension.
+// LoadAdapter loads an AgentAdapter for the given extension.
 // It first checks for a registered factory (test mocks), then falls back to WASM.
-func loadAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
+func LoadAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 	adapterRegistry.RLock()
 	factory, ok := adapterRegistry.factories[ext.Name]
 	adapterRegistry.RUnlock()
@@ -408,4 +411,77 @@ func (a *wasmAdapter) Close() {
 	if a.runtime != nil {
 		a.runtime.Close(context.Background())
 	}
+}
+
+// ListModels returns the list of models available from the agent.
+// It runs the agent binary with "--list-models" flag and parses the tabular output.
+// This is implemented natively (not via WASM) because it requires subprocess execution.
+func (a *wasmAdapter) ListModels(ctx context.Context) []agent.AgentModel {
+	cfg := a.SubprocessConfig(ctx)
+	if cfg.Binary == "" {
+		log.Printf("[wasm-adapter] ListModels: no binary configured")
+		return nil
+	}
+
+	cmd := exec.CommandContext(ctx, cfg.Binary, "--list-models")
+	cmd.Env = append(os.Environ(), cfg.Env...)
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("[wasm-adapter] ListModels: failed to run %s --list-models: %v", cfg.Binary, err)
+		return nil
+	}
+
+	var models []agent.AgentModel
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "provider") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			fullName := fields[0] + "/" + fields[1]
+			var ctxWin *int
+			if len(fields) >= 3 {
+				if v, err := parseContextWindow(fields[2]); err == nil && v > 0 {
+					ctxWin = &v
+				}
+			}
+			models = append(models, agent.AgentModel{Name: fullName, ContextWindow: ctxWin})
+		}
+	}
+	return models
+}
+
+// parseContextWindow parses context window strings like "256K", "196.6K", "1M" into integers.
+func parseContextWindow(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty string")
+	}
+
+	var multiplier int64
+	lastChar := s[len(s)-1]
+	switch lastChar {
+	case 'K', 'k':
+		multiplier = 1000
+		s = s[:len(s)-1]
+	case 'M', 'm':
+		multiplier = 1000000
+		s = s[:len(s)-1]
+	case 'G', 'g':
+		multiplier = 1000000000
+		s = s[:len(s)-1]
+	default:
+		multiplier = 1
+	}
+
+	if multiplier == 1 {
+		return strconv.Atoi(s)
+	}
+
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, err
+	}
+	return int(f * float64(multiplier)), nil
 }

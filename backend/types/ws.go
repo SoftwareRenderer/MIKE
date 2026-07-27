@@ -29,6 +29,7 @@ const (
 	WSTypePromptProgress     WSMessageType = "prompt_progress"
 	WSTypeHint               WSMessageType = "hint"
 	WSTypeExtensionChange    WSMessageType = "extension_change"
+	WSTypeModels              WSMessageType = "models"
 )
 
 // StreamEvent carries a typed payload to broadcast.

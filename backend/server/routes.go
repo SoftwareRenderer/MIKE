@@ -23,7 +23,7 @@ func (s *Server) setupRoutes() {
 
 	// Config
 	s.mux.HandleFunc("/api/config/test-connection", s.configStore.HandleTestConnection)
-	s.mux.HandleFunc("/api/config/fetch-models", s.configStore.HandleFetchModels)
+	s.mux.HandleFunc("/api/config/fetch-models", s.handleFetchModels)
 	s.mux.HandleFunc("/api/config", s.configStore.HandleConfig)
 
 	// WebSocket stream

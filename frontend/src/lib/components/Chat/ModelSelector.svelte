@@ -74,8 +74,38 @@
         selectedProviderUrl.startsWith(AGENT_URL_PREFIX)
     );
 
+    // Agent model fetching
+    let agentModels = $state<Array<{ name: string; context_window?: number }>>([]);
+    let agentModelsLoading = $state(false);
+    let lastFetchedAgentUrl = $state('');
+
+    async function fetchAgentModels(url: string) {
+        if (!url.startsWith(AGENT_URL_PREFIX) || agentModelsLoading || url === lastFetchedAgentUrl) return;
+        lastFetchedAgentUrl = url;
+        agentModelsLoading = true;
+        agentModels = [];
+        try {
+            const { fetchModels } = await import('$lib/api');
+            const result = await fetchModels(url);
+            if (result.models && result.models.length > 0) {
+                agentModels = result.models;
+            }
+        } catch (e) {
+            console.error('Failed to fetch agent models:', e);
+        } finally {
+            agentModelsLoading = false;
+        }
+    }
+
+    // Fetch agent models when selectedProviderUrl changes to an agent URL
     $effect(() => {
-        selectedProviderUrl = currentUrl || '';
+        const url = selectedProviderUrl;
+        if (url.startsWith(AGENT_URL_PREFIX)) {
+            fetchAgentModels(url);
+        } else {
+            agentModels = [];
+            lastFetchedAgentUrl = '';
+        }
     });
 
     $effect(() => {
@@ -180,6 +210,8 @@
         selectedProviderUrl = agentProvider.url;
         providerDropdownOpen = false;
         modelDropdownOpen = false;
+        // Trigger agent model fetch immediately
+        fetchAgentModels(agentProvider.url);
         const getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
         if (agentProvider.default_model && agentProvider.models.some(m => getModelName(m) === agentProvider.default_model)) {
             onSelect(agentProvider.name, agentProvider.default_model, agentProvider.url);
@@ -324,7 +356,7 @@
         </button>
     {/if}
 
-    {#if !isAgentSelected}
+    {#if !isAgentSelected || agentModelsLoading || agentModels.length > 0}
         <button
             type="button"
             class="selector-trigger model-trigger"
@@ -345,7 +377,7 @@
                 <line x1="14" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
             </svg>
             <span class="selector-label model-name" class:current={!!currentModel}>
-                {currentModel || 'Select model'}
+                {isAgentSelected && agentModelsLoading ? 'Loading...' : (currentModel || 'Select model')}
             </span>
             <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -389,7 +421,28 @@
 <!-- Model dropdown -->
 {#if modelDropdownOpen && modelRect}
     <svelte:element this={"div"} class="portal-model-dropdown" role="listbox" aria-label="Select model" style="position:fixed;top:{modelRect.top}px;left:{modelRect.left}px;z-index:10000;min-width:180px;max-height:320px;overflow-y:auto;background:var(--color-surface-1,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:4px;">
-        {#if availableModels.length === 0}
+        {#if isAgentSelected}
+            {#if agentModelsLoading}
+                <div class="empty">Loading models...</div>
+            {:else if agentModels.length === 0}
+                <div class="empty">No models available</div>
+            {:else}
+                {#each agentModels as m}
+                    {@const isActive = m.name === currentModel}
+                    <button type="button" class="model-option" class:active={isActive} onclick={() => selectModel(m.name)} role="option" aria-selected={isActive}>
+                        <span class="option-name">{m.name}</span>
+                        {#if m.context_window}
+                            <span class="effort-badge">{m.context_window / 1000}k</span>
+                        {/if}
+                        {#if isActive}
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        {/if}
+                    </button>
+                {/each}
+            {/if}
+        {:else if availableModels.length === 0}
             <div class="empty">No models available</div>
         {:else}
             {#each availableModels as m}
