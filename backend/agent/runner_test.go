@@ -410,6 +410,121 @@ func TestEventTypes(t *testing.T) {
 	}
 }
 
+// TestAgentRunner_Compact verifies that compaction requests are routed and handled correctly,
+// including failure cases.
+func TestAgentRunner_Compact(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockEvents     []agent.Event
+		wantSummary    string
+		wantErrContain string
+	}{
+		{
+			name: "success",
+			mockEvents: []agent.Event{
+				{
+					Type: agent.EventTypeStatus,
+					RawData: map[string]any{
+						"command": "compact",
+						"summary": "compacted summary",
+						"success": true,
+					},
+				},
+			},
+			wantSummary: "compacted summary",
+		},
+		{
+			name: "failure via Status event",
+			mockEvents: []agent.Event{
+				{
+					Type: agent.EventTypeStatus,
+					RawData: map[string]any{
+						"command": "compact",
+						"summary": "",
+						"success": false,
+						"error":   "session too small",
+					},
+				},
+			},
+			wantErrContain: "session too small",
+		},
+		{
+			name: "failure via Error event",
+			mockEvents: []agent.Event{
+				{
+					Type: agent.EventTypeError,
+					RawData: map[string]any{
+						"command": "compact",
+						"message": "critical failure",
+					},
+				},
+			},
+			wantErrContain: "critical failure",
+		},
+		{
+			name: "failure via Status event with success=false but no error message",
+			mockEvents: []agent.Event{
+				{
+					Type: agent.EventTypeStatus,
+					RawData: map[string]any{
+						"command": "compact",
+						"summary": "",
+						"success": false,
+					},
+				},
+			},
+			wantErrContain: "compaction failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adapter := newMockAdapter()
+			adapter.SetSubprocessConfig(agent.SubprocessConfig{Binary: "cat"})
+			adapter.SetEncodeResponse(agent.CommandCompact, []byte("compact-req\n"))
+			adapter.SetParseResponse("compact-req\n", tt.mockEvents)
+
+			RegisterAdapterFactory("test-compact", func() agent.AgentAdapter { return adapter })
+
+			ext := &extensions.Extension{
+				Name:    "test-compact",
+				Type:    extensions.ExtensionTypeAgent,
+				Manifest: extensions.ExtensionManifest{Agent: &extensions.AgentConfig{}},
+			}
+
+			runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
+			if err != nil {
+				t.Fatalf("NewAgentRunner: %v", err)
+			}
+			defer runner.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			result, err := runner.Compact(ctx)
+			if err != nil {
+				if tt.wantErrContain == "" {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !containsStr(err.Error(), tt.wantErrContain) {
+					t.Errorf("error = %q, want contain %q", err.Error(), tt.wantErrContain)
+				}
+				return
+			}
+
+			if tt.wantErrContain != "" {
+				t.Fatalf("expected error containing %q, got nil", tt.wantErrContain)
+			}
+
+			if result.Summary != tt.wantSummary {
+				t.Errorf("summary = %q, want %q", result.Summary, tt.wantSummary)
+			}
+			if result.Err != nil {
+				t.Errorf("unexpected result.Err: %v", result.Err)
+			}
+		})
+	}
+}
 // TestPersistEntry_Serialization verifies agent.PersistEntry marshals correctly.
 func TestPersistEntry_Serialization(t *testing.T) {
 	entry := agent.PersistEntry{
