@@ -94,6 +94,115 @@ func TestAdapter_EncodeCommand(t *testing.T) {
 	}
 }
 
+func TestAdapter_EncodeCommand_SetModel(t *testing.T) {
+	a := NewAdapter()
+	a.Init(context.Background(), []byte(`{}`))
+
+	// Test with provider/model format
+	result := a.EncodeCommand(context.Background(), agent.CommandSetModel, []byte(`{"model_name":"anthropic/claude-sonnet-4"}`))
+	resultStr := string(result)
+	if !strings.Contains(resultStr, `"type":"set_model"`) {
+		t.Errorf("missing set_model type: %s", resultStr)
+	}
+	if !strings.Contains(resultStr, `"provider":"anthropic"`) {
+		t.Errorf("missing provider: %s", resultStr)
+	}
+	if !strings.Contains(resultStr, `"modelId":"claude-sonnet-4"`) {
+		t.Errorf("missing modelId: %s", resultStr)
+	}
+
+	// Test with model name only (no provider prefix)
+	a2 := NewAdapter()
+	a2.Init(context.Background(), []byte(`{}`))
+	result2 := a2.EncodeCommand(context.Background(), agent.CommandSetModel, []byte(`{"model_name":"claude-sonnet-4"}`))
+	result2Str := string(result2)
+	if !strings.Contains(result2Str, `"type":"set_model"`) {
+		t.Errorf("missing set_model type: %s", result2Str)
+	}
+	if !strings.Contains(result2Str, `"modelId":"claude-sonnet-4"`) {
+		t.Errorf("missing modelId: %s", result2Str)
+	}
+
+	// Test with explicit provider in data
+	a3 := NewAdapter()
+	a3.Init(context.Background(), []byte(`{}`))
+	result3 := a3.EncodeCommand(context.Background(), agent.CommandSetModel, []byte(`{"model_name":"gpt-4o","provider":"openai"}`))
+	result3Str := string(result3)
+	if !strings.Contains(result3Str, `"provider":"openai"`) {
+		t.Errorf("missing explicit provider: %s", result3Str)
+	}
+	if !strings.Contains(result3Str, `"modelId":"gpt-4o"`) {
+		t.Errorf("missing modelId: %s", result3Str)
+	}
+
+	// Test with nil data (should produce empty set_model)
+	a4 := NewAdapter()
+	a4.Init(context.Background(), []byte(`{}`))
+	result4 := a4.EncodeCommand(context.Background(), agent.CommandSetModel, nil)
+	result4Str := string(result4)
+	if !strings.Contains(result4Str, `"type":"set_model"`) {
+		t.Errorf("missing set_model type with nil data: %s", result4Str)
+	}
+}
+
+func TestAdapter_ParseOutput_SetModelResponse(t *testing.T) {
+	a := NewAdapter()
+	a.Init(context.Background(), []byte(`{}`))
+
+	// set_model response with model info
+	input := `{"type":"response","command":"set_model","success":true,"data":{"model":{"provider":"anthropic","name":"claude-sonnet-4","modelId":"claude-sonnet-4"}}}
+`
+	events := a.ParseOutput(context.Background(), []byte(input))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Type != agent.EventTypeStatus {
+		t.Fatalf("Type = %q, want %q", events[0].Type, agent.EventTypeStatus)
+	}
+	if mn, ok := events[0].RawData["model_name"].(string); !ok || mn != "anthropic/claude-sonnet-4" {
+		t.Errorf("model_name = %q, want %q", mn, "anthropic/claude-sonnet-4")
+	}
+	// Adapter should have stored the model name
+	if a.modelName != "anthropic/claude-sonnet-4" {
+		t.Errorf("adapter.modelName = %q, want %q", a.modelName, "anthropic/claude-sonnet-4")
+	}
+}
+
+func TestAdapter_ParseOutput_SetModelResponse_EmptyData(t *testing.T) {
+	a := NewAdapter()
+	a.Init(context.Background(), []byte(`{}`))
+
+	// set_model response with no model data
+	input := `{"type":"response","command":"set_model","success":true,"data":{}}
+`
+	events := a.ParseOutput(context.Background(), []byte(input))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if mn, ok := events[0].RawData["model_name"].(string); !ok || mn != "" {
+		t.Errorf("model_name = %q, want empty", mn)
+	}
+}
+
+func TestAdapter_ParseOutput_SetModelResponse_Error(t *testing.T) {
+	a := NewAdapter()
+	a.Init(context.Background(), []byte(`{}`))
+
+	// set_model response with error
+	input := `{"type":"response","command":"set_model","success":false,"error":"Model not found: invalid/model"}
+`
+	events := a.ParseOutput(context.Background(), []byte(input))
+
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Type != agent.EventTypeError {
+		t.Fatalf("Type = %q, want %q", events[0].Type, agent.EventTypeError)
+	}
+}
+
 func TestAdapter_ParseOutput_TextDelta(t *testing.T) {
 	a := NewAdapter()
 	a.Init(context.Background(), []byte(`{}`))

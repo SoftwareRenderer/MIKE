@@ -24,7 +24,8 @@ const AgentSentinelPrefix = "agent://"
 // executeTaskWithAgent runs the task using an agent extension via the generic agent runner.
 // The agent handles its own LLM calls, tool execution, loop detection, and compaction.
 // Kanban only manages the subprocess lifecycle and streams events to the frontend.
-func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, initialContent string) {
+// requestedModel is the model name from the task config; if set, it sends set_model before the first prompt.
+func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL, requestedModel string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, initialContent string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[agent-panic] task=%s recovered from panic: %v", task.ID, r)
@@ -82,11 +83,19 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 
 	log.Printf("[agent] task=%s runner started (pid=%d)", task.ID, runner.PID())
 
-	// Discover the active model
+	// Set the requested model (from task config) before first prompt.
+	if requestedModel != "" {
+		log.Printf("[agent] task=%s setting model=%s", task.ID, requestedModel)
+		setModelCtx, setModelCancel := context.WithTimeout(ctx, 5*time.Second)
+		runner.SetModel(setModelCtx, requestedModel)
+		setModelCancel()
+	}
+
+	// Discover the active model (after set_model takes effect).
 	modelCtx, modelCancel := context.WithTimeout(ctx, 5*time.Second)
-	modelName := runner.QueryModel(modelCtx)
+	activeModel := runner.QueryModel(modelCtx)
 	modelCancel()
-	log.Printf("[agent] task=%s model=%s", task.ID, modelName)
+	log.Printf("[agent] task=%s model=%s", task.ID, activeModel)
 
 	// Get existing messages
 	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
@@ -286,6 +295,13 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 					if um.ContextChanged {
 						log.Printf("[agent] task=%s context changed notification, skipping", task.ID)
 					} else {
+						// Handle model switch if requested with this message.
+						if um.ModelName != "" {
+							log.Printf("[agent] task=%s model switch requested: %s", task.ID, um.ModelName)
+							setModelCtx, setModelCancel := context.WithTimeout(ctx, 5*time.Second)
+							runner.SetModel(setModelCtx, um.ModelName)
+							setModelCancel()
+						}
 						log.Printf("[agent] task=%s persist: forwarding queued user message for next turn", task.ID)
 						turnStartTime = time.Now()
 						err := runner.Prompt(ctx, um.Content, "steer")
@@ -329,6 +345,13 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			if um.ContextChanged {
 				log.Printf("[agent] task=%s context changed notification, skipping", task.ID)
 				continue
+			}
+			// Handle model switch if requested with this message.
+			if um.ModelName != "" {
+				log.Printf("[agent] task=%s model switch requested: %s", task.ID, um.ModelName)
+				setModelCtx, setModelCancel := context.WithTimeout(ctx, 5*time.Second)
+				runner.SetModel(setModelCtx, um.ModelName)
+				setModelCancel()
 			}
 			log.Printf("[agent] task=%s forwarding user message (len=%d)", task.ID, len(um.Content))
 			turnStartTime = time.Now()

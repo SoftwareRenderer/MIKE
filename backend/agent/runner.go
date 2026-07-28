@@ -248,6 +248,35 @@ func (r *AgentRunner) QueryModel(ctx context.Context) string {
 	return r.ModelName()
 }
 
+// SetModel sends a set_model command to the agent and waits for the model to update.
+// Returns immediately if the runner is closed or context is cancelled.
+func (r *AgentRunner) SetModel(ctx context.Context, modelName string) {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
+	data, _ := json.Marshal(map[string]any{"model_name": modelName})
+	bytes := r.adapter.EncodeCommand(ctx, pkgagent.CommandSetModel, data)
+	if bytes != nil {
+		r.stdin.Write(bytes) // best-effort
+	}
+	r.mu.Unlock()
+
+	// Wait for the model to be updated (via response parsing → modelUpdated channel)
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+
+	select {
+	case <-r.modelUpdated:
+		// Model updated successfully
+	case <-timeout.C:
+		log.Printf("[agent] SetModel timed out waiting for response")
+	case <-ctx.Done():
+		// Context cancelled
+	}
+}
+
 // SendCommand sends a high-level command to the agent.
 func (r *AgentRunner) SendCommand(ctx context.Context, cmd string, data []byte) error {
 	r.mu.Lock()
