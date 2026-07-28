@@ -240,6 +240,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	// Event loop
 	startTime := time.Now()
 	turnStartTime := startTime
+	var firstTokenTime time.Time // tracks when first token arrives (prompt processing ends)
 	agentEnded := false
 	var stopReason string
 	var totalPromptTokens, totalPredictedTokens int
@@ -321,6 +322,11 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 				break
 			}
 
+			// Track first token arrival to compute prompt vs gen timing
+			if event.Type == pkgagent.EventTypeToken && firstTokenTime.IsZero() {
+				firstTokenTime = time.Now()
+			}
+
 			// Stream the event to frontend
 			if streamEvent := toStreamEvent(event, sandboxEnabled, runner); streamEvent.Type != "" {
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
@@ -328,10 +334,29 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 
 			switch event.Type {
 			case pkgagent.EventTypePersist:
+				// Compute prompt/gen timing for this turn
+				turnEnd := time.Now()
+				promptMs := int64(0)
+				predictedMs := int64(0)
+				if !firstTokenTime.IsZero() {
+					promptMs = firstTokenTime.Sub(turnStartTime).Milliseconds()
+					predictedMs = turnEnd.Sub(firstTokenTime).Milliseconds()
+				} else {
+					// No tokens received (e.g., error turn); use full duration as gen time
+					predictedMs = turnEnd.Sub(turnStartTime).Milliseconds()
+				}
+				// Inject timing into persist entries so CreateTaskMessage accumulates speeds
+				for i := range event.PersistEntries {
+					if event.PersistEntries[i].Role == "assistant" {
+						event.PersistEntries[i].PromptMs = promptMs
+						event.PersistEntries[i].PredictedMs = predictedMs
+					}
+				}
 				// Persist pre-parsed messages from adapter
 				pt, ptok := te.persistAgentTurnEntries(projectID, task.ID, task.CurrentThreadID, event.PersistEntries, turnStartTime, sandboxEnabled)
 				totalPromptTokens += pt
 				totalPredictedTokens += ptok
+				firstTokenTime = time.Time{} // reset for next turn
 
 				// Checkpoint file changes after agent turn completes.
 				checkpointMsgID := uuid.New().String()
@@ -361,6 +386,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 						}
 						log.Printf("[agent] task=%s persist: forwarding queued user message for next turn", task.ID)
 						turnStartTime = time.Now()
+						firstTokenTime = time.Time{}
 						err := runner.Prompt(ctx, um.Content, "steer")
 						if err != nil {
 							log.Printf("[agent] task=%s failed to forward queued message: %v", task.ID, err)
@@ -412,6 +438,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			}
 			log.Printf("[agent] task=%s forwarding user message (len=%d)", task.ID, len(um.Content))
 			turnStartTime = time.Now()
+			firstTokenTime = time.Time{}
 			err := runner.Prompt(ctx, um.Content, "steer")
 			if err != nil {
 				log.Printf("[agent] task=%s failed to forward user message: %v", task.ID, err)
@@ -629,6 +656,8 @@ func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID stri
 				ProviderName:     entry.ProviderName,
 				PromptTokens:     entry.PromptTokens,
 				PredictedTokens:  entry.PredictedTokens,
+				PromptMs:         int(entry.PromptMs),
+				PredictedMs:      int(entry.PredictedMs),
 				Duration:         time.Since(startTime).Milliseconds(),
 				CreatedAt:        time.Now().UTC(),
 			})
