@@ -252,6 +252,10 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	initialStats := runner.QueryStats(statsCtxInner)
 	cancel()
 	if initialStats.ContextWindow > 0 {
+		cost := initialStats.Cost
+		if cost <= 0 {
+			cost = runner.SessionCost()
+		}
 		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
 			"model_name":       runner.ModelName(),
 			"prompt_tokens":    initialStats.TotalInput,
@@ -259,6 +263,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			"context_used":     initialStats.ContextTokens,
 			"context_limit":    initialStats.ContextWindow,
 			"context_percent":  initialStats.ContextPercent,
+			"cost":             cost,
 		}})
 	}
 
@@ -275,12 +280,19 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 				stats := runner.QueryStats(statsCtxInner)
 				cancel()
 				if stats.ContextWindow > 0 {
+					// Use per-message cost accumulation as fallback when get_session_stats
+					// returns NaN/null cost (Pi agent bug: usage.cost.total missing from entries).
+					cost := stats.Cost
+					if cost <= 0 {
+						cost = runner.SessionCost()
+					}
 					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
 						"model_name":       runner.ModelName(),
 						"prompt_tokens":    stats.TotalInput,
 						"predicted_tokens": stats.TotalOutput,
 						"context_used":     stats.ContextTokens,
 						"context_limit":    stats.ContextWindow,
+						"cost":             cost,
 						"context_percent":  stats.ContextPercent,
 					}})
 				}
@@ -430,6 +442,20 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		task.Status = "review"
 		task.Output = fmt.Sprintf("Agent process exited unexpectedly (stopReason=%s)", stopReason)
 		te.store.UpdateTask(task)
+	}
+
+	// Accumulate session cost into project_token_stats (aggregate increment, not per-message)
+	// Use SessionCost() directly — it's accumulated from message_end events and persist
+	// entries, bypassing the broken get_session_stats NaN cost entirely.
+	finalCost := runner.SessionCost()
+	if finalCost > 0 {
+		modelName := runner.ModelName()
+		providerName := runner.ProviderName()
+		if providerName == "" {
+			providerName = "Pi Coding Agent"
+		}
+		te.store.AccumulateProjectStats(projectID, modelName, providerName, finalCost)
+		log.Printf("[agent] task=%s accumulated session cost=%f for model=%s provider=%s", task.ID, finalCost, modelName, providerName)
 	}
 
 	// Broadcast complete event to clear streaming state on the frontend.
@@ -782,16 +808,6 @@ func toStreamEvent(event pkgagent.Event, sandbox bool, runner *agent.AgentRunner
 			activity = event.Status.Activity
 		}
 		return types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": state, "activity": activity}}
-
-	case pkgagent.EventTypeStats:
-		return types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-			"model_name":       runner.ModelName(),
-			"prompt_tokens":    event.Stats.TotalInput,
-			"predicted_tokens": event.Stats.TotalOutput,
-			"context_used":     event.Stats.ContextTokens,
-			"context_limit":    event.Stats.ContextWindow,
-			"context_percent":  event.Stats.ContextPercent,
-		}}
 
 	case pkgagent.EventTypeError:
 		msg := ""

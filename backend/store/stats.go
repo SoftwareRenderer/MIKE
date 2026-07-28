@@ -30,7 +30,8 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 			CASE WHEN prompt_ms > 0 THEN (prompt_tokens - cache_tokens) * 1000.0 / prompt_ms ELSE 0 END as avg_prompt_tps,
 			CASE WHEN predicted_ms > 0 THEN predicted_tokens * 1000.0 / predicted_ms ELSE 0 END as avg_generation_tps,
 			prompt_ms,
-			predicted_ms
+			predicted_ms,
+			cost
 		FROM project_token_stats
 		WHERE project_id = ?
 		ORDER BY predicted_tokens DESC
@@ -47,7 +48,7 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 		var promptMsRow int64
 		err := rows.Scan(&ms.ModelName, &ms.ProviderName, &ms.PromptTokens, &ms.CacheTokens,
 			&ms.ProcessedTokens, &ms.GeneratedTokens, &ms.AvgPromptTps, &ms.AvgGenerationTps,
-			&promptMsRow, &ms.PredictedMs)
+			&promptMsRow, &ms.PredictedMs, &ms.Cost)
 		if err != nil {
 			continue
 		}
@@ -57,6 +58,7 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 		stats.TotalCacheTokens += ms.CacheTokens
 		stats.TotalProcessedTokens += ms.ProcessedTokens
 		stats.TotalGeneratedTokens += ms.GeneratedTokens
+		stats.TotalCost += ms.Cost
 
 		totalPromptMs += promptMsRow
 		totalGenMs += ms.PredictedMs
@@ -100,6 +102,22 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 	return stats, nil
 }
 
+// AccumulateProjectStats increments the cost for a specific model/provider in a project.
+// This is used by agent providers to record the session cost reported by the agent,
+// since agents report their own cost rather than having it computed from token counts.
+func (s *Store) AccumulateProjectStats(projectID, modelName, providerName string, cost float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Use INSERT ... ON CONFLICT so the row is created if it doesn't exist yet
+	// (e.g. agent task with no prior assistant message persistence).
+	_, _ = s.db.Exec(`
+		INSERT INTO project_token_stats (project_id, model_name, provider_name, cost)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(project_id, model_name, provider_name)
+		DO UPDATE SET cost = project_token_stats.cost + excluded.cost`,
+		projectID, modelName, providerName, cost)
+}
+
 // DeleteProjectStats zeros out the cumulative stats for a specific model/provider in a project.
 // If providerName is empty, it matches any provider for that model.
 // This does NOT delete messages from task_messages.
@@ -110,7 +128,7 @@ func (s *Store) DeleteProjectStats(projectID, modelName, providerName string) er
 	if providerName != "" {
 		_, err := s.db.Exec(`
 			UPDATE project_token_stats
-			SET prompt_tokens = 0, cache_tokens = 0, predicted_tokens = 0, prompt_ms = 0, predicted_ms = 0
+			SET prompt_tokens = 0, cache_tokens = 0, predicted_tokens = 0, prompt_ms = 0, predicted_ms = 0, cost = 0
 			WHERE project_id = ? AND model_name = ? AND provider_name = ?`,
 			projectID, modelName, providerName)
 		if err != nil {
@@ -125,7 +143,7 @@ func (s *Store) DeleteProjectStats(projectID, modelName, providerName string) er
 
 	_, err := s.db.Exec(`
 		UPDATE project_token_stats
-		SET prompt_tokens = 0, cache_tokens = 0, predicted_tokens = 0, prompt_ms = 0, predicted_ms = 0
+		SET prompt_tokens = 0, cache_tokens = 0, predicted_tokens = 0, prompt_ms = 0, predicted_ms = 0, cost = 0
 		WHERE project_id = ? AND model_name = ?`,
 		projectID, modelName)
 	if err != nil {

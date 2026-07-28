@@ -24,6 +24,7 @@
         selectedReasoningEffort?: string;
         contextUsed?: number;
         contextLimit?: number;
+        sessionCost?: number;
         operatingMode?: string;
         attachments?: ImageAttachment[];
         projectId?: string;
@@ -50,6 +51,7 @@
         selectedReasoningEffort = '',
         contextUsed = 0,
         contextLimit = 0,
+        sessionCost = 0,
         operatingMode = 'act',
         attachments = $bindable<ImageAttachment[]>([]),
         projectId = '',
@@ -300,7 +302,7 @@
                 {disabled}
                 onSelect={onModelSelect!}
             />
-            <ContextUsage used={contextDisplay.used} limit={contextDisplay.limit} {onSummarize} onSummarizeCancel={isAgent ? undefined : onSummarizeCancel} {isSummarizing} disabled={disabled} />
+            <ContextUsage used={contextDisplay.used} limit={contextDisplay.limit} sessionCost={sessionCost} {onSummarize} onSummarizeCancel={isAgent ? undefined : onSummarizeCancel} {isSummarizing} disabled={disabled} />
             {#if onOperatingModeToggle && !isAgent}
                 <button
                     type="button"

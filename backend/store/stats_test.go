@@ -739,3 +739,80 @@ func TestGetProjectStatsTotalTasksExcludesLLMFreeTasks(t *testing.T) {
 		t.Fatalf("expected sum of task_counts to be 2, got %d", sumTaskCount)
 	}
 }
+
+func TestAccumulateProjectStats(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := newTask("task-1", "proj-1")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Create an assistant message to seed the project_token_stats row
+	msg := newMessage("m1", "task-1", "assistant", "response")
+	msg.ModelName = "model-a"
+	msg.ProviderName = "provider-x"
+	msg.PromptTokens = 100
+	msg.PredictedTokens = 50
+	if err := s.CreateTaskMessage(msg); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	// Accumulate cost via AccumulateProjectStats
+	s.AccumulateProjectStats("proj-1", "model-a", "provider-x", 0.45)
+	s.AccumulateProjectStats("proj-1", "model-a", "provider-x", 0.55)
+
+	// Verify the accumulated cost is reflected in GetProjectStats
+	stats, err := s.GetProjectStats("proj-1")
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	if len(stats.ByModel) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(stats.ByModel))
+	}
+	expected := 0.45 + 0.55
+	if stats.ByModel[0].Cost != expected {
+		t.Errorf("expected cost %.2f, got %f", expected, stats.ByModel[0].Cost)
+	}
+	if stats.TotalCost != expected {
+		t.Errorf("expected total cost %.2f, got %f", expected, stats.TotalCost)
+	}
+}
+
+func TestDeleteProjectStatsResetsCost(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := newTask("task-1", "proj-1")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	msg := newMessage("m1", "task-1", "assistant", "response")
+	msg.ModelName = "model-a"
+	msg.ProviderName = "provider-x"
+	if err := s.CreateTaskMessage(msg); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+	s.AccumulateProjectStats("proj-1", "model-a", "provider-x", 1.50)
+
+	// Verify cost is set
+	stats, _ := s.GetProjectStats("proj-1")
+	if stats.ByModel[0].Cost != 1.50 {
+		t.Fatalf("expected cost 1.50, got %f", stats.ByModel[0].Cost)
+	}
+
+	// Delete stats should zero out cost
+	if err := s.DeleteProjectStats("proj-1", "model-a", "provider-x"); err != nil {
+		t.Fatalf("delete stats: %v", err)
+	}
+	stats, _ = s.GetProjectStats("proj-1")
+	if stats.ByModel[0].Cost != 0 {
+		t.Errorf("expected cost 0 after delete, got %f", stats.ByModel[0].Cost)
+	}
+}

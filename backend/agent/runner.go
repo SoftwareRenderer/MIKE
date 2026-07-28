@@ -39,6 +39,12 @@ type AgentRunner struct {
 
 	// model name discovered via get_state
 	modelName string
+	// provider name discovered via persist entries; used for stats accumulation
+	providerName string
+	// last known session stats from get_session_stats; used for persistence after agent exits
+	lastStats   pkgagent.SessionStatsData
+	// accumulated cost from persist entries; fallback when get_session_stats doesn't report cost
+	sessionCost float64
 	// session file path discovered via get_state; used for switch_session on restart
 	sessionFile string
 }
@@ -221,9 +227,9 @@ func (r *AgentRunner) QueryStats(ctx context.Context) pkgagent.SessionStatsData 
 	case stats := <-r.statsChan:
 		return stats
 	case <-ctx.Done():
-		return pkgagent.SessionStatsData{}
+		return r.LastStats()
 	case <-time.After(3 * time.Second):
-		return pkgagent.SessionStatsData{}
+		return r.LastStats()
 	}
 }
 
@@ -336,6 +342,34 @@ func (r *AgentRunner) ModelName() string {
 	return r.modelName
 }
 
+// ProviderName returns the agent provider name discovered from persist entries.
+func (r *AgentRunner) ProviderName() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.providerName
+}
+
+// LastStats returns the last known session stats. Prefer sessionCost
+// (accumulated from message_end + persist entries) over lastStats.Cost
+// because get_session_stats may return NaN/null cost (Pi agent bug).
+func (r *AgentRunner) LastStats() pkgagent.SessionStatsData {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.lastStats
+	if r.sessionCost > 0 {
+		s.Cost = r.sessionCost
+	}
+	return s
+}
+
+// SessionCost returns the accumulated cost from persist entries.
+// This is a reliable fallback when get_session_stats returns NaN/null cost.
+func (r *AgentRunner) SessionCost() float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sessionCost
+}
+
 // PID returns the agent subprocess PID.
 func (r *AgentRunner) PID() int {
 	if r.cmd == nil || r.cmd.Process == nil {
@@ -432,6 +466,20 @@ func (r *AgentRunner) readOutput(ctx context.Context) {
 func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 	// Route stats to dedicated channel
 	if event.Type == pkgagent.EventTypeStats {
+		r.mu.Lock()
+		// Merge stats: use full snapshot from get_session_stats, or accumulate
+		// per-message cost from message_end events.
+		if event.Stats.ContextWindow > 0 {
+			r.lastStats = event.Stats
+			// Also accumulate the cost from get_session_stats
+			if event.Stats.Cost > 0 {
+				r.sessionCost = event.Stats.Cost
+			}
+		} else if event.Stats.Cost > 0 {
+			// Per-message cost from message_end — accumulate additively
+			r.sessionCost += event.Stats.Cost
+		}
+		r.mu.Unlock()
 		select {
 		case r.statsChan <- event.Stats:
 		default:
@@ -505,6 +553,22 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 		if sessionFile, ok := event.RawData["session_file"].(string); ok && sessionFile != "" {
 			r.mu.Lock()
 			r.sessionFile = sessionFile
+			r.mu.Unlock()
+		}
+	}
+
+	// Capture provider name and accumulate cost from persist entries
+	if event.Type == pkgagent.EventTypePersist && len(event.PersistEntries) > 0 {
+		var turnCost float64
+		for _, entry := range event.PersistEntries {
+			if entry.ProviderName != "" {
+				r.providerName = entry.ProviderName
+			}
+			turnCost += entry.Cost
+		}
+		if turnCost > 0 {
+			r.mu.Lock()
+			r.sessionCost += turnCost
 			r.mu.Unlock()
 		}
 	}

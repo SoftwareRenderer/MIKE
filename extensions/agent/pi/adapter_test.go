@@ -331,7 +331,7 @@ func TestAdapter_ParseOutput_SessionStats(t *testing.T) {
 	a := NewAdapter()
 	a.Init(context.Background(), []byte(`{}`))
 
-	input := `{"type":"response","command":"get_session_stats","success":true,"data":{"tokens":{"input":1000,"output":500,"cacheRead":100,"cacheWrite":50},"contextUsage":{"tokens":2000,"contextWindow":8000,"percent":25}}}
+	input := `{"type":"response","command":"get_session_stats","success":true,"data":{"cost":0.45,"tokens":{"input":1000,"output":500,"cacheRead":100,"cacheWrite":50},"contextUsage":{"tokens":2000,"contextWindow":8000,"percent":25}}}
 `
 	events := a.ParseOutput(context.Background(), []byte(input))
 	if len(events) != 1 {
@@ -345,6 +345,24 @@ func TestAdapter_ParseOutput_SessionStats(t *testing.T) {
 	}
 	if events[0].Stats.ContextPercent != 25 {
 		t.Errorf("ContextPercent = %f", events[0].Stats.ContextPercent)
+	}
+	if events[0].Stats.Cost != 0.45 {
+		t.Errorf("Cost = %f, want 0.45", events[0].Stats.Cost)
+	}
+}
+
+func TestAdapter_ParseOutput_SessionStats_NoCost(t *testing.T) {
+	a := NewAdapter()
+	a.Init(context.Background(), []byte(`{}`))
+
+	input := `{"type":"response","command":"get_session_stats","success":true,"data":{"tokens":{"input":500,"output":200}}}
+`
+	events := a.ParseOutput(context.Background(), []byte(input))
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Stats.Cost != 0 {
+		t.Errorf("Cost = %f, want 0", events[0].Stats.Cost)
 	}
 }
 

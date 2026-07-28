@@ -207,6 +207,7 @@ CREATE TABLE IF NOT EXISTS project_token_stats (
     predicted_tokens INTEGER NOT NULL DEFAULT 0,
     prompt_ms        INTEGER NOT NULL DEFAULT 0,
     predicted_ms     INTEGER NOT NULL DEFAULT 0,
+    cost             REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (project_id, model_name, provider_name),
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
@@ -286,6 +287,8 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	// File checkpoint tracking
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN git_commit_hash TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN attachments TEXT DEFAULT NULL`)
+// Add cost column to cumulative token stats (idempotent — ALTER TABLE IF NOT EXISTS is not standard SQLite)
+_, _ = s.db.Exec(`ALTER TABLE project_token_stats ADD COLUMN cost REAL NOT NULL DEFAULT 0`)
 	// Separate merge conflict flag so execution_state can stay "running"
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN has_merge_conflict INTEGER NOT NULL DEFAULT 0`)
 	// Operating mode: act (default), plan, or explore
@@ -301,6 +304,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 			predicted_tokens INTEGER NOT NULL DEFAULT 0,
 			prompt_ms        INTEGER NOT NULL DEFAULT 0,
 			predicted_ms     INTEGER NOT NULL DEFAULT 0,
+			cost             REAL NOT NULL DEFAULT 0,
 			PRIMARY KEY (project_id, model_name, provider_name),
 			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 		)

@@ -327,8 +327,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'stats': {
-                const data = event.data as { model_name: string; prompt_tokens: number; predicted_tokens: number; predicted_ms: number; context_used?: number; context_limit?: number; context_percent?: number };
+                const data = event.data as { model_name: string; prompt_tokens: number; predicted_tokens: number; predicted_ms: number; context_used?: number; context_limit?: number; context_percent?: number; cost?: number };
                 if (data.prompt_tokens !== undefined && data.prompt_tokens > 0) s.lastPromptTokens = data.prompt_tokens;
+                if (data.cost !== undefined && !isNaN(data.cost)) s.sessionCost = data.cost;
                 if (data.predicted_tokens !== s.streamTokenCount) {
                     s.streamTokenCount = data.predicted_tokens;
                 }
