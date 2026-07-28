@@ -4,7 +4,7 @@
     import type { DiffFile, DiffRow } from '$lib/types/diff';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
-    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile, initTask } from '$lib/api';
     import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { clearHighlightCache } from '$lib/highlighter';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -137,8 +137,20 @@
         ...meta,
         file: diffCache.state.files[path] || { path, rows: [], added: 0, removed: 0 },
     })));
-    // Terminal - worktree exists when task has a branch (set on start, cleared on delete)
-    let worktreeExists = $derived(!!task.branch);
+    // Terminal - worktree exists when task is initialized (branch created via init or start)
+    let worktreeExists = $derived(task.worktree_exists || !!task.branch);
+    // Open terminal, initializing the task worktree first if needed.
+    async function handleOpenTerminal() {
+        if (!worktreeExists) {
+            try {
+                await initTask(task.project_id, task.id);
+            } catch (e) {
+                console.error('[terminal] Failed to initialize task:', e);
+                return;
+            }
+        }
+        onOpenTerminal?.();
+    }
 
     // Commit history for diff comparison
     let commits: TaskCommit[] = $state([]);
@@ -696,10 +708,9 @@
             taskId={task.id}
             {sandboxEnabled}
             {badge}
-            {worktreeExists}
             {task}
             {onClose}
-            onOpenTerminal={onOpenTerminal || (() => uiStore.showTerminal = true)}
+            onOpenTerminal={handleOpenTerminal}
             onDelete={handleDelete}
         />
 

@@ -27,7 +27,7 @@ export type ActionType =
     | 'createTask' | 'updateTask' | 'deleteTask' | 'moveTask'
     | 'commitAndDone' | 'clearDoneTasks'
     // Task execution
-    | 'startTask' | 'startSubtask' | 'stopTask' | 'retryTask' | 'resumeTask'
+    | 'initTask' | 'startTask' | 'startSubtask' | 'stopTask' | 'retryTask' | 'resumeTask'
     // Messages
     | 'sendTaskMessage' | 'createTaskMessage' | 'deleteTaskMessagesAfter'
     | 'deleteTaskMessage' | 'updateTaskMessage'
@@ -324,6 +324,17 @@ export function applyQueuedActionsToBoard(
                 break;
             }
 
+            case 'initTask': {
+                const resolvedId = optIdMap.get(taskId) || taskId;
+                const task = result.find(t => t.id === resolvedId);
+                if (task) {
+                    task.branch = result[0]?.branch || task.branch;
+                    task.base_ref = result[0]?.base_ref || task.base_ref;
+                    task.worktree_exists = true;
+                }
+                break;
+            }
+
             case 'startTask':
             case 'startSubtask':
             case 'retryTask':
@@ -422,6 +433,9 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             break;
         case 'clearDoneTasks':
             await clearDoneTasksRaw(p.projectId);
+            break;
+        case 'initTask':
+            await initTaskRaw(p.projectId, taskId);
             break;
         case 'startTask':
             await startTaskRaw(p.projectId, taskId);
@@ -654,6 +668,12 @@ async function clearDoneTasksRaw(projectId: string): Promise<{ deleted: number }
 }
 
 // -- Task execution endpoints --
+async function initTaskRaw(projectId: string, taskId: string): Promise<Task> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/init`, { method: 'POST' });
+    if (!res.ok) throw await apiError(res, 'Failed to initialize task');
+    return res.json();
+}
+
 async function startTaskRaw(projectId: string, taskId: string): Promise<Task> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/start`, { method: 'POST' });
     if (!res.ok) throw await apiError(res, 'Failed to start task');
@@ -827,6 +847,7 @@ export {
     commitAndDoneRaw,
     getCommitPreviewRaw,
     clearDoneTasksRaw,
+    initTaskRaw,
     startTaskRaw,
     startSubtaskRaw,
     stopTaskRaw,

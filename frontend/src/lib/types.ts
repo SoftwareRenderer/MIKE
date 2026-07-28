@@ -80,6 +80,7 @@ export interface Task {
     parent_task_id?: string;
     title_generating: boolean;
     current_thread_id?: string;
+    worktree_exists?: boolean;
     created_at: string;
     updated_at: string;
     assigned_ports?: AssignedPort[];

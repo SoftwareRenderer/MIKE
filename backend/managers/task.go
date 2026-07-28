@@ -69,7 +69,7 @@ func (h *TaskHandler) refreshTaskPorts(task *types.Task) {
 // It uses the workspace_dir from config to build the worktree path.
 func EnrichWorktreeExists(tasks []types.Task, workspaceDir string) {
 	for i := range tasks {
-		path := filepath.Join(workspaceDir, tasks[i].ID)
+		path := filepath.Join(workspaceDir, tasks[i].ProjectID, tasks[i].ID)
 		_, err := os.Stat(path)
 		tasks[i].WorktreeExists = err == nil
 	}
@@ -77,7 +77,7 @@ func EnrichWorktreeExists(tasks []types.Task, workspaceDir string) {
 
 // enrichTaskWorktree sets the WorktreeExists field on a single task.
 func enrichTaskWorktree(task *types.Task, workspaceDir string) {
-	path := filepath.Join(workspaceDir, task.ID)
+	path := filepath.Join(workspaceDir, task.ProjectID, task.ID)
 	_, err := os.Stat(path)
 	task.WorktreeExists = err == nil
 }
@@ -1133,6 +1133,40 @@ func (h *TaskHandler) finishTitleGeneration(projectID, taskID string, broadcast 
 	if broadcast {
 		h.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
 	}
+}
+
+// HandleInit creates the worktree and branch for a task without starting LLM execution.
+// This enables the terminal and file explorer before the task is started.
+// It is idempotent — calling it on an already-initialized task returns the task as-is.
+func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	_, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	task, err := h.executor.InitTask(projectID, taskID)
+	if err != nil {
+		log.Printf("[init] task=%s error: %v", taskID, err)
+		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	log.Printf("[init] task=%s worktree ready", taskID)
+	// Enrich with worktree existence so the frontend knows the terminal is available
+	if h.worktreeMgr != nil {
+		cfg, _ := h.configStore.GetConfig()
+		if cfg != nil {
+			enrichTaskWorktree(task, cfg.WorkspaceDir)
+		}
+	}
+	h.refreshTaskPorts(task)
+	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
 // HandleStartWithSubtasks is the HTTP handler for starting a task.

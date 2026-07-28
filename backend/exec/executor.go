@@ -571,6 +571,102 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 	return te.StartSubtaskWithParent(projectID, selectedID)
 }
 
+// InitTask creates the worktree and branch for a task without starting LLM execution.
+// This enables the terminal and file explorer before the task is started.
+// It is idempotent — calling it on an already-initialized task is a no-op.
+func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) {
+	task, err := te.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Already initialized
+	if task.Branch != "" {
+		return task, nil
+	}
+
+	branchName := te.generateBranchName(task, taskID, projectID)
+
+	// Atomic set prevents double worktree creation from concurrent callers.
+	set, err := te.store.SetTaskBranchIfEmpty(taskID, projectID, branchName)
+	if err != nil {
+		return nil, fmt.Errorf("set branch: %w", err)
+	}
+	if !set {
+		// Another caller won the race — reload to get their branch name
+		task, err = te.store.GetTaskByTaskID(taskID)
+		if err != nil {
+			return nil, err
+		}
+		if task.Branch != "" {
+			return task, nil
+		}
+		// Unreachable safety net — SQLite guarantees this won't happen.
+		return nil, fmt.Errorf("branch was not set by concurrent caller")
+	}
+
+	// If this is a child task, ensure the parent has a branch first.
+	if task.ParentTaskID != "" {
+		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		if err == nil && parent.Branch == "" {
+			if err := te.EnsureParentBranch(projectID, parent); err != nil {
+				return nil, fmt.Errorf("ensure parent branch: %w", err)
+			}
+		}
+	}
+
+	// If this is a child task, branch from the parent's actual worktree branch.
+	sourceBranch := ""
+	if task.ParentTaskID != "" {
+		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		if err == nil {
+			if parentWtPath, wtErr := te.worktreeMgr.WorktreePath(parent.ID); wtErr == nil {
+				if _, statErr := os.Stat(parentWtPath); statErr == nil {
+					if actualBranch, gitErr := te.worktreeMgr.GitRunInDirOutput(parentWtPath, "rev-parse", "--abbrev-ref", "HEAD"); gitErr == nil {
+						sourceBranch = strings.TrimSpace(actualBranch)
+					}
+				}
+			}
+			if sourceBranch == "" && parent.Branch != "" {
+				sourceBranch = parent.Branch
+			}
+		}
+	}
+
+	_, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName, sourceBranch)
+	if err != nil {
+		return nil, fmt.Errorf("create worktree: %w", err)
+	}
+
+	task.Branch = branchName
+	task.BaseRef = baseRef
+
+	// Capture the base ref's commit hash.
+	if task.BaseCommit == "" && task.BaseRef != "" {
+		project, _ := te.store.GetProject(projectID)
+		if project != nil {
+			c := osexec.Command("git", "-C", project.Path, "rev-parse", task.BaseRef)
+			if out, err := c.CombinedOutput(); err == nil {
+				task.BaseCommit = strings.TrimSpace(string(out))
+			}
+		}
+	}
+
+	watchBaseRef := task.BaseRef
+	if task.BaseCommit != "" {
+		watchBaseRef = task.BaseCommit
+	}
+	te.appStreamMgr.WatchWorktree(taskID, projectID, watchBaseRef)
+
+	task.UpdatedAt = time.Now().UTC()
+	if err := te.store.UpdateTask(task); err != nil {
+		return nil, fmt.Errorf("update task: %w", err)
+	}
+
+	log.Printf("[init] task=%s created worktree with branch %s", taskID, branchName)
+	return task, nil
+}
+
 // taskExecSetup holds the shared state prepared for task execution.
 type taskExecSetup struct {
 	task                  *types.Task
@@ -627,7 +723,10 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		modelName = task.ModelName
 	}
 
-	branchName := te.generateBranchName(task, taskID, projectID)
+	branchName := task.Branch
+	if branchName == "" {
+		branchName = te.generateBranchName(task, taskID, projectID)
+	}
 	// If this is a child task, ensure the parent has a branch first.
 	// The parent's branch is the merge target for subtask auto-merge.
 	// If the parent hasn't started yet (no branch), create one now.
