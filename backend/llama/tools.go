@@ -1,8 +1,6 @@
 package llama
 
 import (
-	"encoding/json"
-
 	"kanban/backend/types"
 )
 
@@ -34,6 +32,69 @@ func GetToolDisplayName(toolName string) string {
 	return toolName
 }
 
+// ─── JSON Schema structs (fields serialized in declaration order) ───
+
+type paramSchema struct {
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Items       *editItemSchema `json:"items,omitempty"`
+}
+
+type editItemSchema struct {
+	Type       string              `json:"type"`
+	Properties editPropertyParams  `json:"properties"`
+	Required   []string            `json:"required"`
+}
+
+type editPropertyParams struct {
+	OldText paramSchema `json:"oldText"`
+	NewText paramSchema `json:"newText"`
+}
+
+// Per-tool property structs — field order is the order the LLM sees them.
+
+type readFileProps struct {
+	Path   paramSchema `json:"path"`
+	Offset paramSchema `json:"offset"`
+	Limit  paramSchema `json:"limit"`
+}
+
+type writeFileProps struct {
+	Path    paramSchema `json:"path"`
+	Content paramSchema `json:"content"`
+}
+
+type editFileProps struct {
+	Path  paramSchema `json:"path"`
+	Edits paramSchema `json:"edits"`
+}
+
+type bashProps struct {
+	Command paramSchema `json:"command"`
+	Timeout paramSchema `json:"timeout"`
+}
+
+type askQuestionProps struct {
+	Question paramSchema `json:"question"`
+}
+
+type requestReviewProps struct {
+	Summary paramSchema `json:"summary"`
+}
+
+type createTaskProps struct {
+	Title        paramSchema `json:"title"`
+	Prompt       paramSchema `json:"prompt"`
+	ParentTaskID paramSchema `json:"parent_task_id"`
+}
+
+type editTaskProps struct {
+	TaskID       paramSchema `json:"task_id"`
+	Title        paramSchema `json:"title"`
+	Prompt       paramSchema `json:"prompt"`
+	ParentTaskID paramSchema `json:"parent_task_id"`
+}
+
 // ─── Shared tool definitions (single source of truth) ───
 
 var toolReadFile = types.ChatTool{
@@ -44,10 +105,10 @@ var toolReadFile = types.ChatTool{
 		Description: "Read the contents of a file. Supports offset (1-indexed start line) and limit (max lines to return) for large files. Omit both for full file.",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"path":   map[string]any{"type": "string", "description": "Path to the file"},
-				"offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed)"},
-				"limit":  map[string]any{"type": "integer", "description": "Maximum number of lines to read"},
+			"properties": readFileProps{
+				Path:   paramSchema{Type: "string", Description: "Path to the file"},
+				Offset: paramSchema{Type: "integer", Description: "Line number to start reading from (1-indexed)"},
+				Limit:  paramSchema{Type: "integer", Description: "Maximum number of lines to read"},
 			},
 			"required": []string{"path"},
 		},
@@ -62,9 +123,11 @@ var toolWriteFile = types.ChatTool{
 		Description: "Write content to a file (creates directories as needed)",
 		Parameters: map[string]any{
 			"type": "object",
-			// ensure that the LLM sees path before content
-			"properties": json.RawMessage(`{"path":{"type":"string","description":"Relative path to the file"},"content":{"type":"string","description":"Content to write"}}`),
-			"required":   []string{"path", "content"},
+			"properties": writeFileProps{
+				Path:    paramSchema{Type: "string", Description: "Relative path to the file"},
+				Content: paramSchema{Type: "string", Description: "Content to write"},
+			},
+			"required": []string{"path", "content"},
 		},
 	},
 }
@@ -76,9 +139,22 @@ var toolEditFile = types.ChatTool{
 		DisplayName: "Edit",
 		Description: "Make precise text replacements in a file. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Each oldText must match exactly (whitespace, indentation)",
 		Parameters: map[string]any{
-			"type":       "object",
-			"properties": json.RawMessage(`{"path":{"type":"string","description":"Relative path to the file"},"edits":{"type":"array","items":{"type":"object","properties":{"oldText":{"type":"string","description":"Exact text to replace. Must be unique in the original file and must not overlap with any other edit's oldText."},"newText":{"type":"string","description":"Replacement text for this targeted edit."}},"required":["oldText","newText"]}}}`),
-			"required":   []string{"path", "edits"},
+			"type": "object",
+			"properties": editFileProps{
+				Path: paramSchema{Type: "string", Description: "Relative path to the file"},
+				Edits: paramSchema{
+					Type: "array", Description: "Array of edits to apply",
+					Items: &editItemSchema{
+						Type: "object",
+						Properties: editPropertyParams{
+							OldText: paramSchema{Type: "string", Description: "Exact text to replace. Must be unique in the original file and must not overlap with any other edit's oldText."},
+							NewText: paramSchema{Type: "string", Description: "Replacement text for this targeted edit."},
+						},
+						Required: []string{"oldText", "newText"},
+					},
+				},
+			},
+			"required": []string{"path", "edits"},
 		},
 	},
 }
@@ -91,9 +167,9 @@ var toolBash = types.ChatTool{
 		Description: "Execute a shell command. Always set timeout: 2s for fast commands (ls, cat, grep, git status), 10s for package installs (npm install, pip install), 30s for builds and tests (npm run build, npm test, make), 60s for long-running operations (migrations, large downloads). Max 300s.",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"command": map[string]any{"type": "string", "description": "Shell command to execute"},
-				"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (max 300)"},
+			"properties": bashProps{
+				Command: paramSchema{Type: "string", Description: "Shell command to execute"},
+				Timeout: paramSchema{Type: "integer", Description: "Timeout in seconds (max 300)"},
 			},
 			"required": []string{"command"},
 		},
@@ -109,9 +185,9 @@ var toolBashReadOnly = types.ChatTool{
 		Description: "Execute a read-only shell command. Only safe, non-destructive commands are allowed: ls, cat, grep, find, head, tail, wc, diff, git log, git status, git diff, git show, git branch, git remote, env, echo, pwd, tree, file, stat, du, which, man, help. Do NOT use write commands (rm, mv, cp, chmod, chown, touch, install, build, test, etc.). Always set timeout: 2s for fast commands.",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"command": map[string]any{"type": "string", "description": "Read-only shell command to execute"},
-				"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (max 300)"},
+			"properties": bashProps{
+				Command: paramSchema{Type: "string", Description: "Read-only shell command to execute"},
+				Timeout: paramSchema{Type: "integer", Description: "Timeout in seconds (max 300)"},
 			},
 			"required": []string{"command"},
 		},
@@ -126,8 +202,8 @@ var toolAskQuestion = types.ChatTool{
 		Description: "Ask the user a clarifying question when you need more information to proceed. Use this instead of making assumptions when requirements are unclear.",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"question": map[string]any{"type": "string", "description": "The question to ask the user"},
+			"properties": askQuestionProps{
+				Question: paramSchema{Type: "string", Description: "The question to ask the user"},
 			},
 			"required": []string{"question"},
 		},
@@ -142,8 +218,8 @@ var toolRequestReview = types.ChatTool{
 		Description: "Request the user to review completed changes",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"summary": map[string]any{"type": "string", "description": "Brief summary of the changes made or issues encountered. Explain key decisions ONLY IF changes include complex logic."},
+			"properties": requestReviewProps{
+				Summary: paramSchema{Type: "string", Description: "Brief summary of the changes made or issues encountered. Explain key decisions ONLY IF changes include complex logic."},
 			},
 			"required": []string{"summary"},
 		},
@@ -159,8 +235,8 @@ var toolRequestReviewPlan = types.ChatTool{
 		Description: "If the task is complete, use this tool.",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"summary": map[string]any{"type": "string", "description": "Optional: Concise summary of accomplishments, any issues encountered"},
+			"properties": requestReviewProps{
+				Summary: paramSchema{Type: "string", Description: "Optional: Concise summary of accomplishments, any issues encountered"},
 			},
 			"required": []string{"summary"},
 		},
@@ -175,10 +251,10 @@ var toolCreateTask = types.ChatTool{
 		Description: "Create a new task on the Kanban board. Use this to decompose work into subtasks. Returns the created task_id, which can be used as parent_task_id for nested subtasks. Do not create duplicate tasks.",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"title":          map[string]any{"type": "string", "description": "Short, descriptive title for the task (max 80 characters)"},
-				"prompt":         map[string]any{"type": "string", "description": "Detailed description of what the task should accomplish"},
-				"parent_task_id": map[string]any{"type": "string", "description": "Optional: ID of a parent task to nest this task under. If omitted, creates a primary task. Use a previously created task_id to create nested subtasks."},
+			"properties": createTaskProps{
+				Title:        paramSchema{Type: "string", Description: "Short, descriptive title for the task (max 80 characters)"},
+				Prompt:       paramSchema{Type: "string", Description: "Detailed description of what the task should accomplish"},
+				ParentTaskID: paramSchema{Type: "string", Description: "Optional: ID of a parent task to nest this task under. If omitted, creates a primary task. Use a previously created task_id to create nested subtasks."},
 			},
 			"required": []string{"title", "prompt"},
 		},
@@ -207,11 +283,11 @@ var toolEditTask = types.ChatTool{
 		Description: "Edit a task's title, prompt, or parent_task_id. Only tasks with status 'backlog' in the current project can be edited. At least one field (title, prompt, parent_task_id) must be provided. If parent_task_id is set, the parent task must also have status 'backlog'.",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"task_id":        map[string]any{"type": "string", "description": "ID of the task to edit"},
-				"title":          map[string]any{"type": "string", "description": "New title for the task"},
-				"prompt":         map[string]any{"type": "string", "description": "New prompt/description for the task"},
-				"parent_task_id": map[string]any{"type": "string", "description": "New parent task ID to nest this task under. Must also be a backlog task. Omit to keep existing parent."},
+			"properties": editTaskProps{
+				TaskID:       paramSchema{Type: "string", Description: "ID of the task to edit"},
+				Title:        paramSchema{Type: "string", Description: "New title for the task"},
+				Prompt:       paramSchema{Type: "string", Description: "New prompt/description for the task"},
+				ParentTaskID: paramSchema{Type: "string", Description: "New parent task ID to nest this task under. Must also be a backlog task. Omit to keep existing parent."},
 			},
 			"required": []string{"task_id"},
 		},
