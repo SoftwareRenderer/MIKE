@@ -18,7 +18,7 @@ if ! command -v go &>/dev/null; then
 fi
 
 echo "Building pi.wasm..."
-GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o ../pi.wasm .
+GOOS=wasip1 GOARCH=wasm go build -trimpath -buildmode=c-shared -o ../pi.wasm .
 
 if [ ! -f ../pi.wasm ]; then
     echo "Error: pi.wasm was not built" >&2
