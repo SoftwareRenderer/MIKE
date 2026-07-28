@@ -2,24 +2,34 @@
     interface Props {
         used?: number;
         limit?: number;
+        sessionCost?: number;
         onSummarize?: () => void;
         onSummarizeCancel?: () => void;
         isSummarizing?: boolean;
         disabled?: boolean;
     }
 
-    let { used = 0, limit = 0, onSummarize, onSummarizeCancel, isSummarizing = false, disabled = false }: Props = $props();
+    let { used = 0, limit = 0, sessionCost = 0, onSummarize, onSummarizeCancel, isSummarizing = false, disabled = false }: Props = $props();
 
     let percentage = $derived(limit > 0 ? Math.round((used / limit) * 100) : 0);
     let isWarning = $derived(percentage > 70 && percentage <= 80);
     let isOrange = $derived(percentage > 80 && percentage < 90);
     let isDanger = $derived(percentage >= 90);
-    let show = $derived(used > 0);
+    let show = $derived(used > 0 || sessionCost > 0);
 
     function formatTokens(n: number): string {
         if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
         if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
         return n.toString();
+    }
+
+    function formatCost(cost: number): string {
+        if (cost <= 0) return '';
+        const formatted = cost < 1 ? cost.toFixed(4) : cost.toFixed(2);
+        return '$' + Number(formatted).toLocaleString(undefined, {
+            minimumFractionDigits: cost < 1 ? 4 : 2,
+            maximumFractionDigits: cost < 1 ? 4 : 2,
+        });
     }
 
     function getBarColor(): string {
@@ -50,37 +60,48 @@
 </script>
 
 {#if show}
-    <button
-        type="button"
-        class="context-usage"
-        class:clickable={!!onSummarize && !disabled}
-        class:summarizing={isSummarizing}
-        disabled={disabled}
-        title="{used} tokens used{limit > 0 ? ' / ' + limit + ' limit' : ''}{onSummarize && !disabled ? (isSummarizing ? '\nClick to cancel' : '\nClick to summarize context') : ''}"
-        onclick={handleClick}
-        onkeydown={handleKeyDown}
-    >
-        {#if isSummarizing}
-            <span class="spinner"></span>
-        {:else if limit > 0}
-            <div class="usage-bar">
-                <div class="usage-fill" style="width:{percentage}%;background:{getBarColor()}"></div>
-            </div>
-        {/if}
-        <span class="usage-text" class:warning={isWarning || isOrange} class:danger={isDanger}>
+    <div class="context-usage-group">
+        <button
+            type="button"
+            class="context-usage"
+            class:clickable={!!onSummarize && !disabled}
+            class:summarizing={isSummarizing}
+            disabled={disabled}
+            title="{used} tokens used{limit > 0 ? ' / ' + limit + ' limit' : ''}{onSummarize && !disabled ? (isSummarizing ? '\nClick to cancel' : '\nClick to summarize context') : ''}"
+            onclick={handleClick}
+            onkeydown={handleKeyDown}
+        >
             {#if isSummarizing}
-                Summarizing...
-                <span class="cancel-icon" aria-hidden="true">✕</span>
+                <span class="spinner"></span>
             {:else if limit > 0}
-                {formatTokens(used)} / {formatTokens(limit)} · {percentage}%
-            {:else}
-                {formatTokens(used)} tokens
+                <div class="usage-bar">
+                    <div class="usage-fill" style="width:{percentage}%;background:{getBarColor()}"></div>
+                </div>
             {/if}
-        </span>
-    </button>
+            <span class="usage-text" class:warning={isWarning || isOrange} class:danger={isDanger}>
+                {#if isSummarizing}
+                    Summarizing...
+                    <span class="cancel-icon" aria-hidden="true">✕</span>
+                {:else if limit > 0}
+                    {formatTokens(used)} / {formatTokens(limit)} · {percentage}%
+                {:else}
+                    {formatTokens(used)} tokens
+                {/if}
+            </span>
+        </button>
+        {#if sessionCost > 0}
+            <span class="cost-badge" title="Session cost">{formatCost(sessionCost)}</span>
+        {/if}
+    </div>
 {/if}
 
 <style>
+    .context-usage-group {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
     .context-usage {
         display: inline-flex;
         align-items: center;
@@ -106,6 +127,18 @@
     .context-usage.summarizing {
         opacity: 0.7;
         cursor: pointer;
+    }
+    .cost-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 8px;
+        border-radius: 12px;
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        white-space: nowrap;
+        flex-shrink: 0;
     }
     .usage-bar {
         width: 48px;

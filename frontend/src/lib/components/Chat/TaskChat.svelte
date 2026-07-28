@@ -1353,6 +1353,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
             selectedReasoningEffort={selectedReasoningEffort}
             contextUsed={stream.state.contextState.used}
             contextLimit={stream.state.contextState.limit}
+            sessionCost={stream.state.sessionCost}
             operatingMode={operatingMode}
             projectId={projectId}
             taskId={taskId}

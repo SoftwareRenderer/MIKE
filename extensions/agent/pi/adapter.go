@@ -245,6 +245,8 @@ func (a *Adapter) parseEvent(eventType string, raw map[string]any) *agent.Event 
 		return &agent.Event{Type: agent.EventTypeStatus, Status: agent.StatusData{State: "running", Activity: a.config.DisplayName + " started"}}
 	case "agent_end":
 		return a.parseAgentEnd(raw)
+	case "message_end":
+		return a.parseMessageEnd(raw)
 	case "response":
 		return a.parseResponse(raw)
 	case "extension_ui_request":
@@ -311,6 +313,38 @@ func (a *Adapter) parseToolEnd(raw map[string]any) *agent.Event {
 	return &agent.Event{
 		Type:       agent.EventTypeToolResult,
 		ToolResult: agent.ToolResultData{ID: te.ToolCallID, Output: output, Success: !te.IsError},
+	}
+}
+
+// parseMessageEnd extracts cost from message_end events.
+// message_end carries the full assistant message with usage.cost.total,
+// which is a more reliable source of cost than get_session_stats
+// (Pi agent bug: NaN cost when session entries lack usage.cost.total).
+func (a *Adapter) parseMessageEnd(raw map[string]any) *agent.Event {
+	msg, ok := raw["message"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	role, _ := msg["role"].(string)
+	if role != "assistant" {
+		return nil
+	}
+	var cost float64
+	if usage, ok := msg["usage"].(map[string]any); ok {
+		if costObj, ok := usage["cost"].(map[string]any); ok {
+			if total, ok := costObj["total"].(float64); ok {
+				cost = total
+			}
+		}
+	}
+	if cost <= 0 {
+		return nil
+	}
+	// Return as a stats event so dispatchEvent accumulates it.
+	// The cost field in SessionStatsData is additive per-message.
+	return &agent.Event{
+		Type: agent.EventTypeStats,
+		Stats: agent.SessionStatsData{Cost: cost},
 	}
 }
 
@@ -474,10 +508,19 @@ func (a *Adapter) buildPersistEntries(messages []map[string]any) []agent.Persist
 			continue
 		}
 		text, reasoning, toolCalls, pt, ptok := parseAssistantMessage(msg)
+		// Extract per-message cost from usage.cost.total
+		var cost float64
+		if usage, ok := msg["usage"].(map[string]any); ok {
+			if costObj, ok := usage["cost"].(map[string]any); ok {
+				if total, ok := costObj["total"].(float64); ok {
+					cost = total
+				}
+			}
+		}
 		entries = append(entries, agent.PersistEntry{
 			Role: "assistant", Content: text, ReasoningContent: reasoning,
 			ModelName: modelName, ProviderName: "Pi Coding Agent",
-			PromptTokens: pt, PredictedTokens: ptok,
+			PromptTokens: pt, PredictedTokens: ptok, Cost: cost,
 		})
 		for _, tc := range toolCalls {
 			tid, _ := tc["id"].(string)

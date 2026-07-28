@@ -28,6 +28,7 @@ export class StreamState {
         contextState: { used: 0, limit: 0 },
         streamTokenCount: 0,
         lastPromptTokens: 0,
+        sessionCost: 0,
         pendingCheckpoints: new Set<string>(),
         checkpointLabels: new Map<string, string>(),
         checkpointCommitHashes: new Map<string, string>(),
@@ -70,6 +71,7 @@ export class StreamState {
         this.state.processedToolIds = new Set();
         this.state.streamTokenCount = 0;
         this.state.awaitingResponse = false;
+        this.state.sessionCost = 0;
     }
 
     /** Clear retry state. */
@@ -88,6 +90,7 @@ export class StreamState {
         this.clearRetry();
         this.state.contextState = { used: 0, limit: 0 };
         this.state.lastPromptTokens = 0;
+        this.state.sessionCost = 0;
         this.state.pendingCheckpoints = new Set();
         this.state.checkpointLabels = new Map();
         this.state.checkpointCommitHashes = new Map();

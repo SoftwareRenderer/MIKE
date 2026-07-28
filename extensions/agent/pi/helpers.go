@@ -75,6 +75,9 @@ func parseAssistantMessage(msg map[string]any) (text, reasoning string, toolCall
 
 func parseSessionStats(data map[string]any) agent.SessionStatsData {
 	var s agent.SessionStatsData
+	if cost, ok := data["cost"].(float64); ok {
+		s.Cost = cost
+	}
 	if tokens, ok := data["tokens"].(map[string]any); ok {
 		if v, ok := tokens["input"].(float64); ok {
 			s.TotalInput = int(v)

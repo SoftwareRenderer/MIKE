@@ -194,6 +194,12 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 			continue // no pricing configured for this provider
 		}
 
+		// Agent providers report their own cost — use the DB-accumulated value.
+		// GetProjectStats already scanned cost into m.Cost and added it to stats.TotalCost.
+		if p.EffectiveKind() == types.ProviderKindAgent {
+			continue
+		}
+
 		// Use cache_write_price for non-cached input if set, else input_price
 		inputRate := p.InputPrice
 		if p.CacheWritePrice > 0 {

@@ -47,21 +47,23 @@ type SessionStatsData struct {
 	TotalOutput     int     `json:"total_output"`
 	TotalCacheRead  int     `json:"total_cache_read"`
 	TotalCacheWrite int     `json:"total_cache_write"`
+	Cost            float64 `json:"cost"`
 }
 
 // PersistEntry is a pre-parsed message for DB persistence.
 // The adapter fills these at turn-end; the executor persists them generically.
 type PersistEntry struct {
-	Role             string `json:"role"` // "assistant" or "tool_call"
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
-	ModelName        string `json:"model_name,omitempty"`
-	ProviderName     string `json:"provider_name,omitempty"`
-	PromptTokens     int    `json:"prompt_tokens,omitempty"`
-	PredictedTokens  int    `json:"predicted_tokens,omitempty"`
-	Duration         int64  `json:"duration,omitempty"`
-	ToolCallsJSON    string `json:"tool_calls_json,omitempty"`  // JSON of tool call data (role=tool_call)
-	ToolResultJSON   string `json:"tool_result_json,omitempty"` // JSON of tool result data (role=tool_call)
+	Role             string  `json:"role"` // "assistant" or "tool_call"
+	Content          string  `json:"content,omitempty"`
+	ReasoningContent string  `json:"reasoning_content,omitempty"`
+	ModelName        string  `json:"model_name,omitempty"`
+	ProviderName     string  `json:"provider_name,omitempty"`
+	PromptTokens     int     `json:"prompt_tokens,omitempty"`
+	PredictedTokens  int     `json:"predicted_tokens,omitempty"`
+	Duration         int64   `json:"duration,omitempty"`
+	Cost             float64 `json:"cost,omitempty"` // per-message cost from usage.cost.total
+	ToolCallsJSON    string  `json:"tool_calls_json,omitempty"`  // JSON of tool call data (role=tool_call)
+	ToolResultJSON   string  `json:"tool_result_json,omitempty"` // JSON of tool result data (role=tool_call)
 }
 
 // Event type constants.
