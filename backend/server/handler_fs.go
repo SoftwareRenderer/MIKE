@@ -342,13 +342,29 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	if path == "" {
 		path = string(os.PathSeparator)
 	}
-	// Validate path is within allowed project root
-	if err := s.validateFSPath(path, r); err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	includeFiles := r.URL.Query().Get("files") == "1"
 	project, _ := s.optionalProject(r)
+	taskID := r.URL.Query().Get("task")
+
+	// Determine worktree path (host filesystem)
+	var worktreePath string
+	if taskID != "" {
+		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
+		if err != nil {
+			JSONError(w, http.StatusNotFound, "task worktree not found")
+			return
+		}
+		worktreePath = wtPath
+	} else if project != nil {
+		worktreePath = project.Path
+	}
+	// Validate path is within allowed worktree root
+	if worktreePath != "" {
+		if err := s.validateFSPath(path, r); err != nil {
+			JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	type fsEntry struct {
 		Name      string `json:"name"`
@@ -378,12 +394,19 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
 			sandboxPath = cleanPath
 		} else {
-			relPath, _ := filepath.Rel(project.Path, cleanPath)
+			relPath, _ := filepath.Rel(worktreePath, cleanPath)
 			sandboxPath = filepath.Join(mountPath, relPath)
 		}
 		// Single command: ls -pA marks dirs with trailing /, one entry per line
 		opts := s.fsSandboxConfig(project)
-		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "ls -pA "+shellQuote(sandboxPath), opts)
+		var output string
+		var err error
+		if taskID != "" {
+			// Use task sandbox (creates container on demand)
+			output, err = s.sandboxMgr.ExecTask(taskID, worktreePath, project.Name, project.Path, "ls -pA "+shellQuote(sandboxPath), opts)
+		} else {
+			output, err = s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "ls -pA "+shellQuote(sandboxPath), opts)
+		}
 		if err != nil {
 			JSONError(w, http.StatusNotFound, err.Error())
 			return
@@ -1024,6 +1047,20 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	taskID := r.URL.Query().Get("task")
+
+	// Determine worktree path (host filesystem)
+	var worktreePath string
+	if taskID != "" {
+		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
+		if err != nil {
+			JSONError(w, http.StatusNotFound, "task worktree not found")
+			return
+		}
+		worktreePath = wtPath
+	} else {
+		worktreePath = project.Path
+	}
 
 	// Enforce sandbox if enabled — no fallback to host
 	if project != nil && project.SandboxEnabled {
@@ -1040,23 +1077,30 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 			sandboxPath = cleanPath
 		} else {
 			// req.Path is a host path — convert to sandbox path
-			relPath, _ := filepath.Rel(project.Path, cleanPath)
+			relPath, _ := filepath.Rel(worktreePath, cleanPath)
 			sandboxPath = filepath.Join(mountPath, relPath)
 		}
 		sandboxParent := filepath.Dir(sandboxPath)
 
 		// Combined check + mkdir in single command
 		opts := s.fsSandboxConfig(project)
-		output, err := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name,
-			"if [ ! -d "+shellQuote(sandboxParent)+" ]; then echo 'PARENT_MISSING'; "+
-				"elif [ -e "+shellQuote(sandboxPath)+" ]; then echo 'ALREADY_EXISTS'; "+
-				"else mkdir "+shellQuote(sandboxPath)+" && echo 'OK'; fi",
-			opts)
-		if err != nil {
-			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
+		cmd := "if [ ! -d " + shellQuote(sandboxParent) + "; then echo 'PARENT_MISSING'; " +
+			"elif [ -e " + shellQuote(sandboxPath) + "; then echo 'ALREADY_EXISTS'; " +
+			"else mkdir " + shellQuote(sandboxPath) + " && echo 'OK'; fi"
+		var output string
+		var execErr error
+		if taskID != "" {
+			// Use task sandbox (creates container on demand)
+			output, execErr = s.sandboxMgr.ExecTask(taskID, worktreePath, project.Name, project.Path, cmd, opts)
+		} else {
+			output, execErr = s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, cmd, opts)
+		}
+			if execErr != nil {
+			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", execErr))
 			return
 		}
-		switch strings.TrimSpace(output) {
+		trimmed := strings.TrimSpace(output)
+		switch trimmed {
 		case "PARENT_MISSING":
 			JSONError(w, http.StatusBadRequest, "parent directory does not exist")
 			return
@@ -1066,11 +1110,22 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		case "OK":
 			// success
 		default:
+			// mkdir may have succeeded despite unexpected output (e.g. shell banners)
+			// Verify the directory actually exists before reporting an error
+			var checkOut string
+			var checkErr error
+			checkCmd := "test -d " + shellQuote(sandboxPath) + " && echo EXISTS"
+			if taskID != "" {
+				checkOut, checkErr = s.sandboxMgr.ExecTask(taskID, worktreePath, project.Name, project.Path, checkCmd, opts)
+			} else {
+				checkOut, checkErr = s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, checkCmd, opts)
+			}
+			if checkErr == nil && strings.TrimSpace(checkOut) == "EXISTS" {
+				// Directory exists despite weird output — treat as success
+				break
+			}
+			log.Printf("mkdir unexpected output for %s: %q (check: %q)", sandboxPath, output, checkOut)
 			JSONError(w, http.StatusInternalServerError, "unexpected response from mkdir")
-			return
-		}
-		if err != nil {
-			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", err))
 			return
 		}
 		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})

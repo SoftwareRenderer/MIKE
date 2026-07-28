@@ -144,3 +144,44 @@ export async function stageFile(projectId: string, taskId: string, path: string,
     if (!res.ok) throw await apiError(res, stage ? 'Failed to stage file' : 'Failed to unstage file');
     return res.json();
 }
+
+// -- Task Explorer Git endpoints --
+
+/** Fetch full git log for a task's worktree branch (like project git log but task-scoped).
+ * Returns commits array plus current_branch, origin_tip, and has_more metadata. */
+export async function getTaskGitLog(projectId: string, taskId: string, options?: { branch?: string; limit?: number; offset?: number }): Promise<GitLogResponse> {
+    const params = new URLSearchParams({ full: '1' });
+    if (options?.branch) params.set('branch', options.branch);
+    if (options?.limit != null) params.set('limit', String(options.limit));
+    if (options?.offset != null) params.set('offset', String(options.offset));
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/git/log?${params}`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch task git log');
+    return res.json();
+}
+
+/** List all branches in a task's worktree. */
+export async function getTaskGitBranches(projectId: string, taskId: string): Promise<string[]> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/git/branches`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch task branches');
+    return res.json();
+}
+
+/** Checkout a branch in a task's worktree. Requires CSRF token. */
+export async function checkoutTaskBranch(projectId: string, taskId: string, branch: string): Promise<{ status: string; branch: string }> {
+    const csrfToken = await ensureCsrfToken();
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/git/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+        body: JSON.stringify({ branch }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to checkout branch');
+    return res.json();
+}
+
+/** Fetch the unified diff between two commits in a task's worktree as raw text. */
+export async function getTaskCommitDiff(projectId: string, taskId: string, baseHash: string, headHash: string): Promise<string> {
+    const params = new URLSearchParams({ base: baseHash, head: headHash });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch task commit diff');
+    return res.text();
+}

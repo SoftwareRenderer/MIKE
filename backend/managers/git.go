@@ -1259,3 +1259,214 @@ func (h *GitHandler) HandleProjectCommit(w http.ResponseWriter, r *http.Request)
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "committed"})
 }
+
+// HandleTaskLog returns commit log for a task's worktree branch.
+func (h *GitHandler) HandleTaskLog(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+
+	task, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	// Get worktree path
+	worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task worktree not found")
+		return
+	}
+
+	branch := r.URL.Query().Get("branch")
+	if branch == "" {
+		branch = task.Branch
+	}
+	if branch == "" {
+		branch = "HEAD"
+	}
+
+	full := r.URL.Query().Get("full") == "1"
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+	if full {
+		args := []string{"-C", worktreePath, "log"}
+		if offset > 0 {
+			args = append(args, "--skip", strconv.Itoa(offset))
+		}
+		if limit > 0 {
+			args = append(args, "-n", strconv.Itoa(limit+1))
+		}
+		args = append(args, "--format=%H|%h|%s|%aN|%aI|%P%n---BODY---%n%b%n---END---", branch)
+		c := exec.Command("git", args...)
+		out, err := c.CombinedOutput()
+		if err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
+			return
+		}
+		blocks := strings.Split(string(out), "---END---")
+		var commits []types.GitCommit
+		for _, block := range blocks {
+			block = strings.TrimSpace(block)
+			if block == "" {
+				continue
+			}
+			blockLines := strings.SplitN(block, "\n", 2)
+			parts := strings.SplitN(blockLines[0], "|", 6)
+			if len(parts) < 5 {
+				continue
+			}
+			commit := types.GitCommit{
+				Hash:    parts[0],
+				Short:   parts[1],
+				Subject: parts[2],
+				Author:  parts[3],
+				Date:    parts[4],
+			}
+			if len(parts) == 6 && parts[5] != "" {
+				commit.Parents = strings.Fields(parts[5])
+			}
+			if len(blockLines) > 1 {
+				rest := blockLines[1]
+				if strings.HasPrefix(rest, "---BODY---\n") {
+					rest = strings.TrimPrefix(rest, "---BODY---\n")
+				} else if strings.HasPrefix(rest, "---BODY---") {
+					rest = ""
+				}
+				commit.Body = strings.TrimSpace(rest)
+			}
+			commits = append(commits, commit)
+		}
+
+		// Resolve current branch name
+		currentBranch := h.getCurrentBranch(worktreePath)
+
+		// Build branch-to-commit mapping from local refs
+		branchMap := h.getBranchMap(worktreePath)
+
+		for i := range commits {
+			if branches, ok := branchMap[commits[i].Hash]; ok {
+				commits[i].Branches = branches
+			}
+		}
+
+		// Get origin tip
+		originTip := ""
+		if currentBranch != "" && currentBranch != "HEAD" {
+			originTip = h.getOriginTip(worktreePath, currentBranch)
+		}
+
+		hasMore := false
+		if limit > 0 && len(commits) > limit {
+			hasMore = true
+			commits = commits[:limit]
+		}
+
+		resp := types.GitLogResponse{
+			Commits:       commits,
+			CurrentBranch: currentBranch,
+			OriginTip:     originTip,
+			HasMore:       hasMore,
+		}
+		httputil.JSONResponse(w, http.StatusOK, resp)
+		return
+	}
+
+	// Simple log (non-full)
+	args := []string{"-C", worktreePath, "log"}
+	if limit > 0 {
+		args = append(args, "-n", strconv.Itoa(limit))
+	}
+	args = append(args, "--format=%H|%h|%s", branch)
+	c := exec.Command("git", args...)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
+		return
+	}
+	var commits []types.GitCommit
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		commits = append(commits, types.GitCommit{Hash: parts[0], Short: parts[1], Subject: parts[2]})
+	}
+	httputil.JSONResponse(w, http.StatusOK, commits)
+}
+
+// HandleTaskBranches lists branches for a task's worktree.
+func (h *GitHandler) HandleTaskBranches(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+
+	_, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task worktree not found")
+		return
+	}
+
+	c := exec.Command("git", "-C", worktreePath, "branch", "--format=%(refname:short)")
+	out, err := c.CombinedOutput()
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git branch failed: %v", err))
+		return
+	}
+	var branches []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			branches = append(branches, line)
+		}
+	}
+	httputil.JSONResponse(w, http.StatusOK, branches)
+}
+
+// HandleTaskCheckout checks out a branch in a task's worktree.
+func (h *GitHandler) HandleTaskCheckout(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	taskID := r.PathValue("taskID")
+
+	_, err := h.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task worktree not found")
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Branch string `json:"branch"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Branch == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "branch is required")
+		return
+	}
+
+	c := exec.Command("git", "-C", worktreePath, "checkout", req.Branch)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		log.Printf("git checkout failed: %v: %s", err, out)
+		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git checkout failed: %s", out))
+		return
+	}
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "checked out", "branch": req.Branch})
+}

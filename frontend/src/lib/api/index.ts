@@ -102,6 +102,10 @@ export {
     getProjectDiff,
     stageProjectFile,
     commitProject,
+    getTaskGitLog,
+    getTaskGitBranches,
+    checkoutTaskBranch,
+    getTaskCommitDiff,
 } from './git';
 
 // -- Stream --

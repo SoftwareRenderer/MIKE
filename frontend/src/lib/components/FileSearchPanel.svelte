@@ -7,9 +7,10 @@
         text?: string;
     }
 
-    let { projectId, projectPath, onFileSelected, onClose }: {
+    let { projectId, projectPath, taskId, onFileSelected, onClose }: {
         projectId: string;
         projectPath: string;
+        taskId?: string;
         onFileSelected: (path: string, line?: number) => void;
         onClose: () => void;
     } = $props();
@@ -81,6 +82,7 @@
                 q,
                 project: projectId,
             });
+            if (taskId) params.set('task', taskId);
             if (searchContent) params.set('content', '1');
             if (matchCase) params.set('case', '1');
             if (wholeWord) params.set('word', '1');
