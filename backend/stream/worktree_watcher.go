@@ -70,10 +70,15 @@ type WorktreeWatcher struct {
 	doneCh   chan struct{}
 	workerWg sync.WaitGroup
 	inFlight map[string]bool // taskID in pool or being processed
+
+	// FS event broadcasting (mirrors ProjectWatcher for task worktrees)
+	fsBroadcast  fsBroadcastFn
+	fsDebounces  map[string]*time.Timer
+	fsEventQueue map[string]string // taskID -> "op:path" (debounced, coalesced)
 }
 
 // NewWorktreeWatcher creates a new WorktreeWatcher with a bounded worker pool.
-func NewWorktreeWatcher(worktreeMgr *git.WorktreeManager, broadcast diffBroadcastFn, updateCache diffCacheUpdateFn) (*WorktreeWatcher, error) {
+func NewWorktreeWatcher(worktreeMgr *git.WorktreeManager, broadcast diffBroadcastFn, updateCache diffCacheUpdateFn, fsBroadcast fsBroadcastFn) (*WorktreeWatcher, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -94,6 +99,9 @@ func NewWorktreeWatcher(worktreeMgr *git.WorktreeManager, broadcast diffBroadcas
 		jobCh:          make(chan diffJob, poolSize),
 		doneCh:         make(chan struct{}),
 		inFlight:       make(map[string]bool),
+		fsBroadcast:    fsBroadcast,
+		fsDebounces:    make(map[string]*time.Timer),
+		fsEventQueue:   make(map[string]string),
 	}
 	for i := 0; i < poolSize; i++ {
 		ww.workerWg.Add(1)
@@ -204,6 +212,9 @@ func (ww *WorktreeWatcher) Close() {
 	for _, timer := range ww.throttles {
 		timer.Stop()
 	}
+	for _, timer := range ww.fsDebounces {
+		timer.Stop()
+	}
 
 	close(ww.doneCh)
 	ww.workerWg.Wait()
@@ -211,6 +222,8 @@ func (ww *WorktreeWatcher) Close() {
 	ww.pathCache = nil
 	ww.indexDirToTask = nil
 	ww.inFlight = nil
+	ww.fsDebounces = nil
+	ww.fsEventQueue = nil
 
 	_ = ww.watcher.Close()
 	log.Println("[watcher] closed")
@@ -325,6 +338,42 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 				}
 			}
 		}
+	}
+
+	// Broadcast fs events (debounced, like ProjectWatcher)
+	var fsOp string
+	if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
+		if _, err := os.Stat(event.Name); err == nil {
+			fsOp = "create"
+		}
+	} else if event.Op&fsnotify.Remove != 0 {
+		fsOp = "delete"
+	} else if event.Op&fsnotify.Rename != 0 {
+		fsOp = "delete"
+	}
+	if fsOp != "" && ww.fsBroadcast != nil && !strings.HasPrefix(relPath, "..") {
+		if timer, exists := ww.fsDebounces[taskID]; exists {
+			timer.Stop()
+		}
+		ww.fsEventQueue[taskID] = fsOp + ":" + relPath
+		timer := time.AfterFunc(500*time.Millisecond, func() {
+			ww.mu.Lock()
+			if t, exists := ww.fsDebounces[taskID]; exists {
+				t.Stop()
+				delete(ww.fsDebounces, taskID)
+			}
+			if evt, ok := ww.fsEventQueue[taskID]; ok {
+				colonIdx := strings.IndexByte(evt, ':')
+				if colonIdx > 0 {
+					op := evt[:colonIdx]
+					path := evt[colonIdx+1:]
+					ww.fsBroadcast(info.projectID, op, path)
+				}
+				delete(ww.fsEventQueue, taskID)
+			}
+			ww.mu.Unlock()
+		})
+		ww.fsDebounces[taskID] = timer
 	}
 
 	// Throttle: at most one diff compute every 1s per task.

@@ -151,7 +151,7 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 	// Initialize the filesystem watcher for task worktrees
 	// Cache update callback is set later via SetDiffCacheUpdate (after GitHandler is created)
 	var err error
-	asm.watcher, err = NewWorktreeWatcher(worktreeMgr, asm.BroadcastDiffStats, nil)
+	asm.watcher, err = NewWorktreeWatcher(worktreeMgr, asm.BroadcastDiffStats, nil, asm.BroadcastFsEvent)
 	if err == nil {
 		go asm.watcher.StartEventLoop()
 	}
@@ -871,9 +871,9 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		default:
 		}
 		baseRef := asm.getDiffBaseline(task)
-		// Watch worktrees for tasks in active states
+		// Watch worktrees for tasks in active states or with an initialized worktree
 		// Use resolved baseline (same as panel) so card stats match panel display
-		if task.Status == "in_progress" || task.Status == "review" {
+		if task.Status == "in_progress" || task.Status == "review" || task.Branch != "" {
 			asm.WatchWorktree(task.ID, projectID, baseRef)
 		}
 		headRef := ""

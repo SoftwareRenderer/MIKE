@@ -463,7 +463,7 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 		mu.Lock()
 		broadcasts = append(broadcasts, event.TaskID)
 		mu.Unlock()
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Skipf("skip worktree watcher test (inotify limit): %v", err)
 	}
@@ -567,7 +567,7 @@ func TestWorktreeWatcherWorkerPoolBounds(t *testing.T) {
 	}
 
 	// Create watcher
-	ww, err := NewWorktreeWatcher(wm, func(event DiffStatsEvent) {}, nil)
+	ww, err := NewWorktreeWatcher(wm, func(event DiffStatsEvent) {}, nil, nil)
 	if err != nil {
 		t.Skipf("skip worker pool test (inotify limit): %v", err)
 	}

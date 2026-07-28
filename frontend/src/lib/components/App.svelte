@@ -328,7 +328,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 }
             },
             onFsEvent: (op, path) => {
-                if (showExplorerViewVal) {
+                if (showExplorerViewVal || showTaskExplorerVal) {
                     fsEventQueue = [...fsEventQueue, { op, path }];
                 }
             },
