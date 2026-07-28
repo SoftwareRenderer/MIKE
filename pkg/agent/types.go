@@ -80,12 +80,13 @@ const (
 
 // Command type constants (passed to EncodeCommand).
 const (
-	CommandPrompt   = "prompt"
-	CommandCompact  = "compact"
-	CommandStats    = "stats"
-	CommandGetState = "get_state"
+	CommandPrompt             = "prompt"
+	CommandCompact            = "compact"
+	CommandStats              = "stats"
+	CommandGetState           = "get_state"
 	CommandGetAvailableModels = "get_available_models"
-	CommandAbort    = "abort"
+	CommandSetModel           = "set_model"
+	CommandAbort              = "abort"
 )
 
 // SubprocessConfig describes the agent process to spawn.

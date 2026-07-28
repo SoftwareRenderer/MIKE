@@ -139,6 +139,29 @@ func (a *Adapter) EncodeCommand(_ context.Context, cmd string, data []byte) []by
 		c["type"] = "get_state"
 	case agent.CommandGetAvailableModels:
 		c["type"] = "get_available_models"
+	case agent.CommandSetModel:
+		c["type"] = "set_model"
+		var d struct {
+			ModelName string `json:"model_name"`
+			Provider  string `json:"provider"`
+		}
+		if data != nil {
+			json.Unmarshal(data, &d)
+		}
+		// Parse provider/modelId from model_name if provider not explicitly set.
+		// Accepts formats: "anthropic/claude-sonnet-4" or just "claude-sonnet-4"
+		if d.Provider == "" && d.ModelName != "" {
+			if idx := strings.Index(d.ModelName, "/"); idx > 0 {
+				d.Provider = d.ModelName[:idx]
+				d.ModelName = d.ModelName[idx+1:]
+			}
+		}
+		if d.Provider != "" {
+			c["provider"] = d.Provider
+		}
+		if d.ModelName != "" {
+			c["modelId"] = d.ModelName
+		}
 	case agent.CommandAbort:
 		c["type"] = "abort"
 	}
@@ -331,6 +354,31 @@ func (a *Adapter) parseResponse(raw map[string]any) *agent.Event {
 	}
 	if resp.Command == "get_available_models" {
 		return &agent.Event{Type: agent.EventTypeModels, RawData: map[string]any{"models": resp.Data["models"]}}
+	}
+	if resp.Command == "set_model" {
+		// Extract model info from set_model response data
+		var modelName string
+		if resp.Data != nil {
+			if model, ok := resp.Data["model"].(map[string]any); ok {
+				provider, _ := model["provider"].(string)
+				modelID, _ := model["name"].(string)
+				if modelID == "" {
+					modelID, _ = model["id"].(string)
+				}
+				if modelID == "" {
+					modelID, _ = model["modelId"].(string)
+				}
+				if provider != "" && modelID != "" {
+					modelName = provider + "/" + modelID
+				} else if modelID != "" {
+					modelName = modelID
+				}
+			}
+		}
+		if modelName != "" {
+			a.modelName = modelName
+		}
+		return &agent.Event{Type: agent.EventTypeStatus, RawData: map[string]any{"model_name": modelName}}
 	}
 	if resp.Command == "get_state" {
 		var modelName string
