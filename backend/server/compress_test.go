@@ -305,7 +305,7 @@ func TestCompressMiddleware_FullStack(t *testing.T) {
 	})
 
 	// Full middleware chain (no auth for this test path)
-	handler := CORSMiddleware(CompressMiddleware(s.mux))
+	handler := s.CORSMiddleware(CompressMiddleware(s.mux))
 
 	req := httptest.NewRequest("GET", "/test/full", nil)
 	req.Header.Set("Accept-Encoding", "br")
@@ -318,8 +318,8 @@ func TestCompressMiddleware_FullStack(t *testing.T) {
 	if resp.Header.Get("Content-Encoding") != "br" {
 		t.Errorf("expected Content-Encoding: br with full middleware stack, got: %q", resp.Header.Get("Content-Encoding"))
 	}
-	if resp.Header.Get("Access-Control-Allow-Origin") != "http://localhost" {
-		t.Errorf("expected CORS header, got: %q", resp.Header.Get("Access-Control-Allow-Origin"))
+	if resp.Header.Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("expected NO CORS header (same-origin policy), got: %q", resp.Header.Get("Access-Control-Allow-Origin"))
 	}
 
 	// Decompress and verify

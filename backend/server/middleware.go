@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net/http"
@@ -46,32 +48,29 @@ func isPublicPath(path, method string) bool {
 	return false
 }
 
-// CORS middleware.
-func CORSMiddleware(next http.Handler) http.Handler {
+// CORSMiddleware handles CORS, CSP, and other security headers.
+func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip CORS headers for WebSocket upgrades.
-		// WebSockets don't use CORS, and extra headers on the 101 upgrade
-		// response can delay nginx's protocol switch detection.
 		if strings.Contains(r.Header.Get("Upgrade"), "websocket") {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// Reflect the request Origin (required for cookies with credentials).
-		origin := r.Header.Get("Origin")
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-		} else {
-			// Same-origin request (e.g., browser navigating directly)
-			// No CORS headers needed
-		}
-
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Cookie")
+		// Security Headers
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+
+		// Content Security Policy
+		csp := "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; frame-ancestors 'none';"
+		if nonce, ok := r.Context().Value(nonceKey).(string); ok && nonce != "" {
+			csp += fmt.Sprintf(" script-src 'self' 'nonce-%s';", nonce)
+		} else {
+			csp += " script-src 'self';"
+		}
+		w.Header().Set("Content-Security-Policy", csp)
+
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -80,8 +79,25 @@ func CORSMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// nonceKey is the context key for the request-specific CSP nonce.
+var nonceKey = struct{}{}
+
+// NonceMiddleware generates a unique nonce for each request and injects it into the context.
+func NonceMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		nonce := base64.StdEncoding.EncodeToString(b)
+		ctx := context.WithValue(r.Context(), nonceKey, nonce)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 // sessionKey is the context key for the authenticated session id.
-type sessionKey struct{}
+var sessionKey = struct{}{}
 
 // SessionMiddleware validates the PHPSESSID cookie and injects auth state into context.
 // Public paths (health check, login, session check) bypass validation.
@@ -106,7 +122,7 @@ func (s *Server) SessionMiddleware(next http.Handler) http.Handler {
 		}
 
 		// Inject session id into context for downstream handlers
-		ctx := context.WithValue(r.Context(), sessionKey{}, sessionID)
+		ctx := context.WithValue(r.Context(), sessionKey, sessionID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

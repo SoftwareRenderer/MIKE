@@ -150,7 +150,7 @@ func (s *Server) setupRoutes() {
 		if _, err := os.Stat(s.frontendDist); err == nil {
 			sub, err := fs.Sub(os.DirFS(s.frontendDist), ".")
 			if err == nil {
-				s.mux.Handle("/", http.FileServer(noWriterToFS{http.FS(sub)}))
+				s.mux.Handle("/", s.withNonce(http.FileServer(noWriterToFS{http.FS(sub)})))
 			}
 		}
 	}

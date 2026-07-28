@@ -106,7 +106,7 @@ func testRequest(method, path string, body any) *http.Request {
 func testResponse(t *testing.T, s *Server, req *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
 	rr := httptest.NewRecorder()
-	handler := CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))
+	handler := s.CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))
 	handler.ServeHTTP(rr, req)
 	return rr
 }
@@ -156,7 +156,7 @@ func testResponseAuth(t *testing.T, s *Server, req *http.Request) *httptest.Resp
 	cookie, csrfToken := loginTestCSRF(t, s)
 	withAuthCSRF(req, cookie, csrfToken)
 	rr := httptest.NewRecorder()
-	handler := CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))
+	handler := s.CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))
 	handler.ServeHTTP(rr, req)
 	return rr
 }

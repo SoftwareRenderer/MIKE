@@ -12,8 +12,7 @@
     <title>Kanban Board</title>
 </head>
 <body>
-    <!-- Inject cached theme stylesheet before any rendering (zero-flash on return visits) -->
-    <script>
+    <script nonce="{{.Nonce}}">
         try {
             var _t = localStorage.getItem('kanban-theme-css');
             if (_t) {
