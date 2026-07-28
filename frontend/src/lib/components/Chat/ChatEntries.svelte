@@ -267,6 +267,9 @@
     }
 
     /** Combined scroll handler: calls parent onScroll + computes sticky header. */
+    function getEntryKey(_entry: ChatEntry, index: number): string {
+        return String(index);
+    }
     function handleCombinedScroll() {
         onScroll?.();
         computeStickyFromScroll();
@@ -309,7 +312,7 @@
         <VirtualList
             items={entries}
             itemHeight={getEstimatedHeight}
-            getKey={(e: ChatEntry) => e.id}
+            getKey={getEntryKey}
             overscan={5}
             onScrollElChange={handleScrollElChange}
             onscroll={handleCombinedScroll}
