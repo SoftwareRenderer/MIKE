@@ -60,6 +60,8 @@ type PersistEntry struct {
 	ProviderName     string  `json:"provider_name,omitempty"`
 	PromptTokens     int     `json:"prompt_tokens,omitempty"`
 	PredictedTokens  int     `json:"predicted_tokens,omitempty"`
+	PromptMs         int64   `json:"prompt_ms,omitempty"`         // prompt processing time (ms)
+	PredictedMs      int64   `json:"predicted_ms,omitempty"`      // generation time (ms)
 	Duration         int64   `json:"duration,omitempty"`
 	Cost             float64 `json:"cost,omitempty"` // per-message cost from usage.cost.total
 	ToolCallsJSON    string  `json:"tool_calls_json,omitempty"`  // JSON of tool call data (role=tool_call)
