@@ -237,14 +237,18 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 					return
 				}
 			case <-r.Context().Done():
-				// User clicked ✕ or disconnected — handler exits, loop sees ctx.Done
+				// User clicked ✕ or disconnected — handler exits, loop sees ctx.Done.
+				// Write a response to avoid compression middleware panic on code 0.
+				http.Error(w, "summarization cancelled", http.StatusRequestTimeout)
 				return
 			case <-reqCtx.Done():
 				if reqCtx.Err() == context.DeadlineExceeded {
 					httputil.JSONError(w, http.StatusInternalServerError, "summarization timed out")
 					return
 				}
-				// Cancelled by new request or HTTP abort
+				// Cancelled by new request or HTTP abort.
+				// Write a response to avoid compression middleware panic on code 0.
+				http.Error(w, "summarization cancelled", http.StatusRequestTimeout)
 				return
 			}
 			// Result is sent via WebSocket, return minimal response
@@ -320,7 +324,10 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 }
 
 // HandleCompact triggers agent context compaction via RPC.
-// Only works for tasks actively running with agent executor.
+// If the task has an active agent runner, compaction is performed immediately.
+// If no runner exists (task is idle/stopped), the executor starts a temporary
+// agent runner, performs compaction, and keeps the runner alive for future
+// follow-up operations (the runner is normally kept alive after task completion).
 func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -339,54 +346,20 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if task has an agent runner (running or idle).
-	// Agent runner stays alive after completion for on-demand compaction.
-	te.taskMu.Lock()
-	state := te.tasks[taskID]
-	te.taskMu.Unlock()
-
-	if state == nil {
-		// Task not in active executors — it may have been stopped, restarted, or
-		// the server may have restarted. The task still exists in the store.
-		httputil.JSONError(w, http.StatusNotFound, "task not found in active executors")
-		return
-	}
-	if state.executorType != "agent" {
-		httputil.JSONError(w, http.StatusBadRequest, "compaction only available for agent tasks")
+	// Ensure we have an active agent runner.
+	runner, err := te.getAgentRunner(r.Context(), projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// If task is not actively running, we need to send the compact command
-	// directly to the agent runner (not through the event loop's compactCh).
-	if state.agentRunner != nil {
-		compactCtx, compactCancel := context.WithTimeout(r.Context(), 120*time.Second)
-		compactResult, err := state.agentRunner.Compact(compactCtx)
-		compactCancel()
-		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "compacted", "summary": compactResult.Summary})
+	// Use the runner to perform compaction.
+	compactCtx, compactCancel := context.WithTimeout(r.Context(), 120*time.Second)
+	compactResult, err := runner.Compact(compactCtx)
+	compactCancel()
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "Compaction failed: " + err.Error())
 		return
 	}
-
-	// Task is actively running — use the event loop's compact channel.
-	resultCh := make(chan *CompactResult, 1)
-	var compactResult *CompactResult
-	select {
-	case state.compactCh <- resultCh:
-		select {
-		case compactResult = <-resultCh:
-			if compactResult.Error != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, compactResult.Error.Error())
-				return
-			}
-		case <-time.After(120 * time.Second):
-			httputil.JSONError(w, http.StatusInternalServerError, "compaction timed out")
-			return
-		}
-		httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "compacted", "summary": compactResult.Summary})
-	default:
-		httputil.JSONError(w, http.StatusConflict, "compaction already in progress")
-	}
+	httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "compacted", "summary": compactResult.Summary})
 }

@@ -113,7 +113,7 @@ func TestPrepareTaskExecution_PreservesBaseRefOnRestart(t *testing.T) {
 
 	// Now simulate restart: prepareTaskExecution is called again
 	// Work the worktree exists, CreateWorktree returns early with branch name
-	setup, err := te.prepareTaskExecution(projectID, taskID, "", "")
+	setup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepare task execution: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
 	te.store.CreateTask(task)
 
 	// prepareTaskExecution on first run (no existing worktree)
-	setup, err := te.prepareTaskExecution(projectID, taskID, "", "")
+	setup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepare task execution: %v", err)
 	}

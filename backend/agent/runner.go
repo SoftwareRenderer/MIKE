@@ -441,14 +441,31 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 	}
 
 	// Route compact responses to dedicated channel
-	if event.Type == pkgagent.EventTypeStatus && event.RawData != nil {
+	if event.RawData != nil {
 		if cmd, ok := event.RawData["command"].(string); ok && cmd == "compact" {
 			result := &pkgagent.CompactResult{}
-			if event.RawData["summary"] != nil {
-				result.Summary = fmt.Sprintf("%v", event.RawData["summary"])
-			}
-			if event.RawData["error"] != nil {
-				result.Err = fmt.Errorf("%v", event.RawData["error"])
+			if event.Type == pkgagent.EventTypeStatus {
+				if summary, ok := event.RawData["summary"].(string); ok {
+					result.Summary = summary
+				} else if event.RawData["summary"] != nil {
+					result.Summary = fmt.Sprintf("%v", event.RawData["summary"])
+				}
+				if errStr, ok := event.RawData["error"].(string); ok {
+					result.Err = fmt.Errorf("%s", errStr)
+				} else if event.RawData["error"] != nil {
+					result.Err = fmt.Errorf("%v", event.RawData["error"])
+				}
+				if success, ok := event.RawData["success"].(bool); ok && !success {
+					if result.Err == nil {
+						result.Err = fmt.Errorf("compaction failed")
+					}
+				}
+			} else if event.Type == pkgagent.EventTypeError {
+				if msg, ok := event.RawData["message"].(string); ok {
+					result.Err = fmt.Errorf("%s", msg)
+				} else {
+					result.Err = fmt.Errorf("compaction failed")
+				}
 			}
 			select {
 			case r.compactChan <- result:

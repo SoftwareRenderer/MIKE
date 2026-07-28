@@ -140,7 +140,7 @@ func TestPrepareTaskExecution_SubtaskCreatesParentBranch(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Prepare execution for the subtask
-	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "")
+	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepareTaskExecution failed: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestAutoStartNextSibling_ParentBranchExists(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Prepare subtask execution (this should trigger ensureParentBranch)
-	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "")
+	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepareTaskExecution failed: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Step 1: Prepare subtask — should create parent branch
-	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "")
+	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepareTaskExecution failed: %v", err)
 	}
@@ -546,7 +546,7 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 	}
 
 	// Step 4: Prepare parent execution
-	parentSetup, err := te.prepareTaskExecution(projectID, parentID, "", "")
+	parentSetup, err := te.prepareTaskExecution(projectID, parentID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepareTaskExecution for parent failed: %v", err)
 	}
@@ -628,7 +628,7 @@ func TestMergeBranch_ConflictDetection(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Prepare subtask — creates parent branch + subtask worktree
-	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "")
+	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepareTaskExecution failed: %v", err)
 	}
@@ -725,7 +725,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	}
 
 	// Prepare subtask1 (creates parent branch, parent stays in backlog)
-	setup, err := te.prepareTaskExecution(projectID, subtask1ID, "", "")
+	setup, err := te.prepareTaskExecution(projectID, subtask1ID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepareTaskExecution failed: %v", err)
 	}
@@ -830,7 +830,7 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 	}
 
 	// Prepare subtask1
-	setup, err := te.prepareTaskExecution(projectID, subtask1ID, "", "")
+	setup, err := te.prepareTaskExecution(projectID, subtask1ID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepareTaskExecution failed: %v", err)
 	}
@@ -1003,7 +1003,7 @@ func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Prepare subtask (creates parent branch)
-	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "")
+	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepareTaskExecution failed: %v", err)
 	}
@@ -1370,7 +1370,7 @@ func TestSubtaskManualStart_MergeDiagnostic(t *testing.T) {
 	}
 
 	// Step 1: Prepare subtask execution (simulates manual start)
-	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "")
+	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepareTaskExecution failed: %v", err)
 	}
@@ -1510,7 +1510,7 @@ func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
 	}
 
 	// 3. prepareTaskExecution (sets branch, calls UpdateTask)
-	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "")
+	setup, err := te.prepareTaskExecution(projectID, subtaskID, "", "", true)
 	if err != nil {
 		t.Fatalf("prepareTaskExecution failed: %v", err)
 	}

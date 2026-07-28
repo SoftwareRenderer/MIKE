@@ -596,7 +596,7 @@ type taskExecSetup struct {
 // Both StartTask and handleLazyStart use this to avoid duplicating worktree
 // creation, branch watching, status updates, and sandbox configuration.
 // Returns nil if the task is already actively running (caller should check execSetup == nil).
-func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideServerURL, overrideModelName string) (*taskExecSetup, error) {
+func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideServerURL, overrideModelName string, updateStatus bool) (*taskExecSetup, error) {
 	task, err := te.store.GetTaskByTaskID(taskID)
 	if err != nil {
 		return nil, err
@@ -709,10 +709,12 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	if modelName != "" {
 		task.ModelName = modelName
 	}
-	task.ExecutionState = "running"
-	task.Status = "in_progress"
-	if err := te.store.UpdateTask(task); err != nil {
-		return nil, err
+	if updateStatus {
+		task.ExecutionState = "running"
+		task.Status = "in_progress"
+		if err := te.store.UpdateTask(task); err != nil {
+			return nil, err
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -789,13 +791,103 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}, nil
 }
 
+// getAgentRunner ensures an agent runner is active for the given task,
+// starting it if necessary. If started for compaction, it does not update task status.
+func (te *TaskExecutor) getAgentRunner(ctx context.Context, projectID, taskID string) (*agent.AgentRunner, error) {
+	te.taskMu.Lock()
+	state, exists := te.tasks[taskID]
+	if exists && state.agentRunner != nil && !state.runnerClosed {
+		te.taskMu.Unlock()
+		return state.agentRunner, nil
+	}
+	te.taskMu.Unlock()
+
+	task, err := te.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Agent runner requires agent provider.
+	if !te.configStore.IsAgentProvider(task.LlamaServerURL) {
+		return nil, fmt.Errorf("compaction only available for agent tasks")
+	}
+
+	// Extract agent name from URL: "agent://pi" -> "pi"
+	agentName := strings.TrimPrefix(task.LlamaServerURL, "agent://")
+	if agentName == "" || agentName == task.LlamaServerURL {
+		return nil, fmt.Errorf("invalid agent URL: %s", task.LlamaServerURL)
+	}
+
+	// Lookup agent extension via registry
+	ext := te.agentRegistry.LookupByName(agentName)
+	if ext == nil {
+		return nil, fmt.Errorf("agent %q not found in extensions", agentName)
+	}
+
+	// Prepare execution environment without updating task status in DB.
+	setup, err := te.prepareTaskExecution(projectID, taskID, "", "", false)
+	if err != nil {
+		return nil, fmt.Errorf("prepare execution: %w", err)
+	}
+
+	// Create the sandbox container if needed (for sandbox-enabled agent tasks).
+	// The container is normally created during executeTask, but for compaction
+	// of idle tasks, we create it here so the agent subprocess can run.
+	if setup.sandboxEnabled {
+		if !te.sandboxMgr.ContainerIsRunning(task.ID) {
+			if _, _, _, err := te.setupSandbox(setup); err != nil {
+				return nil, fmt.Errorf("create sandbox for compaction: %w", err)
+			}
+		}
+	}
+
+	// Create the agent runner.
+	var runner *agent.AgentRunner
+	var runnerErr error
+	if setup.sandboxEnabled {
+		runner, runnerErr = agent.NewAgentRunner(setup.ctx, ext, te.sandboxMgr, task.ID, setup.worktreePath, fmt.Sprintf("kanban-%s", task.ID), true)
+	} else {
+		runner, runnerErr = agent.NewAgentRunner(setup.ctx, ext, nil, task.ID, setup.worktreePath, fmt.Sprintf("kanban-%s", task.ID), false)
+	}
+	if runnerErr != nil {
+		return nil, fmt.Errorf("new agent runner: %w", runnerErr)
+	}
+
+	// Store it in the executor state.
+	te.taskMu.Lock()
+	// Re-check to avoid race.
+	if state, exists := te.tasks[taskID]; exists && state.agentRunner != nil && !state.runnerClosed {
+		runner.Close()
+		te.taskMu.Unlock()
+		return state.agentRunner, nil
+	}
+	// Use the setup created above.
+	state = &executionState{
+		ctx:          setup.ctx,
+		cancel:       setup.cancel,
+		userMsgChan:  setup.userMsgChan,
+		summarizeCh:  setup.summarizeCh,
+		compactCh:    make(chan chan *CompactResult, 16),
+		agentRunner:  runner,
+		projectName:  setup.project.Name,
+		executorType: "agent",
+		taskStatus:   task.Status,
+		done:         setup.done,
+	}
+	te.tasks[taskID] = state
+	te.taskMu.Unlock()
+
+	return runner, nil
+}
+
 // StartTask begins AI execution for a task.
 func (te *TaskExecutor) StartTask(projectID, taskID string) error {
-	execSetup, err := te.prepareTaskExecution(projectID, taskID, "", "")
+	execSetup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
 	if err != nil {
 		return err
 	}
 	task := execSetup.task
+
 
 	existingMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
 	if len(existingMsgs) == 0 {
@@ -1001,7 +1093,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		te.store.UpdateTask(task)
 	}
 
-	execSetup, err := te.prepareTaskExecution(projectID, taskID, serverURL, modelName)
+	execSetup, err := te.prepareTaskExecution(projectID, taskID, serverURL, modelName, true)
 	if err != nil {
 		log.Printf("[lazy-start] task=%s setup failed: %v", taskID, err)
 		task.ExecutionState = "failed"
@@ -1013,6 +1105,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		return
 	}
 	task = execSetup.task
+
 
 	// If task has a merge conflict and the content is not already a conflict prompt,
 	// prepend conflict context (covers sync-merge path where no user message was persisted).
