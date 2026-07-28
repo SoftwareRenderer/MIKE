@@ -86,6 +86,7 @@ const (
 	CommandGetState           = "get_state"
 	CommandGetAvailableModels = "get_available_models"
 	CommandSetModel           = "set_model"
+	CommandSwitchSession      = "switch_session"
 	CommandAbort              = "abort"
 )
 

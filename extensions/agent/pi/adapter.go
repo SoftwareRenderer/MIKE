@@ -16,12 +16,13 @@ import (
 
 // Adapter implements the agent.AgentAdapter interface for the Pi Coding Agent.
 // It maintains state across calls: a line buffer for JSONL parsing, a command
-// counter for request IDs, and the discovered model name for persistence.
+// counter for request IDs, the discovered model name, and session file path.
 type Adapter struct {
-	config     piConfig
-	lineBuffer string // accumulates partial JSONL lines across ParseOutput calls
-	cmdID      int    // monotonically increasing counter for command request IDs
-	modelName  string // discovered via get_state or agent_end; used for persistence
+	config      piConfig
+	lineBuffer  string // accumulates partial JSONL lines across ParseOutput calls
+	cmdID       int    // monotonically increasing counter for command request IDs
+	modelName   string // discovered via get_state or agent_end; used for persistence
+	sessionFile string // discovered via get_state; used for switch_session on restart
 }
 
 // NewAdapter creates a new Pi protocol adapter with default configuration.
@@ -161,6 +162,17 @@ func (a *Adapter) EncodeCommand(_ context.Context, cmd string, data []byte) []by
 		}
 		if d.ModelName != "" {
 			c["modelId"] = d.ModelName
+		}
+	case agent.CommandSwitchSession:
+		c["type"] = "switch_session"
+		var d struct {
+			SessionPath string `json:"session_path"`
+		}
+		if data != nil {
+			json.Unmarshal(data, &d)
+		}
+		if d.SessionPath != "" {
+			c["sessionPath"] = d.SessionPath
 		}
 	case agent.CommandAbort:
 		c["type"] = "abort"
@@ -380,8 +392,17 @@ func (a *Adapter) parseResponse(raw map[string]any) *agent.Event {
 		}
 		return &agent.Event{Type: agent.EventTypeStatus, RawData: map[string]any{"model_name": modelName}}
 	}
+	if resp.Command == "switch_session" {
+		// switch_session response — update session file if provided
+		if resp.Data != nil {
+			if sf, ok := resp.Data["sessionFile"].(string); ok && sf != "" {
+				a.sessionFile = sf
+			}
+		}
+		return &agent.Event{Type: agent.EventTypeStatus, RawData: map[string]any{"command": "switch_session", "success": resp.Success}}
+	}
 	if resp.Command == "get_state" {
-		var modelName string
+		var modelName, sessionFile string
 		if resp.Data != nil {
 			if model, ok := resp.Data["model"].(map[string]any); ok {
 				provider, _ := model["provider"].(string)
@@ -398,9 +419,11 @@ func (a *Adapter) parseResponse(raw map[string]any) *agent.Event {
 					modelName = modelID
 				}
 			}
+			sessionFile, _ = resp.Data["sessionFile"].(string)
 		}
 		a.modelName = modelName
-		return &agent.Event{Type: agent.EventTypeStatus, RawData: map[string]any{"model_name": modelName}}
+		a.sessionFile = sessionFile
+		return &agent.Event{Type: agent.EventTypeStatus, RawData: map[string]any{"model_name": modelName, "session_file": sessionFile}}
 	}
 	return nil
 }

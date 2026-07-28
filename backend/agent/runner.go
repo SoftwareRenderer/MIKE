@@ -39,6 +39,8 @@ type AgentRunner struct {
 
 	// model name discovered via get_state
 	modelName string
+	// session file path discovered via get_state; used for switch_session on restart
+	sessionFile string
 }
 
 // RunnerConfig holds runtime configuration passed to the adapter.
@@ -277,6 +279,37 @@ func (r *AgentRunner) SetModel(ctx context.Context, modelName string) {
 	}
 }
 
+// SwitchSession sends a switch_session command to load a Pi session file.
+// Returns true if the command was sent successfully.
+func (r *AgentRunner) SwitchSession(ctx context.Context, sessionPath string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return false
+	}
+	data, _ := json.Marshal(map[string]any{"session_path": sessionPath})
+	bytes := r.adapter.EncodeCommand(ctx, pkgagent.CommandSwitchSession, data)
+	if bytes == nil {
+		return false
+	}
+	_, err := r.stdin.Write(bytes)
+	return err == nil
+}
+
+// SessionFile returns the session file path discovered via get_state.
+func (r *AgentRunner) SessionFile() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sessionFile
+}
+
+// SetSessionFile sets the session file path (used when restoring from task metadata).
+func (r *AgentRunner) SetSessionFile(sessionFile string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sessionFile = sessionFile
+}
+
 // SendCommand sends a high-level command to the agent.
 func (r *AgentRunner) SendCommand(ctx context.Context, cmd string, data []byte) error {
 	r.mu.Lock()
@@ -450,6 +483,12 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 			case r.modelUpdated <- struct{}{}:
 			default:
 			}
+		}
+		// Update session file path if provided
+		if sessionFile, ok := event.RawData["session_file"].(string); ok && sessionFile != "" {
+			r.mu.Lock()
+			r.sessionFile = sessionFile
+			r.mu.Unlock()
 		}
 	}
 
