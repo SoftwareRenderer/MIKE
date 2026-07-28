@@ -14,6 +14,8 @@ let csrfToken: string = '';
 /** Set the CSRF token (called after login or session check). */
 export function setCsrfToken(token: string): void {
     csrfToken = token;
+    // Expose on window for UI extensions that can't import $lib/api
+    if (typeof window !== 'undefined') (window as any).__csrfToken = token;
 }
 
 /** Clear the CSRF token (called on logout). */

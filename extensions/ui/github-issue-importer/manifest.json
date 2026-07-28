@@ -8,6 +8,12 @@
         "module_url": "/extensions/ui/github-issue-importer/GitHubImport.js",
         "injection_points": ["create-task"]
     },
+    "proxy": {
+        "allowed_domains": ["api.github.com"],
+        "headers": {
+            "Authorization": "token {{github_token}}"
+        }
+    },
     "config_schema": {
         "type": "object",
         "properties": [

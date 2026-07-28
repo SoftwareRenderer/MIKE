@@ -3,7 +3,10 @@ package extensions
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -871,6 +874,128 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 	statuses := h.sandbox.ListRunning()
 	ext, _ = h.store.GetByID(id)
 	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, statuses))
+}
+
+// HandleProxy proxies requests to external APIs on behalf of an extension.
+// The extension must declare a `proxy` capability in its manifest with
+// allowed_domains and optional header templates.
+func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ext, err := h.store.GetByID(id)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "extension not found")
+		return
+	}
+	if !ext.Enabled {
+		httputil.JSONError(w, http.StatusForbidden, "extension is not enabled")
+		return
+	}
+	if ext.Manifest.Proxy == nil {
+		httputil.JSONError(w, http.StatusForbidden, "extension does not have proxy capability")
+		return
+	}
+
+	var req struct {
+		URL    string `json:"url"`
+		Method string `json:"method"`
+		Body   string `json:"body,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.URL == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+	if req.Method == "" {
+		req.Method = http.MethodGet
+	}
+
+	// Validate domain against allowed_domains
+	u, err := parseURL(req.URL)
+	if err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, "invalid url: "+err.Error())
+		return
+	}
+	allowed := false
+	for _, d := range ext.Manifest.Proxy.AllowedDomains {
+		if d == u.Hostname() {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		httputil.JSONError(w, http.StatusForbidden, "domain not in allowed_domains: "+u.Hostname())
+		return
+	}
+
+	// Resolve header templates from extension config
+	headers := make(map[string]string)
+	for k, template := range ext.Manifest.Proxy.Headers {
+		resolved := resolveProxyTemplate(template, ext.Config)
+		if resolved == "" || resolved == template {
+			continue // skip unresolved or empty headers
+		}
+		headers[k] = resolved
+	}
+
+	// Create proxy request
+	proxyReq, err := http.NewRequest(req.Method, req.URL, strings.NewReader(req.Body))
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to create proxy request: "+err.Error())
+		return
+	}
+	for k, v := range headers {
+		proxyReq.Header.Set(k, v)
+	}
+	proxyReq.Header.Set("Content-Type", "application/json")
+	proxyReq.Header.Set("Accept", "application/json")
+
+	// Log the proxy request
+	log.Printf("[proxy] extension=%s method=%s url=%s status=pending", ext.Name, req.Method, req.URL)
+
+	// Execute proxy request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		httputil.JSONError(w, http.StatusBadGateway, "proxy request failed: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		httputil.JSONError(w, http.StatusBadGateway, "failed to read proxy response: "+err.Error())
+		return
+	}
+
+	// Log the proxy response
+	log.Printf("[proxy] extension=%s method=%s url=%s status=%d", ext.Name, req.Method, req.URL, resp.StatusCode)
+
+	// Return raw response
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.WriteHeader(resp.StatusCode)
+	w.Write(body)
+}
+
+// parseURL parses a URL and returns the parsed URL.
+func parseURL(rawURL string) (*url.URL, error) {
+	return url.Parse(rawURL)
+}
+
+// resolveProxyTemplate resolves {{property_name}} placeholders in a template string
+// using values from the extension's configuration.
+func resolveProxyTemplate(template string, config map[string]any) string {
+	for k, v := range config {
+		placeholder := "{{" + k + "}}"
+		template = strings.ReplaceAll(template, placeholder, fmt.Sprintf("%v", v))
+	}
+	return template
 }
 
 // --- Request/Response types ---

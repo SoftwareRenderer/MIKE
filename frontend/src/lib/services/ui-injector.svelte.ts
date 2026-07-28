@@ -174,7 +174,7 @@ export class UIInjector {
 
                 // Call init function (plain JS extension)
                 if (typeof mod?.default === 'function') {
-                    const cleanup = mod.default({ ...context, config: reg.config });
+                    const cleanup = mod.default({ ...context, config: reg.config, extensionId: reg.extensionId });
                     if (typeof cleanup === 'function') {
                         this.cleanups.set(`${reg.extensionId}::${point}`, cleanup);
                     }
