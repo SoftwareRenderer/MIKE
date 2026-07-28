@@ -273,7 +273,6 @@
 
     function toggleAgentMenu(e: MouseEvent) {
         e.stopPropagation();
-        if (providers.some(p => p.kind === 'agent')) return;
         if (agentMenuOpen) {
             agentMenuOpen = false;
             agentMenuRect = null;
@@ -288,7 +287,8 @@
     }
 
     function addAgent(ext: Extension) {
-        if (providers.some(p => p.kind === 'agent')) {
+        // Check if this specific agent is already added
+        if (providers.some(p => p.url === AGENT_URL_PREFIX + ext.name)) {
             return;
         }
         agentMenuOpen = false;
@@ -608,12 +608,10 @@
                 <div class="section-header">
                     <h3 class="section-label">Providers</h3>
                     <div class="section-actions">
-                        {#if !providers.some(p => p.kind === 'agent')}
-                            <button type="button" class="btn-small btn-agent" onclick={toggleAgentMenu} bind:this={agentMenuBtn} title="Add a coding agent" class:open={agentMenuOpen}>
-                                + Add Agent
-                                <svg class="chevron" width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            </button>
-                        {/if}
+                        <button type="button" class="btn-small btn-agent" onclick={toggleAgentMenu} bind:this={agentMenuBtn} title="Add a coding agent" class:open={agentMenuOpen}>
+                            + Add Agent
+                            <svg class="chevron" width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </button>
                         <button type="button" class="btn-small" onclick={addProvider} title="Add a new LLM provider">+ Add Provider</button>
                     </div>
                     <!-- Agent selection dropdown -->
@@ -621,19 +619,21 @@
                         <div class="agent-menu" style="position:fixed;top:{agentMenuRect.top}px;left:{agentMenuRect.left}px;z-index:10001" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') agentMenuOpen = false; }} role="menu" tabindex="-1">
                             {#if agentsLoading}
                                 <div class="agent-menu-item agent-menu-loading">Loading agents...</div>
-                            {:else if availableAgents.length === 0}
-                                <div class="agent-menu-item agent-menu-empty">No agents installed. Install one from Extensions tab.</div>
                             {:else}
-                                {#each availableAgents as ext}
-                                    <button type="button" class="agent-menu-item" onclick={() => addAgent(ext)}>
-                                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                            <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
-                                            <circle cx="6" cy="9" r="1" fill="currentColor"/>
-                                            <circle cx="10" cy="9" r="1" fill="currentColor"/>
-                                        </svg>
-                                        {ext.manifest.display_name || ext.name}
-                                    </button>
-                                {/each}
+                                {#if availableAgents.filter(ext => !providers.some(p => p.url === AGENT_URL_PREFIX + ext.name)).length === 0}
+                                    <div class="agent-menu-item agent-menu-empty">No agents available</div>
+                                {:else}
+                                    {#each availableAgents.filter(ext => !providers.some(p => p.url === AGENT_URL_PREFIX + ext.name)) as ext}
+                                        <button type="button" class="agent-menu-item" onclick={() => addAgent(ext)}>
+                                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                                <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                                                <circle cx="6" cy="9" r="1" fill="currentColor"/>
+                                                <circle cx="10" cy="9" r="1" fill="currentColor"/>
+                                            </svg>
+                                            {ext.manifest.display_name || ext.name}
+                                        </button>
+                                    {/each}
+                                {/if}
                             {/if}
                         </div>
                     {/if}
