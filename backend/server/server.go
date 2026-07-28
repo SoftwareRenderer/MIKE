@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -272,10 +273,42 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, result)
 }
 
+// withNonce wraps an http.Handler (the frontend file server) and intercepts
+// requests for "/" to serve index.html with a request-specific CSP nonce.
+// All other requests are passed through to the underlying handler.
+func (s *Server) withNonce(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only intercept exact "/" requests (the index page)
+		if r.URL.Path == "/" {
+			indexPath := filepath.Join(s.frontendDist, "index.html")
+			content, err := os.ReadFile(indexPath)
+			if err != nil {
+				http.Error(w, "failed to read index.html", http.StatusInternalServerError)
+				return
+			}
+
+			nonce, ok := r.Context().Value(nonceKey).(string)
+			if !ok || nonce == "" {
+				nonce = "fallback"
+			}
+
+			// Inject nonce into the inline script
+			updatedContent := strings.Replace(string(content), "nonce=\"{{.Nonce}}\"", fmt.Sprintf("nonce=\"%s\"", nonce), 1)
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write([]byte(updatedContent))
+			return
+		}
+
+		// Pass all other requests (assets, favicon, etc.) to the file server
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) Serve() error {
 	srv := &http.Server{
 		Addr:              s.addr,
-		Handler:           PanicRecoveryMiddleware(CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))),
+		Handler:           PanicRecoveryMiddleware(NonceMiddleware(s.CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux)))))),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

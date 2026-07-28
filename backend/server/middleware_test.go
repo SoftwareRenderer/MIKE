@@ -142,13 +142,13 @@ func TestMiddlewareCORSReflectOrigin(t *testing.T) {
 	rr := testResponse(t, s, req)
 
 	origin := rr.Header().Get("Access-Control-Allow-Origin")
-	if origin != "http://localhost:3000" {
-		t.Errorf("Allow-Origin = %q; want http://localhost:3000", origin)
+	if origin != "" {
+		t.Errorf("expected no Allow-Origin header (same-origin policy), got %q", origin)
 	}
 
 	creds := rr.Header().Get("Access-Control-Allow-Credentials")
-	if creds != "true" {
-		t.Errorf("Allow-Credentials = %q; want true", creds)
+	if creds != "" {
+		t.Errorf("expected no Allow-Credentials header, got %q", creds)
 	}
 }
 
