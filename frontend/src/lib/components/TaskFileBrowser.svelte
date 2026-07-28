@@ -172,10 +172,52 @@
         }
     }
 
-    // Handle fs events
-    $effect(() => {
-        if (pendingFsEvent && entryPaths.has(pendingFsEvent.path)) {
+    // Handle fs events — mirror BranchFileBrowser behavior
+    // Fs events from WorktreeWatcher are relative to the task worktree (e.g. "src/main.go")
+    // Fs events from ProjectWatcher are relative to project root (e.g. "worktrees/temp/bear-comet-lore/src/main.go")
+    function handleFsEvent(op: 'create' | 'delete', relPath: string) {
+        const basePath = sandboxEnabled ? mountPath : taskPath;
+        const currentPrefix = currentPath + '/';
+
+        // Convert project-relative path to task-relative path
+        // Strip "worktrees/<projectID>/<taskId>/" prefix if present (from ProjectWatcher)
+        const worktreePrefix = 'worktrees/' + projectId + '/' + taskId + '/';
+        let taskRelPath = relPath;
+        if (relPath.startsWith(worktreePrefix)) {
+            taskRelPath = relPath.substring(worktreePrefix.length);
+        } else if (relPath.startsWith('worktrees/' + projectId + '/')) {
+            // Event is in the worktrees dir but not this task — skip
+            return;
+        }
+
+        const eventFullPath = basePath + '/' + taskRelPath;
+        const eventDir = eventFullPath.substring(0, eventFullPath.lastIndexOf('/'));
+
+        // Only refresh directory listing when the event affects the current directory
+        if (eventDir === currentPath) {
+            // Always refresh on delete (entry removed)
+            // For create, check if it's already in the listing (skip redundant refresh)
+            if (op === 'delete' || !entryPaths.has(eventFullPath)) {
+                loadDir(currentPath);
+            }
+            return;
+        }
+
+        // New directory created as a direct child of current directory
+        const childName = eventFullPath.substring(currentPrefix.length);
+        if (op === 'create' && childName && !childName.includes('/') && !entries.some(e => e.name === childName && e.isDir)) {
             loadDir(currentPath);
+        }
+    }
+
+    let lastFsEventKey = $state('');
+    $effect(() => {
+        if (pendingFsEvent) {
+            const key = pendingFsEvent.op + ':' + pendingFsEvent.path;
+            if (key !== lastFsEventKey) {
+                handleFsEvent(pendingFsEvent.op, pendingFsEvent.path);
+                lastFsEventKey = key;
+            }
         }
     });
 
