@@ -61,6 +61,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/extensions/{id}/update", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleUpdateImage(w, r, r.PathValue("id"))
 	})
+	s.mux.HandleFunc("POST /api/extensions/{id}/proxy", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleProxy(w, r, r.PathValue("id"))
+	})
 
 	// Global utilities
 	s.mux.HandleFunc("/api/home", s.handleHome)

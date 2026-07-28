@@ -7,7 +7,7 @@
  * Exports an `init` function called by the UI injector with context.
  */
 
-export default function init({ config }) {
+export default function init({ config, extensionId }) {
     const textarea = document.getElementById('task-description');
     if (!textarea) return;
 
@@ -70,18 +70,23 @@ export default function init({ config }) {
 
         e.preventDefault();
         const [, owner, repo, number] = match;
-        const token = config?.github_token;
 
         showLoading();
 
         try {
-            const headers = {};
-            if (token) headers['Authorization'] = `token ${token}`;
-
-            const res = await fetch(
-                `https://api.github.com/repos/${owner}/${repo}/issues/${number}`,
-                { headers }
-            );
+            const csrfToken = typeof window !== 'undefined' ? (window).__csrfToken : '';
+            const res = await fetch(`/api/extensions/${extensionId}/proxy`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {})
+                },
+                body: JSON.stringify({
+                    url: `https://api.github.com/repos/${owner}/${repo}/issues/${number}`,
+                    method: 'GET'
+                })
+            });
             if (!res.ok) throw new Error(`GitHub API: ${res.statusText}`);
 
             const data = await res.json();

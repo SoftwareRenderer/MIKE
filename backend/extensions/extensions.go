@@ -45,6 +45,16 @@ type ExtensionManifest struct {
 	UI           *UIConfig     `json:"ui,omitempty"`
 	CSS          *CSSConfig    `json:"css,omitempty"`
 	Agent        *AgentConfig  `json:"agent,omitempty"`
+	Proxy        *ProxyConfig  `json:"proxy,omitempty"` // server-side proxy capability
+}
+
+// ProxyConfig defines server-side proxy settings for external API access.
+// Extensions must declare this capability to use the proxy endpoint.
+// Headers can use {{property_name}} placeholders which are resolved from
+// the extension's configuration at request time.
+type ProxyConfig struct {
+	AllowedDomains []string         `json:"allowed_domains"` // whitelist of domains the proxy may contact
+	Headers        map[string]string `json:"headers,omitempty"` // header templates (e.g. "Authorization": "token {{github_token}}")
 }
 
 // LSPConfig defines LSP-specific extension configuration.
