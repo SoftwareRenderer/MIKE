@@ -40,9 +40,10 @@
     import { goTemplate } from '$lib/gotemplate';
     import { getLanguageTreeFromView } from '$lib/highlighter';
 
-    let { projectId, projectPath, filePath, targetLine, active, onFocused, onSymbolsUpdate, onHasChanges, onClose }: {
+    let { projectId, projectPath, taskId, filePath, targetLine, active, onFocused, onSymbolsUpdate, onHasChanges, onClose }: {
         projectId: string;
         projectPath?: string;
+        taskId?: string;
         filePath: string;
         targetLine: number;
         active: boolean;
@@ -450,7 +451,8 @@
         historyDeltas = [];
 
         try {
-            const res = await fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}`);
+            const taskParam = taskId ? `&task=${encodeURIComponent(taskId)}` : '';
+            const res = await fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}${taskParam}`);
             if (!res.ok) {
                 if (res.status === 413) {
                     fileTooLarge = true;
@@ -557,7 +559,8 @@
         saving = true;
         try {
             const csrfToken = await ensureCsrfToken();
-            const res = await fetch(`/api/fs/write?project=${encodeURIComponent(projectId)}`, {
+            const taskParam = taskId ? `&task=${encodeURIComponent(taskId)}` : '';
+            const res = await fetch(`/api/fs/write?project=${encodeURIComponent(projectId)}${taskParam}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

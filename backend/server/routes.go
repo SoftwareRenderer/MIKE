@@ -139,6 +139,11 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/projects/{projectID}/git/pull", s.gitHandler.HandlePull)
 	s.mux.HandleFunc("/api/projects/{projectID}/git/push", s.gitHandler.HandlePush)
 
+	// Task-specific git operations
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/git/log", s.gitHandler.HandleTaskLog)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/git/branches", s.gitHandler.HandleTaskBranches)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/git/checkout", s.gitHandler.HandleTaskCheckout)
+
 
 	// Frontend
 	if s.frontendDist != "" {

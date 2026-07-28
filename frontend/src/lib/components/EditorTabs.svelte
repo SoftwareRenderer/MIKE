@@ -6,10 +6,11 @@
         targetLine: number;
     }
 
-    let { projectId, projectPath, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
+    let { projectId, projectPath, taskId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
         onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen }: {
         projectId: string;
         projectPath?: string;
+        taskId?: string;
         openFiles: OpenFile[];
         activeFilePath: string;
         unsavedFiles: Set<string>;
@@ -147,6 +148,7 @@
                 <FileEditor
                     projectId={projectId}
                     projectPath={projectPath}
+                    taskId={taskId}
                     filePath={file.path}
                     targetLine={file.targetLine}
                     active={file.path === activeFilePath}

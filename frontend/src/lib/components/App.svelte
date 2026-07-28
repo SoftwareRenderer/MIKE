@@ -27,6 +27,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     import LoginModal from './LoginModal.svelte';
     import SandboxConfigModal from './SandboxConfigModal.svelte';
     import ExplorerView from './ExplorerView.svelte';
+    import TaskExplorerView from './TaskExplorerView.svelte';
     import Sidebar from './App/Sidebar.svelte';
     import TopBar from './App/TopBar.svelte';
     import SWUpdateBanner from './SWUpdateBanner.svelte';
@@ -176,6 +177,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let boardRefreshPending = false; // deduplicate rapid refreshBoard calls
     let showFileBrowserVal = $state(false);
     let showExplorerViewVal = $state(false);
+    let showTaskExplorerVal = $state(false);
     let cardDetailActiveTab = $state<'context' | 'chat' | 'diff' | 'checkpoint'>('chat');
 let scrollToColumn = $state<string | null>(null); // column to scroll to on mobile after task delete
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
@@ -273,8 +275,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const viewParam = params.get('view');
         if (viewParam === 'explorer') {
             showExplorerViewVal = true;
+            showTaskExplorerVal = false;
+        } else if (viewParam === 'task-explorer') {
+            showExplorerViewVal = false;
+            showTaskExplorerVal = true;
         } else {
             showExplorerViewVal = false;
+            showTaskExplorerVal = false;
         }
         // Notify child components (e.g., TaskChat) that the URL changed
         window.dispatchEvent(new CustomEvent('urlchanged'));
@@ -391,8 +398,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         });
         setAppStreamRef(appStream);
         const urlParams = new URLSearchParams(location.search);
-        if (urlParams.get('view') === 'explorer') {
+        const viewParam = urlParams.get('view');
+        if (viewParam === 'explorer') {
             showExplorerViewVal = true;
+            showTaskExplorerVal = false;
+        } else if (viewParam === 'task-explorer') {
+            showExplorerViewVal = false;
+            showTaskExplorerVal = true;
         }
         await loadAppData();
         extensionManager.loadExtensions().catch(() => {});
@@ -670,7 +682,19 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             }
         }
         appStore.selectedTask = task;
-        uiStore.showCardDetail = true;
+        // Restore view state from URL
+        const viewParam = params.get('view');
+        if (viewParam === 'task-explorer') {
+            showTaskExplorerVal = true;
+            showExplorerViewVal = false;
+            uiStore.showCardDetail = false;
+        } else if (viewParam === 'explorer') {
+            showExplorerViewVal = true;
+            showTaskExplorerVal = false;
+            uiStore.showCardDetail = false;
+        } else {
+            uiStore.showCardDetail = true;
+        }
     }
 
     function disconnectBoardStream() {
@@ -751,6 +775,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     async function selectProject(p: Project) {
         disconnectBoardStream();
         const wasExplorerViewOpen = showExplorerViewVal;
+        const wasTaskExplorerOpen = showTaskExplorerVal;
         const wasProjectSwitch = !!currentProject;
         currentProject = p;
         currentBranch = '';
@@ -760,12 +785,20 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             showExplorerViewVal = false;
             fsEventQueue = [];
         }
+        if (wasProjectSwitch && wasTaskExplorerOpen) {
+            showTaskExplorerVal = false;
+            fsEventQueue = [];
+        }
         // Update URL with project param
         // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
         const urlTaskId = new URLSearchParams(location.search).get('task');
-        updateUrl({ project: p.id, task: appStore.selectedTask?.id || urlTaskId, view: wasExplorerViewOpen ? 'explorer' : null, file: urlFileId || null }, false, true);
+        const viewParam = wasExplorerViewOpen ? 'explorer' : (wasTaskExplorerOpen ? 'task-explorer' : null);
+        updateUrl({ project: p.id, task: appStore.selectedTask?.id || urlTaskId, view: viewParam, file: urlFileId || null }, false, true);
         if (wasProjectSwitch && wasExplorerViewOpen) {
             queueMicrotask(() => { showExplorerViewVal = true; });
+        }
+        if (wasProjectSwitch && wasTaskExplorerOpen) {
+            queueMicrotask(() => { showTaskExplorerVal = true; });
         }
         try {
             const b = await getBoard(p.id);
@@ -1011,7 +1044,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <!-- Main Content -->
     <main id="main-content" class="main" tabindex="-1">
         {#if currentProject}
-            {#if !(uiStore.showCardDetail && appStore.selectedTask) && !showExplorerViewVal}
+            {#if !(uiStore.showCardDetail && appStore.selectedTask) && !showExplorerViewVal && !showTaskExplorerVal}
             <TopBar
                 currentProject={currentProject}
                 {currentBranch}
@@ -1039,6 +1072,20 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         onUpdateFile={handleExplorerFileChange}
                         onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
+                {:else if showTaskExplorerVal && currentProject && appStore.selectedTask}
+                    <TaskExplorerView
+                        projectId={currentProject.id}
+                        projectName={currentProject.name}
+                        taskId={appStore.selectedTask.id}
+                        taskPath={cfg?.workspace_dir ? `${cfg.workspace_dir}/${currentProject.id}/${appStore.selectedTask.id}` : ''}
+                        taskBranch={appStore.selectedTask.branch || ''}
+                        currentBranch={currentBranch}
+                        sandboxEnabled={currentProject.sandbox_enabled ?? false}
+                        fsEventQueue={fsEventQueue}
+                        onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }}
+                        onUpdateFile={(path: string | null) => { if (path) updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer', file: path }, false, true); }}
+                        onClose={() => { showTaskExplorerVal = false; updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
+                    />
                 {:else if uiStore.showCardDetail && appStore.selectedTask}
                     <CardDetail task={appStore.selectedTask} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
                         if (status) scrollToColumn = status;
@@ -1050,7 +1097,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         updateUrl({ project: currentProject?.id, task: t.id }, true, true);
                         if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
                         appStore.selectedTask = t;
-                    }} onRefreshBoard={() => refreshBoard()} onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }} />
+                    }} onRefreshBoard={() => refreshBoard()} onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }} onOpenExplorer={() => { showTaskExplorerVal = true; updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer' }, false, true); }} />
                 {:else}
                     <Board
                         {tasks}

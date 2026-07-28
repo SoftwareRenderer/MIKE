@@ -13,6 +13,7 @@
         badge,
         onClose,
         onOpenTerminal,
+        onOpenExplorer,
         onDelete,
         task,
     }: {
@@ -22,6 +23,7 @@
         badge: { text: string; color: string };
         onClose: (status?: string) => void;
         onOpenTerminal: () => void;
+        onOpenExplorer: () => void;
         onDelete: () => Promise<void>;
         task: Task;
     } = $props();
@@ -55,6 +57,11 @@
         </div>
     </div>
     <div class="header-actions">
+        <button class="icon-btn" onclick={onOpenExplorer} aria-label="Open explorer" title="Open explorer">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2 3h4l1.5 2H13l1.5 2.5V13a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            </svg>
+        </button>
         <button class="icon-btn" onclick={onOpenTerminal} aria-label="Open terminal" title="Open terminal">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
