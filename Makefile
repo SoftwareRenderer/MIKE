@@ -13,11 +13,11 @@ LDFLAGS  := -X kanban/backend/server.Version=$(VERSION)
 
 .PHONY: build
 build: frontend ## Build binary with version injected + frontend
-	go build -ldflags "$(LDFLAGS)" -o kanban .
+	go build -trimpath -ldflags "$(LDFLAGS)" -o kanban .
 
 .PHONY: build-backend
 build-backend: ## Build Go binary only (no frontend rebuild)
-	go build -ldflags "$(LDFLAGS)" -o kanban .
+	go build -trimpath -ldflags "$(LDFLAGS)" -o kanban .
 
 .PHONY: frontend
 frontend: ## Build frontend (Vite)
@@ -76,7 +76,7 @@ clean: ## Remove build artifacts
 release: ## Build release binary with git tag as version (set VERSION=vX.Y.Z)
 	@echo "Building version $(VERSION)"
 	cd frontend && npm run build
-	go build -ldflags "$(LDFLAGS)" -o kanban .
+	go build -trimpath -ldflags "$(LDFLAGS)" -o kanban .
 
 # ---------------------------------------------------------------------------
 # Help

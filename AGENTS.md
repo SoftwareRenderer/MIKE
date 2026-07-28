@@ -18,7 +18,7 @@ The sandbox bridge (`sandbox-bridge`) is a lightweight binary that runs inside e
 **Build:**
 ```bash
 # Build for Linux (CGO_ENABLED=0 for static build)
-CGO_ENABLED=0 GOOS=linux go build -o sandbox/sandbox-bridge -ldflags="-s -w" ./pkg/bridge/agent
+CGO_ENABLED=0 GOOS=linux go build -trimpath -o sandbox/sandbox-bridge -ldflags="-s -w" ./pkg/bridge/agent
 ```
 
 **Runtime discovery:** The server finds `sandbox-bridge` via (in order):
@@ -277,7 +277,7 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 
 ### Backend
 1. Edit Go files in `backend/`
-2. Build: `go build -o kanban .`
+2. Build: `go build -trimpath -o kanban .`
 3. Restart server to pick up changes
 4. Config persists in SQLite (`data/kanban.db`)
 
@@ -452,7 +452,7 @@ extensions/agent/my-agent/
 ├── adapter_test.go     # Unit tests (run natively)
 ├── wasm/main.go        # WASI reactor exports (package main, //go:wasmexport directives)
 ├── manifest.json       # {"agent": {"wasm_module": "my-agent.wasm"}}
-└── build.sh            # GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o ../my-agent.wasm ./wasm
+└── build.sh            # GOOS=wasip1 GOARCH=wasm go build -trimpath -buildmode=c-shared -o ../my-agent.wasm ./wasm
 ```
 
 Adapter core must have **zero `backend/` imports** (WASM compatibility). The `wasm/main.go` wraps the adapter and exports functions via `//go:wasmexport` for the [WASI reactor](https://go.dev/blog/wasmexport) model (`-buildmode=c-shared`, Go 1.24+).
