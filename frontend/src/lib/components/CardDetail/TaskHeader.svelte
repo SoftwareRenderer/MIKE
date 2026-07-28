@@ -11,7 +11,6 @@
         taskId,
         sandboxEnabled,
         badge,
-        worktreeExists,
         onClose,
         onOpenTerminal,
         onDelete,
@@ -21,7 +20,6 @@
         taskId: string;
         sandboxEnabled: boolean | undefined;
         badge: { text: string; color: string };
-        worktreeExists: boolean;
         onClose: (status?: string) => void;
         onOpenTerminal: () => void;
         onDelete: () => Promise<void>;
@@ -57,7 +55,7 @@
         </div>
     </div>
     <div class="header-actions">
-        <button class="icon-btn" onclick={onOpenTerminal} disabled={!worktreeExists} aria-label="Open terminal" title="Open terminal">
+        <button class="icon-btn" onclick={onOpenTerminal} aria-label="Open terminal" title="Open terminal">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                 <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>

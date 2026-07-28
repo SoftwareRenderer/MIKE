@@ -11,6 +11,7 @@ import {
     commitAndDoneRaw,
     getCommitPreviewRaw,
     clearDoneTasksRaw,
+    initTaskRaw,
     startTaskRaw,
     startSubtaskRaw,
     stopTaskRaw,
@@ -87,6 +88,12 @@ export async function clearDoneTasks(projectId: string): Promise<{ deleted: numb
 }
 
 // -- Task execution endpoints --
+
+/** Initialize a task: create its worktree and branch without starting LLM execution.
+ * Enables the terminal and file explorer before the task is started. Idempotent. */
+export async function initTask(projectId: string, taskId: string): Promise<Task> {
+    return initTaskRaw(projectId, taskId);
+}
 
 /** Start task execution. Creates a worktree and begins the LLM loop. Queued when offline. */
 export async function startTask(projectId: string, taskId: string): Promise<Task> {

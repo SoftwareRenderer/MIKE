@@ -37,8 +37,10 @@ describe('TaskHeader rendering', () => {
         expect(source).toContain('onDelete');
     });
 
-    it('shows worktree exists status', () => {
-        expect(source).toContain('worktreeExists');
+    it('terminal button is always enabled (init happens in CardDetail)', () => {
+        expect(source).toContain('onOpenTerminal');
+        // worktreeExists prop removed — init is handled by CardDetail wrapper
+        expect(source).not.toContain('worktreeExists');
     });
 
     it('renders header layout', () => {

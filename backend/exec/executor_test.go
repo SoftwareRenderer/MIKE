@@ -177,6 +177,148 @@ func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
 	te.StopTask(taskID)
 }
 
+// TestInitTask_CreatesWorktree verifies that InitTask creates the worktree
+// and sets branch/BaseRef without starting LLM execution.
+func TestInitTask_CreatesWorktree(t *testing.T) {
+	te, _, projectID, initialSHA := setupExecutorWithGit(t)
+	taskID := "test-init-task"
+
+	task := &types.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Test task",
+		Prompt:    "Test prompt",
+		Status:    "backlog",
+	}
+	te.store.CreateTask(task)
+
+	// Init the task
+	result, err := te.InitTask(projectID, taskID)
+	if err != nil {
+		t.Fatalf("InitTask failed: %v", err)
+	}
+
+	// Verify branch is set
+	if result.Branch == "" {
+		t.Error("Branch should be set after init")
+	}
+
+	// Verify BaseRef is set
+	if result.BaseRef == "" {
+		t.Error("BaseRef should be set after init")
+	}
+
+	// Verify BaseCommit is set to the initial SHA
+	if result.BaseCommit != initialSHA {
+		t.Errorf("BaseCommit should be set to initial SHA: expected %q, got %q", initialSHA, result.BaseCommit)
+	}
+
+	// Verify worktree directory exists
+	wtPath, _ := te.worktreeMgr.WorktreePath(taskID)
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Errorf("worktree directory should exist at %s: %v", wtPath, err)
+	}
+
+	// Verify task status is unchanged (init should NOT move to in_progress)
+	reloaded, _ := te.store.GetTaskByTaskID(taskID)
+	if reloaded.Status != "backlog" {
+		t.Errorf("Status should remain backlog after init, got %q", reloaded.Status)
+	}
+	if reloaded.ExecutionState == "running" {
+		t.Errorf("ExecutionState should not be running after init, got %q", reloaded.ExecutionState)
+	}
+}
+
+// TestInitTask_Idempotent verifies that calling InitTask twice is safe.
+func TestInitTask_Idempotent(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID := "test-init-idempotent-task"
+
+	task := &types.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Test task",
+		Prompt:    "Test prompt",
+		Status:    "backlog",
+	}
+	te.store.CreateTask(task)
+
+	// First init
+	result1, err := te.InitTask(projectID, taskID)
+	if err != nil {
+		t.Fatalf("first InitTask failed: %v", err)
+	}
+
+	// Second init (should be a no-op)
+	result2, err := te.InitTask(projectID, taskID)
+	if err != nil {
+		t.Fatalf("second InitTask failed: %v", err)
+	}
+
+	// Branch should be the same
+	if result1.Branch != result2.Branch {
+		t.Errorf("Branch should be the same on second init: %q vs %q", result1.Branch, result2.Branch)
+	}
+
+	// Status should still be backlog
+	if result2.Status != "backlog" {
+		t.Errorf("Status should remain backlog after second init, got %q", result2.Status)
+	}
+}
+
+// TestInitTask_ThenPrepareTaskExecution verifies that prepareTaskExecution
+// works correctly after InitTask has already created the worktree.
+func TestInitTask_ThenPrepareTaskExecution(t *testing.T) {
+	te, _, projectID, initialSHA := setupExecutorWithGit(t)
+	taskID := "test-init-then-start-task"
+
+	task := &types.Task{
+		ID:             taskID,
+		ProjectID:      projectID,
+		Title:          "Test task",
+		Prompt:         "Test prompt",
+		Status:         "backlog",
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}
+	te.store.CreateTask(task)
+
+	// Init the task first
+	initResult, err := te.InitTask(projectID, taskID)
+	if err != nil {
+		t.Fatalf("InitTask failed: %v", err)
+	}
+	initBranch := initResult.Branch
+
+	// Now prepare for execution (simulating start)
+	setup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
+	if err != nil {
+		t.Fatalf("prepareTaskExecution after init failed: %v", err)
+	}
+	if setup == nil {
+		t.Fatal("prepareTaskExecution returned nil")
+	}
+
+	// Branch should be preserved from init
+	if setup.task.Branch != initBranch {
+		t.Errorf("Branch should be preserved from init: expected %q, got %q", initBranch, setup.task.Branch)
+	}
+
+	// BaseRef should be preserved
+	if setup.task.BaseRef == "" {
+		t.Error("BaseRef should be set")
+	}
+
+	// BaseCommit should be preserved
+	if setup.task.BaseCommit != initialSHA {
+		t.Errorf("BaseCommit should be preserved: expected %q, got %q", initialSHA, setup.task.BaseCommit)
+	}
+
+	// Cleanup
+	setup.cancel()
+	te.StopTask(taskID)
+}
+
 func TestHasRunningTasks_InProgress(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "test-running-task"
