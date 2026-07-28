@@ -15,12 +15,13 @@
     import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles, loadEditorTabs, saveEditorTabs, clearEditorDraft, clearEditorHistory } from '$lib/storage';
     import { dialogStore } from '$lib/stores';
 
-    let { projectId, projectName, taskId, taskPath, taskBranch, currentBranch, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
+    let { projectId, projectName, taskId, taskPath, taskBranch, taskStatus, currentBranch, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
         projectId: string;
         projectName: string;
         taskId: string;
         taskPath: string;
         taskBranch: string;
+        taskStatus: string;
         currentBranch: string;
         sandboxEnabled: boolean;
         onClose: () => void;
@@ -33,6 +34,16 @@
     let originTip = $state('');
     let selectedBranch = $state('');
     $effect(() => { selectedBranch = taskBranch; });
+
+    // Status color for branch badge
+    let statusColor = $derived(
+        taskStatus === 'backlog' ? 'var(--color-column-backlog)' :
+        taskStatus === 'in_progress' ? 'var(--color-column-in-progress)' :
+        taskStatus === 'review' ? 'var(--color-column-review)' :
+        taskStatus === 'done' ? 'var(--color-column-done)' :
+        'var(--color-text-secondary)'
+    );
+
     let loadingCommits = $state(true);
 
     // Commit diff overlay state
@@ -482,7 +493,7 @@
         <span class="project-path">{toHomeRelative(taskPath)}</span>
 
         <!-- Branch badge -->
-        <span class="explorer-branch-badge" title="{selectedBranch}">
+        <span class="explorer-branch-badge" style="background: {statusColor}22; color: {statusColor}; border-color: {statusColor}44" title="{selectedBranch}">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="6" cy="6" r="2.5"/>
                 <circle cx="10" cy="10" r="2.5"/>
@@ -776,8 +787,7 @@
         gap: 4px;
         padding: 4px 10px;
         border-radius: var(--radius-md);
-        background: var(--color-surface-3);
-        color: var(--color-text-secondary);
+        border: 1px solid;
         font-size: 0.8125rem;
         font-family: var(--font-mono);
         font-weight: 500;
