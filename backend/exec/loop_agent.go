@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"kanban/backend/agent"
-	pkgagent "kanban/pkg/agent"
 	"kanban/backend/git"
 	"kanban/backend/prompts"
 	"kanban/backend/stream"
 	"kanban/backend/types"
+	pkgagent "kanban/pkg/agent"
 
 	"github.com/google/uuid"
 )
@@ -25,7 +25,7 @@ const AgentSentinelPrefix = "agent://"
 // The agent handles its own LLM calls, tool execution, loop detection, and compaction.
 // Kanban only manages the subprocess lifecycle and streams events to the frontend.
 // requestedModel is the model name from the task config; if set, it sends set_model before the first prompt.
-func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Task, projectID, projectName, worktreePath, serverURL, requestedModel string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, initialContent string) {
+func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Task, projectID, worktreePath, serverURL, requestedModel string, userMsgChan chan stream.UserMessage, sandboxEnabled bool, initialContent string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[agent-panic] task=%s recovered from panic: %v", task.ID, r)
@@ -64,7 +64,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	} else {
 		// Agent runs on the host.
 		// The adapter's SubprocessConfig() sets config dir env vars from the
-		// extension's sandbox_mount declaration, so no Pi-specific code needed here.
+		// extension's sandbox_mount declaration, so no agent-specific code needed here.
 		log.Printf("[agent] task=%s creating runner (cwd=%s, session=%s)", task.ID, worktreePath, sessionName)
 		runner, err = agent.NewAgentRunner(ctx, ext, nil, task.ID, worktreePath, sessionName, false)
 	}
@@ -97,6 +97,12 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	modelCancel()
 	log.Printf("[agent] task=%s model=%s", task.ID, activeModel)
 
+	// Capture session file path from get_state response (for session resumption on restart).
+	sessionFile := runner.SessionFile()
+	if sessionFile != "" {
+		log.Printf("[agent] task=%s sessionFile=%s", task.ID, sessionFile)
+	}
+
 	// Get existing messages
 	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
 
@@ -115,29 +121,68 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Agent started"}})
 
 	// Send initial prompt to agent.
-	// Pi does not persist sessions, so we must replay conversation history on every start.
-	initialPrompt := task.Prompt
-	if initialContent != "" {
-		// Lazy-start (follow-up message): the new message is already in taskMsgs
-		// (created by HandleSend before ForwardUserMessage). Exclude it from replay
-		// to avoid duplication — it will be sent as initialContent.
-		replayMsgs := taskMsgs
-		if len(taskMsgs) > 0 && taskMsgs[len(taskMsgs)-1].Content == initialContent {
-			replayMsgs = taskMsgs[:len(taskMsgs)-1]
-		}
-		if len(replayMsgs) > 0 {
-			initialPrompt = buildContextReplay(replayMsgs) + "\n\n--- New message ---\n\n" + initialContent
-			log.Printf("[agent] task=%s lazy-start: replaying %d messages + new message", task.ID, len(replayMsgs))
+	// Agent subprocesses start fresh each time. If we have a saved session file
+	// from a previous run, switch to it so the agent resumes with full context.
+	// Otherwise, replay conversation history as a text transcript.
+	useSessionResumption := false
+	if len(taskMsgs) > 1 && task.SessionID != "" {
+		// Restart: try to resume the saved agent session.
+		switchCtx, switchCancel := context.WithTimeout(ctx, 5*time.Second)
+		if runner.SwitchSession(switchCtx, task.SessionID) {
+			log.Printf("[agent] task=%s switching to session %s", task.ID, task.SessionID)
+			// Wait briefly for switch to take effect
+			time.Sleep(500 * time.Millisecond)
+			useSessionResumption = true
 		} else {
+			log.Printf("[agent] task=%s switch_session failed, falling back to context replay", task.ID)
+		}
+		switchCancel()
+	}
+	// Store session file path for future restarts.
+	if sessionFile != "" && task.SessionID == "" {
+		task.SessionID = sessionFile
+		te.store.UpdateTask(task)
+		log.Printf("[agent] task=%s saved sessionFile=%s", task.ID, sessionFile)
+	}
+
+	var initialPrompt string
+	if initialContent != "" {
+		// Lazy-start (follow-up message)
+		if useSessionResumption {
+			// Agent has the session from switch_session, just send the new message.
 			initialPrompt = initialContent
-			log.Printf("[agent] task=%s lazy-start: sending user message as initial prompt", task.ID)
+			log.Printf("[agent] task=%s lazy-start via session resume: sending user message", task.ID)
+		} else {
+			// Replay context as fallback.
+			replayMsgs := taskMsgs
+			if len(taskMsgs) > 0 && taskMsgs[len(taskMsgs)-1].Content == initialContent {
+				replayMsgs = taskMsgs[:len(taskMsgs)-1]
+			}
+			if len(replayMsgs) > 0 {
+				initialPrompt = buildContextReplay(replayMsgs) + "\n\n--- New message ---\n\n" + initialContent
+				log.Printf("[agent] task=%s lazy-start: replaying %d messages + new message", task.ID, len(replayMsgs))
+			} else {
+				initialPrompt = initialContent
+				log.Printf("[agent] task=%s lazy-start: sending user message as initial prompt", task.ID)
+			}
 		}
 	} else if len(taskMsgs) > 1 {
-		// Restart from done/review: replay full conversation history.
-		// The task prompt is already the first message in taskMsgs,
-		// so the replay includes it plus all subsequent messages.
-		initialPrompt = buildContextReplay(taskMsgs)
-		log.Printf("[agent] task=%s restart: replaying %d messages", task.ID, len(taskMsgs))
+		// Restart from done/review
+		if useSessionResumption {
+			// Agent has the session, send the task prompt to continue.
+			initialPrompt = task.Prompt
+			log.Printf("[agent] task=%s restart via session resume: sending task prompt", task.ID)
+		} else {
+			// Replay full conversation history.
+			// The task prompt is already the first message in taskMsgs,
+			// so the replay includes it plus all subsequent messages.
+			initialPrompt = buildContextReplay(taskMsgs)
+			log.Printf("[agent] task=%s restart: replaying %d messages", task.ID, len(taskMsgs))
+		}
+	} else {
+		// Fresh start: agent has no session, send the task prompt.
+		initialPrompt = task.Prompt
+		log.Printf("[agent] task=%s fresh-start: sending task prompt", task.ID)
 	}
 	err = runner.Prompt(ctx, initialPrompt)
 	if err != nil {
@@ -609,8 +654,9 @@ func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID stri
 }
 
 // buildContextReplay builds a text representation of the conversation history
-// for context replay when the Pi agent is restarted without session persistence.
-// The format is a structured transcript that the LLM can understand.
+// for context replay when the agent is restarted. Agent subprocesses start fresh
+// each time, so we must replay the conversation for the agent to have context.
+// This is a fallback when session resumption (switch_session) is not available.
 func buildContextReplay(messages []types.TaskMessage) string {
 	var sb strings.Builder
 	sb.WriteString("<conversation_history>\n")
@@ -717,10 +763,10 @@ func toStreamEvent(event pkgagent.Event, sandbox bool, runner *agent.AgentRunner
 
 	case pkgagent.EventTypeToolResult:
 		return types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{
-			"tool_id":  event.ToolResult.ID,
-			"success":  event.ToolResult.Success,
-			"output":   event.ToolResult.Output,
-			"sandbox":  sandbox,
+			"tool_id": event.ToolResult.ID,
+			"success": event.ToolResult.Success,
+			"output":  event.ToolResult.Output,
+			"sandbox": sandbox,
 		}}
 
 	case pkgagent.EventTypeModels:

@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"kanban/backend/git"
-	kanban_sandbox "kanban/backend/sandbox"
 	"kanban/backend/llama"
 	"kanban/backend/prompts"
+	kanban_sandbox "kanban/backend/sandbox"
 	"kanban/backend/stream"
 	"kanban/backend/types"
 
@@ -278,7 +278,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	// Check if this setup.task uses an agent provider
 	if te.configStore.IsAgentProvider(setup.serverURL) {
 		log.Printf("[exec] setup.task=%s detected agent provider (url=%s), calling executeTaskWithAgent", setup.task.ID, setup.serverURL)
-		te.executeTaskWithAgent(setup.ctx, setup.task, setup.projectID, setup.project.Name, setup.worktreePath, setup.serverURL, setup.modelName, setup.userMsgChan, setup.sandboxEnabled, setup.initialContent)
+		te.executeTaskWithAgent(setup.ctx, setup.task, setup.projectID, setup.worktreePath, setup.serverURL, setup.modelName, setup.userMsgChan, setup.sandboxEnabled, setup.initialContent)
 		log.Printf("[exec] setup.task=%s executeTaskWithAgent returned", setup.task.ID)
 		return
 	}
@@ -393,17 +393,17 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					// Create new container with updated mode
 					var assignedPorts []types.AssignedPort
 					assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, kanban_sandbox.SandboxOpts{
-					BaseImage:        imageToUse,
-					NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
-					MemoryLimit:      setup.sandboxOpts.MemoryLimit,
-					ForwardPorts:     setup.sandboxOpts.ForwardPorts,
-					AgentSandbox:     te.agentRegistry.GetAnyAgentSandbox(),
-					SkillsDir:        prompts.SkillsDir(),
-					SandboxMounts:    setup.sandboxOpts.SandboxMounts,
-					SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
-					Capabilities:     setup.sandboxOpts.Capabilities,
-					PlanMode:         updatedTask.IsPlanMode(),
-				})
+						BaseImage:        imageToUse,
+						NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
+						MemoryLimit:      setup.sandboxOpts.MemoryLimit,
+						ForwardPorts:     setup.sandboxOpts.ForwardPorts,
+						AgentSandbox:     te.agentRegistry.GetAnyAgentSandbox(),
+						SkillsDir:        prompts.SkillsDir(),
+						SandboxMounts:    setup.sandboxOpts.SandboxMounts,
+						SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
+						Capabilities:     setup.sandboxOpts.Capabilities,
+						PlanMode:         updatedTask.IsPlanMode(),
+					})
 					if createErr != nil {
 						log.Printf("[mode-switch] setup.task=%s failed to recreate sandbox: %v", setup.task.ID, createErr)
 						setup.task.ExecutionState = "failed"
@@ -433,14 +433,14 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					te.taskMu.Unlock()
 					// Update setup.task reference with latest mode
 					setup.task.OperatingMode = updatedTask.OperatingMode
-									// Update tools if mode affects them
-				if updatedTask.IsExploreMode() {
-					tools = llama.GetExploreModeToolDefinitions()
-				} else if updatedTask.IsPlanMode() {
-					tools = llama.GetPlanModeToolDefinitions()
-				} else {
-					tools = llama.GetToolDefinitions()
-				}
+					// Update tools if mode affects them
+					if updatedTask.IsExploreMode() {
+						tools = llama.GetExploreModeToolDefinitions()
+					} else if updatedTask.IsPlanMode() {
+						tools = llama.GetPlanModeToolDefinitions()
+					} else {
+						tools = llama.GetToolDefinitions()
+					}
 					// Broadcast assigned ports if any changed
 					if len(assignedPorts) > 0 {
 						setup.task.AssignedPorts = assignedPorts
@@ -747,7 +747,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		case <-setup.ctx.Done():
 			callCancel()
 			te.gate.Release(setup.serverURL) // Release gate immediately so other tasks can proceed
-			<-streamDone               // Then wait for goroutine to finish
+			<-streamDone                     // Then wait for goroutine to finish
 			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", false)
 			return
 		case <-streamDone:
@@ -1289,7 +1289,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 				"state": "idle", "summary": "Agent finished responding",
 				"assistant_message_id": assistantMsgID,
-				"prompt_tokens": promptTokens, "predicted_tokens": predictedTokens,
+				"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
 				"cache_tokens": cacheTokens,
 				"prompt_ms":    promptMs, "predicted_ms": predictedMs,
 				"model_name": activeModel, "duration": duration,
