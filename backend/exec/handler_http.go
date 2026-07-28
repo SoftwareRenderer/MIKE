@@ -319,8 +319,8 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// HandleCompact triggers Pi context compaction via RPC.
-// Only works for tasks actively running with Pi executor.
+// HandleCompact triggers agent context compaction via RPC.
+// Only works for tasks actively running with agent executor.
 func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -335,12 +335,12 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !te.configStore.IsAgentProvider(task.LlamaServerURL) {
-		httputil.JSONError(w, http.StatusBadRequest, "compaction only available for Pi tasks")
+		httputil.JSONError(w, http.StatusBadRequest, "compaction only available for agent tasks")
 		return
 	}
 
-	// Check if task has a Pi client (running or idle).
-	// Pi client stays alive after completion for on-demand compaction.
+	// Check if task has an agent runner (running or idle).
+	// Agent runner stays alive after completion for on-demand compaction.
 	te.taskMu.Lock()
 	state := te.tasks[taskID]
 	te.taskMu.Unlock()
@@ -351,8 +351,8 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusNotFound, "task not found in active executors")
 		return
 	}
-	if state.executorType != "pi" {
-		httputil.JSONError(w, http.StatusBadRequest, "compaction only available for Pi tasks")
+	if state.executorType != "agent" {
+		httputil.JSONError(w, http.StatusBadRequest, "compaction only available for agent tasks")
 		return
 	}
 
