@@ -1079,6 +1079,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         taskId={appStore.selectedTask.id}
                         taskPath={cfg?.workspace_dir ? `${cfg.workspace_dir}/${currentProject.id}/${appStore.selectedTask.id}` : ''}
                         taskBranch={appStore.selectedTask.branch || ''}
+                        taskStatus={appStore.selectedTask.status || ''}
                         currentBranch={currentBranch}
                         sandboxEnabled={currentProject.sandbox_enabled ?? false}
                         fsEventQueue={fsEventQueue}
