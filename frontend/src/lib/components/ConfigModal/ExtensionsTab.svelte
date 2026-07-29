@@ -532,9 +532,10 @@
                                             {formatBuiltAt(ext.built_at)}
                                         {/if}
                                         {#if ext.manifest.author}
-                                            · {#if ext.manifest.homepage}<a href={ext.manifest.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">{ext.manifest.author}</a>{:else}{ext.manifest.author}{/if}
+                                            · {ext.manifest.author}
                                         {/if}
                                         {#if ext.manifest.license_url} · <a href={ext.manifest.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
+                                        {#if ext.manifest.homepage} · <a href={ext.manifest.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">Website</a>{/if}
                                     </span>
                                 </div>
                                 <div class="card-actions">
@@ -868,9 +869,10 @@
                                     <span class="ext-meta">
                                         v{entry.version}
                                         {#if entry.author}
-                                            · {#if entry.homepage}<a href={entry.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">{entry.author}</a>{:else}{entry.author}{/if}
+                                            · {entry.author}
                                         {/if}
                                         {#if entry.license_url} · <a href={entry.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
+                                        {#if entry.homepage} · <a href={entry.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">Website</a>{/if}
                                     </span>
                                 </div>
                                 <div class="ext-action">
