@@ -513,7 +513,7 @@
         font-weight: 500;
     }
 
-    .file-icon {
+    :global(.file-icon) {
         flex-shrink: 0;
         opacity: 0.7;
     }

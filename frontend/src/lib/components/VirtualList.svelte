@@ -45,7 +45,7 @@
         minThreshold?: number;
         overscan?: number;
         buffer?: number;
-        getKey?: (item: any) => string;
+        getKey?: (item: any, index: number) => string;
         onScrollElChange?: (el: HTMLElement | null) => void;
         role?: string;
         'aria-label'?: string;
