@@ -75,18 +75,21 @@
                 description: addForm.description,
                 author: addForm.author,
                 license_url: addForm.licenseUrl,
+                version: addForm.version || '1.0.0',
             };
+            const capabilities: Record<string, any> = {};
             if (addForm.type === 'lsp') {
-                manifest.lsp = {
+                capabilities.lsp = {
                     command: addForm.name,
                     extensions: addForm.fileExtensions ? addForm.fileExtensions.split(',').map(s => s.trim()).filter(Boolean) : [],
                     language: addForm.language || addForm.name,
                 };
             } else if (addForm.type === 'css') {
-                manifest.css = {
+                capabilities.css = {
                     css_url: `/extensions/${addForm.name}/styles.css`,
                 };
             }
+            manifest.capabilities = capabilities;
             await createExtension({
                 name: addForm.name,
                 version: addForm.version,

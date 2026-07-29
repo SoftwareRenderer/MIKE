@@ -24,12 +24,14 @@ function addMockLSPExt(name: string, language: string, extensions: string[]) {
             display_name: name,
             description: '',
             author: 'Test',
-            deprecated: false,
-            lsp: {
-                command: name,
-                args: [],
-                extensions,
-                language,
+            version: '1.0.0',
+            capabilities: {
+                lsp: {
+                    command: name,
+                    args: [],
+                    extensions,
+                    language,
+                },
             },
         },
         config: {},

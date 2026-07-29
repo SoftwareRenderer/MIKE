@@ -29,9 +29,11 @@ describe('UIInjector CSS extension handling', () => {
                 display_name: 'Test Theme',
                 description: 'Test',
                 author: 'Test',
-                deprecated: false,
-                css: {
-                    css_url: cssUrl,
+                version: '1.0.0',
+                capabilities: {
+                    css: {
+                        css_url: cssUrl,
+                    },
                 },
             },
             config: {},
@@ -112,12 +114,14 @@ describe('UIInjector CSS extension handling', () => {
                 display_name: 'Go LSP',
                 description: 'Go',
                 author: 'Go',
-                deprecated: false,
-                lsp: {
-                    command: 'gopls',
-                    args: ['serve'],
-                    extensions: ['go'],
-                    language: 'go',
+                version: '1.0.0',
+                capabilities: {
+                    lsp: {
+                        command: 'gopls',
+                        args: ['serve'],
+                        extensions: ['go'],
+                        language: 'go',
+                    },
                 },
             },
             config: {},
@@ -144,10 +148,12 @@ describe('UIInjector CSS extension handling', () => {
                 display_name: 'UI Extension',
                 description: 'UI',
                 author: 'Test',
-                deprecated: false,
-                ui: {
-                    module_url: '/extensions/ui/test.js',
-                    injection_points: ['task-card'],
+                version: '1.0.0',
+                capabilities: {
+                    ui: {
+                        module_url: '/extensions/ui/test.js',
+                        injection_points: ['task-card'],
+                    },
                 },
             },
             config: {},
@@ -212,11 +218,13 @@ describe('UIInjector CSS extension handling', () => {
                 display_name: 'Low Priority',
                 description: '',
                 author: '',
-                deprecated: false,
+                version: '1.0.0',
                 priority: 0,
-                ui: {
-                    module_url: '/extensions/low.js',
-                    injection_points: ['task-card'],
+                capabilities: {
+                    ui: {
+                        module_url: '/extensions/low.js',
+                        injection_points: ['task-card'],
+                    },
                 },
             },
             config: {},
@@ -237,11 +245,13 @@ describe('UIInjector CSS extension handling', () => {
                 display_name: 'High Priority',
                 description: '',
                 author: '',
-                deprecated: false,
+                version: '1.0.0',
                 priority: 10,
-                ui: {
-                    module_url: '/extensions/high.js',
-                    injection_points: ['task-card'],
+                capabilities: {
+                    ui: {
+                        module_url: '/extensions/high.js',
+                        injection_points: ['task-card'],
+                    },
                 },
             },
             config: {},
@@ -274,10 +284,12 @@ describe('UIInjector CSS extension handling', () => {
                 display_name: 'Default Priority',
                 description: '',
                 author: '',
-                deprecated: false,
-                ui: {
-                    module_url: '/extensions/default.js',
-                    injection_points: ['task-card'],
+                version: '1.0.0',
+                capabilities: {
+                    ui: {
+                        module_url: '/extensions/default.js',
+                        injection_points: ['task-card'],
+                    },
                 },
             },
             config: {},
@@ -298,11 +310,13 @@ describe('UIInjector CSS extension handling', () => {
                 display_name: 'Priority 10',
                 description: '',
                 author: '',
-                deprecated: false,
+                version: '1.0.0',
                 priority: 10,
-                ui: {
-                    module_url: '/extensions/ten.js',
-                    injection_points: ['task-card'],
+                capabilities: {
+                    ui: {
+                        module_url: '/extensions/ten.js',
+                        injection_points: ['task-card'],
+                    },
                 },
             },
             config: {},
@@ -335,11 +349,13 @@ describe('UIInjector CSS extension handling', () => {
                 display_name: 'Negative Priority',
                 description: '',
                 author: '',
-                deprecated: false,
+                version: '1.0.0',
                 priority: -5,
-                ui: {
-                    module_url: '/extensions/neg.js',
-                    injection_points: ['task-card'],
+                capabilities: {
+                    ui: {
+                        module_url: '/extensions/neg.js',
+                        injection_points: ['task-card'],
+                    },
                 },
             },
             config: {},
@@ -360,11 +376,13 @@ describe('UIInjector CSS extension handling', () => {
                 display_name: 'Zero Priority',
                 description: '',
                 author: '',
-                deprecated: false,
+                version: '1.0.0',
                 priority: 0,
-                ui: {
-                    module_url: '/extensions/zero.js',
-                    injection_points: ['task-card'],
+                capabilities: {
+                    ui: {
+                        module_url: '/extensions/zero.js',
+                        injection_points: ['task-card'],
+                    },
                 },
             },
             config: {},

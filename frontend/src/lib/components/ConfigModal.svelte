@@ -299,7 +299,7 @@
             display_name: ext.manifest.display_name || ext.name,
             kind: 'agent',
             url: AGENT_URL_PREFIX + ext.name,
-            agent_config_dir: ext.manifest.agent?.sandbox_mount?.host_path || '',
+            agent_config_dir: ext.manifest.capabilities?.agent?.sandbox_mount?.host_path || '',
             api_key: '',
             models: [],
             concurrency: 1,

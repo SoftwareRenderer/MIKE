@@ -3,8 +3,10 @@
     "description": "Light color scheme for the Kanban UI.",
     "author": "SoftwareRenderer",
     "homepage": "https://github.com/SoftwareRenderer",
-    "deprecated": false,
-    "css": {
-        "css_url": "/extensions/css/mike-light/styles.css"
+    "version": "1.0.0",
+    "capabilities": {
+        "css": {
+            "css_url": "/extensions/css/mike-light/styles.css"
+        }
     }
 }

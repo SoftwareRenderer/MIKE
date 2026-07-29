@@ -27,15 +27,15 @@ type BuildProgress struct {
 
 // BuildProgressTracker manages build progress notifications.
 type BuildProgressTracker struct {
-	mu       sync.RWMutex
-	builds   map[string]*BuildProgress
+	mu          sync.RWMutex
+	builds      map[string]*BuildProgress
 	subscribers map[string][]chan *BuildProgress
 }
 
 // NewBuildProgressTracker creates a new tracker.
 func NewBuildProgressTracker() *BuildProgressTracker {
 	return &BuildProgressTracker{
-		builds:        make(map[string]*BuildProgress),
+		builds:      make(map[string]*BuildProgress),
 		subscribers: make(map[string][]chan *BuildProgress),
 	}
 }
@@ -111,19 +111,19 @@ func (t *BuildProgressTracker) Subscribe(extName string) <-chan *BuildProgress {
 
 // ExtensionHandler handles extension API requests.
 type ExtensionHandler struct {
-	store               *ExtensionStore
-	sandbox             *ExtensionSandboxManager
-	registry            *RegistryClient
-	config              *ExtensionConfig
-	progress            *BuildProgressTracker
-	onImageUpdated      func(extID string)      // callback after successful image update
-	onExtensionChanged  func()                   // callback after any extension change (enable/disable/create/delete)
+	store              *ExtensionStore
+	sandbox            *ExtensionSandboxManager
+	registry           *RegistryClient
+	config             *ExtensionConfig
+	progress           *BuildProgressTracker
+	onImageUpdated     func(extID string) // callback after successful image update
+	onExtensionChanged func()             // callback after any extension change (enable/disable/create/delete)
 }
 
 // ExtensionConfig holds configuration for the extension handler.
 type ExtensionConfig struct {
-	RegistryURL   string
-	WorkspaceDir  string
+	RegistryURL  string
+	WorkspaceDir string
 }
 
 // NewExtensionHandler creates a new ExtensionHandler.
@@ -224,16 +224,16 @@ func (h *ExtensionHandler) HandleCreate(w http.ResponseWriter, r *http.Request) 
 	id := fmt.Sprintf("%s-%d", strings.ToLower(req.Name), time.Now().Unix())
 
 	ext := &Extension{
-		ID:            id,
-		Name:          req.Name,
-		Version:       req.Version,
-		Type:          req.Type,
-		Manifest:      req.Manifest,
-		Config:        req.Config,
+		ID:              id,
+		Name:            req.Name,
+		Version:         req.Version,
+		Type:            req.Type,
+		Manifest:        req.Manifest,
+		Config:          req.Config,
 		ContainerConfig: req.ContainerConfig,
 		SandboxConfig:   req.SandboxConfig,
-		InstallSource: "manual",
-		Enabled:       true,
+		InstallSource:   "manual",
+		Enabled:         true,
 	}
 
 	if err := h.store.Create(ext); err != nil {
@@ -362,28 +362,31 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		ext.SandboxConfig.Capabilities = req.SandboxConfig.Capabilities
 	}
 	// LSP config — merge fields from manifest
-	if req.Manifest.LSP != nil {
-		if ext.Manifest.LSP == nil {
-			ext.Manifest.LSP = &LSPConfig{}
+	if req.Manifest.Capabilities != nil && req.Manifest.Capabilities.LSP != nil {
+		if ext.Manifest.Capabilities == nil {
+			ext.Manifest.Capabilities = &Capabilities{}
 		}
-		if req.Manifest.LSP.Command != "" {
-			ext.Manifest.LSP.Command = req.Manifest.LSP.Command
+		if ext.Manifest.Capabilities.LSP == nil {
+			ext.Manifest.Capabilities.LSP = &LSPConfig{}
 		}
-		if len(req.Manifest.LSP.Args) > 0 {
-			ext.Manifest.LSP.Args = req.Manifest.LSP.Args
+		if req.Manifest.Capabilities.LSP.Command != "" {
+			ext.Manifest.Capabilities.LSP.Command = req.Manifest.Capabilities.LSP.Command
 		}
-		if len(req.Manifest.LSP.Extensions) > 0 {
-			ext.Manifest.LSP.Extensions = req.Manifest.LSP.Extensions
+		if len(req.Manifest.Capabilities.LSP.Args) > 0 {
+			ext.Manifest.Capabilities.LSP.Args = req.Manifest.Capabilities.LSP.Args
 		}
-		if req.Manifest.LSP.Language != "" {
-			ext.Manifest.LSP.Language = req.Manifest.LSP.Language
+		if len(req.Manifest.Capabilities.LSP.Extensions) > 0 {
+			ext.Manifest.Capabilities.LSP.Extensions = req.Manifest.Capabilities.LSP.Extensions
 		}
-		if len(req.Manifest.LSP.InitParamsOverride) > 0 {
-			if ext.Manifest.LSP.InitParamsOverride == nil {
-				ext.Manifest.LSP.InitParamsOverride = make(map[string]any)
+		if req.Manifest.Capabilities.LSP.Language != "" {
+			ext.Manifest.Capabilities.LSP.Language = req.Manifest.Capabilities.LSP.Language
+		}
+		if len(req.Manifest.Capabilities.LSP.InitParamsOverride) > 0 {
+			if ext.Manifest.Capabilities.LSP.InitParamsOverride == nil {
+				ext.Manifest.Capabilities.LSP.InitParamsOverride = make(map[string]any)
 			}
-			for k, v := range req.Manifest.LSP.InitParamsOverride {
-				ext.Manifest.LSP.InitParamsOverride[k] = v
+			for k, v := range req.Manifest.Capabilities.LSP.InitParamsOverride {
+				ext.Manifest.Capabilities.LSP.InitParamsOverride[k] = v
 			}
 		}
 	}
@@ -563,18 +566,19 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 			Description: entry.Description,
 			Author:      entry.Author,
 			LicenseURL:  entry.LicenseURL,
+			Version:     entry.Version,
 		}
 	}
 
 	// Create extension record
 	id := fmt.Sprintf("%s-%d", strings.ToLower(entry.Name), time.Now().Unix())
 	ext := &Extension{
-		ID:            id,
-		Name:          entry.Name,
-		Version:       entry.Version,
-		Type:          entry.Type,
-		Manifest:      manifest,
-		Config:        map[string]any{},
+		ID:       id,
+		Name:     entry.Name,
+		Version:  entry.Version,
+		Type:     entry.Type,
+		Manifest: manifest,
+		Config:   map[string]any{},
 		ContainerConfig: ContainerConfig{
 			Image: entry.Image,
 		},
@@ -707,9 +711,9 @@ func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Req
 			if entry.Name == ext.Name {
 				if UpdateAvailable(ext.Version, entry.Version) {
 					updates = append(updates, ExtensionUpdate{
-						ID:            ext.ID,
-						Name:          ext.Name,
-						CurrentVersion: ext.Version,
+						ID:               ext.ID,
+						Name:             ext.Name,
+						CurrentVersion:   ext.Version,
 						AvailableVersion: entry.Version,
 					})
 				}
@@ -894,7 +898,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 		httputil.JSONError(w, http.StatusForbidden, "extension is not enabled")
 		return
 	}
-	if ext.Manifest.Proxy == nil {
+	if ext.Manifest.Capabilities.GetProxy() == nil {
 		httputil.JSONError(w, http.StatusForbidden, "extension does not have proxy capability")
 		return
 	}
@@ -923,7 +927,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	allowed := false
-	for _, d := range ext.Manifest.Proxy.AllowedDomains {
+	for _, d := range ext.Manifest.Capabilities.GetProxy().AllowedDomains {
 		if d == u.Hostname() {
 			allowed = true
 			break
@@ -936,7 +940,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 
 	// Resolve header templates from extension config
 	headers := make(map[string]string)
-	for k, template := range ext.Manifest.Proxy.Headers {
+	for k, template := range ext.Manifest.Capabilities.GetProxy().Headers {
 		resolved := resolveProxyTemplate(template, ext.Config)
 		if resolved == "" || resolved == template {
 			continue // skip unresolved or empty headers
@@ -1028,21 +1032,21 @@ type InstallExtensionRequest struct {
 
 // ExtensionResponse is the API response for an extension.
 type ExtensionResponse struct {
-	ID              string                 `json:"id"`
-	Name            string                 `json:"name"`
-	Version         string                 `json:"version"`
-	Type            string                 `json:"type"`
-	Manifest        ExtensionManifest      `json:"manifest"`
-	Config          map[string]any         `json:"config"`
-	ContainerConfig ContainerConfig        `json:"container_config"`
-	SandboxConfig   SandboxConfig          `json:"sandbox_config"`
-	InstallSource   string                 `json:"install_source"`
-	ImageRef        string                 `json:"image_ref,omitempty"`
-	Enabled         bool                   `json:"enabled"`
-	Running         bool                   `json:"running"`
-	Ports           []types.AssignedPort   `json:"ports,omitempty"`
-	InstalledAt     string                 `json:"installed_at"`
-	BuiltAt         string                 `json:"built_at"`
+	ID              string               `json:"id"`
+	Name            string               `json:"name"`
+	Version         string               `json:"version"`
+	Type            string               `json:"type"`
+	Manifest        ExtensionManifest    `json:"manifest"`
+	Config          map[string]any       `json:"config"`
+	ContainerConfig ContainerConfig      `json:"container_config"`
+	SandboxConfig   SandboxConfig        `json:"sandbox_config"`
+	InstallSource   string               `json:"install_source"`
+	ImageRef        string               `json:"image_ref,omitempty"`
+	Enabled         bool                 `json:"enabled"`
+	Running         bool                 `json:"running"`
+	Ports           []types.AssignedPort `json:"ports,omitempty"`
+	InstalledAt     string               `json:"installed_at"`
+	BuiltAt         string               `json:"built_at"`
 }
 
 // ExtensionUpdate describes an available update.

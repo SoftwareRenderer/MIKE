@@ -3,15 +3,17 @@
     "description": "Automatically imports GitHub issue content when a URL is pasted into task description",
     "author": "SoftwareRenderer",
     "homepage": "https://github.com/SoftwareRenderer",
-    "deprecated": false,
-    "ui": {
-        "module_url": "/extensions/ui/github-issue-importer/GitHubImport.js",
-        "injection_points": ["create-task"]
-    },
-    "proxy": {
-        "allowed_domains": ["api.github.com"],
-        "headers": {
-            "Authorization": "token {{github_token}}"
+    "version": "1.0.0",
+    "capabilities": {
+        "ui": {
+            "module_url": "/extensions/ui/github-issue-importer/GitHubImport.js",
+            "injection_points": ["create-task"]
+        },
+        "proxy": {
+            "allowed_domains": ["api.github.com"],
+            "headers": {
+                "Authorization": "token {{github_token}}"
+            }
         }
     },
     "config_schema": {

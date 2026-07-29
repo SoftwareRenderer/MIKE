@@ -72,13 +72,13 @@ func TestExtension_HasLSPConfig(t *testing.T) {
 		t.Error("HasLSPConfig() = true, want false (no LSP config)")
 	}
 	// Set LSP config
-	ext.Manifest.LSP = &LSPConfig{Command: "gopls", Args: []string{"serve"}}
+	ext.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{Command: "gopls", Args: []string{"serve"}}}
 	if !ext.HasLSPConfig() {
 		t.Error("HasLSPConfig() = false, want true")
 	}
 	// UI type with LSP config (should still be false)
 	uiExt := makeTestExtension(t, ExtensionTypeUI, "registry")
-	uiExt.Manifest.LSP = &LSPConfig{Command: "test"}
+	uiExt.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{Command: "test"}}
 	if uiExt.HasLSPConfig() {
 		t.Error("HasLSPConfig() = true for UI extension, want false")
 	}
@@ -91,13 +91,13 @@ func TestExtension_HasUIConfig(t *testing.T) {
 		t.Error("HasUIConfig() = true, want false (no UI config)")
 	}
 	// Set UI config
-	ext.Manifest.UI = &UIConfig{ModuleURL: "/ext/test.js"}
+	ext.Manifest.Capabilities = &Capabilities{UI: &UIConfig{ModuleURL: "/ext/test.js"}}
 	if !ext.HasUIConfig() {
 		t.Error("HasUIConfig() = false, want true")
 	}
 	// LSP type with UI config (should still be false)
 	lspExt := makeTestExtension(t, ExtensionTypeLSP, "registry")
-	lspExt.Manifest.UI = &UIConfig{ModuleURL: "/ext/test.js"}
+	lspExt.Manifest.Capabilities = &Capabilities{UI: &UIConfig{ModuleURL: "/ext/test.js"}}
 	if lspExt.HasUIConfig() {
 		t.Error("HasUIConfig() = true for LSP extension, want false")
 	}
@@ -339,11 +339,11 @@ func TestCSSConfig_JSONRoundTrip(t *testing.T) {
 
 func TestAgentConfig_ResolveSandboxTemplates(t *testing.T) {
 	tests := []struct {
-		name        string
-		agent       *AgentConfig
-		wantMounts  []types.SandboxMount
-		wantEnvs    []types.SandboxEnv
-		wantNil     bool
+		name       string
+		agent      *AgentConfig
+		wantMounts []types.SandboxMount
+		wantEnvs   []types.SandboxEnv
+		wantNil    bool
 	}{
 		{
 			name: "resolve all templates from config_schema array defaults",
@@ -502,7 +502,7 @@ func TestManifest_Priority_JSONRoundTrip(t *testing.T) {
 		DisplayName: "Test",
 		Description: "Desc",
 		Author:      "Author",
-		Deprecated:  false,
+		Version:     "1.0.0",
 		Priority:    42,
 	}
 
@@ -523,7 +523,7 @@ func TestManifest_Priority_JSONRoundTrip(t *testing.T) {
 
 func TestManifest_Priority_JSONDefault(t *testing.T) {
 	// When priority is omitted in JSON, it should default to 0
-	jsonStr := `{"display_name":"Test","description":"","author":"","deprecated":false}`
+	jsonStr := `{"display_name":"Test","description":"","author":"","version":"1.0.0"}`
 	var m ExtensionManifest
 	if err := json.Unmarshal([]byte(jsonStr), &m); err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
@@ -536,7 +536,7 @@ func TestManifest_Priority_JSONDefault(t *testing.T) {
 func TestExtension_HasCSSConfig(t *testing.T) {
 	// CSS type with CSS config
 	cssExt := makeTestExtension(t, ExtensionTypeCSS, "manual")
-	cssExt.Manifest.CSS = &CSSConfig{CSSURL: "/theme.css"}
+	cssExt.Manifest.Capabilities = &Capabilities{CSS: &CSSConfig{CSSURL: "/theme.css"}}
 	if !cssExt.HasCSSConfig() {
 		t.Error("HasCSSConfig() = false, want true")
 	}
@@ -549,7 +549,7 @@ func TestExtension_HasCSSConfig(t *testing.T) {
 
 	// UI type with CSS config (should still be false)
 	uiExt := makeTestExtension(t, ExtensionTypeUI, "manual")
-	uiExt.Manifest.CSS = &CSSConfig{CSSURL: "/theme.css"}
+	uiExt.Manifest.Capabilities = &Capabilities{CSS: &CSSConfig{CSSURL: "/theme.css"}}
 	if uiExt.HasCSSConfig() {
 		t.Error("HasCSSConfig() = true for UI extension, want false")
 	}
@@ -573,32 +573,33 @@ func TestPiManifestTemplateResolution(t *testing.T) {
 		t.Fatalf("unmarshal manifest: %v", err)
 	}
 
-	if manifest.Agent == nil {
-		t.Fatal("manifest.Agent is nil")
+	agent := manifest.Capabilities.GetAgent()
+	if agent == nil {
+		t.Fatal("manifest.Capabilities.Agent is nil")
 	}
-	if manifest.Agent.Sandbox == nil {
-		t.Fatal("manifest.Agent.Sandbox is nil")
+	if agent.Sandbox == nil {
+		t.Fatal("manifest.Capabilities.Agent.Sandbox is nil")
 	}
 
 	// Verify template references are present in the raw manifest
-	if len(manifest.Agent.Sandbox.Mounts) != 1 {
-		t.Fatalf("expected 1 mount, got %d", len(manifest.Agent.Sandbox.Mounts))
+	if len(agent.Sandbox.Mounts) != 1 {
+		t.Fatalf("expected 1 mount, got %d", len(agent.Sandbox.Mounts))
 	}
-	if manifest.Agent.Sandbox.Mounts[0].HostPath != "{{sandbox_mount_host_path[]}}" {
-		t.Errorf("expected template host_path, got %q", manifest.Agent.Sandbox.Mounts[0].HostPath)
+	if agent.Sandbox.Mounts[0].HostPath != "{{sandbox_mount_host_path[]}}" {
+		t.Errorf("expected template host_path, got %q", agent.Sandbox.Mounts[0].HostPath)
 	}
-	if manifest.Agent.Sandbox.Mounts[0].ContainerPath != "{{sandbox_mount_container_path[]}}" {
-		t.Errorf("expected template container_path, got %q", manifest.Agent.Sandbox.Mounts[0].ContainerPath)
+	if agent.Sandbox.Mounts[0].ContainerPath != "{{sandbox_mount_container_path[]}}" {
+		t.Errorf("expected template container_path, got %q", agent.Sandbox.Mounts[0].ContainerPath)
 	}
-	if manifest.Agent.Sandbox.Mounts[0].Mode != "{{sandbox_mount_mode[]}}" {
-		t.Errorf("expected template mode, got %q", manifest.Agent.Sandbox.Mounts[0].Mode)
+	if agent.Sandbox.Mounts[0].Mode != "{{sandbox_mount_mode[]}}" {
+		t.Errorf("expected template mode, got %q", agent.Sandbox.Mounts[0].Mode)
 	}
-	if len(manifest.Agent.Sandbox.Envs) != 1 || manifest.Agent.Sandbox.Envs[0].Key != "{{sandbox_env_key[]}}" {
-		t.Errorf("expected template env key, got %+v", manifest.Agent.Sandbox.Envs)
+	if len(agent.Sandbox.Envs) != 1 || agent.Sandbox.Envs[0].Key != "{{sandbox_env_key[]}}" {
+		t.Errorf("expected template env key, got %+v", agent.Sandbox.Envs)
 	}
 
 	// Resolve templates and verify against config_schema defaults
-	sb := manifest.Agent.ResolveSandboxTemplates(manifest.ConfigSchema)
+	sb := agent.ResolveSandboxTemplates(manifest.ConfigSchema)
 	if sb == nil {
 		t.Fatal("resolved sandbox is nil")
 	}

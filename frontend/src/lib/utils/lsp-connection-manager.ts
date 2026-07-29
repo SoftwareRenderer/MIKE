@@ -16,8 +16,8 @@ export function detectLanguage(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() || '';
   // Check if an LSP extension handles this file
   const lspExt = extensionManager.getLSPForFile(filePath);
-  if (lspExt?.manifest.lsp?.language) {
-    return lspExt.manifest.lsp.language;
+  if (lspExt?.manifest.capabilities?.lsp?.language) {
+    return lspExt.manifest.capabilities.lsp.language;
   }
   return ext;
 }
@@ -31,8 +31,8 @@ export function isLSPAvailable(filePath: string): boolean {
 export function getSupportedExtensions(): string[] {
   const exts = new Set<string>();
   for (const ext of extensionManager.getLSPExtensions()) {
-    if (ext.manifest.lsp?.extensions) {
-      for (const e of ext.manifest.lsp.extensions) {
+    if (ext.manifest.capabilities?.lsp?.extensions) {
+      for (const e of ext.manifest.capabilities.lsp.extensions) {
         exts.add(e);
       }
     }

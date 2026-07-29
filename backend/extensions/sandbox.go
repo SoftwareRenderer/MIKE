@@ -31,13 +31,13 @@ const (
 
 // ExtensionSandboxManager manages gVisor sandbox containers for extensions.
 type ExtensionSandboxManager struct {
-	mu       sync.Mutex
-	rt       *sandboxruntime.Runtime
-	clients  map[string]*sandbox.Client         // extID -> bridge client
-	refs     map[string]int                     // extID -> active client count
-	states   map[string]*extensionSandboxState  // extID -> runtime state
-	registry *RegistryClient
-	store    *ExtensionStore
+	mu        sync.Mutex
+	rt        *sandboxruntime.Runtime
+	clients   map[string]*sandbox.Client        // extID -> bridge client
+	refs      map[string]int                    // extID -> active client count
+	states    map[string]*extensionSandboxState // extID -> runtime state
+	registry  *RegistryClient
+	store     *ExtensionStore
 	available bool
 }
 
@@ -45,7 +45,7 @@ type ExtensionSandboxManager struct {
 type extensionSandboxState struct {
 	containerName string
 	client        *sandbox.Client
-	agentCmd      *exec.Cmd       // podman exec process
+	agentCmd      *exec.Cmd // podman exec process
 	ports         []types.AssignedPort
 	createdAt     time.Time
 	lastCheckedAt time.Time
@@ -527,11 +527,11 @@ func (sm *ExtensionSandboxManager) ListRunning() map[string]ExtensionRuntimeStat
 	for extID, state := range sm.states {
 		running, _ := sm.rt.IsRunning(state.containerName)
 		result[extID] = ExtensionRuntimeStatus{
-			Running:     running,
-			Container:   state.containerName,
-			Ports:       state.ports,
-			RefCount:    sm.refs[extID],
-			CreatedAt:   state.createdAt,
+			Running:   running,
+			Container: state.containerName,
+			Ports:     state.ports,
+			RefCount:  sm.refs[extID],
+			CreatedAt: state.createdAt,
 		}
 	}
 	return result
@@ -539,11 +539,11 @@ func (sm *ExtensionSandboxManager) ListRunning() map[string]ExtensionRuntimeStat
 
 // ExtensionRuntimeStatus describes the runtime state of an extension sandbox.
 type ExtensionRuntimeStatus struct {
-	Running   bool                   `json:"running"`
-	Container string                 `json:"container"`
-	Ports     []types.AssignedPort   `json:"ports,omitempty"`
-	RefCount  int                    `json:"ref_count"`
-	CreatedAt time.Time              `json:"created_at"`
+	Running   bool                 `json:"running"`
+	Container string               `json:"container"`
+	Ports     []types.AssignedPort `json:"ports,omitempty"`
+	RefCount  int                  `json:"ref_count"`
+	CreatedAt time.Time            `json:"created_at"`
 }
 
 // InstallAndCreate installs an extension from a registry entry and creates its sandbox.

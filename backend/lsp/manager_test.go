@@ -23,8 +23,8 @@ func echoServerPath() string {
 // messages from stdin back to stdout with proper LSP framing.
 func echoConfig() *ServerConfig {
 	return &ServerConfig{
-		Command: "python3",
-		Args:    []string{echoServerPath()},
+		Command:  "python3",
+		Args:     []string{echoServerPath()},
 		Language: "go",
 	}
 }
@@ -33,8 +33,8 @@ func echoConfig() *ServerConfig {
 // then echoes Content-Length framed messages.
 func stderrConfig() *ServerConfig {
 	return &ServerConfig{
-		Command: "python3",
-		Args:    []string{echoServerPath(), "--stderr", "stderr-line-123"},
+		Command:  "python3",
+		Args:     []string{echoServerPath(), "--stderr", "stderr-line-123"},
 		Language: "go",
 	}
 }
@@ -44,8 +44,8 @@ func stderrConfig() *ServerConfig {
 func notificationConfig() *ServerConfig {
 	notif := `{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":1,"message":"hello-lsp"}}`
 	return &ServerConfig{
-		Command: "python3",
-		Args:    []string{echoServerPath(), "--initial-notif", notif},
+		Command:  "python3",
+		Args:     []string{echoServerPath(), "--initial-notif", notif},
 		Language: "go",
 	}
 }
@@ -394,8 +394,8 @@ func TestWorkspaceReplacementInArgs(t *testing.T) {
 	dir := t.TempDir()
 
 	cfg := &ServerConfig{
-		Command: "sh",
-		Args:    []string{"-c", "echo '{\"workspace\":\"{workspace}\"}' >&2; exec stdbuf -oL cat"},
+		Command:  "sh",
+		Args:     []string{"-c", "echo '{\"workspace\":\"{workspace}\"}' >&2; exec stdbuf -oL cat"},
 		Language: "go",
 	}
 

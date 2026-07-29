@@ -16,9 +16,9 @@ import (
 // mockProcessManager is a test double for ProcessManager that captures sent messages
 // and can inject server responses.
 type mockProcessManager struct {
-	mu           sync.Mutex
-	processes    map[string]*LSPProcess // key: "workspace\tlanguage"
-	nextID       atomic.Int64
+	mu        sync.Mutex
+	processes map[string]*LSPProcess // key: "workspace\tlanguage"
+	nextID    atomic.Int64
 	// sentMessages captures messages sent to the server (in order)
 	sentMessages []json.RawMessage
 	// messageCh for delivering server responses
@@ -208,7 +208,7 @@ func subscribeClient(t *testing.T, url string, channelID int64, workspace, file,
 
 	// Send subscribe message with _ch hint
 	client.send(t, map[string]any{
-		"_ch": channelID,
+		"_ch":    channelID,
 		"method": "workspace/subscribe",
 		"params": map[string]any{
 			"workspace": workspace,
@@ -849,8 +849,8 @@ func TestLSPReadyNotification(t *testing.T) {
 		"id":      1,
 		"method":  "initialize",
 		"params": map[string]any{
-			"processId": 12345,
-			"rootUri":   "file:///tmp/test-project",
+			"processId":    12345,
+			"rootUri":      "file:///tmp/test-project",
 			"capabilities": map[string]any{},
 		},
 	})
@@ -937,7 +937,7 @@ func TestLSPReadyNotificationCachedResponse(t *testing.T) {
 		"id":      backendID,
 		"result": map[string]any{
 			"capabilities": map[string]any{},
-			"serverInfo":  map[string]any{"name": "gopls"},
+			"serverInfo":   map[string]any{"name": "gopls"},
 		},
 	}
 	mgr.Deliver(json.RawMessage(mustMarshal(t, initResponse)))

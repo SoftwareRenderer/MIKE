@@ -87,11 +87,14 @@ func TestFetchManifest(t *testing.T) {
 		Description: "A test extension",
 		Author:      "Test Author",
 		Homepage:    "https://example.com",
-		LSP: &LSPConfig{
-			Command:    "test-lsp",
-			Args:       []string{"serve"},
-			Extensions: []string{"test"},
-			Language:   "test",
+		Version:     "1.0.0",
+		Capabilities: &Capabilities{
+			LSP: &LSPConfig{
+				Command:    "test-lsp",
+				Args:       []string{"serve"},
+				Extensions: []string{"test"},
+				Language:   "test",
+			},
 		},
 	}
 
@@ -109,11 +112,11 @@ func TestFetchManifest(t *testing.T) {
 	if got.DisplayName != "Test Extension" {
 		t.Errorf("DisplayName = %v, want Test Extension", got.DisplayName)
 	}
-	if got.LSP == nil {
+	if got.Capabilities.GetLSP() == nil {
 		t.Fatal("LSP config is nil")
 	}
-	if got.LSP.Command != "test-lsp" {
-		t.Errorf("LSP.Command = %v, want test-lsp", got.LSP.Command)
+	if got.Capabilities.GetLSP().Command != "test-lsp" {
+		t.Errorf("LSP.Command = %v, want test-lsp", got.Capabilities.GetLSP().Command)
 	}
 }
 
@@ -247,7 +250,7 @@ func TestFetchManifest_FileURL(t *testing.T) {
 	// Create a temp file with valid manifest JSON
 	tmp := t.TempDir()
 	manifestPath := tmp + "/manifest.json"
-	data := `{"display_name":"Test","description":"Desc","author":"Auth","lsp":{"command":"test","extensions":["go"],"language":"go"}}`
+	data := `{"display_name":"Test","description":"Desc","author":"Auth","version":"1.0.0","capabilities":{"lsp":{"command":"test","extensions":["go"],"language":"go"}}}`
 	if err := os.WriteFile(manifestPath, []byte(data), 0644); err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@
 
     let agentConfig = $derived(
         extensionManager.state.extensions
-            .find(e => e.name === agentName && e.type === 'agent' && e.enabled)?.manifest.agent
+            .find(e => e.name === agentName && e.type === 'agent' && e.enabled)?.manifest.capabilities?.agent
     );
 
     let description = $derived(agentConfig?.description || '');

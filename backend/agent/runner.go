@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"kanban/backend/extensions"
-	pkgagent "kanban/pkg/agent"
 	sandboxmgr "kanban/backend/sandbox"
+	pkgagent "kanban/pkg/agent"
 )
 
 // AgentRunner manages an agent adapter (WASM) and its subprocess.
@@ -29,20 +29,20 @@ type AgentRunner struct {
 	stdin        io.WriteCloser
 	stdout       io.Reader
 	cmd          *exec.Cmd
-	mu          sync.Mutex
-	closed      bool
-	eventChan   chan pkgagent.Event
-	statsChan   chan pkgagent.SessionStatsData
-	compactChan chan *pkgagent.CompactResult
+	mu           sync.Mutex
+	closed       bool
+	eventChan    chan pkgagent.Event
+	statsChan    chan pkgagent.SessionStatsData
+	compactChan  chan *pkgagent.CompactResult
 	modelUpdated chan struct{}
-	done        chan struct{}
+	done         chan struct{}
 
 	// model name discovered via get_state
 	modelName string
 	// provider name discovered via persist entries; used for stats accumulation
 	providerName string
 	// last known session stats from get_session_stats; used for persistence after agent exits
-	lastStats   pkgagent.SessionStatsData
+	lastStats pkgagent.SessionStatsData
 	// accumulated cost from persist entries; fallback when get_session_stats doesn't report cost
 	sessionCost float64
 	// session file path discovered via get_state; used for switch_session on restart
@@ -51,11 +51,11 @@ type AgentRunner struct {
 
 // RunnerConfig holds runtime configuration passed to the adapter.
 type RunnerConfig struct {
-	ExtensionName string                 `json:"extension_name"`
-	SessionName   string                 `json:"session_name"`
-	WorktreePath  string                 `json:"worktree_path"`
-	Sandbox       bool                   `json:"sandbox"`
-	Config        map[string]any         `json:"config,omitempty"`
+	ExtensionName string                  `json:"extension_name"`
+	SessionName   string                  `json:"session_name"`
+	WorktreePath  string                  `json:"worktree_path"`
+	Sandbox       bool                    `json:"sandbox"`
+	Config        map[string]any          `json:"config,omitempty"`
 	AgentManifest *extensions.AgentConfig `json:"agent_manifest,omitempty"`
 }
 
@@ -70,7 +70,7 @@ func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *
 		WorktreePath:  worktreePath,
 		Sandbox:       sandboxEnabled,
 		Config:        ext.Config,
-		AgentManifest: ext.Manifest.Agent,
+		AgentManifest: ext.Manifest.Capabilities.GetAgent(),
 	}
 	// Resolve {{property}} template references in sandbox using config_schema defaults
 	// so the adapter receives concrete values, not template strings.

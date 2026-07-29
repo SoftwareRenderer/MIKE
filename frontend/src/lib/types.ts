@@ -401,13 +401,23 @@ export interface ExtensionManifest {
     author: string;
     homepage?: string;
     license_url?: string;
-    deprecated: boolean;
+    version: string;
     priority?: number; // loading order: lower values load first (default 0)
     config_schema?: ConfigSchema;
+    capabilities?: ExtensionCapabilities;
+}
+
+export interface ExtensionCapabilities {
     lsp?: LSPConfig;
     ui?: UIExtensionConfig;
     css?: CSSExtensionConfig;
     agent?: AgentExtensionConfig;
+    proxy?: ProxyExtensionConfig;
+}
+
+export interface ProxyExtensionConfig {
+    allowed_domains: string[];
+    headers?: Record<string, string>;
 }
 
 export interface AgentExtensionConfig {
