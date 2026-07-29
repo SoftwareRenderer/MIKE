@@ -399,6 +399,183 @@ test.describe('Extensions Tab', () => {
     // Cleanup
     await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
   });
+
+  test('should show capability badges for extensions with capabilities', async ({ page }) => {
+    // Create a UI extension with UI capability
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `caps-badge-test-${Date.now()}`,
+        type: 'ui',
+        version: '1.0.0',
+        manifest: {
+          display_name: 'Caps Badge Test',
+          description: 'Test extension with UI capability',
+          author: 'Test',
+          capabilities: {
+            ui: {
+              module_url: '/extensions/caps-badge-test/module.js',
+              injection_points: ['task-card'],
+            },
+          },
+        },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Open settings > Extensions tab
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Wait for extension to appear
+    await expect(page.locator('.extension-card:has-text("Caps Badge Test")')).toBeVisible({ timeout: 10000 });
+
+    // Find the extension card and check capability badges are visible
+    const extCard = page.locator('.extension-card').filter({ hasText: 'Caps Badge Test' });
+    const badges = extCard.locator('.cap-badge');
+    await expect(badges).toHaveCount(1);
+    expect(await badges.first().textContent()).toBe('UI');
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
+  test('should open capabilities modal when clicking a badge', async ({ page }) => {
+    // Create an extension with multiple capabilities
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `caps-modal-test-${Date.now()}`,
+        type: 'ui',
+        version: '1.0.0',
+        manifest: {
+          display_name: 'Caps Modal Test',
+          description: 'Extension with multiple capabilities',
+          author: 'Test',
+          capabilities: {
+            ui: {
+              module_url: '/extensions/caps-modal-test/module.js',
+              injection_points: ['task-card'],
+            },
+            css: {
+              css_url: '/extensions/caps-modal-test/styles.css',
+            },
+          },
+        },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Open settings > Extensions tab
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Wait for extension to appear
+    await expect(page.locator('.extension-card:has-text("Caps Modal Test")')).toBeVisible({ timeout: 10000 });
+
+    // Should show 2 capability badges
+    const extCard = page.locator('.extension-card').filter({ hasText: 'Caps Modal Test' });
+    const badges = extCard.locator('.cap-badge');
+    await expect(badges).toHaveCount(2);
+
+    // Click a capability badge to open the modal
+    await badges.first().click();
+
+    // Wait for capabilities modal to appear
+    await expect(page.locator('text=Extension Capabilities')).toBeVisible({ timeout: 5000 });
+
+    // Modal should show the extension name
+    await expect(page.locator('.caps-ext-name')).toContainText('Caps Modal Test');
+
+    // Modal should show capability details
+    const capDetails = page.locator('.cap-detail');
+    await expect(capDetails).toHaveCount(2);
+
+    // Close the modal
+    await page.locator('text=Close').click();
+    await expect(page.locator('text=Extension Capabilities')).toBeHidden({ timeout: 5000 });
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
+  test('should not show capability badges for extensions without capabilities', async ({ page }) => {
+    // Create an extension without capabilities
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `no-caps-test-${Date.now()}`,
+        type: 'ui',
+        version: '1.0.0',
+        manifest: {
+          display_name: 'No Caps Test',
+          description: 'Extension without capabilities',
+          author: 'Test',
+        },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Open settings > Extensions tab
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Wait for extension to appear
+    await expect(page.locator('.extension-card:has-text("No Caps Test")')).toBeVisible({ timeout: 10000 });
+
+    // Find the extension card and check no capability badges
+    const extCard = page.locator('.extension-card').filter({ hasText: 'No Caps Test' });
+    const badges = extCard.locator('.cap-badge');
+    await expect(badges).toHaveCount(0);
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
+  test('should show capability badges in Browse Registry view', async ({ page }) => {
+    // Navigate and check registry URL is configured
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+    const config = await page.evaluate(async () => {
+      const res = await fetch('/api/config');
+      return res.json();
+    });
+    if (!config.registry_url) {
+      test.skip();
+    }
+
+    // Open settings > Extensions tab
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Switch to Browse Registry view
+    await page.click('text=Browse Registry');
+    await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
+
+    // Wait for registry cards to load
+    await expect(page.locator('.registry-card').first()).toBeVisible({ timeout: 10000 });
+
+    // Check that registry cards show capability badges
+    const firstCard = page.locator('.registry-card').first();
+    const badges = firstCard.locator('.cap-badge');
+    await expect(badges).toHaveCount(1);
+
+    // Verify the badge has an aria-label for accessibility
+    const ariaLabel = await badges.first().getAttribute('aria-label');
+    expect(ariaLabel).toBeTruthy();
+    expect(ariaLabel!.length).toBeGreaterThan(0);
+  });
 });
 
 // ============================================================
