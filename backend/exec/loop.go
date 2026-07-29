@@ -1434,6 +1434,10 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			preSyncCount := len(lc.messages)
 			// Re-sync from DB to pick up any messages queued during summarization.
 			lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+			// Clear summarizing flag.
+			setup.task.Summarizing = false
+			te.store.UpdateTask(setup.task)
+			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 			// If DB has more messages than we had in-memory, new input arrived.
 			hasQueuedInput := len(lc.messages) > preSyncCount
 			if !hasQueuedInput {
