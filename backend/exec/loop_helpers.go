@@ -164,7 +164,10 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 	// Persist to DB.
 	summaryMsgID := uuid.New().String()
 	summaryCreatedAt := time.Now().UTC()
-	// Anchor: task.UpdatedAt reflects when Summarizing flag was set.
+	// Anchor: reload task to get UpdatedAt (set when Summarizing flag was set).
+	if updated, err := te.store.GetTaskByTaskID(taskID); err == nil && updated != nil {
+		task = updated
+	}
 	summaryAnchor := task.UpdatedAt
 	_ = te.store.CreateTaskMessage(&types.TaskMessage{
 		ID:              summaryMsgID,
