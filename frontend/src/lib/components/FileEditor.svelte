@@ -22,6 +22,7 @@
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax, lightTheme, lightSyntax, isLightTheme } from '$lib/utils/codemirror-theme';
+    import { stickyScroll } from '$lib/utils/sticky-scroll';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
     import { mount, unmount } from 'svelte';
@@ -213,6 +214,7 @@
         gitGutterExt.state.baselineContent = baselineContent;
         const extensions = [
             // Explicit setup (replaces basicSetup, excludes searchKeymap)
+            stickyScroll(filePath),
             gitGutterExt.extension,
             highlightActiveLineGutter(),
             highlightSpecialChars(),
