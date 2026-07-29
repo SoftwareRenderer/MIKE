@@ -79,6 +79,7 @@ export interface Task {
     operating_mode: string; // "act", "plan", or "explore"
     parent_task_id?: string;
     title_generating: boolean;
+    summarizing: boolean;
     current_thread_id?: string;
     worktree_exists?: boolean;
     created_at: string;

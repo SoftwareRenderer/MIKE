@@ -730,14 +730,13 @@ func pkgagentPersistEntry(toolName, argsJSON string) string {
 	return string(b)
 }
 
-func TestForwardUserMessage_BlocksLazyStartDuringDBSummarize(t *testing.T) {
+func TestForwardUserMessage_BlocksLazyStartDuringSummarize(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	te.gate = NewConcurrencyGate()
-	// Initialize the activeDBSummarize map (setupExecutorWithGit doesn't call NewTaskExecutor)
-	te.activeDBSummarize.tasks = make(map[string]struct{})
+	te.blockedMessages.tasks = make(map[string]struct{})
 	taskID := "test-task"
 
-	// Create a task
+	// Create a task with summarizing flag set
 	task := &types.Task{
 		ID:             taskID,
 		ProjectID:      projectID,
@@ -746,13 +745,9 @@ func TestForwardUserMessage_BlocksLazyStartDuringDBSummarize(t *testing.T) {
 		ExecutionState: "idle",
 		LlamaServerURL: "http://localhost:8080/v1",
 		ModelName:      "test-model",
+		Summarizing:    true,
 	}
 	te.store.CreateTask(task)
-
-	// Simulate an active DB-based summarize
-	te.activeDBSummarize.mu.Lock()
-	te.activeDBSummarize.tasks[taskID] = struct{}{}
-	te.activeDBSummarize.mu.Unlock()
 
 	// Forward a user message — should NOT trigger lazy-start
 	te.ForwardUserMessage(projectID, taskID, stream.UserMessage{
@@ -769,12 +764,15 @@ func TestForwardUserMessage_BlocksLazyStartDuringDBSummarize(t *testing.T) {
 	_, exists := te.tasks[taskID]
 	te.taskMu.Unlock()
 	if exists {
-		t.Fatal("executor should not be created during active DB-based summarize")
+		t.Fatal("executor should not be created during active summarization")
 	}
 
-	// Clear the active summarize flag
-	te.activeDBSummarize.mu.Lock()
-	delete(te.activeDBSummarize.tasks, taskID)
-	te.activeDBSummarize.mu.Unlock()
+	// Verify the blocked message was tracked
+	te.blockedMessages.mu.Lock()
+	_, hasBlocked := te.blockedMessages.tasks[taskID]
+	te.blockedMessages.mu.Unlock()
+	if !hasBlocked {
+		t.Fatal("blocked message should be tracked")
+	}
 }
 

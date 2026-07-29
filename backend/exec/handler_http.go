@@ -188,6 +188,30 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusCreated, result)
 }
 
+// cancelSummarize cancels an in-progress summarization for a task.
+func (te *TaskExecutor) cancelSummarize(taskID, projectID string) {
+	// Cancel DB-based background summarization.
+	te.dbSummarizeCancel.mu.Lock()
+	if cancel, ok := te.dbSummarizeCancel.tasks[taskID]; ok {
+		cancel()
+		delete(te.dbSummarizeCancel.tasks, taskID)
+	}
+	te.dbSummarizeCancel.mu.Unlock()
+
+	// Cancel channel-based summarization (executor running).
+	te.taskMu.Lock()
+	state := te.tasks[taskID]
+	te.taskMu.Unlock()
+	if state != nil {
+		state.activeSummarize.mu.Lock()
+		if req := state.activeSummarize.request; req != nil {
+			req.cancel()
+			state.activeSummarize.request = nil
+		}
+		state.activeSummarize.mu.Unlock()
+	}
+}
+
 // HandleSummarize triggers context summarization (live or from DB).
 func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
@@ -207,15 +231,37 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// If already summarizing, cancel it (acts as the cancel endpoint).
+	if task.Summarizing {
+		log.Printf("[summarize] task=%s cancelling in-progress summarization", taskID)
+		te.cancelSummarize(taskID, projectID)
+		task.Summarizing = false
+		_ = te.store.UpdateTask(task)
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "cancelled"})
+		return
+	}
+
+	// Set summarizing flag so the UI survives refresh and ForwardUserMessage blocks lazy-start.
+	task.Summarizing = true
+	_ = te.store.UpdateTask(task)
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+
 	// If task is actively running, send request to the execution loop
 	te.taskMu.Lock()
 	state := te.tasks[taskID]
 	te.taskMu.Unlock()
 
 	if state != nil {
+		defer func() {
+			task.Summarizing = false
+			_ = te.store.UpdateTask(task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		}()
 		// Create a cancellable context for this summarize request.
-		// Cancelled when: user clicks ✕ (HTTP abort), new summarize request arrives, or timeout.
-		reqCtx, reqCancel := context.WithTimeout(r.Context(), 60*time.Second)
+		// Uses background context so summarization survives browser refresh.
+		// Cancelled when: new summarize request arrives, or timeout.
+		reqCtx, reqCancel := context.WithTimeout(context.Background(), 120*time.Second)
 		resultCh := make(chan error, 1)
 		req := &summarizeRequest{ctx: reqCtx, resultCh: resultCh, cancel: reqCancel}
 
@@ -229,28 +275,26 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 
 		select {
 		case state.summarizeCh <- req:
-			// Request sent, wait for result (respects HTTP abort via r.Context)
+			// Request sent, wait for result (respects timeout via reqCtx).
 			select {
 			case err := <-resultCh:
 				if err != nil {
 					httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 					return
 				}
-			case <-r.Context().Done():
-				// User clicked ✕ or disconnected — handler exits, loop sees ctx.Done.
-				// Write a response to avoid compression middleware panic on code 0.
-				http.Error(w, "summarization cancelled", http.StatusRequestTimeout)
-				return
 			case <-reqCtx.Done():
 				if reqCtx.Err() == context.DeadlineExceeded {
 					httputil.JSONError(w, http.StatusInternalServerError, "summarization timed out")
 					return
 				}
-				// Cancelled by new request or HTTP abort.
-				// Write a response to avoid compression middleware panic on code 0.
+				// Cancelled by new request.
 				http.Error(w, "summarization cancelled", http.StatusRequestTimeout)
 				return
 			}
+			// Clean up blocked messages tracking.
+			te.blockedMessages.mu.Lock()
+			delete(te.blockedMessages.tasks, taskID)
+			te.blockedMessages.mu.Unlock()
 			// Result is sent via WebSocket, return minimal response
 			httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "summarizing"})
 			return
@@ -265,73 +309,95 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Task is idle/stopped — summarize from DB
-	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
-	project, _ := te.store.GetProject(projectID)
-	projectName := ""
-	if project != nil {
-		projectName = project.Name
-	}
-	worktreePath, _ := te.worktreeMgr.WorktreePath(taskID)
+	// Task is idle/stopped — summarize from DB in a background goroutine.
+	// Uses background context so summarization survives browser refresh.
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	te.dbSummarizeCancel.mu.Lock()
+	te.dbSummarizeCancel.tasks[taskID] = cancel
+	te.dbSummarizeCancel.mu.Unlock()
 
-	messages := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, false)
+	go func() {
+		defer func() {
+			te.dbSummarizeCancel.mu.Lock()
+			delete(te.dbSummarizeCancel.tasks, taskID)
+			te.dbSummarizeCancel.mu.Unlock()
+			task.Summarizing = false
+			_ = te.store.UpdateTask(task)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		}()
 
-	previousSummary := extractPrevSummary(messages)
+		taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
+		project, _ := te.store.GetProject(projectID)
+		projectName := ""
+		if project != nil {
+			projectName = project.Name
+		}
+		worktreePath, _ := te.worktreeMgr.WorktreePath(taskID)
 
-	// Mark active so ForwardUserMessage blocks lazy-start (prevents concurrent LLM calls).
-	te.activeDBSummarize.mu.Lock()
-	te.activeDBSummarize.tasks[taskID] = struct{}{}
-	te.activeDBSummarize.mu.Unlock()
+		messages := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, false)
+		previousSummary := extractPrevSummary(messages)
 
-	sumResult, err := te.summarizeContext(r.Context(), messages, task.LlamaServerURL, task.ModelName, previousSummary)
-	if err != nil {
-		log.Printf("[summarize] task=%s manual summarization failed: %v", taskID, err)
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+		sumResult, err := te.summarizeContext(ctx, messages, task.LlamaServerURL, task.ModelName, previousSummary)
+		if err != nil {
+			log.Printf("[summarize] task=%s manual summarization failed: %v", taskID, err)
+			return
+		}
 
-	// Persist summary with stats
-	summaryMsgID := uuid.New().String()
-	_ = te.store.CreateTaskMessage(&types.TaskMessage{
-		ID:              summaryMsgID,
-		TaskID:          task.ID,
-		ThreadID:        task.CurrentThreadID,
-		Role:            "summarization",
-		Content:         sumResult.summary,
-		ModelName:       task.ModelName,
-		PromptTokens:    sumResult.promptTokens,
-		PredictedTokens: sumResult.predictedTokens,
-		PromptMs:        int(sumResult.promptMs),
-		PredictedMs:     int(sumResult.predictedMs),
-		CreatedAt:       time.Now().UTC(),
-	})
+		// Persist summary with stats
+		summaryMsgID := uuid.New().String()
+		summaryCreatedAt := time.Now().UTC()
+		// Anchor: latest message before summarization (all taskMsgs are pre-summarization).
+		var summaryAnchor time.Time
+		for _, m := range taskMsgs {
+			if m.CreatedAt.After(summaryAnchor) {
+				summaryAnchor = m.CreatedAt
+			}
+		}
+		_ = te.store.CreateTaskMessage(&types.TaskMessage{
+			ID:              summaryMsgID,
+			TaskID:          task.ID,
+			ThreadID:        task.CurrentThreadID,
+			Role:            "summarization",
+			Content:         sumResult.summary,
+			ModelName:       task.ModelName,
+			PromptTokens:    sumResult.promptTokens,
+			PredictedTokens: sumResult.predictedTokens,
+			PromptMs:        int(sumResult.promptMs),
+			PredictedMs:     int(sumResult.predictedMs),
+			CreatedAt:       summaryCreatedAt,
+		})
 
-	// Notify frontend
-	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "summarization", Data: map[string]any{
-		"id":               summaryMsgID,
-		"summary":          sumResult.summary,
-		"created_at":       time.Now().UTC().Format(time.RFC3339),
-		"prompt_tokens":    sumResult.promptTokens,
-		"predicted_tokens": sumResult.predictedTokens,
-		"prompt_ms":        sumResult.promptMs,
-		"predicted_ms":     sumResult.predictedMs,
-		"model_name":       task.ModelName,
-	}})
+		// Notify frontend
+		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: "summarization", Data: map[string]any{
+			"id":               summaryMsgID,
+			"summary":          sumResult.summary,
+			"created_at":       time.Now().UTC().Format(time.RFC3339),
+			"prompt_tokens":    sumResult.promptTokens,
+			"predicted_tokens": sumResult.predictedTokens,
+			"prompt_ms":        sumResult.promptMs,
+			"predicted_ms":     sumResult.predictedMs,
+			"model_name":       task.ModelName,
+		}})
 
-	log.Printf("[summarize] task=%s manual summarization complete (messages preserved, LLM context compressed)", taskID)
+		log.Printf("[summarize] task=%s manual summarization complete (messages preserved, LLM context compressed)", taskID)
 
-	// Clear the active flag, then start executor to process any messages that
-	// arrived during summarization (they were blocked from lazy-start).
-	te.activeDBSummarize.mu.Lock()
-	delete(te.activeDBSummarize.tasks, taskID)
-	te.activeDBSummarize.mu.Unlock()
-	te.handleLazyStart(projectID, taskID, "", "", "", "", false)
+		// Fix timestamps of messages sent during the summarization window
+		// so they sort after the summary in the database.
+		_ = te.store.FixPostSummaryTimestamps(taskID, task.CurrentThreadID, summaryAnchor, summaryCreatedAt)
 
-	// Return updated token estimate
+		// Only start executor if there are blocked messages for this task.
+		te.blockedMessages.mu.Lock()
+		_, hasBlocked := te.blockedMessages.tasks[taskID]
+		delete(te.blockedMessages.tasks, taskID)
+		te.blockedMessages.mu.Unlock()
+		if hasBlocked {
+			te.handleLazyStart(projectID, taskID, "", "", "", "", false)
+		}
+	}()
+
+	// Return immediately — summarization runs in background.
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{
-		"summary":     sumResult.summary,
-		"old_count":   sumResult.oldLen,
-		"new_count":   sumResult.oldLen + 1, // summary appended, all messages preserved
+		"status": "summarizing",
 	})
 }
 

@@ -239,9 +239,9 @@ export function buildEntriesFromMessages(
     });
 
     const validDbEntries = dbEntries.filter(e => e !== null) as ChatEntry[];
-    const mergedDbEntries = mergeToolCallsIntoAssistant(validDbEntries);
+    const entries = mergeToolCallsIntoAssistant(validDbEntries);
 
-    return { entries: mergedDbEntries, checkpointHashes };
+    return { entries, checkpointHashes };
 }
 
 /**

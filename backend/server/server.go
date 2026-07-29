@@ -198,6 +198,10 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	if err := store.ClearStaleTitleGenerating(); err != nil {
 		log.Printf("[title-gen] startup: failed to clear stale flags: %v", err)
 	}
+	// Clear stale summarizing flags from previous server sessions
+	if err := store.ClearStaleSummarizing(); err != nil {
+		log.Printf("[summarize] startup: failed to clear stale flags: %v", err)
+	}
 
 	s.setupRoutes()
 

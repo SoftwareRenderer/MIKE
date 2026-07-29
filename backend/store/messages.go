@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 
 	"kanban/backend/types"
@@ -13,7 +14,7 @@ func (s *Store) CreateTaskMessage(m *types.TaskMessage) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
 		`INSERT INTO task_messages (id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, ptrStr(m.Attachments), m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, ptrStr(m.GitCommitHash), m.CreatedAt.Format(time.RFC3339),
+		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, ptrStr(m.Attachments), m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, ptrStr(m.GitCommitHash), m.CreatedAt.Format(time.RFC3339Nano),
 	)
 	if err != nil {
 		return err
@@ -204,9 +205,12 @@ func (s *Store) GetMessageCreatedAt(messageID string) (*time.Time, error) {
 	if err != nil {
 		return nil, err
 	}
-	t, err := time.Parse(time.RFC3339, createdAt)
+	t, err := time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {
-		return nil, err
+		t, err = time.Parse(time.RFC3339, createdAt) // fallback for legacy data
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &t, nil
 }
@@ -266,4 +270,21 @@ func (s *Store) GetLastAssistantMessageIdBeforeMessage(messageID, threadID strin
 		return "", nil
 	}
 	return id, err
+}
+
+// FixPostSummaryTimestamps updates messages created between anchorTime
+// and summaryTime to sort after the summary. This fixes ordering for
+// messages sent during a summarization window, which have earlier
+// created_at than the summary but semantically belong after it.
+func (s *Store) FixPostSummaryTimestamps(taskID, threadID string, anchorTime, summaryTime time.Time) error {
+	newTime := summaryTime.Add(time.Millisecond)
+	_, err := s.db.Exec(
+		`UPDATE task_messages SET created_at = ? WHERE task_id = ? AND thread_id = ? AND created_at > ? AND created_at < ?`,
+		newTime.Format(time.RFC3339Nano), taskID, threadID,
+		anchorTime.Format(time.RFC3339Nano), summaryTime.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return fmt.Errorf("fix post-summary timestamps: %w", err)
+	}
+	return nil
 }

@@ -767,6 +767,7 @@
                             taskStatus={task.status}
                             taskExecutionState={task.execution_state}
                             taskTitle={task.title}
+                            taskSummarizing={task.summarizing}
                             hasStagedChanges={hasStagedChanges}
                             onToggleFullscreen={toggleChatFullscreen}
                             isChatFullscreen={chatFullscreen}

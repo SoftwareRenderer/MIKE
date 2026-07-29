@@ -23,7 +23,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import ReviewBar from './ReviewBar.svelte';
     import StartPanel from './StartPanel.svelte';
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskTitle = '', hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskTitle?: string; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskTitle = '', taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskTitle?: string; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean } = $props();
 
     let connected = $state(false);
     let connecting = $state(true);
@@ -150,7 +150,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let activeThreadId = $state('');
 
     let stopping = $state(false);
-    let isSummarizing = $state(false);
+    let isSummarizing = $derived(taskSummarizing);
     // isLoading: true when LLM is actively streaming tokens OR task is in running state.
     // After page refresh, streamingIds is empty but execution_state preserves running state.
     let streamingIds = getStreamingContext();
@@ -706,13 +706,12 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     async function handleSummarize() {
         const confirmed = await dialogStore.showConfirm({
             title: 'Compress Context',
-            message: 'This will create a summary of the conversation to reduce token usage. All messages are preserved — delete the summary entry to restore the full context.',
+            message: 'This will create a summary of the conversation to make more efficient use of context space. You can delete the summary to restore the full context.',
             confirmText: 'Compress',
             cancelText: 'Cancel',
             variant: 'default',
         });
         if (!confirmed) return;
-        isSummarizing = true;
         try {
             if (isAgentSelected()) {
                 // Pi mode: trigger compaction via RPC (only works while task is running)
@@ -727,25 +726,31 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
                     stats: { model_name: selectedModel || 'Pi', prompt_tokens: 0, predicted_tokens: 0, prompt_ms: 0, predicted_ms: 0, duration: 0 },
                 }];
             } else {
-                // LLM mode: summarize via backend
+                // LLM mode: summarize via backend (runs in background, result arrives via WebSocket).
                 summarizeController = new AbortController();
-                const result = await summarizeTask(projectId, taskId, summarizeController.signal);
-                console.log('[summarize] context summarized:', result.old_count, '->', result.new_count, 'messages');
+                await summarizeTask(projectId, taskId, summarizeController.signal);
             }
         } catch (e: any) {
             if (e?.name === 'AbortError') return;
             console.error('Failed to compress context:', e);
             dialogStore.showToast(e?.message || 'Failed to compress context', 'error');
         } finally {
-            isSummarizing = false;
             summarizeController = null;
-            // Clear queued flags on entries that were queued during summarization.
-            stream.state.entries = stream.state.entries.map(e => e.queued ? { ...e, queued: false } : e);
         }
     }
 
+    // Clear queued flags when summarization finishes (task.summarizing transitions to false).
+    let wasSummarizing = $state(false);
+    $effect(() => {
+        if (wasSummarizing && !isSummarizing) {
+            stream.state.entries = stream.state.entries.map(e => e.queued ? { ...e, queued: false } : e);
+        }
+        wasSummarizing = isSummarizing;
+    });
+
     function handleSummarizeCancel() {
-        summarizeController?.abort();
+        // Call the summarize endpoint again — backend treats it as a cancel.
+        summarizeTask(projectId, taskId).catch(() => {});
     }
 
     async function handleRegenerate(entryId: string) {

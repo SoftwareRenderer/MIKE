@@ -300,6 +300,7 @@ export function applyQueuedActionsToBoard(
                     operating_mode: taskData.operating_mode ?? 'act',
                     parent_task_id: taskData.parent_task_id || undefined,
                     title_generating: taskData.title_generating ?? false,
+                    summarizing: taskData.summarizing ?? false,
                     current_thread_id: taskData.current_thread_id || undefined,
                     has_merge_conflict: false,
                     created_at: new Date().toISOString(),

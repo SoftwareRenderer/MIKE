@@ -164,6 +164,8 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 	// Persist to DB.
 	summaryMsgID := uuid.New().String()
 	summaryCreatedAt := time.Now().UTC()
+	// Anchor: task.UpdatedAt reflects when Summarizing flag was set.
+	summaryAnchor := task.UpdatedAt
 	_ = te.store.CreateTaskMessage(&types.TaskMessage{
 		ID:              summaryMsgID,
 		TaskID:          taskID,
@@ -177,6 +179,9 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 		PredictedMs:     int(sumResult.predictedMs),
 		CreatedAt:       summaryCreatedAt,
 	})
+
+	// Fix timestamps of messages sent during the summarization window.
+	_ = te.store.FixPostSummaryTimestamps(taskID, task.CurrentThreadID, summaryAnchor, summaryCreatedAt)
 
 	// Append to in-memory messages.
 	messages = append(messages, types.ChatMessage{
