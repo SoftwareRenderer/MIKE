@@ -293,6 +293,7 @@ _, _ = s.db.Exec(`ALTER TABLE project_token_stats ADD COLUMN cost REAL NOT NULL 
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN has_merge_conflict INTEGER NOT NULL DEFAULT 0`)
 	// Operating mode: act (default), plan, or explore
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN operating_mode TEXT NOT NULL DEFAULT 'act'`)
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN summarizing INTEGER NOT NULL DEFAULT 0`)
 	// Cumulative token stats table (survives task deletion)
 	_, _ = s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS project_token_stats (
@@ -503,22 +504,25 @@ func ptrTime(t *time.Time) *string {
 
 // scanTime scans a TEXT column (RFC3339) into a time.Time.
 func scanTime(s string) time.Time {
-	t, err := time.Parse(time.RFC3339, s)
+	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
-		return time.Time{}
+		t, err = time.Parse(time.RFC3339, s) // fallback for legacy data
+		if err != nil {
+			return time.Time{}
+		}
 	}
 	return t
 }
 
 // scanTask scans a row into a Task, handling bool/time conversions.
 func scanTask(s scanner, t *types.Task) error {
-	var autoCommit, autoMerge, subtasksAutoMerge, titleGenerating, hasMergeConflict int
+	var autoCommit, autoMerge, subtasksAutoMerge, titleGenerating, summarizing, hasMergeConflict int
 	var createdAt, updatedAt string
 	var parentTaskID, currentThreadID, reasoningEffort, baseRef, baseCommit, branchTip, assignedPortsJSON sql.NullString
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
 		&t.SessionID, &t.Branch, &baseRef, &baseCommit, &branchTip, &t.Output, &t.ExecutionState, &hasMergeConflict,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &titleGenerating, &currentThreadID, &createdAt, &updatedAt, &assignedPortsJSON)
+		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &titleGenerating, &summarizing, &currentThreadID, &createdAt, &updatedAt, &assignedPortsJSON)
 	if err != nil {
 		return err
 	}
@@ -528,6 +532,7 @@ func scanTask(s scanner, t *types.Task) error {
 	t.HasMergeConflict = i2b(hasMergeConflict)
 	t.ParentTaskID = parentTaskID.String
 	t.TitleGenerating = i2b(titleGenerating)
+	t.Summarizing = i2b(summarizing)
 	t.CurrentThreadID = currentThreadID.String
 	t.ReasoningEffort = reasoningEffort.String
 	t.BaseRef = baseRef.String

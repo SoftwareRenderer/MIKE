@@ -380,11 +380,18 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             case 'summarization': {
                 const data = event.data as { id?: string; summary: string; created_at?: string; prompt_tokens?: number; predicted_tokens?: number; prompt_ms?: number; predicted_ms?: number; model_name?: string };
                 if (data.id && s.entries.some(e => e.id === data.id)) break;
-                s.entries = [...s.entries, {
-                    id: data.id || genId(), role: 'summarization', content: data.summary || 'Context was summarized to free space',
+                const summaryEntry = {
+                    id: data.id || genId(), role: 'summarization' as const, content: data.summary || 'Context was summarized to free space',
                     isStreaming: false, createdAt: data.created_at || new Date().toISOString(),
                     stats: data.model_name ? { model_name: data.model_name, prompt_tokens: data.prompt_tokens ?? 0, predicted_tokens: data.predicted_tokens ?? 0, prompt_ms: data.prompt_ms ?? 0, predicted_ms: data.predicted_ms ?? 0, duration: (data.prompt_ms ?? 0) + (data.predicted_ms ?? 0) } : undefined,
-                }];
+                };
+                // Insert before any queued entries (messages sent during summarization).
+                const firstQueuedIdx = s.entries.findIndex(e => e.queued);
+                if (firstQueuedIdx >= 0) {
+                    s.entries = [...s.entries.slice(0, firstQueuedIdx), summaryEntry, ...s.entries.slice(firstQueuedIdx)];
+                } else {
+                    s.entries = [...s.entries, summaryEntry];
+                }
                 break;
             }
             case 'merge_resolution': {

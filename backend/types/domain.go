@@ -30,6 +30,7 @@ type Task struct {
 	OperatingMode             string    `json:"operating_mode"`      // "act" (default), "plan", or "explore"
 	ParentTaskID              string    `json:"parent_task_id,omitempty"`
 	TitleGenerating           bool      `json:"title_generating"`
+	Summarizing               bool      `json:"summarizing"`
 	CurrentThreadID           string    `json:"current_thread_id,omitempty"`
 	WorktreeExists            bool      `json:"worktree_exists"`
 	CreatedAt                 time.Time `json:"created_at"`

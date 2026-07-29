@@ -40,9 +40,13 @@ type TaskExecutor struct {
 	tasks         map[string]*executionState
 	// Per-task mutexes to serialize worktree access across executors and merges.
 	worktreeMu sync.Map // taskID -> *sync.Mutex
-	// activeDBSummarize tracks in-progress DB-based summarizes to block lazy-start
-	// and prevent concurrent LLM calls.
-	activeDBSummarize struct {
+	// dbSummarizeCancel tracks cancel functions for DB-based background summarization.
+	dbSummarizeCancel struct {
+		mu    sync.Mutex
+		tasks map[string]context.CancelFunc
+	}
+	// blockedMessages tracks tasks that had user messages blocked during summarization.
+	blockedMessages struct {
 		mu    sync.Mutex
 		tasks map[string]struct{}
 	}
@@ -140,7 +144,8 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 		gate:              NewConcurrencyGate(),
 		tasks:             make(map[string]*executionState),
 	}
-	te.activeDBSummarize.tasks = make(map[string]struct{})
+	te.dbSummarizeCancel.tasks = make(map[string]context.CancelFunc)
+	te.blockedMessages.tasks = make(map[string]struct{})
 	te.appStreamMgr.SetLazyStartHandler(te.handleLazyStart)
 	return te
 }
@@ -1139,13 +1144,13 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 		return
 	}
 	te.taskMu.Unlock()
-	// Block lazy-start while DB-based summarize is in progress to prevent
+	// Block lazy-start while summarization is in progress to prevent
 	// concurrent LLM calls. Message is already in DB from HandleSend.
-	te.activeDBSummarize.mu.Lock()
-	_, hasActiveSummarize := te.activeDBSummarize.tasks[taskID]
-	te.activeDBSummarize.mu.Unlock()
-	if hasActiveSummarize {
-		log.Printf("[user-msg] task=%s blocking lazy-start: DB-based summarize in progress", taskID)
+	if task, _ := te.store.GetTaskByTaskID(taskID); task != nil && task.Summarizing {
+		log.Printf("[user-msg] task=%s blocking lazy-start: summarization in progress", taskID)
+		te.blockedMessages.mu.Lock()
+		te.blockedMessages.tasks[taskID] = struct{}{}
+		te.blockedMessages.mu.Unlock()
 		return
 	}
 	go te.handleLazyStart(projectID, taskID, um.Content, um.ModelName, um.ServerURL, um.ReasoningEffort, um.Regenerate)
@@ -1247,8 +1252,6 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	execSetup.regenerate = regenerate
 	log.Printf("[lazy-start] task=%s worktree=%s", taskID, execSetup.worktreePath)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-
-	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Agent responding"}})
 
 	log.Printf("[lazy-start] task=%s starting executor", taskID)
 

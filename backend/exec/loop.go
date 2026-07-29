@@ -661,6 +661,12 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		// Assemble LLM context (compresses history via summary if one exists).
 		llmMessages := buildLLMContext(lc.messages)
 
+		// Set status before the LLM call so the frontend picks up streaming tokens.
+		setup.task.Status = "in_progress"
+		setup.task.ExecutionState = "running"
+		te.store.UpdateTask(setup.task)
+		te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+
 		// Stream flusher: batches token/reasoning/tool_call events and sends
 		// at most once every 500ms to reduce WebSocket write overhead.
 		flusher := newStreamFlusher(setup.projectID, setup.task.ID, lc.sandboxEnabled,
@@ -1424,6 +1430,25 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			lc.messages = te.applySummarization(req.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, setup.serverURL, activeModel, req.resultCh)
 			lc.detector.reset() // context changed, clear stale text window
 			lc.detector.clearHints()
+			// Count messages before DB sync (includes in-memory summary).
+			preSyncCount := len(lc.messages)
+			// Re-sync from DB to pick up any messages queued during summarization.
+			lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+			// If DB has more messages than we had in-memory, new input arrived.
+			hasQueuedInput := len(lc.messages) > preSyncCount
+			if !hasQueuedInput {
+				// No new user input — go idle, don't call LLM with just the summary.
+				setup.task.Status = "review"
+				setup.task.ExecutionState = "idle"
+				te.store.UpdateTask(setup.task)
+				te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+				continue
+			}
+			// User message present — continue to LLM call.
+			setup.task.Status = "in_progress"
+			setup.task.ExecutionState = "running"
+			te.store.UpdateTask(setup.task)
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing queued message"}})
 			continue
 		case um := <-setup.userMsgChan:
 			if um.ContextChanged {
