@@ -32,6 +32,53 @@
     let updating = $state<Set<string>>(new Set());
     let buildProgress = $state<{ ext: string; progress: number; message: string } | null>(null);
 
+    // Capabilities modal
+    let showCapabilitiesModal = $state(false);
+    let selectedExtension: Extension | null = $state(null);
+
+    // Capability descriptions
+    const CAPABILITY_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
+        lsp: {
+            label: 'LSP',
+            description: 'Provides a Language Server Protocol server for code intelligence — completions, diagnostics, go-to-definition, and more. Runs in an isolated gVisor sandbox.',
+        },
+        ui: {
+            label: 'UI',
+            description: 'Injects custom JavaScript UI modules into specific parts of the application. Can add buttons, panels, or other interactive elements to task cards, the file editor, chat interface, and other components.',
+        },
+        css: {
+            label: 'CSS',
+            description: 'Loads a global stylesheet that applies custom styling across the entire application. Used for themes and visual customizations.',
+        },
+        agent: {
+            label: 'Agent',
+            description: 'Adds an AI coding agent as a provider option. The agent runs as a subprocess with a WASM adapter for protocol handling, enabling automated code tasks and conversations.',
+        },
+        proxy: {
+            label: 'Proxy',
+            description: 'Declares server-side proxy rules for external API access. The server forwards requests to allowed domains with configurable headers, enabling extensions to access external APIs securely.',
+        },
+    };
+
+    // Get list of capability keys for an installed extension
+    function getCapabilityKeys(ext: Extension): string[] {
+        const caps = ext.manifest.capabilities;
+        if (!caps) return [];
+        const keys: string[] = [];
+        if (caps.lsp) keys.push('lsp');
+        if (caps.ui) keys.push('ui');
+        if (caps.css) keys.push('css');
+        if (caps.agent) keys.push('agent');
+        if (caps.proxy) keys.push('proxy');
+        return keys;
+    }
+
+    // Get capability key from a registry entry type
+    function getRegistryCapabilityKey(entry: RegistryEntry): string | null {
+        const capMap: Record<string, string> = { lsp: 'lsp', ui: 'ui', css: 'css', agent: 'agent' };
+        return capMap[entry.type] || null;
+    }
+
     // Add extension form
     let addForm = $state({
         name: '',
@@ -454,7 +501,18 @@
                                     {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : ext.type === 'agent' ? 'AGENT' : 'UI'}
                                 </div>
                                 <div class="ext-info">
-                                    <span class="ext-name">{ext.manifest.display_name || ext.name}</span>
+                                    <div class="ext-name-row">
+                                        <span class="ext-name">{ext.manifest.display_name || ext.name}</span>
+                                        {#if getCapabilityKeys(ext).length > 0}
+                                            <div class="capability-badges" role="group" aria-label="Capabilities">
+                                                {#each getCapabilityKeys(ext) as capKey}
+                                                    <button class="cap-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-proxy={capKey === 'proxy'} aria-label="{CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey} capability for {ext.manifest.display_name || ext.name}. Click to learn more" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>
+                                                        {CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey}
+                                                    </button>
+                                                {/each}
+                                            </div>
+                                        {/if}
+                                    </div>
                                     <span class="ext-meta">
                                         {#if ext.type === 'ui' || ext.type === 'css'}
                                             v{ext.version}
@@ -659,6 +717,45 @@
         </BaseModal>
     {/if}
 
+    <!-- Capabilities Modal -->
+    {#if showCapabilitiesModal && selectedExtension}
+        {#snippet capsFooter()}
+            <button type="button" class="btn-secondary" onclick={() => { showCapabilitiesModal = false; selectedExtension = null; }}>Close</button>
+        {/snippet}
+
+        <BaseModal title="Extension Capabilities" width="520px" footer={capsFooter} onClose={() => { showCapabilitiesModal = false; selectedExtension = null; }}>
+            <div class="caps-modal-body">
+                <div class="caps-ext-header">
+                    <div class="caps-ext-icon" class:ext-lsp={selectedExtension.type === 'lsp'} class:ext-ui={selectedExtension.type === 'ui'} class:ext-css={selectedExtension.type === 'css'} class:ext-agent={selectedExtension.type === 'agent'} aria-hidden="true">
+                        {selectedExtension.type === 'lsp' ? 'LSP' : selectedExtension.type === 'css' ? 'CSS' : selectedExtension.type === 'agent' ? 'AGENT' : 'UI'}
+                    </div>
+                    <div class="caps-ext-info">
+                        <h3 class="caps-ext-name">{selectedExtension.manifest.display_name || selectedExtension.name}</h3>
+                        {#if selectedExtension.manifest.description}
+                            <p class="caps-ext-desc">{selectedExtension.manifest.description}</p>
+                        {/if}
+                    </div>
+                </div>
+
+                <div class="caps-list" role="list" aria-label="Capability details">
+                    {#each getCapabilityKeys(selectedExtension) as capKey}
+                        {@const info = CAPABILITY_DESCRIPTIONS[capKey]}
+                        {#if info}
+                            <div class="cap-detail" role="listitem">
+                                <div class="cap-detail-header">
+                                    <span class="cap-detail-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-proxy={capKey === 'proxy'}>
+                                        {info.label}
+                                    </span>
+                                </div>
+                                <p class="cap-detail-desc">{info.description}</p>
+                            </div>
+                        {/if}
+                    {/each}
+                </div>
+            </div>
+        </BaseModal>
+    {/if}
+
     <!-- Browse View -->
     {#if activeView === 'browse'}
         <div class="browse-view">
@@ -691,13 +788,24 @@
             {:else}
                 <div class="extension-list">
                     {#each filteredRegistry as entry}
+                        {@const regCapKey = getRegistryCapabilityKey(entry)}
+                        {@const regCapInfo = regCapKey ? CAPABILITY_DESCRIPTIONS[regCapKey] : null}
                         <div class="extension-card registry-card">
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'}>
                                     {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : entry.type === 'agent' ? 'AGENT' : 'UI'}
                                 </div>
                                 <div class="ext-info">
-                                    <span class="ext-name">{entry.display_name || entry.name}</span>
+                                    <div class="ext-name-row">
+                                        <span class="ext-name">{entry.display_name || entry.name}</span>
+                                        {#if regCapInfo}
+                                            <div class="capability-badges" role="group" aria-label="Capabilities">
+                                                <button class="cap-badge" class:cap-lsp={regCapKey === 'lsp'} class:cap-ui={regCapKey === 'ui'} class:cap-css={regCapKey === 'css'} class:cap-agent={regCapKey === 'agent'} class:cap-proxy={regCapKey === 'proxy'} aria-label="{regCapInfo.label} capability for {entry.display_name || entry.name}. {regCapInfo.description}" onclick={() => { const caps: Record<string, any> = {}; caps[regCapKey!] = {}; selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: caps }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>
+                                                    {regCapInfo.label}
+                                                </button>
+                                            </div>
+                                        {/if}
+                                    </div>
                                     <span class="ext-meta">
                                         v{entry.version}
                                         {#if entry.author}
@@ -977,13 +1085,26 @@
     .ext-info {
         flex: 1;
         min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+    }
+
+    .ext-name-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        min-width: 0;
     }
 
     .ext-name {
-        display: block;
         font-weight: 600;
         color: var(--color-text-primary);
         font-size: 0.95rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .ext-meta {
@@ -1044,6 +1165,143 @@
         padding: 0.1em 0.35em;
         border-radius: 3px;
         font-size: 0.78rem;
+    }
+
+    /* Capability badges */
+    .capability-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+        flex-shrink: 0;
+    }
+
+    .cap-badge {
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 0.15rem 0.5rem;
+        border-radius: 4px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition: all 0.15s;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .cap-badge:hover {
+        filter: brightness(1.2);
+    }
+
+    .cap-lsp {
+        background: rgba(63, 185, 80, 0.15);
+        color: var(--color-status-green);
+        border-color: rgba(63, 185, 80, 0.3);
+    }
+
+    .cap-ui {
+        background: rgba(76, 154, 255, 0.15);
+        color: var(--color-status-blue);
+        border-color: rgba(76, 154, 255, 0.3);
+    }
+
+    .cap-css {
+        background: rgba(227, 179, 65, 0.15);
+        color: var(--color-status-yellow);
+        border-color: rgba(227, 179, 65, 0.3);
+    }
+
+    .cap-agent {
+        background: rgba(163, 113, 247, 0.15);
+        color: var(--color-status-purple);
+        border-color: rgba(163, 113, 247, 0.3);
+    }
+
+    .cap-proxy {
+        background: rgba(236, 72, 153, 0.15);
+        color: #ec4899;
+        border-color: rgba(236, 72, 153, 0.3);
+    }
+
+    /* Capabilities modal */
+    .caps-modal-body {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+        padding: 0.5rem 0;
+    }
+
+    .caps-ext-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .caps-ext-icon {
+        width: 2.5rem;
+        height: 2.5rem;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        font-weight: 700;
+        flex-shrink: 0;
+    }
+
+    .caps-ext-info {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+    }
+
+    .caps-ext-name {
+        margin: 0;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        font-size: 1rem;
+    }
+
+    .caps-ext-desc {
+        margin: 0;
+        font-size: 0.8rem;
+        color: var(--color-text-tertiary);
+    }
+
+    .caps-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .cap-detail {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        padding: 0.75rem;
+        background: var(--color-bg-card);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: 8px;
+    }
+
+    .cap-detail-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .cap-detail-badge {
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.2rem 0.6rem;
+        border-radius: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .cap-detail-desc {
+        margin: 0;
+        font-size: 0.85rem;
+        color: var(--color-text-secondary);
+        line-height: 1.5;
     }
 
     /* Radio group (matches SandboxConfigModal) */
