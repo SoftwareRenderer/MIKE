@@ -36,6 +36,17 @@
     let showCapabilitiesModal = $state(false);
     let selectedExtension: Extension | null = $state(null);
 
+    // Human-readable labels for UI injection points
+    const INJECTION_POINT_LABELS: Record<string, string> = {
+        'task-card': 'Task Cards',
+        'file-editor': 'File Editor',
+        'project-board': 'Project Board',
+        'task-chat': 'Task Chat',
+        'project-sidebar': 'Project Sidebar',
+        'file-browser': 'File Browser',
+        'create-task': 'Create Task',
+    };
+
     // Capability descriptions
     const CAPABILITY_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
         lsp: {
@@ -740,6 +751,7 @@
                 <div class="caps-list" role="list" aria-label="Capability details">
                     {#each getCapabilityKeys(selectedExtension) as capKey}
                         {@const info = CAPABILITY_DESCRIPTIONS[capKey]}
+                        {@const caps = selectedExtension.manifest.capabilities}
                         {#if info}
                             <div class="cap-detail" role="listitem">
                                 <div class="cap-detail-header">
@@ -748,6 +760,52 @@
                                     </span>
                                 </div>
                                 <p class="cap-detail-desc">{info.description}</p>
+                                <!-- Proxy: show allowed domains -->
+                                {#if capKey === 'proxy' && caps?.proxy?.allowed_domains?.length}
+                                    <div class="cap-detail-extra">
+                                        <span class="cap-detail-label">Allowed domains:</span>
+                                        <div class="cap-detail-tags">
+                                            {#each caps.proxy.allowed_domains as domain}
+                                                <span class="cap-detail-tag">{domain}</span>
+                                            {/each}
+                                        </div>
+                                    </div>
+                                {/if}
+                                <!-- UI: show injection points -->
+                                {#if capKey === 'ui' && caps?.ui?.injection_points?.length}
+                                    <div class="cap-detail-extra">
+                                        <span class="cap-detail-label">Modifies:</span>
+                                        <div class="cap-detail-tags">
+                                            {#each caps.ui.injection_points as point}
+                                                <span class="cap-detail-tag">{INJECTION_POINT_LABELS[point] || point}</span>
+                                            {/each}
+                                        </div>
+                                    </div>
+                                {/if}
+                                <!-- LSP: show language and extensions -->
+                                {#if capKey === 'lsp' && caps?.lsp}
+                                    <div class="cap-detail-extra">
+                                        {#if caps.lsp.language}
+                                            <span class="cap-detail-label">Language:</span>
+                                            <span class="cap-detail-value">{caps.lsp.language}</span>
+                                        {/if}
+                                        {#if caps.lsp.extensions?.length}
+                                            <span class="cap-detail-label">File extensions:</span>
+                                            <div class="cap-detail-tags">
+                                                {#each caps.lsp.extensions as ext}
+                                                    <span class="cap-detail-tag">.{ext}</span>
+                                                {/each}
+                                            </div>
+                                        {/if}
+                                    </div>
+                                {/if}
+                                <!-- CSS: show stylesheet URL -->
+                                {#if capKey === 'css' && caps?.css?.css_url}
+                                    <div class="cap-detail-extra">
+                                        <span class="cap-detail-label">Stylesheet:</span>
+                                        <code class="cap-detail-value">{caps.css.css_url}</code>
+                                    </div>
+                                {/if}
                             </div>
                         {/if}
                     {/each}
@@ -1302,6 +1360,52 @@
         font-size: 0.85rem;
         color: var(--color-text-secondary);
         line-height: 1.5;
+    }
+
+    .cap-detail-extra {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 0.3rem 0.5rem;
+        margin-top: 0.5rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--color-border-subtle);
+    }
+
+    .cap-detail-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--color-text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .cap-detail-value {
+        font-size: 0.82rem;
+        color: var(--color-text-secondary);
+    }
+
+    .cap-detail-value code {
+        background: var(--color-bg-input);
+        padding: 0.1em 0.4em;
+        border-radius: 3px;
+        font-size: 0.8rem;
+    }
+
+    .cap-detail-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+    }
+
+    .cap-detail-tag {
+        font-size: 0.75rem;
+        padding: 0.15rem 0.5rem;
+        border-radius: 4px;
+        background: var(--color-bg-input);
+        border: 1px solid var(--color-border-subtle);
+        color: var(--color-text-secondary);
+        white-space: nowrap;
     }
 
     /* Radio group (matches SandboxConfigModal) */
