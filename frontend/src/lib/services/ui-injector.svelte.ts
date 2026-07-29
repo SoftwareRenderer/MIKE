@@ -70,7 +70,6 @@ export class UIInjector {
 
     /** Register injections from UI extensions and CSS from CSS-type extensions. */
     registerFromExtensions(extensions: Extension[]) {
-        // Clean up old extensions
         for (const cleanup of this.cleanups.values()) {
             try { cleanup(); } catch {}
         }
@@ -120,10 +119,13 @@ export class UIInjector {
      * Pass null to remove any active theme stylesheet.
      */
     private setThemeCSS(url: string | null) {
-        if (url === this.activeCSSUrl) return; // no change
+        // No change if URL is the same AND no stale link exists in the DOM
+        // (a stale link can exist if the inline cache script ran before the
+        //  Svelte app initialized, e.g. after an extension was disabled).
+        const existing = document.getElementById(THEME_LINK_ID);
+        if (url === this.activeCSSUrl && (!existing || url)) return;
 
         // Remove existing link
-        const existing = document.getElementById(THEME_LINK_ID);
         if (existing) {
             existing.remove();
         }

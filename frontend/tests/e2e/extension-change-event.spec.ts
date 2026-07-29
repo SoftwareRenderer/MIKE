@@ -99,7 +99,7 @@ test.describe('Extension Change WebSocket Event', () => {
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
     // Wait for extension to appear
-    await expect(page.locator('.extension-card')).toContainText('UI Refresh Test', { timeout: 5000 });
+    await expect(page.locator('.extension-card').filter({ hasText: 'UI Refresh Test' })).toBeVisible({ timeout: 5000 });
 
     // Verify it's enabled (toggle should be in "on" state)
     const extCard = page.locator('.extension-card').filter({ hasText: 'UI Refresh Test' });
