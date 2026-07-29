@@ -23,8 +23,6 @@ import (
 	"kanban/backend/stream"
 	"kanban/backend/types"
 
-	sandbox "kanban/pkg/bridge"
-
 	"github.com/google/uuid"
 )
 
@@ -85,8 +83,6 @@ type executionState struct {
 	sandboxExecStream execStreamFunc
 	sandboxRead       readFunc
 	sandboxWrite      writeFunc
-	// Sandbox client reference for liveness checks (nil when sandbox is disabled).
-	sandboxClient *sandbox.Client
 	// Operating mode at container creation time — used to detect mode changes
 	// and recreate the container with the correct mount mode (ro vs rw).
 	sandboxOperatingMode string
@@ -95,6 +91,12 @@ type executionState struct {
 	agentSandboxHash string
 	// os.Root handle for non-sandbox write isolation.
 	root *os.Root
+	// recoverBridge attempts to reconnect the sandbox bridge (client reconnect or
+	// full sandbox recreation). Returns true if recovery succeeded (callbacks and
+	// client are updated inside the callback). Only non-nil when sandbox is enabled.
+	// Guards against infinite loops via bridgeRecoveryAttempts.
+	recoverBridge func() bool
+	bridgeRecoveryAttempts int
 	// Closed by executor defer so ForwardUserMessage type-switch can wait for clean exit.
 	done chan struct{}
 }

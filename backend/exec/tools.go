@@ -132,7 +132,21 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 	sandboxExecStream := state.sandboxExecStream
 	sandboxRead := state.sandboxRead
 	sandboxWrite := state.sandboxWrite
-	sandboxClient := state.sandboxClient
+
+	// recoverBridge detects bridge errors and attempts automatic recovery.
+	// Returns true if recovery succeeded and callbacks were refreshed.
+	// The caller should re-read sandboxExec/Stream/Read/Write/Client from state.
+	recoverBridge := func(errStr string) bool {
+		if !strings.Contains(errStr, "sandbox bridge is not responding") &&
+			!strings.Contains(errStr, "broken pipe") {
+			return false
+		}
+		if state.recoverBridge == nil {
+			return false
+		}
+		return state.recoverBridge()
+	}
+
 	// Lazy os.Root fallback (only used when sandbox callbacks are nil).
 	// In production, loop.go always provides sandboxWrite via os.Root.
 	// Read uses plain os.ReadFile (no isolation) when sandbox is disabled.
@@ -192,13 +206,20 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		if read == nil {
 			read = makeRead()
 		}
-		// Check sandbox bridge liveness before I/O
-		if sandboxClient != nil && !sandboxClient.IsAlive() {
-			return "Error: sandbox bridge is not responding", false
-		}
 		data, err := read(ctx, path)
 		if err != nil {
-			return fmt.Sprintf("Error: %v", err), false
+			if recoverBridge(err.Error()) {
+				read = state.sandboxRead
+				if read == nil {
+					read = makeRead()
+				}
+				data, err = read(ctx, path)
+				if err != nil {
+					return fmt.Sprintf("Error: %v", err), false
+				}
+			} else {
+				return fmt.Sprintf("Error: %v", err), false
+			}
 		}
 		content := string(data)
 		// Apply offset/limit first so the LLM can read any region of large files.
@@ -236,13 +257,20 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		if write == nil {
 			write = makeWrite()
 		}
-		// Check sandbox bridge liveness before I/O
-		if sandboxClient != nil && !sandboxClient.IsAlive() {
-			return "Error: sandbox bridge is not responding", false
-		}
 		err := write(ctx, path, content)
 		if err != nil {
-			return fmt.Sprintf("Error: %v", err), false
+			if recoverBridge(err.Error()) {
+				write = state.sandboxWrite
+				if write == nil {
+					write = makeWrite()
+				}
+				err = write(ctx, path, content)
+				if err != nil {
+					return fmt.Sprintf("Error: %v", err), false
+				}
+			} else {
+				return fmt.Sprintf("Error: %v", err), false
+			}
 		}
 		return fmt.Sprintf("Wrote %d bytes to %s", len(content), path), true
 	case "edit_file":
@@ -254,10 +282,6 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		}
 		if write == nil {
 			write = makeWrite()
-		}
-		// Check sandbox bridge liveness before I/O
-		if sandboxClient != nil && !sandboxClient.IsAlive() {
-			return "Error: sandbox bridge is not responding", false
 		}
 		editsRaw, ok := args["edits"].(json.RawMessage)
 		if !ok {
@@ -278,7 +302,18 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 		// Read current file content
 		data, err := read(ctx, path)
 		if err != nil {
-			return fmt.Sprintf("Error: %v", err), false
+			if recoverBridge(err.Error()) {
+				read = state.sandboxRead
+				if read == nil {
+					read = makeRead()
+				}
+				data, err = read(ctx, path)
+				if err != nil {
+					return fmt.Sprintf("Error: %v", err), false
+				}
+			} else {
+				return fmt.Sprintf("Error: %v", err), false
+			}
 		}
 		fileContent := string(data)
 
@@ -328,7 +363,17 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 
 		// Write the result
 		if err := write(ctx, path, result); err != nil {
-			return fmt.Sprintf("Error: %v", err), false
+			if recoverBridge(err.Error()) {
+				write = state.sandboxWrite
+				if write == nil {
+					write = makeWrite()
+				}
+				if err := write(ctx, path, result); err != nil {
+					return fmt.Sprintf("Error: %v", err), false
+				}
+			} else {
+				return fmt.Sprintf("Error: %v", err), false
+			}
 		}
 		return fmt.Sprintf("Edited %s (%d edit(s) applied)", path, len(edits)), true
 	case "bash":
@@ -343,66 +388,78 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 
 		var out string
 		var err error
-		if sandboxExecStream != nil && outputCallback != nil {
-			// Use streaming sandbox execution — output is streamed line by line
-			out, err = sandboxExecStream(ctx, cmd, timeout, func(text string) {
-				outputCallback(task.ID, text)
-			})
-		} else if sandboxExec != nil {
-			// Use sandbox execution (non-streaming fallback) — ctx propagates task cancellation
-			out, err = sandboxExec(ctx, cmd, timeout)
-		} else {
-			// Direct execution (no sandbox) with streaming output.
-			c := exec.CommandContext(ctx, "bash", "-c", cmd)
-			c.Dir = worktreePath
-			stdout, pipeErr := c.StdoutPipe()
-			if pipeErr != nil {
-				return fmt.Sprintf("Failed: %v", pipeErr), false
-			}
-			stderr, pipeErr := c.StderrPipe()
-			if pipeErr != nil {
-				return fmt.Sprintf("Failed: %v", pipeErr), false
-			}
-			if startErr := c.Start(); startErr != nil {
-				return fmt.Sprintf("Failed: %v", startErr), false
-			}
-			// Read stdout and stderr concurrently, stream output line by line.
-			var buf bytes.Buffer
-			var bufMu sync.Mutex // protect concurrent writes from stdout/stderr goroutines
-			var scanErr error
-			var scanMu sync.Mutex
-			var wg sync.WaitGroup
-			stream := outputCallback != nil
-			readStream := func(r io.Reader) {
-				defer wg.Done()
-				scanner := bufio.NewScanner(r)
-				for scanner.Scan() {
-					line := scanner.Text() + "\n"
-					bufMu.Lock()
-					buf.WriteString(line)
-					bufMu.Unlock()
-					if stream {
-						outputCallback(task.ID, line)
-					}
-				}
-				if err := scanner.Err(); err != nil {
-					scanMu.Lock()
-					if scanErr == nil {
-						scanErr = fmt.Errorf("scan output: %w", err)
-					}
-					scanMu.Unlock()
-				}
-			}
-			wg.Add(2)
-			go readStream(stdout)
-			go readStream(stderr)
-			err = c.Wait()
-			wg.Wait()
-			if scanErr != nil {
-				out = fmt.Sprintf("Failed: %v\n%s", scanErr, buf.String())
+
+		// Run sandbox bash with automatic bridge recovery + retry.
+		// Bridge errors mean the command never reached the agent, so retry is safe.
+		runBash := func() (string, error) {
+			if sandboxExecStream != nil && outputCallback != nil {
+				// Use streaming sandbox execution — output is streamed line by line
+				return sandboxExecStream(ctx, cmd, timeout, func(text string) {
+					outputCallback(task.ID, text)
+				})
+			} else if sandboxExec != nil {
+				// Use sandbox execution (non-streaming fallback) — ctx propagates task cancellation
+				return sandboxExec(ctx, cmd, timeout)
 			} else {
-				out = buf.String()
+				// Direct execution (no sandbox) with streaming output.
+				c := exec.CommandContext(ctx, "bash", "-c", cmd)
+				c.Dir = worktreePath
+				stdout, pipeErr := c.StdoutPipe()
+				if pipeErr != nil {
+					return "", fmt.Errorf("Failed: %v", pipeErr)
+				}
+				stderr, pipeErr := c.StderrPipe()
+				if pipeErr != nil {
+					return "", fmt.Errorf("Failed: %v", pipeErr)
+				}
+				if startErr := c.Start(); startErr != nil {
+					return "", fmt.Errorf("Failed: %v", startErr)
+				}
+				// Read stdout and stderr concurrently, stream output line by line.
+				var buf bytes.Buffer
+				var bufMu sync.Mutex // protect concurrent writes from stdout/stderr goroutines
+				var scanErr error
+				var scanMu sync.Mutex
+				var wg sync.WaitGroup
+				stream := outputCallback != nil
+				readStream := func(r io.Reader) {
+					defer wg.Done()
+					scanner := bufio.NewScanner(r)
+					for scanner.Scan() {
+						line := scanner.Text() + "\n"
+						bufMu.Lock()
+						buf.WriteString(line)
+						bufMu.Unlock()
+						if stream {
+							outputCallback(task.ID, line)
+						}
+					}
+					if err := scanner.Err(); err != nil {
+						scanMu.Lock()
+						if scanErr == nil {
+							scanErr = fmt.Errorf("scan output: %w", err)
+						}
+						scanMu.Unlock()
+					}
+				}
+				wg.Add(2)
+				go readStream(stdout)
+				go readStream(stderr)
+				waitErr := c.Wait()
+				wg.Wait()
+				if scanErr != nil {
+					return fmt.Sprintf("Failed: %v\n%s", scanErr, buf.String()), waitErr
+				}
+				return buf.String(), waitErr
 			}
+		}
+
+		out, err = runBash()
+		if err != nil && recoverBridge(err.Error()) {
+			// Bridge recovered — refresh callbacks and retry
+			sandboxExec = state.sandboxExec
+			sandboxExecStream = state.sandboxExecStream
+			out, err = runBash()
 		}
 
 		// Strip ANSI escape codes from output so the LLM sees clean text
