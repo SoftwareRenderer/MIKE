@@ -542,6 +542,7 @@
         display: flex;
         align-items: flex-end;
         gap: 6px;
+        flex-shrink: 0;
     }
     .message-row {
         display: flex;
