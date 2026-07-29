@@ -236,22 +236,25 @@ func TestSetEnabledNotFound(t *testing.T) {
 func TestExtensionWithFullConfig(t *testing.T) {
 	es := testStore(t)
 	ext := &Extension{
-		ID:            "full-ext",
-		Name:          "full-extension",
-		Version:       "1.0.0",
-		Type:          ExtensionTypeLSP,
+		ID:      "full-ext",
+		Name:    "full-extension",
+		Version: "1.0.0",
+		Type:    ExtensionTypeLSP,
 		Manifest: ExtensionManifest{
 			DisplayName: "Full Extension",
 			Description: "Test extension with full config",
 			Author:      "Test Author",
-			LSP: &LSPConfig{
-				Command:    "gopls",
-				Args:       []string{"serve"},
-				Extensions: []string{"go"},
-				Language:   "go",
-				InitParamsOverride: map[string]any{
-					"usePlaceholders": true,
-					"staticcheck":     true,
+			Version:     "1.0.0",
+			Capabilities: &Capabilities{
+				LSP: &LSPConfig{
+					Command:    "gopls",
+					Args:       []string{"serve"},
+					Extensions: []string{"go"},
+					Language:   "go",
+					InitParamsOverride: map[string]any{
+						"usePlaceholders": true,
+						"staticcheck":     true,
+					},
 				},
 			},
 		},
@@ -287,16 +290,16 @@ func TestExtensionWithFullConfig(t *testing.T) {
 	if !got.HasLSPConfig() {
 		t.Fatal("HasLSPConfig = false, want true")
 	}
-	if got.Manifest.LSP.Command != "gopls" {
-		t.Errorf("LSP.Command = %v, want gopls", got.Manifest.LSP.Command)
+	if got.Manifest.Capabilities.GetLSP().Command != "gopls" {
+		t.Errorf("LSP.Command = %v, want gopls", got.Manifest.Capabilities.GetLSP().Command)
 	}
-	if len(got.Manifest.LSP.Args) != 1 || got.Manifest.LSP.Args[0] != "serve" {
-		t.Errorf("LSP.Args = %v, want [serve]", got.Manifest.LSP.Args)
+	if len(got.Manifest.Capabilities.GetLSP().Args) != 1 || got.Manifest.Capabilities.GetLSP().Args[0] != "serve" {
+		t.Errorf("LSP.Args = %v, want [serve]", got.Manifest.Capabilities.GetLSP().Args)
 	}
-	if got.Manifest.LSP.Language != "go" {
-		t.Errorf("LSP.Language = %v, want go", got.Manifest.LSP.Language)
+	if got.Manifest.Capabilities.GetLSP().Language != "go" {
+		t.Errorf("LSP.Language = %v, want go", got.Manifest.Capabilities.GetLSP().Language)
 	}
-	if got.Manifest.LSP.InitParamsOverride["staticcheck"] != true {
+	if got.Manifest.Capabilities.GetLSP().InitParamsOverride["staticcheck"] != true {
 		t.Error("LSP.InitParamsOverride.staticcheck = false, want true")
 	}
 

@@ -9,9 +9,9 @@ import (
 
 func TestSanitizeContainerID(t *testing.T) {
 	tests := []struct {
-		input    string
-		want     string
-		wantErr  bool
+		input   string
+		want    string
+		wantErr bool
 	}{
 		{"ext-1", "ext-1", false},
 		{"my_extension", "my_extension", false},

@@ -58,14 +58,14 @@ export class ExtensionManager {
     /** Check if an LSP extension is available for a language. */
     hasLSPForLanguage(language: string): boolean {
         return this.getLSPExtensions().some(
-            ext => ext.manifest.lsp?.language === language
+            ext => ext.manifest.capabilities?.lsp?.language === language
         );
     }
 
     /** Get the LSP extension for a given language. */
     getLSPForLanguage(language: string): Extension | undefined {
         return this.getLSPExtensions().find(
-            ext => ext.manifest.lsp?.language === language
+            ext => ext.manifest.capabilities?.lsp?.language === language
         );
     }
 
@@ -74,7 +74,7 @@ export class ExtensionManager {
         const ext = file.split('.').pop()?.toLowerCase();
         if (!ext) return undefined;
         return this.getLSPExtensions().find(
-            e => e.manifest.lsp?.extensions?.includes(ext)
+            e => e.manifest.capabilities?.lsp?.extensions?.includes(ext)
         );
     }
 
@@ -82,8 +82,8 @@ export class ExtensionManager {
     getSupportedLanguages(): string[] {
         const langs = new Set<string>();
         for (const ext of this.getLSPExtensions()) {
-            if (ext.manifest.lsp?.language) {
-                langs.add(ext.manifest.lsp.language);
+            if (ext.manifest.capabilities?.lsp?.language) {
+                langs.add(ext.manifest.capabilities.lsp.language);
             }
         }
         return [...langs];

@@ -40,8 +40,11 @@ func loadPiWasm(t *testing.T) agent.AgentAdapter {
 		Name: "pi",
 		Type: extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{
-				WasmModule: "pi.wasm",
+			Version: "1.0.0",
+			Capabilities: &extensions.Capabilities{
+				Agent: &extensions.AgentConfig{
+					WasmModule: "pi.wasm",
+				},
 			},
 		},
 	}
@@ -252,7 +255,7 @@ func TestWasmPiAdapter_ConcurrentAccess(t *testing.T) {
 	cfg := RunnerConfig{ExtensionName: "pi", SessionName: "conc-test", WorktreePath: t.TempDir()}
 	cfgBytes, _ := json.Marshal(cfg)
 	if err := adapter.Init(context.Background(), cfgBytes); err != nil {
-		 t.Fatalf("Init: %v", err)
+		t.Fatalf("Init: %v", err)
 	}
 
 	ctx := context.Background()
@@ -262,50 +265,50 @@ func TestWasmPiAdapter_ConcurrentAccess(t *testing.T) {
 	// Simulate concurrent ParseOutput (from readOutput goroutine) and
 	// EncodeCommand (from Prompt goroutine) calls
 	for i := 0; i < 10; i++ {
-		 wg.Add(1)
-		 go func(i int) {
-			 defer wg.Done()
-			 data := []byte(fmt.Sprintf(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"turn-%d"}}`, i) + "\n")
-			 events := adapter.ParseOutput(ctx, data)
-			 if len(events) != 1 {
-				 errors <- fmt.Errorf("goroutine %d: ParseOutput got %d events, want 1", i, len(events))
-				 return
-			 }
-			 if events[0].Text != fmt.Sprintf("turn-%d", i) {
-				 errors <- fmt.Errorf("goroutine %d: text = %q, want %q", i, events[0].Text, fmt.Sprintf("turn-%d", i))
-				 return
-			 }
-		 }(i)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			data := []byte(fmt.Sprintf(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"turn-%d"}}`, i) + "\n")
+			events := adapter.ParseOutput(ctx, data)
+			if len(events) != 1 {
+				errors <- fmt.Errorf("goroutine %d: ParseOutput got %d events, want 1", i, len(events))
+				return
+			}
+			if events[0].Text != fmt.Sprintf("turn-%d", i) {
+				errors <- fmt.Errorf("goroutine %d: text = %q, want %q", i, events[0].Text, fmt.Sprintf("turn-%d", i))
+				return
+			}
+		}(i)
 	}
 
 	for i := 0; i < 10; i++ {
-		 wg.Add(1)
-		 go func(i int) {
-			 defer wg.Done()
-			 cmd := adapter.EncodeCommand(ctx, agent.CommandPrompt, nil)
-			 if len(cmd) == 0 {
-				 errors <- fmt.Errorf("goroutine %d: EncodeCommand returned empty", i)
-				 return
-			 }
-		 }(i)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cmd := adapter.EncodeCommand(ctx, agent.CommandPrompt, nil)
+			if len(cmd) == 0 {
+				errors <- fmt.Errorf("goroutine %d: EncodeCommand returned empty", i)
+				return
+			}
+		}(i)
 	}
 
 	// Also interleave HandleUIRequest and SubprocessConfig calls
 	for i := 0; i < 5; i++ {
-		 wg.Add(1)
-		 go func(i int) {
-			 defer wg.Done()
-			 adapter.HandleUIRequest(ctx, fmt.Sprintf("req-%d", i), "confirm")
-			 adapter.SubprocessConfig(ctx)
-		 }(i)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			adapter.HandleUIRequest(ctx, fmt.Sprintf("req-%d", i), "confirm")
+			adapter.SubprocessConfig(ctx)
+		}(i)
 	}
 
 	wg.Wait()
 	close(errors)
 	for err := range errors {
-		 t.Error(err)
+		t.Error(err)
 	}
-	}
+}
 
 // TestWasmPiAdapter_GetStateModelDiscovery verifies that the WASM module
 // correctly discovers the model name via get_state response and persists it

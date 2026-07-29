@@ -38,14 +38,59 @@ type ExtensionManifest struct {
 	Author       string        `json:"author"`
 	Homepage     string        `json:"homepage,omitempty"`
 	LicenseURL   string        `json:"license_url,omitempty"`
-	Deprecated   bool          `json:"deprecated"`
+	Version      string        `json:"version"`
 	Priority     int           `json:"priority"` // loading order: lower values load first (default 0)
 	ConfigSchema *ConfigSchema `json:"config_schema,omitempty"`
-	LSP          *LSPConfig    `json:"lsp,omitempty"`
-	UI           *UIConfig     `json:"ui,omitempty"`
-	CSS          *CSSConfig    `json:"css,omitempty"`
-	Agent        *AgentConfig  `json:"agent,omitempty"`
-	Proxy        *ProxyConfig  `json:"proxy,omitempty"` // server-side proxy capability
+	Capabilities *Capabilities `json:"capabilities,omitempty"`
+}
+
+// Capabilities groups the functional capabilities an extension provides.
+type Capabilities struct {
+	LSP   *LSPConfig   `json:"lsp,omitempty"`
+	UI    *UIConfig    `json:"ui,omitempty"`
+	CSS   *CSSConfig   `json:"css,omitempty"`
+	Agent *AgentConfig `json:"agent,omitempty"`
+	Proxy *ProxyConfig `json:"proxy,omitempty"` // server-side proxy capability
+}
+
+// GetLSP returns the LSP capability, or nil if not present.
+func (c *Capabilities) GetLSP() *LSPConfig {
+	if c == nil {
+		return nil
+	}
+	return c.LSP
+}
+
+// GetUI returns the UI capability, or nil if not present.
+func (c *Capabilities) GetUI() *UIConfig {
+	if c == nil {
+		return nil
+	}
+	return c.UI
+}
+
+// GetCSS returns the CSS capability, or nil if not present.
+func (c *Capabilities) GetCSS() *CSSConfig {
+	if c == nil {
+		return nil
+	}
+	return c.CSS
+}
+
+// GetAgent returns the Agent capability, or nil if not present.
+func (c *Capabilities) GetAgent() *AgentConfig {
+	if c == nil {
+		return nil
+	}
+	return c.Agent
+}
+
+// GetProxy returns the Proxy capability, or nil if not present.
+func (c *Capabilities) GetProxy() *ProxyConfig {
+	if c == nil {
+		return nil
+	}
+	return c.Proxy
 }
 
 // ProxyConfig defines server-side proxy settings for external API access.
@@ -53,17 +98,17 @@ type ExtensionManifest struct {
 // Headers can use {{property_name}} placeholders which are resolved from
 // the extension's configuration at request time.
 type ProxyConfig struct {
-	AllowedDomains []string         `json:"allowed_domains"` // whitelist of domains the proxy may contact
+	AllowedDomains []string          `json:"allowed_domains"`   // whitelist of domains the proxy may contact
 	Headers        map[string]string `json:"headers,omitempty"` // header templates (e.g. "Authorization": "token {{github_token}}")
 }
 
 // LSPConfig defines LSP-specific extension configuration.
 type LSPConfig struct {
-	Command            string                 `json:"command"`
-	Args               []string               `json:"args"`
-	Extensions         []string               `json:"extensions"`
-	Language           string                 `json:"language"`
-	InitParamsOverride map[string]any         `json:"initParamsOverride,omitempty"`
+	Command            string         `json:"command"`
+	Args               []string       `json:"args"`
+	Extensions         []string       `json:"extensions"`
+	Language           string         `json:"language"`
+	InitParamsOverride map[string]any `json:"initParamsOverride,omitempty"`
 }
 
 // UIConfig defines UI-specific extension configuration.
@@ -82,11 +127,11 @@ type CSSConfig struct {
 // AgentConfig defines agent-specific extension configuration.
 // The agent adapter (WASM module) handles all protocol details.
 type AgentConfig struct {
-	WasmModule  string                   `json:"wasm_module"`              // path to WASM adapter module (relative to extension dir)
-	Description string                   `json:"description,omitempty"`    // short description shown in provider card (markdown)
-	SetupInfo    string                   `json:"setup_info,omitempty"`     // setup instructions shown in provider card (markdown, newline-separated items)
-	ConfigSchema *ConfigSchema            `json:"config_schema,omitempty"`  // user-configurable options
-	Sandbox *types.AgentSandbox `json:"sandbox,omitempty"` // default mounts and envs for sandbox containers
+	WasmModule   string              `json:"wasm_module"`             // path to WASM adapter module (relative to extension dir)
+	Description  string              `json:"description,omitempty"`   // short description shown in provider card (markdown)
+	SetupInfo    string              `json:"setup_info,omitempty"`    // setup instructions shown in provider card (markdown, newline-separated items)
+	ConfigSchema *ConfigSchema       `json:"config_schema,omitempty"` // user-configurable options
+	Sandbox      *types.AgentSandbox `json:"sandbox,omitempty"`       // default mounts and envs for sandbox containers
 }
 
 // ResolveSandboxTemplates resolves {{property_name}} template references
@@ -205,12 +250,12 @@ type ContainerConfig struct {
 // SandboxConfig defines sandbox options for the extension container.
 // Same shape as project SandboxOpts.
 type SandboxConfig struct {
-	NetworkIsolation bool                   `json:"network_isolation"`
-	MemoryLimit      int                    `json:"memory_limit"`
-	ForwardPorts     []types.PortForward    `json:"forward_ports,omitempty"`
-	Mounts           []types.SandboxMount   `json:"mounts,omitempty"`
-	Envs             []types.SandboxEnv     `json:"envs,omitempty"`
-	Capabilities     []string               `json:"capabilities,omitempty"`
+	NetworkIsolation bool                 `json:"network_isolation"`
+	MemoryLimit      int                  `json:"memory_limit"`
+	ForwardPorts     []types.PortForward  `json:"forward_ports,omitempty"`
+	Mounts           []types.SandboxMount `json:"mounts,omitempty"`
+	Envs             []types.SandboxEnv   `json:"envs,omitempty"`
+	Capabilities     []string             `json:"capabilities,omitempty"`
 }
 
 // RegistryIndex is the top-level registry format.
@@ -218,17 +263,17 @@ type RegistryIndex []RegistryEntry
 
 // RegistryEntry describes a single extension available in the registry.
 type RegistryEntry struct {
-	Name           string `json:"name"`
-	Version        string `json:"version"`
-	Type           string `json:"type"`
-	DisplayName    string `json:"display_name"`
-	Description    string `json:"description"`
-	Author         string `json:"author"`
-	Homepage       string `json:"homepage,omitempty"`
-	LicenseURL     string `json:"license_url,omitempty"`
-	Image          string `json:"image,omitempty"`          // OCI image reference
-	DockerfileURL  string `json:"dockerfile_url,omitempty"` // URL to Dockerfile
-	ManifestURL    string `json:"manifest_url,omitempty"`   // URL to manifest.json
+	Name          string `json:"name"`
+	Version       string `json:"version"`
+	Type          string `json:"type"`
+	DisplayName   string `json:"display_name"`
+	Description   string `json:"description"`
+	Author        string `json:"author"`
+	Homepage      string `json:"homepage,omitempty"`
+	LicenseURL    string `json:"license_url,omitempty"`
+	Image         string `json:"image,omitempty"`          // OCI image reference
+	DockerfileURL string `json:"dockerfile_url,omitempty"` // URL to Dockerfile
+	ManifestURL   string `json:"manifest_url,omitempty"`   // URL to manifest.json
 }
 
 // IsLSP returns true if this extension is an LSP extension.
@@ -248,17 +293,17 @@ func (e *Extension) IsCSS() bool {
 
 // HasLSPConfig returns true if this extension has LSP configuration.
 func (e *Extension) HasLSPConfig() bool {
-	return e.IsLSP() && e.Manifest.LSP != nil
+	return e.IsLSP() && e.Manifest.Capabilities.GetLSP() != nil
 }
 
 // HasUIConfig returns true if this extension has UI configuration.
 func (e *Extension) HasUIConfig() bool {
-	return e.IsUI() && e.Manifest.UI != nil
+	return e.IsUI() && e.Manifest.Capabilities.GetUI() != nil
 }
 
 // HasCSSConfig returns true if this extension has CSS configuration.
 func (e *Extension) HasCSSConfig() bool {
-	return e.IsCSS() && e.Manifest.CSS != nil
+	return e.IsCSS() && e.Manifest.Capabilities.GetCSS() != nil
 }
 
 // IsAgent returns true if this extension is an agent extension.
@@ -268,7 +313,7 @@ func (e *Extension) IsAgent() bool {
 
 // HasAgentConfig returns true if this extension has agent configuration.
 func (e *Extension) HasAgentConfig() bool {
-	return e.IsAgent() && e.Manifest.Agent != nil
+	return e.IsAgent() && e.Manifest.Capabilities.GetAgent() != nil
 }
 
 // IsRegistryInstalled returns true if this extension was installed from a registry.

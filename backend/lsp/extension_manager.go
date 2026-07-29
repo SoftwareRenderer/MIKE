@@ -43,7 +43,8 @@ type sandboxClient struct {
 // translateURIsToContainer translates file URIs from host paths to container paths.
 // Uses project-based mounts: each project at /mnt/<project-dirname>.
 // E.g., /home/user/projects/kanban mounted at /mnt/kanban means:
-//   file:///home/user/projects/kanban/main.go -> file:///mnt/kanban/main.go
+//
+//	file:///home/user/projects/kanban/main.go -> file:///mnt/kanban/main.go
 func translateURIsToContainer(msg json.RawMessage, workspacePath string, projectMounts map[string]string) json.RawMessage {
 	if len(projectMounts) == 0 {
 		return msg
@@ -161,7 +162,7 @@ func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *S
 	// Start (or restart) the LSP server process in the sandbox.
 	// Always called — the agent restarts the LSP if already running.
 	ctx := context.Background()
-	lspConfig := ext.Manifest.LSP
+	lspConfig := ext.Manifest.Capabilities.GetLSP()
 	if lspConfig == nil {
 		return nil, fmt.Errorf("extension %s has no LSP config", ext.Name)
 	}
@@ -343,7 +344,7 @@ func (m *ExtensionLSPManager) lookupExtension(language string) (*extensions.Exte
 		if !ext.Enabled {
 			continue
 		}
-		lspCfg := ext.Manifest.LSP
+		lspCfg := ext.Manifest.Capabilities.GetLSP()
 		if lspCfg == nil {
 			continue
 		}
@@ -389,7 +390,7 @@ func (r *ExtensionRegistry) Lookup(fileOrPath string) *ServerConfig {
 		if !extItem.Enabled {
 			continue
 		}
-		lspCfg := extItem.Manifest.LSP
+		lspCfg := extItem.Manifest.Capabilities.GetLSP()
 		if lspCfg == nil {
 			continue
 		}
@@ -419,8 +420,9 @@ func (r *ExtensionRegistry) GetAvailable() []string {
 
 	langs := make([]string, 0, len(extensions))
 	for _, ext := range extensions {
-		if ext.Enabled && ext.Manifest.LSP != nil && ext.Manifest.LSP.Language != "" {
-			langs = append(langs, ext.Manifest.LSP.Language)
+		lspCfg := ext.Manifest.Capabilities.GetLSP()
+		if ext.Enabled && lspCfg != nil && lspCfg.Language != "" {
+			langs = append(langs, lspCfg.Language)
 		}
 	}
 	return langs
@@ -437,7 +439,8 @@ func (r *ExtensionRegistry) GetConfig(language string) *ServerConfig {
 		if !ext.Enabled {
 			continue
 		}
-		if ext.Manifest.LSP != nil && ext.Manifest.LSP.Language == language {
+		lspCfg := ext.Manifest.Capabilities.GetLSP()
+		if lspCfg != nil && lspCfg.Language == language {
 			return r.toServerConfig(&ext)
 		}
 	}
@@ -447,7 +450,7 @@ func (r *ExtensionRegistry) GetConfig(language string) *ServerConfig {
 // toServerConfig converts an Extension to a ServerConfig.
 // It applies runtime overrides for known extensions (e.g., tsserver.path for TypeScript).
 func (r *ExtensionRegistry) toServerConfig(ext *extensions.Extension) *ServerConfig {
-	lspCfg := ext.Manifest.LSP
+	lspCfg := ext.Manifest.Capabilities.GetLSP()
 	if lspCfg == nil {
 		return nil
 	}

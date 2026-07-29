@@ -42,11 +42,11 @@ type SubscribeParams struct {
 // ClientSession holds the state for a single WebSocket client connected to the LSP handler.
 // Workspace and language are tracked per-channel via _workspace/_lang hints, not per-session.
 type ClientSession struct {
-	conn  *websocket.Conn
-	clientID  uint64
+	conn     *websocket.Conn
+	clientID uint64
 	// mu protects the session's maps (incomingIDs, channelIDs, workspaceKeys, activeWorkspaces)
 	// from concurrent access by forwardRequest/routeResponse goroutines.
-	mu               sync.Mutex
+	mu sync.Mutex
 	// backendRequestID → clientRequestID (incoming responses)
 	incomingIDs map[string]string
 	// backendRequestID → channelID (for multiplex response routing)
@@ -67,10 +67,10 @@ type queuedInit struct {
 
 // workspaceState tracks per-workspace+language state in the handler.
 type workspaceState struct {
-	process      *LSPProcess
-	language     string
-	cfg          *ServerConfig
-	clientCount  int
+	process     *LSPProcess
+	language    string
+	cfg         *ServerConfig
+	clientCount int
 	// initialized tracks whether the LSP server has been initialized.
 	// In multiplex mode, only the first channel's initialize reaches the server;
 	// subsequent channels get the cached response.
@@ -108,7 +108,7 @@ type LSPHandler struct {
 	clients  map[*websocket.Conn]*ClientSession
 	// Per workspace+language state
 	workspaces map[string]*workspaceState
-	nextID      atomic.Uint64
+	nextID     atomic.Uint64
 	// nextBackendID generates unique backend request IDs for remapping
 	nextBackendID atomic.Int64
 	// serverRouterDone signals the server message router to stop

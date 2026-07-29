@@ -59,9 +59,9 @@ func RegisterAdapterFactory(name string, fn agent.AdapterFactory) {
 // EncodeCommand while holding r.mu — concurrent calls would corrupt the
 // bump allocator, overwrite resultCh, and crash the WASM module.
 type wasmAdapter struct {
-	mu      sync.Mutex
-	runtime wazero.Runtime
-	module  api.Module
+	mu       sync.Mutex
+	runtime  wazero.Runtime
+	module   api.Module
 	memory   api.Memory
 	resultCh chan []byte // receives results from store_result host callback
 }
@@ -84,7 +84,7 @@ func LoadAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 // instead of _start. The host calls _initialize to set up the Go runtime,
 // then calls exported functions.
 func loadWasmAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
-	if ext.Manifest.Agent == nil || ext.Manifest.Agent.WasmModule == "" {
+	if ext.Manifest.Capabilities.GetAgent() == nil || ext.Manifest.Capabilities.GetAgent().WasmModule == "" {
 		return nil, fmt.Errorf("extension %q has no wasm_module configured", ext.Name)
 	}
 
@@ -97,7 +97,7 @@ func loadWasmAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 	ctx := context.Background()
 	runtime := wazero.NewRuntimeWithConfig(ctx,
 		wazero.NewRuntimeConfig().
-			WithMemoryLimitPages(512). // 32 MiB max — ensures safety while providing headroom for persistence spikes
+			WithMemoryLimitPages(512).       // 32 MiB max — ensures safety while providing headroom for persistence spikes
 			WithMemoryCapacityFromMax(true), // Size memory to the module's declared max, not just initial
 	)
 
@@ -166,7 +166,7 @@ func loadWasmAdapter(ext *extensions.Extension) (agent.AgentAdapter, error) {
 
 // resolveWasmPath finds the WASM module file for an extension.
 func resolveWasmPath(ext *extensions.Extension) string {
-	wasmModule := ext.Manifest.Agent.WasmModule
+	wasmModule := ext.Manifest.Capabilities.GetAgent().WasmModule
 
 	candidates := []string{
 		filepath.Join("extensions", "agent", ext.Name, wasmModule),

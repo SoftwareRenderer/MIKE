@@ -45,8 +45,9 @@ func TestRegistry_Lookup(t *testing.T) {
 				Type:    ext.ExtensionTypeAgent,
 				Enabled: true,
 				Manifest: ext.ExtensionManifest{
-					DisplayName: "My Coding Agent",
-					Agent:       &ext.AgentConfig{},
+					DisplayName:  "My Coding Agent",
+					Version:      "1.0.0",
+					Capabilities: &ext.Capabilities{Agent: &ext.AgentConfig{}},
 				},
 			},
 			{
@@ -267,14 +268,15 @@ func TestRegistry_GetAgentSandbox(t *testing.T) {
 				Enabled: true,
 				Config:  map[string]any{},
 				Manifest: ext.ExtensionManifest{
-					Agent: &ext.AgentConfig{
+					Version: "1.0.0",
+					Capabilities: &ext.Capabilities{Agent: &ext.AgentConfig{
 						Sandbox: &types.AgentSandbox{
 							Mounts: []types.SandboxMount{
 								{HostPath: "~/.agent/config", ContainerPath: "/root/agent/config", Mode: "ro"},
 							},
 							Envs: []types.SandboxEnv{{Key: "AGENT_CONFIG_DIR", Value: "~/.agent/config"}},
 						},
-					},
+					}},
 				},
 			},
 		},
@@ -327,13 +329,14 @@ func TestRegistry_GetAgentSandboxWithOverrides(t *testing.T) {
 					},
 				},
 				Manifest: ext.ExtensionManifest{
-					Agent: &ext.AgentConfig{
+					Version: "1.0.0",
+					Capabilities: &ext.Capabilities{Agent: &ext.AgentConfig{
 						Sandbox: &types.AgentSandbox{
 							Mounts: []types.SandboxMount{
 								{HostPath: "~/.default/config", ContainerPath: "/root/default/config", Mode: "ro"},
 							},
 						},
-					},
+					}},
 				},
 			},
 		},
@@ -370,13 +373,14 @@ func TestRegistry_GetAgentSandboxProviderOverride(t *testing.T) {
 				Enabled: true,
 				Config:  map[string]any{},
 				Manifest: ext.ExtensionManifest{
-					Agent: &ext.AgentConfig{
+					Version: "1.0.0",
+					Capabilities: &ext.Capabilities{Agent: &ext.AgentConfig{
 						Sandbox: &types.AgentSandbox{
 							Mounts: []types.SandboxMount{
 								{HostPath: "~/.agent/config", ContainerPath: "/root/agent/config", Mode: "ro"},
 							},
 						},
-					},
+					}},
 				},
 			},
 		},
@@ -411,9 +415,8 @@ func TestRegistry_GetAgentSandboxNoManifest(t *testing.T) {
 				Type:    ext.ExtensionTypeAgent,
 				Enabled: true,
 				Manifest: ext.ExtensionManifest{
-					Agent: &ext.AgentConfig{
-						
-					},
+					Version:      "1.0.0",
+					Capabilities: &ext.Capabilities{Agent: &ext.AgentConfig{}},
 				},
 			},
 		},
@@ -435,11 +438,12 @@ func TestRegistry_GetAnyAgentSandbox(t *testing.T) {
 				Type:    ext.ExtensionTypeAgent,
 				Enabled: true,
 				Manifest: ext.ExtensionManifest{
-					Agent: &ext.AgentConfig{
+					Version: "1.0.0",
+					Capabilities: &ext.Capabilities{Agent: &ext.AgentConfig{
 						Sandbox: &types.AgentSandbox{
 							Mounts: []types.SandboxMount{{HostPath: "~/.agent/config", ContainerPath: "/x", Mode: "ro"}},
 						},
-					},
+					}},
 				},
 			},
 		},
@@ -466,6 +470,7 @@ func TestRegistry_GetAgentSandboxTemplates(t *testing.T) {
 				Enabled: true,
 				Config:  map[string]any{},
 				Manifest: ext.ExtensionManifest{
+					Version: "1.0.0",
 					ConfigSchema: &ext.ConfigSchema{
 						Properties: []ext.SchemaProp{
 							{Key: "sandbox_mount", Type: "mount", Default: []any{
@@ -476,14 +481,14 @@ func TestRegistry_GetAgentSandboxTemplates(t *testing.T) {
 							}},
 						},
 					},
-					Agent: &ext.AgentConfig{
+					Capabilities: &ext.Capabilities{Agent: &ext.AgentConfig{
 						Sandbox: &types.AgentSandbox{
 							Mounts: []types.SandboxMount{
 								{HostPath: "{{sandbox_mount_host_path[]}}", ContainerPath: "{{sandbox_mount_container_path[]}}", Mode: "{{sandbox_mount_mode[]}}"},
 							},
 							Envs: []types.SandboxEnv{{Key: "{{sandbox_env_key[]}}", Value: "{{sandbox_env_value[]}}"}},
 						},
-					},
+					}},
 				},
 			},
 		},
@@ -531,6 +536,7 @@ func TestRegistry_GetAgentSandboxTemplatesWithOverride(t *testing.T) {
 					},
 				},
 				Manifest: ext.ExtensionManifest{
+					Version: "1.0.0",
 					ConfigSchema: &ext.ConfigSchema{
 						Properties: []ext.SchemaProp{
 							{Key: "sandbox_mount", Type: "mount", Default: []any{
@@ -538,13 +544,13 @@ func TestRegistry_GetAgentSandboxTemplatesWithOverride(t *testing.T) {
 							}},
 						},
 					},
-					Agent: &ext.AgentConfig{
+					Capabilities: &ext.Capabilities{Agent: &ext.AgentConfig{
 						Sandbox: &types.AgentSandbox{
 							Mounts: []types.SandboxMount{
 								{HostPath: "{{sandbox_mount_host_path[]}}", ContainerPath: "{{sandbox_mount_container_path[]}}", Mode: "{{sandbox_mount_mode[]}}"},
 							},
 						},
-					},
+					}},
 				},
 			},
 		},

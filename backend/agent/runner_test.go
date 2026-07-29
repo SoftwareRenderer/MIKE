@@ -16,9 +16,9 @@ type mockAdapter struct {
 	mu               sync.Mutex
 	initConfig       []byte
 	subprocessConfig agent.SubprocessConfig
-	encodeResponses  map[string][]byte // cmd -> bytes
+	encodeResponses  map[string][]byte        // cmd -> bytes
 	parseResponses   map[string][]agent.Event // input bytes key -> events
-	uiResponses      map[string][]byte  // "id:method" -> bytes
+	uiResponses      map[string][]byte        // "id:method" -> bytes
 	closed           bool
 }
 
@@ -122,8 +122,9 @@ func TestNewAgentRunner_Host(t *testing.T) {
 		Type:    extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
 			DisplayName: "Test Agent",
-			Agent: &extensions.AgentConfig{
-				
+			Version:     "1.0.0",
+			Capabilities: &extensions.Capabilities{
+				Agent: &extensions.AgentConfig{},
 			},
 		},
 		Config: map[string]any{},
@@ -166,10 +167,10 @@ func TestAgentRunner_Prompt(t *testing.T) {
 	RegisterAdapterFactory("test-prompt", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
-		Name:    "test-prompt",
-		Type:    extensions.ExtensionTypeAgent,
+		Name: "test-prompt",
+		Type: extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{},
+			Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}},
 		},
 	}
 
@@ -204,10 +205,10 @@ func TestAgentRunner_EventChan(t *testing.T) {
 	RegisterAdapterFactory("test-events", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
-		Name:    "test-events",
-		Type:    extensions.ExtensionTypeAgent,
+		Name: "test-events",
+		Type: extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{},
+			Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}},
 		},
 	}
 
@@ -244,10 +245,10 @@ func TestAgentRunner_Close(t *testing.T) {
 	RegisterAdapterFactory("test-close", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
-		Name:    "test-close",
-		Type:    extensions.ExtensionTypeAgent,
+		Name: "test-close",
+		Type: extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{},
+			Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}},
 		},
 	}
 
@@ -276,10 +277,10 @@ func TestAgentRunner_ModelName(t *testing.T) {
 	RegisterAdapterFactory("test-model", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
-		Name:    "test-model",
-		Type:    extensions.ExtensionTypeAgent,
+		Name: "test-model",
+		Type: extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{},
+			Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}},
 		},
 	}
 
@@ -301,10 +302,10 @@ func TestAgentRunner_QueryStats(t *testing.T) {
 	RegisterAdapterFactory("test-stats", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
-		Name:    "test-stats",
-		Type:    extensions.ExtensionTypeAgent,
+		Name: "test-stats",
+		Type: extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{},
+			Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}},
 		},
 	}
 
@@ -333,9 +334,7 @@ func TestRunnerConfig_Serialization(t *testing.T) {
 		WorktreePath:  "/tmp/worktree",
 		Sandbox:       true,
 		Config:        map[string]any{"key": "value"},
-		AgentManifest: &extensions.AgentConfig{
-			
-		},
+		AgentManifest: &extensions.AgentConfig{},
 	}
 
 	data, err := json.Marshal(cfg)
@@ -356,7 +355,6 @@ func TestRunnerConfig_Serialization(t *testing.T) {
 	}
 }
 
-
 // TestAdapterRegistry verifies factory registration and lookup.
 func TestAdapterRegistry(t *testing.T) {
 	called := false
@@ -370,7 +368,7 @@ func TestAdapterRegistry(t *testing.T) {
 		Name: "registry-test",
 		Type: extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{},
+			Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}},
 		},
 	}
 
@@ -487,9 +485,9 @@ func TestAgentRunner_Compact(t *testing.T) {
 			RegisterAdapterFactory("test-compact", func() agent.AgentAdapter { return adapter })
 
 			ext := &extensions.Extension{
-				Name:    "test-compact",
-				Type:    extensions.ExtensionTypeAgent,
-				Manifest: extensions.ExtensionManifest{Agent: &extensions.AgentConfig{}},
+				Name:     "test-compact",
+				Type:     extensions.ExtensionTypeAgent,
+				Manifest: extensions.ExtensionManifest{Version: "1.0.0", Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}}},
 			}
 
 			runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
@@ -525,6 +523,7 @@ func TestAgentRunner_Compact(t *testing.T) {
 		})
 	}
 }
+
 // TestPersistEntry_Serialization verifies agent.PersistEntry marshals correctly.
 func TestPersistEntry_Serialization(t *testing.T) {
 	entry := agent.PersistEntry{
@@ -601,10 +600,10 @@ func TestNewAgentRunner_BrokenAdapter(t *testing.T) {
 	})
 
 	ext := &extensions.Extension{
-		Name:    "test-broken",
-		Type:    extensions.ExtensionTypeAgent,
+		Name: "test-broken",
+		Type: extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{},
+			Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}},
 		},
 	}
 
@@ -624,10 +623,10 @@ func TestAgentRunner_PromptNilEncode(t *testing.T) {
 	RegisterAdapterFactory("test-nil-encode", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
-		Name:    "test-nil-encode",
-		Type:    extensions.ExtensionTypeAgent,
+		Name: "test-nil-encode",
+		Type: extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{},
+			Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}},
 		},
 	}
 
@@ -652,10 +651,10 @@ func TestAgentRunner_CloseNilEncode(t *testing.T) {
 	RegisterAdapterFactory("test-close-nil", func() agent.AgentAdapter { return adapter })
 
 	ext := &extensions.Extension{
-		Name:    "test-close-nil",
-		Type:    extensions.ExtensionTypeAgent,
+		Name: "test-close-nil",
+		Type: extensions.ExtensionTypeAgent,
 		Manifest: extensions.ExtensionManifest{
-			Agent: &extensions.AgentConfig{},
+			Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}},
 		},
 	}
 
@@ -709,4 +708,3 @@ func TestSubprocessConfig_Serialization(t *testing.T) {
 		t.Errorf("Args len = %d, want %d", len(decoded.Args), len(cfg.Args))
 	}
 }
-

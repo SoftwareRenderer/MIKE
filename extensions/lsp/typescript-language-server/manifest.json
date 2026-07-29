@@ -4,7 +4,7 @@
     "author": "Microsoft",
     "homepage": "https://github.com/typescript-language-server/typescript-language-server",
     "license_url": "https://github.com/typescript-language-server/typescript-language-server/blob/master/LICENSE",
-    "deprecated": false,
+    "version": "1.0.0",
     "config_schema": {
         "type": "object",
         "properties": [
@@ -26,32 +26,34 @@
         ],
         "required": []
     },
-    "lsp": {
-        "command": "typescript-language-server",
-        "args": ["--stdio"],
-        "extensions": ["ts", "tsx", "js", "jsx"],
-        "language": "typescript",
-        "initParamsOverride": {
-            "initializationOptions": {
-                "tsserver": {
-                    "path": "/usr/local/lib/node_modules/typescript"
+    "capabilities": {
+        "lsp": {
+            "command": "typescript-language-server",
+            "args": ["--stdio"],
+            "extensions": ["ts", "tsx", "js", "jsx"],
+            "language": "typescript",
+            "initParamsOverride": {
+                "initializationOptions": {
+                    "tsserver": {
+                        "path": "/usr/local/lib/node_modules/typescript"
+                    }
+                },
+                "preferences": {
+                    "includeCompletionsForModuleExports": true,
+                    "includeCompletionsWithImport": true,
+                    "includeCompletionsWithSnippetText": true,
+                    "includeAutomaticOptionalChainCompletions": true,
+                    "includeCompletionsForImportStatements": true
+                },
+                "typescript-suggest": {
+                    "includeAutomaticOptionalChainCompletions": true,
+                    "includeCompletionsForImportStatements": true,
+                    "includeCompletionsWithClassMemberSnippets": true,
+                    "includeCompletionsWithInsertTextEdits": true,
+                    "includeCompletionsWithObjectLiteralMethodSnippets": true,
+                    "includeCompletionsWithSnippetText": true,
+                    "includeCompletionsWithModuleAugmentations": true
                 }
-            },
-            "preferences": {
-                "includeCompletionsForModuleExports": true,
-                "includeCompletionsWithImport": true,
-                "includeCompletionsWithSnippetText": true,
-                "includeAutomaticOptionalChainCompletions": true,
-                "includeCompletionsForImportStatements": true
-            },
-            "typescript-suggest": {
-                "includeAutomaticOptionalChainCompletions": true,
-                "includeCompletionsForImportStatements": true,
-                "includeCompletionsWithClassMemberSnippets": true,
-                "includeCompletionsWithInsertTextEdits": true,
-                "includeCompletionsWithObjectLiteralMethodSnippets": true,
-                "includeCompletionsWithSnippetText": true,
-                "includeCompletionsWithModuleAugmentations": true
             }
         }
     }

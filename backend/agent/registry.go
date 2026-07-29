@@ -129,7 +129,7 @@ func (r *AgentRegistry) GetAgentSandbox(agentName string) *types.AgentSandbox {
 		return nil
 	}
 
-	def := ext.Manifest.Agent
+	def := ext.Manifest.Capabilities.GetAgent()
 	if def == nil {
 		return nil
 	}

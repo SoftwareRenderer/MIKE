@@ -4,7 +4,7 @@
     "author": "Go Team",
     "homepage": "https://github.com/golang/tools/tree/master/gopls",
     "license_url": "https://github.com/golang/tools/blob/master/LICENSE",
-    "deprecated": false,
+    "version": "1.0.0",
     "config_schema": {
         "type": "object",
         "properties": [
@@ -18,29 +18,31 @@
         ],
         "required": []
     },
-    "lsp": {
-        "command": "gopls",
-        "args": ["serve"],
-        "extensions": ["go"],
-        "language": "go",
-        "initParamsOverride": {
-            "hover": {
-                "actions": {
-                    "enabled": true
-                }
-            },
-            "codeLens": {
-                "disable": ["generated_test"]
-            },
-            "hints": {
-                "assignVariableType": true,
-                "compositeLiteralFields": true,
-                "constantValues": true,
-                "functionTypeParameters": true,
-                "parameterNames": true
-            },
-            "usePlaceholders": true,
-            "staticcheck": true
+    "capabilities": {
+        "lsp": {
+            "command": "gopls",
+            "args": ["serve"],
+            "extensions": ["go"],
+            "language": "go",
+            "initParamsOverride": {
+                "hover": {
+                    "actions": {
+                        "enabled": true
+                    }
+                },
+                "codeLens": {
+                    "disable": ["generated_test"]
+                },
+                "hints": {
+                    "assignVariableType": true,
+                    "compositeLiteralFields": true,
+                    "constantValues": true,
+                    "functionTypeParameters": true,
+                    "parameterNames": true
+                },
+                "usePlaceholders": true,
+                "staticcheck": true
+            }
         }
     }
 }

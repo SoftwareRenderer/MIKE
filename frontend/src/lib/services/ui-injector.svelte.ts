@@ -83,16 +83,16 @@ export class UIInjector {
             if (!ext.enabled) continue;
 
             // CSS-type extensions: inject global stylesheet
-            if (ext.type === 'css' && ext.manifest.css?.css_url) {
+            if (ext.type === 'css' && ext.manifest.capabilities?.css?.css_url) {
                 if (!cssUrl) {
-                    cssUrl = ext.manifest.css.css_url;
+                    cssUrl = ext.manifest.capabilities.css.css_url;
                 }
                 continue;
             }
 
             // UI-type extensions: register injection points
-            if (ext.type !== 'ui' || !ext.manifest.ui) continue;
-            const ui = ext.manifest.ui;
+            if (ext.type !== 'ui' || !ext.manifest.capabilities?.ui) continue;
+            const ui = ext.manifest.capabilities.ui;
             if (!ui.injection_points || !ui.module_url) continue;
 
             for (let i = 0; i < ui.injection_points.length; i++) {

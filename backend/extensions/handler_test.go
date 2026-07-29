@@ -380,21 +380,23 @@ func TestHandleUpdate_NotFound(t *testing.T) {
 func TestHandleUpdate_LSPConfig(t *testing.T) {
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
-	ext.Manifest.LSP = &LSPConfig{
+	ext.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{
 		Command:    "typescript-language-server",
 		Args:       []string{"--stdio"},
 		Extensions: []string{"ts", "tsx", "js", "jsx"},
 		Language:   "typescript",
-	}
+	}}
 	if err := h.store.Create(ext); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	body := map[string]any{
 		"manifest": map[string]any{
-			"lsp": map[string]any{
-				"initParamsOverride": map[string]any{
-					"tsserver.path": "/usr/local/lib/node_modules/typescript",
+			"capabilities": map[string]any{
+				"lsp": map[string]any{
+					"initParamsOverride": map[string]any{
+						"tsserver.path": "/usr/local/lib/node_modules/typescript",
+					},
 				},
 			},
 		},
@@ -415,13 +417,13 @@ func TestHandleUpdate_LSPConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if updated.Manifest.LSP == nil {
+	if updated.Manifest.Capabilities.GetLSP() == nil {
 		t.Fatal("LSP config is nil after update")
 	}
-	if updated.Manifest.LSP.InitParamsOverride == nil {
+	if updated.Manifest.Capabilities.GetLSP().InitParamsOverride == nil {
 		t.Fatal("InitParamsOverride is nil after update")
 	}
-	tsserverPath, ok := updated.Manifest.LSP.InitParamsOverride["tsserver.path"]
+	tsserverPath, ok := updated.Manifest.Capabilities.GetLSP().InitParamsOverride["tsserver.path"]
 	if !ok {
 		t.Fatal("tsserver.path not found in InitParamsOverride")
 	}
@@ -440,11 +442,13 @@ func TestHandleUpdate_LSPConfig_CreateNilLSP(t *testing.T) {
 
 	body := map[string]any{
 		"manifest": map[string]any{
-			"lsp": map[string]any{
-				"command":  "my-lsp",
-				"language": "mylang",
-				"initParamsOverride": map[string]any{
-					"customOption": true,
+			"capabilities": map[string]any{
+				"lsp": map[string]any{
+					"command":  "my-lsp",
+					"language": "mylang",
+					"initParamsOverride": map[string]any{
+						"customOption": true,
+					},
 				},
 			},
 		},
@@ -464,11 +468,11 @@ func TestHandleUpdate_LSPConfig_CreateNilLSP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if updated.Manifest.LSP == nil {
+	if updated.Manifest.Capabilities.GetLSP() == nil {
 		t.Fatal("LSP config is nil after update")
 	}
-	if updated.Manifest.LSP.Command != "my-lsp" {
-		t.Errorf("Command = %q, want my-lsp", updated.Manifest.LSP.Command)
+	if updated.Manifest.Capabilities.GetLSP().Command != "my-lsp" {
+		t.Errorf("Command = %q, want my-lsp", updated.Manifest.Capabilities.GetLSP().Command)
 	}
 }
 

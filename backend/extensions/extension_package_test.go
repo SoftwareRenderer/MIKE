@@ -13,8 +13,8 @@ func findExtensionsDir(t *testing.T) string {
 	t.Helper()
 	// Package is at backend/extensions/, repo root is ../../..  from here
 	candidates := []string{
-		"../../extensions",                         // from backend/extensions/
-		"../../../../extensions",                   // deeper nesting
+		"../../extensions",                              // from backend/extensions/
+		"../../../../extensions",                        // deeper nesting
 		filepath.Join(os.Getenv("MIKE_EXTENSIONS"), ""), // env override
 	}
 	for _, c := range candidates {
@@ -52,11 +52,11 @@ func TestExtensionPackage_TypescriptLanguageServer_Manifest(t *testing.T) {
 	}
 
 	// LSP config must be present
-	if manifest.LSP == nil {
+	if manifest.Capabilities.GetLSP() == nil {
 		t.Fatal("LSP config is nil")
 	}
 
-	lsp := manifest.LSP
+	lsp := manifest.Capabilities.GetLSP()
 	if lsp.Command == "" {
 		t.Error("LSP.Command is empty")
 	}

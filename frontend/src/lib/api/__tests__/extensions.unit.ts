@@ -81,7 +81,7 @@ describe('extensions API', () => {
             name: 'my-lsp',
             type: 'lsp' as const,
             version: '1.0.0',
-            manifest: { display_name: 'My LSP', description: 'Test', author: 'Test', deprecated: false, lsp: { command: 'mylsp', args: [], extensions: ['my'], language: 'my' } },
+            manifest: { display_name: 'My LSP', description: 'Test', author: 'Test', version: '1.0.0', capabilities: { lsp: { command: 'mylsp', args: [], extensions: ['my'], language: 'my' } } },
         };
         const result = { id: 'my-lsp-1', ...data, enabled: true, running: false };
         mockSuccess(result, 201);

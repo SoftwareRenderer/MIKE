@@ -43,11 +43,14 @@ func makeTestLSPExt(name, lang string) *extensions.Extension {
 		Type:    extensions.ExtensionTypeLSP,
 		Manifest: extensions.ExtensionManifest{
 			DisplayName: name,
-			LSP: &extensions.LSPConfig{
-				Command:    lang + "pls",
-				Args:       []string{"-mode=stdio"},
-				Extensions: extns,
-				Language:   lang,
+			Version:     "1.0.0",
+			Capabilities: &extensions.Capabilities{
+				LSP: &extensions.LSPConfig{
+					Command:    lang + "pls",
+					Args:       []string{"-mode=stdio"},
+					Extensions: extns,
+					Language:   lang,
+				},
 			},
 		},
 		Enabled: true,
@@ -171,7 +174,7 @@ func TestExtensionRegistry_GetConfig(t *testing.T) {
 	}
 
 	ext := makeTestLSPExt("go", "go")
-	ext.Manifest.LSP.InitParamsOverride = map[string]any{
+	ext.Manifest.Capabilities.GetLSP().InitParamsOverride = map[string]any{
 		"hover": map[string]any{"actions": map[string]any{"enabled": true}},
 	}
 	if err := store.Create(ext); err != nil {
@@ -218,7 +221,10 @@ func TestExtensionRegistry_NoLSPConfig(t *testing.T) {
 		Type:    extensions.ExtensionTypeLSP,
 		Manifest: extensions.ExtensionManifest{
 			DisplayName: "No LSP",
-			LSP:         nil, // No LSP config
+			Version:     "1.0.0",
+			Capabilities: &extensions.Capabilities{
+				LSP: nil, // No LSP config
+			},
 		},
 		Enabled: true,
 	}
@@ -242,7 +248,7 @@ func TestToServerConfig_TypescriptTsserverPath(t *testing.T) {
 	// Create a TypeScript extension WITHOUT tsserver.path in InitParamsOverride
 	// (simulating an old manifest from the registry)
 	ext := makeTestLSPExt("typescript-language-server", "typescript")
-	ext.Manifest.LSP.InitParamsOverride = map[string]any{
+	ext.Manifest.Capabilities.GetLSP().InitParamsOverride = map[string]any{
 		"preferences": map[string]any{
 			"includeCompletionsForModuleExports": true,
 		},
@@ -294,7 +300,7 @@ func TestToServerConfig_TypescriptNilInitParams(t *testing.T) {
 
 	// Create a TypeScript extension with NO InitParamsOverride at all
 	ext := makeTestLSPExt("typescript-language-server", "typescript")
-	ext.Manifest.LSP.InitParamsOverride = nil
+	ext.Manifest.Capabilities.GetLSP().InitParamsOverride = nil
 	if err := store.Create(ext); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -334,7 +340,7 @@ func TestToServerConfig_NonTypescriptNoOverride(t *testing.T) {
 
 	// Create a non-TypeScript extension
 	ext := makeTestLSPExt("gopls", "go")
-	ext.Manifest.LSP.InitParamsOverride = map[string]any{
+	ext.Manifest.Capabilities.GetLSP().InitParamsOverride = map[string]any{
 		"staticcheck": true,
 	}
 	if err := store.Create(ext); err != nil {
