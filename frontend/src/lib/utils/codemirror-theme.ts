@@ -34,6 +34,7 @@ export const darkTheme = EditorView.theme({
         lineHeight: '1.5',
         tabSize: 4,
         overflow: 'auto',
+        position: 'relative',
     },
     '.cm-gutters': {
         backgroundColor: 'var(--color-surface-1)',
@@ -125,6 +126,24 @@ export const darkTheme = EditorView.theme({
     '.cm-completionIconInfo': {
         color: '#58A6FF',
     },
+    '.cm-sticky-scroll': {
+        position: 'absolute',
+        top: '0',
+        left: '0',
+        zIndex: '1000',
+        display: 'none',
+        backgroundColor: 'rgba(30, 30, 46, 0.95)',
+        borderBottom: '1px solid var(--color-border)',
+        padding: '2px 10px 2px 6px',
+        fontFamily: 'var(--font-mono)',
+        fontSize: '14px',
+        lineHeight: '1.5',
+        color: '#C9D1D9',
+        pointerEvents: 'none',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+    },
 });
 
 export const darkSyntax = syntaxHighlighting(darkHighlight);
@@ -163,6 +182,7 @@ export const lightTheme = EditorView.theme({
         lineHeight: '1.5',
         tabSize: 4,
         overflow: 'auto',
+        position: 'relative',
     },
     '.cm-gutters': {
         backgroundColor: 'var(--color-surface-1)',
@@ -253,6 +273,24 @@ export const lightTheme = EditorView.theme({
     },
     '.cm-completionIconInfo': {
         color: '#0969DA',
+    },
+    '.cm-sticky-scroll': {
+        position: 'absolute',
+        top: '0',
+        left: '0',
+        zIndex: '1000',
+        display: 'none',
+        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+        borderBottom: '1px solid var(--color-border)',
+        padding: '2px 10px 2px 6px',
+        fontFamily: 'var(--font-mono)',
+        fontSize: '14px',
+        lineHeight: '1.5',
+        color: '#24292F',
+        pointerEvents: 'none',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
     },
 });
 
