@@ -150,6 +150,7 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     let activeThreadId = $state('');
 
     let stopping = $state(false);
+    let isSummarizing = $state(false);
     // isLoading: true when LLM is actively streaming tokens OR task is in running state.
     // After page refresh, streamingIds is empty but execution_state preserves running state.
     let streamingIds = getStreamingContext();
@@ -165,10 +166,11 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     // Show "Restart Task" button when task is in_progress, stalled (no active LLM, not queued),
     // has at least one assistant response (was actually started before),
     // and the last message is from the user (agent hasn't responded yet).
-    // Hidden for "pending" tasks (idle + in_progress, never started — no assistant messages).
+    // Hidden during summarization so the ChatForm (with spinner) stays visible.
     let showRestartButton = $derived(
         taskStatus === 'in_progress' &&
         !isLoading &&
+        !isSummarizing &&
         queuePosition === 0 &&
         entries.length > 0 &&
         entries[entries.length - 1].role === 'user' &&
@@ -177,9 +179,11 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
 
     // Show "Resume" button in review bar when the last message is from the user
     // (agent hasn't responded yet — user sent a follow-up before moving to review).
+    // Hidden during summarization so the ChatForm (with spinner) stays visible.
     let showResumeButton = $derived(
         taskStatus === 'review' &&
         !isLoading &&
+        !isSummarizing &&
         entries.length > 0 &&
         entries[entries.length - 1].role === 'user'
     );
@@ -625,7 +629,13 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         // Add message optimistically with current thread context
         const entryId = genId();
         const isOfflineNow = getOfflineStatus();
-        stream.state.entries = [...stream.state.entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow }];
+        const isQueuedForSummarize = isSummarizing;
+        stream.state.entries = [...stream.state.entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow || isQueuedForSummarize }];
+        // If queued for summarization, don't show awaiting spinner — executor hasn't started yet.
+        // The executor will be started after summarization completes and process this message.
+        if (isQueuedForSummarize) {
+            stream.state.awaitingResponse = false;
+        }
         // Send with model info for lazy-start
         if (!await sendWithTracking(msg, attachments, false, entryId)) {
             const errorMsg = lastSentMessage ? 'Failed to send message' : 'Failed to send message';
@@ -691,7 +701,6 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         }
     }
 
-    let isSummarizing = $state(false);
     let summarizeController: AbortController | null = null;
 
     async function handleSummarize() {
@@ -730,6 +739,8 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         } finally {
             isSummarizing = false;
             summarizeController = null;
+            // Clear queued flags on entries that were queued during summarization.
+            stream.state.entries = stream.state.entries.map(e => e.queued ? { ...e, queued: false } : e);
         }
     }
 

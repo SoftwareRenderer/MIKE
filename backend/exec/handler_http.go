@@ -278,6 +278,11 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 
 	previousSummary := extractPrevSummary(messages)
 
+	// Mark active so ForwardUserMessage blocks lazy-start (prevents concurrent LLM calls).
+	te.activeDBSummarize.mu.Lock()
+	te.activeDBSummarize.tasks[taskID] = struct{}{}
+	te.activeDBSummarize.mu.Unlock()
+
 	sumResult, err := te.summarizeContext(r.Context(), messages, task.LlamaServerURL, task.ModelName, previousSummary)
 	if err != nil {
 		log.Printf("[summarize] task=%s manual summarization failed: %v", taskID, err)
@@ -314,6 +319,13 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 	}})
 
 	log.Printf("[summarize] task=%s manual summarization complete (messages preserved, LLM context compressed)", taskID)
+
+	// Clear the active flag, then start executor to process any messages that
+	// arrived during summarization (they were blocked from lazy-start).
+	te.activeDBSummarize.mu.Lock()
+	delete(te.activeDBSummarize.tasks, taskID)
+	te.activeDBSummarize.mu.Unlock()
+	te.handleLazyStart(projectID, taskID, "", "", "", "", false)
 
 	// Return updated token estimate
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{

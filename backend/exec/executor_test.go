@@ -729,3 +729,52 @@ func pkgagentPersistEntry(toolName, argsJSON string) string {
 	b, _ := json.Marshal(data)
 	return string(b)
 }
+
+func TestForwardUserMessage_BlocksLazyStartDuringDBSummarize(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	te.gate = NewConcurrencyGate()
+	// Initialize the activeDBSummarize map (setupExecutorWithGit doesn't call NewTaskExecutor)
+	te.activeDBSummarize.tasks = make(map[string]struct{})
+	taskID := "test-task"
+
+	// Create a task
+	task := &types.Task{
+		ID:             taskID,
+		ProjectID:      projectID,
+		Prompt:         "Test task",
+		Status:         "backlog",
+		ExecutionState: "idle",
+		LlamaServerURL: "http://localhost:8080/v1",
+		ModelName:      "test-model",
+	}
+	te.store.CreateTask(task)
+
+	// Simulate an active DB-based summarize
+	te.activeDBSummarize.mu.Lock()
+	te.activeDBSummarize.tasks[taskID] = struct{}{}
+	te.activeDBSummarize.mu.Unlock()
+
+	// Forward a user message — should NOT trigger lazy-start
+	te.ForwardUserMessage(projectID, taskID, stream.UserMessage{
+		Content:   "Hello",
+		ModelName: "test-model",
+		ServerURL: "http://localhost:8080/v1",
+	})
+
+	// Give a brief moment for any goroutine to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify no executor was created (lazy-start was blocked)
+	te.taskMu.Lock()
+	_, exists := te.tasks[taskID]
+	te.taskMu.Unlock()
+	if exists {
+		t.Fatal("executor should not be created during active DB-based summarize")
+	}
+
+	// Clear the active summarize flag
+	te.activeDBSummarize.mu.Lock()
+	delete(te.activeDBSummarize.tasks, taskID)
+	te.activeDBSummarize.mu.Unlock()
+}
+

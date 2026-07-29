@@ -351,16 +351,19 @@
                     {/each}
                 </div>
             {/if}
-            <div class="message-bubble">
-                <div class="message-text">{@html userHtml}</div>
+            <div class="message-row">
                 {#if queued}
-                    <span class="queued-indicator" title="Queued (will send when reconnected)">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <span class="queued-indicator" title="Queued — will process after summarization completes">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <circle cx="12" cy="12" r="10"/>
                             <polyline points="12 6 12 12 16 14"/>
                         </svg>
+                        <span>Queued</span>
                     </span>
                 {/if}
+                <div class="message-bubble">
+                    <div class="message-text">{@html userHtml}</div>
+                </div>
             </div>
             <MessageActions
                 variant="user"
@@ -540,11 +543,22 @@
         align-items: flex-end;
         gap: 6px;
     }
-    .queued-indicator {
-        flex-shrink: 0;
-        color: var(--color-text-secondary);
+    .message-row {
         display: flex;
         align-items: center;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+    .queued-indicator {
+        flex-shrink: 0;
+        color: var(--color-warning, #f59e0b);
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
     }
     .assistant .message-bubble {
         max-width: 100%;
