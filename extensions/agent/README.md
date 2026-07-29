@@ -1,6 +1,6 @@
 # Agent Extensions
 
-The agent extensions system allows MIKE to run third-party AI coding agents (like [Pi](https://pi.dev/)) as subprocesses, while keeping all protocol logic inside a WASM adapter. The backend knows nothing about any specific agent protocol — it only interacts with the generic `AgentAdapter` interface.
+The agent extensions system allows [MIKE](https://getmike.dev) to run third-party AI coding agents (like [Pi](https://pi.dev/)) as subprocesses, while keeping all protocol logic inside a WASM adapter. The backend knows nothing about any specific agent protocol — it only interacts with the generic `AgentAdapter` interface.
 
 ## Architecture
 
