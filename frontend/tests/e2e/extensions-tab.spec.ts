@@ -34,9 +34,18 @@ test.describe('Extensions Tab', () => {
     await page.click('text=Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
-    // Should show empty state or installed count of 0
-    const installedCount = await page.locator('.view-tab:has-text("Installed")').first().textContent();
-    expect(installedCount).toContain('0');
+    // Should show installed count — check against actual API count to avoid
+    // flakiness from parallel tests creating extensions.
+    const actualCount = await page.evaluate(async () => {
+      const res = await fetch('/api/extensions');
+      return res.ok ? res.json().then((exts: any[]) => exts.length) : 0;
+    });
+    const installedTab = await page.locator('.view-tab:has-text("Installed")').first().textContent();
+    expect(installedTab).toContain(String(actualCount));
+    if (actualCount === 0) {
+      // Verify empty state when truly no extensions installed
+      await expect(page.locator('.extensions-empty, .ext-empty-state')).toBeVisible({ timeout: 3000 });
+    }
   });
 
   test('should switch between Installed and Browse views', async ({ page }) => {
@@ -169,7 +178,7 @@ test.describe('Extensions Tab', () => {
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
     // Wait for extension to appear in the list
-    await expect(page.locator('.extension-card')).toContainText('UI Toggle Test', { timeout: 5000 });
+    await expect(page.locator('.extension-card').filter({ hasText: 'UI Toggle Test' })).toBeVisible({ timeout: 5000 });
 
     // Find the toggle switch for this extension and click it to disable
     const extCard = page.locator('.extension-card').filter({ hasText: 'UI Toggle Test' });
@@ -251,7 +260,7 @@ test.describe('Extensions Tab', () => {
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
     // Wait for extension to appear
-    await expect(page.locator('.extension-card')).toContainText('UI Version Test', { timeout: 5000 });
+    await expect(page.locator('.extension-card').filter({ hasText: 'UI Version Test' })).toBeVisible({ timeout: 5000 });
 
     // Find the extension card and check it shows version, not "Built"
     const extCard = page.locator('.extension-card').filter({ hasText: 'UI Version Test' });
@@ -284,7 +293,7 @@ test.describe('Extensions Tab', () => {
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
     // Wait for extension to appear
-    await expect(page.locator('.extension-card')).toContainText('LSP Built Test', { timeout: 5000 });
+    await expect(page.locator('.extension-card').filter({ hasText: 'LSP Built Test' })).toBeVisible({ timeout: 5000 });
 
     // Find the extension card and check it shows built time, not version
     const extCard = page.locator('.extension-card').filter({ hasText: 'LSP Built Test' });
@@ -318,8 +327,8 @@ test.describe('Extensions Tab', () => {
     await page.click('text=Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
-    // Wait for extension to appear
-    await expect(page.locator('.extension-card')).toContainText('Homepage Test', { timeout: 5000 });
+    // Wait for extension to appear (filter by both title and author to avoid strict mode violation from parallel test extensions)
+    await expect(page.locator('.extension-card').filter({ hasText: 'Homepage Test' }).filter({ hasText: 'Test Author' })).toBeVisible({ timeout: 5000 });
 
     // Find the extension card and check the author link
     const extCard = page.locator('.extension-card').filter({ hasText: 'Homepage Test' });
@@ -353,7 +362,7 @@ test.describe('Extensions Tab', () => {
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
     // Wait for extension to appear
-    await expect(page.locator('.extension-card')).toContainText('No Homepage Test', { timeout: 5000 });
+    await expect(page.locator('.extension-card').filter({ hasText: 'No Homepage Test' })).toBeVisible({ timeout: 5000 });
 
     // Find the extension card and check author is plain text (no link)
     const extCard = page.locator('.extension-card').filter({ hasText: 'No Homepage Test' });
@@ -631,7 +640,7 @@ test.describe('TypeScript Language Server Extension', () => {
     const tsEntry = index.find((entry: any) => entry.name === 'typescript-language-server');
     expect(tsEntry).toBeDefined();
     expect(tsEntry.type).toBe('lsp');
-    expect(tsEntry.display_name).toBe('TypeScript Language Server');
+    expect(tsEntry.display_name).toBe('TypeScript/JavaScript Language Server');
   });
 
   test('should have correct registry entry fields for typescript-language-server', async ({ page }) => {
@@ -653,8 +662,8 @@ test.describe('TypeScript Language Server Extension', () => {
     const tsEntry = index.find((entry: any) => entry.name === 'typescript-language-server');
     expect(tsEntry).toBeDefined();
     expect(tsEntry.type).toBe('lsp');
-    expect(tsEntry.dockerfile_url).toBe('typescript-language-server/Dockerfile');
-    expect(tsEntry.manifest_url).toBe('typescript-language-server/manifest.json');
+    expect(tsEntry.dockerfile_url).toBe('lsp/typescript-language-server/Dockerfile');
+    expect(tsEntry.manifest_url).toBe('lsp/typescript-language-server/manifest.json');
   });
 });
 

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { getProjectId, csrfFetch } from './helpers';
 
-test.describe.configure({ mode: 'parallel' });
+test.describe.configure({ mode: 'serial' });
 
 test.describe('UI Extension CSS URL', () => {
   test.beforeEach(async ({ page }) => {
@@ -20,15 +20,20 @@ test.describe('UI Extension CSS URL', () => {
           display_name: 'CSS Test Extension',
           description: 'Test CSS URL',
           author: 'Test',
-          css: {
-            css_url: '/extensions/test/test.css',
+          capabilities: {
+            css: {
+              css_url: '/extensions/test/test.css',
+            },
           },
         },
       },
     });
 
     expect(result.ok).toBe(true);
-    expect(result.data.manifest.css.css_url).toBe('/extensions/test/test.css');
+    expect(result.data.manifest.capabilities.css.css_url).toBe('/extensions/test/test.css');
+
+    // Cleanup: delete the test extension
+    await csrfFetch(page, `/api/extensions/${result.data.id}`, { method: 'DELETE' });
   });
 
   test('should inject stylesheet link when CSS extension is enabled', async ({ page }) => {
@@ -43,8 +48,10 @@ test.describe('UI Extension CSS URL', () => {
           display_name: 'CSS Link Test',
           description: 'Test',
           author: 'Test',
-          css: {
-            css_url: '/extensions/test/test.css',
+          capabilities: {
+            css: {
+              css_url: '/extensions/test/test.css',
+            },
           },
         },
       },
@@ -86,8 +93,10 @@ test.describe('UI Extension CSS URL', () => {
           display_name: 'CSS Toggle Test',
           description: 'Test',
           author: 'Test',
-          css: {
-            css_url: '/extensions/test/test.css',
+          capabilities: {
+            css: {
+              css_url: '/extensions/test/test.css',
+            },
           },
         },
       },
@@ -116,17 +125,18 @@ test.describe('UI Extension CSS URL', () => {
     // Reload to pick up the change
     await page.reload();
     await page.waitForSelector('.card', { timeout: 10000 });
-    await page.waitForTimeout(1000);
+
+    // Wait for extensions to be re-loaded and theme CSS to be updated
+    await expect(async () => {
+      const cached = await page.evaluate(() => localStorage.getItem('kanban-theme-css'));
+      expect(cached).toBeNull();
+    }).toPass({ timeout: 5000 });
 
     // Verify link is removed
     hasLink = await page.evaluate(() => {
       return document.getElementById('kanban-theme-stylesheet') !== null;
     });
     expect(hasLink).toBe(false);
-
-    // Verify localStorage is cleared
-    const cached = await page.evaluate(() => localStorage.getItem('kanban-theme-css'));
-    expect(cached).toBeNull();
 
     // Cleanup
     await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
@@ -144,8 +154,10 @@ test.describe('UI Extension CSS URL', () => {
           display_name: 'CSS Persist Test',
           description: 'Test',
           author: 'Test',
-          css: {
-            css_url: '/extensions/test/persist.css',
+          capabilities: {
+            css: {
+              css_url: '/extensions/test/persist.css',
+            },
           },
         },
       },

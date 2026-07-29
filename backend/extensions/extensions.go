@@ -1,6 +1,8 @@
 package extensions
 
 import (
+	"encoding/json"
+	"sort"
 	"strings"
 
 	"kanban/backend/types"
@@ -211,6 +213,45 @@ type ConfigSchema struct {
 	Type       string       `json:"type"`
 	Properties []SchemaProp `json:"properties,omitempty"`
 	Required   []string     `json:"required,omitempty"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for ConfigSchema.
+// It accepts properties as either a JSON object (standard JSON Schema format
+// where keys are property names) or a JSON array (internal representation).
+func (s *ConfigSchema) UnmarshalJSON(data []byte) error {
+	type alias ConfigSchema
+	var raw struct {
+		Type       string          `json:"type"`
+		Properties json.RawMessage `json:"properties,omitempty"`
+		Required   []string        `json:"required,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	s.Type = raw.Type
+	s.Required = raw.Required
+
+	if len(raw.Properties) == 0 {
+		return nil
+	}
+
+	// Try to unmarshal as JSON object (standard JSON Schema format)
+	var propsMap map[string]SchemaProp
+	if err := json.Unmarshal(raw.Properties, &propsMap); err == nil {
+		s.Properties = make([]SchemaProp, 0, len(propsMap))
+		for key, prop := range propsMap {
+			prop.Key = key
+			s.Properties = append(s.Properties, prop)
+		}
+		// Sort by key for deterministic order
+		sort.Slice(s.Properties, func(i, j int) bool {
+			return s.Properties[i].Key < s.Properties[j].Key
+		})
+		return nil
+	}
+
+	// Fall back to array format (internal representation)
+	return json.Unmarshal(raw.Properties, &s.Properties)
 }
 
 // GetProperty returns the SchemaProp with the given key, or nil if not found.
