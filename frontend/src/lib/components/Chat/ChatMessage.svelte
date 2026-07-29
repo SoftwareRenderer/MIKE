@@ -548,6 +548,7 @@
         align-items: center;
         gap: 8px;
         justify-content: flex-end;
+        width: 100%;
     }
     .queued-indicator {
         flex-shrink: 0;
