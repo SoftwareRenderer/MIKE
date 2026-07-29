@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv } from '$lib/types';
+    import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv, SchemaProperty } from '$lib/types';
     import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage, createExtension, streamBuildProgress } from '$lib/api';
     import type { BuildProgressEvent } from '$lib/api';
     import { getConfig } from '$lib/api';
@@ -353,12 +353,13 @@
     }
 
     // Get config schema fields for an extension
-    function getConfigSchemaFields(ext: Extension): Array<{ key: string; title: string; type: string; default?: any; sensitive?: boolean; enum?: any[] }> {
+    function getConfigSchemaFields(ext: Extension): Array<{ key: string; title: string; type: string; description?: string; default?: any; sensitive?: boolean; enum?: any[] }> {
         const schema = ext.manifest.config_schema;
         if (!schema || !schema.properties) return [];
         return schema.properties.map((p: SchemaProperty) => ({
             key: p.key,
             title: p.title || p.key,
+            description: p.description,
             type: p.type || 'string',
             default: p.default,
             sensitive: p.sensitive || false,
@@ -531,9 +532,10 @@
                                             {formatBuiltAt(ext.built_at)}
                                         {/if}
                                         {#if ext.manifest.author}
-                                            · {#if ext.manifest.homepage}<a href={ext.manifest.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">{ext.manifest.author}</a>{:else}{ext.manifest.author}{/if}
+                                            · {ext.manifest.author}
                                         {/if}
                                         {#if ext.manifest.license_url} · <a href={ext.manifest.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
+                                        {#if ext.manifest.homepage} · <a href={ext.manifest.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">Website</a>{/if}
                                     </span>
                                 </div>
                                 <div class="card-actions">
@@ -867,9 +869,10 @@
                                     <span class="ext-meta">
                                         v{entry.version}
                                         {#if entry.author}
-                                            · {#if entry.homepage}<a href={entry.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">{entry.author}</a>{:else}{entry.author}{/if}
+                                            · {entry.author}
                                         {/if}
                                         {#if entry.license_url} · <a href={entry.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
+                                        {#if entry.homepage} · <a href={entry.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">Website</a>{/if}
                                     </span>
                                 </div>
                                 <div class="ext-action">
@@ -1383,13 +1386,6 @@
     .cap-detail-value {
         font-size: 0.82rem;
         color: var(--color-text-secondary);
-    }
-
-    .cap-detail-value code {
-        background: var(--color-bg-input);
-        padding: 0.1em 0.4em;
-        border-radius: 3px;
-        font-size: 0.8rem;
     }
 
     .cap-detail-tags {

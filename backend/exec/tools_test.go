@@ -861,3 +861,373 @@ func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
 		t.Errorf("unexpected error: %q", result)
 	}
 }
+
+// --- Bridge recovery tests ---
+// These test the recoverBridge callback and retry logic in executeTool.
+// Callbacks return bridge errors, recoverBridge refreshes them, and the retry succeeds.
+
+func TestExecuteTool_ReadFile_BridgeRecovery(t *testing.T) {
+	te := &TaskExecutor{}
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "hello.txt")
+	expectedContent := "hello from sandbox"
+	if err := os.WriteFile(testFile, []byte(expectedContent), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	// First read fails with bridge error, recovery refreshes the callback
+	readAttempts := 0
+	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
+		readAttempts++
+		if readAttempts == 1 {
+			return nil, fmt.Errorf("broken pipe")
+		}
+		return os.ReadFile(filepath.Join(dir, path))
+	}
+
+	recoveryCalled := false
+	state := &executionState{sandboxRead: sandboxRead}
+	state.recoverBridge = func() bool {
+		recoveryCalled = true
+		state.sandboxRead = func(_ context.Context, path string) ([]byte, error) {
+			return os.ReadFile(filepath.Join(dir, path))
+		}
+		return true
+	}
+
+	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "hello.txt"}, dir, &types.Task{}, state, nil)
+	if !ok {
+		t.Fatalf("expected success after recovery, got failure: %s", result)
+	}
+	if !recoveryCalled {
+		t.Fatal("expected recoverBridge to be called")
+	}
+	if result != expectedContent {
+		t.Errorf("unexpected content: %q, want %q", result, expectedContent)
+	}
+}
+
+func TestExecuteTool_ReadFile_NoRecoveryOnNonBridgeError(t *testing.T) {
+	te := &TaskExecutor{}
+
+	recoveryCalled := false
+	state := &executionState{
+		sandboxRead: func(_ context.Context, path string) ([]byte, error) {
+		return nil, fmt.Errorf("file not found")
+	},
+		recoverBridge: func() bool {
+			recoveryCalled = true
+			return true
+		},
+	}
+
+	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "missing.txt"}, "/tmp/worktree", &types.Task{}, state, nil)
+	if ok {
+		t.Fatalf("expected failure, got success: %s", result)
+	}
+	if recoveryCalled {
+		t.Fatal("recoverBridge should not be called for non-bridge errors")
+	}
+	if result != "Error: file not found" {
+		t.Errorf("unexpected error: %q", result)
+	}
+}
+
+func TestExecuteTool_WriteFile_BridgeRecovery(t *testing.T) {
+	te := &TaskExecutor{}
+	dir := t.TempDir()
+
+	writeAttempts := 0
+	sandboxWrite := func(_ context.Context, path, content string) error {
+		writeAttempts++
+		if writeAttempts == 1 {
+			return fmt.Errorf("broken pipe")
+		}
+		return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
+	}
+
+	recoveryCalled := false
+	state := &executionState{sandboxWrite: sandboxWrite}
+	state.recoverBridge = func() bool {
+		recoveryCalled = true
+		state.sandboxWrite = func(_ context.Context, path, content string) error {
+			return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
+		}
+		return true
+	}
+
+	result, ok := te.executeTool(context.Background(), "write_file", map[string]any{
+		"path":    "test.txt",
+		"content": "hello",
+	}, dir, &types.Task{}, state, nil)
+	if !ok {
+		t.Fatalf("expected success after recovery, got failure: %s", result)
+	}
+	if !recoveryCalled {
+		t.Fatal("expected recoverBridge to be called")
+	}
+	if !strings.Contains(result, "Wrote") {
+		t.Errorf("unexpected result: %q", result)
+	}
+	// Verify file was actually written
+	data, err := os.ReadFile(filepath.Join(dir, "test.txt"))
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("file content = %q, want %q", string(data), "hello")
+	}
+}
+
+func TestExecuteTool_Bash_BridgeRecovery(t *testing.T) {
+	te := &TaskExecutor{}
+
+	execAttempts := 0
+	sandboxExec := func(_ context.Context, command string, timeout int64) (string, error) {
+		execAttempts++
+		if execAttempts == 1 {
+			return "", fmt.Errorf("bash: send bash request: write header: write |1: broken pipe")
+		}
+		return "echo output", nil
+	}
+
+	recoveryCalled := false
+	state := &executionState{sandboxExec: sandboxExec}
+	state.recoverBridge = func() bool {
+		recoveryCalled = true
+		state.sandboxExec = func(_ context.Context, command string, timeout int64) (string, error) {
+			return "echo output", nil
+		}
+		return true
+	}
+
+	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
+		"command": "echo hello",
+	}, "/tmp/worktree", &types.Task{}, state, nil)
+	if !ok {
+		t.Fatalf("expected success after recovery, got failure: %s", result)
+	}
+	if !recoveryCalled {
+		t.Fatal("expected recoverBridge to be called")
+	}
+	if result != "echo output" {
+		t.Errorf("unexpected result: %q", result)
+	}
+}
+
+func TestExecuteTool_Bash_BridgeRecoveryStreaming(t *testing.T) {
+	te := &TaskExecutor{}
+
+	execAttempts := 0
+	sandboxExecStream := func(_ context.Context, command string, timeout int64, cb func(string)) (string, error) {
+		execAttempts++
+		if execAttempts == 1 {
+			return "", fmt.Errorf("bash: send bash request: write header: write |1: broken pipe")
+		}
+		if cb != nil {
+			cb("streamed line\n")
+		}
+		return "streamed line\n", nil
+	}
+
+	recoveryCalled := false
+	state := &executionState{sandboxExecStream: sandboxExecStream}
+	state.recoverBridge = func() bool {
+		recoveryCalled = true
+		state.sandboxExecStream = func(_ context.Context, command string, timeout int64, cb func(string)) (string, error) {
+			if cb != nil {
+				cb("streamed line\n")
+			}
+			return "streamed line\n", nil
+		}
+		return true
+	}
+
+	var streamedOutput []string
+	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
+		"command": "echo hello",
+	}, "/tmp/worktree", &types.Task{}, state, func(id, text string) {
+		streamedOutput = append(streamedOutput, text)
+	})
+	if !ok {
+		t.Fatalf("expected success after recovery, got failure: %s", result)
+	}
+	if !recoveryCalled {
+		t.Fatal("expected recoverBridge to be called")
+	}
+	if result != "streamed line\n" {
+		t.Errorf("unexpected result: %q", result)
+	}
+}
+
+func TestExecuteTool_Bash_NoRecoveryOnNonBridgeError(t *testing.T) {
+	te := &TaskExecutor{}
+
+	execAttempts := 0
+	sandboxExec := func(_ context.Context, command string, timeout int64) (string, error) {
+		execAttempts++
+		return "", fmt.Errorf("exit code 1")
+	}
+
+	recoveryCalled := false
+	state := &executionState{
+		sandboxExec: sandboxExec,
+		recoverBridge: func() bool {
+			recoveryCalled = true
+			return true
+		},
+	}
+
+	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
+		"command": "false",
+	}, "/tmp/worktree", &types.Task{}, state, nil)
+	if ok {
+		t.Fatalf("expected failure, got success: %s", result)
+	}
+	if recoveryCalled {
+		t.Fatal("recoverBridge should not be called for non-bridge errors")
+	}
+	if execAttempts != 1 {
+		t.Errorf("expected 1 exec attempt, got %d", execAttempts)
+	}
+	if !strings.Contains(result, "exit code 1") {
+		t.Errorf("unexpected result: %q", result)
+	}
+}
+
+func TestExecuteTool_EditFile_BridgeRecovery(t *testing.T) {
+	te := &TaskExecutor{}
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "test.txt")
+	originalContent := "line one\nline two\nline three"
+	if err := os.WriteFile(testFile, []byte(originalContent), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	readAttempts := 0
+	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
+		readAttempts++
+		if readAttempts == 1 {
+			return nil, fmt.Errorf("broken pipe")
+		}
+		return os.ReadFile(filepath.Join(dir, path))
+	}
+	sandboxWrite := func(_ context.Context, path, content string) error {
+		return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
+	}
+
+	recoveryCalled := false
+	state := &executionState{
+		sandboxRead:  sandboxRead,
+		sandboxWrite: sandboxWrite,
+		projectName:  "test",
+	}
+	state.recoverBridge = func() bool {
+		recoveryCalled = true
+		state.sandboxRead = func(_ context.Context, path string) ([]byte, error) {
+			return os.ReadFile(filepath.Join(dir, path))
+		}
+		state.sandboxWrite = func(_ context.Context, path, content string) error {
+			return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
+		}
+		return true
+	}
+
+	edits, _ := json.Marshal([]map[string]any{{"oldText": "line two", "newText": "modified two"}})
+	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
+		"path":  "test.txt",
+		"edits": json.RawMessage(edits),
+	}, dir, &types.Task{}, state, nil)
+	if !ok {
+		t.Fatalf("expected success after recovery, got failure: %s", result)
+	}
+	if !recoveryCalled {
+		t.Fatal("expected recoverBridge to be called")
+	}
+	if !strings.Contains(result, "Edited") {
+		t.Errorf("unexpected result: %q", result)
+	}
+	// Verify file was actually edited
+	data, err := os.ReadFile(filepath.Join(dir, "test.txt"))
+	if err != nil {
+		t.Fatalf("read edited file: %v", err)
+	}
+	if !strings.Contains(string(data), "modified two") {
+		t.Errorf("file content = %q, want to contain %q", string(data), "modified two")
+	}
+}
+
+func TestExecuteTool_EditFile_WriteBridgeRecovery(t *testing.T) {
+	te := &TaskExecutor{}
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "test.txt")
+	originalContent := "line one\nline two\nline three"
+	if err := os.WriteFile(testFile, []byte(originalContent), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
+		return os.ReadFile(filepath.Join(dir, path))
+	}
+	writeAttempts := 0
+	sandboxWrite := func(_ context.Context, path, content string) error {
+		writeAttempts++
+		if writeAttempts == 1 {
+			return fmt.Errorf("broken pipe")
+		}
+		return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
+	}
+
+	recoveryCalled := false
+	state := &executionState{
+		sandboxRead:  sandboxRead,
+		sandboxWrite: sandboxWrite,
+		projectName:  "test",
+	}
+	state.recoverBridge = func() bool {
+		recoveryCalled = true
+		// Reuse the same callback — it will succeed on 2nd call (writeAttempts == 2)
+		state.sandboxWrite = sandboxWrite
+		return true
+	}
+
+	edits, _ := json.Marshal([]map[string]any{{"oldText": "line two", "newText": "modified two"}})
+	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
+		"path":  "test.txt",
+		"edits": json.RawMessage(edits),
+	}, dir, &types.Task{}, state, nil)
+	if !ok {
+		t.Fatalf("expected success after recovery, got failure: %s", result)
+	}
+	if !recoveryCalled {
+		t.Fatal("expected recoverBridge to be called for write failure")
+	}
+	if writeAttempts != 2 {
+		t.Errorf("expected 2 write attempts, got %d", writeAttempts)
+	}
+	if !strings.Contains(result, "Edited") {
+		t.Errorf("unexpected result: %q", result)
+	}
+}
+
+func TestExecuteTool_RecoveryReturnsNil(t *testing.T) {
+	// When recoverBridge returns nil (recovery failed), the error propagates
+	te := &TaskExecutor{}
+
+	state := &executionState{
+		sandboxRead: func(_ context.Context, path string) ([]byte, error) {
+		return nil, fmt.Errorf("broken pipe")
+	},
+		recoverBridge: func() bool {
+			return false // recovery failed
+		},
+	}
+
+	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "test.txt"}, "/tmp/worktree", &types.Task{}, state, nil)
+	if ok {
+		t.Fatalf("expected failure when recovery returns nil, got success: %s", result)
+	}
+	if result != "Error: broken pipe" {
+		t.Errorf("unexpected error: %q", result)
+	}
+}

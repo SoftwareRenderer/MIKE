@@ -209,6 +209,9 @@ func formatToolAction(name, arguments string) string {
 			return "execute `" + cmd + "`"
 		}
 	case "request_review":
+		if summary, ok := args["summary"].(string); ok && summary != "" {
+			return "request a review: " + summary
+		}
 		return "request a review"
 	case "create_task":
 		return "create"
@@ -569,7 +572,7 @@ func (te *TaskExecutor) GenerateCommitMessageForTask(ctx context.Context, taskID
 	}
 	taskMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
 	conversation := BuildConversationFromTaskMessages(taskMsgs)
-	commitMsg := te.GenerateCommitMessage(ctx, taskID, diffStat, FormatConversationTurns(ExtractLastTurns(conversation, 3)))
+	commitMsg := te.GenerateCommitMessage(ctx, taskID, diffStat, FormatConversationTurns(ExtractCommitContext(conversation)))
 	// GenerateCommitMessage returns "file changes" as a generic fallback when LLM is unavailable.
 	// Use the task title instead for a more useful commit message.
 	if commitMsg == "file changes" && task.Title != "" {
@@ -616,7 +619,7 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 	}
 	taskMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
 	conversation := BuildConversationFromTaskMessages(taskMsgs)
-	turnText := FormatConversationTurns(ExtractLastTurns(conversation, 3))
+	turnText := FormatConversationTurns(ExtractCommitContext(conversation))
 	labelMessages := buildCommitMessages(diffStat, turnText)
 
 	// Collect all unique models that contributed to this task.
@@ -677,6 +680,100 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 		content = buildCommitMessageWithCoAuthors(content, models)
 		writeSSE("done", fmt.Sprintf("{\"content\":%q}", content))
 	}
+}
+
+// hasRequestReview checks if an assistant message contains a request_review tool call.
+func hasRequestReview(m *types.ChatMessage) bool {
+	for _, tc := range m.ToolCalls {
+		if tc.Function.Name == "request_review" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasStateChangingTool checks if an assistant message has a state-changing tool call
+// (edit_file, write_file, bash) that modifies the codebase.
+func hasStateChangingTool(m *types.ChatMessage) bool {
+	for _, tc := range m.ToolCalls {
+		switch tc.Function.Name {
+		case "edit_file", "write_file", "bash":
+			return true
+		}
+	}
+	return false
+}
+
+// collectToolIDs extracts tool call IDs from a set of assistant messages.
+func collectToolIDs(msgs []*types.ChatMessage) map[string]bool {
+	ids := make(map[string]bool)
+	for _, m := range msgs {
+		for _, tc := range m.ToolCalls {
+			ids[tc.ID] = true
+		}
+	}
+	return ids
+}
+
+// ExtractCommitContext extracts the first user message and the last relevant assistant
+// message from a conversation.
+func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
+	var firstUser *types.ChatMessage
+	var lastAssistant *types.ChatMessage
+	var lastRequestReview *types.ChatMessage
+
+	for i := range messages {
+		m := &messages[i]
+		if m.Role == "system" {
+			continue
+		}
+		if m.Role == "user" && firstUser == nil {
+			firstUser = m
+		}
+		if m.Role == "assistant" {
+			lastAssistant = m
+			if hasRequestReview(m) {
+				lastRequestReview = m
+			}
+		}
+	}
+
+	// Decide which assistant messages to include.
+	// Always include if it's the request_review message, or if there is no request_review.
+	// Otherwise only include if it has state-changing tool calls (edits are relevant).
+	includeLastAssistant := lastAssistant != nil &&
+		(lastAssistant == lastRequestReview || lastRequestReview == nil || hasStateChangingTool(lastAssistant))
+
+	// Collect assistant messages to include.
+	var assistants []*types.ChatMessage
+	if includeLastAssistant {
+		assistants = append(assistants, lastAssistant)
+	}
+	if lastRequestReview != nil && lastRequestReview != lastAssistant {
+		assistants = append(assistants, lastRequestReview)
+	}
+
+	toolIDSet := collectToolIDs(assistants)
+
+	var result []types.ChatMessage
+	if firstUser != nil {
+		result = append(result, *firstUser)
+	}
+	// Add assistant messages: request_review first (chronological), then last.
+	if lastRequestReview != nil && lastRequestReview != lastAssistant {
+		result = append(result, *lastRequestReview)
+	}
+	if includeLastAssistant {
+		result = append(result, *lastAssistant)
+	}
+	// Include tool result messages for the included assistants' tool calls.
+	for i := range messages {
+		m := &messages[i]
+		if m.Role == "tool" && toolIDSet[m.ToolCallID] {
+			result = append(result, *m)
+		}
+	}
+	return result
 }
 
 // ExtractLastTurns extracts the last N turns (user + assistant pairs, including tool results) from a conversation.
