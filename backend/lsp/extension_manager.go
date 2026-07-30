@@ -111,6 +111,20 @@ func NewExtensionLSPManager(extStore *extensions.ExtensionStore, extSandbox *ext
 	}
 }
 
+// GetMountPath returns the container mount path for a given host workspace path.
+// Returns the host path if no mapping is found.
+func (m *ExtensionLSPManager) GetMountPath(workspacePath string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, sc := range m.clients {
+		if containerPath, ok := sc.projectMounts[workspacePath]; ok {
+			return containerPath
+		}
+	}
+	return workspacePath
+}
+
 // Close stops the manager and removes all client state.
 func (m *ExtensionLSPManager) Close() {
 	m.mu.Lock()

@@ -455,6 +455,20 @@ func (sm *ExtensionSandboxManager) Close() {
 	}
 }
 
+// GetMountPath returns the container mount path for a given host workspace path.
+// Returns the host path if no mapping is found.
+func (sm *ExtensionSandboxManager) GetMountPath(workspacePath string) string {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	for _, state := range sm.states {
+		if containerPath, ok := state.projectMounts[workspacePath]; ok {
+			return containerPath
+		}
+	}
+	return workspacePath
+}
+
 // IsRunning checks if an extension sandbox is running.
 func (sm *ExtensionSandboxManager) IsRunning(extID string) bool {
 	sm.mu.Lock()
