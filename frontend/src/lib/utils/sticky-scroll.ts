@@ -60,7 +60,7 @@ function findStickyHeader(
 
     let result: SectionHeader | undefined;
     for (const header of headers) {
-        if (header.line <= topLine && topLine < header.endLine) {
+        if (header.line <= topLine && topLine < header.endLine - 3) {
             result = header;
         } else if (header.line > topLine) {
             break;
