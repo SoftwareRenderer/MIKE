@@ -61,7 +61,7 @@ func (te *TaskExecutor) AgentRegistry() *agent.AgentRegistry {
 }
 
 type summarizeRequest struct {
-	ctx      context.Context // HTTP request context — cancelled when user clicks ✕ or new request arrives
+	ctx      context.Context // cancelled when user clicks ✕ or new request arrives
 	resultCh chan error      // receives ok/err from the loop
 	cancel   context.CancelFunc
 }
