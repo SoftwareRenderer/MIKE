@@ -40,64 +40,80 @@ type sandboxClient struct {
 	projectMounts map[string]string
 }
 
+// translateURIs recursively translates file URIs in the provided data.
+// If toContainer is true, it translates host paths to container paths using projectMounts.
+// If toContainer is false, it translates container paths back to host paths.
+func translateURIs(val any, workspacePath string, projectMounts map[string]string, toContainer bool) any {
+	switch v := val.(type) {
+	case string:
+		if !strings.HasPrefix(v, "file://") {
+			return v
+		}
+		path := strings.TrimPrefix(v, "file://")
+		absWorkspace, _ := filepath.Abs(workspacePath)
+
+		if toContainer {
+			// Host -> Container
+			if strings.HasPrefix(path, absWorkspace) {
+				mount := "/mnt/" + filepath.Base(absWorkspace)
+				return "file://" + strings.Replace(path, absWorkspace, mount, 1)
+			}
+			for host, container := range projectMounts {
+				if strings.HasPrefix(path, host) {
+					return "file://" + strings.Replace(path, host, container, 1)
+				}
+			}
+		} else {
+			// Container -> Host
+			for host, container := range projectMounts {
+				if strings.HasPrefix(path, container) {
+					return "file://" + strings.Replace(path, container, host, 1)
+				}
+			}
+			if strings.HasPrefix(path, "/mnt/"+filepath.Base(absWorkspace)) {
+				return "file://" + strings.Replace(path, "/mnt/"+filepath.Base(absWorkspace), absWorkspace, 1)
+			}
+		}
+		return v
+	case map[string]any:
+		for k, val := range v {
+			v[k] = translateURIs(val, workspacePath, projectMounts, toContainer)
+		}
+		return v
+	case []any:
+		for i, val := range v {
+			v[i] = translateURIs(val, workspacePath, projectMounts, toContainer)
+		}
+		return v
+	default:
+		return v
+	}
+}
+
 // translateURIsToContainer translates file URIs from host paths to container paths.
-// Uses project-based mounts: each project at /mnt/<project-dirname>.
-// E.g., /home/user/projects/kanban mounted at /mnt/kanban means:
-//
-//	file:///home/user/projects/kanban/main.go -> file:///mnt/kanban/main.go
 func translateURIsToContainer(msg json.RawMessage, workspacePath string, projectMounts map[string]string) json.RawMessage {
-	if len(projectMounts) == 0 {
+	var data any
+	if err := json.Unmarshal(msg, &data); err != nil {
 		return msg
 	}
-	absWorkspace, err := filepath.Abs(workspacePath)
-	if err != nil {
-		return msg
+	translated := translateURIs(data, workspacePath, projectMounts, true)
+	if b, err := json.Marshal(translated); err == nil {
+		return b
 	}
-	result := string(msg)
-	// Try each project mount mapping
-	for hostPath, containerPath := range projectMounts {
-		oldPrefix := "file://" + hostPath
-		newPrefix := "file://" + containerPath
-		result = strings.ReplaceAll(result, oldPrefix, newPrefix)
-	}
-	// Fallback: try workspace path directly
-	if result == string(msg) {
-		oldPrefix := "file://" + absWorkspace
-		newPrefix := "file:///mnt/" + filepath.Base(absWorkspace)
-		result = strings.ReplaceAll(result, oldPrefix, newPrefix)
-	}
-	if result == string(msg) {
-		return msg // no change
-	}
-	return json.RawMessage(result)
+	return msg
 }
 
 // translateURIsToHost translates file URIs from container paths back to host paths.
 func translateURIsToHost(msg json.RawMessage, workspacePath string, projectMounts map[string]string) json.RawMessage {
-	if len(projectMounts) == 0 {
+	var data any
+	if err := json.Unmarshal(msg, &data); err != nil {
 		return msg
 	}
-	absWorkspace, err := filepath.Abs(workspacePath)
-	if err != nil {
-		return msg
+	translated := translateURIs(data, workspacePath, projectMounts, false)
+	if b, err := json.Marshal(translated); err == nil {
+		return b
 	}
-	result := string(msg)
-	// Try each project mount mapping (reverse)
-	for hostPath, containerPath := range projectMounts {
-		oldPrefix := "file://" + containerPath
-		newPrefix := "file://" + hostPath
-		result = strings.ReplaceAll(result, oldPrefix, newPrefix)
-	}
-	// Fallback: try /mnt/<basename> → workspace
-	if result == string(msg) {
-		oldPrefix := "file:///mnt/" + filepath.Base(absWorkspace)
-		newPrefix := "file://" + absWorkspace
-		result = strings.ReplaceAll(result, oldPrefix, newPrefix)
-	}
-	if result == string(msg) {
-		return msg // no change
-	}
-	return json.RawMessage(result)
+	return msg
 }
 
 // NewExtensionLSPManager creates a new ExtensionLSPManager.
