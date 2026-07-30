@@ -150,6 +150,10 @@ func (m *ExtensionLSPManager) Close() {
 	m.mu.Unlock()
 }
 
+func (m *ExtensionLSPManager) GetRegistry() *ExtensionRegistry {
+	return &ExtensionRegistry{extStore: m.extStore}
+}
+
 // GetOrCreate gets or creates an LSP connection for the given workspace and language.
 // It looks up the matching extension by file extension and starts the LSP server in the sandbox.
 func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	osexec "os/exec"
 	"regexp"
 	"strings"
@@ -1877,9 +1878,7 @@ func (te *TaskExecutor) generateBranchName(task *types.Task, taskID, projectID s
 // E.g. "Fix login bug #123" -> "fix-login-bug-123"
 // The slug is capped so that "task/" + slug fits within maxBranchName (50 chars).
 func slugifyBranchName(title string) string {
-	// Convert to lowercase
 	s := strings.ToLower(title)
-	// Replace non-alphanumeric chars (except hyphens) with hyphens
 	var result []rune
 	for _, r := range s {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
@@ -1888,11 +1887,8 @@ func slugifyBranchName(title string) string {
 			result = append(result, '-')
 		}
 	}
-	// Trim leading/trailing hyphens
 	out := string(result)
 	out = strings.Trim(out, "-")
-	// Truncate so "task/" + slug fits within maxBranchName.
-	// If the slug exceeds this, the caller falls back to the task ID.
 	slugMax := maxBranchName - len("task/")
 	if len(out) > slugMax {
 		out = out[:slugMax]
@@ -1900,12 +1896,115 @@ func slugifyBranchName(title string) string {
 	return out
 }
 
-// agentSandboxHash returns a stable string representation of an AgentSandbox
-// for change detection. Returns empty string if nil.
+func agentSandboxHash(sb *types.AgentSandbox) string {
+	if sb == nil {
 func agentSandboxHash(sb *types.AgentSandbox) string {
 	if sb == nil {
 		return ""
 	}
 	b, _ := json.Marshal(sb)
 	return string(b)
+}
+
+func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, taskID, filePath string) {
+	go func() {
+		ext := filepath.Ext(filePath)
+		if ext == "" {
+			return
+		}
+		lang := strings.TrimPrefix(ext, ".")
+		registry := te.lspMgr.GetRegistry()
+		cfg := registry.Lookup(filePath)
+		if cfg == nil {
+			return
+		}
+		worktreePath, err := te.worktreeMgr.WorktreePath(taskID)
+		if err != nil {
+			return
+		}
+		proc, err := te.lspMgr.GetOrCreate(worktreePath, lang, cfg)
+		if err != nil {
+			return
+		}
+		defer te.lspMgr.Release(worktreePath, lang)
+		content, err := os.ReadFile(filepath.Join(worktreePath, filePath))
+		if err != nil {
+			return
+		}
+		absPath := filepath.Join(worktreePath, filePath)
+		uri := "file://" + absPath
+		didOpen := map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "textDocument/didOpen",
+			"params": map[string]any{
+				"textDocument": map[string]any{"uri": uri, "version": 1},
+				"content":      string(content),
+			},
+		}
+		msg, _ := json.Marshal(didOpen)
+		if err := te.lspMgr.SendToServer(proc, msg); err != nil {
+			return
+		}
+		timeout := time.After(5 * time.Second)
+		serverCh := te.lspMgr.ServerMessageCh()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timeout:
+				return
+			case raw, ok := <-serverCh:
+				if !ok {
+					return
+				}
+				var envelope struct {
+					Method string "json:\"method\""
+					Params struct {
+						Uri          string "json:\"uri\""
+						Diagnostics []struct {
+							Range struct {
+								Start struct {
+									Line int "json:\"line\""
+								} "json:\"start\""
+							} "json:\"range\""
+							Message string "json:\"message\""
+							Severity int    "json:\"severity\""
+						} "json:\"diagnostics\""
+					} "json:\"params\""
+				}
+				if err := json.Unmarshal(raw, &envelope); err != nil {
+					continue
+				}
+				if envelope.Method != "textDocument/publishDiagnostics" || envelope.Params.Uri != uri {
+					continue
+				}
+				var errors []string
+				for _, d := range envelope.Params.Diagnostics {
+					if d.Severity <= 1 {
+						errors = append(errors, fmt.Sprintf("Line %d: %s", d.Range.Start.Line+1, d.Message))
+					}
+				}
+				if len(errors) > 0 {
+					errMsg := fmt.Sprintf("LSP Error in %s:\n%s", filePath, strings.Join(errors, "\n"))
+					task, _ := te.store.GetTaskByTaskID(taskID)
+					if task != nil {
+						msgID := uuid.New().String()
+						_ = te.store.CreateTaskMessage(&types.TaskMessage{
+							ID: msgID, TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "user", Content: errMsg, CreatedAt: time.Now().UTC(),
+						})
+						te.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
+						te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{
+							Type: types.WSTypeUserMessage,
+							Data: map[string]any{
+								"id":      msgID,
+								"role":    "user",
+								"content": errMsg,
+							},
+						})
+					}
+				}
+				return
+			}
+		}
+	}()
 }

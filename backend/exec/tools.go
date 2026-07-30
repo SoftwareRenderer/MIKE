@@ -272,6 +272,9 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 				return fmt.Sprintf("Error: %v", err), false
 			}
 		}
+		if path != "" {
+			te.triggerLSPDiagnostics(ctx, task.ProjectID, task.ID, path)
+		}
 		return fmt.Sprintf("Wrote %d bytes to %s", len(content), path), true
 	case "edit_file":
 		path, _ := args["path"].(string)
@@ -374,6 +377,9 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 			} else {
 				return fmt.Sprintf("Error: %v", err), false
 			}
+		}
+		if path != "" {
+			te.triggerLSPDiagnostics(ctx, task.ProjectID, task.ID, path)
 		}
 		return fmt.Sprintf("Edited %s (%d edit(s) applied)", path, len(edits)), true
 	case "bash":
