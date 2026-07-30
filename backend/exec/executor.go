@@ -1908,8 +1908,7 @@ func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, ta
 	if te.lspMgr == nil {
 		return
 	}
-	go func() {
-		ext := filepath.Ext(filePath)
+	ext := filepath.Ext(filePath)
 		if ext == "" {
 			return
 		}
@@ -2014,5 +2013,4 @@ func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, ta
 				return
 			}
 		}
-	}()
 }
