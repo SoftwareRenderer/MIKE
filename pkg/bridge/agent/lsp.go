@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -345,4 +346,45 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 
 	result := protocol.NewResult(req.MsgID, resp)
 	_ = h.writeFrame(conn, result)
+}
+
+// handleLSPNotify handles LSP notification frames (no response expected).
+// Forwards raw JSON-RPC notifications to the LSP server.
+func (h *handler) handleLSPNotify(_ net.Conn, frame *protocol.Frame) {
+	// Extract JSON params from frame payload: [method:1][reserved:1][jsonLen:4][json:params]
+	if len(frame.Payload) < 6 {
+		log.Printf("lsp: notification payload too short")
+		return
+	}
+	jsonLen := binary.BigEndian.Uint32(frame.Payload[2:6])
+	if uint32(len(frame.Payload)) < 6+jsonLen {
+		log.Printf("lsp: notification payload truncated")
+		return
+	}
+	paramsJSON := frame.Payload[6 : 6+jsonLen]
+
+	var p protocol.LSPParams
+	if err := json.Unmarshal(paramsJSON, &p); err != nil {
+		log.Printf("lsp: parse notification params: %v", err)
+		return
+	}
+
+	h.mu.Lock()
+	lsp := h.lsp
+	h.mu.Unlock()
+
+	if lsp == nil || lsp.session == nil || lsp.session.isClosed() {
+		log.Printf("lsp: notification dropped — server not started")
+		return
+	}
+
+	if len(p.Raw) == 0 {
+		log.Printf("lsp: raw JSON-RPC message required for notification")
+		return
+	}
+
+	// Forward raw JSON-RPC notification to LSP server (fire-and-forget)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, _ = lsp.session.send(ctx, p.Raw) // send() handles notifications correctly
 }
