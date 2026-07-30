@@ -115,6 +115,21 @@ type executionState struct {
 }
 
 // modelConfig holds mutable model/provider settings for an executor.
+type LSPDiagnosticPosition struct {
+	Line      int `json:"line"`
+	Character int `json:"character"`
+}
+
+type LSPDiagnosticRange struct {
+	Start LSPDiagnosticPosition `json:"start"`
+}
+
+type LSPDiagnostic struct {
+	Range    LSPDiagnosticRange `json:"range"`
+	Message  string             `json:"message"`
+	Severity int                `json:"severity"`
+}
+
 type modelConfig struct {
 	mu        sync.Mutex
 	serverURL string
@@ -1904,6 +1919,19 @@ func agentSandboxHash(sb *types.AgentSandbox) string {
 	return string(b)
 }
 
+func (te *TaskExecutor) formatLSPDiagnostics(filePath string, diagnostics []LSPDiagnostic) string {
+	var lines []string
+	for _, d := range diagnostics {
+		if d.Severity <= 1 {
+			lines = append(lines, fmt.Sprintf("LSP Error in %s: %s at line %d, col %d", filePath, d.Message, d.Range.Start.Line+1, d.Range.Start.Character+1))
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, taskID, filePath string) {
 	if te.lspMgr == nil {
 		return
@@ -1968,15 +1996,7 @@ func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, ta
 					Method string `json:"method"`
 					Params struct {
 						Uri         string `json:"uri"`
-						Diagnostics []struct {
-							Range struct {
-								Start struct {
-									Line int `json:"line"`
-								} `json:"start"`
-							} `json:"range"`
-							Message  string `json:"message"`
-							Severity int    `json:"severity"`
-						} `json:"diagnostics"`
+						Diagnostics []LSPDiagnostic `json:"diagnostics"`
 					} `json:"params"`
 				}
 				if err := json.Unmarshal(raw, &envelope); err != nil {
@@ -1985,14 +2005,8 @@ func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, ta
 				if envelope.Method != "textDocument/publishDiagnostics" || envelope.Params.Uri != uri {
 					continue
 				}
-				var errors []string
-				for _, d := range envelope.Params.Diagnostics {
-					if d.Severity <= 1 {
-						errors = append(errors, fmt.Sprintf("Line %d: %s", d.Range.Start.Line+1, d.Message))
-					}
-				}
-				if len(errors) > 0 {
-					errMsg := fmt.Sprintf("LSP Error in %s:\n%s", filePath, strings.Join(errors, "\n"))
+				errMsg := te.formatLSPDiagnostics(filePath, envelope.Params.Diagnostics)
+				if errMsg != "" {
 					task, _ := te.store.GetTaskByTaskID(taskID)
 					if task != nil {
 						msgID := uuid.New().String()
