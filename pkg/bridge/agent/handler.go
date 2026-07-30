@@ -92,51 +92,56 @@ func (h *handler) handleConn(conn net.Conn) error {
 			return fmt.Errorf("read frame: %w", err)
 		}
 
-		if frame.Type != protocol.TypeRequest {
-			log.Printf("agent: unexpected frame type %s (MsgID=%d)", protocol.MessageTypeName(frame.Type), frame.MsgID)
-			continue
-		}
-
 		// Check method from payload[0] before full parsing
 		if len(frame.Payload) < 1 {
 			continue
 		}
 		method := frame.Payload[0]
 
-		// Binary shell methods — parse directly from frame
-		switch method {
-		case protocol.MethodShellIO:
-			h.handleShellIO(conn, frame)
+		switch frame.Type {
+		case protocol.TypeNotification:
+			// Notifications (e.g., LSP notifications like initialized, didOpen)
+			if method == protocol.MethodLSP {
+				go h.handleLSPNotify(conn, frame)
+			}
 			continue
-		case protocol.MethodLSP:
+
+		case protocol.TypeRequest:
+			// Binary shell methods — parse directly from frame
+			switch method {
+			case protocol.MethodShellIO:
+				h.handleShellIO(conn, frame)
+				continue
+			case protocol.MethodLSP:
+				req, err := protocol.ParseRequest(frame)
+				if err != nil {
+					log.Printf("agent: parse request MsgID %d: %v", frame.MsgID, err)
+					_ = h.writeFrame(conn, protocol.NewError(frame.MsgID, err.Error()))
+					continue
+				}
+				go h.handleLSP(conn, req)
+				continue
+			case protocol.MethodShellResize:
+				h.handleShellResize(conn, frame)
+				continue
+			case protocol.MethodShellClose:
+				h.handleShellClose(conn, frame)
+				continue
+			case protocol.MethodBashCancel:
+				h.handleBashCancel(frame)
+				continue
+			}
+
+			// JSON-based methods — parse into Request
 			req, err := protocol.ParseRequest(frame)
 			if err != nil {
 				log.Printf("agent: parse request MsgID %d: %v", frame.MsgID, err)
 				_ = h.writeFrame(conn, protocol.NewError(frame.MsgID, err.Error()))
 				continue
 			}
-			go h.handleLSP(conn, req)
-			continue
-		case protocol.MethodShellResize:
-			h.handleShellResize(conn, frame)
-			continue
-		case protocol.MethodShellClose:
-			h.handleShellClose(conn, frame)
-			continue
-		case protocol.MethodBashCancel:
-			h.handleBashCancel(frame)
-			continue
-		}
 
-		// JSON-based methods — parse into Request
-		req, err := protocol.ParseRequest(frame)
-		if err != nil {
-			log.Printf("agent: parse request MsgID %d: %v", frame.MsgID, err)
-			_ = h.writeFrame(conn, protocol.NewError(frame.MsgID, err.Error()))
-			continue
+			go h.dispatch(conn, req)
 		}
-
-		go h.dispatch(conn, req)
 	}
 }
 

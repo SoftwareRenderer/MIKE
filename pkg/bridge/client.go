@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -607,6 +608,20 @@ func (c *Client) LSPSend(ctx context.Context, raw json.RawMessage) ([]byte, erro
 		return nil, errors.New(final.ErrorMsg())
 	}
 	return final.Payload, nil
+}
+
+// LSPNotify sends a raw JSON-RPC notification to the LSP server without waiting for a response.
+// Use this for notifications (messages without an 'id' field) like initialized, didOpen, etc.
+func (c *Client) LSPNotify(_ context.Context, raw json.RawMessage) error {
+	params, _ := json.Marshal(protocol.LSPParams{Raw: raw})
+	// Same payload format as NewRequest: [method:1][reserved:1][jsonLen:4][json:params]
+	payload := make([]byte, 2+4+len(params))
+	payload[0] = protocol.MethodLSP
+	payload[1] = 0 // reserved
+	binary.BigEndian.PutUint32(payload[2:6], uint32(len(params)))
+	copy(payload[6:], params)
+	frame := &protocol.Frame{MsgID: 0, Type: protocol.TypeNotification, Payload: payload}
+	return protocol.WriteFrame(c.conn, frame)
 }
 
 // LSPStart starts the LSP server process inside the sandbox.

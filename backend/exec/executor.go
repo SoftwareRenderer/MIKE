@@ -1932,99 +1932,201 @@ func (te *TaskExecutor) formatLSPDiagnostics(filePath string, diagnostics []LSPD
 	return strings.Join(lines, "\n")
 }
 
-func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, taskID, filePath string) {
+func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, taskID, filePath string) string {
+	// Normalize sandbox path to relative path (e.g., /home/sandbox/temp/lsp_test.go -> lsp_test.go)
+	relPath := normalizePath(projectID, filePath)
 	if te.lspMgr == nil {
-		return
+		log.Printf("[lsp-diag] task=%s lspMgr is nil", taskID)
+		return ""
 	}
-	ext := filepath.Ext(filePath)
-		if ext == "" {
-			return
-		}
-		lang := strings.TrimPrefix(ext, ".")
-		registry := te.lspMgr.GetRegistry()
-		cfg := registry.Lookup(filePath)
-		if cfg == nil {
-			return
-		}
-		worktreePath, err := te.worktreeMgr.WorktreePath(taskID)
-		if err != nil {
-			return
-		}
-		proc, err := te.lspMgr.GetOrCreate(worktreePath, lang, cfg)
-		if err != nil {
-			return
-		}
-		defer te.lspMgr.Release(worktreePath, lang)
+	ext := filepath.Ext(relPath)
+	if ext == "" {
+		log.Printf("[lsp-diag] task=%s no file extension", taskID)
+		return ""
+	}
+	lang := strings.TrimPrefix(ext, ".")
+	registry := te.lspMgr.GetRegistry()
+	cfg := registry.Lookup(relPath)
+	if cfg == nil {
+		log.Printf("[lsp-diag] task=%s no LSP config for relPath=%s ext=%s", taskID, relPath, ext)
+		return ""
+	}
+	log.Printf("[lsp-diag] task=%s found LSP config lang=%s", taskID, lang)
+	worktreePath, err := te.worktreeMgr.WorktreePath(taskID)
+	if err != nil {
+		log.Printf("[lsp-diag] task=%s worktree path error: %v", taskID, err)
+		return ""
+	}
+	proc, err := te.lspMgr.GetOrCreate(worktreePath, lang, cfg)
+	if err != nil {
+		log.Printf("[lsp-diag] task=%s GetOrCreate failed: %v", taskID, err)
+		return ""
+	}
+	log.Printf("[lsp-diag] task=%s LSP connection ready", taskID)
+	defer te.lspMgr.Release(worktreePath, lang)
 
-		// Subscribe to LSP messages for this diagnostic check.
-		// This creates a temporary filtered channel so we don't steal messages
-		// from the shared serverCh used by the LSP handler.
-		subCh := te.lspMgr.Subscribe()
-		defer te.lspMgr.Unsubscribe(subCh)
+	// Subscribe to LSP messages for this diagnostic check.
+	subCh := te.lspMgr.Subscribe()
+	defer te.lspMgr.Unsubscribe(subCh)
 
-		content, err := os.ReadFile(filepath.Join(worktreePath, filePath))
-		if err != nil {
-			return
-		}
-		absPath := filepath.Join(worktreePath, filePath)
-		uri := "file://" + absPath
-		didOpen := map[string]any{
-			"jsonrpc": "2.0",
-			"method":  "textDocument/didOpen",
-			"params": map[string]any{
-				"textDocument": map[string]any{"uri": uri, "version": 1},
-				"content":      string(content),
+	absPath := filepath.Join(worktreePath, relPath)
+	uri := "file://" + absPath
+
+	// Step 1: LSP initialize handshake (required before any textDocument requests)
+	initReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"processId":    os.Getpid(),
+			"clientInfo":   map[string]any{"name": "kanban-lsp-diag", "version": "1.0"},
+			"rootUri":      "file://" + worktreePath,
+			"workspaceFolders": []map[string]any{{"uri": "file://" + worktreePath, "name": "workspace"}},
+			"capabilities": map[string]any{
+				"textDocument": map[string]any{
+					"publishDiagnostics": map[string]any{
+						"relatedInformation": true,
+						"tagSupport":         map[string]any{"valueSet": []int{1, 2}},
+					},
+				},
+				"workspace": map[string]any{
+					"workspaceFolders": true,
+				},
 			},
-		}
-		msg, _ := json.Marshal(didOpen)
-		if err := te.lspMgr.SendToServer(proc, msg); err != nil {
-			return
-		}
-
-		timeout := time.After(5 * time.Second)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-timeout:
-				return
-			case raw, ok := <-subCh:
-				if !ok {
-					return
-				}
-				var envelope struct {
-					Method string `json:"method"`
-					Params struct {
-						Uri         string `json:"uri"`
-						Diagnostics []LSPDiagnostic `json:"diagnostics"`
-					} `json:"params"`
-				}
-				if err := json.Unmarshal(raw, &envelope); err != nil {
-					continue
-				}
-				if envelope.Method != "textDocument/publishDiagnostics" || envelope.Params.Uri != uri {
-					continue
-				}
-				errMsg := te.formatLSPDiagnostics(filePath, envelope.Params.Diagnostics)
-				if errMsg != "" {
-					task, _ := te.store.GetTaskByTaskID(taskID)
-					if task != nil {
-						msgID := uuid.New().String()
-						_ = te.store.CreateTaskMessage(&types.TaskMessage{
-							ID: msgID, TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "user", Content: errMsg, CreatedAt: time.Now().UTC(),
-						})
-						te.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
-						te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{
-							Type: types.WSTypeUserMessage,
-							Data: map[string]any{
-								"id":      msgID,
-								"role":    "user",
-								"content": errMsg,
-							},
-						})
+		},
+	}
+	// Merge server-specific init params overrides (e.g., tsserver.path for TypeScript)
+	if cfg.InitParamsOverride != nil {
+		params := initReq["params"].(map[string]any)
+		for k, v := range cfg.InitParamsOverride {
+			if existing, ok := params[k].(map[string]any); ok {
+				if override, ok := v.(map[string]any); ok {
+					for ok2, ov := range override {
+						existing[ok2] = ov
 					}
+				} else {
+					params[k] = v
 				}
-				return
+			} else {
+				params[k] = v
 			}
 		}
+	}
+	initMsg, _ := json.Marshal(initReq)
+	if err := te.lspMgr.SendToServer(proc, initMsg); err != nil {
+		log.Printf("[lsp-diag] task=%s initialize failed: %v", taskID, err)
+		return ""
+	}
+
+	// Wait for initialize response
+	initTimer := time.After(10 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return ""
+		case <-initTimer:
+			log.Printf("[lsp-diag] task=%s initialize timeout", taskID)
+			return ""
+		case raw, ok := <-subCh:
+			if !ok {
+				return ""
+			}
+			var resp struct {
+				JSONRPC string `json:"jsonrpc"`
+				ID      *int   `json:"id"`
+				Result  any    `json:"result"`
+				Error   *struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(raw, &resp); err != nil {
+				continue
+			}
+			if resp.ID != nil && *resp.ID == 1 {
+				if resp.Error != nil {
+					log.Printf("[lsp-diag] task=%s initialize error: %s", taskID, resp.Error.Message)
+					return ""
+				}
+				log.Printf("[lsp-diag] task=%s initialize successful", taskID)
+				goto initialized
+			}
+		}
+	}
+initialized:
+	// Step 2: Send initialized notification (fire-and-forget, no response expected)
+	initNotif := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "initialized",
+		"params":  map[string]any{},
+	}
+	initNotifMsg, _ := json.Marshal(initNotif)
+	if err := te.lspMgr.LSPNotify(proc, initNotifMsg); err != nil {
+		log.Printf("[lsp-diag] task=%s initialized notification failed: %v", taskID, err)
+		return ""
+	}
+
+	// Step 3: Read file content and send didOpen (fire-and-forget notification)
+	content, err := os.ReadFile(filepath.Join(worktreePath, relPath))
+	if err != nil {
+		log.Printf("[lsp-diag] task=%s ReadFile failed: %v", taskID, err)
+		return ""
+	}
+
+	didOpen := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "textDocument/didOpen",
+		"params": map[string]any{
+			"textDocument": map[string]any{
+				"uri":        uri,
+				"languageId": lang,
+				"version":    1,
+				"text":       string(content),
+			},
+		},
+	}
+	didOpenMsg, _ := json.Marshal(didOpen)
+	if err := te.lspMgr.LSPNotify(proc, didOpenMsg); err != nil {
+		log.Printf("[lsp-diag] task=%s didOpen failed: %v", taskID, err)
+		return ""
+	}
+
+	// Step 4: Wait for publishDiagnostics
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("[lsp-diag] task=%s context cancelled", taskID)
+			return ""
+		case <-timeout:
+			log.Printf("[lsp-diag] task=%s timeout waiting for diagnostics", taskID)
+			return ""
+		case raw, ok := <-subCh:
+			if !ok {
+				log.Printf("[lsp-diag] task=%s subscriber channel closed", taskID)
+				return ""
+			}
+			var envelope struct {
+				Method string `json:"method"`
+				Params struct {
+					Uri         string          `json:"uri"`
+					Diagnostics []LSPDiagnostic `json:"diagnostics"`
+				} `json:"params"`
+			}
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				continue
+			}
+			log.Printf("[lsp-diag] task=%s received LSP message: method=%s uri=%s diagnostics=%d", taskID, envelope.Method, envelope.Params.Uri, len(envelope.Params.Diagnostics))
+			if envelope.Method != "textDocument/publishDiagnostics" || envelope.Params.Uri != uri {
+				continue
+			}
+			errMsg := te.formatLSPDiagnostics(relPath, envelope.Params.Diagnostics)
+			if errMsg != "" {
+				log.Printf("[lsp-diag] task=%s diagnostic hint: %s", taskID, errMsg)
+				return errMsg
+			}
+			log.Printf("[lsp-diag] task=%s no errors found (diagnostics may be warnings only)", taskID)
+			return ""
+		}
+	}
 }

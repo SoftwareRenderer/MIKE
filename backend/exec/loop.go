@@ -1004,16 +1004,46 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
 				})
 
-				// Trigger LSP diagnostics if any files were modified by the tool.
-				// This ensures that errors introduced by any tool (including bash) are reported.
-				if err := te.worktreeMgr.GitRunInDir(setup.worktreePath, "diff", "--quiet"); err != nil {
-					// Modified files exist — trigger diagnostics for each.
-					modified, _ := te.worktreeMgr.GitRunInDirOutput(setup.worktreePath, "diff", "--name-only")
-					files := strings.Split(strings.TrimSpace(modified), "\n")
-					for _, f := range files {
-						if f != "" {
-							go te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, f)
+				// Trigger LSP diagnostics for files modified by the tool.
+				// For write/edit tools, use the path from tool args directly.
+				// For bash, use git diff as a fallback to detect modified files.
+				var lspHint string
+				switch tc.Function.Name {
+				case "write_file", "edit_file":
+					if path, ok := args["path"].(string); ok && path != "" {
+						lspHint = te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, path)
+					}
+				case "bash":
+					if err := te.worktreeMgr.GitRunInDir(setup.worktreePath, "diff", "--quiet"); err != nil {
+						modified, _ := te.worktreeMgr.GitRunInDirOutput(setup.worktreePath, "diff", "--name-only")
+						files := strings.Split(strings.TrimSpace(modified), "\n")
+						for _, f := range files {
+							if f != "" {
+								if hint := te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, f); hint != "" {
+									lspHint = hint
+									break
+								}
+							}
 						}
+					}
+				}
+				// Inject LSP diagnostic hint into LLM context if found.
+				if lspHint != "" {
+					task, _ := te.store.GetTaskByTaskID(setup.task.ID)
+					if task != nil {
+						msgID := uuid.New().String()
+						_ = te.store.CreateTaskMessage(&types.TaskMessage{
+							ID: msgID, TaskID: setup.task.ID, ThreadID: task.CurrentThreadID, Role: "user", Content: lspHint, CreatedAt: time.Now().UTC(),
+						})
+						lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: lspHint})
+						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
+							Type: types.WSTypeUserMessage,
+							Data: map[string]any{
+								"id":      msgID,
+								"role":    "user",
+								"content": lspHint,
+							},
+						})
 					}
 				}
 				te.GetWorktreeMu(setup.task.ID).Unlock()

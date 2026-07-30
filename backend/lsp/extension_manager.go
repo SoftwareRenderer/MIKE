@@ -352,6 +352,30 @@ func (m *ExtensionLSPManager) SendToServer(process *LSPProcess, msg json.RawMess
 	return nil
 }
 
+// LSPNotify sends a JSON-RPC notification to the LSP server without waiting for a response.
+// File URIs are translated from host workspace path to container path.
+func (m *ExtensionLSPManager) LSPNotify(process *LSPProcess, msg json.RawMessage) error {
+	workspaceKey := processKey(process.Workspace, process.Language)
+
+	m.mu.Lock()
+	sc, ok := m.clients[workspaceKey]
+	if !ok || sc.bridgeClient == nil || !sc.bridgeClient.IsAlive() {
+		if ok {
+			delete(m.clients, workspaceKey)
+		}
+		m.mu.Unlock()
+		return fmt.Errorf("sandbox client stale for workspace=%s lang=%s", process.Workspace, process.Language)
+	}
+	m.mu.Unlock()
+
+	translated := translateURIsToContainer(msg, sc.workspace, sc.projectMounts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	return sc.bridgeClient.LSPNotify(ctx, translated)
+}
+
 // ServerMessageCh returns a channel that receives messages from LSP servers.
 func (m *ExtensionLSPManager) ServerMessageCh() <-chan json.RawMessage {
 	return m.serverCh
