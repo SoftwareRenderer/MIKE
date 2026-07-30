@@ -78,6 +78,14 @@ function getGutterWidth(editor: HTMLElement): number {
 }
 
 /**
+ * Get the scrollbar width in pixels.
+ */
+function getScrollbarWidth(editor: HTMLElement): number {
+    const scroller = editor.querySelector('.cm-scroller') as HTMLElement | null;
+    return scroller ? scroller.offsetWidth - scroller.clientWidth : 0;
+}
+
+/**
  * Get the highlighted HTML for a declaration line by cloning from the
  * editor's DOM. Falls back to plain text if the line is not in viewport.
  */
@@ -195,8 +203,9 @@ export function stickyScroll() {
                     const html = getHeaderLineHtml(view, header);
                     this.element.innerHTML = html;
                     const gutterW = getGutterWidth(view.dom);
+                    const scrollbarW = getScrollbarWidth(view.dom);
                     this.element.style.left = gutterW + 'px';
-                    this.element.style.width = `calc(100% - ${gutterW}px)`;
+                    this.element.style.width = `calc(100% - ${gutterW}px - ${scrollbarW}px)`;
                     this.element.style.display = 'block';
                 } else if (!header && this.currentHeader) {
                     this.currentHeader = null;
