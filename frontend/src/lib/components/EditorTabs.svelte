@@ -1,5 +1,6 @@
 <script lang="ts">
     import FileEditor from './FileEditor.svelte';
+    import type { LSPSymbol } from '$lib/utils/lsp-symbols';
 
     interface OpenFile {
         path: string;
@@ -16,7 +17,7 @@
         unsavedFiles: Set<string>;
         pinnedFiles: Set<string>;
         onFocused: (focused: boolean) => void;
-        onSymbolsUpdate: (symbols: Array<{ name: string; kind: string; line: number; indent: number }>) => void;
+        onSymbolsUpdate: (symbols: LSPSymbol[]) => void;
         onHasChanges: (filePath: string, hasChanges: boolean) => void;
         onSelectTab: (path: string) => void;
         onCloseTab: (path: string) => void | Promise<void>;
@@ -56,7 +57,7 @@
         }
     }
 
-    function handleSymbolsUpdate(filePath: string, symbols: Array<{ name: string; kind: string; line: number; indent: number }>) {
+    function handleSymbolsUpdate(filePath: string, symbols: LSPSymbol[]) {
         if (filePath === activeFilePath) {
             onSymbolsUpdate(symbols);
         }

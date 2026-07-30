@@ -728,6 +728,9 @@ function extractSvelteSymbols(source: string, lineInfo: { lineAt: (pos: number) 
  * For markdown, extracts ATX headings as a document outline.
  * For Svelte, extracts components, blocks, and script-level declarations.
  * Returns an array of { name, kind, line, indent } sorted by line number.
+ *
+ * @deprecated LSP is now the primary symbol source. This is kept as a fallback
+ * for languages/files without LSP support.
  */
 export function getLanguageTreeFromView(view: any, path?: string): Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> {
     const symbols: Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> = [];
@@ -779,18 +782,30 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
             'TypeDecl': 'class',
             'InterfaceType': 'class',
             'StructType': 'class',
+            // Python (Lezer fallback only — LSP is primary)
+            'ClassDefinition': 'class',
+            // Rust (Lezer fallback only — LSP is primary)
+            'FunctionItem': 'function',
+            'StructItem': 'class',
+            'EnumItem': 'class',
+            'TraitItem': 'class',
+            'ImplItem': 'class',
+            'ConstItem': 'variable',
+            'StaticItem': 'variable',
+            'ModItem': 'variable',
+            'TypeItem': 'class',
         };
 
         // Track parent stack during iteration (name + end position for sticky scroll)
         const parentStack: { name: string; to: number }[] = [];
-        const rootNodes = new Set(['SourceFile', 'Script', 'Program', 'Document', 'CompilationUnit', 'TranslationUnit']);
+        const rootNodes = new Set(['SourceFile', 'Script', 'Program', 'Document', 'CompilationUnit', 'TranslationUnit', 'Module']);
 
         tree.iterate({
             enter(node) {
                 const name = node.type.name;
 
                 // Check if this is an identifier name node
-                const isIdent = name === 'Identifier' || name === 'TypeIdentifier' || name === 'FieldIdentifier' || name === 'VariableName' || name === 'PropertyName' || name === 'VariableDefinition' || name === 'PropertyDefinition' || name === 'DefName' || name === 'FieldName' || name === 'TypeName';
+                const isIdent = name === 'Identifier' || name === 'TypeIdentifier' || name === 'FieldIdentifier' || name === 'VariableName' || name === 'PropertyName' || name === 'VariableDefinition' || name === 'PropertyDefinition' || name === 'DefName' || name === 'FieldName' || name === 'TypeName' || name === 'BoundIdentifier';
 
                 // Only capture top-level (global) identifiers.
                 // Uses parent stack length to distinguish global from local scope:

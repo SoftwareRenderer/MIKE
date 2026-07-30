@@ -23,6 +23,7 @@
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax, lightTheme, lightSyntax, isLightTheme } from '$lib/utils/codemirror-theme';
     import { stickyScroll, updateHeadersEffect, sectionHeadersField, type SectionHeader } from '$lib/utils/sticky-scroll';
+    import { requestLSPSymbols, flattenSymbols, type LSPSymbol } from '$lib/utils/lsp-symbols';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
     import { mount, unmount } from 'svelte';
@@ -49,7 +50,7 @@
         targetLine: number;
         active: boolean;
         onFocused: (focused: boolean) => void;
-        onSymbolsUpdate: (symbols: Array<{ name: string; kind: string; line: number; indent: number }>) => void;
+        onSymbolsUpdate: (symbols: LSPSymbol[]) => void;
         onHasChanges: (filePath: string, hasChanges: boolean) => void;
         onClose: () => void;
     } = $props();
@@ -135,13 +136,19 @@
         return support ? support() : null;
     }
 
-    function extractSymbols() {
+    async function extractSymbols() {
         if (!view) return;
-        const symbols = getLanguageTreeFromView(view, filePath);
+        // Try LSP first, fall back to Lezer tree analysis
+        let symbols = await requestLSPSymbols(lspClient, filePath);
+        if (!symbols || symbols.length === 0) {
+            const visibleKinds = new Set(['function', 'method', 'class', 'struct', 'enum', 'interface', 'type', 'namespace', 'package', 'module', 'file', 'property', 'field', 'constructor', 'constant', 'event', 'heading']);
+            symbols = getLanguageTreeFromView(view, filePath).filter(s => visibleKinds.has(s.kind));
+        }
         onSymbolsUpdate(symbols);
-        // Update sticky scroll headers
-        const sorted = symbols
-            .filter((s) => s.kind === 'function' || s.kind === 'class')
+        // Update sticky scroll headers (flatten for sticky scroll)
+        const flat = flattenSymbols(symbols);
+        const sorted = flat
+            .filter((s) => s.kind === 'function' || s.kind === 'class' || s.kind === 'method' || s.kind === 'struct' || s.kind === 'enum' || s.kind === 'interface')
             .sort((a, b) => a.line - b.line);
         const headers: SectionHeader[] = sorted.map((s, i) => ({
             line: s.line,
