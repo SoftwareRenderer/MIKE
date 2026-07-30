@@ -15,6 +15,7 @@
     import GitStatusPanel from './GitStatusPanel.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
     import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles, loadEditorTabs, saveEditorTabs, clearEditorDraft, clearEditorHistory } from '$lib/storage';
+    import type { LSPSymbol } from '$lib/utils/lsp-symbols';
     import { dialogStore } from '$lib/stores';
 
     let { projectId, projectPath, currentBranch, initialFile, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
@@ -192,7 +193,7 @@
     });
 
     // Symbol outline state
-    let symbols = $state<Array<{ name: string; kind: string; line: number; indent: number }>>([]);
+    let symbols = $state<LSPSymbol[]>([]);
 
     // Clear symbols when no file is selected
     $effect(() => {
@@ -413,7 +414,7 @@
         }
     }
 
-    function handleSymbolsUpdate(newSymbols: Array<{ name: string; kind: string; line: number; indent: number }>) {
+    function handleSymbolsUpdate(newSymbols: LSPSymbol[]) {
         symbols = newSymbols;
     }
 
