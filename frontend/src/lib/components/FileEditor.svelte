@@ -22,7 +22,7 @@
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax, lightTheme, lightSyntax, isLightTheme } from '$lib/utils/codemirror-theme';
-    import { stickyScroll } from '$lib/utils/sticky-scroll';
+    import { stickyScroll, updateHeadersEffect, sectionHeadersField, type SectionHeader } from '$lib/utils/sticky-scroll';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
     import { mount, unmount } from 'svelte';
@@ -139,6 +139,12 @@
         if (!view) return;
         const symbols = getLanguageTreeFromView(view, filePath);
         onSymbolsUpdate(symbols);
+        // Update sticky scroll headers
+        const headers: SectionHeader[] = symbols
+            .filter((s) => s.kind === 'function' || s.kind === 'class')
+            .sort((a, b) => a.line - b.line)
+            .map((s) => ({ line: s.line }));
+        view.dispatch({ effects: updateHeadersEffect.of(headers) });
     }
 
     function openSearchPanel() {
@@ -214,7 +220,8 @@
         gitGutterExt.state.baselineContent = baselineContent;
         const extensions = [
             // Explicit setup (replaces basicSetup, excludes searchKeymap)
-            stickyScroll(filePath),
+            stickyScroll(),
+            sectionHeadersField,
             gitGutterExt.extension,
             highlightActiveLineGutter(),
             highlightSpecialChars(),

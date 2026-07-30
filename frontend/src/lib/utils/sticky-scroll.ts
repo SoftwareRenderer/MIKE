@@ -1,10 +1,24 @@
 import { ViewPlugin, ViewUpdate, EditorView } from '@codemirror/view';
-import { getLanguageTreeFromView } from '$lib/highlighter';
+import { StateEffect, StateField } from '@codemirror/state';
 
 /** Section header for sticky scroll. */
-interface SectionHeader {
+export interface SectionHeader {
     line: number;
 }
+
+/** Effect to update section headers from the parent component. */
+export const updateHeadersEffect = StateEffect.define<SectionHeader[]>();
+
+/** StateField that reacts to updateHeadersEffect. */
+export const sectionHeadersField = StateField.define<SectionHeader[]>({
+    create() { return []; },
+    update(value, tr) {
+        for (const e of tr.effects) {
+            if (e.is(updateHeadersEffect)) value = e.value;
+        }
+        return value;
+    },
+});
 
 /**
  * Compute the pixel line height from CSS computed styles.
@@ -27,21 +41,6 @@ function getLineHeightPx(scroller: HTMLElement): number {
 
     const fontSize = parseFloat(rawFontSize);
     return !isNaN(fontSize) && fontSize > 0 ? fontSize * 1.5 : 21;
-}
-
-/**
- * Extract section headers from the editor using the existing symbol extractor.
- * Filters to functions and classes only, sorted by line number.
- */
-function extractSectionHeaders(view: EditorView, filePath: string): SectionHeader[] {
-    try {
-        const symbols = getLanguageTreeFromView(view, filePath);
-        return symbols
-            .filter((s) => s.kind === 'function' || s.kind === 'class')
-            .sort((a, b) => a.line - b.line);
-    } catch {
-        return [];
-    }
 }
 
 /**
@@ -123,21 +122,20 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Create a sticky scroll ViewPlugin configured with the given file path.
+ * Create a sticky scroll ViewPlugin.
+ *
+ * Headers are provided by the parent component via `updateHeadersEffect`.
+ * The plugin reads them from `sectionHeadersField` in the editor state.
  *
  * When scrolling through code, the current section header (function/class
  * declaration) sticks to the top of the editor until scrolling into the
  * next section.
  */
-export function stickyScroll(filePath: string) {
+export function stickyScroll() {
     return ViewPlugin.fromClass(
         class {
             element: HTMLElement;
-            headers: SectionHeader[] = [];
             currentHeader: SectionHeader | null = null;
-            viewRef: EditorView | null = null;
-            extractTimer: ReturnType<typeof setTimeout> | null = null;
-            needsExtract = false;
 
             constructor(view: EditorView) {
                 this.element = document.createElement('div');
@@ -146,11 +144,8 @@ export function stickyScroll(filePath: string) {
 
                 const insert = () => {
                     if (view.dom.parentElement && !this.element.parentElement) {
-                        // Insert as child of .cm-editor (not .cm-scroller) to avoid
-                        // stacking context issues with .cm-sizer
                         view.dom.appendChild(this.element);
                         this.setupScrollListener(view);
-                        this.headers = extractSectionHeaders(view, filePath);
                         this.updateSticky(view);
                     }
                 };
@@ -183,41 +178,22 @@ export function stickyScroll(filePath: string) {
             }
 
             update(update: ViewUpdate) {
-                if (!this.viewRef) this.viewRef = update.view;
-                const view = update.view;
-
-                if (update.docChanged) {
-                    this.needsExtract = true;
-                    if (!this.extractTimer) {
-                        this.extractTimer = setTimeout(() => {
-                            this.extractTimer = null;
-                            if (this.needsExtract && this.viewRef) {
-                                this.headers = extractSectionHeaders(this.viewRef, filePath);
-                                this.needsExtract = false;
-                                this.updateSticky(this.viewRef!);
-                            }
-                        }, 300);
-                    }
-                }
-
-                if (update.viewportChanged) {
-                    this.updateSticky(view);
-                }
+                this.updateSticky(update.view);
             }
 
             updateSticky(view: EditorView) {
-                if (this.headers.length === 0) {
+                const headers = view.state.field(sectionHeadersField, false) || [];
+                if (headers.length === 0) {
                     this.hide();
                     return;
                 }
 
-                const header = findStickyHeader(view, this.headers);
+                const header = findStickyHeader(view, headers);
 
-                if (header && header !== this.currentHeader) {
+                if (header && (!this.currentHeader || header.line !== this.currentHeader.line)) {
                     this.currentHeader = header;
                     const html = getHeaderLineHtml(view, header);
                     this.element.innerHTML = html;
-                    // Offset past gutters
                     const gutterW = getGutterWidth(view.dom);
                     this.element.style.left = gutterW + 'px';
                     this.element.style.width = `calc(100% - ${gutterW}px)`;
@@ -233,10 +209,6 @@ export function stickyScroll(filePath: string) {
             }
 
             destroy() {
-                if (this.extractTimer) {
-                    clearTimeout(this.extractTimer);
-                    this.extractTimer = null;
-                }
                 const scroller = (this as any)._scroller as HTMLElement | null;
                 const handler = (this as any)._scrollHandler as (() => void) | null;
                 if (scroller && handler) {
