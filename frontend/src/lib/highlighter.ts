@@ -509,15 +509,15 @@ export function clearHighlightCache(): void {
  * Extract symbols from Go template source using regex.
  * Finds: {{define "name"}}, {{block "name" .}}, $var := assignments.
  */
-function extractGoTemplateSymbols(source: string, lineInfo: { lineAt: (pos: number) => { number: number } }): Array<{ name: string; kind: string; line: number; indent: number }> {
-    const symbols: Array<{ name: string; kind: string; line: number; indent: number }> = [];
+function extractGoTemplateSymbols(source: string, lineInfo: { lineAt: (pos: number) => { number: number } }): Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> {
+    const symbols: Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> = [];
 
     // Match {{define "name"}} and {{block "name" ...}}
     const defineRegex = /\{\{-?\s*(define|block)\s+["']([^"']+)["']/g;
     let m;
     while ((m = defineRegex.exec(source)) !== null) {
         const line = lineInfo.lineAt(m.index).number;
-        symbols.push({ name: m[2], kind: 'class', line, indent: 0 });
+        symbols.push({ name: m[2], kind: 'class', line, endLine: line, indent: 0 });
     }
 
     // Match $var := ... (variable assignments inside actions)
@@ -525,7 +525,7 @@ function extractGoTemplateSymbols(source: string, lineInfo: { lineAt: (pos: numb
     while ((m = varRegex.exec(source)) !== null) {
         const name = m[1].substring(1); // strip $
         const line = lineInfo.lineAt(m.index).number;
-        symbols.push({ name, kind: 'variable', line, indent: 0 });
+        symbols.push({ name, kind: 'variable', line, endLine: line, indent: 0 });
     }
 
     // Match .Field references inside actions (e.g., {{ .TaskTitle }}, {{ .User.Name }})
@@ -552,7 +552,7 @@ function extractGoTemplateSymbols(source: string, lineInfo: { lineAt: (pos: numb
         if (beforeAction === -1 || afterAction === -1 || beforeAction > afterAction) continue;
         if (skipFields.has(fieldName)) continue;
         const line = lineInfo.lineAt(fm.index).number;
-        symbols.push({ name: fieldName, kind: 'property', line, indent: 0 });
+        symbols.push({ name: fieldName, kind: 'property', line, endLine: line, indent: 0 });
     }
 
     // Deduplicate by name (keep first occurrence)
@@ -597,8 +597,8 @@ function stripMarkdownFormatting(text: string): string {
  * Extract markdown headings (ATX format) from source text.
  * Returns headings up to depth 3 (h1, h2, h3) with inline formatting stripped.
  */
-function extractMarkdownHeadings(source: string, lineInfo: { lineAt: (pos: number) => { number: number } }): Array<{ name: string; kind: string; line: number; indent: number }> {
-    const symbols: Array<{ name: string; kind: string; line: number; indent: number }> = [];
+function extractMarkdownHeadings(source: string, lineInfo: { lineAt: (pos: number) => { number: number } }): Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> {
+    const symbols: Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> = [];
     const lines = source.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
@@ -613,6 +613,7 @@ function extractMarkdownHeadings(source: string, lineInfo: { lineAt: (pos: numbe
                     name,
                     kind: 'heading',
                     line: i + 1,
+                    endLine: i + 1,
                     indent: level - 1, // 0 for h1, 1 for h2, 2 for h3
                 });
             }
@@ -627,8 +628,8 @@ function extractMarkdownHeadings(source: string, lineInfo: { lineAt: (pos: numbe
  * Finds: component props ($props()), exported functions, $state declarations, and classes.
  * Skips template-level noise (block directives, component references, internal variables).
  */
-function extractSvelteSymbols(source: string, lineInfo: { lineAt: (pos: number) => { number: number } }): Array<{ name: string; kind: string; line: number; indent: number }> {
-    const symbols: Array<{ name: string; kind: string; line: number; indent: number }> = [];
+function extractSvelteSymbols(source: string, lineInfo: { lineAt: (pos: number) => { number: number } }): Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> {
+    const symbols: Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> = [];
 
     // Extract script-level symbols from <script>
     try {
@@ -648,7 +649,7 @@ function extractSvelteSymbols(source: string, lineInfo: { lineAt: (pos: number) 
                     for (const prop of propsMatch[1].split(',')) {
                         const name = prop.trim().split(/[=:]/)[0].trim();
                         if (name && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) {
-                            symbols.push({ name, kind: 'property', line: absLine, indent: 0 });
+                            symbols.push({ name, kind: 'property', line: absLine, endLine: absLine, indent: 0 });
                         }
                     }
                     continue;
@@ -657,7 +658,7 @@ function extractSvelteSymbols(source: string, lineInfo: { lineAt: (pos: number) 
                 // Function declarations: function name(, export function name(, async function name(
                 const funcMatch = /(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/.exec(sLine);
                 if (funcMatch) {
-                    symbols.push({ name: funcMatch[1], kind: 'function', line: absLine, indent: 0 });
+                    symbols.push({ name: funcMatch[1], kind: 'function', line: absLine, endLine: absLine, indent: 0 });
                     continue;
                 }
 
@@ -666,7 +667,7 @@ function extractSvelteSymbols(source: string, lineInfo: { lineAt: (pos: number) 
                 if (arrowMatch) {
                     const arrowName = arrowMatch[1] || arrowMatch[2];
                     if (arrowName) {
-                        symbols.push({ name: arrowName, kind: 'function', line: absLine, indent: 0 });
+                        symbols.push({ name: arrowName, kind: 'function', line: absLine, endLine: absLine, indent: 0 });
                         continue;
                     }
                 }
@@ -674,21 +675,21 @@ function extractSvelteSymbols(source: string, lineInfo: { lineAt: (pos: number) 
                 // Class declarations: class name extends/implements/{
                 const classMatch = /(?:export\s+)?class\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?:extends|implements|\{|$)/.exec(sLine);
                 if (classMatch) {
-                    symbols.push({ name: classMatch[1], kind: 'class', line: absLine, indent: 0 });
+                    symbols.push({ name: classMatch[1], kind: 'class', line: absLine, endLine: absLine, indent: 0 });
                     continue;
                 }
 
                 // $state declarations: const name = $state(...) or let name = $state(...)
                 const stateMatch = /(?:const|let)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*\$state/.exec(sLine);
                 if (stateMatch) {
-                    symbols.push({ name: stateMatch[1], kind: 'variable', line: absLine, indent: 0 });
+                    symbols.push({ name: stateMatch[1], kind: 'variable', line: absLine, endLine: absLine, indent: 0 });
                     continue;
                 }
 
                 // $derived declarations: const name = $derived(...)
                 const derivedMatch = /const\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*\$derived/.exec(sLine);
                 if (derivedMatch) {
-                    symbols.push({ name: derivedMatch[1], kind: 'variable', line: absLine, indent: 0 });
+                    symbols.push({ name: derivedMatch[1], kind: 'variable', line: absLine, endLine: absLine, indent: 0 });
                     continue;
                 }
             }
@@ -728,8 +729,8 @@ function extractSvelteSymbols(source: string, lineInfo: { lineAt: (pos: number) 
  * For Svelte, extracts components, blocks, and script-level declarations.
  * Returns an array of { name, kind, line, indent } sorted by line number.
  */
-export function getLanguageTreeFromView(view: any, path?: string): Array<{ name: string; kind: string; line: number; indent: number }> {
-    const symbols: Array<{ name: string; kind: string; line: number; indent: number }> = [];
+export function getLanguageTreeFromView(view: any, path?: string): Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> {
+    const symbols: Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> = [];
     try {
         const doc = view.state.doc;
 
@@ -780,8 +781,8 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
             'StructType': 'class',
         };
 
-        // Track parent stack during iteration
-        const parentStack: string[] = [];
+        // Track parent stack during iteration (name + end position for sticky scroll)
+        const parentStack: { name: string; to: number }[] = [];
         const rootNodes = new Set(['SourceFile', 'Script', 'Program', 'Document', 'CompilationUnit', 'TranslationUnit']);
 
         tree.iterate({
@@ -800,24 +801,28 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
                 // - stackLen 3: root+declaration+spec (Go: [SourceFile, TypeDecl, TypeSpec])
                 // This rejects stacks like [Block, VarDecl] or [FunctionDecl, VarDecl] (local/nested)
                 let topDeclKind: string | null = null;
+                let topDeclEnd: number = node.to;
                 if (parentStack.length === 1) {
                     // Only accept functions and classes at stackLen 1
-                    const k = kindMap[parentStack[0]];
-                    if (k === 'function' || k === 'class') topDeclKind = k;
+                    const k = kindMap[parentStack[0].name];
+                    if (k === 'function' || k === 'class') { topDeclKind = k; topDeclEnd = parentStack[0].to; }
                 } else if (parentStack.length === 2) {
                     // JS/C: root wrapper at index 0, declaration at index 1
-                    if (rootNodes.has(parentStack[0])) {
-                        topDeclKind = kindMap[parentStack[1]] ?? null;
+                    if (rootNodes.has(parentStack[0].name)) {
+                        topDeclKind = kindMap[parentStack[1].name] ?? null;
+                        if (topDeclKind) topDeclEnd = parentStack[1].to;
                     }
                     // Go global: declaration at index 0 (e.g., [VarDecl, VarSpec])
                     // But NOT if index 0 is a function/method (those contain local vars)
-                    else if (kindMap[parentStack[0]] && kindMap[parentStack[0]] !== 'function') {
-                        topDeclKind = kindMap[parentStack[0]];
+                    else if (kindMap[parentStack[0].name] && kindMap[parentStack[0].name] !== 'function') {
+                        topDeclKind = kindMap[parentStack[0].name];
+                        topDeclEnd = parentStack[0].to;
                     }
                 } else if (parentStack.length === 3) {
                     // Go types: [SourceFile, TypeDecl, TypeSpec] → identifier
-                    if (rootNodes.has(parentStack[0]) && kindMap[parentStack[1]]) {
-                        topDeclKind = kindMap[parentStack[1]];
+                    if (rootNodes.has(parentStack[0].name) && kindMap[parentStack[1].name]) {
+                        topDeclKind = kindMap[parentStack[1].name];
+                        topDeclEnd = parentStack[1].to;
                     }
                 }
                 if (isIdent && parentStack.length <= 3 && topDeclKind) {
@@ -829,12 +834,13 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
                     const declKind = topDeclKind;
 
                     const line = doc.lineAt(node.from).number;
+                    const endLine = doc.lineAt(topDeclEnd).number;
                     if (!symbols.some(s => s.name === text && s.line === line)) {
-                        symbols.push({ name: text, kind: declKind, line, indent: 0 });
+                        symbols.push({ name: text, kind: declKind, line, endLine, indent: 0 });
                     }
                 }
 
-                parentStack.push(name);
+                parentStack.push({ name, to: node.to });
             },
             leave(node) {
                 parentStack.pop();

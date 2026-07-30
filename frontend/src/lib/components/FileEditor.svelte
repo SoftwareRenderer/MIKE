@@ -143,7 +143,7 @@
         const headers: SectionHeader[] = symbols
             .filter((s) => s.kind === 'function' || s.kind === 'class')
             .sort((a, b) => a.line - b.line)
-            .map((s) => ({ line: s.line }));
+            .map((s) => ({ line: s.line, endLine: s.endLine }));
         view.dispatch({ effects: updateHeadersEffect.of(headers) });
     }
 
