@@ -797,6 +797,7 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
                 //   local short-var declarations also have stackLen=1 [VarDecl], excluded by kind check
                 // - stackLen 2: root+declaration (JS/C: [Script, FunctionDeclaration]),
                 //   or declaration+child for non-functions (Go global: [VarDecl, VarSpec])
+                // - stackLen 3: root+declaration+spec (Go: [SourceFile, TypeDecl, TypeSpec])
                 // This rejects stacks like [Block, VarDecl] or [FunctionDecl, VarDecl] (local/nested)
                 let topDeclKind: string | null = null;
                 if (parentStack.length === 1) {
@@ -813,8 +814,13 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
                     else if (kindMap[parentStack[0]] && kindMap[parentStack[0]] !== 'function') {
                         topDeclKind = kindMap[parentStack[0]];
                     }
+                } else if (parentStack.length === 3) {
+                    // Go types: [SourceFile, TypeDecl, TypeSpec] → identifier
+                    if (rootNodes.has(parentStack[0]) && kindMap[parentStack[1]]) {
+                        topDeclKind = kindMap[parentStack[1]];
+                    }
                 }
-                if (isIdent && parentStack.length <= 2 && topDeclKind) {
+                if (isIdent && parentStack.length <= 3 && topDeclKind) {
                     const text = doc.sliceString(node.from, node.to).trim();
                     if (!text || text.length > 60) return;
                     // Skip keywords
