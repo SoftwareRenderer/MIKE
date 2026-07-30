@@ -530,6 +530,30 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 	case "edit_task":
 		result, err := te.handleEditTask(args, task)
 		return result, err == nil
+	case "lsp_references":
+		result, err := te.handleLSPSymbolRequest(args, worktreePath, "textDocument/references", map[string]any{"includeDeclaration": true})
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err), false
+		}
+		return result, true
+	case "lsp_definition":
+		result, err := te.handleLSPSymbolRequest(args, worktreePath, "textDocument/definition", nil)
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err), false
+		}
+		return result, true
+	case "lsp_code_actions":
+		result, err := te.handleLSPSymbolRequest(args, worktreePath, "textDocument/codeAction", nil)
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err), false
+		}
+		return result, true
+	case "lsp_hover":
+		result, err := te.handleLSPHover(args, worktreePath)
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err), false
+		}
+		return result, true
 	default:
 		return fmt.Sprintf("Unknown tool: %s", name), false
 	}
@@ -811,6 +835,275 @@ func (te *TaskExecutor) handleEditTask(args map[string]any, currentTask *types.T
 
 	result, _ := json.Marshal(map[string]string{"task_id": taskID, "title": target.Title, "status": "updated"})
 	return string(result), nil
+}
+
+// handleLSPSymbolRequest resolves a symbol name to a position via text search,
+// then calls the given LSP method at that position.
+func (te *TaskExecutor) handleLSPSymbolRequest(args map[string]any, worktreePath string, method string, extraParams map[string]any) (string, error) {
+	if te.lspMgr == nil {
+		return "", fmt.Errorf("LSP manager not available")
+	}
+	path, _ := args["path"].(string)
+	symbol, _ := args["symbol"].(string)
+	if path == "" || symbol == "" {
+		return "", fmt.Errorf("path and symbol are required")
+	}
+
+	absPath := filepath.Join(worktreePath, path)
+	absWorkspace, err := filepath.Abs(worktreePath)
+	if err != nil {
+		absWorkspace = worktreePath
+	}
+
+	// Read the file and find the symbol by text search
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+	position := findSymbolInText(string(content), symbol)
+	if position == nil {
+		return fmt.Sprintf("Symbol %q not found in %s. Use read_file to inspect the file.", symbol, path), nil
+	}
+
+	// Build the LSP request with the resolved position
+	uri := "file://" + absPath
+	params := map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     position,
+	}
+	for k, v := range extraParams {
+		params[k] = v
+	}
+
+	response, err := te.lspMgr.LSPRequest(absWorkspace, path, method, params)
+	if err != nil {
+		return "", err
+	}
+
+	return formatLSPResponse(response, method, absWorkspace), nil
+}
+
+// handleLSPHover resolves a symbol name to a position via text search,
+// then calls textDocument/hover at that position.
+func (te *TaskExecutor) handleLSPHover(args map[string]any, worktreePath string) (string, error) {
+	return te.handleLSPSymbolRequest(args, worktreePath, "textDocument/hover", nil)
+}
+
+// findSymbolInText searches file content for an identifier and returns its LSP position
+// (0-indexed line, 0-indexed character). Uses word boundary matching to avoid partial matches.
+func findSymbolInText(content, symbol string) map[string]any {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		idx := findWordIndex(line, symbol)
+		if idx >= 0 {
+			return map[string]any{"line": i, "character": idx}
+		}
+	}
+	return nil
+}
+
+// findWordIndex finds the start position of a word in a line, matching whole words only.
+// Returns -1 if not found.
+func findWordIndex(line, word string) int {
+	for i := 0; i <= len(line)-len(word); i++ {
+		if line[i:i+len(word)] == word {
+			// Check word boundaries
+			beforeOK := i == 0 || !isIdentChar(line[i-1])
+			afterOK := i+len(word) >= len(line) || !isIdentChar(line[i+len(word)])
+			if beforeOK && afterOK {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// isIdentChar checks if a character is valid in an identifier (letter, digit, underscore).
+func isIdentChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
+}
+
+// formatLSPResponse formats a raw LSP JSON response into a human-readable string.
+func formatLSPResponse(response json.RawMessage, method string, worktreePath string) string {
+	// Check for LSP error
+	var envelope struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(response, &envelope); err == nil && envelope.Error != nil {
+		return fmt.Sprintf("LSP error %d: %s", envelope.Error.Code, envelope.Error.Message)
+	}
+
+	// For success, unmarshal the result
+	var result any
+	if err := json.Unmarshal(response, &envelope); err != nil {
+		return string(response)
+	}
+	if envelope.Result == nil || string(envelope.Result) == "null" {
+		return "(no result)"
+	}
+	if err := json.Unmarshal(envelope.Result, &result); err != nil {
+		return string(envelope.Result)
+	}
+
+	switch method {
+	case "textDocument/references":
+		return formatLocationArray(result, worktreePath, "references")
+	case "textDocument/definition":
+		return formatDefinitionResult(result, worktreePath)
+	case "textDocument/codeAction":
+		return formatCodeActions(result)
+	case "textDocument/hover":
+		return formatHoverResult(result)
+	default:
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return string(data)
+	}
+}
+
+// formatLocationArray formats an array of LSP Location objects.
+func formatLocationArray(result any, worktreePath string, label string) string {
+	locs, ok := result.([]any)
+	if !ok {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return string(data)
+	}
+	if len(locs) == 0 {
+		return fmt.Sprintf("No %s found", label)
+	}
+
+	var buf strings.Builder
+	fmt.Fprintf(&buf, "Found %d %s:\n", len(locs), label)
+	for i, locAny := range locs {
+		loc, ok := locAny.(map[string]any)
+		if !ok {
+			continue
+		}
+		uri, _ := loc["uri"].(string)
+		rangeMap, _ := loc["range"].(map[string]any)
+		start, _ := rangeMap["start"].(map[string]any)
+		line, _ := start["line"].(float64)
+		character, _ := start["character"].(float64)
+
+		// Extract relative path from URI
+		path := strings.TrimPrefix(uri, "file://")
+		rel, _ := filepath.Rel(worktreePath, path)
+
+		fmt.Fprintf(&buf, "  %d. %s:%d:%d\n", i+1, rel, int(line)+1, int(character)+1)
+	}
+	return buf.String()
+}
+
+// formatDefinitionResult formats a definition result (Location or Location[]).
+func formatDefinitionResult(result any, worktreePath string) string {
+	// Can be a single Location or LocationLink[] or Location[]
+	switch v := result.(type) {
+	case map[string]any:
+		// Single Location
+		loc := v
+		uri, _ := loc["uri"].(string)
+		rangeMap, _ := loc["range"].(map[string]any)
+		start, _ := rangeMap["start"].(map[string]any)
+		line, _ := start["line"].(float64)
+		character, _ := start["character"].(float64)
+
+		path := strings.TrimPrefix(uri, "file://")
+		rel, _ := filepath.Rel(worktreePath, path)
+
+		return fmt.Sprintf("Definition found at %s:%d:%d", rel, int(line)+1, int(character)+1)
+	case []any:
+		// Location[] or LocationLink[]
+		if len(v) == 0 {
+			return "No definition found"
+		}
+		var buf strings.Builder
+		fmt.Fprintf(&buf, "Found %d definition(s):\n", len(v))
+		for i, locAny := range v {
+			loc, ok := locAny.(map[string]any)
+			if !ok {
+				continue
+			}
+			uri, _ := loc["uri"].(string)
+			// Handle LocationLink (targetRange) vs Location (range)
+			rangeMap, _ := loc["range"].(map[string]any)
+			if rangeMap == nil {
+				rangeMap, _ = loc["targetSelectionRange"].(map[string]any)
+			}
+			start, _ := rangeMap["start"].(map[string]any)
+			line, _ := start["line"].(float64)
+			character, _ := start["character"].(float64)
+
+			path := strings.TrimPrefix(uri, "file://")
+			rel, _ := filepath.Rel(worktreePath, path)
+
+			fmt.Fprintf(&buf, "  %d. %s:%d:%d\n", i+1, rel, int(line)+1, int(character)+1)
+		}
+		return buf.String()
+	default:
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return string(data)
+	}
+}
+
+// formatCodeActions formats code actions result.
+func formatCodeActions(result any) string {
+	actions, ok := result.([]any)
+	if !ok {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return string(data)
+	}
+	if len(actions) == 0 {
+		return "No code actions available at this position"
+	}
+
+	var buf strings.Builder
+	fmt.Fprintf(&buf, "Found %d code action(s):\n", len(actions))
+	for i, actAny := range actions {
+		act, ok := actAny.(map[string]any)
+		if !ok {
+			continue
+		}
+		title, _ := act["title"].(string)
+		kind, _ := act["kind"].(string)
+		fmt.Fprintf(&buf, "  %d. %s", i+1, title)
+		if kind != "" {
+			fmt.Fprintf(&buf, " [%s]", kind)
+		}
+		fmt.Fprintln(&buf)
+	}
+	return buf.String()
+}
+
+// formatHoverResult formats hover information result.
+func formatHoverResult(result any) string {
+	hover, ok := result.(map[string]any)
+	if !ok {
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return string(data)
+	}
+
+	contents, _ := hover["contents"].(map[string]any)
+	if contents == nil {
+		return "No hover information available"
+	}
+
+	// Handle MarkupContent { kind, value }
+	if kind, ok := contents["kind"].(string); ok {
+		value, _ := contents["value"].(string)
+		return fmt.Sprintf("[%s]\n%s", kind, value)
+	}
+
+	// Handle MarkupContent as plain string
+	if value, ok := contents["value"].(string); ok {
+		return value
+	}
+
+	// Fallback: marshal the whole thing
+	data, _ := json.MarshalIndent(contents, "", "  ")
+	return string(data)
 }
 
 // pluralS returns "s" if count > 1, empty string otherwise.

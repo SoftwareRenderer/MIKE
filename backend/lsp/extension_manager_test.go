@@ -560,3 +560,57 @@ func TestParsePublishDiagnostics(t *testing.T) {
 		t.Errorf("errors[1] = %q, want %q", errors[1], "Line 16: syntax error")
 	}
 }
+
+func TestHasAnyLSPExtension(t *testing.T) {
+	store := testExtensionStore(t)
+	reg := NewExtensionRegistry(store)
+
+	// No extensions — should return false
+	if reg.HasAnyLSPExtension() {
+		t.Error("HasAnyLSPExtension() = true, want false (no extensions)")
+	}
+
+	// Add an enabled LSP extension
+	ext := makeTestLSPExt("gopls", "go")
+	if err := store.Create(ext); err != nil {
+		t.Fatalf("create extension: %v", err)
+	}
+
+	if !reg.HasAnyLSPExtension() {
+		t.Error("HasAnyLSPExtension() = false, want true (gopls enabled)")
+	}
+
+	// Disable the extension
+	if err := store.SetEnabled(ext.ID, false); err != nil {
+		t.Fatalf("set enabled: %v", err)
+	}
+
+	if reg.HasAnyLSPExtension() {
+		t.Error("HasAnyLSPExtension() = true, want false (gopls disabled)")
+	}
+}
+
+func TestHasAnyLSPExtension_NonLSPExtension(t *testing.T) {
+	store := testExtensionStore(t)
+	reg := NewExtensionRegistry(store)
+
+	// Add a non-LSP extension (UI type)
+	uiExt := &extensions.Extension{
+		ID:      "ui-ext",
+		Name:    "ui-ext",
+		Version: "1.0.0",
+		Type:    extensions.ExtensionTypeUI,
+		Manifest: extensions.ExtensionManifest{
+			DisplayName: "UI Extension",
+			Version:     "1.0.0",
+		},
+		Enabled: true,
+	}
+	if err := store.Create(uiExt); err != nil {
+		t.Fatalf("create extension: %v", err)
+	}
+
+	if reg.HasAnyLSPExtension() {
+		t.Error("HasAnyLSPExtension() = true, want false (only UI extension)")
+	}
+}
