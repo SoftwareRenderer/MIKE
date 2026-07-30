@@ -17,6 +17,7 @@ function makeTask(updatedAt: string, columnOrder: number): ReturnType<typeof sor
         subtasks_auto_merge: false,
         operating_mode: 'act',
         title_generating: false,
+        summarizing: false,
         created_at: '2025-01-01T00:00:00Z',
         updated_at: updatedAt,
     };

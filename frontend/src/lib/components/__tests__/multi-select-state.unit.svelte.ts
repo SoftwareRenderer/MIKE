@@ -48,6 +48,7 @@ function createMockTask(id: string, status: string = 'backlog'): Task {
         subtasks_auto_merge: true,
         operating_mode: 'act',
         title_generating: false,
+        summarizing: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
     };
