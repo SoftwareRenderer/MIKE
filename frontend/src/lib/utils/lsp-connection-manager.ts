@@ -2,6 +2,26 @@ import type { Transport } from '@codemirror/lsp-client';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
 
 /**
+ * Create notification handlers that forward LSP messages to a callback
+ * instead of the default CodeMirror dialog (cm-lsp-message).
+ *
+ * Returns a handler map for the LSPClient `notificationHandlers` option.
+ * Returning true stops propagation to the default handler.
+ */
+export function createLSPNotificationHandlers(
+    onMessage: (message: string) => void,
+): Record<string, (client: unknown, params: unknown) => boolean> {
+    const handle = (_client: unknown, params: unknown) => {
+        onMessage((params as { message?: string }).message || '');
+        return true;
+    };
+    return {
+        'window/showMessage': handle,
+        'window/logMessage': handle,
+    };
+}
+
+/**
  * Channel ID step for non-overlapping ID ranges per virtual transport.
  * Channel 1: IDs 1001–1999, Channel 2: IDs 2001–2999, etc.
  */

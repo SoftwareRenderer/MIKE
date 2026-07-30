@@ -1,5 +1,5 @@
 <script lang="ts">
-    let { cursorLine, cursorCol, lineCount, charCount, onFind, lspReady, lspConnecting, lspError, lspLanguage, lspServerName, lspServerVersion }: {
+    let { cursorLine, cursorCol, lineCount, charCount, onFind, lspReady, lspConnecting, lspError, lspLanguage, lspServerName, lspServerVersion, lspMessage }: {
         cursorLine: number;
         cursorCol: number;
         lineCount: number;
@@ -11,6 +11,7 @@
         lspLanguage?: string;
         lspServerName?: string;
         lspServerVersion?: string;
+        lspMessage?: string;
     } = $props();
 
     let lspTooltipVisible = $state(false);
@@ -54,6 +55,12 @@
                             {#if lspError}{lspError}{:else if lspReady}Connected{:else}Connecting...{/if}
                         </span>
                     </div>
+                    {#if lspMessage}
+                        <div class="lsp-tooltip-row">
+                            <span class="lsp-tooltip-label">LSP Log</span>
+                            <div class="lsp-tooltip-log">{lspMessage}</div>
+                        </div>
+                    {/if}
                 </div>
             {/if}
         {/if}
@@ -146,6 +153,18 @@
     }
     .lsp-tooltip-value.lsp-error {
         color: var(--color-status-red);
+    }
+    .lsp-tooltip-log {
+        max-width: 280px;
+        max-height: 120px;
+        overflow-y: auto;
+        text-align: left;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--color-text-secondary);
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.4;
     }
     .footer-find-btn {
         display: flex;
