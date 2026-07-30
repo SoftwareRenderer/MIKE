@@ -999,15 +999,24 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				state := te.tasks[setup.task.ID]
 				te.taskMu.Unlock()
 				// Serialize tool writes against subtask merges into this worktree.
-				if !lc.sandboxEnabled {
-					te.GetWorktreeMu(setup.task.ID).Lock()
-				}
+				te.GetWorktreeMu(setup.task.ID).Lock()
 				result, success := te.executeTool(setup.ctx, tc.Function.Name, args, setup.worktreePath, setup.task, state, func(toolID string, text string) {
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
 				})
-				if !lc.sandboxEnabled {
-					te.GetWorktreeMu(setup.task.ID).Unlock()
+
+				// Trigger LSP diagnostics if any files were modified by the tool.
+				// This ensures that errors introduced by any tool (including bash) are reported.
+				if err := te.worktreeMgr.GitRunInDir(setup.worktreePath, "diff", "--quiet"); err != nil {
+					// Modified files exist — trigger diagnostics for each.
+					modified, _ := te.worktreeMgr.GitRunInDirOutput(setup.worktreePath, "diff", "--name-only")
+					files := strings.Split(strings.TrimSpace(modified), "\n")
+					for _, f := range files {
+						if f != "" {
+							go te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, f)
+						}
+					}
 				}
+				te.GetWorktreeMu(setup.task.ID).Unlock()
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})
