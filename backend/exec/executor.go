@@ -17,6 +17,7 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/llama"
+	"kanban/backend/lsp"
 	"kanban/backend/prompts"
 	sandboxmgr "kanban/backend/sandbox"
 	"kanban/backend/store"
@@ -34,6 +35,7 @@ type TaskExecutor struct {
 	worktreeMgr   *git.WorktreeManager
 	sandboxMgr    *sandboxmgr.SandboxManager
 	agentRegistry *agent.AgentRegistry
+	lspMgr        *lsp.ExtensionLSPManager
 	commitQueue   *CommitQueue
 	gate          *ConcurrencyGate
 	taskMu        sync.Mutex
@@ -132,7 +134,7 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 }
 
 // NewTaskExecutor creates a new TaskExecutor.
-func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandboxmgr.SandboxManager, agentRegistry *agent.AgentRegistry, commitQueue *CommitQueue) *TaskExecutor {
+func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandboxmgr.SandboxManager, agentRegistry *agent.AgentRegistry, lspMgr *lsp.ExtensionLSPManager, commitQueue *CommitQueue) *TaskExecutor {
 	te := &TaskExecutor{
 		store:             store,
 		configStore:       configStore,
@@ -140,6 +142,7 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 		worktreeMgr:       worktreeMgr,
 		sandboxMgr:        sandboxMgr,
 		agentRegistry:     agentRegistry,
+		lspMgr:            lspMgr,
 		commitQueue:       commitQueue,
 		gate:              NewConcurrencyGate(),
 		tasks:             make(map[string]*executionState),

@@ -147,7 +147,11 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	// 'Pi Coding Agent') are included in the /api/config response.
 	cfgStore.SetAgentRegistry(agentRegistry)
 
-	s.executor = kanbanexec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, commitQueue)
+	extRegistry := extensions.NewRegistryClient()
+	s.extSandboxMgr = extensions.NewExtensionSandboxManager(extRegistry, s.extStore)
+	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
+
+	s.executor = kanbanexec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, s.extLSPMgr, commitQueue)
 	// Wire agent registry to terminal manager (created earlier before agentRegistry was available)
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)
@@ -160,8 +164,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 
 	// Bootstrap built-in extensions
 	// (Removed built-in bootstrapping to decouple extensions from core)
-	extRegistry := extensions.NewRegistryClient()
-	s.extSandboxMgr = extensions.NewExtensionSandboxManager(extRegistry, s.extStore)
 	s.extHandler = extensions.NewExtensionHandler(s.extStore, s.extSandboxMgr, extRegistry, &extensions.ExtensionConfig{
 		RegistryURL:  cfg.RegistryURL,
 		WorkspaceDir: cfg.WorkspaceDir,
@@ -170,7 +172,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	// LSP handler for language server WebSocket bridging
 	// Use extension-based registry and manager for dynamic LSP discovery
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)
-	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
 	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, s.extLSPMgr)
 	// Wire extension change callback → reload agent registry + broadcast to all clients
 	s.extHandler.SetOnExtensionChanged(func() {
