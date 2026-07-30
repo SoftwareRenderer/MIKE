@@ -469,9 +469,9 @@ func (m *ExtensionLSPManager) lookupExtension(language string) (*extensions.Exte
 		if lspCfg.Language == language {
 			return &ext, nil
 		}
-		// Also check file extensions
+		// Also check file extensions (entries may or may not have a leading dot)
 		for _, extn := range lspCfg.Extensions {
-			if filepath.Ext(extn) == "."+language {
+			if extn == language || strings.TrimPrefix(extn, ".") == language {
 				return &ext, nil
 			}
 		}
