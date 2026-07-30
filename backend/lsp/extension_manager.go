@@ -24,8 +24,11 @@ type ExtensionLSPManager struct {
 	projects   *store.Store
 	mu         sync.Mutex
 	clients    map[string]*sandboxClient // workspaceKey → client state
-	// serverCh receives messages from all LSP servers
+	// serverCh receives messages from all LSP servers (responses + notifications)
 	serverCh chan json.RawMessage
+	// subscribers receive a copy of all LSP server messages (for filtered listening)
+	subscribers []chan json.RawMessage
+	subMu       sync.Mutex
 }
 
 // sandboxClient tracks the state of a single LSP connection in a sandbox.
@@ -119,11 +122,12 @@ func translateURIsToHost(msg json.RawMessage, workspacePath string, projectMount
 // NewExtensionLSPManager creates a new ExtensionLSPManager.
 func NewExtensionLSPManager(extStore *extensions.ExtensionStore, extSandbox *extensions.ExtensionSandboxManager, projects *store.Store) *ExtensionLSPManager {
 	return &ExtensionLSPManager{
-		extStore:   extStore,
-		extSandbox: extSandbox,
-		projects:   projects,
-		clients:    make(map[string]*sandboxClient),
-		serverCh:   make(chan json.RawMessage, 256),
+		extStore:    extStore,
+		extSandbox:  extSandbox,
+		projects:    projects,
+		clients:     make(map[string]*sandboxClient),
+		serverCh:    make(chan json.RawMessage, 256),
+		subscribers: make([]chan json.RawMessage, 0),
 	}
 }
 
@@ -207,6 +211,21 @@ func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *S
 	if err := bridgeClient.LSPStart(ctx, command, args); err != nil {
 		return nil, fmt.Errorf("start LSP server in sandbox: %w", err)
 	}
+
+	// Start a goroutine to forward LSP notifications (e.g., publishDiagnostics)
+	// from the sandbox bridge to the server channel and subscribers.
+	go func() {
+		for notif := range bridgeClient.LSPNotificationCh() {
+			// Translate URIs from container paths back to host paths
+			translated := translateURIsToHost(notif, workspacePath, projectMounts)
+			select {
+			case m.serverCh <- translated:
+			default:
+				log.Printf("[lsp] server channel full, dropping notification")
+			}
+			m.broadcastToSubscribers(translated)
+		}
+	}()
 
 	client := &sandboxClient{
 		bridgeClient:  bridgeClient,
@@ -327,12 +346,52 @@ func (m *ExtensionLSPManager) SendToServer(process *LSPProcess, msg json.RawMess
 		log.Printf("[lsp] server channel full, dropping message")
 	}
 
+	// Broadcast to subscribers (e.g., triggerLSPDiagnostics)
+	m.broadcastToSubscribers(response)
+
 	return nil
 }
 
 // ServerMessageCh returns a channel that receives messages from LSP servers.
 func (m *ExtensionLSPManager) ServerMessageCh() <-chan json.RawMessage {
 	return m.serverCh
+}
+
+// Subscribe returns a channel that receives a copy of all LSP server messages
+// (responses and notifications). Call Unsubscribe when done to release resources.
+// The returned channel is bidirectional so Unsubscribe can close it.
+func (m *ExtensionLSPManager) Subscribe() chan json.RawMessage {
+	m.subMu.Lock()
+	defer m.subMu.Unlock()
+	ch := make(chan json.RawMessage, 64)
+	m.subscribers = append(m.subscribers, ch)
+	return ch
+}
+
+// Unsubscribe removes a subscriber channel and closes it.
+func (m *ExtensionLSPManager) Unsubscribe(ch chan json.RawMessage) {
+	m.subMu.Lock()
+	defer m.subMu.Unlock()
+	for i, s := range m.subscribers {
+		if s == ch {
+			m.subscribers = append(m.subscribers[:i], m.subscribers[i+1:]...)
+			close(ch)
+			break
+		}
+	}
+}
+
+// broadcastToSubscribers sends a copy of the message to all subscribers.
+func (m *ExtensionLSPManager) broadcastToSubscribers(msg json.RawMessage) {
+	m.subMu.Lock()
+	defer m.subMu.Unlock()
+	for _, sub := range m.subscribers {
+		select {
+		case sub <- msg:
+		default:
+			// Drop if subscriber is too slow
+		}
+	}
 }
 
 // collectProjectMounts queries registered projects and builds a map of

@@ -1898,8 +1898,6 @@ func slugifyBranchName(title string) string {
 
 func agentSandboxHash(sb *types.AgentSandbox) string {
 	if sb == nil {
-func agentSandboxHash(sb *types.AgentSandbox) string {
-	if sb == nil {
 		return ""
 	}
 	b, _ := json.Marshal(sb)
@@ -1907,6 +1905,9 @@ func agentSandboxHash(sb *types.AgentSandbox) string {
 }
 
 func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, taskID, filePath string) {
+	if te.lspMgr == nil {
+		return
+	}
 	go func() {
 		ext := filepath.Ext(filePath)
 		if ext == "" {
@@ -1927,6 +1928,13 @@ func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, ta
 			return
 		}
 		defer te.lspMgr.Release(worktreePath, lang)
+
+		// Subscribe to LSP messages for this diagnostic check.
+		// This creates a temporary filtered channel so we don't steal messages
+		// from the shared serverCh used by the LSP handler.
+		subCh := te.lspMgr.Subscribe()
+		defer te.lspMgr.Unsubscribe(subCh)
+
 		content, err := os.ReadFile(filepath.Join(worktreePath, filePath))
 		if err != nil {
 			return
@@ -1945,32 +1953,32 @@ func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, ta
 		if err := te.lspMgr.SendToServer(proc, msg); err != nil {
 			return
 		}
+
 		timeout := time.After(5 * time.Second)
-		serverCh := te.lspMgr.ServerMessageCh()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-timeout:
 				return
-			case raw, ok := <-serverCh:
+			case raw, ok := <-subCh:
 				if !ok {
 					return
 				}
 				var envelope struct {
-					Method string "json:\"method\""
+					Method string `json:"method"`
 					Params struct {
-						Uri          string "json:\"uri\""
+						Uri         string `json:"uri"`
 						Diagnostics []struct {
 							Range struct {
 								Start struct {
-									Line int "json:\"line\""
-								} "json:\"start\""
-							} "json:\"range\""
-							Message string "json:\"message\""
-							Severity int    "json:\"severity\""
-						} "json:\"diagnostics\""
-					} "json:\"params\""
+									Line int `json:"line"`
+								} `json:"start"`
+							} `json:"range"`
+							Message  string `json:"message"`
+							Severity int    `json:"severity"`
+						} `json:"diagnostics"`
+					} `json:"params"`
 				}
 				if err := json.Unmarshal(raw, &envelope); err != nil {
 					continue

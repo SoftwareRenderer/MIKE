@@ -9,10 +9,11 @@ import (
 
 // Message types.
 const (
-	TypeRequest uint8 = 0x01
-	TypeResult  uint8 = 0x02
-	TypeChunk   uint8 = 0x03
-	TypeError   uint8 = 0x04
+	TypeRequest    uint8 = 0x01
+	TypeResult     uint8 = 0x02
+	TypeChunk      uint8 = 0x03
+	TypeError      uint8 = 0x04
+	TypeNotification uint8 = 0x05
 )
 
 // MessageTypeName returns the human-readable name for a message type.
@@ -30,6 +31,8 @@ func messageTypeString(t uint8) string {
 		return "Chunk"
 	case TypeError:
 		return "Error"
+	case TypeNotification:
+		return "Notification"
 	default:
 		return fmt.Sprintf("Unknown(%d)", t)
 	}
@@ -118,7 +121,7 @@ func (f *Frame) ErrorMsg() string {
 // Validate checks that the frame type is known.
 func (f *Frame) Validate() error {
 	switch f.Type {
-	case TypeRequest, TypeResult, TypeChunk, TypeError:
+	case TypeRequest, TypeResult, TypeChunk, TypeError, TypeNotification:
 		return nil
 	default:
 		return fmt.Errorf("unknown frame type %d (MsgID=%d)", f.Type, f.MsgID)
