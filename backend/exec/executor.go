@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	osexec "os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -73,17 +73,17 @@ type CompactResult struct {
 }
 
 type executionState struct {
-	ctx          context.Context
-	cancel       context.CancelFunc
-	userMsgChan  chan stream.UserMessage
-	summarizeCh  chan *summarizeRequest // send a request, receives result via resultCh
+	ctx             context.Context
+	cancel          context.CancelFunc
+	userMsgChan     chan stream.UserMessage
+	summarizeCh     chan *summarizeRequest // send a request, receives result via resultCh
 	activeSummarize struct {
 		mu      sync.Mutex
 		request *summarizeRequest // currently active summarize request (nil = none)
 	}
-	compactCh    chan chan *CompactResult      // send a channel, receives result from agent compaction
-	agentRunner  *agent.AgentRunner            // Agent runner — kept alive after completion for on-demand compaction
-	runnerClosed bool                          // true when agentRunner has been closed (prevents double-close)
+	compactCh    chan chan *CompactResult // send a channel, receives result from agent compaction
+	agentRunner  *agent.AgentRunner       // Agent runner — kept alive after completion for on-demand compaction
+	runnerClosed bool                     // true when agentRunner has been closed (prevents double-close)
 	projectName  string
 	createdIDs   []string // task IDs created by create_task during this execution
 	executorType string   // "llm" or "agent" — tracks which executor type is active
@@ -108,7 +108,7 @@ type executionState struct {
 	// full sandbox recreation). Returns true if recovery succeeded (callbacks and
 	// client are updated inside the callback). Only non-nil when sandbox is enabled.
 	// Guards against infinite loops via bridgeRecoveryAttempts.
-	recoverBridge func() bool
+	recoverBridge          func() bool
 	bridgeRecoveryAttempts int
 	// Closed by executor defer so ForwardUserMessage type-switch can wait for clean exit.
 	done chan struct{}
@@ -122,12 +122,24 @@ type LSPDiagnosticPosition struct {
 
 type LSPDiagnosticRange struct {
 	Start LSPDiagnosticPosition `json:"start"`
+	End   LSPDiagnosticPosition `json:"end"`
+}
+
+type LSPRelatedInformation struct {
+	Location struct {
+		URI   string             `json:"uri"`
+		Range LSPDiagnosticRange `json:"range"`
+	} `json:"location"`
+	Message string `json:"message"`
 }
 
 type LSPDiagnostic struct {
-	Range    LSPDiagnosticRange `json:"range"`
-	Message  string             `json:"message"`
-	Severity int                `json:"severity"`
+	Range              LSPDiagnosticRange      `json:"range"`
+	Message            string                  `json:"message"`
+	Severity           int                     `json:"severity"`
+	Source             string                  `json:"source"`
+	Code               interface{}             `json:"code"`
+	RelatedInformation []LSPRelatedInformation `json:"relatedInformation"`
 }
 
 type modelConfig struct {
@@ -152,16 +164,16 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 // NewTaskExecutor creates a new TaskExecutor.
 func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandboxmgr.SandboxManager, agentRegistry *agent.AgentRegistry, lspMgr *lsp.ExtensionLSPManager, commitQueue *CommitQueue) *TaskExecutor {
 	te := &TaskExecutor{
-		store:             store,
-		configStore:       configStore,
-		appStreamMgr:      appStreamMgr,
-		worktreeMgr:       worktreeMgr,
-		sandboxMgr:        sandboxMgr,
-		agentRegistry:     agentRegistry,
-		lspMgr:            lspMgr,
-		commitQueue:       commitQueue,
-		gate:              NewConcurrencyGate(),
-		tasks:             make(map[string]*executionState),
+		store:         store,
+		configStore:   configStore,
+		appStreamMgr:  appStreamMgr,
+		worktreeMgr:   worktreeMgr,
+		sandboxMgr:    sandboxMgr,
+		agentRegistry: agentRegistry,
+		lspMgr:        lspMgr,
+		commitQueue:   commitQueue,
+		gate:          NewConcurrencyGate(),
+		tasks:         make(map[string]*executionState),
 	}
 	te.dbSummarizeCancel.tasks = make(map[string]context.CancelFunc)
 	te.blockedMessages.tasks = make(map[string]struct{})
@@ -713,7 +725,7 @@ type taskExecSetup struct {
 	cancel                context.CancelFunc
 	userMsgChan           chan stream.UserMessage
 	summarizeCh           chan *summarizeRequest // channel for manual summarization requests
-	initialContent        string          // user message content for lazy-start (empty for normal start)
+	initialContent        string                 // user message content for lazy-start (empty for normal start)
 	regenerate            bool
 	sandboxEnabled        bool
 	sandboxDockerfilePath string
@@ -1020,7 +1032,6 @@ func (te *TaskExecutor) StartTask(projectID, taskID string) error {
 	}
 	task := execSetup.task
 
-
 	existingMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
 	if len(existingMsgs) == 0 {
 		_ = te.store.CreateTaskMessage(&types.TaskMessage{
@@ -1246,7 +1257,6 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		return
 	}
 	task = execSetup.task
-
 
 	// If task has a merge conflict and the content is not already a conflict prompt,
 	// prepend conflict context (covers sync-merge path where no user message was persisted).
@@ -1919,17 +1929,53 @@ func agentSandboxHash(sb *types.AgentSandbox) string {
 	return string(b)
 }
 
+// formatLSPDiagnostics formats context for LLM follow-up action
 func (te *TaskExecutor) formatLSPDiagnostics(filePath string, diagnostics []LSPDiagnostic) string {
-	var lines []string
-	for _, d := range diagnostics {
-		if d.Severity <= 1 {
-			lines = append(lines, fmt.Sprintf("LSP Error in %s: %s at line %d, col %d", filePath, d.Message, d.Range.Start.Line+1, d.Range.Start.Character+1))
+	var issues []string
+	for i, d := range diagnostics {
+		// Include errors (1) and warnings (2); skip info (3) and hints (4)
+		if d.Severity > 2 {
+			continue
 		}
+		label := "error"
+		if d.Severity == 2 {
+			label = "warning"
+		}
+		// Build source+code tag, e.g. "[gopls S1002]" or "[eslint]"
+		var tag string
+		parts := []string{}
+		if d.Source != "" {
+			parts = append(parts, d.Source)
+		}
+		if d.Code != nil {
+			switch c := d.Code.(type) {
+			case string:
+				parts = append(parts, c)
+			case float64:
+				parts = append(parts, fmt.Sprintf("%d", int(c)))
+			}
+		}
+		if len(parts) > 0 {
+			tag = " [" + strings.Join(parts, " ") + "]"
+		}
+		msg := d.Message
+		// Append related info if present, e.g. " (see: type defined at foo.go:10)"
+		if len(d.RelatedInformation) > 0 {
+			for _, r := range d.RelatedInformation {
+				if r.Message != "" {
+					relLine := r.Location.Range.Start.Line + 1
+					relFile := filepath.Base(r.Location.URI)
+					msg += fmt.Sprintf(" (see %s:%d: %s)", relFile, relLine, r.Message)
+				}
+			}
+		}
+		issues = append(issues, fmt.Sprintf("%d. line %d, col %d %s: %s (%s)", i+1, d.Range.Start.Line+1, d.Range.Start.Character+1, tag, msg, label))
 	}
-	if len(lines) == 0 {
+	if len(issues) == 0 {
 		return ""
 	}
-	return strings.Join(lines, "\n")
+	header := fmt.Sprintf("Fix issues in %s:", filePath)
+	return header + "\n" + strings.Join(issues, "\n")
 }
 
 func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, taskID, filePath string) string {
@@ -1978,9 +2024,9 @@ func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, ta
 		"id":      1,
 		"method":  "initialize",
 		"params": map[string]any{
-			"processId":    os.Getpid(),
-			"clientInfo":   map[string]any{"name": "kanban-lsp-diag", "version": "1.0"},
-			"rootUri":      "file://" + worktreePath,
+			"processId":        os.Getpid(),
+			"clientInfo":       map[string]any{"name": "kanban-lsp-diag", "version": "1.0"},
+			"rootUri":          "file://" + worktreePath,
 			"workspaceFolders": []map[string]any{{"uri": "file://" + worktreePath, "name": "workspace"}},
 			"capabilities": map[string]any{
 				"textDocument": map[string]any{
