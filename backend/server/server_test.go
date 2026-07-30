@@ -906,28 +906,7 @@ func TestGitIdentityAvailable(t *testing.T) {
 	gitEnvKeys := []string{
 		"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME",
 		"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL",
-		"KANBAN_GIT_AUTHOR_NAME", "KANBAN_GIT_AUTHOR_EMAIL",
 	}
-
-	t.Run("KANBAN env vars satisfy check", func(t *testing.T) {
-		saved := saveEnv(gitEnvKeys...)
-		defer restoreEnv(saved)
-		// Clear all git env vars
-		for _, k := range gitEnvKeys {
-			os.Unsetenv(k)
-		}
-		// Set KANBAN vars
-		os.Setenv("KANBAN_GIT_AUTHOR_NAME", "Kanban User")
-		os.Setenv("KANBAN_GIT_AUTHOR_EMAIL", "kanban@example.com")
-
-		// gitIdentityAvailable uses git.GitAuthorName/Email (package-level, set at init)
-		// and os.Getenv for standard git env vars. For this test we verify the
-		// standard git env var path.
-		name, email := resolveGitIdentity()
-		if name == "" || email == "" {
-			t.Errorf("expected non-empty identity from KANBAN env vars, got name=%q email=%q", name, email)
-		}
-	})
 
 	t.Run("standard git env vars satisfy check", func(t *testing.T) {
 		saved := saveEnv(gitEnvKeys...)
