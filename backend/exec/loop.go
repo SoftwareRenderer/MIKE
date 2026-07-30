@@ -1006,7 +1006,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 				// Trigger LSP diagnostics for files modified by the tool.
 				// For write/edit tools, use the path from tool args directly.
-				// For bash, use git diff as a fallback to detect modified files.
+				// For bash, extract file paths from the command and only check files
+				// that match an installed LSP extension.
 				var lspHint string
 				switch tc.Function.Name {
 				case "write_file", "edit_file":
@@ -1014,15 +1015,12 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						lspHint = te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, path)
 					}
 				case "bash":
-					if err := te.worktreeMgr.GitRunInDir(setup.worktreePath, "diff", "--quiet"); err != nil {
-						modified, _ := te.worktreeMgr.GitRunInDirOutput(setup.worktreePath, "diff", "--name-only")
-						files := strings.Split(strings.TrimSpace(modified), "\n")
+					if cmd, ok := args["command"].(string); ok && cmd != "" {
+						files := extractFilesFromBashCommand(cmd)
 						for _, f := range files {
-							if f != "" {
-								if hint := te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, f); hint != "" {
-									lspHint = hint
-									break
-								}
+							if hint := te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, f); hint != "" {
+								lspHint = hint
+								break
 							}
 						}
 					}
@@ -1636,4 +1634,245 @@ func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistan
 	// usage is nil only when ChatStream returns no SSE data at all (empty/error stream).
 	// Callers should treat zero stats as "unknown" — no estimation needed.
 	return 0, 0, 0, 0, 0
+}
+
+// extractFilesFromBashCommand parses a bash command and extracts file paths that
+// are likely being written to or modified. Only returns paths with known code file
+// extensions (e.g., .go, .ts, .py, .rs) — the triggerLSPDiagnostics function
+// further filters by installed LSP extensions.
+//
+// Handles common patterns:
+//  - Shell redirections: > file, >> file
+//  - echo/cat/printf ... > file
+//  - tee file
+//  - sed -i 's/...' file
+//  - mv old new (returns new)
+//  - cp src dest (returns dest)
+//  - touch file
+func extractFilesFromBashCommand(cmd string) []string {
+	var files []string
+	seen := make(map[string]bool)
+
+	addFile := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" || path == "." || path == "-" {
+			return
+		}
+		// Remove quotes
+		path = strings.Trim(path, "\"'")
+		if seen[path] {
+			return
+		}
+		// Only include files with extensions (skip directories, /dev/null, etc.)
+		if filepath.Ext(path) == "" {
+			return
+		}
+		// Skip non-code files
+		if isImageFile(path) || strings.HasPrefix(path, "/dev/") {
+			return
+		}
+		seen[path] = true
+		files = append(files, path)
+	}
+
+	// Split into lines for multi-line commands, then split each line by &&/||
+	for _, line := range strings.Split(cmd, "\n") {
+		for _, part := range splitChainedCommands(line) {
+			part = strings.TrimSpace(part)
+			if part == "" || strings.HasPrefix(part, "#") {
+				continue
+			}
+
+			// 1. Shell redirections: > file, >> file
+			// Match patterns like: echo "foo" > file.ts or cat > file.ts <<EOF
+			for _, re := range []string{">>", ">"} {
+				parts := strings.Split(part, re)
+				if len(parts) < 2 {
+					continue
+				}
+				// Check each part after the first (before the command) for file paths.
+				// The first redirect target is the one we want (e.g., > file 2>&1).
+				// parts[1] is right after the first >, parts[2+] are from 2> etc.
+				for i := 1; i < len(parts); i++ {
+					right := strings.TrimSpace(parts[i])
+					if right == "" {
+						continue
+					}
+					// Skip stderr redirect patterns like 2>&1, 2>/dev/null
+					if strings.HasPrefix(right, "2") {
+						continue
+					}
+					// Skip if it's a heredoc (starts with <<)
+					if strings.HasPrefix(right, "<<") {
+						continue
+					}
+					// Skip pipes
+					if strings.HasPrefix(right, "|") {
+						continue
+					}
+					// Extract just the filename (may have trailing commands)
+					fields := strings.Fields(right)
+					if len(fields) == 0 {
+						continue
+					}
+					addFile(fields[0])
+					break // only the first valid redirect matters
+				}
+			}
+
+			// 2. sed -i 's/...' file (and similar in-place edit commands)
+			if strings.Contains(part, "sed ") && strings.Contains(part, "-i") {
+				fields := strings.Fields(part)
+				for i, f := range fields {
+					if f == "sed" && i+1 < len(fields) {
+						j := i + 1
+						if j < len(fields) && fields[j] == "-i" {
+							j++
+						}
+						if j < len(fields) && !strings.HasPrefix(fields[j], "-") {
+							j++
+						}
+						for k := j; k < len(fields); k++ {
+							if !strings.HasPrefix(fields[k], "-") && fields[k] != "|" && fields[k] != "&&" && fields[k] != "||" {
+								addFile(fields[k])
+							}
+						}
+					}
+				}
+			}
+
+			// 3. tee file
+			if idx := strings.Index(part, "tee "); idx != -1 {
+				rest := strings.TrimSpace(part[idx+4:])
+				fields := strings.Fields(rest)
+				for _, f := range fields {
+					if !strings.HasPrefix(f, "-") && f != "|" && f != "&&" && f != "||" {
+						addFile(f)
+					}
+				}
+			}
+
+			// 4. mv old new (returns destination)
+			if strings.HasPrefix(part, "mv ") {
+				fields := strings.Fields(part)
+				for i, f := range fields {
+					if f == "mv" && i+2 < len(fields) {
+						j := i + 1
+						for j < len(fields) && strings.HasPrefix(fields[j], "-") {
+							j++
+						}
+						if j+1 < len(fields) {
+							addFile(fields[j+1])
+						}
+						break
+					}
+				}
+			}
+
+			// 5. cp src dest (returns destination)
+			if strings.HasPrefix(part, "cp ") {
+				fields := strings.Fields(part)
+				for i, f := range fields {
+					if f == "cp" && i+2 < len(fields) {
+						j := i + 1
+						for j < len(fields) && strings.HasPrefix(fields[j], "-") {
+							j++
+						}
+						for k := len(fields) - 1; k > j; k-- {
+							if !strings.HasPrefix(fields[k], "-") && fields[k] != "|" && fields[k] != "&&" && fields[k] != "||" {
+								addFile(fields[k])
+								break
+							}
+						}
+						break
+					}
+				}
+			}
+
+			// 6. touch file
+			if strings.HasPrefix(part, "touch ") {
+				fields := strings.Fields(part)
+				for i, f := range fields {
+					if f == "touch" {
+						for j := i + 1; j < len(fields); j++ {
+							if !strings.HasPrefix(fields[j], "-") && fields[j] != "|" && fields[j] != "&&" && fields[j] != "||" {
+								addFile(fields[j])
+							}
+						}
+						break
+					}
+				}
+			}
+
+			// 7. Commands that write to a file via argument: gofmt -w file
+			if strings.Contains(part, " -w ") {
+				fields := strings.Fields(part)
+				for i, f := range fields {
+					if f == "-w" && i+1 < len(fields) {
+						addFile(fields[i+1])
+					}
+				}
+			}
+		}
+	}
+
+	return files
+}
+
+// splitChainedCommands splits a bash command line by && and || operators,
+// respecting quoted strings. This allows processing each sub-command separately.
+func splitChainedCommands(line string) []string {
+	var parts []string
+	var current strings.Builder
+	inSingleQuote, inDoubleQuote := false, false
+	i := 0
+
+	for i < len(line) {
+		ch := line[i]
+
+		// Track quote state
+		switch ch {
+		case '\'':
+			if !inDoubleQuote {
+				inSingleQuote = !inSingleQuote
+			}
+		case '"':
+			if !inSingleQuote {
+				inDoubleQuote = !inDoubleQuote
+			}
+		case '\\':
+			if inSingleQuote {
+				current.WriteByte(ch)
+			} else {
+				// Escape next char
+				current.WriteByte(ch)
+				if i+1 < len(line) {
+					i++
+					current.WriteByte(line[i])
+				}
+				i++
+				continue
+			}
+		}
+
+		// Check for && or || outside quotes
+		if !inSingleQuote && !inDoubleQuote {
+			if i+1 < len(line) && ((line[i:i+2] == "&&") || (line[i:i+2] == "||")) {
+				parts = append(parts, strings.TrimSpace(current.String()))
+				current.Reset()
+				i += 2
+				continue
+			}
+		}
+
+		current.WriteByte(ch)
+		i++
+	}
+
+	// Add the last part
+	if last := strings.TrimSpace(current.String()); last != "" {
+		parts = append(parts, last)
+	}
+
+	return parts
 }
