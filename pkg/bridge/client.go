@@ -41,6 +41,9 @@ type Client struct {
 	sessions map[uint32]*shellSessionState // sessionID → shell state
 	readDone chan struct{}
 	closed   bool
+	// lspNotificationCh receives LSP server notifications (e.g., publishDiagnostics)
+	// forwarded from the sandbox bridge.
+	lspNotificationCh chan json.RawMessage
 }
 
 // shellSessionState tracks a persistent shell session.
@@ -78,10 +81,11 @@ type BashResultHolder struct {
 func NewClient(stdin io.WriteCloser, stdout io.ReadCloser) *Client {
 	conn := &pipeConn{reader: stdout, writer: stdin}
 	c := &Client{
-		conn:     conn,
-		pending:  make(map[uint32]*pendingReq),
-		sessions: make(map[uint32]*shellSessionState),
-		readDone: make(chan struct{}),
+		conn:              conn,
+		pending:           make(map[uint32]*pendingReq),
+		sessions:          make(map[uint32]*shellSessionState),
+		readDone:          make(chan struct{}),
+		lspNotificationCh: make(chan json.RawMessage, 64),
 	}
 	c.nextID.Store(1)
 	go c.readLoop()
@@ -96,6 +100,12 @@ func (c *Client) IsAlive() bool {
 	default:
 		return true
 	}
+}
+
+// LSPNotificationCh returns a channel that receives LSP server notifications
+// (e.g., publishDiagnostics) forwarded from the sandbox bridge.
+func (c *Client) LSPNotificationCh() <-chan json.RawMessage {
+	return c.lspNotificationCh
 }
 
 // nextMsgID returns the next unique message ID.
@@ -173,6 +183,16 @@ func (c *Client) readLoop() {
 			case s.outputCh <- chunk.Data:
 			default:
 				log.Printf("[sandbox/client] shell output channel full for session %d", frame.MsgID)
+			}
+			continue
+		}
+
+		// Handle LSP notifications (e.g., publishDiagnostics)
+		if frame.Type == protocol.TypeNotification && frame.MsgID == 0 {
+			select {
+			case c.lspNotificationCh <- frame.Payload:
+			default:
+				log.Printf("[sandbox/client] lsp notification channel full")
 			}
 			continue
 		}

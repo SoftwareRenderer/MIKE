@@ -20,13 +20,16 @@ import (
 // Communication is always over stdin/stdout with Content-Length framing
 // (the standard LSP transport protocol).
 type lspSession struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  io.ReadCloser
-	mu      sync.Mutex
-	closed  bool
-	pending map[string]chan []byte // JSON-RPC id string -> response channel
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	stdout    io.ReadCloser
+	mu        sync.Mutex
+	closed    bool
+	pending   map[string]chan []byte // JSON-RPC id string -> response channel
 	pendingMu sync.Mutex
+	// outputCh receives LSP server notifications (e.g., publishDiagnostics)
+	// so they can be forwarded to the host asynchronously.
+	outputCh chan json.RawMessage
 }
 
 // isClosed returns true if the session has been closed.
@@ -55,10 +58,11 @@ func newLSPSession(command string, args []string) (*lspSession, error) {
 	}
 
 	sess := &lspSession{
-		cmd:     cmd,
-		stdin:   stdin,
-		stdout:  stdout,
-		pending: make(map[string]chan []byte),
+		cmd:      cmd,
+		stdin:    stdin,
+		stdout:   stdout,
+		pending:  make(map[string]chan []byte),
+		outputCh: make(chan json.RawMessage, 64),
 	}
 
 	// Stream stderr to log
@@ -131,7 +135,12 @@ func (s *lspSession) readLoop() {
 			continue
 		}
 		if envelope.ID == nil {
-			// Notification — no pending match
+			// Notification (e.g., publishDiagnostics) — forward to host
+			select {
+			case s.outputCh <- msg:
+			default:
+				log.Printf("lsp: notification output channel full")
+			}
 			continue
 		}
 		idKey := string(*envelope.ID)
@@ -276,6 +285,18 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 		h.mu.Lock()
 		h.lsp = &lspState{session: sess, command: cmd, args: args}
 		h.mu.Unlock()
+
+		// Start a goroutine to forward LSP notifications (e.g., publishDiagnostics) to the host.
+		go func() {
+			for notif := range sess.outputCh {
+				notifFrame := &protocol.Frame{
+					MsgID:   0, // Notifications use MsgID 0
+					Type:    protocol.TypeNotification,
+					Payload: []byte(notif),
+				}
+				_ = protocol.WriteFrame(conn, notifFrame)
+			}
+		}()
 
 		// Send init response
 		result := protocol.NewResult(req.MsgID, json.RawMessage(`{"status":"started"}`))

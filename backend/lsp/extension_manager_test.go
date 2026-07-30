@@ -1,8 +1,11 @@
 package lsp
 
 import (
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"kanban/backend/extensions"
 	"kanban/backend/store"
@@ -422,5 +425,138 @@ func TestExtensionLSPManager_ServerMessageCh(t *testing.T) {
 	ch := mgr.ServerMessageCh()
 	if ch == nil {
 		t.Error("ServerMessageCh() = nil")
+	}
+}
+
+func TestExtensionLSPManager_SubscribeAndUnsubscribe(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	reg := extensions.NewRegistryClient()
+	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	mgr := NewExtensionLSPManager(store, sandbox, nil)
+
+	// Subscribe two clients
+	sub1 := mgr.Subscribe()
+	sub2 := mgr.Subscribe()
+
+	// Simulate a server message being broadcast (normally from SendToServer or notification forwarding)
+	msg := json.RawMessage(`{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file:///tmp/test.go","diagnostics":[]}}`)
+
+	// Directly invoke broadcastToSubscribers (simulating what SendToServer does)
+	mgr.broadcastToSubscribers(msg)
+
+	// Both subscribers should receive the message
+	for i, ch := range []chan json.RawMessage{sub1, sub2} {
+		select {
+		case received := <-ch:
+			if string(received) != string(msg) {
+				t.Errorf("subscriber %d: got %s, want %s", i+1, received, msg)
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatalf("subscriber %d: did not receive message", i+1)
+		}
+	}
+
+	// Unsubscribe sub1
+	mgr.Unsubscribe(sub1)
+
+	// Broadcast another message
+	msg2 := json.RawMessage(`{"jsonrpc":"2.0","method":"window/logMessage","params":{"type":1,"message":"test"}}`)
+	mgr.broadcastToSubscribers(msg2)
+
+	// sub1 should NOT receive it (channel closed)
+	select {
+	case _, ok := <-sub1:
+		if ok {
+			t.Error("unsubscribed subscriber received a message")
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Error("unsubscribed channel should have been closed")
+	}
+
+	// sub2 should receive it
+	select {
+	case received := <-sub2:
+		if string(received) != string(msg2) {
+			t.Errorf("subscriber 2: got %s, want %s", received, msg2)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("subscriber 2: did not receive message")
+	}
+
+	mgr.Unsubscribe(sub2)
+}
+
+func TestParsePublishDiagnostics(t *testing.T) {
+	// Simulates the JSON parsing logic used in triggerLSPDiagnostics
+	raw := json.RawMessage(`{
+		"jsonrpc": "2.0",
+		"method": "textDocument/publishDiagnostics",
+		"params": {
+			"uri": "file:///tmp/main.go",
+			"diagnostics": [
+				{
+					"range": {"start": {"line": 5}, "end": {"line": 5}},
+					"severity": 1,
+					"message": "undefined: foo"
+				},
+				{
+					"range": {"start": {"line": 10}, "end": {"line": 10}},
+					"severity": 2,
+					"message": "unused variable"
+				},
+				{
+					"range": {"start": {"line": 15}, "end": {"line": 15}},
+					"severity": 1,
+					"message": "syntax error"
+				}
+			]
+		}
+	}`)
+
+	var envelope struct {
+		Method string `json:"method"`
+		Params struct {
+			Uri         string `json:"uri"`
+			Diagnostics []struct {
+				Range struct {
+					Start struct {
+						Line int `json:"line"`
+					} `json:"start"`
+				} `json:"range"`
+				Message  string `json:"message"`
+				Severity int    `json:"severity"`
+			} `json:"diagnostics"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if envelope.Method != "textDocument/publishDiagnostics" {
+		t.Errorf("method = %q, want %q", envelope.Method, "textDocument/publishDiagnostics")
+	}
+	if envelope.Params.Uri != "file:///tmp/main.go" {
+		t.Errorf("uri = %q, want %q", envelope.Params.Uri, "file:///tmp/main.go")
+	}
+
+	// Filter for errors (severity <= 1)
+	var errors []string
+	for _, d := range envelope.Params.Diagnostics {
+		if d.Severity <= 1 {
+			errors = append(errors, fmt.Sprintf("Line %d: %s", d.Range.Start.Line+1, d.Message))
+		}
+	}
+
+	if len(errors) != 2 {
+		t.Fatalf("got %d errors, want 2", len(errors))
+	}
+	if errors[0] != "Line 6: undefined: foo" {
+		t.Errorf("errors[0] = %q, want %q", errors[0], "Line 6: undefined: foo")
+	}
+	if errors[1] != "Line 16: syntax error" {
+		t.Errorf("errors[1] = %q, want %q", errors[1], "Line 16: syntax error")
 	}
 }
