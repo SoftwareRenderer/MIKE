@@ -5,9 +5,6 @@
     import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
-    import ModelSelector from './Chat/ModelSelector.svelte';
-    import ToggleSwitch from './ToggleSwitch.svelte';
-    import ModelPickerPortal from './Card/ModelPickerPortal.svelte';
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
@@ -266,6 +263,97 @@
 
     const isMobileCtx = useIsMobile();
 
+    // Mobile subtask overflow menu ("..." button)
+    let isMobileSubtask = $derived(isMobileCtx.isMobile && inline && !!task.parent_task_id);
+    let overflowOpen = $state(false);
+    let overflowRef: HTMLButtonElement | null = $state(null);
+    let overflowMenuEl: HTMLDivElement | null = null;
+
+    function buildOverflowMenu(): HTMLDivElement {
+        const menu = document.createElement('div');
+        menu.className = 'card-overflow-menu';
+        menu.setAttribute('role', 'menu');
+        // Inline styles to escape Svelte scoping (element is on document.body)
+        menu.style.cssText = 'position:fixed;z-index:10000;background:var(--color-surface-3,#1e1e2e);border:1px solid var(--color-border,#333);border-radius:var(--radius-md,8px);padding:4px;width:140px;box-shadow:0 8px 24px rgba(0,0,0,0.3);display:flex;flex-direction:column;gap:2px;';
+
+        const items: Array<{ icon: string; label: string; action: (e: MouseEvent) => void; danger?: boolean }> = [];
+
+        if (!inline || !task.parent_task_id || hasChildren || showSubtaskBorder) {
+            items.push({ icon: '<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>', label: 'Create subtask', action: handleCreateChild });
+        }
+        if (!isDoneSubtask) {
+            items.push({ icon: '<path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>', label: 'Edit', action: startEdit });
+        }
+        if (isPausable) {
+            items.push({ icon: '<rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/>', label: 'Pause', action: handlePause });
+        } else if (isResumable) {
+            items.push({ icon: '<polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/>', label: 'Resume', action: handleResume });
+        }
+        if ((columnId === 'done' || isDoneSubtask) && !(multiSelect?.isSelected(task.id) ?? false)) {
+            items.push({ icon: '<path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>', label: 'Delete', action: handleDelete, danger: true });
+        }
+
+        for (const item of items) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'overflow-item' + (item.danger ? ' overflow-delete' : '');
+            btn.setAttribute('role', 'menuitem');
+            btn.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;border-radius:var(--radius-sm,6px);background:transparent;color:var(--color-text-primary,#ccc);font-size:0.875rem;font-family:inherit;font-weight:500;cursor:pointer;text-align:left;touch-action:manipulation;-webkit-tap-highlight-color:transparent;';
+            btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0">${item.icon}</svg>${item.label}`;
+            btn.addEventListener('click', (e: MouseEvent) => { closeOverflow(); item.action(e); });
+            menu.appendChild(btn);
+        }
+
+        return menu;
+    }
+
+    function toggleOverflow(e: MouseEvent) {
+        e.stopPropagation();
+        if (overflowOpen) {
+            closeOverflow();
+            return;
+        }
+        if (overflowRef) {
+            const r = overflowRef.getBoundingClientRect();
+            const menuWidth = 140;
+            let left = r.left - menuWidth - 4;
+            const vw = window.visualViewport?.width || window.innerWidth;
+            if (left < 8) left = r.right + 4;
+            if (left + menuWidth > vw - 8) left = vw - menuWidth - 8;
+            overflowMenuEl = buildOverflowMenu();
+            overflowMenuEl.style.top = r.top + 'px';
+            overflowMenuEl.style.left = left + 'px';
+            document.body.appendChild(overflowMenuEl);
+        }
+        overflowOpen = true;
+    }
+
+    function closeOverflow() {
+        overflowOpen = false;
+        if (overflowMenuEl) {
+            overflowMenuEl.remove();
+            overflowMenuEl = null;
+        }
+    }
+
+    $effect(() => {
+        if (!overflowOpen) return;
+        function handleClick(e: MouseEvent) {
+            if (overflowRef && overflowRef.contains(e.target as Node)) return;
+            if (overflowMenuEl && overflowMenuEl.contains(e.target as Node)) return;
+            closeOverflow();
+        }
+        function handleKey(e: KeyboardEvent) {
+            if (e.key === 'Escape') closeOverflow();
+        }
+        document.addEventListener('mousedown', handleClick);
+        document.addEventListener('keydown', handleKey);
+        return () => {
+            document.removeEventListener('mousedown', handleClick);
+            document.removeEventListener('keydown', handleKey);
+        };
+    });
+
     let statusBadge = $derived.by(() => {
         const streaming = streamingIds.has(task.id);
         const state = appStore.board?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state;
@@ -317,14 +405,6 @@
         return { text, provider: provName, model: activeModel, color: getModelColor(activeModel), isAgent: false };
     });
 
-    // Model picker dropdown - only in Backlog column (task not yet started)
-    let modelPickerOpen = $state(false);
-    let modelBadgeRef: HTMLButtonElement | null = $state(null);
-    let pickerRect = $state<{ top: number; left: number } | null>(null);
-    let providers = $derived(appStore.config?.providers || []);
-    let targetBranch = $derived(appStore.selectedProject?.origin_branch || 'main');
-    let isConfigurable = $derived(columnId === 'backlog');
-
     // Context stores (must be retrieved at top level, not inside derived/effects)
     let streamingIdsContext = getStreamingContext();
     let taskDiffStatsStore = getTaskDiffStatsContext();
@@ -337,100 +417,6 @@
     });
     let diffStats = $derived($taskDiffStatsStore[task.id] || null);
     let hasChanges = $derived(!!diffStats?.hash && ((diffStats.staged_paths?.length || 0) > 0 || !!diffStats.has_committed_changes));
-
-    function togglePicker(e: MouseEvent) {
-        e.stopPropagation(); // Prevent card from opening when clicking the model badge
-        if (!isConfigurable) return;
-        if (modelPickerOpen) {
-            modelPickerOpen = false;
-            pickerRect = null;
-            return;
-        }
-        if (!modelBadgeRef || providers.length === 0) return;
-        const r = modelBadgeRef.getBoundingClientRect();
-        pickerRect = { top: r.bottom + 4, left: r.left };
-        modelPickerOpen = true;
-    }
-
-    function closePicker() {
-        modelPickerOpen = false;
-        pickerRect = null;
-    }
-
-    async function selectModel(providerUrl: string, modelName: string, reasoningEffort?: string) {
-        if (!projectId) return;
-        try {
-            const updated = await updateTask(projectId, task.id, { model_name: modelName, llama_server_url: providerUrl, reasoning_effort: reasoningEffort || undefined });
-            task.model_name = updated.model_name;
-            task.llama_server_url = updated.llama_server_url;
-            task.reasoning_effort = updated.reasoning_effort;
-            updateTaskInBoard(appStore, task.id, updated);
-        } catch (err) {
-            console.error('Failed to update model:', err);
-        }
-    }
-
-    async function selectAgent() {
-        if (!projectId) return;
-        try {
-            const updated = await updateTask(projectId, task.id, { model_name: undefined, llama_server_url: AGENT_URL_PREFIX + 'pi', reasoning_effort: undefined });
-            task.model_name = updated.model_name;
-            task.llama_server_url = updated.llama_server_url;
-            task.reasoning_effort = updated.reasoning_effort;
-            updateTaskInBoard(appStore, task.id, updated);
-        } catch (err) {
-            console.error('Failed to select agent:', err);
-        }
-        modelPickerOpen = false;
-        pickerRect = null;
-    }
-
-    $effect(() => {
-        if (!modelPickerOpen) return;
-        function handleClick(e: MouseEvent) {
-            if (modelBadgeRef && modelBadgeRef.contains(e.target as Node)) return;
-            const portal = document.querySelector('.portal-card-model-picker');
-            if (portal && portal.contains(e.target as Node)) return;
-            closePicker();
-        }
-        function handleKey(e: KeyboardEvent) {
-            if (e.key === 'Escape') closePicker();
-        }
-        document.addEventListener('mousedown', handleClick);
-        document.addEventListener('keydown', handleKey);
-        return () => {
-            document.removeEventListener('mousedown', handleClick);
-            document.removeEventListener('keydown', handleKey);
-        };
-    });
-
-    // Adjust dropdown position after render (flip if overflowing)
-    $effect(() => {
-        if (!modelPickerOpen || !pickerRect || !modelBadgeRef) return;
-        const badge = modelBadgeRef as HTMLButtonElement;
-        const rect = pickerRect;
-        const raf = requestAnimationFrame(() => {
-            const portal = document.querySelector('.portal-card-model-picker');
-            if (!portal) return;
-            const triggerTop = badge.getBoundingClientRect().top;
-            const dropdownHeight = portal.getBoundingClientRect().height;
-            const dropdownWidth = portal.getBoundingClientRect().width;
-            const viewportHeight = window.visualViewport?.height || window.innerHeight;
-            const viewportWidth = window.visualViewport?.width || window.innerWidth;
-            let top = rect.top;
-            let left = rect.left;
-            const spaceBelow = viewportHeight - (triggerTop + badge.getBoundingClientRect().height);
-            if (spaceBelow < dropdownHeight + 12) {
-                top = triggerTop - dropdownHeight - 6;
-            }
-            if (left + dropdownWidth > viewportWidth - 8) {
-                left = viewportWidth - dropdownWidth - 8;
-            }
-            if (left < 8) left = 8;
-            pickerRect = { top, left };
-        });
-        return () => cancelAnimationFrame(raf);
-    });
 
     let isSelected = $state(false);
     // Don't show selected highlight on parent when any descendant is selected
@@ -743,101 +729,119 @@
             {/if}
             <span class="card-title-text">{truncate(task.title, 80)}</span>
             <div class="card-actions">
-                {#if !inline || !task.parent_task_id || hasChildren || showSubtaskBorder}
+                {#if isMobileSubtask}
+                    <!-- Overflow menu for mobile subtasks -->
                     <button
                         type="button"
-                        class="action-icon action-add"
-                        onclick={handleCreateChild}
-                        aria-label="Create subtask"
-                        title="Create subtask"
+                        class="action-icon action-overflow"
+                        class:is-open={overflowOpen}
+                        onclick={toggleOverflow}
+                        bind:this={overflowRef}
+                        aria-label="Actions"
+                        aria-expanded={overflowOpen}
                     >
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><circle cx="4" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="12" cy="8" r="1.5"/></svg>
                     </button>
-                {/if}
-                {#if !isDoneSubtask}
-                <button
-                    type="button"
-                    class="action-icon"
-                    onclick={startEdit}
-                    aria-label="Edit task"
-                    title="Edit Task"
-                >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
-                </button>
-                {/if}
-                {#if isPausable}
-                    <button
-                        type="button"
-                        class="action-icon"
-                        onclick={handlePause}
-                        aria-label="Pause task"
-                        title="Pause task"
-                    >
-                        <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/></svg>
-                    </button>
-                {:else if isResumable}
-                    <button
-                        type="button"
-                        class="action-icon"
-                        onclick={handleResume}
-                        aria-label="Resume task"
-                        title="Resume task"
-                    >
-                        <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
-                    </button>
-                {:else if isIdle}
-                    <span class="action-idle" aria-label="Idle" title="Idle">Idle</span>
-                {:else if columnId === 'done' && !(multiSelect?.isSelected(task.id) ?? false)}
-                    <button
-                        type="button"
-                        class="action-icon action-delete"
-                        onclick={handleDelete}
-                        aria-label="Delete task"
-                        title="Delete task"
-                    >
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    </button>
-                {:else if isDoneSubtask && !(multiSelect?.isSelected(task.id) ?? false)}
-                    <button
-                        type="button"
-                        class="action-icon action-delete"
-                        onclick={handleDelete}
-                        aria-label="Delete task"
-                        title="Delete task"
-                    >
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    </button>
-                {:else if inline && task.parent_task_id}
-                    <!-- no move button for inline subtasks -->
-                {:else if task.status === 'in_progress'}
-                    <!-- no move button for in_progress tasks -->
+                    {#if isIdle}
+                        <span class="action-idle" aria-label="Idle" title="Idle">Idle</span>
+                    {/if}
                 {:else}
+                    {#if !inline || !task.parent_task_id || hasChildren || showSubtaskBorder}
+                        <button
+                            type="button"
+                            class="action-icon action-add"
+                            onclick={handleCreateChild}
+                            aria-label="Create subtask"
+                            title="Create subtask"
+                        >
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        </button>
+                    {/if}
+                    {#if !isDoneSubtask}
                     <button
                         type="button"
-                        class="action-icon action-move"
-                        onclick={cycleStatus}
-                        aria-label={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`) : `Move to ${statusLabels[nextStatus]}`}
-                        title={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`) : `Move to ${statusLabels[nextStatus]}`}
-                        style="color: {nextStatus === 'done' && hasChanges ? '#EAB308' : statusColors[nextStatus]}"
+                        class="action-icon"
+                        onclick={startEdit}
+                        aria-label="Edit task"
+                        title="Edit Task"
                     >
-                        {#if nextStatus === 'backlog'}
-                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
-                        {:else if nextStatus === 'in_progress'}
-                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
-                        {:else if nextStatus === 'review'}
-                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
-                        {:else if nextStatus === 'done' && hasChanges}
-                            <Icon src={commitPushIcon} color="#eab308" width={14} height={14} />
-                        {:else if nextStatus === 'done'}
-                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
-                        {/if}
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
                     </button>
+                    {/if}
+                    {#if isPausable}
+                        <button
+                            type="button"
+                            class="action-icon"
+                            onclick={handlePause}
+                            aria-label="Pause task"
+                            title="Pause task"
+                        >
+                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/></svg>
+                        </button>
+                    {:else if isResumable}
+                        <button
+                            type="button"
+                            class="action-icon"
+                            onclick={handleResume}
+                            aria-label="Resume task"
+                            title="Resume task"
+                        >
+                            <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+                        </button>
+                    {:else if isIdle}
+                        <span class="action-idle" aria-label="Idle" title="Idle">Idle</span>
+                    {:else if columnId === 'done' && !(multiSelect?.isSelected(task.id) ?? false)}
+                        <button
+                            type="button"
+                            class="action-icon action-delete"
+                            onclick={handleDelete}
+                            aria-label="Delete task"
+                            title="Delete task"
+                        >
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
+                    {:else if isDoneSubtask && !(multiSelect?.isSelected(task.id) ?? false)}
+                        <button
+                            type="button"
+                            class="action-icon action-delete"
+                            onclick={handleDelete}
+                            aria-label="Delete task"
+                            title="Delete task"
+                        >
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                                <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
+                    {:else if inline && task.parent_task_id}
+                        <!-- no move button for inline subtasks -->
+                    {:else if task.status === 'in_progress'}
+                        <!-- no move button for in_progress tasks -->
+                    {:else}
+                        <button
+                            type="button"
+                            class="action-icon action-move"
+                            onclick={cycleStatus}
+                            aria-label={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`) : `Move to ${statusLabels[nextStatus]}`}
+                            title={nextStatus === 'done' ? (hasChanges ? 'Commit and move to done' : `Move to ${statusLabels[nextStatus]}`) : `Move to ${statusLabels[nextStatus]}`}
+                            style="color: {nextStatus === 'done' && hasChanges ? '#EAB308' : statusColors[nextStatus]}"
+                        >
+                            {#if nextStatus === 'backlog'}
+                                <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+                            {:else if nextStatus === 'in_progress'}
+                                <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+                            {:else if nextStatus === 'review'}
+                                <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
+                            {:else if nextStatus === 'done' && hasChanges}
+                                <Icon src={commitPushIcon} color="#eab308" width={14} height={14} />
+                            {:else if nextStatus === 'done'}
+                                <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" fill="currentColor"/></svg>
+                            {/if}
+                        </button>
+                    {/if}
                 {/if}
             </div>
         </div>
@@ -900,19 +904,6 @@
         </div>
     {/if}
 </div>
-
-<!-- Model picker dropdown (portal to escape card overflow) -->
-{#if modelPickerOpen && pickerRect && providers.length > 0}
-    <ModelPickerPortal
-        {providers}
-        currentUrl={task.llama_server_url}
-        currentModel={task.model_name}
-        currentEffort={task.reasoning_effort || 'medium'}
-        rect={pickerRect}
-        onSelectAgent={selectAgent}
-        onSelectModel={selectModel}
-    />
-{/if}
 
 <style>
     .card {
@@ -1116,6 +1107,10 @@
         padding: 0 4px;
         pointer-events: none;
     }
+    .action-overflow.is-open {
+        background: var(--color-surface-4);
+        color: var(--color-text-primary);
+    }
     .badges-row {
         display: flex;
         flex-wrap: wrap;
@@ -1132,7 +1127,6 @@
         font-weight: 500;
         font-family: inherit;
     }
-    /* badge styles removed - no longer used */
     .model-badge {
         max-width: 100%;
         overflow: hidden;
@@ -1183,9 +1177,32 @@
         .card-actions {
             opacity: 1;
             transition: none;
+            gap: 4px;
         }
         .card-title-text {
-            padding-right: calc(var(--actions) * 28px + 6px);
+            padding-right: calc(var(--actions) * 48px + 10px);
+        }
+        .card.is-subtask > .card-title > .card-title-text {
+            padding-right: 58px;
+        }
+        .action-icon {
+            width: 44px;
+            height: 44px;
+            padding: 0;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .action-icon svg {
+            width: 18px;
+            height: 18px;
+        }
+        .action-idle {
+            min-width: 44px;
+            min-height: 44px;
+            padding: 0 8px;
+        }
+        .subtask-progress-bar {
+            height: 44px;
         }
     }
 
@@ -1239,9 +1256,6 @@
         color: var(--color-text-primary);
         white-space: nowrap;
         pointer-events: none;
-    }
-    .subtask-progress-bar.is-expanded .subtask-progress-count {
-        color: var(--color-text-primary);
     }
     .subtask-progress-bar.is-expanded .subtask-progress-count {
         color: var(--color-text-primary);
