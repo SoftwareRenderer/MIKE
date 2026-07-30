@@ -93,6 +93,8 @@ function getScrollbarWidth(editor: HTMLElement): number {
 function getHeaderLineHtml(view: EditorView, header: SectionHeader): string {
     const line = view.state.doc.line(header.line);
     const plain = line.text.trim();
+    // Preserve leading indentation
+    const indent = line.text.match(/^(\s*)/)?.[1] ?? '';
 
     // Try to find the line's DOM in the visible viewport
     const lineStart = line.from;
@@ -122,7 +124,7 @@ function getHeaderLineHtml(view: EditorView, header: SectionHeader): string {
         }
     }
 
-    return escapeHtml(plain);
+    return escapeHtml(indent) + escapeHtml(plain);
 }
 
 /** Escape HTML special characters. */

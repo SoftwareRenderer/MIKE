@@ -142,7 +142,7 @@ export const darkTheme = EditorView.theme({
         pointerEvents: 'none',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
+        whiteSpace: 'pre',
     },
 });
 
@@ -290,7 +290,7 @@ export const lightTheme = EditorView.theme({
         pointerEvents: 'none',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
+        whiteSpace: 'pre',
     },
 });
 

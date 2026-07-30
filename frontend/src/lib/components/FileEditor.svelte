@@ -140,10 +140,13 @@
         const symbols = getLanguageTreeFromView(view, filePath);
         onSymbolsUpdate(symbols);
         // Update sticky scroll headers
-        const headers: SectionHeader[] = symbols
+        const sorted = symbols
             .filter((s) => s.kind === 'function' || s.kind === 'class')
-            .sort((a, b) => a.line - b.line)
-            .map((s) => ({ line: s.line, endLine: s.endLine }));
+            .sort((a, b) => a.line - b.line);
+        const headers: SectionHeader[] = sorted.map((s, i) => ({
+            line: s.line,
+            endLine: i + 1 < sorted.length ? sorted[i + 1].line - 1 : s.endLine,
+        }));
         view.dispatch({ effects: updateHeadersEffect.of(headers) });
     }
 
