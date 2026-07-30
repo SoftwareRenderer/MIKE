@@ -2,7 +2,8 @@
     import { onMount, onDestroy } from 'svelte';
     import type { DiffFile } from '$lib/types/diff';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
-    import { getGitStatus, getProjectDiff, stageProjectFile, commitProject } from '$lib/api/git';
+    import { getGitStatus, getProjectDiff, stageProjectFile, commitProject, getGitLogFull, getCommitDiff } from '$lib/api/git';
+    import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting, clearEditorDraft, clearEditorHistory } from '$lib/storage';
     // Lazy-loaded on first diff view
@@ -64,6 +65,296 @@
     let authorName = $state('');
     let authorEmail = $state('');
 
+    // Commit comparison state
+    const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f826635b6';
+    let commits = $state<GitCommit[]>([]);
+    let fromCommit = $state('');
+    let toCommit = $state('');
+    let compareDiff = $state<DiffFile[]>([]);
+    let compareLoading = $state(false);
+    let compareError = $state('');
+    // Dropdown state
+    let showFromDropdown = $state(false);
+    let showToDropdown = $state(false);
+    // svelte-ignore non_reactive_update — DOM refs via bind:this
+    let fromDropdownEl: HTMLDivElement | null = null;
+    // svelte-ignore non_reactive_update — DOM refs via bind:this
+    let toDropdownEl: HTMLDivElement | null = null;
+    // Combobox input state for "From" field (allows typing a hash)
+    let fromInputValue = $state('');
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
+    let fromInputEl: HTMLInputElement | null = null;
+    // Filtered commits list for the "From" combobox
+    let filteredFromCommits = $derived.by(() => {
+        const query = fromInputValue.trim().toLowerCase();
+        if (!query) return commits;
+        // If query matches the current selection's short hash, show all commits
+        const currentFrom = commits.find(c => c.hash === fromCommit);
+        if (currentFrom && query === currentFrom.short.toLowerCase()) return commits;
+        return commits.filter(c =>
+            c.hash.toLowerCase().includes(query) ||
+            c.short.toLowerCase().includes(query) ||
+            c.subject.toLowerCase().includes(query)
+        );
+    });
+    // Combobox input state for "To" field (allows typing a hash)
+    let toInputValue = $state('');
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
+    let toInputEl: HTMLInputElement | null = null;
+    let toInputFocused = $state(false);
+    // Filtered commits list for the "To" combobox
+    let filteredToCommits = $derived.by(() => {
+        const query = toInputValue.trim().toLowerCase();
+        if (!query) return commits;
+        // If query matches the current selection's short hash, show all commits
+        const currentTo = commits.find(c => c.hash === toCommit);
+        if (currentTo && query === currentTo.short.toLowerCase()) return commits;
+        return commits.filter(c =>
+            c.hash.toLowerCase().includes(query) ||
+            c.short.toLowerCase().includes(query) ||
+            c.subject.toLowerCase().includes(query)
+        );
+    });
+
+    function toggleFromDropdown() {
+        showFromDropdown = !showFromDropdown;
+        showToDropdown = false;
+        if (showFromDropdown) fromInputEl?.focus();
+    }
+    function toggleToDropdown() {
+        showToDropdown = !showToDropdown;
+        showFromDropdown = false;
+        if (showToDropdown) toInputEl?.focus();
+    }
+    function closeDropdowns() {
+        showFromDropdown = false;
+        showToDropdown = false;
+    }
+
+    // Keyboard navigation for dropdown listboxes (Arrow Up/Down, Enter, Escape)
+    let activeFromIndex = $state(-1);
+    let activeToIndex = $state(-1);
+
+    function handleFromKeydown(e: KeyboardEvent) {
+        const items = fromDropdownEl?.querySelectorAll('.commit-dropdown-item') as NodeListOf<HTMLButtonElement> | undefined;
+        if (!items || items.length === 0) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                showFromDropdown = true;
+                showToDropdown = false;
+            }
+            return;
+        }
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            showFromDropdown = true;
+            showToDropdown = false;
+            activeFromIndex = (activeFromIndex + 1) % items.length;
+            items[activeFromIndex]?.focus();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            showFromDropdown = true;
+            showToDropdown = false;
+            activeFromIndex = (activeFromIndex - 1 + items.length) % items.length;
+            items[activeFromIndex]?.focus();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            closeDropdowns();
+            fromInputEl?.focus();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            showFromDropdown = true;
+            showToDropdown = false;
+            // Select the highlighted item, or the sole match if none highlighted
+            if (activeFromIndex >= 0) {
+                items[activeFromIndex]?.click();
+            } else if (items.length === 1) {
+                items[0]?.click();
+            }
+        }
+    }
+
+    function handleToKeydown(e: KeyboardEvent) {
+        const items = toDropdownEl?.querySelectorAll('.commit-dropdown-item') as NodeListOf<HTMLButtonElement> | undefined;
+        if (!items || items.length === 0) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                showToDropdown = true;
+                showFromDropdown = false;
+            }
+            return;
+        }
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            showToDropdown = true;
+            showFromDropdown = false;
+            activeToIndex = (activeToIndex + 1) % items.length;
+            items[activeToIndex]?.focus();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            showToDropdown = true;
+            showFromDropdown = false;
+            activeToIndex = (activeToIndex - 1 + items.length) % items.length;
+            items[activeToIndex]?.focus();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            closeDropdowns();
+            toInputEl?.focus();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            showToDropdown = true;
+            showFromDropdown = false;
+            // Select the highlighted item, or the sole match if none highlighted
+            if (activeToIndex >= 0) {
+                items[activeToIndex]?.click();
+            } else if (items.length === 1) {
+                items[0]?.click();
+            }
+        }
+    }
+
+    function handleListItemFocus(index: number, dropdown: 'from' | 'to') {
+        if (dropdown === 'from') activeFromIndex = index;
+        else activeToIndex = index;
+    }
+
+    // Handle typed input in the "From" combobox
+    function handleFromInput(e: Event) {
+        const value = (e.target as HTMLInputElement).value;
+        fromInputValue = value;
+        showFromDropdown = true;
+        showToDropdown = false;
+        activeFromIndex = -1;
+    }
+
+    function handleFromInputBlur() {
+        fromInputFocused = false;
+        // Delay to allow click on dropdown item to fire first
+        setTimeout(() => {
+            showFromDropdown = false;
+            // If input value doesn't match any commit, keep it as a raw hash
+            const trimmed = fromInputValue.trim();
+            if (trimmed) {
+                const matched = commits.find(c => c.hash === trimmed || c.short === trimmed);
+                fromCommit = matched ? matched.hash : trimmed;
+            }
+        }, 150);
+    }
+
+    function handleFromInputFocus() {
+        fromInputFocused = true;
+        showFromDropdown = true;
+        showToDropdown = false;
+    }
+
+    // Handle typed input in the "To" combobox
+    function handleToInput(e: Event) {
+        const value = (e.target as HTMLInputElement).value;
+        toInputValue = value;
+        showToDropdown = true;
+        showFromDropdown = false;
+        activeToIndex = -1;
+    }
+
+    function handleToInputBlur() {
+        toInputFocused = false;
+        // Delay to allow click on dropdown item to fire first
+        setTimeout(() => {
+            showToDropdown = false;
+            // If input value doesn't match any commit, keep it as a raw hash
+            const trimmed = toInputValue.trim();
+            if (trimmed) {
+                const matched = commits.find(c => c.hash === trimmed || c.short === trimmed);
+                toCommit = matched ? matched.hash : trimmed;
+            }
+        }, 150);
+    }
+
+    function handleToInputFocus() {
+        toInputFocused = true;
+        showToDropdown = true;
+        showFromDropdown = false;
+    }
+    // Close dropdowns on outside click
+    $effect(() => {
+        function handleClick(e: MouseEvent) {
+            if (fromDropdownEl && !fromDropdownEl.contains(e.target as Node) &&
+                toDropdownEl && !toDropdownEl.contains(e.target as Node)) {
+                closeDropdowns();
+            }
+        }
+        if (showFromDropdown || showToDropdown) {
+            document.addEventListener('click', handleClick);
+            return () => document.removeEventListener('click', handleClick);
+        }
+    });
+
+    async function loadCommits() {
+        try {
+            const resp = await getGitLogFull(projectId, { limit: 50 });
+            commits = resp.commits;
+            // Default: HEAD~1 → HEAD (last commit's changes)
+            if (commits.length > 0) {
+                toCommit = commits[0].hash;
+                // HEAD~1 = first parent of HEAD, or next commit in log, or empty tree
+                if (commits[0].parents && commits[0].parents.length > 0) {
+                    fromCommit = commits[0].parents[0];
+                } else if (commits.length > 1) {
+                    fromCommit = commits[1].hash;
+                } else {
+                    fromCommit = EMPTY_TREE;
+                }
+            }
+        } catch (e) {
+            console.error('Failed to load commits:', e);
+        }
+    }
+
+    async function fetchCompareDiff() {
+        if (!fromCommit || !toCommit) return;
+        compareLoading = true;
+        compareError = '';
+        compareDiff = [];
+        // Preload the diff viewer chunk
+        loadDiffViewer();
+        try {
+            const diffText = await getCommitDiff(projectId, fromCommit, toCommit);
+            compareDiff = parseUnifiedDiff(diffText);
+        } catch (e: any) {
+            compareError = e.message || 'Failed to fetch diff';
+            compareDiff = [];
+        } finally {
+            compareLoading = false;
+        }
+    }
+
+    // Fetch diff when from/to change
+    $effect(() => {
+        fromCommit;
+        toCommit;
+        if (fromCommit && toCommit) {
+            fetchCompareDiff();
+        }
+    });
+
+    // Sync input values when commit hashes change (e.g. initial load)
+    // Only sync when the input is NOT focused so we don't fight user typing
+    let fromInputFocused = $state(false);
+    $effect(() => {
+        fromCommit;
+        if (!fromInputFocused) {
+            const commit = commits.find(c => c.hash === fromCommit);
+            fromInputValue = commit ? commit.short : fromCommit.substring(0, 7);
+        }
+    });
+    $effect(() => {
+        toCommit;
+        if (!toInputFocused) {
+            const commit = commits.find(c => c.hash === toCommit);
+            toInputValue = commit ? commit.short : toCommit.substring(0, 7);
+        }
+    });
+
     // Resizable sidebar width — persisted to IndexedDB
     const DEFAULT_SIDEBAR_WIDTH = 240;
     const MIN_SIDEBAR = 160;
@@ -98,7 +389,9 @@
         stagedDiffFiles.length > 0 ||
         unstagedDiffFiles.length > 0 ||
         stagedEntries.length > 0 ||
-        unstagedEntries.length > 0
+        unstagedEntries.length > 0 ||
+        compareDiff.length > 0 ||
+        compareLoading
     );
 
     // Sort helpers
@@ -335,6 +628,7 @@
 
     onMount(() => {
         loadData();
+        loadCommits();
         window.addEventListener('keydown', handleKeydown);
     });
 
@@ -346,7 +640,152 @@
 <div class="git-status-panel">
     <!-- Header -->
     <div class="panel-header">
+        <button class="close-btn" onclick={onClose} aria-label="Close changes panel" title="Close (Escape)">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+        </button>
         <span class="panel-title">Changes</span>
+        <!-- Commit comparison dropdowns -->
+        <div class="commit-selectors" role="group" aria-label="Compare commits">
+            <div class="commit-selector" class:open={showFromDropdown} bind:this={fromDropdownEl}>
+                <div class="commit-combobox">
+                    <svg class="commit-combobox-icon" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M8 5v6M5 8h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                    </svg>
+                    <input
+                        id="compare-from-input"
+                        bind:this={fromInputEl}
+                        type="text"
+                        class="commit-combobox-input"
+                        placeholder="commit hash or subject"
+                        value={fromInputValue}
+                        oninput={handleFromInput}
+                        onkeydown={handleFromKeydown}
+                        onblur={handleFromInputBlur}
+                        onfocus={handleFromInputFocus}
+                        aria-label="From commit"
+                        aria-expanded={showFromDropdown}
+                        aria-autocomplete="list"
+                        role="combobox"
+                        autocomplete="off"
+                    />
+                    <button
+                        type="button"
+                        class="commit-combobox-toggle"
+                        onclick={toggleFromDropdown}
+                        aria-label={showFromDropdown ? 'Hide suggestions' : 'Show suggestions'}
+                    >
+                        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+                            <polyline points="1.5,2.5 4,5.5 6.5,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
+                {#if showFromDropdown}
+                    <div class="commit-dropdown-list" role="listbox" aria-labelledby="compare-from-input">
+                        {#each filteredFromCommits as commit, i}
+                            <button
+                                id={`compare-from-item-${i}`}
+                                class="commit-dropdown-item"
+                                class:active={commit.hash === fromCommit}
+                                onclick={() => { fromCommit = commit.hash; fromInputValue = commit.short; showFromDropdown = false; fromInputEl?.blur(); }}
+                                onfocus={() => handleListItemFocus(i, 'from')}
+                                role="option"
+                                aria-selected={commit.hash === fromCommit}
+                            >
+                                {#if commit.hash === fromCommit}
+                                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+                                        <polyline points="1.5,4 3,5.5 6.5,2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                {:else}
+                                    <span class="commit-check-empty"></span>
+                                {/if}
+                                <span class="commit-dropdown-hash">{commit.short}</span>
+                                <span class="commit-dropdown-subject" title={commit.subject}>{commit.subject}</span>
+                            </button>
+                        {/each}
+                        {#if filteredFromCommits.length === 0 && fromInputValue.trim()}
+                            <div class="commit-dropdown-empty">No matching commits</div>
+                        {/if}
+                    </div>
+                {/if}
+            </div>
+
+            <svg class="commit-arrow-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true" role="presentation">
+                <path d="M4 8h8M10 5l3 3-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+
+            <div class="commit-selector" class:open={showToDropdown} bind:this={toDropdownEl}>
+                <div class="commit-combobox">
+                    <svg class="commit-combobox-icon" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M8 5v6M5 8h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                    </svg>
+                    <input
+                        id="compare-to-input"
+                        bind:this={toInputEl}
+                        type="text"
+                        class="commit-combobox-input"
+                        placeholder="commit hash or subject"
+                        value={toInputValue}
+                        oninput={handleToInput}
+                        onkeydown={handleToKeydown}
+                        onblur={handleToInputBlur}
+                        onfocus={handleToInputFocus}
+                        aria-label="To commit"
+                        aria-expanded={showToDropdown}
+                        aria-autocomplete="list"
+                        role="combobox"
+                        autocomplete="off"
+                    />
+                    <button
+                        type="button"
+                        class="commit-combobox-toggle"
+                        onclick={toggleToDropdown}
+                        aria-label={showToDropdown ? 'Hide suggestions' : 'Show suggestions'}
+                    >
+                        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+                            <polyline points="1.5,2.5 4,5.5 6.5,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
+                {#if showToDropdown}
+                    <div class="commit-dropdown-list" role="listbox" aria-labelledby="compare-to-input">
+                        {#each filteredToCommits as commit, i}
+                            <button
+                                id={`compare-to-item-${i}`}
+                                class="commit-dropdown-item"
+                                class:active={commit.hash === toCommit}
+                                onclick={() => { toCommit = commit.hash; toInputValue = commit.short; showToDropdown = false; toInputEl?.blur(); }}
+                                onfocus={() => handleListItemFocus(i, 'to')}
+                                role="option"
+                                aria-selected={commit.hash === toCommit}
+                            >
+                                {#if commit.hash === toCommit}
+                                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+                                        <polyline points="1.5,4 3,5.5 6.5,2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                {:else}
+                                    <span class="commit-check-empty"></span>
+                                {/if}
+                                <span class="commit-dropdown-hash">{commit.short}</span>
+                                <span class="commit-dropdown-subject" title={commit.subject}>{commit.subject}</span>
+                            </button>
+                        {/each}
+                        {#if filteredToCommits.length === 0 && toInputValue.trim()}
+                            <div class="commit-dropdown-empty">No matching commits</div>
+                        {/if}
+                    </div>
+                {/if}
+            </div>
+        </div>
+
+        <!-- Live region for diff updates (screen reader announcements) -->
+        <div class="sr-only" aria-live="polite" aria-atomic="true">
+            {#if compareLoading}Loading commit diff{:else if compareError}Diff error: {compareError}{:else if compareDiff.length > 0}Showing diff with {compareDiff.length} file{compareDiff.length !== 1 ? 's' : ''}{/if}
+        </div>
+
         {#if stagedEntries.length > 0}
             <button class="panel-commit-btn" onclick={openCommitDialog} title="Commit staged changes" aria-label="Commit staged changes">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
@@ -509,6 +948,22 @@
                             <div class="file-editor-loading">Loading editor...</div>
                         {/if}
                     </div>
+                {:else if compareDiff.length > 0 || compareLoading}
+                    <!-- Commit comparison diff -->
+                    {#if DiffViewerComponent}
+                        {@const DiffViewer = DiffViewerComponent}
+                        <DiffViewer
+                            committedFiles={compareDiff}
+                            stagedFiles={[]}
+                            unstagedFiles={[]}
+                            loading={compareLoading}
+                        />
+                    {:else}
+                        <div class="diff-viewer-loading">Loading diff viewer...</div>
+                    {/if}
+                    {#if compareError}
+                        <div class="compare-error" role="alert">{compareError}</div>
+                    {/if}
                 {:else}
                     {#if DiffViewerComponent}
                         {@const DiffViewer = DiffViewerComponent}
@@ -549,6 +1004,7 @@
         border-bottom: 1px solid var(--color-border);
         flex-shrink: 0;
         background: var(--color-surface-2);
+        flex-wrap: wrap;
     }
     .panel-title {
         font-size: 0.75rem;
@@ -556,7 +1012,184 @@
         color: var(--color-text-secondary);
         text-transform: uppercase;
         letter-spacing: 0.05em;
+        flex-shrink: 0;
+    }
+    .close-btn {
+        padding: 4px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .close-btn:hover {
+        color: var(--color-text-primary);
+        background: var(--color-surface-3);
+    }
+    .close-btn:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: -1px;
+    }
+
+    /* Commit comparison selectors */
+    .commit-selectors {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+    .commit-arrow-icon {
+        color: var(--color-text-tertiary);
+        flex-shrink: 0;
+    }
+    .commit-selector {
+        position: relative;
+    }
+    /* Combobox */
+    .commit-combobox {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        padding: 1px 4px;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface-1);
+        border-radius: 4px;
+        max-width: 220px;
+    }
+    .commit-selector.open .commit-combobox-input {
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+    }
+    .commit-combobox-icon {
+        color: var(--color-text-tertiary);
+        flex-shrink: 0;
+    }
+    .commit-combobox-input {
         flex: 1;
+        min-width: 0;
+        padding: 2px 4px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+        font-family: var(--font-mono);
+        outline: none;
+        width: 100%;
+    }
+    .commit-combobox-input::placeholder {
+        color: var(--color-text-tertiary);
+        font-style: italic;
+    }
+    .commit-combobox-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 3px;
+        flex-shrink: 0;
+    }
+    .commit-combobox-toggle:hover {
+        color: var(--color-text-primary);
+        background: var(--color-surface-3);
+    }
+    .commit-combobox-toggle:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: -1px;
+    }
+    .commit-dropdown-empty {
+        padding: 6px 10px;
+        color: var(--color-text-tertiary);
+        font-size: 0.75rem;
+        font-style: italic;
+    }
+    .commit-dropdown-list {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        z-index: 100;
+        min-width: 260px;
+        max-height: 240px;
+        overflow-y: auto;
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        margin-top: 2px;
+    }
+    .commit-dropdown-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        padding: 5px 8px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        text-align: left;
+        cursor: pointer;
+    }
+    .commit-dropdown-item:hover {
+        background: var(--color-surface-3);
+    }
+    .commit-dropdown-item:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: -2px;
+        background: var(--color-surface-3);
+    }
+    .commit-dropdown-item.active {
+        color: var(--color-accent-light);
+        font-weight: 600;
+    }
+    .commit-check-empty {
+        display: inline-block;
+        width: 8px;
+    }
+    .commit-dropdown-hash {
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        flex-shrink: 0;
+        width: 3.5rem;
+    }
+    .commit-dropdown-subject {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+        min-width: 0;
+    }
+
+    /* Compare error */
+    .compare-error {
+        padding: 8px 12px;
+        color: var(--color-status-red);
+        font-size: 0.75rem;
+        background: rgba(248, 81, 73, 0.1);
+        border-top: 1px solid var(--color-border);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    /* Screen reader only (visually hidden) */
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
     }
     .panel-icon-btn {
         display: flex;
@@ -570,6 +1203,8 @@
         color: var(--color-text-secondary);
         cursor: pointer;
         border-radius: 4px;
+        margin-left: auto;
+        flex-shrink: 0;
     }
     .panel-icon-btn:hover {
         background: var(--color-surface-3);
@@ -656,7 +1291,7 @@
         border: none;
         background: transparent;
         color: var(--color-text-secondary);
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -676,7 +1311,7 @@
     }
     .changes-section-count {
         margin-left: auto;
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-weight: 500;
         color: var(--color-text-tertiary);
     }
@@ -756,7 +1391,7 @@
         padding: 0 6px;
     }
     .changes-file-badge {
-        font-size: 0.6875rem;
+        font-size: 0.75rem;
         font-weight: 700;
         font-family: var(--font-mono);
         flex-shrink: 0;
