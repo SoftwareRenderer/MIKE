@@ -4,6 +4,7 @@ import { StateEffect, StateField } from '@codemirror/state';
 /** Section header for sticky scroll. */
 export interface SectionHeader {
     line: number;
+    endLine: number; // last line that belongs to this section
 }
 
 /** Effect to update section headers from the parent component. */
@@ -59,9 +60,9 @@ function findStickyHeader(
 
     let result: SectionHeader | undefined;
     for (const header of headers) {
-        if (header.line <= topLine) {
+        if (header.line <= topLine && topLine < header.endLine) {
             result = header;
-        } else {
+        } else if (header.line > topLine) {
             break;
         }
     }
