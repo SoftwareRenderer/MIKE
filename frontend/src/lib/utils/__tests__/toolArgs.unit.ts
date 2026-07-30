@@ -119,3 +119,51 @@ describe('formatToolArgs - write_file', () => {
         expect(formatToolArgs('write_file', args, undefined)).toBe('');
     });
 });
+
+describe('formatToolArgs - lsp_hover', () => {
+    it('shows symbol and path', () => {
+        expect(formatToolArgs('lsp_hover', { path: 'main.go', symbol: 'fmt' })).toBe('hover fmt in main.go');
+    });
+
+    it('shows fallback when no symbol', () => {
+        expect(formatToolArgs('lsp_hover', { path: 'main.go' })).toBe('(hover in main.go)');
+    });
+
+    it('shows fallback when no path', () => {
+        expect(formatToolArgs('lsp_hover', { symbol: 'fmt' })).toBe('hover fmt in file');
+    });
+
+    it('shows fallback when no symbol and no path', () => {
+        expect(formatToolArgs('lsp_hover', {})).toBe('(hover in file)');
+    });
+});
+
+describe('formatToolArgs - lsp_references', () => {
+    it('shows symbol and path', () => {
+        expect(formatToolArgs('lsp_references', { path: 'main.go', symbol: 'main' })).toBe('references for main in main.go');
+    });
+
+    it('shows fallback when no symbol', () => {
+        expect(formatToolArgs('lsp_references', { path: 'main.go' })).toBe('(references in main.go)');
+    });
+});
+
+describe('formatToolArgs - lsp_definition', () => {
+    it('shows symbol and path', () => {
+        expect(formatToolArgs('lsp_definition', { path: 'main.go', symbol: 'Println' })).toBe('definition of Println in main.go');
+    });
+
+    it('shows fallback when no symbol', () => {
+        expect(formatToolArgs('lsp_definition', { path: 'main.go' })).toBe('(definition in main.go)');
+    });
+});
+
+describe('formatToolArgs - lsp_code_actions', () => {
+    it('shows symbol and path', () => {
+        expect(formatToolArgs('lsp_code_actions', { path: 'main.go', symbol: 'foo' })).toBe('code actions for foo in main.go');
+    });
+
+    it('shows fallback when no symbol', () => {
+        expect(formatToolArgs('lsp_code_actions', { path: 'main.go' })).toBe('(code actions in main.go)');
+    });
+});

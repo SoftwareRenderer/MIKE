@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -41,6 +42,10 @@ type sandboxClient struct {
 	// Each registered project is mounted at /mnt/<project-dirname>.
 	// projectMounts maps host project path → container mount path.
 	projectMounts map[string]string
+	// initialized tracks whether the LSP server has been initialized.
+	initialized bool
+	// openedFiles tracks file URIs that have been sent via didOpen.
+	openedFiles map[string]bool
 }
 
 // translateURIs recursively translates file URIs in the provided data.
@@ -449,6 +454,247 @@ func (m *ExtensionLSPManager) collectProjectMounts(workspacePath string) map[str
 	return mounts
 }
 
+// LSPRequest makes a synchronous JSON-RPC request to the LSP server for the
+// given file. It looks up the matching extension by file path, gets/creates
+// the sandbox client, sends the request with URI translation, and returns
+// the raw JSON response. Returns an error if no LSP extension handles the file.
+func (m *ExtensionLSPManager) LSPRequest(workspacePath, filePath, method string, params any) (json.RawMessage, error) {
+	// Look up the extension by file path
+	ext, err := m.lookupExtensionByFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("no LSP extension for file %q: %w", filePath, err)
+	}
+	lspCfg := ext.Manifest.Capabilities.GetLSP()
+	if lspCfg == nil {
+		return nil, fmt.Errorf("extension %s has no LSP config", ext.Name)
+	}
+	language := lspCfg.Language
+
+	// Get or create the sandbox client
+	workspaceKey := processKey(workspacePath, language)
+	m.mu.Lock()
+	sc, ok := m.clients[workspaceKey]
+	m.mu.Unlock()
+
+	if !ok || sc.bridgeClient == nil || !sc.bridgeClient.IsAlive() {
+		// Need to create the connection
+		cfg := m.GetRegistry().toServerConfig(ext)
+		if cfg == nil {
+			return nil, fmt.Errorf("no server config for language %q", language)
+		}
+		projectMounts := m.collectProjectMounts(workspacePath)
+		bridgeClient, _, err := m.getOrCreateSandbox(ext, projectMounts)
+		if err != nil {
+			return nil, fmt.Errorf("create sandbox: %w", err)
+		}
+		if err := bridgeClient.LSPStart(context.Background(), lspCfg.Command, lspCfg.Args); err != nil {
+			return nil, fmt.Errorf("start LSP server: %w", err)
+		}
+		// Forward notifications from this sandbox
+		go func() {
+			for notif := range bridgeClient.LSPNotificationCh() {
+				translated := translateURIsToHost(notif, workspacePath, projectMounts)
+				select {
+				case m.serverCh <- translated:
+				default:
+				}
+				m.broadcastToSubscribers(translated)
+			}
+		}()
+		sc = &sandboxClient{
+			bridgeClient:  bridgeClient,
+			workspace:     workspacePath,
+			language:      language,
+			extensionID:   ext.ID,
+			projectMounts: projectMounts,
+			openedFiles:   make(map[string]bool),
+		}
+		m.mu.Lock()
+		m.clients[workspaceKey] = sc
+		m.mu.Unlock()
+	}
+
+	ctx := context.Background()
+
+	// Initialize the LSP server if not already done
+	if !sc.initialized {
+		if err := m.lspInitialize(ctx, sc, ext); err != nil {
+			return nil, fmt.Errorf("LSP initialize failed: %w", err)
+		}
+		sc.initialized = true
+	}
+
+	// Extract the file URI from params to ensure the file is opened
+	if paramsMap, ok := params.(map[string]any); ok {
+		if td, ok := paramsMap["textDocument"].(map[string]any); ok {
+			if uri, ok := td["uri"].(string); ok {
+				if !sc.openedFiles[uri] {
+					if err := m.lspDidOpen(ctx, sc, uri, workspacePath, filePath, language); err != nil {
+						log.Printf("[lsp] didOpen failed for %s: %v", filePath, err)
+						// Continue anyway — the server may still have the file
+					}
+					sc.openedFiles[uri] = true
+				}
+			}
+		}
+	}
+
+	// Build the JSON-RPC request
+	reqID := int64(time.Now().UnixNano())
+	req := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      reqID,
+		"method":  method,
+		"params":  params,
+	}
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	// Translate URIs and send
+	translated := translateURIsToContainer(reqBytes, sc.workspace, sc.projectMounts)
+	ctxTimeout, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	response, err := sc.bridgeClient.LSPSend(ctxTimeout, translated)
+	if err != nil {
+		m.mu.Lock()
+		if sc2, ok2 := m.clients[workspaceKey]; ok2 && sc2 == sc {
+			delete(m.clients, workspaceKey)
+		}
+		m.mu.Unlock()
+		return nil, fmt.Errorf("LSP request failed: %w", err)
+	}
+	if len(response) == 0 {
+		return nil, fmt.Errorf("empty LSP response")
+	}
+
+	// Translate URIs back to host paths
+	return translateURIsToHost(response, sc.workspace, sc.projectMounts), nil
+}
+
+// lspInitialize sends an initialize request to the LSP server and waits for the response.
+func (m *ExtensionLSPManager) lspInitialize(ctx context.Context, sc *sandboxClient, ext *extensions.Extension) error {
+	absWorkspace, _ := filepath.Abs(sc.workspace)
+	initParams := map[string]any{
+		"processId": os.Getpid(),
+		"rootUri":   "file://" + absWorkspace,
+		"capabilities": map[string]any{
+			"textDocument": map[string]any{
+				"publishDiagnostics": map[string]any{
+					"relatedInformation": true,
+				},
+				"hover": map[string]any{
+					"contentFormat": []string{"markdown", "plaintext"},
+				},
+			},
+			"workspace": map[string]any{
+				"workspaceFolders": true,
+			},
+		},
+		"workspaceFolders": []map[string]any{
+			{"uri": "file://" + absWorkspace, "name": filepath.Base(absWorkspace)},
+		},
+	}
+	// Merge init params from extension config
+	lspCfg := ext.Manifest.Capabilities.GetLSP()
+	if lspCfg != nil && lspCfg.InitParamsOverride != nil {
+		for k, v := range lspCfg.InitParamsOverride {
+			initParams[k] = v
+		}
+	}
+
+	req := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params":  initParams,
+	}
+	reqBytes, _ := json.Marshal(req)
+	translated := translateURIsToContainer(reqBytes, sc.workspace, sc.projectMounts)
+
+	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	_, err := sc.bridgeClient.LSPSend(ctxTimeout, translated)
+	if err != nil {
+		return err
+	}
+
+	// Send "initialized" notification
+	notify := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "initialized",
+		"params":  map[string]any{},
+	}
+	notifyBytes, _ := json.Marshal(notify)
+	_ = sc.bridgeClient.LSPNotify(ctx, notifyBytes)
+
+	return nil
+}
+
+// lspDidOpen sends a textDocument/didOpen notification to the LSP server.
+func (m *ExtensionLSPManager) lspDidOpen(ctx context.Context, sc *sandboxClient, uri, workspacePath, filePath, language string) error {
+	// Read file content from the host workspace
+	absPath := filepath.Join(workspacePath, filePath)
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return fmt.Errorf("read file for didOpen: %w", err)
+	}
+
+	notify := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "textDocument/didOpen",
+		"params": map[string]any{
+			"textDocument": map[string]any{
+				"uri":        uri,
+				"languageId": language,
+				"version":    1,
+				"text":       string(content),
+			},
+		},
+	}
+	notifyBytes, _ := json.Marshal(notify)
+	translated := translateURIsToContainer(notifyBytes, sc.workspace, sc.projectMounts)
+
+	return sc.bridgeClient.LSPNotify(ctx, translated)
+}
+
+// lookupExtensionByFile finds the matching LSP extension for a given file path.
+func (m *ExtensionLSPManager) lookupExtensionByFile(filePath string) (*extensions.Extension, error) {
+extensions, err := m.extStore.GetByType(extensions.ExtensionTypeLSP)
+	if err != nil {
+		return nil, err
+	}
+
+	ext := filepath.Ext(filePath)
+	base := filepath.Base(filePath)
+
+	for _, extItem := range extensions {
+		if !extItem.Enabled {
+			continue
+		}
+		lspCfg := extItem.Manifest.Capabilities.GetLSP()
+		if lspCfg == nil {
+			continue
+		}
+		// Check file extensions
+		for _, extn := range lspCfg.Extensions {
+			if extn == ext || strings.TrimPrefix(extn, ".") == ext[1:] {
+				return &extItem, nil
+			}
+		}
+		// Check language directly
+		if lspCfg.Language != "" {
+			if ext == "."+lspCfg.Language || base == lspCfg.Language {
+				return &extItem, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("no enabled LSP extension found for file %q", filePath)
+}
+
 // lookupExtension finds the matching LSP extension for a given language.
 func (m *ExtensionLSPManager) lookupExtension(language string) (*extensions.Extension, error) {
 	extensions, err := m.extStore.GetByType(extensions.ExtensionTypeLSP)
@@ -543,6 +789,20 @@ func (r *ExtensionRegistry) GetAvailable() []string {
 		}
 	}
 	return langs
+}
+
+// HasAnyLSPExtension returns true if any enabled LSP extension is installed.
+func (r *ExtensionRegistry) HasAnyLSPExtension() bool {
+extensions, err := r.extStore.GetByType(extensions.ExtensionTypeLSP)
+	if err != nil {
+		return false
+	}
+	for _, ext := range extensions {
+		if ext.Enabled && ext.Manifest.Capabilities.GetLSP() != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // GetConfig returns the ServerConfig for a given language.

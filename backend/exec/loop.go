@@ -367,6 +367,10 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	} else {
 		tools = llama.GetToolDefinitions()
 	}
+	// Append LSP tools if any LSP extension is installed
+	if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPExtension() {
+		tools = append(tools, llama.GetLSPToolDefinitions()...)
+	}
 	taskMsgs, _ := te.store.GetTaskMessages(setup.task.ID, setup.task.CurrentThreadID)
 	messages := buildMessagesFromDB(setup.task, taskMsgs, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 
@@ -506,6 +510,10 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						tools = llama.GetPlanModeToolDefinitions()
 					} else {
 						tools = llama.GetToolDefinitions()
+					}
+					// Append LSP tools if any LSP extension is installed
+					if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPExtension() {
+						tools = append(tools, llama.GetLSPToolDefinitions()...)
 					}
 					// Broadcast assigned ports if any changed
 					if len(assignedPorts) > 0 {
@@ -726,7 +734,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					if isNew {
 						actualPrevLen = 0
 					}
-					flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, actualPrevLen, isNew, lc.sandboxEnabled && isSandboxableTool(tc.Function.Name))
+					flusher.appendToolCall(tc.ID, tc.Function.Name, llama.GetToolDisplayName(tc.Function.Name), path, tc.Function.Arguments, argLen, actualPrevLen, isNew, (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name))
 				}
 			}
 			// Throttled progress updates for write_file (1 per 2 seconds)
@@ -977,7 +985,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					"tool_display_name": llama.GetToolDisplayName(tc.Function.Name),
 					"args":              args,
 					"raw_args":          tc.Function.Arguments,
-					"sandbox":           lc.sandboxEnabled && isSandboxableTool(tc.Function.Name),
+					"sandbox":           (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name),
 				})
 				toolCallMsgID := uuid.New().String()
 				if err := te.store.CreateTaskMessage(&types.TaskMessage{
@@ -1046,7 +1054,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				}
 				te.GetWorktreeMu(setup.task.ID).Unlock()
 				toolDuration := time.Since(toolStart).Milliseconds()
-				isSandboxed := lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)
+				isSandboxed := (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})
 				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
 

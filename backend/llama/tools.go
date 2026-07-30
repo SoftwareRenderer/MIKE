@@ -13,15 +13,19 @@ type CreateTaskArgs struct {
 
 // toolDisplayNames maps tool names to their UI display names.
 var toolDisplayNames = map[string]string{
-	"read_file":      "Read",
-	"write_file":     "Write",
-	"edit_file":      "Edit",
-	"bash":           "Execute",
-	"ask_question":   "Question",
-	"request_review": "Done",
-	"create_task":    "Create Task",
-	"view_tasks":     "View Tasks",
-	"edit_task":      "Edit Task",
+	"read_file":        "Read",
+	"write_file":       "Write",
+	"edit_file":        "Edit",
+	"bash":             "Execute",
+	"ask_question":     "Question",
+	"request_review":   "Done",
+	"create_task":      "Create Task",
+	"view_tasks":       "View Tasks",
+	"edit_task":        "Edit Task",
+	"lsp_references":   "LSP References",
+	"lsp_definition":   "LSP Definition",
+	"lsp_code_actions": "LSP Code Actions",
+	"lsp_hover":        "LSP Hover",
 }
 
 // GetToolDisplayName returns the display name for a tool, or the raw name if unknown.
@@ -35,15 +39,15 @@ func GetToolDisplayName(toolName string) string {
 // ─── JSON Schema structs (fields serialized in declaration order) ───
 
 type paramSchema struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
+	Type        string          `json:"type"`
+	Description string          `json:"description"`
 	Items       *editItemSchema `json:"items,omitempty"`
 }
 
 type editItemSchema struct {
-	Type       string              `json:"type"`
-	Properties editPropertyParams  `json:"properties"`
-	Required   []string            `json:"required"`
+	Type       string             `json:"type"`
+	Properties editPropertyParams `json:"properties"`
+	Required   []string           `json:"required"`
 }
 
 type editPropertyParams struct {
@@ -275,19 +279,105 @@ var toolViewTasks = types.ChatTool{
 	},
 }
 
+// ─── LSP tool definitions ───
+
+type lspSymbolProps struct {
+	Path   paramSchema `json:"path"`
+	Symbol paramSchema `json:"symbol"`
+}
+
+var toolLSPReferences = types.ChatTool{
+	Type: "function",
+	Function: &types.ToolDef{
+		Name:        "lsp_references",
+		DisplayName: "LSP References",
+		Description: "Find all references to a symbol in a file. Returns an array of locations with file path, line, and character. Use this to find all usages of a variable, function, or type before refactoring.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": lspSymbolProps{
+				Path:   paramSchema{Type: "string", Description: "Relative path to the file containing the symbol"},
+				Symbol: paramSchema{Type: "string", Description: "Name of the symbol to find references for"},
+			},
+			"required": []string{"path", "symbol"},
+		},
+	},
+}
+
+var toolLSPDefinition = types.ChatTool{
+	Type: "function",
+	Function: &types.ToolDef{
+		Name:        "lsp_definition",
+		DisplayName: "LSP Definition",
+		Description: "Find the definition location of a symbol in a file. Returns the file path, line, and character where the symbol is defined. Use this to navigate to where a function, variable, or type is declared.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": lspSymbolProps{
+				Path:   paramSchema{Type: "string", Description: "Relative path to the file containing the symbol"},
+				Symbol: paramSchema{Type: "string", Description: "Name of the symbol to find the definition of"},
+			},
+			"required": []string{"path", "symbol"},
+		},
+	},
+}
+
+var toolLSPCodeActions = types.ChatTool{
+	Type: "function",
+	Function: &types.ToolDef{
+		Name:        "lsp_code_actions",
+		DisplayName: "LSP Code Actions",
+		Description: "Get available code actions (quick fixes, refactoring options) at a symbol in a file. Returns an array of actions with title, kind, and optional edit details. Use this to see what fixes the language server suggests for errors or to access refactoring options like 'Extract variable' or 'Organize imports'.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": lspSymbolProps{
+				Path:   paramSchema{Type: "string", Description: "Relative path to the file"},
+				Symbol: paramSchema{Type: "string", Description: "Name of the symbol to get code actions for"},
+			},
+			"required": []string{"path", "symbol"},
+		},
+	},
+}
+
+var toolLSPHover = types.ChatTool{
+	Type: "function",
+	Function: &types.ToolDef{
+		Name:        "lsp_hover",
+		DisplayName: "LSP Hover",
+		Description: "Get hover information (type signature, documentation) for a symbol in a file. Returns the symbol's type, signature, and any attached documentation in markdown or plain text. Use this to understand what a function, variable, or type does without reading its source.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": lspSymbolProps{
+				Path:   paramSchema{Type: "string", Description: "Relative path to the file containing the symbol"},
+				Symbol: paramSchema{Type: "string", Description: "Name of the symbol to hover over (e.g. 'fmt', 'Println', 'main')"},
+			},
+			"required": []string{"path", "symbol"},
+		},
+	},
+}
+
+// GetLSPToolDefinitions returns the LSP-aware tool definitions.
+// These tools are only available when an LSP extension is installed.
+func GetLSPToolDefinitions() []types.ChatTool {
+	return []types.ChatTool{
+		toolLSPReferences,
+		toolLSPDefinition,
+		toolLSPCodeActions,
+		toolLSPHover,
+	}
+}
+
 var toolEditTask = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
 		Name:        "edit_task",
 		DisplayName: "Edit Task",
-		Description: "Edit a task's title, prompt, or parent_task_id. Only tasks with status 'backlog' in the current project can be edited. At least one field (title, prompt, parent_task_id) must be provided. If parent_task_id is set, the parent task must also have status 'backlog'.",
+		Description: "Edit a task's title, prompt, or parent_task_id. At least one field (title, prompt, parent_task_id) must be provided.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": editTaskProps{
 				TaskID:       paramSchema{Type: "string", Description: "ID of the task to edit"},
 				Title:        paramSchema{Type: "string", Description: "New title for the task"},
 				Prompt:       paramSchema{Type: "string", Description: "New prompt/description for the task"},
-				ParentTaskID: paramSchema{Type: "string", Description: "New parent task ID to nest this task under. Must also be a backlog task. Omit to keep existing parent."},
+				ParentTaskID: paramSchema{Type: "string", Description: "New parent task ID to nest this task under. Omit to keep existing parent."},
 			},
 			"required": []string{"task_id"},
 		},

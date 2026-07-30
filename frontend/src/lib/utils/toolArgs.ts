@@ -78,6 +78,26 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
             return args.question as string || '(question)';
         case 'view_tasks':
             return '(list backlog tasks)';
+        case 'lsp_hover': {
+            const sym = args.symbol as string;
+            const path = args.path as string;
+            return sym ? `hover ${sym} in ${path || 'file'}` : `(hover in ${path || 'file'})`;
+        }
+        case 'lsp_references': {
+            const sym = args.symbol as string;
+            const path = args.path as string;
+            return sym ? `references for ${sym} in ${path || 'file'}` : `(references in ${path || 'file'})`;
+        }
+        case 'lsp_definition': {
+            const sym = args.symbol as string;
+            const path = args.path as string;
+            return sym ? `definition of ${sym} in ${path || 'file'}` : `(definition in ${path || 'file'})`;
+        }
+        case 'lsp_code_actions': {
+            const sym = args.symbol as string;
+            const path = args.path as string;
+            return sym ? `code actions for ${sym} in ${path || 'file'}` : `(code actions in ${path || 'file'})`;
+        }
         default:
             return JSON.stringify(args, null, 2);
     }

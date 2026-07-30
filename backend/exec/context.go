@@ -217,6 +217,34 @@ func formatToolAction(name, arguments string) string {
 		return "create"
 	case "edit_task":
 		return "edit"
+	case "lsp_references":
+		if path, ok := args["path"].(string); ok && path != "" {
+			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
+				return "find references for `" + sym + "` in `" + path + "`"
+			}
+			return "find references in `" + path + "`"
+		}
+	case "lsp_definition":
+		if path, ok := args["path"].(string); ok && path != "" {
+			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
+				return "find definition of `" + sym + "` in `" + path + "`"
+			}
+			return "find definition in `" + path + "`"
+		}
+	case "lsp_code_actions":
+		if path, ok := args["path"].(string); ok && path != "" {
+			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
+				return "get code actions for `" + sym + "` in `" + path + "`"
+			}
+			return "get code actions in `" + path + "`"
+		}
+	case "lsp_hover":
+		if path, ok := args["path"].(string); ok && path != "" {
+			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
+				return "hover over `" + sym + "` in `" + path + "`"
+			}
+			return "get hover info in `" + path + "`"
+		}
 	}
 	return "perform an action"
 }
@@ -306,6 +334,17 @@ func formatToolResult(name, toolCallID string, status string, toolResults map[st
 func isSandboxableTool(name string) bool {
 	switch name {
 	case "read_file", "write_file", "edit_file", "bash":
+		return true
+	default:
+		return false
+	}
+}
+
+// isLSPTool returns true for tools that run inside an LSP extension sandbox.
+// These are always sandboxed regardless of the project's sandbox setting.
+func isLSPTool(name string) bool {
+	switch name {
+	case "lsp_references", "lsp_definition", "lsp_code_actions", "lsp_hover":
 		return true
 	default:
 		return false
