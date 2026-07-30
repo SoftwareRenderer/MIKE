@@ -97,6 +97,7 @@ type lspManager interface {
 	Release(workspacePath, language string)
 	SendToServer(process *LSPProcess, msg json.RawMessage) error
 	ServerMessageCh() <-chan json.RawMessage
+	GetMountPath(workspacePath string) string
 }
 
 // LSPHandler bridges frontend LSP clients to backend-managed language server processes.
@@ -273,6 +274,18 @@ func (h *LSPHandler) handleClientMessage(ctx context.Context, session *ClientSes
 
 	// Extract channel ID, workspace, language, file path, and strip wrapper
 	channelID, workspace, lang, file, stripped := extractHints(msg)
+
+	// Translate host paths to container paths in the JSON-RPC message
+	mountPath := h.manager.GetMountPath(workspace)
+	var rpcMap map[string]any
+	if err := json.Unmarshal(stripped, &rpcMap); err == nil {
+		translated := translateUri(rpcMap, workspace, mountPath)
+		if translated != nil {
+			if b, err := json.Marshal(translated); err == nil {
+				stripped = b
+			}
+		}
+	}
 
 	// Parse to check message type
 	var rpc JSONRPCMessage
@@ -609,7 +622,6 @@ func (h *LSPHandler) routeServerMessage(serverMsg json.RawMessage) {
 		return
 	}
 
-	// Response: has id but no method
 	if rpc.ID != nil && rpc.Method == "" {
 		h.routeResponse(serverMsg, rpc.ID.String())
 		return
@@ -886,4 +898,29 @@ func itoa(n int64) string {
 		buf[i], buf[j] = buf[j], buf[i]
 	}
 	return string(buf)
+}
+
+func translateUri(val any, workspace, mountPath string) any {
+	switch v := val.(type) {
+	case string:
+		if strings.HasPrefix(v, "file://") {
+			path := strings.TrimPrefix(v, "file://")
+			if strings.HasPrefix(path, workspace) {
+				return "file://" + strings.Replace(path, workspace, mountPath, 1)
+			}
+		}
+		return v
+	case map[string]any:
+		for k, val := range v {
+			v[k] = translateUri(val, workspace, mountPath)
+		}
+		return v
+	case []any:
+		for i, val := range v {
+			v[i] = translateUri(val, workspace, mountPath)
+		}
+		return v
+	default:
+		return v
+	}
 }
