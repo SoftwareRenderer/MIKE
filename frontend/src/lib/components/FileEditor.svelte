@@ -9,7 +9,7 @@
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
     import { LSPClient, languageServerExtensions } from '@codemirror/lsp-client';
-    import { requestLSPChannel, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
+    import { requestLSPChannel, createLSPNotificationHandlers, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
@@ -87,6 +87,8 @@
     let lspLanguage = $state(''); // language name for display (e.g., "Go", "TypeScript")
     let lspServerName = $state(''); // server name from LSP (e.g., "gopls")
     let lspServerVersion = $state(''); // server version from LSP (e.g., "v0.15.0")
+    let lspMessages = $state<string[]>([]); // LSP server messages for tooltip
+    const lspMessageLog = $derived(lspMessages.join('\n'));
     let fileUri = $state('');
     let lspCompartment = $state(new Compartment());
     let lspAvailable = $state(false);
@@ -738,6 +740,9 @@
                 lspClient = new LSPClient({
                     extensions: languageServerExtensions(),
                     rootUri: `file://${_projPath!}`,
+                    notificationHandlers: createLSPNotificationHandlers((msg) => {
+                        lspMessages = [...lspMessages.slice(-19), msg]; // keep last 20
+                    }),
                     // Gopls can take 10-20s to initialize on large workspaces
                     timeout: 30000,
                 });
@@ -842,6 +847,9 @@
                 const newClient = new LSPClient({
                     extensions: languageServerExtensions(),
                     rootUri: `file://${_projPath!}`,
+                    notificationHandlers: createLSPNotificationHandlers((msg) => {
+                        lspMessages = [...lspMessages.slice(-19), msg]; // keep last 20
+                    }),
                     timeout: 30000,
                 });
                 lspClient = newClient;
@@ -929,6 +937,7 @@
                 {lspLanguage}
                 {lspServerName}
                 {lspServerVersion}
+                lspMessage={lspMessageLog}
             />
         {/if}
     {/if}
