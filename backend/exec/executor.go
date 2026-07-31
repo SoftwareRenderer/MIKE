@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1854,46 +1855,48 @@ func (te *TaskExecutor) branchExists(projectID, branchName string) bool {
 // maxBranchName is the maximum length for any git branch name.
 const maxBranchName = 50
 
+// randomSuffix generates a random alphanumeric string of length n.
+func randomSuffix(n int) string {
+	chars := "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	for i := range b {
+		b[i] = chars[int(b[i])%len(chars)]
+	}
+	return string(b)
+}
+
 // generateBranchName creates a unique git branch name for a task.
 // Uses a slugified title when possible (e.g. "task/fix-login-bug"),
 // falls back to the task ID (e.g. "task/frost-amber-quartz"),
 // and appends a short suffix if the branch already exists from a deleted task.
 // The total branch name (including prefix) is capped at 50 characters.
+const randomSuffixLen = 6
+
 func (te *TaskExecutor) generateBranchName(task *types.Task, taskID, projectID string) string {
-	branchName := fmt.Sprintf("task/%s", task.ID)
+	baseName := fmt.Sprintf("task/%s", task.ID)
 	if !task.AutoMerge && task.Title != "" {
 		slug := slugifyBranchName(task.Title)
-		if slug != "" && len("task/"+slug) <= maxBranchName {
-			branchName = "task/" + slug
+		if slug != "" {
+			baseName = "task/" + slug
 		}
 	}
-	// Ensure uniqueness: if the branch already exists (e.g., from a deleted task)
-	// AND the worktree doesn't exist yet (first run), append a short suffix.
-	// If the worktree already exists, the branch was created with this name — keep it.
+	// Always append random suffix to avoid collisions with stale branches.
+	// Truncate base to leave room for "-" + randomSuffixLen chars.
+	suffixSpace := 1 + randomSuffixLen // "-" + 6 chars
+	if len(baseName)+suffixSpace > maxBranchName {
+		baseName = baseName[:maxBranchName-suffixSpace]
+	}
+	branchName := baseName + "-" + randomSuffix(randomSuffixLen)
+
+	// Safety net: if this random name somehow collides, append taskID chars.
 	wtPath, wtErr := te.worktreeMgr.WorktreePath(taskID)
 	_, wtStatErr := os.Stat(wtPath)
 	wtExists := wtErr == nil && wtStatErr == nil
 	if !wtExists && te.branchExists(projectID, branchName) {
-		// Append a unique suffix: taskID[:8], then taskID[:8]-N if that also collides
-		suffix := "-" + taskID[:8]
-		n := 1
-		for {
-			candidate := branchName + suffix
-			if n > 1 {
-				candidate = branchName + suffix + fmt.Sprintf("-%d", n)
-			}
-			// Truncate to fit within maxBranchName
-			if len(candidate) > maxBranchName {
-				candidate = candidate[:maxBranchName]
-			}
-			if !te.branchExists(projectID, candidate) {
-				branchName = candidate
-				break
-			}
-			n++
-			if n > 100 {
-				break // safety net — shouldn't happen
-			}
+		extra := "-" + taskID[:8]
+		if len(branchName)+len(extra) <= maxBranchName {
+			branchName += extra
 		}
 	}
 	return branchName
