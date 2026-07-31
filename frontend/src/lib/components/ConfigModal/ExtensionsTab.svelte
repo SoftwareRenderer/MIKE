@@ -9,6 +9,18 @@
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
 
+    /** Validate a URL has an allowed scheme (http/https). Returns '#' for unsafe URLs. */
+    function safeUrl(url: string): string {
+        if (!url) return '#';
+        try {
+            const u = new URL(url);
+            if (!['http:', 'https:'].includes(u.protocol)) return '#';
+            return url;
+        } catch {
+            return '#';
+        }
+    }
+
     // State
     let extensions = $state<Extension[]>([]);
     let registryEntries = $state<RegistryEntry[]>([]);
@@ -553,8 +565,8 @@
                                         {#if ext.manifest.author}
                                             · {ext.manifest.author}
                                         {/if}
-                                        {#if ext.manifest.license_url} · <a href={ext.manifest.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
-                                        {#if ext.manifest.homepage} · <a href={ext.manifest.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">Website</a>{/if}
+                                        {#if ext.manifest.license_url} · <a href={safeUrl(ext.manifest.license_url)} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
+                                        {#if ext.manifest.homepage} · <a href={safeUrl(ext.manifest.homepage)} target="_blank" rel="noopener noreferrer" class="ext-link">Website</a>{/if}
                                     </span>
                                 </div>
                                 <div class="card-actions">
@@ -914,8 +926,8 @@
                                         {#if entry.author}
                                             · {entry.author}
                                         {/if}
-                                        {#if entry.license_url} · <a href={entry.license_url} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
-                                        {#if entry.homepage} · <a href={entry.homepage} target="_blank" rel="noopener noreferrer" class="ext-link">Website</a>{/if}
+                                        {#if entry.license_url} · <a href={safeUrl(entry.license_url)} target="_blank" rel="noopener noreferrer" class="ext-link">License</a>{/if}
+                                        {#if entry.homepage} · <a href={safeUrl(entry.homepage)} target="_blank" rel="noopener noreferrer" class="ext-link">Website</a>{/if}
                                     </span>
                                 </div>
                                 <div class="ext-action">

@@ -220,6 +220,9 @@ func (h *ExtensionHandler) HandleCreate(w http.ResponseWriter, r *http.Request) 
 		req.Version = "1.0.0"
 	}
 
+	// Sanitize manifest URLs to prevent javascript:/data: injection
+	sanitizeManifestURLs(&req.Manifest)
+
 	// Generate ID from name
 	id := fmt.Sprintf("%s-%d", strings.ToLower(req.Name), time.Now().Unix())
 
@@ -284,10 +287,10 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 			ext.Manifest.Author = req.Manifest.Author
 		}
 		if req.Manifest.LicenseURL != "" {
-			ext.Manifest.LicenseURL = req.Manifest.LicenseURL
+			ext.Manifest.LicenseURL = sanitizeURL(req.Manifest.LicenseURL)
 		}
 		if req.Manifest.Homepage != "" {
-			ext.Manifest.Homepage = req.Manifest.Homepage
+			ext.Manifest.Homepage = sanitizeURL(req.Manifest.Homepage)
 		}
 	}
 	if req.Config != nil {
@@ -575,6 +578,9 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 			Version:     entry.Version,
 		}
 	}
+
+	// Sanitize manifest URLs to prevent javascript:/data: injection
+	sanitizeManifestURLs(&manifest)
 
 	// Create extension record
 	id := fmt.Sprintf("%s-%d", strings.ToLower(entry.Name), time.Now().Unix())
