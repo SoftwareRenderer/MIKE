@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"log"
@@ -179,7 +180,10 @@ func (s *Server) CSRFMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if csrfHeader != storedCSRF {
+		c1 := []byte(csrfHeader)
+		c2 := []byte(storedCSRF)
+
+		if subtle.ConstantTimeCompare(c1, c2) != 1 {
 			JSONError(w, http.StatusForbidden, "invalid CSRF token")
 			return
 		}

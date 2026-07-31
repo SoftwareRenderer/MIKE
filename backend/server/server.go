@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -31,30 +32,30 @@ import (
 
 // Server is the main HTTP server.
 type Server struct {
-	store             *store.Store
-	configStore       *config.ConfigStore
-	sessionMgr        *auth.SessionManager
-	projectHandler    *managers.ProjectHandler
-	taskHandler       *managers.TaskHandler
-	boardHandler      *managers.BoardHandler
-	appStreamMgr      *stream.AppStreamManager
-	depHandler        *managers.DependencyHandler
-	reviewHandler     *managers.ReviewHandler
-	gitHandler        *managers.GitHandler
-	executor          *kanbanexec.TaskExecutor
-	terminalMgr       *term.TerminalManager
-	sandboxMgr        *sandbox.SandboxManager
-	agentRegistry     *agent.AgentRegistry
-	extStore          *extensions.ExtensionStore
-	extSandboxMgr     *extensions.ExtensionSandboxManager
-	extHandler        *extensions.ExtensionHandler
-	extLSPMgr         *lsp.ExtensionLSPManager
-	lspHandler        *lsp.LSPHandler
-	loginLimiter      *RateLimiter
-	mux               *http.ServeMux
-	addr              string
-	frontendDist      string
-	tlsConfig         *tls.Config
+	store          *store.Store
+	configStore    *config.ConfigStore
+	sessionMgr     *auth.SessionManager
+	projectHandler *managers.ProjectHandler
+	taskHandler    *managers.TaskHandler
+	boardHandler   *managers.BoardHandler
+	appStreamMgr   *stream.AppStreamManager
+	depHandler     *managers.DependencyHandler
+	reviewHandler  *managers.ReviewHandler
+	gitHandler     *managers.GitHandler
+	executor       *kanbanexec.TaskExecutor
+	terminalMgr    *term.TerminalManager
+	sandboxMgr     *sandbox.SandboxManager
+	agentRegistry  *agent.AgentRegistry
+	extStore       *extensions.ExtensionStore
+	extSandboxMgr  *extensions.ExtensionSandboxManager
+	extHandler     *extensions.ExtensionHandler
+	extLSPMgr      *lsp.ExtensionLSPManager
+	lspHandler     *lsp.LSPHandler
+	loginLimiter   *RateLimiter
+	mux            *http.ServeMux
+	addr           string
+	frontendDist   string
+	tlsConfig      *tls.Config
 
 	// worktreeMux serializes git operations per task.
 
@@ -310,10 +311,29 @@ func (s *Server) withNonce(next http.Handler) http.Handler {
 	})
 }
 
+type Middleware func(http.Handler) http.Handler
+
+// AddMiddleware wraps successive middleware within each other
+func AddMiddleware(h http.Handler, middleware ...Middleware) http.Handler {
+
+	for _, m := range slices.Backward(middleware) {
+		h = m(h)
+	}
+
+	return h
+}
+
 func (s *Server) Serve() error {
 	srv := &http.Server{
-		Addr:              s.addr,
-		Handler:           PanicRecoveryMiddleware(NonceMiddleware(s.CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux)))))),
+		Addr: s.addr,
+		Handler: AddMiddleware(s.mux,
+			PanicRecoveryMiddleware,
+			s.CORSMiddleware,
+			s.CSRFMiddleware,
+			NonceMiddleware,
+			s.SessionMiddleware,
+			CompressMiddleware,
+		),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
@@ -348,4 +368,3 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	return s.store.Close()
 }
-
