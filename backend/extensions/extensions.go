@@ -243,7 +243,6 @@ type ConfigSchema struct {
 // It accepts properties as either a JSON object (standard JSON Schema format
 // where keys are property names) or a JSON array (internal representation).
 func (s *ConfigSchema) UnmarshalJSON(data []byte) error {
-	type alias ConfigSchema
 	var raw struct {
 		Type       string          `json:"type"`
 		Properties json.RawMessage `json:"properties,omitempty"`

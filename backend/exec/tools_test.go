@@ -1231,3 +1231,125 @@ func TestExecuteTool_RecoveryReturnsNil(t *testing.T) {
 		t.Errorf("unexpected error: %q", result)
 	}
 }
+
+func TestExecuteTool_ReadFile_ClientClosedRecovery(t *testing.T) {
+	// "client closed" error (from Client.Close()) should trigger bridge recovery.
+	// This happens when the sandbox is recreated (e.g., operating mode change)
+	// and a tool call hits the old, closed client.
+	te := &TaskExecutor{}
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "hello.txt")
+	expectedContent := "hello from sandbox"
+	if err := os.WriteFile(testFile, []byte(expectedContent), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	readAttempts := 0
+	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
+		readAttempts++
+		if readAttempts == 1 {
+			return nil, fmt.Errorf("read: client closed")
+		}
+		return os.ReadFile(filepath.Join(dir, path))
+	}
+
+	recoveryCalled := false
+	state := &executionState{sandboxRead: sandboxRead}
+	state.recoverBridge = func() bool {
+		recoveryCalled = true
+		state.sandboxRead = func(_ context.Context, path string) ([]byte, error) {
+			return os.ReadFile(filepath.Join(dir, path))
+		}
+		return true
+	}
+
+	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "hello.txt"}, dir, &types.Task{}, state, nil)
+	if !ok {
+		t.Fatalf("expected success after recovery, got failure: %s", result)
+	}
+	if !recoveryCalled {
+		t.Fatal("expected recoverBridge to be called for 'client closed' error")
+	}
+	if result != expectedContent {
+		t.Errorf("unexpected content: %q, want %q", result, expectedContent)
+	}
+}
+
+func TestExecuteTool_ReadFile_ConnectionClosedRecovery(t *testing.T) {
+	// "connection closed" error (from readLoop cleanup) should trigger bridge recovery.
+	// This happens when the bridge readLoop exits and delivers error frames to pending requests.
+	te := &TaskExecutor{}
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "hello.txt")
+	expectedContent := "hello from sandbox"
+	if err := os.WriteFile(testFile, []byte(expectedContent), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	readAttempts := 0
+	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
+		readAttempts++
+		if readAttempts == 1 {
+			return nil, fmt.Errorf("read: connection closed")
+		}
+		return os.ReadFile(filepath.Join(dir, path))
+	}
+
+	recoveryCalled := false
+	state := &executionState{sandboxRead: sandboxRead}
+	state.recoverBridge = func() bool {
+		recoveryCalled = true
+		state.sandboxRead = func(_ context.Context, path string) ([]byte, error) {
+			return os.ReadFile(filepath.Join(dir, path))
+		}
+		return true
+	}
+
+	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "hello.txt"}, dir, &types.Task{}, state, nil)
+	if !ok {
+		t.Fatalf("expected success after recovery, got failure: %s", result)
+	}
+	if !recoveryCalled {
+		t.Fatal("expected recoverBridge to be called for 'connection closed' error")
+	}
+	if result != expectedContent {
+		t.Errorf("unexpected content: %q, want %q", result, expectedContent)
+	}
+}
+
+func TestExecuteTool_Bash_ClientClosedRecovery(t *testing.T) {
+	// "client closed" error from bash tool should also trigger recovery.
+	te := &TaskExecutor{}
+
+	execAttempts := 0
+	sandboxExec := func(_ context.Context, command string, timeout int64) (string, error) {
+		execAttempts++
+		if execAttempts == 1 {
+			return "", fmt.Errorf("bash: client closed")
+		}
+		return "echo output", nil
+	}
+
+	recoveryCalled := false
+	state := &executionState{sandboxExec: sandboxExec}
+	state.recoverBridge = func() bool {
+		recoveryCalled = true
+		state.sandboxExec = func(_ context.Context, command string, timeout int64) (string, error) {
+			return "echo output", nil
+		}
+		return true
+	}
+
+	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
+		"command": "echo hello",
+	}, "/tmp/worktree", &types.Task{}, state, nil)
+	if !ok {
+		t.Fatalf("expected success after recovery, got failure: %s", result)
+	}
+	if !recoveryCalled {
+		t.Fatal("expected recoverBridge to be called for 'client closed' error in bash")
+	}
+	if result != "echo output" {
+		t.Errorf("unexpected result: %q", result)
+	}
+}
