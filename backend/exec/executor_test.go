@@ -594,6 +594,30 @@ func TestSlugifyBranchName_AllHyphens(t *testing.T) {
 	}
 }
 
+// TestSlugifyBranchName_NeverStartsWithHyphen verifies that slugifyBranchName
+// can never produce a slug starting with '-', preventing Git argument injection.
+func TestSlugifyBranchName_NeverStartsWithHyphen(t *testing.T) {
+	inputs := []string{
+		"-fix login",           // starts with hyphen
+		"  -fix",               // whitespace then hyphen
+		"---fix",               // multiple hyphens
+		"-123",                 // hyphen then digits
+		"---",                  // all hyphens
+		"-",                    // single hyphen
+		"-a-b-c",               // hyphen-separated
+		"Fix login",            // normal title
+		"123 fix",              // starts with digit
+		"!!!fix!!!",            // special chars
+		"",                     // empty
+	}
+	for _, input := range inputs {
+		slug := slugifyBranchName(input)
+		if len(slug) > 0 && slug[0] == '-' {
+			t.Errorf("slugifyBranchName(%q) = %q starts with hyphen", input, slug)
+		}
+	}
+}
+
 func TestGenerateBranchName_FallsBackToTaskIDWhenSlugIsEmpty(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "frost-amber-quartz"

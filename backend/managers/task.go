@@ -255,6 +255,10 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
+	if err := types.ValidateTaskID(taskID); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		task, err := h.store.GetTask(projectID, taskID)
@@ -297,7 +301,12 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			task.SessionID = v.(string)
 		}
 		if v, ok := rawBody["branch"]; ok {
-			task.Branch = v.(string)
+			branch := v.(string)
+			if err := types.ValidateBranchName(branch); err != nil {
+				httputil.JSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			task.Branch = branch
 		}
 		if v, ok := rawBody["base_ref"]; ok {
 			task.BaseRef = v.(string)
