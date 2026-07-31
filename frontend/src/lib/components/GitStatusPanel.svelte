@@ -67,6 +67,8 @@
 
     // Commit comparison state
     const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f826635b6';
+    // Sentinel value for "Current" (working tree) in the From dropdown
+    const CURRENT_TREE = '__current__';
     let commits = $state<GitCommit[]>([]);
     let fromCommit = $state('');
     let toCommit = $state('');
@@ -82,6 +84,7 @@
     let toDropdownEl: HTMLDivElement | null = null;
     // Combobox input state for "From" field (allows typing a hash)
     let fromInputValue = $state('');
+    let fromInputFocused = $state(false);
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let fromInputEl: HTMLInputElement | null = null;
     // Filtered commits list for the "From" combobox
@@ -232,12 +235,16 @@
         // Delay to allow click on dropdown item to fire first
         setTimeout(() => {
             showFromDropdown = false;
-            // If input value doesn't match any commit, keep it as a raw hash
             const trimmed = fromInputValue.trim();
-            if (trimmed) {
-                const matched = commits.find(c => c.hash === trimmed || c.short === trimmed);
-                fromCommit = matched ? matched.hash : trimmed;
+            if (!trimmed) return;
+            // Handle "Current" sentinel
+            if (trimmed.toLowerCase() === 'current') {
+                fromCommit = CURRENT_TREE;
+                return;
             }
+            // If input value doesn't match any commit, keep it as a raw hash
+            const matched = commits.find(c => c.hash === trimmed || c.short === trimmed);
+            fromCommit = matched ? matched.hash : trimmed;
         }, 150);
     }
 
@@ -293,17 +300,9 @@
         try {
             const resp = await getGitLogFull(projectId, { limit: 50 });
             commits = resp.commits;
-            // Default: HEAD~1 → HEAD (last commit's changes)
+            // Set To = HEAD; From is set by updateCompareMode based on context
             if (commits.length > 0) {
                 toCommit = commits[0].hash;
-                // HEAD~1 = first parent of HEAD, or next commit in log, or empty tree
-                if (commits[0].parents && commits[0].parents.length > 0) {
-                    fromCommit = commits[0].parents[0];
-                } else if (commits.length > 1) {
-                    fromCommit = commits[1].hash;
-                } else {
-                    fromCommit = EMPTY_TREE;
-                }
             }
         } catch (e) {
             console.error('Failed to load commits:', e);
@@ -312,6 +311,8 @@
 
     async function fetchCompareDiff() {
         if (!fromCommit || !toCommit) return;
+        // Skip fetch when "Current" (working tree) is selected — working tree diff is shown directly
+        if (fromCommit === CURRENT_TREE) return;
         compareLoading = true;
         compareError = '';
         compareDiff = [];
@@ -339,12 +340,15 @@
 
     // Sync input values when commit hashes change (e.g. initial load)
     // Only sync when the input is NOT focused so we don't fight user typing
-    let fromInputFocused = $state(false);
     $effect(() => {
         fromCommit;
         if (!fromInputFocused) {
-            const commit = commits.find(c => c.hash === fromCommit);
-            fromInputValue = commit ? commit.short : fromCommit.substring(0, 7);
+            if (fromCommit === CURRENT_TREE) {
+                fromInputValue = 'Current';
+            } else {
+                const commit = commits.find(c => c.hash === fromCommit);
+                fromInputValue = commit ? commit.short : fromCommit.substring(0, 7);
+            }
         }
     });
     $effect(() => {
@@ -420,7 +424,7 @@
     let sortedStagedFiles = $derived(sortFiles(stagedDiffFiles));
     let sortedUnstagedFiles = $derived(sortFiles(unstagedDiffFiles));
 
-    async function loadData() {
+    async function loadData(): Promise<boolean> {
         loading = true;
         // Preload the diff viewer chunk while fetching data
         loadDiffViewer();
@@ -467,11 +471,43 @@
 
             stagedDiffFiles = parseUnifiedDiff(stagedDiff);
             unstagedDiffFiles = parseUnifiedDiff(unstagedDiff);
+
+            return stagedEntries.length > 0 || unstagedEntries.length > 0;
         } catch (e) {
             console.error('Failed to load git status:', e);
+            return false;
         } finally {
             loading = false;
         }
+    }
+
+    /** Set default From/To based on whether there are working tree changes.
+     * When there are changes, default to "Current" (working tree) vs latest commit.
+     * When clean, default to previous commit vs latest commit. */
+    async function updateCompareMode(hasChanges: boolean) {
+        // Always ensure commits are loaded (for dropdown population)
+        if (commits.length === 0) {
+            await loadCommits();
+        }
+        if (hasChanges) {
+            // Default to "Current" (working tree) when there are changes
+            fromCommit = CURRENT_TREE;
+            fromInputValue = 'Current';
+        } else {
+            // Default to HEAD~1 → HEAD when clean
+            if (fromCommit === CURRENT_TREE || !fromCommit) {
+                fromCommit = commits[0]?.parents?.[0] || (commits.length > 1 ? commits[1].hash : EMPTY_TREE);
+                fromInputValue = commits.find(c => c.hash === fromCommit)?.short || fromCommit.substring(0, 7);
+            }
+        }
+        // Sync To input
+        toInputValue = commits.find(c => c.hash === toCommit)?.short || toCommit.substring(0, 7);
+    }
+
+    /** Refresh button handler — reloads data and updates compare mode. */
+    async function handleRefresh() {
+        const hasChanges = await loadData();
+        await updateCompareMode(hasChanges);
     }
 
     function toggleSection(id: string) {
@@ -518,7 +554,8 @@
     async function handleStageFile(path: string, stage: boolean) {
         try {
             await stageProjectFile(projectId, path, stage);
-            await loadData();
+            const hasChanges = await loadData();
+            await updateCompareMode(hasChanges);
         } catch (e) {
             console.error('Failed to stage/unstage file:', e);
         }
@@ -528,7 +565,8 @@
     async function handleStageAll() {
         try {
             await Promise.all(unstagedEntries.map(e => stageProjectFile(projectId, e.path, true)));
-            await loadData();
+            const hasChanges = await loadData();
+            await updateCompareMode(hasChanges);
         } catch (e) {
             console.error('Failed to stage all:', e);
         }
@@ -538,7 +576,8 @@
     async function handleUnstageAll() {
         try {
             await Promise.all(stagedEntries.map(e => stageProjectFile(projectId, e.path, false)));
-            await loadData();
+            const hasChanges = await loadData();
+            await updateCompareMode(hasChanges);
         } catch (e) {
             console.error('Failed to unstage all:', e);
         }
@@ -558,7 +597,8 @@
                         cancelText: 'Commit anyway',
                     });
                     if (proceed) {
-                        await loadData();
+                        const hasChanges = await loadData();
+                        await updateCompareMode(hasChanges);
                     }
                 }
             } catch {
@@ -612,7 +652,8 @@
         editorTargetLine = 0;
         if (onUpdateFile) onUpdateFile(null);
         // Refresh data to pick up any changes
-        loadData();
+        const hasChanges = await loadData();
+        await updateCompareMode(hasChanges);
     }
 
     /** Called when the inline editor content changes. */
@@ -627,8 +668,7 @@
     }
 
     onMount(() => {
-        loadData();
-        loadCommits();
+        loadData().then((hasChanges) => updateCompareMode(hasChanges));
         window.addEventListener('keydown', handleKeydown);
     });
 
@@ -685,6 +725,25 @@
                 </div>
                 {#if showFromDropdown}
                     <div id="compare-from-listbox" class="commit-dropdown-list" role="listbox" aria-labelledby="compare-from-input">
+                        <button
+                            id="compare-from-item-current"
+                            class="commit-dropdown-item"
+                            class:active={fromCommit === CURRENT_TREE}
+                            onclick={() => { fromCommit = CURRENT_TREE; fromInputValue = 'Current'; showFromDropdown = false; fromInputEl?.blur(); }}
+                            onfocus={() => handleListItemFocus(-1, 'from')}
+                            role="option"
+                            aria-selected={fromCommit === CURRENT_TREE}
+                        >
+                            {#if fromCommit === CURRENT_TREE}
+                                <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+                                    <polyline points="1.5,4 3,5.5 6.5,2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            {:else}
+                                <span class="commit-check-empty"></span>
+                            {/if}
+                            <span class="commit-dropdown-hash" style="color: var(--color-status-green)">●</span>
+                            <span class="commit-dropdown-subject">Current</span>
+                        </button>
                         {#each filteredFromCommits as commit, i}
                             <button
                                 id={`compare-from-item-${i}`}
@@ -797,7 +856,7 @@
                 <span>Commit</span>
             </button>
         {/if}
-        <button class="panel-icon-btn" onclick={loadData} title="Refresh" aria-label="Refresh">
+        <button class="panel-icon-btn" onclick={handleRefresh} title="Refresh" aria-label="Refresh">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                 <path d="M2 8a6 6 0 0 1 10.47-4M14 8a6 6 0 0 1-10.47 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                 <path d="M12 1v3h-3M4 15v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -950,7 +1009,7 @@
                             <div class="file-editor-loading">Loading editor...</div>
                         {/if}
                     </div>
-                {:else if compareDiff.length > 0 || compareLoading}
+                {:else if fromCommit !== CURRENT_TREE}
                     <!-- Commit comparison diff -->
                     {#if DiffViewerComponent}
                         {@const DiffViewer = DiffViewerComponent}
@@ -966,7 +1025,7 @@
                     {#if compareError}
                         <div class="compare-error" role="alert">{compareError}</div>
                     {/if}
-                {:else}
+                {:else if stagedEntries.length > 0 || unstagedEntries.length > 0 || fromCommit === CURRENT_TREE}
                     {#if DiffViewerComponent}
                         {@const DiffViewer = DiffViewerComponent}
                         <DiffViewer
