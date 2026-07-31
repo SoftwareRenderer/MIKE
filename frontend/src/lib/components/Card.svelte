@@ -1,12 +1,12 @@
 <script lang="ts">
-    import type { Task, Provider } from '$lib/types';
+    import type { Task } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import Card from './Card.svelte';
-    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, startTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
+    import { moveTask, updateTask, stopTask, resumeTask, deleteTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import Icon from './Icon.svelte';
@@ -153,7 +153,7 @@
     let actionCount = $derived(
         (!inline || !task.parent_task_id || hasChildren || showSubtaskBorder ? 1 : 0) // + subtask
         + (!isDoneSubtask ? 1 : 0) // edit
-        + (inline && task.parent_task_id || task.status === 'in_progress' ? 0 : 1) // move/pause/resume/idle (move hidden for inline subtasks and in_progress)
+        + (inline && task.parent_task_id ? 0 : 1) // move/pause/resume/idle (move hidden for inline subtasks)
     );
 
     const statuses = ['backlog', 'in_progress', 'review', 'done'] as const;
@@ -474,42 +474,6 @@
         appStore.showEditTask = true;
     }
 
-    function handleEditSaved(title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean) {
-        const trimmed = title.trim();
-        if (!trimmed || !projectId) {
-            appStore.showEditTask = false;
-            appStore.editTaskData = null;
-            return;
-        }
-        const updates: Record<string, unknown> = { title: trimmed };
-        updates.operating_mode = operatingMode;
-        updates.auto_commit = autoMerge;
-        updates.auto_merge = autoMerge;
-        updates.subtasks_auto_merge = subtasksAutoMerge;
-        if (model) updates.model_name = model;
-        if (url) updates.llama_server_url = url;
-        if (reasoningEffort) updates.reasoning_effort = reasoningEffort;
-        task.title = trimmed;
-        task.operating_mode = operatingMode;
-        task.auto_commit = autoMerge;
-        task.auto_merge = autoMerge;
-        task.subtasks_auto_merge = subtasksAutoMerge;
-        if (model) task.model_name = model;
-        if (url) task.llama_server_url = url;
-        if (reasoningEffort) task.reasoning_effort = reasoningEffort;
-        updateTaskInBoard(appStore, task.id, task);
-        updateTask(projectId, task.id, updates).catch(err => {
-            console.error('Failed to update task:', err);
-        });
-        appStore.showEditTask = false;
-        appStore.editTaskData = null;
-    }
-
-    function handleEditCancelled() {
-        appStore.showEditTask = false;
-        appStore.editTaskData = null;
-    }
-
     function truncate(s: string, max: number): string {
         if (!s) return '';
         return s.length > max ? s.slice(0, max) + '...' : s;
@@ -664,26 +628,6 @@
         e.stopPropagation();
         if (onCreateChildTask) {
             onCreateChildTask(task.id);
-        }
-    }
-
-    async function handleStart(e: MouseEvent) {
-        e.stopPropagation();
-        if (!projectId) return;
-        try {
-            // If this is a subtask, use the start-subtask endpoint
-            if (task.parent_task_id) {
-                const { startSubtask } = await import('$lib/api');
-                const updated = await startSubtask(projectId, task.id);
-                updateTaskInBoard(appStore, updated.id, updated);
-            } else {
-                // Parent task or root task — use normal start (backend handles LLM subtask selection)
-                const updated = await startTask(projectId, task.id);
-                updateTaskInBoard(appStore, updated.id, updated);
-            }
-        } catch (err) {
-            console.error('Failed to start task:', err);
-            dialogStore.showToast('Failed to start task: ' + String(err), 'error');
         }
     }
 
@@ -1088,9 +1032,6 @@
         background: var(--color-accent-dark);
         color: white !important;
     }
-    :global(.action-icon.action-move:hover .icon svg) {
-        color: white !important;
-    }
     .action-icon.action-delete:hover {
         background: var(--color-status-red-dark);
         color: white;
@@ -1256,9 +1197,6 @@
         color: var(--color-text-primary);
         white-space: nowrap;
         pointer-events: none;
-    }
-    .subtask-progress-bar.is-expanded .subtask-progress-count {
-        color: var(--color-text-primary);
     }
     .subtask-chevron {
         position: absolute;
