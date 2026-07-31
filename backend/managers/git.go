@@ -490,6 +490,10 @@ func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	if err := types.ValidateBranchName(req.Branch); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	// Acquire per-project mutex to serialize project-level git operations.
 	if h.getProjectMutex != nil {
 		mu := h.getProjectMutex(projectID)
@@ -1458,6 +1462,10 @@ func (h *GitHandler) HandleTaskCheckout(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Branch == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "branch is required")
+		return
+	}
+	if err := types.ValidateBranchName(req.Branch); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
