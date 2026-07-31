@@ -7,8 +7,7 @@ import (
 
 // allowedBranchChars is a lookup table for characters permitted in git branch
 // names. Only ASCII alphanumeric, hyphen, underscore, dot, slash, and plus are
-// allowed. This is a whitelist to prevent git argument injection and ensure
-// refs are valid per git's own naming rules.
+// allowed.
 var allowedBranchChars = func() [256]bool {
 	var t [256]bool
 	for c := byte('0'); c <= '9'; c++ {
