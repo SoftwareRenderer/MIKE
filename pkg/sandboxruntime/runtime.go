@@ -8,17 +8,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
-// ValidateImageRef rejects image references that start with a dash,
-// preventing them from being interpreted as podman flags.
+// imageRefPattern matches valid OCI/Docker image references.
+// Requires the first character be alphanumeric (not a dash) and all
+// subsequent characters be alphanumeric or one of / . _ - : @.
+var imageRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9/._:@-]*$`)
+
+// ValidateImageRef rejects image references that are invalid OCI image characters.
+// This prevents references like "-v /etc:/host" or "$(rm -rf /)" from being
+// passed to podman as if they were flags.
 func (r *Runtime) ValidateImageRef(image string) error {
 	if image == "" {
 		return fmt.Errorf("image reference must not be empty")
 	}
-	if strings.HasPrefix(image, "-") {
-		return fmt.Errorf("image reference must not start with a dash: %q", image)
+	if !imageRefPattern.MatchString(image) {
+		return fmt.Errorf("invalid image reference: %q", image)
 	}
 	return nil
 }
