@@ -309,10 +309,20 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			task.Branch = branch
 		}
 		if v, ok := rawBody["base_ref"]; ok {
-			task.BaseRef = v.(string)
+			baseRef := v.(string)
+			if err := types.ValidateBranchName(baseRef); err != nil {
+				httputil.JSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			task.BaseRef = baseRef
 		}
 		if v, ok := rawBody["branch_tip"]; ok {
-			task.BranchTip = v.(string)
+			branchTip := v.(string)
+			if err := types.ValidateBranchName(branchTip); err != nil {
+				httputil.JSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			task.BranchTip = branchTip
 		}
 		if v, ok := rawBody["output"]; ok {
 			task.Output = v.(string)
