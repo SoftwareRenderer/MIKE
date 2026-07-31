@@ -85,7 +85,12 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	branch := r.URL.Query().Get("branch")
-	if branch == "" {
+	if branch != "" {
+		if err := types.ValidateBranchName(branch); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else {
 		branch = "HEAD"
 	}
 
@@ -309,6 +314,20 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	base := r.URL.Query().Get("base")
 	head := r.URL.Query().Get("head")
 	cached := r.URL.Query().Get("cached") == "1"
+
+	// Validate user-supplied refs to prevent git argument injection.
+	if base != "" {
+		if err := types.ValidateBranchName(base); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if head != "" {
+		if err := types.ValidateBranchName(head); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	var c *exec.Cmd
 	if cached {
@@ -686,6 +705,20 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	customBase := r.URL.Query().Get("base")
 	fullDiff := r.URL.Query().Get("full") == "1"
 	checkpointIdxStr := r.URL.Query().Get("checkpointIdx")
+
+	// Validate user-supplied refs to prevent git argument injection.
+	if headRef != "" {
+		if err := types.ValidateBranchName(headRef); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if customBase != "" {
+		if err := types.ValidateBranchName(customBase); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	checkpointIdx := -1
 	if checkpointIdxStr != "" {
 		checkpointIdx, _ = strconv.Atoi(checkpointIdxStr)
@@ -1285,6 +1318,12 @@ func (h *GitHandler) HandleTaskLog(w http.ResponseWriter, r *http.Request) {
 	branch := r.URL.Query().Get("branch")
 	if branch == "" {
 		branch = task.Branch
+	}
+	if branch != "" {
+		if err := types.ValidateBranchName(branch); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if branch == "" {
 		branch = "HEAD"
