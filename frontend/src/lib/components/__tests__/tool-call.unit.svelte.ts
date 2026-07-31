@@ -10,6 +10,7 @@ vi.mock('$lib/assets/icons/shield-green.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/shield-off.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/zap.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/file-text.svg?raw', () => ({ default: '' }));
+vi.mock('$lib/assets/icons/search.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/edit.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/check-circle.svg?raw', () => ({ default: '' }));
 vi.mock('$lib/assets/icons/question.svg?raw', () => ({ default: '' }));

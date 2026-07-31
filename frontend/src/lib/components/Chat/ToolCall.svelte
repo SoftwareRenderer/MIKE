@@ -9,6 +9,7 @@
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import zapIcon from '$lib/assets/icons/zap.svg?raw';
     import fileTextIcon from '$lib/assets/icons/file-text.svg?raw';
+    import searchIcon from '$lib/assets/icons/search.svg?raw';
     import editIcon from '$lib/assets/icons/edit.svg?raw';
     import checkCircleIcon from '$lib/assets/icons/check-circle.svg?raw';
     import questionIcon from '$lib/assets/icons/question.svg?raw';
@@ -249,12 +250,16 @@
         resultExpanded = true;
     }
 
+    // LSP tools (hover, references, definition, code actions) use a magnifying glass icon
+    const LSP_TOOLS = new Set(['lsp_hover', 'lsp_references', 'lsp_definition', 'lsp_code_actions']);
+
     // Icon selection
     let iconInfo = $derived(
         tc.toolName === 'read_file' ? { src: fileTextIcon } :
         tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? { src: editIcon } :
         tc.toolName === 'request_review' ? { src: checkCircleIcon } :
         tc.toolName === 'ask_question' ? { src: questionIcon } :
+        LSP_TOOLS.has(tc.toolName) ? { src: searchIcon } :
         { src: zapIcon }
     );
 
