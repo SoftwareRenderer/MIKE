@@ -912,6 +912,9 @@ func (sm *SandboxManager) ImageReady(image string) bool {
 	if image == "" {
 		image = BaseImage
 	}
+	if strings.HasPrefix(image, "-") {
+		return false
+	}
 	_, err := sm.podmanExec("image", "exists", image)
 	return err == nil
 }
@@ -926,6 +929,9 @@ func (sm *SandboxManager) PullImage(image string) error {
 func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(line string)) error {
 	if image == "" {
 		image = BaseImage
+	}
+	if strings.HasPrefix(image, "-") {
+		return fmt.Errorf("image reference must not start with a dash: %q", image)
 	}
 	log.Printf("[sandbox] pulling image %s", image)
 
@@ -985,6 +991,9 @@ func (sm *SandboxManager) BuildImage(projectName, dockerfilePath string) error {
 func (sm *SandboxManager) BuildImageWithProgress(projectName, dockerfilePath string, onProgress func(line string)) error {
 	if !sm.available {
 		return fmt.Errorf("gVisor not available (runsc not installed)")
+	}
+	if strings.HasPrefix(dockerfilePath, "-") {
+		return fmt.Errorf("dockerfile path must not start with a dash: %q", dockerfilePath)
 	}
 
 	// Read the Dockerfile
