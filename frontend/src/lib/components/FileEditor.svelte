@@ -680,6 +680,20 @@
         }
     });
 
+    // Normalize filePath for LSP: convert sandbox container paths (/home/sandbox/<name>/...)
+    // to host project paths. The LSP sandbox mounts projects at /mnt/<name>, not /home/sandbox/<name>.
+    // Without this normalization, gopls sees file URIs like file:///home/sandbox/kanban/...
+    // which don't match its workspace root (/mnt/kanban), causing "No packages found" errors.
+    const lspFilePath = (() => {
+        if (!filePath || !projectPath) return filePath;
+        const projectName = projectPath.split('/').filter(Boolean).pop();
+        const sandboxPrefix = `/home/sandbox/${projectName}/`;
+        if (filePath.startsWith(sandboxPrefix)) {
+            return projectPath + '/' + filePath.slice(sandboxPrefix.length);
+        }
+        return filePath.startsWith('/') ? filePath : (projectPath + '/' + filePath);
+    })();
+
     // Initialize LSP after the file and editor are ready
     // Track extension manager state so this effect re-runs when extensions are loaded
     $effect(() => {
@@ -702,7 +716,7 @@
 
             lspConnecting = true;
             lspReady = false;
-            fileUri = `file://${filePath}`;
+            fileUri = `file://${lspFilePath}`;
             try {
                 // Promise resolved when backend sends $server/lspReady notification
                 let resolveReady: () => void;
@@ -712,7 +726,7 @@
                 // All editors in the same workspace share one WebSocket.
                 const virtTransport = await requestLSPChannel({
                     workspace: _projPath!,
-                    filePath,
+                    filePath: lspFilePath,
                     onDisconnected: () => {
                         lspReady = false;
                         lspWorkspace = ''; // clear workspace on disconnect
@@ -819,7 +833,7 @@
 
                 const virtTransport = await requestLSPChannel({
                     workspace: _projPath!,
-                    filePath,
+                    filePath: lspFilePath,
                     onDisconnected: () => {
                         lspReady = false;
                         lspWorkspace = '';
