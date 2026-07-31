@@ -29,12 +29,12 @@ const CHANNEL_ID_STEP = 1000;
 
 /**
  * Derive the language identifier from a file path.
- * Uses installed LSP extensions to determine language support.
+ * Uses installed LSP extensions (with editor features enabled) to determine language support.
  * Falls back to file extension if no extension is found.
  */
 export function detectLanguage(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() || '';
-  // Check if an LSP extension handles this file
+  // Check if an LSP extension handles this file (editor features enabled)
   const lspExt = extensionManager.getLSPForFile(filePath);
   if (lspExt?.manifest.capabilities?.lsp?.language) {
     return lspExt.manifest.capabilities.lsp.language;
@@ -45,19 +45,6 @@ export function detectLanguage(filePath: string): string {
 /** Check if LSP is available for a given file. */
 export function isLSPAvailable(filePath: string): boolean {
   return extensionManager.getLSPForFile(filePath) !== undefined;
-}
-
-/** Get all supported file extensions from installed LSP extensions. */
-export function getSupportedExtensions(): string[] {
-  const exts = new Set<string>();
-  for (const ext of extensionManager.getLSPExtensions()) {
-    if (ext.manifest.capabilities?.lsp?.extensions) {
-      for (const e of ext.manifest.capabilities.lsp.extensions) {
-        exts.add(e);
-      }
-    }
-  }
-  return [...exts];
 }
 
 export interface LSPTransportOptions {

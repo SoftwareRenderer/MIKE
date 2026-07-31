@@ -2,9 +2,14 @@ package exec
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"kanban/backend/config"
+	"kanban/backend/extensions"
+	"kanban/backend/lsp"
 	"kanban/backend/store"
 	"kanban/backend/stream"
 	"kanban/backend/types"
@@ -22,6 +27,30 @@ func newLSPTestExecutor(t *testing.T, worktreePath string) *TaskExecutor {
 		configStore:  &config.ConfigStore{},
 		tasks:        make(map[string]*executionState),
 		// lspMgr is nil — no LSP extension installed
+	}
+}
+
+// newLSPTestExecutorWithMgr creates a TaskExecutor with an LSP manager and extensions.
+func newLSPTestExecutorWithMgr(t *testing.T, worktreePath string, exts ...*extensions.Extension) *TaskExecutor {
+	t.Helper()
+	s := testStore(t)
+	es := extensions.NewExtensionStore(s)
+	if err := es.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	for _, ext := range exts {
+		if err := es.Create(ext); err != nil {
+			t.Fatalf("Create extension %s: %v", ext.Name, err)
+		}
+	}
+	mgr := lsp.NewExtensionLSPManager(es, nil, s)
+	appStreamMgr := stream.NewAppStreamManager(s, nil)
+	return &TaskExecutor{
+		store:        s,
+		appStreamMgr: appStreamMgr,
+		configStore:  &config.ConfigStore{},
+		tasks:        make(map[string]*executionState),
+		lspMgr:       mgr,
 	}
 }
 
@@ -67,6 +96,55 @@ func TestLSPTools_MissingPath(t *testing.T) {
 	}
 	if result == "" {
 		t.Fatal("expected error message, got empty string")
+	}
+}
+
+func TestLSPTools_ToolCallsDisabledForFile(t *testing.T) {
+	// Create Go extension with tool calls disabled
+	falseVal := false
+	goExt := &extensions.Extension{
+		ID:      "gopls",
+		Name:    "gopls",
+		Version: "1.0.0",
+		Type:    extensions.ExtensionTypeLSP,
+		Manifest: extensions.ExtensionManifest{
+			DisplayName: "Go Language Server",
+			Version:     "1.0.0",
+			Capabilities: &extensions.Capabilities{
+				LSP: &extensions.LSPConfig{
+					Command:          "gopls",
+					Args:             []string{"serve"},
+					Extensions:       []string{"go"},
+					Language:         "go",
+					ToolCallsEnabled: &falseVal,
+				},
+			},
+		},
+		Enabled: true,
+	}
+
+	dir := t.TempDir()
+	te := newLSPTestExecutorWithMgr(t, dir, goExt)
+	task := makeTestTaskLSP(t, te.store, "proj-lsp-3", "task-lsp-3")
+
+	// Create a Go file
+	goFile := filepath.Join(dir, "main.go")
+	writeFile(t, goFile, "package main\n\nfunc main() {}")
+
+	// Go file — tool calls should be rejected
+	result, ok := te.executeTool(context.Background(), "lsp_references", map[string]any{
+		"path":   "main.go",
+		"symbol": "main",
+	}, dir, task, &executionState{}, nil)
+
+	if ok {
+		t.Fatalf("expected error for Go file, got success: %s", result)
+	}
+	if result == "" {
+		t.Fatal("expected error message for Go file, got empty string")
+	}
+	if !containsString(result, "tool calls are disabled") {
+		t.Errorf("expected 'tool calls are disabled' error, got: %s", result)
 	}
 }
 
@@ -260,4 +338,15 @@ func TestFindWordIndex(t *testing.T) {
 			t.Errorf("findWordIndex(%q, %q) = %d, want %d", tt.line, tt.word, got, tt.want)
 		}
 	}
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write file %s: %v", path, err)
+	}
+}
+
+func containsString(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }

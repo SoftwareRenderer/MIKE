@@ -389,6 +389,12 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 				ext.Manifest.Capabilities.LSP.InitParamsOverride[k] = v
 			}
 		}
+		if req.Manifest.Capabilities.LSP.EditorEnabled != nil {
+			ext.Manifest.Capabilities.LSP.EditorEnabled = req.Manifest.Capabilities.LSP.EditorEnabled
+		}
+		if req.Manifest.Capabilities.LSP.ToolCallsEnabled != nil {
+			ext.Manifest.Capabilities.LSP.ToolCallsEnabled = req.Manifest.Capabilities.LSP.ToolCallsEnabled
+		}
 	}
 
 	if err := h.store.Update(id, ext); err != nil {

@@ -432,6 +432,118 @@ func TestHandleUpdate_LSPConfig(t *testing.T) {
 	}
 }
 
+func TestHandleUpdate_LSPConfig_BoolFlags(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
+	ext.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{
+		Command:    "gopls",
+		Args:       []string{"serve"},
+		Extensions: []string{"go"},
+		Language:   "go",
+	}}
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Update editor_enabled and tool_calls_enabled
+	body := map[string]any{
+		"manifest": map[string]any{
+			"capabilities": map[string]any{
+				"lsp": map[string]any{
+					"editor_enabled":     false,
+					"tool_calls_enabled": true,
+				},
+			},
+		},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.HandleUpdate(w, req, "test-ext")
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+
+	updated, err := h.store.GetByID("test-ext")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	lspCfg := updated.Manifest.Capabilities.GetLSP()
+	if lspCfg == nil {
+		t.Fatal("LSP config is nil after update")
+	}
+	if lspCfg.EditorEnabled == nil {
+		t.Fatal("EditorEnabled is nil after update")
+	}
+	if *lspCfg.EditorEnabled {
+		t.Error("EditorEnabled = true, want false")
+	}
+	if lspCfg.ToolCallsEnabled == nil {
+		t.Fatal("ToolCallsEnabled is nil after update")
+	}
+	if !*lspCfg.ToolCallsEnabled {
+		t.Error("ToolCallsEnabled = false, want true")
+	}
+}
+
+func TestHandleUpdate_LSPConfig_BoolFlags_PartialUpdate(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
+	falseVal := false
+	ext.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{
+		Command:          "gopls",
+		Args:             []string{"serve"},
+		Extensions:       []string{"go"},
+		Language:         "go",
+		EditorEnabled:    &falseVal,
+		ToolCallsEnabled: &falseVal,
+	}}
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Update only editor_enabled (tool_calls_enabled should stay false)
+	body := map[string]any{
+		"manifest": map[string]any{
+			"capabilities": map[string]any{
+				"lsp": map[string]any{
+					"editor_enabled": true,
+				},
+			},
+		},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.HandleUpdate(w, req, "test-ext")
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+
+	updated, err := h.store.GetByID("test-ext")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	lspCfg := updated.Manifest.Capabilities.GetLSP()
+	if lspCfg == nil {
+		t.Fatal("LSP config is nil after update")
+	}
+	// editor_enabled should be true
+	if lspCfg.EditorEnabled == nil || !*lspCfg.EditorEnabled {
+		t.Error("EditorEnabled should be true after update")
+	}
+	// tool_calls_enabled should still be false (not in request)
+	if lspCfg.ToolCallsEnabled == nil || *lspCfg.ToolCallsEnabled {
+		t.Error("ToolCallsEnabled should still be false (not in request)")
+	}
+}
+
 func TestHandleUpdate_LSPConfig_CreateNilLSP(t *testing.T) {
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)

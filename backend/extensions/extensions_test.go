@@ -165,6 +165,62 @@ func TestLSPConfig_FullConfig(t *testing.T) {
 	}
 }
 
+func TestLSPConfig_EditorEnabled(t *testing.T) {
+	// Default (nil) should return true
+	cfg := &LSPConfig{Command: "gopls", Args: []string{"serve"}}
+	if !cfg.IsEditorEnabled() {
+		t.Error("IsEditorEnabled() = false, want true (nil defaults to true)")
+	}
+
+	// Explicitly enabled
+	trueVal := true
+	cfg.EditorEnabled = &trueVal
+	if !cfg.IsEditorEnabled() {
+		t.Error("IsEditorEnabled() = false, want true (explicitly enabled)")
+	}
+
+	// Explicitly disabled
+	falseVal := false
+	cfg.EditorEnabled = &falseVal
+	if cfg.IsEditorEnabled() {
+		t.Error("IsEditorEnabled() = true, want false (explicitly disabled)")
+	}
+
+	// Nil config
+	var nilCfg *LSPConfig
+	if !nilCfg.IsEditorEnabled() {
+		t.Error("nil.IsEditorEnabled() = false, want true")
+	}
+}
+
+func TestLSPConfig_ToolCallsEnabled(t *testing.T) {
+	// Default (nil) should return true
+	cfg := &LSPConfig{Command: "gopls", Args: []string{"serve"}}
+	if !cfg.IsToolCallsEnabled() {
+		t.Error("IsToolCallsEnabled() = false, want true (nil defaults to true)")
+	}
+
+	// Explicitly enabled
+	trueVal := true
+	cfg.ToolCallsEnabled = &trueVal
+	if !cfg.IsToolCallsEnabled() {
+		t.Error("IsToolCallsEnabled() = false, want true (explicitly enabled)")
+	}
+
+	// Explicitly disabled
+	falseVal := false
+	cfg.ToolCallsEnabled = &falseVal
+	if cfg.IsToolCallsEnabled() {
+		t.Error("IsToolCallsEnabled() = true, want false (explicitly disabled)")
+	}
+
+	// Nil config
+	var nilCfg *LSPConfig
+	if !nilCfg.IsToolCallsEnabled() {
+		t.Error("nil.IsToolCallsEnabled() = false, want true")
+	}
+}
+
 func TestRegistryEntry_Fields(t *testing.T) {
 	entry := RegistryEntry{
 		Name:          "gopls",

@@ -910,3 +910,179 @@ test.describe('Sensitive Config Encryption', () => {
     await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
   });
 });
+
+// ============================================================
+// LSP Extension Settings
+// ============================================================
+
+test.describe('LSP Extension Settings', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+  });
+
+  test('should show LSP features toggles in edit modal', async ({ page }) => {
+    // Create an LSP extension with config_schema (so edit button shows)
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `lsp-settings-${Date.now()}`,
+        type: 'lsp',
+        version: '1.0.0',
+        manifest: {
+          display_name: 'LSP Settings Test',
+          description: 'Test LSP extension with settings',
+          author: 'Test',
+          capabilities: {
+            lsp: {
+              command: 'gopls',
+              args: ['serve'],
+              extensions: ['go'],
+              language: 'go',
+            },
+          },
+          config_schema: {
+            type: 'object',
+            properties: {
+              log_level: {
+                type: 'string',
+                title: 'Log Level',
+                default: 'info',
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Open settings > Extensions tab
+    await page.locator('.icon-btn[aria-label="Settings"]').click();
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Wait for extension to appear
+    await expect(page.locator('.extension-card:has-text("LSP Settings Test")')).toBeVisible({ timeout: 10000 });
+
+    // Click the edit button
+    await page.locator('.extension-card:has-text("LSP Settings Test") button[title="Edit"]').click();
+
+    // Wait for edit modal
+    await expect(page.locator('text=Edit: LSP Settings Test')).toBeVisible({ timeout: 5000 });
+
+    // Should show LSP Features section
+    await expect(page.locator('text=LSP Features')).toBeVisible();
+
+    // Should show Editor Features toggle
+    await expect(page.locator('text=Editor Features')).toBeVisible();
+    await expect(page.locator('text=Enable LSP in the editor')).toBeVisible();
+
+    // Should show Tool Calls toggle
+    await expect(page.locator('text=Tool Calls')).toBeVisible();
+    await expect(page.locator('text=Enable LSP tools for agent')).toBeVisible();
+
+    // Close the edit modal
+    await page.locator('text=Cancel').click();
+    await expect(page.locator('text=Edit: LSP Settings Test')).toBeHidden({ timeout: 5000 });
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
+  test('should update LSP settings via API', async ({ page }) => {
+    // Create an LSP extension
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `lsp-api-settings-${Date.now()}`,
+        type: 'lsp',
+        version: '1.0.0',
+        manifest: {
+          display_name: 'LSP API Settings Test',
+          description: '',
+          author: 'Test',
+          capabilities: {
+            lsp: {
+              command: 'gopls',
+              args: ['serve'],
+              extensions: ['go'],
+              language: 'go',
+            },
+          },
+        },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Update LSP settings via API
+    const updateResult = await csrfFetch(page, `/api/extensions/${extId}`, {
+      method: 'PUT',
+      body: {
+        manifest: {
+          capabilities: {
+            lsp: {
+              editor_enabled: false,
+              tool_calls_enabled: true,
+            },
+          },
+        },
+      },
+    });
+    expect(updateResult.ok).toBe(true);
+
+    // Verify the settings were saved
+    const getResult = await page.evaluate(async (id) => {
+      const res = await fetch(`/api/extensions/${id}`);
+      return res.json();
+    }, extId);
+
+    expect(getResult.manifest.capabilities.lsp.editor_enabled).toBe(false);
+    expect(getResult.manifest.capabilities.lsp.tool_calls_enabled).toBe(true);
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+
+  test('should default LSP settings to enabled', async ({ page }) => {
+    // Create an LSP extension
+    const createResult = await csrfFetch(page, '/api/extensions', {
+      method: 'POST',
+      body: {
+        name: `lsp-default-settings-${Date.now()}`,
+        type: 'lsp',
+        version: '1.0.0',
+        manifest: {
+          display_name: 'LSP Default Settings Test',
+          description: '',
+          author: 'Test',
+          capabilities: {
+            lsp: {
+              command: 'gopls',
+              args: ['serve'],
+              extensions: ['go'],
+              language: 'go',
+            },
+          },
+        },
+      },
+    });
+    expect(createResult.ok).toBe(true);
+    const extId = createResult.data.id;
+
+    // Verify defaults (should be undefined/null, meaning enabled)
+    const getResult = await page.evaluate(async (id) => {
+      const res = await fetch(`/api/extensions/${id}`);
+      return res.json();
+    }, extId);
+
+    // When not set, they should be undefined (defaults to true)
+    expect(getResult.manifest.capabilities.lsp.editor_enabled).toBeUndefined();
+    expect(getResult.manifest.capabilities.lsp.tool_calls_enabled).toBeUndefined();
+
+    // Cleanup
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'DELETE' });
+  });
+});

@@ -111,6 +111,30 @@ type LSPConfig struct {
 	Extensions         []string       `json:"extensions"`
 	Language           string         `json:"language"`
 	InitParamsOverride map[string]any `json:"initParamsOverride,omitempty"`
+	// EditorEnabled controls whether LSP features (diagnostics, completions,
+	// go-to-definition) are available in the editor. Nil or true = enabled.
+	EditorEnabled *bool `json:"editor_enabled,omitempty"`
+	// ToolCallsEnabled controls whether LSP tools (references, definition,
+	// code actions, hover) are available to agent tool calls. Nil or true = enabled.
+	ToolCallsEnabled *bool `json:"tool_calls_enabled,omitempty"`
+}
+
+// IsEditorEnabled returns true if editor LSP features are enabled.
+// Defaults to true when not explicitly set (nil).
+func (c *LSPConfig) IsEditorEnabled() bool {
+	if c == nil || c.EditorEnabled == nil {
+		return true
+	}
+	return *c.EditorEnabled
+}
+
+// IsToolCallsEnabled returns true if LSP tool calls are enabled.
+// Defaults to true when not explicitly set (nil).
+func (c *LSPConfig) IsToolCallsEnabled() bool {
+	if c == nil || c.ToolCallsEnabled == nil {
+		return true
+	}
+	return *c.ToolCallsEnabled
 }
 
 // UIConfig defines UI-specific extension configuration.
