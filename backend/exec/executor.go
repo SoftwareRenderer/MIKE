@@ -11,6 +11,7 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -464,8 +465,24 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) erro
 //
 // If the parent already has a branch, this is a no-op.
 func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task) error {
+	project, err := te.store.GetProject(projectID)
+	if err != nil {
+		return fmt.Errorf("get project: %w", err)
+	}
+
 	if parent.Branch != "" {
-		return nil // already has a branch
+		// verify it actually exists in git.
+		if te.branchExists(projectID, parent.Branch) {
+			return nil // branch exists, nothing to do
+		}
+		// Branch missing in git — create it from HEAD so the stored name becomes valid.
+		cmd := osexec.Command("git", "-C", project.Path, "branch", parent.Branch, "HEAD")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("[ensure-parent-branch] task=%s branch %q missing in git, create failed: %s", parent.ID, parent.Branch, string(out))
+			return fmt.Errorf("create missing parent branch %q: %w", parent.Branch, err)
+		}
+		log.Printf("[ensure-parent-branch] task=%s recovered missing branch %q from HEAD", parent.ID, parent.Branch)
+		return nil
 	}
 
 	branchName := te.generateBranchName(parent, parent.ID, projectID)
@@ -681,6 +698,10 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 
 	_, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName, sourceBranch)
 	if err != nil {
+		// Roll back orphaned branch name so later calls don't see a stale
+		// branch with no corresponding git ref (would cause "not a valid
+		// commit, skipping merge" errors).
+		_ = te.store.ClearTaskBranch(taskID, projectID)
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
@@ -1454,8 +1475,16 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 	cmd := osexec.Command("git", "rev-parse", "--verify", "--quiet", taskBranch)
 	cmd.Dir = project.Path
 	if err := cmd.Run(); err != nil {
-		log.Printf("[merge] task=%s branch %q is not a valid commit, skipping merge: %v", taskID, taskBranch, err)
-		return nil
+		// Branch missing
+		recovered := te.recoverMissingBranch(projectID, taskID, taskBranch)
+		if recovered != "" {
+			taskBranch = recovered
+		}
+		// If still missing, skip the merge.
+		if taskBranch == "" || te.branchExists(projectID, taskBranch) == false {
+			log.Printf("[merge] task=%s branch %q is not a valid commit, skipping merge: %v", taskID, taskBranch, err)
+			return nil
+		}
 	}
 
 	// Determine target branch and the git directory to run merge in.
@@ -1850,6 +1879,86 @@ func (te *TaskExecutor) getCompactCh(taskID string) chan chan *CompactResult {
 func (te *TaskExecutor) branchExists(projectID, branchName string) bool {
 	_, err := te.worktreeMgr.GitRunInProjectOutput(projectID, "rev-parse", "--verify", branchName)
 	return err == nil
+}
+
+// recoverMissingBranch looks for a stale/orphaned branch with the same slug
+// pattern when the expected branch is missing. Returns the recovered branch
+// name (and updates the task in DB), or empty string if no match found.
+func (te *TaskExecutor) recoverMissingBranch(projectID, taskID, missingBranch string) string {
+	slugPrefix := extractSlugPrefix(missingBranch)
+	if slugPrefix == "" {
+		return ""
+	}
+
+	// List all branches matching the pattern.
+	branchesOut, err := te.worktreeMgr.GitRunInProjectOutput(projectID, "branch", "--list", slugPrefix+"*")
+	if err != nil {
+		return ""
+	}
+
+	var matches []string
+	for line := range strings.SplitSeq(branchesOut, "\n") {
+		b := strings.TrimSpace(line)
+		// Strip " + " prefix from git branch --list output (marks checked-out branch).
+		b = strings.TrimPrefix(b, " + ")
+		b = strings.TrimPrefix(b, "+ ")
+		if b != "" && b != missingBranch {
+			matches = append(matches, b)
+		}
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+
+	// If multiple matches, pick the most recent one (by commit date).
+	var recovered string
+	if len(matches) == 1 {
+		recovered = matches[0]
+	} else {
+		// Pick the branch with the most recent commit.
+		var latestTime time.Time
+		for _, b := range matches {
+			tsOut, err := te.worktreeMgr.GitRunInProjectOutput(projectID, "log", "-1", "--format=%ct", b)
+			if err != nil {
+				continue
+			}
+			if ts, err := strconv.ParseInt(strings.TrimSpace(tsOut), 10, 64); err == nil {
+				t := time.Unix(ts, 0)
+				if t.After(latestTime) {
+					latestTime = t
+					recovered = b
+				}
+			}
+		}
+		if recovered == "" {
+			recovered = matches[0] // fallback to first
+		}
+	}
+
+	// Update the task's branch in DB.
+	if err := te.store.SetTaskBranch(taskID, projectID, recovered); err != nil {
+		log.Printf("[merge] task=%s failed to update branch from %q to %q: %v", taskID, missingBranch, recovered, err)
+		return ""
+	}
+	log.Printf("[merge] task=%s recovered missing branch %q → %q", taskID, missingBranch, recovered)
+	return recovered
+}
+
+// extractSlugPrefix extracts the slug prefix from a branch name.
+// E.g. "task/count-hello-files-0a6zyr" → "task/count-hello-files-"
+// E.g. "task/frost-amber-quartz-abc123" → "task/frost-amber-quartz-"
+func extractSlugPrefix(branchName string) string {
+	if !strings.HasPrefix(branchName, "task/") {
+		return ""
+	}
+	// Find the last "-" followed by exactly 6 alphanumeric chars at the end.
+	// The branch name pattern is: task/<slug>-<random6>
+	re := regexp.MustCompile(`^(task/.+)-[a-z0-9]{6}$`)
+	m := re.FindStringSubmatch(branchName)
+	if len(m) >= 2 {
+		return m[1] + "-"
+	}
+	return ""
 }
 
 // maxBranchName is the maximum length for any git branch name.

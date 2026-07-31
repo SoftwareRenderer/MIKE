@@ -1547,3 +1547,142 @@ func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
 		t.Errorf("branch changed: was %q, now %q", branch, taskFromDB.Branch)
 	}
 }
+
+// TestEnsureParentBranch_RecoverMissingBranch verifies that when the parent's
+// branch is set in DB but missing in git (e.g., CreateWorktree failed on a
+// previous call), EnsureParentBranch recovers by creating the branch.
+func TestEnsureParentBranch_RecoverMissingBranch(t *testing.T) {
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+
+	parentID := "parent-recover-branch"
+	branchName := "task/parent-recover-branch"
+	parent := &types.Task{
+		ID:        parentID,
+		ProjectID: projectID,
+		Title:     "Parent Recover",
+		Prompt:    "Parent prompt",
+		Status:    "backlog",
+		Branch:    branchName, // pre-set branch that doesn't exist in git
+	}
+	te.store.CreateTask(parent)
+
+	// Branch name is set but doesn't exist in git.
+	// EnsureParentBranch should recover by creating it.
+	err := te.EnsureParentBranch(projectID, parent)
+	if err != nil {
+		t.Fatalf("EnsureParentBranch should recover missing branch: %v", err)
+	}
+
+	// Verify the branch now exists in git.
+	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", branchName)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("branch %q should exist after recovery: %s", branchName, string(out))
+	}
+}
+
+// TestEnsureParentBranch_FailsWhenRepoCorrupted verifies that when the git
+// repo is corrupted, EnsureParentBranch fails (can't create the branch).
+func TestEnsureParentBranch_FailsWhenRepoCorrupted(t *testing.T) {
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+
+	parentID := "parent-corrupted-repo"
+	parent := &types.Task{
+		ID:        parentID,
+		ProjectID: projectID,
+		Title:     "Parent Corrupted",
+		Prompt:    "Parent prompt",
+		Status:    "backlog",
+	}
+	te.store.CreateTask(parent)
+
+	// Corrupt the git repo so CreateWorktree will fail.
+	os.RemoveAll(filepath.Join(repoDir, ".git"))
+
+	err := te.EnsureParentBranch(projectID, parent)
+	if err == nil {
+		t.Fatal("EnsureParentBranch should fail when git repo is corrupted")
+	}
+}
+
+// TestMergeBranch_RecoverMissingBranch verifies that when a task's branch
+// is missing in git (e.g., cleared and regenerated), MergeBranch finds the
+// old branch with the same slug and updates the task's branch reference.
+func TestMergeBranch_RecoverMissingBranch(t *testing.T) {
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+
+	// Create a task with a branch name that doesn't exist in git.
+	// Simulates the case where InitTask cleared the branch and a new
+	// random suffix was generated.
+	parentID := "parent-missing-branch"
+	oldBranch := "task/count-files-abc123"   // exists in git
+	newBranch := "task/count-files-xyz789"   // in DB but missing in git
+
+	// Create the old branch in git (with some work).
+	runGit(t, repoDir, "branch", oldBranch, "HEAD")
+	// Add a commit to the old branch to simulate child merge work.
+	runGit(t, repoDir, "checkout", oldBranch)
+	os.WriteFile(filepath.Join(repoDir, "child-work.txt"), []byte("child work\n"), 0o644)
+	runGit(t, repoDir, "add", "child-work.txt")
+	runGit(t, repoDir, "commit", "-m", "Child merge work")
+	runGit(t, repoDir, "checkout", "master")
+
+	// Create task with the NEW (missing) branch name.
+	parent := &types.Task{
+		ID:        parentID,
+		ProjectID: projectID,
+		Title:     "Count Files",
+		Prompt:    "Count files",
+		Status:    "done",
+		Branch:    newBranch, // doesn't exist in git
+		BaseRef:   "master",
+	}
+	te.store.CreateTask(parent)
+
+	// Verify the new branch doesn't exist.
+	if te.branchExists(projectID, newBranch) {
+		t.Fatal("new branch should not exist in git")
+	}
+
+	// Call MergeBranch — it should recover the old branch.
+	err := te.MergeBranch(projectID, parentID, parent)
+	if err != nil {
+		t.Fatalf("MergeBranch should succeed after recovery: %v", err)
+	}
+
+	// Verify the task's branch was updated in DB.
+	reloaded, _ := te.store.GetTaskByTaskID(parentID)
+	if reloaded.Branch != oldBranch {
+		t.Fatalf("branch should be updated to old branch: expected %q, got %q", oldBranch, reloaded.Branch)
+	}
+
+	// Verify the merge happened (old branch merged into master).
+	cmd := exec.Command("git", "-C", repoDir, "log", "--oneline", "master")
+	out, _ := cmd.Output()
+	if !strings.Contains(string(out), "Child merge work") {
+		t.Fatalf("master should contain child merge work:\n%s", string(out))
+	}
+}
+
+// TestExtractSlugPrefix tests the slug prefix extraction.
+func TestExtractSlugPrefix(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"task/count-hello-files-abc123", "task/count-hello-files-"},
+		{"task/fix-login-bug-xyz789", "task/fix-login-bug-"},
+		{"task/frost-amber-quartz-abc123", "task/frost-amber-quartz-"},
+		{"task/simple-abc123", "task/simple-"},
+		{"master", ""},
+		{"main", ""},
+		{"task/nosuffix", ""},
+		{"task/too-short-ab", ""},
+	}
+
+	for _, tc := range tests {
+		got := extractSlugPrefix(tc.input)
+		if got != tc.expected {
+			t.Errorf("extractSlugPrefix(%q) = %q, want %q", tc.input, got, tc.expected)
+		}
+	}
+}
