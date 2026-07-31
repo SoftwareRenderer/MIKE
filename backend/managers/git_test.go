@@ -385,3 +385,113 @@ func TestHandleTaskDiff_ValidRefs(t *testing.T) {
 		t.Fatalf("expected 200 for valid refs, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+// --- Character validation tests ---
+// These tests verify that characters not in the allowed set (letters, digits,
+// -, _, ., /, +) are rejected with 400 Bad Request.
+
+var invalidBranchChars = []string{"~", "^", ":", "?", "*", "[", "\\", " ", "feat..branch"}
+
+// setupHandleLogProject creates a project with a git repo and returns (handler, mux).
+func setupHandleLogProject(t *testing.T) (*GitHandler, *http.ServeMux) {
+	t.Helper()
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "log-char-proj", Name: "log-char-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+	return h, newTestGitMux(h)
+}
+
+func TestHandleLog_InvalidCharacters(t *testing.T) {
+	_, mux := setupHandleLogProject(t)
+	for _, ch := range invalidBranchChars {
+		url := "/api/projects/log-char-proj/git/log?branch=" + ch
+		if ch == " " {
+			url = "/api/projects/log-char-proj/git/log?branch=feat%20branch"
+		}
+		t.Run(ch, func(t *testing.T) {
+			rr := doRequest(t, mux, "GET", url)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for invalid character %q, got %d: %s", ch, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandleDiff_InvalidCharacters(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "diff-char-proj", Name: "diff-char-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+	mux := newTestGitMux(h)
+
+	for _, ch := range invalidBranchChars {
+		val := "feat" + ch + "branch"
+		if ch == " " {
+			val = "feat%20branch"
+		}
+		t.Run("base_"+ch, func(t *testing.T) {
+			url := "/api/projects/diff-char-proj/git/diff?base=" + val + "&head=HEAD"
+			rr := doRequest(t, mux, "GET", url)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for invalid base char %q, got %d: %s", ch, rr.Code, rr.Body.String())
+			}
+		})
+		t.Run("head_"+ch, func(t *testing.T) {
+			url := "/api/projects/diff-char-proj/git/diff?base=HEAD&head=" + val
+			rr := doRequest(t, mux, "GET", url)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for invalid head char %q, got %d: %s", ch, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandleTaskDiff_InvalidCharacters(t *testing.T) {
+	h, s, wm, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "taskdiff-char-proj", Name: "taskdiff-char-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+	task := &types.Task{
+		ID:        "taskdiff-char-task",
+		ProjectID: proj.ID,
+		Title:     "char diff task",
+		Status:    "in_progress",
+		Branch:    "main",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	mux := newTestGitMux(h)
+	_ = wm
+
+	for _, ch := range invalidBranchChars {
+		val := "feat" + ch + "branch"
+		if ch == " " {
+			val = "feat%20branch"
+		}
+		t.Run("base_"+ch, func(t *testing.T) {
+			url := "/api/projects/taskdiff-char-proj/tasks/taskdiff-char-task/diff?base=" + val
+			rr := doRequest(t, mux, "GET", url)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for invalid base char %q, got %d: %s", ch, rr.Code, rr.Body.String())
+			}
+		})
+		t.Run("head_"+ch, func(t *testing.T) {
+			url := "/api/projects/taskdiff-char-proj/tasks/taskdiff-char-task/diff?head=" + val
+			rr := doRequest(t, mux, "GET", url)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for invalid head char %q, got %d: %s", ch, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
