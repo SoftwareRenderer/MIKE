@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"kanban/backend/types"
+	"kanban/pkg/sandboxruntime"
 )
 
 // TestMain runs cleanup of stale containers before the test suite starts.
@@ -351,12 +352,61 @@ func TestCreateWithoutGVisor(t *testing.T) {
 	// Simulate unavailable gVisor by creating a manager and forcing unavailable
 	sm := &SandboxManager{
 		active:    make(map[string]string),
+		rt:        sandboxruntime.NewRuntime(),
 		available: false,
 	}
 
 	_, err := sm.Create("task-1", t.TempDir(), "test-proj", "", SandboxOpts{})
 	if err == nil {
 		t.Fatal("expected error when gVisor is unavailable")
+	}
+	if !strings.Contains(err.Error(), "gVisor not available") {
+		t.Fatalf("expected gVisor unavailable error, got: %v", err)
+	}
+}
+
+func TestCreate_RejectsInvalidImageRef(t *testing.T) {
+	sm := &SandboxManager{
+		active:    make(map[string]string),
+		rt:        sandboxruntime.NewRuntime(),
+		available: false,
+	}
+
+	invalidImages := []string{
+		"-v",
+		"--format=json",
+		"-t something",
+	}
+
+	for _, img := range invalidImages {
+		_, err := sm.Create("test-invalid-image", t.TempDir(), "test-proj", "", SandboxOpts{
+			BaseImage: img,
+		})
+		if err == nil {
+			t.Fatalf("expected error for invalid image ref %q", img)
+		}
+		if !strings.Contains(err.Error(), "invalid sandbox image") {
+			t.Fatalf("expected error about invalid sandbox image for %q, got: %v", img, err)
+		}
+	}
+}
+
+func TestCreate_ValidImageRefPassesValidation(t *testing.T) {
+	sm := &SandboxManager{
+		active:    make(map[string]string),
+		rt:        sandboxruntime.NewRuntime(),
+		available: false,
+	}
+
+	// A valid image ref should pass validation and reach the gVisor check.
+	_, err := sm.Create("test-valid-image", t.TempDir(), "test-proj", "", SandboxOpts{
+		BaseImage: "docker.io/library/ubuntu:latest",
+	})
+	if err == nil {
+		t.Fatal("expected error (gVisor not available)")
+	}
+	if !strings.Contains(err.Error(), "gVisor not available") {
+		t.Fatalf("valid image should pass validation and reach gVisor check, got: %v", err)
 	}
 }
 

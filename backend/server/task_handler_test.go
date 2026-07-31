@@ -141,6 +141,106 @@ func TestTaskUpdate(t *testing.T) {
 	}
 }
 
+func TestTaskUpdateBaseRefValidation(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Branch validation task")
+
+	// Dash-prefixed base_ref should be rejected (git argument injection)
+	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
+		"base_ref": "-f",
+	})
+	ra := testResponseAuth(t, s, req)
+	if ra.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for dash-prefixed base_ref, got %d: %s", ra.Code, ra.Body.String())
+	}
+
+	// Double-dash injection attempt should also be rejected
+	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
+		"base_ref": "--dry-run",
+	})
+	ra = testResponseAuth(t, s, req)
+	if ra.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for double-dash base_ref, got %d: %s", ra.Code, ra.Body.String())
+	}
+
+	// Valid base_ref should be accepted
+	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
+		"base_ref": "main",
+	})
+	ra = testResponseAuth(t, s, req)
+	if ra.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid base_ref, got %d: %s", ra.Code, ra.Body.String())
+	}
+	result := mustJSON[map[string]any](t, ra.Body)
+	if result["base_ref"] != "main" {
+		t.Fatalf("expected base_ref=main, got %s", result["base_ref"])
+	}
+
+	// Valid base_ref with slashes and hyphens should be accepted
+	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
+		"base_ref": "origin/feature-branch",
+	})
+	ra = testResponseAuth(t, s, req)
+	if ra.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid base_ref, got %d: %s", ra.Code, ra.Body.String())
+	}
+	result = mustJSON[map[string]any](t, ra.Body)
+	if result["base_ref"] != "origin/feature-branch" {
+		t.Fatalf("expected base_ref=origin/feature-branch, got %s", result["base_ref"])
+	}
+}
+
+func TestTaskUpdateBranchTipValidation(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Branch tip validation task")
+
+	// Dash-prefixed branch_tip should be rejected (git argument injection)
+	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
+		"branch_tip": "-f",
+	})
+	ra := testResponseAuth(t, s, req)
+	if ra.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for dash-prefixed branch_tip, got %d: %s", ra.Code, ra.Body.String())
+	}
+
+	// Git injection attempt should also be rejected
+	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
+		"branch_tip": "-C/tmp/evil",
+	})
+	ra = testResponseAuth(t, s, req)
+	if ra.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for git injection branch_tip, got %d: %s", ra.Code, ra.Body.String())
+	}
+
+	// Valid branch_tip should be accepted
+	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
+		"branch_tip": "feature-branch",
+	})
+	ra = testResponseAuth(t, s, req)
+	if ra.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid branch_tip, got %d: %s", ra.Code, ra.Body.String())
+	}
+	result := mustJSON[map[string]any](t, ra.Body)
+	if result["branch_tip"] != "feature-branch" {
+		t.Fatalf("expected branch_tip=feature-branch, got %s", result["branch_tip"])
+	}
+
+	// Valid branch_tip with slashes should be accepted
+	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
+		"branch_tip": "task/frost-amber-quartz",
+	})
+	ra = testResponseAuth(t, s, req)
+	if ra.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid branch_tip, got %d: %s", ra.Code, ra.Body.String())
+	}
+	result = mustJSON[map[string]any](t, ra.Body)
+	if result["branch_tip"] != "task/frost-amber-quartz" {
+		t.Fatalf("expected branch_tip=task/frost-amber-quartz, got %s", result["branch_tip"])
+	}
+}
+
 func TestTaskDelete(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)

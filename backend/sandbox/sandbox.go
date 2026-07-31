@@ -207,6 +207,16 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath 
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
+	// Validate image ref before any resource allocation to prevent argument
+	// injection (e.g. leading dash being interpreted as a podman flag).
+	image := opts.BaseImage
+	if image == "" {
+		image = BaseImage
+	}
+	if err := sm.rt.ValidateImageRef(image); err != nil {
+		return nil, fmt.Errorf("invalid sandbox image: %w", err)
+	}
+
 	if !sm.available {
 		return nil, fmt.Errorf("gVisor not available (runsc not installed)")
 	}
@@ -251,11 +261,6 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath 
 	// --security-opt label=disable: required for gVisor (no SELinux support)
 	// --cap-drop=ALL: drop all capabilities, re-add only those explicitly configured
 	// --security-opt no-new-privileges: prevent privilege escalation via setuid binaries
-	image := opts.BaseImage
-	if image == "" {
-		image = BaseImage
-	}
-
 	// --runtime-flag is a global podman option (must come before subcommand)
 	// Do not include leading -- in the flag value per podman docs
 	createArgs := []string{
