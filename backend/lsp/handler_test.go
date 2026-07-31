@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,17 +16,23 @@ import (
 // and can inject server responses.
 type mockProcessManager struct {
 	mu        sync.Mutex
-	processes map[string]*LSPProcess // key: "workspace\tlanguage"
-	nextID    atomic.Int64
+	processes map[string]*mockProcess // key: "workspace\tlanguage"
+	nextID    int
 	// sentMessages captures messages sent to the server (in order)
 	sentMessages []json.RawMessage
 	// messageCh for delivering server responses
 	messageCh chan json.RawMessage
 }
 
+// mockProcess wraps LSPProcess with a test-only reference count.
+type mockProcess struct {
+	*LSPProcess
+	refCount int
+}
+
 func newMockProcessManager() *mockProcessManager {
 	return &mockProcessManager{
-		processes: make(map[string]*LSPProcess),
+		processes: make(map[string]*mockProcess),
 		messageCh: make(chan json.RawMessage, 1024),
 	}
 }
@@ -36,27 +41,29 @@ func (m *mockProcessManager) GetOrCreate(workspacePath, language string, cfg *Se
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := processKey(workspacePath, language)
-	if p, ok := m.processes[key]; ok {
-		atomic.AddInt32(&p.RefCount, 1)
-		return p, nil
+	if mp, ok := m.processes[key]; ok {
+		mp.refCount++
+		return mp.LSPProcess, nil
 	}
-	m.nextID.Add(1)
-	p := &LSPProcess{
-		Workspace: workspacePath,
-		Language:  language,
-		RefCount:  1,
+	m.nextID++
+	mp := &mockProcess{
+		LSPProcess: &LSPProcess{
+			Workspace: workspacePath,
+			Language:  language,
+		},
+		refCount: 1,
 	}
-	m.processes[key] = p
-	return p, nil
+	m.processes[key] = mp
+	return mp.LSPProcess, nil
 }
 
 func (m *mockProcessManager) Release(workspacePath, language string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := processKey(workspacePath, language)
-	if p, ok := m.processes[key]; ok {
-		n := atomic.AddInt32(&p.RefCount, -1)
-		if n <= 0 {
+	if mp, ok := m.processes[key]; ok {
+		mp.refCount--
+		if mp.refCount <= 0 {
 			delete(m.processes, key)
 		}
 	}
