@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"encoding/json"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -393,4 +394,43 @@ func (e *Extension) IsManualInstalled() bool {
 // IsLocalInstalled returns true if this extension was installed from a local Dockerfile.
 func (e *Extension) IsLocalInstalled() bool {
 	return e.InstallSource == "local"
+}
+
+// sanitizeURL validates that a URL uses an allowed scheme (http or https).
+// Returns an empty string if the URL is empty or uses a disallowed scheme.
+// This prevents javascript: and data: URL injection in href attributes.
+func sanitizeURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	switch parsed.Scheme {
+	case "http", "https":
+		return raw
+	default:
+		return ""
+	}
+}
+
+// sanitizeManifestURLs validates and sanitizes all URL fields in a manifest.
+// Mutates the manifest in place, clearing any disallowed URLs.
+func sanitizeManifestURLs(m *ExtensionManifest) {
+	if m == nil {
+		return
+	}
+	m.Homepage = sanitizeURL(m.Homepage)
+	m.LicenseURL = sanitizeURL(m.LicenseURL)
+}
+
+// sanitizeRegistryEntryURLs validates and sanitizes all URL fields in a registry entry.
+// Mutates the entry in place, clearing any disallowed URLs.
+func sanitizeRegistryEntryURLs(e *RegistryEntry) {
+	if e == nil {
+		return
+	}
+	e.Homepage = sanitizeURL(e.Homepage)
+	e.LicenseURL = sanitizeURL(e.LicenseURL)
 }
