@@ -443,6 +443,8 @@ export interface LSPConfig {
     extensions: string[];
     language: string;
     initParamsOverride?: Record<string, any>;
+    editor_enabled?: boolean;  // LSP features in editor (diagnostics, completions, etc.)
+    tool_calls_enabled?: boolean;  // LSP tools for agent (references, definition, etc.)
 }
 
 export interface UIExtensionConfig {

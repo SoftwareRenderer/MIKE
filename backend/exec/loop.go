@@ -367,8 +367,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	} else {
 		tools = llama.GetToolDefinitions()
 	}
-	// Append LSP tools if any LSP extension is installed
-	if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPExtension() {
+	// Append LSP tools if any LSP extension has tool calls enabled
+	if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPToolCallsExtension() {
 		tools = append(tools, llama.GetLSPToolDefinitions()...)
 	}
 	taskMsgs, _ := te.store.GetTaskMessages(setup.task.ID, setup.task.CurrentThreadID)
@@ -511,8 +511,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					} else {
 						tools = llama.GetToolDefinitions()
 					}
-					// Append LSP tools if any LSP extension is installed
-					if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPExtension() {
+					// Append LSP tools if any LSP extension has tool calls enabled
+					if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPToolCallsExtension() {
 						tools = append(tools, llama.GetLSPToolDefinitions()...)
 					}
 					// Broadcast assigned ports if any changed

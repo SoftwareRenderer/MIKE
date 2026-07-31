@@ -849,6 +849,11 @@ func (te *TaskExecutor) handleLSPSymbolRequest(args map[string]any, worktreePath
 		return "", fmt.Errorf("path and symbol are required")
 	}
 
+	// Check if tool calls are enabled for the LSP extension that handles this file
+	if !te.lspMgr.IsToolCallsEnabledForFile(path) {
+		return "", fmt.Errorf("LSP tool calls are disabled for this file type")
+	}
+
 	absPath := filepath.Join(worktreePath, path)
 	absWorkspace, err := filepath.Abs(worktreePath)
 	if err != nil {

@@ -561,56 +561,117 @@ func TestParsePublishDiagnostics(t *testing.T) {
 	}
 }
 
-func TestHasAnyLSPExtension(t *testing.T) {
+func TestHasAnyLSPToolCallsExtension(t *testing.T) {
 	store := testExtensionStore(t)
 	reg := NewExtensionRegistry(store)
 
 	// No extensions — should return false
-	if reg.HasAnyLSPExtension() {
-		t.Error("HasAnyLSPExtension() = true, want false (no extensions)")
+	if reg.HasAnyLSPToolCallsExtension() {
+		t.Error("HasAnyLSPToolCallsExtension() = true, want false (no extensions)")
 	}
 
-	// Add an enabled LSP extension
+	// Add an enabled LSP extension (tool calls default to enabled)
 	ext := makeTestLSPExt("gopls", "go")
 	if err := store.Create(ext); err != nil {
 		t.Fatalf("create extension: %v", err)
 	}
 
-	if !reg.HasAnyLSPExtension() {
-		t.Error("HasAnyLSPExtension() = false, want true (gopls enabled)")
+	if !reg.HasAnyLSPToolCallsExtension() {
+		t.Error("HasAnyLSPToolCallsExtension() = false, want true (gopls enabled, tool calls default true)")
 	}
 
-	// Disable the extension
-	if err := store.SetEnabled(ext.ID, false); err != nil {
-		t.Fatalf("set enabled: %v", err)
+	// Disable tool calls
+	falseVal := false
+	ext.Manifest.Capabilities.LSP.ToolCallsEnabled = &falseVal
+	if err := store.Update(ext.ID, ext); err != nil {
+		t.Fatalf("update extension: %v", err)
 	}
 
-	if reg.HasAnyLSPExtension() {
-		t.Error("HasAnyLSPExtension() = true, want false (gopls disabled)")
+	if reg.HasAnyLSPToolCallsExtension() {
+		t.Error("HasAnyLSPToolCallsExtension() = true, want false (tool calls disabled)")
+	}
+
+	// Re-enable tool calls
+	trueVal := true
+	ext.Manifest.Capabilities.LSP.ToolCallsEnabled = &trueVal
+	if err := store.Update(ext.ID, ext); err != nil {
+		t.Fatalf("update extension: %v", err)
+	}
+
+	if !reg.HasAnyLSPToolCallsExtension() {
+		t.Error("HasAnyLSPToolCallsExtension() = false, want true (tool calls re-enabled)")
 	}
 }
 
-func TestHasAnyLSPExtension_NonLSPExtension(t *testing.T) {
+func TestHasAnyLSPToolCallsExtension_MultipleExtensions(t *testing.T) {
 	store := testExtensionStore(t)
 	reg := NewExtensionRegistry(store)
 
-	// Add a non-LSP extension (UI type)
-	uiExt := &extensions.Extension{
-		ID:      "ui-ext",
-		Name:    "ui-ext",
-		Version: "1.0.0",
-		Type:    extensions.ExtensionTypeUI,
-		Manifest: extensions.ExtensionManifest{
-			DisplayName: "UI Extension",
-			Version:     "1.0.0",
-		},
-		Enabled: true,
-	}
-	if err := store.Create(uiExt); err != nil {
+	// Add two LSP extensions — one with tool calls disabled, one enabled
+	ext1 := makeTestLSPExt("gopls", "go")
+	falseVal := false
+	ext1.Manifest.Capabilities.LSP.ToolCallsEnabled = &falseVal
+	if err := store.Create(ext1); err != nil {
 		t.Fatalf("create extension: %v", err)
 	}
 
-	if reg.HasAnyLSPExtension() {
-		t.Error("HasAnyLSPExtension() = true, want false (only UI extension)")
+	ext2 := makeTestLSPExt("typescript", "typescript")
+	// ToolCallsEnabled is nil (defaults to true)
+	if err := store.Create(ext2); err != nil {
+		t.Fatalf("create extension: %v", err)
+	}
+
+	// Should return true because ext2 has tool calls enabled (default)
+	if !reg.HasAnyLSPToolCallsExtension() {
+		t.Error("HasAnyLSPToolCallsExtension() = false, want true (ext2 has tool calls enabled)")
+	}
+
+	// Disable tool calls on ext2 as well
+	ext2.Manifest.Capabilities.LSP.ToolCallsEnabled = &falseVal
+	if err := store.Update(ext2.ID, ext2); err != nil {
+		t.Fatalf("update extension: %v", err)
+	}
+
+	// Now both have tool calls disabled — should return false
+	if reg.HasAnyLSPToolCallsExtension() {
+		t.Error("HasAnyLSPToolCallsExtension() = true, want false (all tool calls disabled)")
+	}
+}
+
+func TestIsToolCallsEnabledForFile(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	// Create two LSP extensions: Go (tool calls disabled) and TypeScript (enabled)
+	goExt := makeTestLSPExt("gopls", "go")
+	falseVal := false
+	goExt.Manifest.Capabilities.LSP.ToolCallsEnabled = &falseVal
+	if err := store.Create(goExt); err != nil {
+		t.Fatalf("create gopls: %v", err)
+	}
+
+	tsExt := makeTestLSPExt("typescript", "typescript")
+	// ToolCallsEnabled is nil (defaults to true)
+	if err := store.Create(tsExt); err != nil {
+		t.Fatalf("create typescript: %v", err)
+	}
+
+	mgr := NewExtensionLSPManager(store, nil, nil)
+
+	// Go file — tool calls disabled
+	if mgr.IsToolCallsEnabledForFile("main.go") {
+		t.Error("IsToolCallsEnabledForFile(main.go) = true, want false (gopls tool calls disabled)")
+	}
+
+	// TypeScript file — tool calls enabled
+	if !mgr.IsToolCallsEnabledForFile("app.ts") {
+		t.Error("IsToolCallsEnabledForFile(app.ts) = false, want true (typescript tool calls enabled)")
+	}
+
+	// Unknown file type — no LSP extension
+	if mgr.IsToolCallsEnabledForFile("README.md") {
+		t.Error("IsToolCallsEnabledForFile(README.md) = true, want false (no LSP extension)")
 	}
 }

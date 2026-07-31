@@ -695,6 +695,21 @@ extensions, err := m.extStore.GetByType(extensions.ExtensionTypeLSP)
 	return nil, fmt.Errorf("no enabled LSP extension found for file %q", filePath)
 }
 
+// IsToolCallsEnabledForFile returns true if the LSP extension that handles
+// the given file has tool calls enabled. Returns false if no matching
+// extension is found or tool calls are disabled for that extension.
+func (m *ExtensionLSPManager) IsToolCallsEnabledForFile(filePath string) bool {
+	ext, err := m.lookupExtensionByFile(filePath)
+	if err != nil {
+		return false
+	}
+	lspCfg := ext.Manifest.Capabilities.GetLSP()
+	if lspCfg == nil {
+		return false
+	}
+	return lspCfg.IsToolCallsEnabled()
+}
+
 // lookupExtension finds the matching LSP extension for a given language.
 func (m *ExtensionLSPManager) lookupExtension(language string) (*extensions.Extension, error) {
 	extensions, err := m.extStore.GetByType(extensions.ExtensionTypeLSP)
@@ -791,14 +806,16 @@ func (r *ExtensionRegistry) GetAvailable() []string {
 	return langs
 }
 
-// HasAnyLSPExtension returns true if any enabled LSP extension is installed.
-func (r *ExtensionRegistry) HasAnyLSPExtension() bool {
+// HasAnyLSPToolCallsExtension returns true if any enabled LSP extension has
+// tool calls enabled. This is used to determine whether LSP tools should be
+// available to agent tool calls.
+func (r *ExtensionRegistry) HasAnyLSPToolCallsExtension() bool {
 extensions, err := r.extStore.GetByType(extensions.ExtensionTypeLSP)
 	if err != nil {
 		return false
 	}
 	for _, ext := range extensions {
-		if ext.Enabled && ext.Manifest.Capabilities.GetLSP() != nil {
+		if ext.Enabled && ext.Manifest.Capabilities.GetLSP() != nil && ext.Manifest.Capabilities.LSP.IsToolCallsEnabled() {
 			return true
 		}
 	}

@@ -27,6 +27,7 @@
     let editExtensionId = $state<string | null>(null);
     let editingExtension = $state<Extension | null>(null);
     let editConfig = $state<Record<string, any>>({});
+    let editLspSettings = $state<{ editor_enabled: boolean; tool_calls_enabled: boolean }>({ editor_enabled: true, tool_calls_enabled: true });
     let saving = $state(false);
     let installing = $state<Set<string>>(new Set());
     let updating = $state<Set<string>>(new Set());
@@ -327,6 +328,11 @@
         editingExtension = ext;
         editExtensionId = ext.id;
         editConfig = { ...ext.config };
+        const lsp = ext.manifest.capabilities?.lsp;
+        editLspSettings = {
+            editor_enabled: lsp?.editor_enabled ?? true,
+            tool_calls_enabled: lsp?.tool_calls_enabled ?? true,
+        };
     }
 
     // Close edit form
@@ -334,6 +340,7 @@
         editingExtension = null;
         editExtensionId = null;
         editConfig = {};
+        editLspSettings = { editor_enabled: true, tool_calls_enabled: true };
     }
 
     // Save edit
@@ -342,7 +349,19 @@
         saving = true;
         error = '';
         try {
-            await updateExtension(editExtensionId, { config: editConfig });
+            const data: { config?: Record<string, any>; manifest?: Record<string, any> } = { config: editConfig };
+            // Include LSP settings for LSP extensions
+            if (editingExtension?.type === 'lsp') {
+                data.manifest = {
+                    capabilities: {
+                        lsp: {
+                            editor_enabled: editLspSettings.editor_enabled,
+                            tool_calls_enabled: editLspSettings.tool_calls_enabled,
+                        },
+                    },
+                };
+            }
+            await updateExtension(editExtensionId, data);
             closeEdit();
             await loadExtensions();
         } catch (e: any) {
@@ -726,6 +745,30 @@
                 </div>
             {:else}
                 <p class="no-schema">No configurable fields for this extension.</p>
+            {/if}
+            <!-- LSP Settings -->
+            {#if editingExtension?.type === 'lsp'}
+                <div class="config-fields">
+                    <h4>LSP Features</h4>
+                    <div class="config-field">
+                        <span class="field-label">Editor Features</span>
+                        <p class="field-desc">Enable LSP in the editor: diagnostics, completions, go-to-definition, and hover.</p>
+                        <ToggleSwitch
+                            checked={editLspSettings.editor_enabled}
+                            onChange={() => editLspSettings.editor_enabled = !editLspSettings.editor_enabled}
+                            ariaLabel="Enable LSP features in editor"
+                        />
+                    </div>
+                    <div class="config-field">
+                        <span class="field-label">Tool Calls</span>
+                        <p class="field-desc">Enable LSP tools for agent: references, definition, code actions, and hover.</p>
+                        <ToggleSwitch
+                            checked={editLspSettings.tool_calls_enabled}
+                            onChange={() => editLspSettings.tool_calls_enabled = !editLspSettings.tool_calls_enabled}
+                            ariaLabel="Enable LSP tool calls for agent"
+                        />
+                    </div>
+                </div>
             {/if}
         </BaseModal>
     {/if}
