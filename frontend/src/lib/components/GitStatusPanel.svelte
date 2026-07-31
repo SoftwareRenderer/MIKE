@@ -168,10 +168,10 @@
             e.preventDefault();
             showFromDropdown = true;
             showToDropdown = false;
-            // Select the highlighted item, or the sole match if none highlighted
-            if (activeFromIndex >= 0) {
+            // Select the highlighted item, or the first item if none highlighted
+            if (activeFromIndex >= 0 && activeFromIndex < items.length) {
                 items[activeFromIndex]?.click();
-            } else if (items.length === 1) {
+            } else if (items.length > 0) {
                 items[0]?.click();
             }
         }
@@ -207,18 +207,21 @@
             e.preventDefault();
             showToDropdown = true;
             showFromDropdown = false;
-            // Select the highlighted item, or the sole match if none highlighted
-            if (activeToIndex >= 0) {
+            // Select the highlighted item, or the first item if none highlighted
+            if (activeToIndex >= 0 && activeToIndex < items.length) {
                 items[activeToIndex]?.click();
-            } else if (items.length === 1) {
+            } else if (items.length > 0) {
                 items[0]?.click();
             }
         }
     }
 
     function handleListItemFocus(index: number, dropdown: 'from' | 'to') {
-        if (dropdown === 'from') activeFromIndex = index;
-        else activeToIndex = index;
+        if (dropdown === 'from') {
+            activeFromIndex = index >= 0 ? index + 1 : 0; // +1 for "Current" button offset
+        } else {
+            activeToIndex = index;
+        }
     }
 
     // Handle typed input in the "From" combobox
@@ -234,6 +237,8 @@
         fromInputFocused = false;
         // Delay to allow click on dropdown item to fire first
         setTimeout(() => {
+            // Keep dropdown open if focus moved to a dropdown item (arrow key navigation)
+            if (fromDropdownEl && fromDropdownEl.contains(document.activeElement)) return;
             showFromDropdown = false;
             const trimmed = fromInputValue.trim();
             if (!trimmed) return;
@@ -267,6 +272,8 @@
         toInputFocused = false;
         // Delay to allow click on dropdown item to fire first
         setTimeout(() => {
+            // Keep dropdown open if focus moved to a dropdown item (arrow key navigation)
+            if (toDropdownEl && toDropdownEl.contains(document.activeElement)) return;
             showToDropdown = false;
             // If input value doesn't match any commit, keep it as a raw hash
             const trimmed = toInputValue.trim();
@@ -730,6 +737,7 @@
                             class="commit-dropdown-item"
                             class:active={fromCommit === CURRENT_TREE}
                             onclick={() => { fromCommit = CURRENT_TREE; fromInputValue = 'Current'; showFromDropdown = false; fromInputEl?.blur(); }}
+                            onkeydown={handleFromKeydown}
                             onfocus={() => handleListItemFocus(-1, 'from')}
                             role="option"
                             aria-selected={fromCommit === CURRENT_TREE}
@@ -750,6 +758,7 @@
                                 class="commit-dropdown-item"
                                 class:active={commit.hash === fromCommit}
                                 onclick={() => { fromCommit = commit.hash; fromInputValue = commit.short; showFromDropdown = false; fromInputEl?.blur(); }}
+                                onkeydown={handleFromKeydown}
                                 onfocus={() => handleListItemFocus(i, 'from')}
                                 role="option"
                                 aria-selected={commit.hash === fromCommit}
@@ -819,6 +828,7 @@
                                 class="commit-dropdown-item"
                                 class:active={commit.hash === toCommit}
                                 onclick={() => { toCommit = commit.hash; toInputValue = commit.short; showToDropdown = false; toInputEl?.blur(); }}
+                                onkeydown={handleToKeydown}
                                 onfocus={() => handleListItemFocus(i, 'to')}
                                 role="option"
                                 aria-selected={commit.hash === toCommit}
