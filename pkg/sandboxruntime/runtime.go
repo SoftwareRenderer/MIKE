@@ -8,31 +8,26 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
-// ValidateImageRef rejects image references that are empty, start with a
-// dash, or contain characters that could be used for argument injection.
-// Valid OCI image characters: alphanumerics, / . _ - : and hex (for digests).
+// imageRefPattern matches valid OCI/Docker image references.
+// Requires the first character be alphanumeric (not a dash) and all
+// subsequent characters be alphanumeric or one of / . _ - : @.
+// This prevents argument injection via podman flags (e.g. "-v /etc:/host")
+// or shell metacharacters (e.g. "$(rm -rf /)", semicolons, pipes, etc.).
+var imageRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9/._:@-]*$`)
+
+// ValidateImageRef rejects image references that are invalid OCI image characters.
 // This prevents references like "-v /etc:/host" or "$(rm -rf /)" from being
 // passed to podman as if they were flags.
 func ValidateImageRef(image string) error {
 	if image == "" {
 		return fmt.Errorf("image reference must not be empty")
 	}
-	if strings.HasPrefix(image, "-") {
-		return fmt.Errorf("image reference must not start with a dash: %q", image)
-	}
-	for _, r := range image {
-		switch {
-		case r >= 'a' && r <= 'z',
-			r >= 'A' && r <= 'Z',
-			r >= '0' && r <= '9',
-			r == '/', r == '.', r == '_', r == '-', r == ':', r == '@':
-			// allowed
-		default:
-			return fmt.Errorf("image reference contains invalid character %q: %q", r, image)
-		}
+	if !imageRefPattern.MatchString(image) {
+		return fmt.Errorf("image reference contains invalid characters or starts with a dash: %q", image)
 	}
 	return nil
 }
