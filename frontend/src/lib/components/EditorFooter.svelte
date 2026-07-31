@@ -1,10 +1,11 @@
 <script lang="ts">
-    let { cursorLine, cursorCol, lineCount, charCount, onFind, lspReady, lspConnecting, lspError, lspLanguage, lspServerName, lspServerVersion, lspMessage }: {
+    let { cursorLine, cursorCol, lineCount, charCount, onFind, onWrapToggle, lspReady, lspConnecting, lspError, lspLanguage, lspServerName, lspServerVersion, lspMessage }: {
         cursorLine: number;
         cursorCol: number;
         lineCount: number;
         charCount: number;
         onFind: () => void;
+        onWrapToggle: (enabled: boolean) => void;
         lspReady?: boolean;
         lspConnecting?: boolean;
         lspError?: string;
@@ -16,6 +17,7 @@
 
     let lspTooltipVisible = $state(false);
     let showFileStats = $state(false);
+    let wordWrap = $state(false);
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let lspStatusEl: HTMLButtonElement | null = null;
 
@@ -23,6 +25,11 @@
 
     function toggleLspTooltip() {
         lspTooltipVisible = !lspTooltipVisible;
+    }
+
+    function toggleWordWrap() {
+        wordWrap = !wordWrap;
+        onWrapToggle(wordWrap);
     }
 </script>
 
@@ -70,6 +77,15 @@
             {:else}
                 Ln {cursorLine}, Col {cursorCol}
             {/if}
+        </button>
+        <button type="button" class="footer-find-btn" class:active={wordWrap} title="Toggle word wrap" onclick={toggleWordWrap}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7h18"/>
+                <path d="M3 17h12"/>
+                <polyline points="15 10 18 10 18 13"/>
+                <path d="M15 13h3"/>
+            </svg>
+            Wrap
         </button>
     </div>
     <div class="footer-right">
@@ -182,6 +198,14 @@
     }
     .footer-find-btn:hover {
         background: var(--color-surface-4);
+        color: var(--color-text-primary);
+    }
+    .footer-find-btn.active {
+        background: var(--color-surface-4);
+        color: var(--color-text-primary);
+    }
+    .footer-find-btn.active:hover {
+        background: #484848;
         color: var(--color-text-primary);
     }
 </style>
