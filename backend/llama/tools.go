@@ -308,7 +308,7 @@ var toolLSPDefinition = types.ChatTool{
 	Function: &types.ToolDef{
 		Name:        "lsp_definition",
 		DisplayName: "LSP Definition",
-		Description: "Find the definition location of a symbol in a file. Returns the file path, line, and character where the symbol is defined. Use this to navigate to where a function, variable, or type is declared.",
+		Description: "Find the definition location of a symbol in a file. Returns the file path, line, and character where the symbol is defined.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": lspSymbolProps{
@@ -342,7 +342,7 @@ var toolLSPHover = types.ChatTool{
 	Function: &types.ToolDef{
 		Name:        "lsp_hover",
 		DisplayName: "LSP Hover",
-		Description: "Get hover information (type signature, documentation) for a symbol in a file. Returns the symbol's type, signature, and any attached documentation in markdown or plain text. Use this to understand what a function, variable, or type does without reading its source.",
+		Description: "Get type signature, documentation for a symbol in a file. Returns the symbol's type, signature, and any attached documentation. Use this as a quick reference before reading full source code. If more clarification or validation is needed, read the source file.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": lspSymbolProps{
