@@ -3,8 +3,9 @@
 ## Context
 Git argument injection is possible when user-supplied query parameters starting with `-`
 are passed directly to `git` commands as arguments. The `types.ValidateBranchName()`
-function already exists in `backend/types/validate.go` and checks for empty names and
-leading dashes. The four git handlers in `backend/managers/git.go` now use it.
+function in `backend/types/validate.go` was enhanced to not only check for leading
+hyphens but also validate that only allowed characters are present (letters, digits,
+-, _, ., /, +) and reject consecutive dots (..).
 
 ## Tasks — ALL COMPLETE
 
@@ -12,7 +13,7 @@ leading dashes. The four git handlers in `backend/managers/git.go` now use it.
 - [x] Validate `branch` query param when non-empty before defaulting to "HEAD"
 - [x] Return 400 Bad Request on validation failure
 
-### 2. HandleTaskLog (line ~1285) — task-level git log
+### 2. HandleTaskLog (line ~1315) — task-level git log
 - [x] Validate `branch` after fallback to `task.Branch` (only when non-empty)
 - [x] Return 400 Bad Request on validation failure
 
@@ -24,8 +25,14 @@ leading dashes. The four git handlers in `backend/managers/git.go` now use it.
 - [x] Validate `customBase` and `headRef` before worktree operations
 - [x] Return 400 Bad Request on validation failure
 
-### 5. Tests in backend/managers/git_test.go
-- [x] Test each handler with dash-prefixed query params → expect 400
-- [x] Test valid refs are accepted (200)
-- [x] Use test server helpers (store, config, worktree manager)
-- [x] All existing tests pass (managers + types packages)
+### 5. Enhanced ValidateBranchName (backend/types/validate.go)
+- [x] Added character whitelist: only `a-zA-Z0-9-_.+/` allowed
+- [x] Added `..` (consecutive dots) check
+- [x] Kept existing empty and leading-dash checks
+- [x] Updated tests with valid/invalid character cases
+
+### 6. Tests (backend/managers/git_test.go + backend/types/validate_test.go)
+- [x] Unit tests for ValidateBranchName with 22 test cases (8 valid, 14 invalid)
+- [x] Handler-level tests for all 4 handlers (dash prefix → 400, valid → 200)
+- [x] Character validation tests for all 4 handlers (~ ^ : ? * [ \ space .. → 400)
+- [x] All existing tests pass (managers, types, exec, git, store packages)
