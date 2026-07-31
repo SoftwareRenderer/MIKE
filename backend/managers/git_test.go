@@ -664,6 +664,224 @@ func TestHandleStageFile_PathStartingWithDash(t *testing.T) {
 	t.Fatalf("expected %q to be staged, got: %v", filename, files)
 }
 
+// --- HandleTaskLog invalid character tests ---
+// These mirror the HandleLog/HandleDiff invalid character tests for the
+// task-level log endpoint.
+
+func TestHandleTaskLog_InvalidCharacters(t *testing.T) {
+	h, s, wm, worktreesDir := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "tasklog-char-proj", Name: "tasklog-char-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	task := &types.Task{
+		ID:        "tasklog-char-task",
+		ProjectID: proj.ID,
+		Title:     "char log task",
+		Status:    "in_progress",
+		Branch:    "main",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
+	createWorktreeAt(t, projPath, wtPath, "main")
+
+	mux := newTestGitMux(h)
+	_ = wm
+
+	for _, ch := range invalidBranchChars {
+		url := "/api/projects/tasklog-char-proj/tasks/tasklog-char-task/git/log?branch=" + ch
+		if ch == " " {
+			url = "/api/projects/tasklog-char-proj/tasks/tasklog-char-task/git/log?branch=feat%20branch"
+		}
+		t.Run(ch, func(t *testing.T) {
+			rr := doRequest(t, mux, "GET", url)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for invalid character %q in task log branch, got %d: %s", ch, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandleTaskLog_BranchDefaultsToTaskBranch(t *testing.T) {
+	h, s, wm, worktreesDir := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "tasklog-default-proj", Name: "tasklog-default-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	task := &types.Task{
+		ID:        "tasklog-default-task",
+		ProjectID: proj.ID,
+		Title:     "default log task",
+		Status:    "in_progress",
+		Branch:    "main",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
+	createWorktreeAt(t, projPath, wtPath, "main")
+
+	mux := newTestGitMux(h)
+	_ = wm
+
+	// No branch param → defaults to task.Branch ("main") → 200
+	rr := doRequest(t, mux, "GET", "/api/projects/tasklog-default-proj/tasks/tasklog-default-task/git/log")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 when branch param is absent (defaults to task branch), got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// --- HandleCheckout tests ---
+
+func TestHandleCheckout_DashPrefix(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "checkout-proj", Name: "checkout-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/git/checkout", h.HandleCheckout)
+
+	// Dash-prefixed branch → 400
+	body := strings.NewReader(`{"branch": "-foo"}`)
+	req := httptest.NewRequest("POST", "/api/projects/checkout-proj/git/checkout", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for dash-prefixed checkout branch, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCheckout_ValidBranch(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	// Create a second branch to checkout (use git branch, not checkout -b)
+	mustRun(t, projPath, "git", "branch", "feature-branch")
+	proj := &types.Project{ID: "checkout-valid-proj", Name: "checkout-valid-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/git/checkout", h.HandleCheckout)
+
+	// Valid branch → 200
+	body := strings.NewReader(`{"branch": "feature-branch"}`)
+	req := httptest.NewRequest("POST", "/api/projects/checkout-valid-proj/git/checkout", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid checkout branch, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// --- HandleTaskCheckout tests ---
+
+func TestHandleTaskCheckout_DashPrefix(t *testing.T) {
+	h, s, wm, worktreesDir := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "taskcheckout-proj", Name: "taskcheckout-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	task := &types.Task{
+		ID:        "taskcheckout-task",
+		ProjectID: proj.ID,
+		Title:     "checkout task",
+		Status:    "in_progress",
+		Branch:    "main",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
+	createWorktreeAt(t, projPath, wtPath, "main")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/git/checkout", h.HandleTaskCheckout)
+	_ = wm
+
+	// Dash-prefixed branch → 400
+	body := strings.NewReader(`{"branch": "-foo"}`)
+	req := httptest.NewRequest("POST", "/api/projects/taskcheckout-proj/tasks/taskcheckout-task/git/checkout", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for dash-prefixed task checkout branch, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleTaskCheckout_ValidBranch(t *testing.T) {
+	h, s, wm, worktreesDir := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	// Create a branch in the project repo (not checked out by any worktree)
+	mustRun(t, projPath, "git", "branch", "feature-task")
+	proj := &types.Project{ID: "taskcheckout-valid-proj", Name: "taskcheckout-valid-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	task := &types.Task{
+		ID:        "taskcheckout-valid-task",
+		ProjectID: proj.ID,
+		Title:     "valid checkout task",
+		Status:    "in_progress",
+		Branch:    "main",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
+	createWorktreeAt(t, projPath, wtPath, "main")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/git/checkout", h.HandleTaskCheckout)
+	_ = wm
+
+	// Valid branch → 200
+	body := strings.NewReader(`{"branch": "feature-task"}`)
+	req := httptest.NewRequest("POST", "/api/projects/taskcheckout-valid-proj/tasks/taskcheckout-valid-task/git/checkout", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid task checkout branch, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// --- HandleProjectStageFile_DashFPathNotForceAdd ---
 // TestHandleProjectStageFile_DashFPathNotForceAdd verifies that a path of
 // exactly "-f" is treated as a filename (via '--'), not as the --force flag.
 // Since no file named "-f" exists, git add -- -f fails (500) rather than
