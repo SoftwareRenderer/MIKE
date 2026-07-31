@@ -808,3 +808,35 @@ func TestForwardUserMessage_BlocksLazyStartDuringSummarize(t *testing.T) {
 	}
 }
 
+// TestInitTask_ClearsOrphanedBranchOnWorktreeFailure verifies that when
+// CreateWorktree fails after SetTaskBranchIfEmpty, the branch name is
+// cleared from the DB so it doesn't become an orphaned ref.
+func TestInitTask_ClearsOrphanedBranchOnWorktreeFailure(t *testing.T) {
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+	taskID := "test-orphaned-branch-task"
+
+	task := &types.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Test task",
+		Prompt:    "Test prompt",
+		Status:    "backlog",
+	}
+	te.store.CreateTask(task)
+
+	// Corrupt the git repo so CreateWorktree will fail.
+	// SetTaskBranchIfEmpty runs first (DB-only), then CreateWorktree needs git.
+	os.RemoveAll(filepath.Join(repoDir, ".git"))
+
+	_, err := te.InitTask(projectID, taskID)
+	if err == nil {
+		t.Fatal("InitTask should fail when git repo is corrupted")
+	}
+
+	// Branch should be cleared (not orphaned in DB)
+	reloaded, _ := te.store.GetTaskByTaskID(taskID)
+	if reloaded.Branch != "" {
+		t.Fatalf("branch should be cleared after worktree failure, got %q", reloaded.Branch)
+	}
+}
+

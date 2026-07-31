@@ -569,6 +569,17 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			*agentEnded = true
 			return
 		}
+		if !task.AutoMerge {
+			// Merge was skipped (auto_merge=false) — don't mark done
+			task.ExecutionState = "idle"
+			task.Status = "review"
+			if te.sandboxMgr != nil {
+				_ = te.sandboxMgr.Stop(task.ID)
+			}
+			te.store.UpdateTask(task)
+			*agentEnded = true
+			return
+		}
 		task.ExecutionState = "completed"
 		task.Status = "done"
 		if te.sandboxMgr != nil {
@@ -590,6 +601,14 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 				_ = te.sandboxMgr.Stop(task.ID)
 			}
 			task.Output = fmt.Sprintf("Agent finished but merge still conflicted (%s)", stopReason)
+		} else if !task.AutoMerge {
+			// Merge was skipped (auto_merge=false) — don't mark done
+			task.ExecutionState = "idle"
+			task.Status = "review"
+			if te.sandboxMgr != nil {
+				_ = te.sandboxMgr.Stop(task.ID)
+			}
+			task.Output = fmt.Sprintf("Agent finished (%s)", stopReason)
 		} else {
 			task.ExecutionState = "completed"
 			task.Status = "done"

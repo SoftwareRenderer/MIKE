@@ -1110,8 +1110,14 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 								lc.finishReason = ""
 								continue
 							}
-							setup.task.ExecutionState = "completed"
-							setup.task.Status = "done"
+							if !setup.task.AutoMerge {
+								// Merge was skipped (auto_merge=false) — don't mark done
+								setup.task.ExecutionState = "idle"
+								setup.task.Status = "review"
+							} else {
+								setup.task.ExecutionState = "completed"
+								setup.task.Status = "done"
+							}
 							if te.sandboxMgr != nil {
 								_ = te.sandboxMgr.Stop(setup.task.ID)
 							}
@@ -1172,6 +1178,13 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 							if te.sandboxMgr != nil {
 								_ = te.sandboxMgr.Stop(setup.task.ID)
 							}
+						} else if !setup.task.AutoMerge {
+							// Merge was skipped (auto_merge=false) — don't mark done
+							setup.task.ExecutionState = "idle"
+							setup.task.Status = "review"
+							if te.sandboxMgr != nil {
+								_ = te.sandboxMgr.Stop(setup.task.ID)
+							}
 						} else {
 							setup.task.ExecutionState = "completed"
 							setup.task.Status = "done"
@@ -1188,6 +1201,13 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 							// Still conflicted after LLM called request_review — fail.
 							log.Printf("[merge] setup.task=%s merge still conflicted after request_review", setup.task.ID)
 							setup.task.ExecutionState = "failed"
+							setup.task.Status = "review"
+							if te.sandboxMgr != nil {
+								_ = te.sandboxMgr.Stop(setup.task.ID)
+							}
+						} else if !setup.task.AutoMerge {
+							// Merge was skipped (auto_merge=false) — don't mark done
+							setup.task.ExecutionState = "idle"
 							setup.task.Status = "review"
 							if te.sandboxMgr != nil {
 								_ = te.sandboxMgr.Stop(setup.task.ID)

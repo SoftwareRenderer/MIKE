@@ -354,10 +354,12 @@ func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath
 
 	_ = te.store.SetTaskMergeConflict(taskID, projectID, false)
 
-	if commitOK {
+	if commitOK && task.AutoMerge {
 		if mergeErr := te.MergeBranch(projectID, taskID, task); mergeErr != nil {
 			log.Printf("[merge] task=%s final merge failed: %v", taskID, mergeErr)
 		}
+	} else if commitOK && !task.AutoMerge {
+		log.Printf("[merge] task=%s merge skipped (auto_merge=false)", taskID)
 	}
 
 	updatedTask, _ = te.store.GetTaskByTaskID(taskID)
