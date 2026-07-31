@@ -956,12 +956,16 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 
 		// git init + create README + add + commit in single command
 		// Use -c flags to override the commit author identity (if configured in git package)
-		authorFlags := strings.Join(git.GitAuthorFlags(), " ")
+		authorFlags := git.GitAuthorFlags()
+		flagCmd := ""
+		for i := 0; i+1 < len(authorFlags); i += 2 {
+			flagCmd += shellQuote(authorFlags[i]) + " " + shellQuote(authorFlags[i+1]) + " "
+		}
 		_, err := s.sandboxMgr.ExecProjectWithInput(project.ID, project.Path, project.Name,
 			"git -C "+shellQuote(sandboxPath)+" init && "+
 				"base64 -d > "+shellQuote(filepath.Join(sandboxPath, "README.md"))+" && "+
 				"git -C "+shellQuote(sandboxPath)+" add README.md && "+
-				"git -C "+shellQuote(sandboxPath)+" "+authorFlags+" commit -m 'Initial commit'",
+				"git -C "+shellQuote(sandboxPath)+" "+flagCmd+" commit -m 'Initial commit'",
 			[]byte(encoded+"\n"), opts)
 		if err != nil {
 			JSONError(w, http.StatusInternalServerError, "git commit failed: "+err.Error())
