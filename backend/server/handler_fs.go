@@ -956,11 +956,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 
 		// git init + create README + add + commit in single command
 		// Use -c flags to override the commit author identity (if configured in git package)
-		authorFlags := git.GitAuthorFlags()
-		flagCmd := ""
-		for i := 0; i+1 < len(authorFlags); i += 2 {
-			flagCmd += shellQuote(authorFlags[i]) + " " + shellQuote(authorFlags[i+1]) + " "
-		}
+		flagCmd := gitAuthorFlagCmd()
 		_, err := s.sandboxMgr.ExecProjectWithInput(project.ID, project.Path, project.Name,
 			"git -C "+shellQuote(sandboxPath)+" init && "+
 				"base64 -d > "+shellQuote(filepath.Join(sandboxPath, "README.md"))+" && "+
@@ -1187,4 +1183,14 @@ func (s *Server) fsSandboxConfig(project *types.Project) sandbox.SandboxOpts {
 		SandboxEnvs:      project.SandboxEnvs,
 		Capabilities:     project.SandboxCapabilities,
 	}
+}
+
+// gitAuthorFlagCmd builds a shell-safe command fragment
+func gitAuthorFlagCmd() string {
+	flags := git.GitAuthorFlags()
+	var parts []string
+	for i := 0; i+1 < len(flags); i += 2 {
+		parts = append(parts, shellQuote(flags[i]), shellQuote(flags[i+1]))
+	}
+	return strings.Join(parts, " ")
 }
