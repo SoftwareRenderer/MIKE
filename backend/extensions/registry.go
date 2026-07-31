@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 // RegistryClient fetches extension metadata and manages container images.
@@ -132,18 +134,6 @@ func (rc *RegistryClient) FetchDockerfile(url string) (string, error) {
 	return string(data), nil
 }
 
-// validateImageRef rejects image references that start with a dash,
-// preventing them from being interpreted as podman flags.
-func validateImageRef(imageRef string) error {
-	if imageRef == "" {
-		return fmt.Errorf("image reference must not be empty")
-	}
-	if strings.HasPrefix(imageRef, "-") {
-		return fmt.Errorf("image reference must not start with a dash: %q", imageRef)
-	}
-	return nil
-}
-
 // validateDockerfilePath rejects paths that start with a dash,
 // preventing them from being interpreted as podman flags.
 func validateDockerfilePath(path string) error {
@@ -158,7 +148,7 @@ func validateDockerfilePath(path string) error {
 
 // PullImage pulls an OCI image via podman.
 func (rc *RegistryClient) PullImage(imageRef string) error {
-	if err := validateImageRef(imageRef); err != nil {
+	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
 		return err
 	}
 	cmd := exec.Command("podman", "pull", imageRef)
@@ -171,7 +161,7 @@ func (rc *RegistryClient) PullImage(imageRef string) error {
 
 // BuildImage builds an image from a Dockerfile path via podman.
 func (rc *RegistryClient) BuildImage(dockerfilePath, imageRef string) error {
-	if err := validateImageRef(imageRef); err != nil {
+	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
 		return err
 	}
 	if err := validateDockerfilePath(dockerfilePath); err != nil {
@@ -187,7 +177,7 @@ func (rc *RegistryClient) BuildImage(dockerfilePath, imageRef string) error {
 
 // BuildImageFromReader builds an image from a Dockerfile content via podman.
 func (rc *RegistryClient) BuildImageFromReader(dockerfileContent, imageRef string) error {
-	if err := validateImageRef(imageRef); err != nil {
+	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
 		return err
 	}
 	// Write Dockerfile to temp dir and build from it
@@ -202,7 +192,7 @@ func (rc *RegistryClient) BuildImageFromReader(dockerfileContent, imageRef strin
 
 // ImageExists checks if an image is available locally via podman.
 func (rc *RegistryClient) ImageExists(imageRef string) bool {
-	if err := validateImageRef(imageRef); err != nil {
+	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
 		return false
 	}
 	cmd := exec.Command("podman", "image", "exists", imageRef)
@@ -252,7 +242,7 @@ func UpdateAvailable(installed, remote string) bool {
 
 // StreamBuildOutput builds an image and streams output via a channel.
 func (rc *RegistryClient) StreamBuildOutput(ctx context.Context, dockerfilePath, imageRef string, ch chan<- string) error {
-	if err := validateImageRef(imageRef); err != nil {
+	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
 		return err
 	}
 	if err := validateDockerfilePath(dockerfilePath); err != nil {
