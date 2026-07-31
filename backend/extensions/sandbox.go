@@ -161,6 +161,9 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	if image == "" {
 		image = "docker.io/library/ubuntu:latest"
 	}
+	if err := sm.rt.ValidateImageRef(image); err != nil {
+		return nil, fmt.Errorf("invalid extension image: %w", err)
+	}
 
 	// Build container create args - container runs sleep infinity
 	// sandbox-bridge is started via podman exec when needed
