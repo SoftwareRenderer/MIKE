@@ -257,10 +257,18 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     $effect(() => {
         const boardTask = appStore.board?.tasks.find(t => t.id === taskId);
         if (boardTask) {
-            if (!isUpdatingTask && boardTask.llama_server_url) selectedUrl = boardTask.llama_server_url;
-            if (!isUpdatingTask && boardTask.model_name) selectedModel = boardTask.model_name;
+            let changed = false;
+            if (!isUpdatingTask && boardTask.llama_server_url && boardTask.llama_server_url !== selectedUrl) {
+                selectedUrl = boardTask.llama_server_url;
+                changed = true;
+            }
+            if (!isUpdatingTask && boardTask.model_name && boardTask.model_name !== selectedModel) {
+                selectedModel = boardTask.model_name;
+                changed = true;
+            }
             if (!isUpdatingTask && boardTask.reasoning_effort) selectedReasoningEffort = boardTask.reasoning_effort;
             if (!isUpdatingTask) operatingMode = boardTask.operating_mode ?? 'act';
+            if (changed) updateContextLimit();
         }
     });
 
@@ -1115,8 +1123,6 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         window.addEventListener('keydown', handleKeydown);
 
         (async () => {
-            // Providers loaded via configStore subscription (no separate fetch needed)
-            updateProvidersFromStore();
             await loadThreads();
             // If URL has a thread param, switch to that thread before loading history
             const urlThread = readThreadFromUrl();
@@ -1182,6 +1188,8 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
                 if (task.reasoning_effort) {
                     selectedReasoningEffort = task.reasoning_effort;
                 }
+                // Recalculate context limit now that task-specific model is set
+                updateContextLimit();
             } catch {
                 // Task may not exist yet
             }
