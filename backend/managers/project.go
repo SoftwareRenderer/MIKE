@@ -19,6 +19,7 @@ import (
 	"kanban/backend/store"
 	"kanban/backend/term"
 	"kanban/backend/types"
+	"kanban/pkg/sandboxruntime"
 )
 
 // ProjectHandler handles project CRUD operations.
@@ -90,7 +91,11 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		name = filepath.Base(req.Path)
 	}
 
-
+	// Validate project name to prevent injection when used in image refs, mount paths, etc.
+	if err := sandboxruntime.ValidateProjectName(name); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Collect existing project IDs to avoid collisions
 	existingIDs := []string{}
@@ -326,6 +331,10 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		}
 		// Partial update: apply only provided fields
 		if req.Name != "" {
+			if err := sandboxruntime.ValidateProjectName(req.Name); err != nil {
+				httputil.JSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
 			if _, updateErr := h.store.UpdateProject(id, req.Name); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update project")
 				return

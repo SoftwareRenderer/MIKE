@@ -28,6 +28,92 @@ func TestProjectCreate(t *testing.T) {
 	}
 }
 
+func TestProjectCreate_RejectsInvalidName(t *testing.T) {
+	s := testServer(t)
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	invalidNames := []string{
+		"-my-project",     // leading dash
+		"--verbose",       // double dash
+		"my; rm -rf /",    // shell injection
+		"my$(rm /)project", // shell injection
+		"my`whoami`proj",  // backtick injection
+		"my|cat",          // pipe injection
+		"my&project",      // ampersand
+		"my!project",      // exclamation
+		"my?project",      // question mark
+		"my*project",      // asterisk
+		"my#project",      // hash
+		"my%project",      // percent
+		"my^project",      // caret
+		`my"project"`,     // double quote
+		"my'project",      // single quote
+		"my=project",      // equals
+		"my+project",      // plus
+		"my,project",      // comma
+		"my:project",      // colon
+		"my;project",      // semicolon
+		"my@project",      // at sign
+		"my(project)",     // parentheses
+		"my<project>",     // angle brackets
+		"my\\project",     // backslash
+	}
+
+	for _, name := range invalidNames {
+		t.Run(name, func(t *testing.T) {
+			req := testRequest("POST", "/api/projects", map[string]any{
+				"name": name,
+				"path": dir,
+			})
+			rr := testResponseAuth(t, s, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for name %q, got %d: %s", name, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestProjectCreate_RejectsEmptyName(t *testing.T) {
+	s := testServer(t)
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	// Empty name falls back to filepath.Base(path) which should be valid.
+	// But explicitly empty after fallback should not happen since path is validated.
+	// Test that a valid auto-derived name works.
+	req := testRequest("POST", "/api/projects", map[string]any{
+		"path": dir,
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201 when name is omitted, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProjectUpdate_RejectsInvalidName(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	invalidNames := []string{
+		"-renamed",       // leading dash
+		"my; rm -rf /",   // shell injection
+		"my$(rm /)project", // shell injection
+	}
+
+	for _, name := range invalidNames {
+		t.Run(name, func(t *testing.T) {
+			req := testRequest("PUT", "/api/projects/"+projID, map[string]any{
+				"name": name,
+			})
+			rr := testResponseAuth(t, s, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for name %q, got %d: %s", name, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
 func TestProjectCreateSandboxEnabled(t *testing.T) {
 	s := testServer(t)
 	dir := t.TempDir()
