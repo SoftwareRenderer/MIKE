@@ -24,9 +24,9 @@ func TestValidateImageRef(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateImageRef(tt.image)
+			err := ValidateImageRef(tt.image)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateImageRef(%q) error = %v, wantErr %v", tt.image, err, tt.wantErr)
+				t.Errorf("ValidateImageRef(%q) error = %v, wantErr %v", tt.image, err, tt.wantErr)
 			}
 		})
 	}

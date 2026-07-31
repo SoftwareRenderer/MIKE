@@ -1,6 +1,9 @@
 package extensions
 
 import (
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -284,5 +287,69 @@ func TestGracePeriod_TimerFiresAndStops(t *testing.T) {
 func TestGracePeriod_ExtensionStopGracePeriod(t *testing.T) {
 	if ExtensionStopGracePeriod != 15*time.Minute {
 		t.Errorf("ExtensionStopGracePeriod = %v, want 15m", ExtensionStopGracePeriod)
+	}
+}
+
+func TestCreate_RejectsLeadingDashImage(t *testing.T) {
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+	sm.available = true
+	_, filename, _, _ := runtime.Caller(0)
+	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
+	bridgePath := filepath.Join(projectRoot, "sandbox", "sandbox-bridge")
+	t.Setenv("MIKE_AGENT_PATH", bridgePath)
+
+	ext := &Extension{
+		ID: "test-dash-image",
+		ContainerConfig: ContainerConfig{
+			Image: "-v /etc/passwd:/tmp/host",
+		},
+	}
+
+	_, err := sm.Create(ext, nil)
+	if err == nil {
+		t.Fatal("Create() with leading-dash image should return error")
+	}
+	if !strings.Contains(err.Error(), "invalid extension image") {
+		t.Errorf("Create() error = %v, want error containing 'invalid extension image'", err)
+	}
+}
+
+func TestCreate_AcceptsValidImage(t *testing.T) {
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+	sm.available = true
+	_, filename, _, _ := runtime.Caller(0)
+	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
+	bridgePath := filepath.Join(projectRoot, "sandbox", "sandbox-bridge")
+	t.Setenv("MIKE_AGENT_PATH", bridgePath)
+
+	ext := &Extension{
+		ID: "test-valid-image",
+		ContainerConfig: ContainerConfig{
+			Image: "docker.io/library/ubuntu:latest",
+		},
+	}
+	_, err := sm.Create(ext, nil)
+	if err != nil && strings.Contains(err.Error(), "invalid extension image") {
+		t.Errorf("Create() with valid image should not fail at image validation, got: %v", err)
+	}
+}
+
+func TestCreate_DefaultImagePassesValidation(t *testing.T) {
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+	sm.available = true
+	_, filename, _, _ := runtime.Caller(0)
+	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
+	bridgePath := filepath.Join(projectRoot, "sandbox", "sandbox-bridge")
+	t.Setenv("MIKE_AGENT_PATH", bridgePath)
+
+	ext := &Extension{
+		ID: "test-default-image",
+	}
+	_, err := sm.Create(ext, nil)
+	if err != nil && strings.Contains(err.Error(), "invalid extension image") {
+		t.Errorf("Create() with empty (defaulted) image should not fail at image validation, got: %v", err)
 	}
 }
