@@ -11,9 +11,9 @@ import (
 	"strings"
 )
 
-// validateImageRef rejects image references that start with a dash,
+// ValidateImageRef rejects image references that start with a dash,
 // preventing them from being interpreted as podman flags.
-func validateImageRef(image string) error {
+func (r *Runtime) ValidateImageRef(image string) error {
 	if image == "" {
 		return fmt.Errorf("image reference must not be empty")
 	}
@@ -151,7 +151,7 @@ func (r *Runtime) SanitizeID(id string) (string, error) {
 
 // ImageExists checks if a container image is available locally.
 func (r *Runtime) ImageExists(image string) bool {
-	if err := validateImageRef(image); err != nil {
+	if err := r.ValidateImageRef(image); err != nil {
 		return false
 	}
 	_, err := r.PodmanExec("image", "exists", image)
@@ -160,7 +160,7 @@ func (r *Runtime) ImageExists(image string) bool {
 
 // PullImage downloads a container image.
 func (r *Runtime) PullImage(image string, onProgress func(line string)) error {
-	if err := validateImageRef(image); err != nil {
+	if err := r.ValidateImageRef(image); err != nil {
 		return err
 	}
 	log.Printf("[sandboxruntime] pulling image %s", image)
@@ -195,7 +195,7 @@ func (r *Runtime) PullImage(image string, onProgress func(line string)) error {
 
 // BuildImage builds a container image from a Dockerfile.
 func (r *Runtime) BuildImage(imageName, dockerfilePath string, onProgress func(line string)) error {
-	if err := validateImageRef(imageName); err != nil {
+	if err := r.ValidateImageRef(imageName); err != nil {
 		return err
 	}
 	if err := validateDockerfilePath(dockerfilePath); err != nil {
