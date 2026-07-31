@@ -954,6 +954,16 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		readmeContent := "# " + filepath.Base(req.Path) + "\n"
 		encoded := base64.StdEncoding.EncodeToString([]byte(readmeContent))
 
+		// Resolve git identity for the sandbox commit (env vars > git config)
+		name, email := resolveGitIdentity()
+		if name == "" || email == "" {
+			JSONError(w, http.StatusBadRequest, "git user.name and user.email are not set — set GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL, or run: git config --global user.name '<value>'")
+			return
+		}
+		// Propagate resolved identity to git package so gitAuthorFlagCmd() includes -c flags
+		git.GitAuthorName = name
+		git.GitAuthorEmail = email
+
 		// git init + create README + add + commit in single command
 		// Use -c flags to override the commit author identity (if configured in git package)
 		flagCmd := gitAuthorFlagCmd()
@@ -1017,8 +1027,9 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git add failed: %s", out))
 		return
 	}
-	commitArgs := append([]string{"-C", req.Path}, git.GitAuthorFlags()...)
-	commitArgs = append(commitArgs, "commit", "-m", "Initial commit")
+	// Use the resolved identity from resolveGitIdentity() directly in the commit args.
+	// (resolveGitIdentity already validated that name and email are non-empty above.)
+	commitArgs := []string{"-C", req.Path, "-c", "user.name=" + name, "-c", "user.email=" + email, "commit", "-m", "Initial commit"}
 	cmd = exec.Command("git", commitArgs...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git commit failed: %s", out))

@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"kanban/pkg/sandboxruntime"
 )
 
 func TestFetchIndex(t *testing.T) {
@@ -304,9 +306,9 @@ func TestValidateImageRef(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateImageRef(tt.image)
+			err := sandboxruntime.ValidateImageRef(tt.image)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateImageRef(%q) error = %v, wantErr %v", tt.image, err, tt.wantErr)
+				t.Errorf("sandboxruntime.ValidateImageRef(%q) error = %v, wantErr %v", tt.image, err, tt.wantErr)
 			}
 		})
 	}

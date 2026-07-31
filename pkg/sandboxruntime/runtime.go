@@ -20,7 +20,12 @@ var imageRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9/._:@-]*$`)
 // ValidateImageRef rejects image references that are invalid OCI image characters.
 // This prevents references like "-v /etc:/host" or "$(rm -rf /)" from being
 // passed to podman as if they were flags.
-func (r *Runtime) ValidateImageRef(image string) error {
+//
+// This is the single source of truth for image-reference validation across the
+// entire codebase. Both the sandbox Runtime method (below) and the extensions
+// RegistryClient delegate to this standalone function, eliminating duplicate
+// validation logic that could drift and create security gaps.
+func ValidateImageRef(image string) error {
 	if image == "" {
 		return fmt.Errorf("image reference must not be empty")
 	}
@@ -28,6 +33,16 @@ func (r *Runtime) ValidateImageRef(image string) error {
 		return fmt.Errorf("invalid image reference: %q", image)
 	}
 	return nil
+}
+
+// ValidateImageRef rejects image references that are invalid OCI image characters.
+// This prevents references like "-v /etc:/host" or "$(rm -rf /)" from being
+// passed to podman as if they were flags.
+//
+// This method is retained for backward compatibility and delegates to the package
+// -level ValidateImageRef function.
+func (r *Runtime) ValidateImageRef(image string) error {
+	return ValidateImageRef(image)
 }
 
 // validateDockerfilePath rejects paths that start with a dash,
