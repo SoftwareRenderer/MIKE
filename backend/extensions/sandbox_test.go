@@ -353,3 +353,42 @@ func TestCreate_DefaultImagePassesValidation(t *testing.T) {
 		t.Errorf("Create() with empty (defaulted) image should not fail at image validation, got: %v", err)
 	}
 }
+
+func TestCreate_RejectsShellInjectionImage(t *testing.T) {
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+	sm.available = true
+	_, filename, _, _ := runtime.Caller(0)
+	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
+	bridgePath := filepath.Join(projectRoot, "sandbox", "sandbox-bridge")
+	t.Setenv("MIKE_AGENT_PATH", bridgePath)
+
+	tests := []struct {
+		name  string
+		image string
+	}{
+		{"shell substitution", "$(rm -rf /)"},
+		{"semicolon injection", "ubuntu:latest; rm -rf /"},
+		{"pipe injection", "ubuntu | cat /etc/passwd"},
+		{"backtick injection", "ubun`whoami`t"},
+		{"space in image", "ubuntu latest"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ext := &Extension{
+				ID: "test-injection-image",
+				ContainerConfig: ContainerConfig{
+					Image: tt.image,
+				},
+			}
+			_, err := sm.Create(ext, nil)
+			if err == nil {
+				t.Fatalf("Create() with image %q should return error", tt.image)
+			}
+			if !strings.Contains(err.Error(), "invalid extension image") {
+				t.Errorf("Create() error = %v, want error containing 'invalid extension image'", err)
+			}
+		})
+	}
+}
