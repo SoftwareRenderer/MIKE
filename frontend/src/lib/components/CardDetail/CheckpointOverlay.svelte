@@ -109,6 +109,8 @@
         color: var(--color-text-primary);
     }
     .checkpoint-diff-body {
+        display: flex;
+        flex-direction: column;
         flex: 1;
         min-height: 0;
         overflow: hidden;
