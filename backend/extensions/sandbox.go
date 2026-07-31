@@ -430,7 +430,9 @@ func (sm *ExtensionSandboxManager) Destroy(extID string) error {
 
 	// Remove image if it was built locally
 	if ext, err := sm.store.GetByID(extID); err == nil && ext.IsLocalInstalled() && ext.ImageRef != "" {
-		_, _ = sm.rt.PodmanExec("rmi", ext.ImageRef)
+		if !strings.HasPrefix(ext.ImageRef, "-") {
+			_, _ = sm.rt.PodmanExec("rmi", ext.ImageRef)
+		}
 	}
 
 	log.Printf("[ext-sandbox] ext=%s destroyed", extID)

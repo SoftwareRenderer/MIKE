@@ -11,6 +11,30 @@ import (
 	"strings"
 )
 
+// validateImageRef rejects image references that start with a dash,
+// preventing them from being interpreted as podman flags.
+func validateImageRef(image string) error {
+	if image == "" {
+		return fmt.Errorf("image reference must not be empty")
+	}
+	if strings.HasPrefix(image, "-") {
+		return fmt.Errorf("image reference must not start with a dash: %q", image)
+	}
+	return nil
+}
+
+// validateDockerfilePath rejects paths that start with a dash,
+// preventing them from being interpreted as podman flags.
+func validateDockerfilePath(path string) error {
+	if path == "" {
+		return fmt.Errorf("dockerfile path must not be empty")
+	}
+	if strings.HasPrefix(path, "-") {
+		return fmt.Errorf("dockerfile path must not start with a dash: %q", path)
+	}
+	return nil
+}
+
 // Runtime provides low-level Podman and gVisor operations used by sandbox managers.
 type Runtime struct{}
 
@@ -127,12 +151,18 @@ func (r *Runtime) SanitizeID(id string) (string, error) {
 
 // ImageExists checks if a container image is available locally.
 func (r *Runtime) ImageExists(image string) bool {
+	if err := validateImageRef(image); err != nil {
+		return false
+	}
 	_, err := r.PodmanExec("image", "exists", image)
 	return err == nil
 }
 
 // PullImage downloads a container image.
 func (r *Runtime) PullImage(image string, onProgress func(line string)) error {
+	if err := validateImageRef(image); err != nil {
+		return err
+	}
 	log.Printf("[sandboxruntime] pulling image %s", image)
 	c := exec.Command("podman", "pull", image)
 	pr, pw := io.Pipe()
@@ -165,6 +195,12 @@ func (r *Runtime) PullImage(image string, onProgress func(line string)) error {
 
 // BuildImage builds a container image from a Dockerfile.
 func (r *Runtime) BuildImage(imageName, dockerfilePath string, onProgress func(line string)) error {
+	if err := validateImageRef(imageName); err != nil {
+		return err
+	}
+	if err := validateDockerfilePath(dockerfilePath); err != nil {
+		return err
+	}
 	content, err := os.ReadFile(dockerfilePath)
 	if err != nil {
 		return fmt.Errorf("read dockerfile: %w", err)
