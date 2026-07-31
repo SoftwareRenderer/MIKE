@@ -623,8 +623,12 @@ func TestGenerateBranchName_FallsBackToTaskIDWhenSlugIsEmpty(t *testing.T) {
 	taskID := "frost-amber-quartz"
 	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "###"}
 	branchName := te.generateBranchName(task, taskID, projectID)
-	if branchName != "task/"+taskID {
-		t.Errorf("expected 'task/%s', got %q", taskID, branchName)
+	expectedPrefix := "task/" + taskID + "-"
+	if !strings.HasPrefix(branchName, expectedPrefix) {
+		t.Errorf("expected prefix %q, got %q", expectedPrefix, branchName)
+	}
+	if len(branchName) != len("task/"+taskID)+1+randomSuffixLen {
+		t.Errorf("expected len %d, got %d (%q)", len("task/"+taskID)+1+randomSuffixLen, len(branchName), branchName)
 	}
 }
 
@@ -633,8 +637,12 @@ func TestGenerateBranchName_UsesSlugForNormalTitle(t *testing.T) {
 	taskID := "frost-amber-quartz"
 	task := &types.Task{ID: taskID, ProjectID: projectID, Title: "Fix login"}
 	branchName := te.generateBranchName(task, taskID, projectID)
-	if branchName != "task/fix-login" {
-		t.Errorf("expected 'task/fix-login', got %q", branchName)
+	expectedPrefix := "task/fix-login-"
+	if !strings.HasPrefix(branchName, expectedPrefix) {
+		t.Errorf("expected prefix %q, got %q", expectedPrefix, branchName)
+	}
+	if len(branchName) != len("task/fix-login")+1+randomSuffixLen {
+		t.Errorf("expected len %d, got %d (%q)", len("task/fix-login")+1+randomSuffixLen, len(branchName), branchName)
 	}
 }
 
