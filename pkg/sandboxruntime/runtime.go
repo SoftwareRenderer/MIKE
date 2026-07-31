@@ -17,6 +17,41 @@ import (
 // subsequent characters be alphanumeric or one of / . _ - : @.
 var imageRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9/._:@-]*$`)
 
+// ValidateProjectName rejects project names that could cause issues when used
+// as part of container image names, mount paths, or shell commands.
+//
+// Rules:
+//   - Must not be empty
+//   - Must not start with a dash (prevents flag injection in podman commands)
+//   - Must not contain control characters (prevents newline/tab injection)
+//   - Only allows: letters, digits, spaces, hyphens, underscores, dots, and slashes
+//
+// This is defense-in-depth: project names flow into ProjectImageName() which
+// produces image refs for podman, and into mount paths. Even though downstream
+// functions validate their inputs, validating at creation/update is the
+// earliest point to reject bad data.
+func ValidateProjectName(name string) error {
+	if name == "" {
+		return fmt.Errorf("project name must not be empty")
+	}
+	if len(name) > 256 {
+		return fmt.Errorf("project name must not exceed 256 characters")
+	}
+	for _, r := range name {
+		if r < ' ' || r == '\x7f' {
+			return fmt.Errorf("project name must not contain control characters")
+		}
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == ' ' || r == '-' || r == '_' || r == '.' || r == '/') {
+			return fmt.Errorf("project name contains invalid character %q", string(r))
+		}
+	}
+	if name[0] == '-' {
+		return fmt.Errorf("project name must not start with a dash")
+	}
+	return nil
+}
+
 // ValidateImageRef rejects image references that are invalid OCI image characters.
 // This prevents references like "-v /etc:/host" or "$(rm -rf /)" from being
 // passed to podman as if they were flags.

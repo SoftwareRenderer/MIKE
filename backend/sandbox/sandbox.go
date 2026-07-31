@@ -1021,6 +1021,12 @@ func (sm *SandboxManager) BuildImageWithProgress(projectName, dockerfilePath str
 
 	imageName := ProjectImageName(projectName)
 
+	// Validate the derived image name before passing to podman to prevent
+	// argument injection (e.g. if ProjectImagePrefix is ever emptied).
+	if err := sm.rt.ValidateImageRef(imageName); err != nil {
+		return fmt.Errorf("invalid project image name: %w", err)
+	}
+
 	// Remove any existing image with the same name
 	_, _ = sm.podmanExec("rmi", imageName) // best-effort
 

@@ -640,6 +640,35 @@ func TestBuildImage_MissingFile(t *testing.T) {
 	}
 }
 
+func TestBuildImageWithProgress_InvalidImageRef(t *testing.T) {
+	// BuildImageWithProgress must validate the derived image name before
+	// passing it to podman. This catches issues if ProjectImagePrefix is
+	// ever emptied or projectName produces an invalid image ref.
+	sm := &SandboxManager{
+		active:    make(map[string]string),
+		rt:        sandboxruntime.NewRuntime(),
+		available: true,
+	}
+
+	// Create a temp Dockerfile so we get past the file-read step
+	tmpDir := t.TempDir()
+	dockerfile := filepath.Join(tmpDir, "Dockerfile")
+	if err := os.WriteFile(dockerfile, []byte("FROM alpine:latest"), 0644); err != nil {
+		t.Fatalf("write dockerfile: %v", err)
+	}
+
+	// A project name containing a semicolon produces an image ref like
+	// "sandbox-my;project" which fails ValidateImageRef (semicolon not in
+	// allowed character set). This verifies the validation gate exists.
+	err := sm.BuildImageWithProgress("my;project", dockerfile, nil)
+	if err == nil {
+		t.Fatal("expected error for project name producing invalid image ref")
+	}
+	if !strings.Contains(err.Error(), "invalid project image name") {
+		t.Fatalf("expected image name validation error, got: %v", err)
+	}
+}
+
 func TestProjectImageName(t *testing.T) {
 	name := ProjectImageName("my-project")
 	if name != "sandbox-my-project" {
