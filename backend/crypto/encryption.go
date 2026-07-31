@@ -37,18 +37,15 @@ func Encrypt(value string) (string, error) {
 		return "", nil
 	}
 
-	key, err := deriveKey()
-	if err != nil {
-		return "", err
-	}
-
 	salt, err := generateSalt()
 	if err != nil {
 		return "", fmt.Errorf("crypto: failed to generate salt: %w", err)
 	}
 
-	// Re-derive with the generated salt for encryption
-	key = deriveKeyPBKDF2(salt)
+	key := deriveKeyPBKDF2(salt)
+	if key == nil {
+		return "", fmt.Errorf("crypto: MIKE_ENCRYPTION_KEY environment variable is not set")
+	}
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -130,14 +127,6 @@ func decryptV1(encoded string) (string, error) {
 // IsEnabled returns true if the MIKE_ENCRYPTION_KEY environment variable is set.
 func IsEnabled() bool {
 	return os.Getenv("MIKE_ENCRYPTION_KEY") != ""
-}
-
-// deriveKey validates that the encryption key is set and returns nil-safe result.
-func deriveKey() ([]byte, error) {
-	if !IsEnabled() {
-		return nil, fmt.Errorf("crypto: MIKE_ENCRYPTION_KEY environment variable is not set")
-	}
-	return nil, nil
 }
 
 // deriveKeyPBKDF2 derives a 32-byte AES key from the MIKE_ENCRYPTION_KEY env var

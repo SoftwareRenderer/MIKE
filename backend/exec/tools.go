@@ -137,8 +137,9 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 	// Returns true if recovery succeeded and callbacks were refreshed.
 	// The caller should re-read sandboxExec/Stream/Read/Write/Client from state.
 	recoverBridge := func(errStr string) bool {
-		if !strings.Contains(errStr, "sandbox bridge is not responding") &&
-			!strings.Contains(errStr, "broken pipe") {
+		if !strings.Contains(errStr, "broken pipe") &&
+			!strings.Contains(errStr, "client closed") &&
+			!strings.Contains(errStr, "connection closed") {
 			return false
 		}
 		if state.recoverBridge == nil {
@@ -406,14 +407,14 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 				c.Dir = worktreePath
 				stdout, pipeErr := c.StdoutPipe()
 				if pipeErr != nil {
-					return "", fmt.Errorf("Failed: %v", pipeErr)
+					return "", fmt.Errorf("failed: %v", pipeErr)
 				}
 				stderr, pipeErr := c.StderrPipe()
 				if pipeErr != nil {
-					return "", fmt.Errorf("Failed: %v", pipeErr)
+					return "", fmt.Errorf("failed: %v", pipeErr)
 				}
 				if startErr := c.Start(); startErr != nil {
-					return "", fmt.Errorf("Failed: %v", startErr)
+					return "", fmt.Errorf("failed: %v", startErr)
 				}
 				// Read stdout and stderr concurrently, stream output line by line.
 				var buf bytes.Buffer
