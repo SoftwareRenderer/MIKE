@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
-    import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, clearEditorHistory } from '$lib/storage';
+    import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, clearEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { EditorView } from 'codemirror';
     import { EditorState, Compartment, StateField, StateEffect } from '@codemirror/state';
     import { keymap } from '@codemirror/view';
@@ -91,7 +91,14 @@
     const lspMessageLog = $derived(lspMessages.join('\n'));
     let fileUri = $state('');
     let lspCompartment = $state(new Compartment());
+    let wrapCompartment = $state(new Compartment());
     let lspAvailable = $state(false);
+    let wordWrap = $state(false);
+
+    // Load saved word wrap preference
+    loadAppSetting('editor-word-wrap', false).then((saved) => {
+        wordWrap = saved;
+    });
     let lspWorkspace = $state(''); // workspace path the LSP client is connected to
 
     // Notify parent when unsaved changes state changes
@@ -387,6 +394,7 @@
             EditorState.tabSize.of(4),
             indentUnit.of('    '),
             ...(langSupport ? [langSupport] : []),
+            wrapCompartment.of(wordWrap ? EditorView.lineWrapping : []),
         ];
 
         const state = EditorState.create({ doc: initialDoc, extensions });
@@ -649,6 +657,18 @@
         if (active) {
             handleSave();
         }
+    }
+
+    // Handle word wrap toggle from footer
+    function handleWrapToggle(enabled: boolean) {
+        wordWrap = enabled;
+        if (view) {
+            view.dispatch({
+                effects: wrapCompartment.reconfigure(enabled ? EditorView.lineWrapping : []),
+            });
+        }
+        // Persist preference
+        saveAppSetting('editor-word-wrap', enabled).catch(() => {});
     }
 
     // Jump to targetLine when editor is ready (from diff view click)
@@ -945,6 +965,7 @@
                 {lineCount}
                 {charCount}
                 onFind={openSearchPanel}
+                onWrapToggle={handleWrapToggle}
                 lspReady={lspReady}
                 lspConnecting={lspConnecting}
                 {lspError}

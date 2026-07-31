@@ -79,7 +79,9 @@
     const lspMessageLog = $derived(lspMessages.join('\n'));
     let fileUri = $state('');
     let lspCompartment = $state(new Compartment());
+    let wrapCompartment = $state(new Compartment());
     let lspAvailable = $state(false);
+    let wordWrap = $state(false);
     let lspWorkspace = $state(''); // workspace path the LSP client is connected to
 
     // LSP file path: uses the real project path so the language server can find the file.
@@ -303,6 +305,7 @@
             EditorState.tabSize.of(4),
             indentUnit.of('    '),
             ...(langSupport ? [langSupport] : []),
+            wrapCompartment.of(wordWrap ? EditorView.lineWrapping : []),
         ];
 
         const state = EditorState.create({
@@ -746,6 +749,16 @@
         }
     }
 
+    // Handle word wrap toggle from footer
+    function handleWrapToggle(enabled: boolean) {
+        wordWrap = enabled;
+        if (view) {
+            view.dispatch({
+                effects: wrapCompartment.reconfigure(enabled ? EditorView.lineWrapping : []),
+            });
+        }
+    }
+
     function handleClose() {
         onClose(true);
     }
@@ -881,6 +894,7 @@
             {lspServerName}
             {lspServerVersion}
             lspMessage={lspMessageLog}
+            onWrapToggle={handleWrapToggle}
         />
     {/if}
 </div>
