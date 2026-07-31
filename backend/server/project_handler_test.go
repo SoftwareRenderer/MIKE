@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"os"
 	"testing"
 )
 
@@ -329,6 +330,17 @@ func TestProjectUpdateSandboxNetworkIsolation(t *testing.T) {
 }
 
 func TestProjectToggleSandboxWithTasks(t *testing.T) {
+	// Allow disabling sandbox in this test
+	oldVal := os.Getenv("DANGER_ZONE")
+	os.Setenv("DANGER_ZONE", "1")
+	t.Cleanup(func() {
+		if oldVal != "" {
+			os.Setenv("DANGER_ZONE", oldVal)
+		} else {
+			os.Unsetenv("DANGER_ZONE")
+		}
+	})
+
 	s := testServer(t)
 	projID := createTestProject(t, s)
 
