@@ -285,6 +285,8 @@ func shellTokens(cmd string) []string {
 }
 
 // isReadOnlyCall classifies a tool call as read-only (no state changes) or state-changing.
+// This is not used in a security context, only used to infer if the model is either reading
+// or writing in order to provide hints.
 func isReadOnlyCall(toolName, rawArgs string) bool {
 	switch toolName {
 	case "read_file":
