@@ -92,6 +92,11 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
+	// Warn on weak secrets
+	for _, name := range crypto.WarnWeakSecrets() {
+		log.Printf("⚠ WARNING: %s is less than 8 characters. Use a stronger secret for production use.", name)
+	}
+
 	// Start flight recorder for crash diagnostics (always-on, ~1% overhead)
 	tracePath := filepath.Join(effectiveDataDir, "kanban.trace")
 	traceFile, err := os.Create(tracePath)

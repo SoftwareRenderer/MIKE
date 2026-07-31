@@ -157,3 +157,19 @@ func ValidateKey() error {
 	}
 	return nil
 }
+
+const minSecretLength = 8
+
+// WarnWeakSecrets checks MIKE_ENCRYPTION_KEY and MIKE_LOGIN_PASSWORD
+// and returns a list of env var names that are set but shorter than
+// the minimum recommended length. Empty (unset) variables are ignored.
+func WarnWeakSecrets() []string {
+	var weak []string
+	for _, name := range []string{"MIKE_ENCRYPTION_KEY", "MIKE_LOGIN_PASSWORD"} {
+		v := os.Getenv(name)
+		if len(v) > 0 && len(v) < minSecretLength {
+			weak = append(weak, name)
+		}
+	}
+	return weak
+}
