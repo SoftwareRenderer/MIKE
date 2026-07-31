@@ -1176,9 +1176,11 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 	fullPath := filepath.Join(worktreePath, req.Path)
 
 	if req.Stage {
-		// Stage the file: git add <path>
+		// Stage the file: git add -- <path>
+		// Use -- to separate options from the path argument, preventing
+		// paths starting with '-' (e.g. "-f") from being interpreted as flags.
 		// For deleted files, git add records the deletion.
-		cmd := exec.Command("git", "-C", worktreePath, "add", req.Path)
+		cmd := exec.Command("git", "-C", worktreePath, "add", "--", req.Path)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			log.Printf("git add failed: %v: %s", err, out)
 			httputil.JSONError(w, http.StatusInternalServerError, "git add failed")
@@ -1236,7 +1238,7 @@ func (h *GitHandler) HandleProjectStageFile(w http.ResponseWriter, r *http.Reque
 		defer mu.Unlock()
 	}
 	if req.Stage {
-		cmd := exec.Command("git", "-C", project.Path, "add", req.Path)
+		cmd := exec.Command("git", "-C", project.Path, "add", "--", req.Path)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			log.Printf("git add failed: %v: %s", err, out)
 			httputil.JSONError(w, http.StatusInternalServerError, "git add failed")

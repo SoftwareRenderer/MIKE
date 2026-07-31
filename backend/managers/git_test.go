@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kanban/backend/config"
@@ -14,7 +15,7 @@ import (
 	"kanban/backend/types"
 )
 
-// --- Test helpers ---
+// --- Test helpers (shared) ---
 
 // mustRun executes a command in dir, failing the test on error.
 func mustRun(t *testing.T, dir, cmd string, args ...string) {
@@ -26,7 +27,8 @@ func mustRun(t *testing.T, dir, cmd string, args ...string) {
 	}
 }
 
-// initGitRepo creates a git repo with one committed file.
+// initGitRepo creates a git repo at path with one committed file.
+// Used by tests that need git history (log, diff, etc.).
 func initGitRepo(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(path, "README.md"), []byte("# Test\n"), 0o644); err != nil {
@@ -39,15 +41,68 @@ func initGitRepo(t *testing.T, path string) {
 	mustRun(t, path, "git", "commit", "-m", "Initial commit")
 }
 
+// initGitRepoTemp creates a temp directory, initializes a bare git repo there
+// (no commits, no user config), and returns the repo path. Used by tests that
+// only need a git working tree for staging.
+func initGitRepoTemp(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "init", dir).CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v: %s", err, out)
+	}
+	exec.Command("git", "-C", dir, "symbolic-ref", "HEAD", "refs/heads/main").Run()
+	return dir
+}
+
+// createFile creates a file with the given name and content inside repoPath.
+func createFile(t *testing.T, repoPath, filename, content string) {
+	t.Helper()
+	fullPath := filepath.Join(repoPath, filename)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("mkdir for %s: %v", filename, err)
+	}
+	if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write file %s: %v", filename, err)
+	}
+}
+
+// stagedFiles returns the names of files staged in the index.
+func stagedFiles(t *testing.T, repoPath string) []string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repoPath, "diff", "--cached", "--name-only").Output()
+	if err != nil {
+		t.Fatalf("git diff --cached: %v: %s", err, out)
+	}
+	var files []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files
+}
+
 // createWorktreeAt creates a git worktree at worktreePath with the given branch.
 func createWorktreeAt(t *testing.T, projectPath, worktreePath, branch string) {
 	t.Helper()
 	mustRun(t, projectPath, "git", "worktree", "add", "-B", branch, worktreePath)
 }
 
+// gitTestStore creates a temp store and registers cleanup.
+func gitTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	s, err := store.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
 // newTestGitHandler creates a GitHandler backed by a temporary store, config, and
-// worktree manager. Returns the handler, store, worktree manager, and the worktrees
-// directory path.
+// worktree manager with config values set so ConfigStore.GetConfig() succeeds.
 func newTestGitHandler(t *testing.T) (*GitHandler, *store.Store, *git.WorktreeManager, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -63,7 +118,6 @@ func newTestGitHandler(t *testing.T) (*GitHandler, *store.Store, *git.WorktreeMa
 	}
 	t.Cleanup(func() { s.Close() })
 
-	// Set required config values so that ConfigStore.GetConfig() succeeds.
 	s.SetConfigValue("workspace_dir", worktreesDir)
 	s.SetConfigValue("providers", "[]")
 	s.SetConfigValue("default_provider", "test-provider")
@@ -86,7 +140,7 @@ func newTestGitMux(h *GitHandler) *http.ServeMux {
 	return mux
 }
 
-// doRequest sends a GET request through the mux and returns the recorded response.
+// doRequest sends a request through the mux and returns the recorded response.
 func doRequest(t *testing.T, mux *http.ServeMux, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
@@ -95,12 +149,37 @@ func doRequest(t *testing.T, mux *http.ServeMux, method, path string) *httptest.
 	return rr
 }
 
+// newStageRequest builds an HTTP POST request with a JSON body for staging.
+func newStageRequest(t *testing.T, target, path string, stage bool) *http.Request {
+	t.Helper()
+	stageStr := "true"
+	if !stage {
+		stageStr = "false"
+	}
+	body := strings.NewReader(`{"path": "` + path + `", "stage": ` + stageStr + `}`)
+	req := httptest.NewRequest("POST", target, body)
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+// setupHandleLogProject creates a project with a git repo and returns (handler, mux).
+func setupHandleLogProject(t *testing.T) (*GitHandler, *http.ServeMux) {
+	t.Helper()
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "log-char-proj", Name: "log-char-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+	return h, newTestGitMux(h)
+}
+
 // --- HandleLog tests ---
 
 func TestHandleLog_BranchValidation_DashPrefix(t *testing.T) {
 	h, s, _, _ := newTestGitHandler(t)
 
-	// Create a project with a git repo
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
 	proj := &types.Project{ID: "log-proj", Name: "log-proj", Path: projPath}
@@ -219,7 +298,6 @@ func TestHandleDiff_ValidRefs(t *testing.T) {
 func TestHandleTaskLog_BranchValidation_DashPrefix(t *testing.T) {
 	h, s, wm, worktreesDir := newTestGitHandler(t)
 
-	// Create a project git repo with a commit
 	projPath := t.TempDir()
 	initGitRepo(t, projPath)
 	proj := &types.Project{ID: "tasklog-proj", Name: "tasklog-proj", Path: projPath}
@@ -227,7 +305,6 @@ func TestHandleTaskLog_BranchValidation_DashPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a task
 	task := &types.Task{
 		ID:        "tasklog-task",
 		ProjectID: proj.ID,
@@ -239,12 +316,11 @@ func TestHandleTaskLog_BranchValidation_DashPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create the worktree at the expected path so WorktreePath resolves.
 	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
 	createWorktreeAt(t, projPath, wtPath, "main")
 
 	mux := newTestGitMux(h)
-	_ = wm // worktree manager is non-nil via handler
+	_ = wm
 
 	// Dash-prefixed branch → 400
 	rr := doRequest(t, mux, "GET", "/api/projects/tasklog-proj/tasks/tasklog-task/git/log?branch=-foo")
@@ -372,7 +448,6 @@ func TestHandleTaskDiff_ValidRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create the worktree at the expected path so git commands inside the worktree succeed.
 	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
 	createWorktreeAt(t, projPath, wtPath, "main")
 
@@ -391,19 +466,6 @@ func TestHandleTaskDiff_ValidRefs(t *testing.T) {
 // -, _, ., /, +) are rejected with 400 Bad Request.
 
 var invalidBranchChars = []string{"~", "^", ":", "?", "*", "[", "\\", " ", "feat..branch"}
-
-// setupHandleLogProject creates a project with a git repo and returns (handler, mux).
-func setupHandleLogProject(t *testing.T) (*GitHandler, *http.ServeMux) {
-	t.Helper()
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "log-char-proj", Name: "log-char-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-	return h, newTestGitMux(h)
-}
 
 func TestHandleLog_InvalidCharacters(t *testing.T) {
 	_, mux := setupHandleLogProject(t)
@@ -493,5 +555,147 @@ func TestHandleTaskDiff_InvalidCharacters(t *testing.T) {
 				t.Fatalf("expected 400 for invalid head char %q, got %d: %s", ch, rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+// --- Dash-prefixed path staging tests ---
+// These tests verify that file paths starting with '-' are safely staged
+// (treated as filenames, not git flags) thanks to the '--' separator
+// before the path argument in `git add`.
+
+// TestHandleProjectStageFile_PathStartingWithDash verifies that a path
+// starting with '-' is safely staged (treated as a filename, not a git flag)
+// thanks to the '--' separator before the path argument in `git add`.
+//
+// Without the '--', `git add -dash-file.txt` would be interpreted as
+// `git add -d -a -s -h ...` (short options) and fail with an "unknown switch"
+// error, leaving the file unstaged.
+func TestHandleProjectStageFile_PathStartingWithDash(t *testing.T) {
+	repoPath := initGitRepoTemp(t)
+	s := gitTestStore(t)
+
+	proj := &types.Project{ID: "test-proj", Name: "test", Path: repoPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	h := &GitHandler{store: s}
+
+	filename := "-dash-file.txt"
+	createFile(t, repoPath, filename, "content\n")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/git/stage", h.HandleProjectStageFile)
+
+	req := newStageRequest(t, "/api/projects/test-proj/git/stage", filename, true)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// The file must actually be in the staged index.
+	files := stagedFiles(t, repoPath)
+	for _, f := range files {
+		if f == filename {
+			return
+		}
+	}
+	t.Fatalf("expected %q to be staged, got: %v", filename, files)
+}
+
+// TestHandleStageFile_PathStartingWithDash verifies the same '--' separator
+// protection for the task-level staging handler, which operates against a
+// git worktree rather than the project repo.
+func TestHandleStageFile_PathStartingWithDash(t *testing.T) {
+	worktreesDir := t.TempDir()
+	t.Setenv("MIKE_WORKTREES_DIR", worktreesDir)
+
+	repoPath := initGitRepoTemp(t)
+	s := gitTestStore(t)
+
+	projID := "test-proj"
+	taskID := "test-task"
+	proj := &types.Project{ID: projID, Name: "test", Path: repoPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Create the task. Status must not be "backlog" or "done".
+	task := &types.Task{ID: taskID, ProjectID: projID, Title: "test", Status: "in_progress"}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	cfgStore := config.NewConfigStore(s, filepath.Join(t.TempDir(), "test.db"), "test")
+	wm := git.NewWorktreeManager(s, cfgStore)
+	h := &GitHandler{store: s, worktreeMgr: wm}
+
+	// Create the worktree directory (mirrors what WorktreePath computes).
+	worktreePath := filepath.Join(worktreesDir, projID, taskID)
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	if out, err := exec.Command("git", "init", worktreePath).CombinedOutput(); err != nil {
+		t.Fatalf("git init worktree: %v: %s", err, out)
+	}
+
+	filename := "-dash-file.txt"
+	createFile(t, worktreePath, filename, "content\n")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/diff/stage", h.HandleStageFile)
+
+	req := newStageRequest(t, "/api/projects/test-proj/tasks/test-task/diff/stage", filename, true)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	files := stagedFiles(t, worktreePath)
+	for _, f := range files {
+		if f == filename {
+			return
+		}
+	}
+	t.Fatalf("expected %q to be staged, got: %v", filename, files)
+}
+
+// TestHandleProjectStageFile_DashFPathNotForceAdd verifies that a path of
+// exactly "-f" is treated as a filename (via '--'), not as the --force flag.
+// Since no file named "-f" exists, git add -- -f fails (500) rather than
+// silently force-adding unrelated tracked files.
+func TestHandleProjectStageFile_DashFPathNotForceAdd(t *testing.T) {
+	repoPath := initGitRepoTemp(t)
+	s := gitTestStore(t)
+
+	proj := &types.Project{ID: "test-proj", Name: "test", Path: repoPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Create a tracked file so there is content, but do NOT create a file named "-f".
+	createFile(t, repoPath, "real-file.txt", "tracked\n")
+	if out, err := exec.Command("git", "-C", repoPath, "add", "--", "real-file.txt").CombinedOutput(); err != nil {
+		t.Fatalf("initial git add: %v: %s", err, out)
+	}
+
+	h := &GitHandler{store: s}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/git/stage", h.HandleProjectStageFile)
+
+	// With "--" before the path, "-f" is treated as a filename, not --force.
+	req := newStageRequest(t, "/api/projects/test-proj/git/stage", "-f", true)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	// git add -- -f fails because no file named "-f" exists, so we expect 500.
+	// Critically, this is NOT 200 (which would indicate -f was treated as --force).
+	if rec.Code == http.StatusOK {
+		t.Fatalf("path '-f' should be treated as a filename and fail, not as --force (got 200)")
 	}
 }
