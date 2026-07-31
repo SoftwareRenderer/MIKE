@@ -109,6 +109,11 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if memoryLimit == 0 {
 		memoryLimit = 1024 // default 1 GB
 	}
+	// Block creating a project with sandbox disabled unless DANGER_ZONE=1
+	if !req.SandboxEnabled && os.Getenv("DANGER_ZONE") != "1" {
+		httputil.JSONError(w, http.StatusForbidden, "cannot create project with sandbox disabled — set DANGER_ZONE=1 to allow")
+		return
+	}
 	// When sandbox is enabled, network isolation must be explicitly specified
 	if req.SandboxEnabled && req.SandboxNetworkIsolation == nil {
 		httputil.JSONError(w, http.StatusBadRequest, "sandbox_network_isolation is required when sandbox_enabled is true")
@@ -363,6 +368,11 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if req.SandboxEnabled != nil {
+			// Block disabling sandbox unless DANGER_ZONE=1
+			if !*req.SandboxEnabled && os.Getenv("DANGER_ZONE") != "1" {
+				httputil.JSONError(w, http.StatusForbidden, "cannot disable sandbox isolation — set DANGER_ZONE=1 to allow")
+				return
+			}
 			if updateErr := h.store.UpdateProjectSandboxEnabled(id, *req.SandboxEnabled); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox setting")
 				return

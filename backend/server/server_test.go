@@ -64,6 +64,9 @@ func testServer(t *testing.T) *Server {
 	// parallel sandbox package tests (they manage their own cleanup via TestMain).
 	os.Setenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP", "1")
 
+	// Allow sandbox to be disabled in tests (individual tests can override).
+	os.Setenv("DANGER_ZONE", "1")
+
 	// Set path to sandbox-bridge binary so tests can create sandbox containers.
 	// Without this, GetAgentBinaryPath() searches relative to the test executable
 	// (in /tmp/go-build/...) and never finds it.
@@ -1218,6 +1221,167 @@ func TestDoneTaskDiffReturnsCommittedDiff(t *testing.T) {
 	}
 	if !strings.Contains(diff, "committed content") {
 		t.Fatalf("diff does not contain committed content:\n%s", diff)
+	}
+}
+
+// TestSandboxDisableBlockedWithoutDangerZone verifies that disabling sandbox
+// returns 403 Forbidden when DANGER_ZONE is not set to "1".
+func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
+	s := testServer(t)
+
+	// Ensure DANGER_ZONE is not set
+	oldVal := os.Getenv("DANGER_ZONE")
+	os.Unsetenv("DANGER_ZONE")
+	t.Cleanup(func() {
+		if oldVal != "" {
+			os.Setenv("DANGER_ZONE", oldVal)
+		} else {
+			os.Unsetenv("DANGER_ZONE")
+		}
+	})
+
+	// Create a project with sandbox enabled
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	netIso := true
+	proj := map[string]any{
+		"name":                       "sandbox-test-proj",
+		"path":                       dir,
+		"sandbox_enabled":            true,
+		"sandbox_network_isolation":  netIso,
+	}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	projectID := result["id"].(string)
+
+	// Try to disable sandbox — should be blocked
+	update := map[string]any{
+		"sandbox_enabled": false,
+	}
+	req = testRequest("PUT", "/api/projects/"+projectID, update)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr = testResponse(t, s, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var errResp map[string]any
+	json.NewDecoder(rr.Body).Decode(&errResp)
+	errMsg, _ := errResp["error"].(string)
+	if !strings.Contains(errMsg, "DANGER_ZONE") {
+		t.Fatalf("expected error mentioning DANGER_ZONE, got: %s", errMsg)
+	}
+}
+
+// TestSandboxDisableAllowedWithDangerZone verifies that disabling sandbox
+// succeeds when DANGER_ZONE is set to "1".
+func TestSandboxDisableAllowedWithDangerZone(t *testing.T) {
+	s := testServer(t)
+
+	// Set DANGER_ZONE=1
+	oldVal := os.Getenv("DANGER_ZONE")
+	os.Setenv("DANGER_ZONE", "1")
+	t.Cleanup(func() {
+		if oldVal != "" {
+			os.Setenv("DANGER_ZONE", oldVal)
+		} else {
+			os.Unsetenv("DANGER_ZONE")
+		}
+	})
+
+	// Create a project with sandbox enabled
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	netIso := true
+	proj := map[string]any{
+		"name":                       "sandbox-test-proj-2",
+		"path":                       dir,
+		"sandbox_enabled":            true,
+		"sandbox_network_isolation":  netIso,
+	}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	projectID := result["id"].(string)
+
+	// Disable sandbox — should succeed with DANGER_ZONE=1
+	update := map[string]any{
+		"sandbox_enabled": false,
+	}
+	req = testRequest("PUT", "/api/projects/"+projectID, update)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr = testResponse(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result = mustJSON[map[string]any](t, rr.Body)
+	sandboxEnabled, _ := result["sandbox_enabled"].(bool)
+	if sandboxEnabled {
+		t.Fatal("expected sandbox_enabled to be false")
+	}
+}
+
+// TestSandboxCreateDisabledBlockedWithoutDangerZone verifies that creating a
+// project with sandbox disabled returns 403 when DANGER_ZONE is not set.
+func TestSandboxCreateDisabledBlockedWithoutDangerZone(t *testing.T) {
+	s := testServer(t)
+
+	// Ensure DANGER_ZONE is not set
+	oldVal := os.Getenv("DANGER_ZONE")
+	os.Unsetenv("DANGER_ZONE")
+	t.Cleanup(func() {
+		if oldVal != "" {
+			os.Setenv("DANGER_ZONE", oldVal)
+		} else {
+			os.Unsetenv("DANGER_ZONE")
+		}
+	})
+
+	// Try to create a project with sandbox disabled — should be blocked
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{
+		"name":            "sandbox-test-proj-3",
+		"path":            dir,
+		"sandbox_enabled": false,
+	}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var errResp map[string]any
+	json.NewDecoder(rr.Body).Decode(&errResp)
+	errMsg, _ := errResp["error"].(string)
+	if !strings.Contains(errMsg, "DANGER_ZONE") {
+		t.Fatalf("expected error mentioning DANGER_ZONE, got: %s", errMsg)
+	}
+
+	// Creating with sandbox enabled should always work
+	netIso := true
+	proj = map[string]any{
+		"name":                       "sandbox-test-proj-4",
+		"path":                       dir,
+		"sandbox_enabled":            true,
+		"sandbox_network_isolation":  netIso,
+	}
+	req = testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr = testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project with sandbox enabled: expected 201, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
