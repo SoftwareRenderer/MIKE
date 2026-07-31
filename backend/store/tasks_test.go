@@ -530,3 +530,72 @@ func TestSetTaskBranchIfEmpty_Concurrent(t *testing.T) {
 		t.Fatalf("unexpected branch format: %q", got.Branch)
 	}
 }
+
+func TestClearTaskBranch(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := newTask("task-1", "proj-1")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Set a branch
+	set, err := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-1")
+	if err != nil || !set {
+		t.Fatalf("set branch: set=%v, err=%v", set, err)
+	}
+
+	// Clear it
+	err = s.ClearTaskBranch("task-1", "proj-1")
+	if err != nil {
+		t.Fatalf("clear branch: %v", err)
+	}
+
+	// Verify branch is empty
+	got, _ := s.GetTask("proj-1", "task-1")
+	if got.Branch != "" {
+		t.Fatalf("expected empty branch after clear, got %q", got.Branch)
+	}
+
+	// SetTaskBranchIfEmpty should work again (branch is empty)
+	set, err = s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-2")
+	if err != nil || !set {
+		t.Fatalf("set branch after clear: set=%v, err=%v", set, err)
+	}
+	got, _ = s.GetTask("proj-1", "task-1")
+	if got.Branch != "task/branch-2" {
+		t.Fatalf("expected branch 'task/branch-2', got %q", got.Branch)
+	}
+}
+
+func TestClearTaskBranch_WrongProject(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := newTask("task-1", "proj-1")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	set, err := s.SetTaskBranchIfEmpty("task-1", "proj-1", "task/branch-1")
+	if err != nil || !set {
+		t.Fatalf("set branch: set=%v, err=%v", set, err)
+	}
+
+	// Clear with wrong project — should not affect the branch
+	err = s.ClearTaskBranch("task-1", "wrong-proj")
+	if err != nil {
+		t.Fatalf("clear branch with wrong project: %v", err)
+	}
+	got, _ := s.GetTask("proj-1", "task-1")
+	if got.Branch != "task/branch-1" {
+		t.Fatalf("expected branch unchanged, got %q", got.Branch)
+	}
+}
