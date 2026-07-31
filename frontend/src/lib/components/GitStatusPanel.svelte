@@ -667,6 +667,7 @@
                         onfocus={handleFromInputFocus}
                         aria-label="From commit"
                         aria-expanded={showFromDropdown}
+                        aria-controls="compare-from-listbox"
                         aria-autocomplete="list"
                         role="combobox"
                         autocomplete="off"
@@ -683,7 +684,7 @@
                     </button>
                 </div>
                 {#if showFromDropdown}
-                    <div class="commit-dropdown-list" role="listbox" aria-labelledby="compare-from-input">
+                    <div id="compare-from-listbox" class="commit-dropdown-list" role="listbox" aria-labelledby="compare-from-input">
                         {#each filteredFromCommits as commit, i}
                             <button
                                 id={`compare-from-item-${i}`}
@@ -735,6 +736,7 @@
                         onfocus={handleToInputFocus}
                         aria-label="To commit"
                         aria-expanded={showToDropdown}
+                        aria-controls="compare-to-listbox"
                         aria-autocomplete="list"
                         role="combobox"
                         autocomplete="off"
@@ -751,7 +753,7 @@
                     </button>
                 </div>
                 {#if showToDropdown}
-                    <div class="commit-dropdown-list" role="listbox" aria-labelledby="compare-to-input">
+                    <div id="compare-to-listbox" class="commit-dropdown-list" role="listbox" aria-labelledby="compare-to-input">
                         {#each filteredToCommits as commit, i}
                             <button
                                 id={`compare-to-item-${i}`}

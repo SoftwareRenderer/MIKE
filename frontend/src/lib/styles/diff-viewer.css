@@ -281,50 +281,50 @@
 }
 
 /* Lezer token highlighting — uses CSS vars from app.css (--cm-*) */
-:global(.diff-text .hl-keyword) {
+.diff-text .hl-keyword {
     color: var(--cm-keyword);
 }
-:global(.diff-text .hl-constantkeyword) {
+.diff-text .hl-constantkeyword {
     color: var(--cm-keyword-const);
 }
-:global(.diff-text .hl-definitionvariable),
-:global(.diff-text .hl-variable),
-:global(.diff-text .hl-classname),
-:global(.diff-text .hl-typename) {
+.diff-text .hl-definitionvariable,
+.diff-text .hl-variable,
+.diff-text .hl-classname,
+.diff-text .hl-typename {
     color: var(--cm-class);
 }
-:global(.diff-text .hl-function) {
+.diff-text .hl-function {
     color: var(--cm-function);
 }
-:global(.diff-text .hl-property),
-:global(.diff-text .hl-attribute) {
+.diff-text .hl-property,
+.diff-text .hl-attribute {
     color: var(--cm-attr-name);
 }
-:global(.diff-text .hl-string),
-:global(.diff-text .hl-attributevalue),
-:global(.diff-text .hl-regexp) {
+.diff-text .hl-string,
+.diff-text .hl-attributevalue,
+.diff-text .hl-regexp {
     color: var(--cm-string);
 }
-:global(.diff-text .hl-number) {
+.diff-text .hl-number {
     color: var(--cm-number);
 }
-:global(.diff-text .hl-comment) {
+.diff-text .hl-comment {
     color: var(--cm-comment);
     font-style: italic;
 }
-:global(.diff-text .hl-operator) {
+.diff-text .hl-operator {
     color: var(--cm-operator);
 }
-:global(.diff-text .hl-punctuation) {
+.diff-text .hl-punctuation {
     color: var(--cm-punctuation);
 }
-:global(.diff-text .hl-tagname) {
+.diff-text .hl-tagname {
     color: var(--cm-tag);
 }
-:global(.diff-text .hl-meta) {
+.diff-text .hl-meta {
     color: var(--cm-variable);
 }
-:global(.diff-text .hl-invalid) {
+.diff-text .hl-invalid {
     color: var(--cm-keyword);
     text-decoration: underline wavy var(--cm-keyword);
 }
