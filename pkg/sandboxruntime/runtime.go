@@ -15,8 +15,6 @@ import (
 // imageRefPattern matches valid OCI/Docker image references.
 // Requires the first character be alphanumeric (not a dash) and all
 // subsequent characters be alphanumeric or one of / . _ - : @.
-// This prevents argument injection via podman flags (e.g. "-v /etc:/host")
-// or shell metacharacters (e.g. "$(rm -rf /)", semicolons, pipes, etc.).
 var imageRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9/._:@-]*$`)
 
 // ValidateImageRef rejects image references that are invalid OCI image characters.
