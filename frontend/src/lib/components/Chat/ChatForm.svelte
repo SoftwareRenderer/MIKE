@@ -403,6 +403,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
+        flex-wrap: wrap;
     }
     .btn-plan-toggle {
         display: flex;
@@ -561,11 +562,6 @@
     @media (max-width: 768px) {
         .chat-form {
             padding: 8px;
-        }
-        .model-bar {
-            overflow-x: auto;
-            flex-wrap: nowrap;
-            -webkit-overflow-scrolling: touch;
         }
         .chat-form-inner {
             align-items: center;
