@@ -135,6 +135,28 @@ func (s *Store) SetTaskBranchIfEmpty(taskID, projectID, branch string) (bool, er
 	return rows > 0, nil
 }
 
+// ClearTaskBranch clears the branch field of a task. Used to roll back an
+// orphaned branch name when worktree creation fails after SetTaskBranchIfEmpty.
+func (s *Store) ClearTaskBranch(taskID, projectID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`UPDATE tasks SET branch = '', updated_at = ? WHERE id = ? AND project_id = ?`,
+		now.Format(time.RFC3339), taskID, projectID)
+	return err
+}
+
+// SetTaskBranch unconditionally sets the branch of a task. Used by
+// recoverMissingBranch to update a stale branch reference.
+func (s *Store) SetTaskBranch(taskID, projectID, branch string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`UPDATE tasks SET branch = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
+		branch, now.Format(time.RFC3339), taskID, projectID)
+	return err
+}
+
 // SetTaskMergeConflict sets or clears the merge conflict flag on a task.
 func (s *Store) SetTaskMergeConflict(taskID, projectID string, hasConflict bool) error {
 	s.mu.Lock()
