@@ -581,12 +581,21 @@
     }
 
     let diffLoading = $state(false);
+    // Set when loadDiff() is requested while another load is in flight. The current
+    // load finishes, then a reload runs so a thread switch during a slow diff load is
+    // not dropped (otherwise the panel stays stale until a manual refresh).
+    let diffReloadQueued = $state(false);
 
     /** Reload the full diff. Aborts in-flight delta fetches and resets overlay state.
      * Used after thread switch or task change to ensure a clean slate.
      * For done tasks, uses branch_tip to show the diff of committed changes. */
     async function loadDiff() {
-        if (!task || task.status === 'backlog' || diffLoading) return;
+        if (!task || task.status === 'backlog') return;
+        if (diffLoading) {
+            // A load is in progress; a newer thread switch/task change supersedes it.
+            diffReloadQueued = true;
+            return;
+        }
         // Reset overlay and comparison state
         checkpointDiffOpen = false;
         checkpointDiffHash = '';
@@ -595,6 +604,7 @@
         diffTo = 'working';
         clearHighlightCache();
         diffLoading = true;
+        diffReloadQueued = false;
         // Preload the diff viewer chunk while fetching diff data
         loadDiffViewer();
         try {
@@ -611,6 +621,12 @@
             const stat = diffStatsMap[task.id];
             if (stat) {
                 diffCache.applyStagedPaths(stat.staged_paths);
+            }
+            // If a newer request arrived during the load, run it now so the panel
+            // reflects the latest thread/task instead of staying stale.
+            if (diffReloadQueued) {
+                diffReloadQueued = false;
+                void loadDiff();
             }
         }
     }
@@ -782,7 +798,12 @@
                                 if (!diffLoading) diffCache.updateDiff(data);
                             }}
                             onMoveTask={handleMove}
-                            onThreadSwitch={() => loadDiff()}
+                            onThreadSwitch={() => {
+                                // Reset the diff cache synchronously so stale rows from
+                                // the previous thread can't leak into the new thread's view
+                                diffCache.reset();
+                                loadDiff();
+                            }}
                             onViewChanges={handleViewChanges}
                             onInvalidateDiff={() => {
                                 // Clear cache so next WS event triggers a full reload.
@@ -845,7 +866,7 @@
                             {/if}
                             {#if DiffViewerComponent}
                                 {@const DiffViewer = DiffViewerComponent}
-                                <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? 'Merged' : hasMergedSubtasks ? 'Merged from Subtasks' : 'Committed changes'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                                <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? 'Merged' : hasMergedSubtasks ? 'Merged from Subtasks' : 'Committed in task'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
                             {:else}
                                 <div class="diff-viewer-loading">Loading diff viewer...</div>
                             {/if}

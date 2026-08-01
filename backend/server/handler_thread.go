@@ -155,6 +155,17 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Switching to the already-active thread (page-load with thread URL): the worktree
+	// already holds this thread's content, so skip checkout/stash/restore to avoid
+	// wiping uncommitted work. Just refresh the diff.
+	if task.CurrentThreadID == req.ThreadID {
+		s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
+		s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": req.ThreadID, "task_id": taskID}})
+		s.broadcastTaskDiff(taskID)
+		JSONResponse(w, http.StatusOK, thread)
+		return
+	}
+
 	// Stop executor if running
 	if task.ExecutionState == "running" {
 		_ = s.executor.StopTask(taskID)
@@ -190,29 +201,29 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		// Checkout target thread's branch (or task's original branch if none)
+		// Checkout target thread's branch (or task's original branch if none).
+		// A titled task's Main branch is slug-named, not task/<taskID>; resolve it so checkout succeeds.
 		targetBranch := thread.GitBranch
 		if targetBranch == "" {
-			targetBranch = fmt.Sprintf("task/%s", taskID)
+			targetBranch = s.executor.WorktreeMgr().ResolveMainBranch(projectID, taskID, task.Title, fmt.Sprintf("task/%s", taskID))
 		}
-		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", targetBranch)
 		task.Branch = targetBranch
-		// Restore worktree from target thread's saved stash hash.
+		// With a saved stash, re-apply it on the branch. Otherwise force-checkout the
+		// branch HEAD, which already holds the thread's committed work (do NOT reset to
+		// baseRef/checkpoint — that would discard committed fork work).
 		if thread.WorktreeStashHash != "" {
+			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", targetBranch)
 			s.executor.WorktreeMgr().ResetWorktreeTo(taskID, thread.WorktreeStashHash)
-		} else if thread.CheckpointCommitHash != "" {
-			// Fork thread with no stash yet: its clean-slate state is the checkpoint
-			// commit where its branch was created. Resetting to baseRef instead would
-			// discard the fork's file changes (e.g. the created file disappears).
-			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "reset", "--hard", thread.CheckpointCommitHash)
-			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "clean", "-fd")
 		} else {
-			baseRef := task.BaseRef
-			if baseRef == "" {
-				baseRef = "master"
-			}
-			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "reset", "--hard", baseRef)
+			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", "-f", targetBranch)
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "clean", "-fd")
+			// Re-apply the thread's last checkpoint stash if it sits on top of branch HEAD
+			// (uncommitted work not yet on the branch).
+			if last := s.getLastCommitHashInThread(req.ThreadID); last != "" {
+				if s.executor.WorktreeMgr().IsAncestor(taskID, "HEAD", last) {
+					s.resetWorktreeToCommit(taskID, last)
+				}
+			}
 		}
 	}
 	// Set new active thread
