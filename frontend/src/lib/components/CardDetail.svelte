@@ -367,6 +367,10 @@
     // Subtask hierarchy (extracted composable)
     let hierarchy = useSubtaskHierarchy(() => allTasks, expandedTasksContext, () => task.parent_task_id);
 
+    // True when this task actually has child subtasks (only then is the
+    // committed-files section legitimately "Merged from Subtasks").
+    let hasMergedSubtasks = $derived((hierarchy.childrenMap.get(task.id)?.length ?? 0) > 0);
+
     // Multi-select actions (wires up floating bar events)
     let multiSelectActions = useMultiSelectActions({
         async onDelete(taskIds, titles) {
@@ -841,7 +845,7 @@
                             {/if}
                             {#if DiffViewerComponent}
                                 {@const DiffViewer = DiffViewerComponent}
-                                <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? 'Merged' : 'Merged from Subtasks'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                                <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? 'Merged' : hasMergedSubtasks ? 'Merged from Subtasks' : 'Committed changes'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
                             {:else}
                                 <div class="diff-viewer-loading">Loading diff viewer...</div>
                             {/if}

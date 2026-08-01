@@ -96,13 +96,21 @@ export function getCheckpointThreads(
     const entryTime = entry.createdAt;
     if (!entryTime) return null;
 
+    // Compare as Date values, not strings: checkpoint_message_time is stored at
+    // second precision (RFC3339) while entry.createdAt is nanosecond precision,
+    // so a lexicographic compare misjudges equal instants ("...36Z" > "...36.6Z").
+    const threadRelevantAtEntry = (ct: string | undefined): boolean => {
+        if (!ct) return true; // root thread (Main)
+        if (ct.startsWith('0001-') || ct.startsWith('1970-')) return true; // zero/epoch
+        return new Date(ct).getTime() <= new Date(entryTime).getTime();
+    };
+
     const threadMap = new Map(threads.map(t => [t.id, t]));
     let current: Thread = activeThread;
     let checkpointThread: Thread | null = null;
 
     while (true) {
-        const ct = current.checkpoint_message_time;
-        if (!ct || ct.startsWith('0001-') || ct.startsWith('1970-') || ct <= entryTime) {
+        if (threadRelevantAtEntry(current.checkpoint_message_time)) {
             checkpointThread = current;
             break;
         }
@@ -114,8 +122,7 @@ export function getCheckpointThreads(
     if (requireOptions) {
         let relevantCount = 0;
         for (const t of threads) {
-            const ct = t.checkpoint_message_time;
-            if (!ct || ct.startsWith('0001-') || ct.startsWith('1970-') || ct <= entryTime) {
+            if (threadRelevantAtEntry(t.checkpoint_message_time)) {
                 relevantCount++;
             }
         }

@@ -284,7 +284,7 @@ func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *type
 		// Reset file state to match the (possibly new) active thread's conversation.
 		// Skip for summary deletion — summary doesn't change files.
 		if msgRole != "summarization" {
-			lastCommit := s.getLastCommitHashInThread(task.CurrentThreadID)
+			lastCommit := s.resolveRollbackCommit(task, task.CurrentThreadID)
 			s.resetWorktreeToCommit(taskID, lastCommit)
 		}
 		s.broadcastTaskDiff(taskID)
@@ -295,11 +295,39 @@ func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *type
 		// No fork threads affected, but messages were deleted.
 		// Reset file state to match remaining conversation. Skip for summary deletion.
 		if msgRole != "summarization" {
-			lastCommit := s.getLastCommitHashInThread(threadID)
+			lastCommit := s.resolveRollbackCommit(task, threadID)
 			s.resetWorktreeToCommit(taskID, lastCommit)
 		}
 		s.broadcastTaskDiff(taskID)
 	}
+}
+
+// resolveRollbackCommit returns the commit the worktree should be reset to after
+// messages are deleted from a thread, so the file state reflects the remaining
+// conversation (discarding changes made by the deleted messages).
+//
+// Resolution order:
+//  1. The last commit hash among the remaining messages — the state captured at
+//     the end of the last surviving turn.
+//  2. The thread's checkpoint_commit_hash — the fork's clean-slate commit. Required
+//     for fork threads, whose copied messages carry no git_commit_hash (see
+//     CopyMessagesToThread), so step 1 finds nothing after deleting everything past
+//     the checkpoint.
+//  3. The task's base_commit — the state before any conversation changes. Required
+//     when the deleted portion contained the only checkpoint(s) (e.g. deleting the
+//     first real request), so no checkpoint remains and the conversation has no
+//     recorded state.
+func (s *Server) resolveRollbackCommit(task *types.Task, threadID string) string {
+	if c := s.getLastCommitHashInThread(threadID); c != "" {
+		return c
+	}
+	if th, err := s.store.GetThread(threadID); err == nil && th != nil && th.CheckpointCommitHash != "" {
+		return th.CheckpointCommitHash
+	}
+	if task != nil && task.BaseCommit != "" {
+		return task.BaseCommit
+	}
+	return ""
 }
 
 // redactWriteFileContent redacts the content field from write_file tool calls.

@@ -18,12 +18,16 @@
 
     let { timestamp, threadId, threads, activeThreadId, onSwitch, isSwitching = false, isPending = false, commitLabel, commitHash, checkpointIndex, onViewChanges }: Props = $props();
 
-    // Filter threads to only show those relevant at this checkpoint
+    // Filter threads to only show those relevant at this checkpoint.
+    // Compare as Date values (not strings): checkpoint_message_time is stored at
+    // second precision (RFC3339) while message created_at is nanosecond precision,
+    // so a lexicographic compare misjudges equal instants ("...36Z" > "...36.6Z").
     let relevantThreads = $derived(threads.filter(t => {
         const ct = t.checkpoint_message_time;
         if (!ct) return true; // root thread (Main)
         if (ct.startsWith('0001-') || ct.startsWith('1970-')) return true; // zero/epoch
-        return !timestamp || ct <= timestamp;
+        if (!timestamp) return true;
+        return new Date(ct).getTime() <= new Date(timestamp).getTime();
     }));
 </script>
 
