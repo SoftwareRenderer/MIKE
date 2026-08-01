@@ -981,7 +981,7 @@ test.describe('LSP Extension Settings', () => {
 
     // Should show Tool Calls toggle
     await expect(page.locator('text=Tool Calls')).toBeVisible();
-    await expect(page.locator('text=Enable LSP tools for agent')).toBeVisible();
+    await expect(page.locator('text=Enable LSP tool support')).toBeVisible();
 
     // Close the edit modal
     await page.locator('text=Cancel').click();

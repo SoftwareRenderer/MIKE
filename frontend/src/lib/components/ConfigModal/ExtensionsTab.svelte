@@ -773,7 +773,7 @@
                     </div>
                     <div class="config-field">
                         <span class="field-label">Tool Calls</span>
-                        <p class="field-desc">Enable LSP tools for agent: references, definition, code actions, and hover.</p>
+                        <p class="field-desc">Enable LSP tool support: references, definition, code actions, and hover.</p>
                         <ToggleSwitch
                             checked={editLspSettings.tool_calls_enabled}
                             onChange={() => editLspSettings.tool_calls_enabled = !editLspSettings.tool_calls_enabled}
@@ -844,7 +844,9 @@
                                     <div class="cap-detail-extra">
                                         {#if caps.lsp.language}
                                             <span class="cap-detail-label">Language:</span>
-                                            <span class="cap-detail-value">{caps.lsp.language}</span>
+                                            <span class="cap-detail-tags">
+                                                <span class="cap-detail-tag">{caps.lsp.language}</span>
+                                            </span>
                                         {/if}
                                         {#if caps.lsp.extensions?.length}
                                             <span class="cap-detail-label">File extensions:</span>
