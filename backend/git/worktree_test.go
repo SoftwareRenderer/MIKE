@@ -2324,3 +2324,80 @@ func TestIsMergedInto_FastForward(t *testing.T) {
 		t.Error("IsMergedInto should return true after fast-forward merge")
 	}
 }
+
+// TestGarbageCollect_KeepsTitledTaskSlugMainBranch verifies the GC keeps a titled
+// task's slug-named Main branch when a fork is the task's active branch.
+func TestGarbageCollect_KeepsTitledTaskSlugMainBranch(t *testing.T) {
+	repoDir, taskID, s, _, wm := setupTestRepo(t)
+
+	// Simulate a fork being the task's active branch: task.Branch points to the fork
+	// thread branch, and the task has a title whose slug names its Main branch.
+	task, err := s.GetTask("test-project", taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.Title = "Hey" // slugifies to "hey"
+	task.Branch = "thread/some-fork"
+	if err := s.UpdateTask(task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	// The titled task's Main branch is slug-named (task/hey-<random6>).
+	runGit(t, repoDir, "branch", "task/hey-zimxpq")
+	// An unrelated orphaned branch must still be removed.
+	runGit(t, repoDir, "branch", "task/orphan-one-branch")
+
+	_, err = wm.GarbageCollect(false)
+	if err != nil {
+		t.Fatalf("GarbageCollect: %v", err)
+	}
+
+	branches := getBranches(t, repoDir)
+	if !contains(branches, "task/hey-zimxpq") {
+		t.Error("titled task's slug Main branch should be kept by GC when a fork is active")
+	}
+	if contains(branches, "task/orphan-one-branch") {
+		t.Error("unrelated orphaned task branch should be removed by GC")
+	}
+}
+
+// TestResolveMainBranch_RecoversSlugBranch verifies ResolveMainBranch recovers a
+// titled task's slug-named Main branch when task/<taskID> is missing.
+func TestResolveMainBranch_RecoversSlugBranch(t *testing.T) {
+	repoDir, taskID, s, _, wm := setupTestRepo(t)
+
+	task, err := s.GetTask("test-project", taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.Title = "Hey" // slug "hey"
+	if err := s.UpdateTask(task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	// The real Main branch is slug-named; task/<taskID> does not exist.
+	runGit(t, repoDir, "branch", "task/hey-zimxpq")
+
+	got := wm.ResolveMainBranch("test-project", taskID, task.Title, "task/"+taskID)
+	if got != "task/hey-zimxpq" {
+		t.Fatalf("expected recovered slug branch task/hey-zimxpq, got %q", got)
+	}
+
+	// If the canonical branch exists, it takes precedence.
+	runGit(t, repoDir, "branch", "task/"+taskID)
+	got = wm.ResolveMainBranch("test-project", taskID, task.Title, "task/"+taskID)
+	if got != "task/"+taskID {
+		t.Fatalf("expected canonical task/%s when it exists, got %q", taskID, got)
+	}
+}
+
+// TestResolveMainBranch_NoSlug returns canonical when no slug matches.
+func TestResolveMainBranch_NoSlug(t *testing.T) {
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+	// No task/<taskID> branch and a title that produces no matching branch.
+	runGit(t, repoDir, "branch", "task/other-zzz")
+	got := wm.ResolveMainBranch("test-project", taskID, "No Match", "task/"+taskID)
+	if got != "task/"+taskID {
+		t.Fatalf("expected fallback task/%s, got %q", taskID, got)
+	}
+}

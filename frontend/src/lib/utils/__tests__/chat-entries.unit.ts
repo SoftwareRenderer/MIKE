@@ -242,6 +242,47 @@ describe('buildCheckpointStateMap', () => {
         expect(map.get(2)).toBeNull();
     });
 
+    it('checkpoint above a message uses the PRIOR assistant commit (state before the message)', () => {
+        // Mirror the reported bug: "add a counter to 5" follows a create-hello.cs turn.
+        // The checkpoint above the counter message must reference the create commit
+        // (state before the counter), not the counter's own commit.
+        const entries = [
+            user('u_create'),
+            assistant('a_create', [{ toolId: 't1' }], 'create-hash'),
+            assistant('a_done'),          // non-qualifying, ignored
+            user('u_counter'),
+            assistant('a_counter', [{ toolId: 't2' }], 'counter-hash'),
+        ];
+        const hashes = new Map<string, string>();
+        hashes.set('a_create', 'create-hash');
+        hashes.set('a_counter', 'counter-hash');
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), hashes);
+        expect(map.get(0)).toEqual({ isPending: false, commitHash: 'create-hash' });
+        // The checkpoint above the counter message points to the PRIOR create commit.
+        expect(map.get(3)).toEqual({ isPending: false, commitHash: 'create-hash' });
+    });
+
+    it('prefers a hashed assistant over a tool-call-only one in backward scan', () => {
+        // A "Done!" assistant with tool calls but NO commit hash sits between two hashed
+        // assistants. The checkpoint above the later message must still reference the
+        // earlier hashed assistant (so the "view changes" button has a commit), not the
+        // tool-call-only one.
+        const entries = [
+            user('u_create'),
+            assistant('a_create', [{ toolId: 't1' }], 'create-hash'),
+            assistant('a_done', [{ toolId: 't2' }]),   // tool calls, NO hash
+            user('u_counter'),
+            assistant('a_counter', [{ toolId: 't3' }], 'counter-hash'),
+        ];
+        const hashes = new Map<string, string>();
+        hashes.set('a_create', 'create-hash');
+        hashes.set('a_counter', 'counter-hash');
+        const map = buildCheckpointStateMap(entries, new Set(), new Map(), hashes);
+        expect(map.get(0)).toEqual({ isPending: false, commitHash: 'create-hash' });
+        // Backward scan skips the tool-call-only a_done and uses a_create's hash.
+        expect(map.get(3)).toEqual({ isPending: false, commitHash: 'create-hash' });
+    });
+
     it('non-qualifying forward assistant does not block next user from backward scanning', () => {
         const entries = [
             user('u1'),

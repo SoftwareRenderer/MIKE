@@ -443,6 +443,9 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	// Prune git worktree registrations and orphaned branches per project
 	for _, p := range projects {
 		wm.gitRun(p.Path, "worktree", "prune")
+		// Keep slug-named Main branches of active titled tasks: once a fork becomes the
+		// active branch, the slug branch leaves activeBranchSet and would be GC'd.
+		slugPrefixes := taskSlugPrefixSet(wm.store, p.ID)
 		// Prune orphaned task branches (task/<id> with no matching task in DB)
 		branchesOut, err := wm.gitRunOutput(p.Path, "branch", "--list", "task/*")
 		if err != nil {
@@ -454,7 +457,7 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 				continue
 			}
 			taskID := strings.TrimPrefix(branch, "task/")
-			if !activeSet[taskID] && !activeBranchSet[branch] {
+			if !activeSet[taskID] && !activeBranchSet[branch] && !slugPrefixes[taskBranchSlugPrefix(branch)] {
 				if dryRun {
 					log.Printf("[gc] would delete orphaned branch %s in project %s", branch, p.Name)
 				} else {
@@ -529,6 +532,111 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	}
 
 	return removed, nil
+}
+
+// taskBranchSlugRe matches a titled task's Main branch name: task/<slug>-<random6>.
+var taskBranchSlugRe = regexp.MustCompile(`^(task/.+)-[a-z0-9]{6}$`)
+
+// taskBranchSlugPrefix returns the slug prefix ("task/<slug>-") of a slug-named
+// task branch, or "" if the branch is not slug-named (e.g. task/<taskID>).
+func taskBranchSlugPrefix(branch string) string {
+	m := taskBranchSlugRe.FindStringSubmatch(branch)
+	if len(m) >= 2 {
+		return m[1] + "-"
+	}
+	return ""
+}
+
+// branchExistsInProject reports whether a git branch exists in a project's repo.
+func (wm *WorktreeManager) branchExistsInProject(projectID, branch string) bool {
+	_, err := wm.GitRunInProjectOutput(projectID, "rev-parse", "--verify", "--quiet", branch)
+	return err == nil
+}
+
+// ResolveMainBranch returns the branch to use for a task's Main thread. A titled
+// task's Main branch is slug-named (task/<slug>-<random6>), not task/<taskID>; if the
+// canonical branch is missing, recover the slug branch. Falls back to canonicalBranch.
+func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonicalBranch string) string {
+	if canonicalBranch == "" {
+		canonicalBranch = "task/" + taskID
+	}
+	if wm.branchExistsInProject(projectID, canonicalBranch) {
+		return canonicalBranch
+	}
+	slug := slugifyBranchTitle(title)
+	if slug == "" {
+		return canonicalBranch
+	}
+	prefix := "task/" + slug + "-"
+	out, err := wm.GitRunInProjectOutput(projectID, "branch", "--list", prefix+"*")
+	if err != nil {
+		return canonicalBranch
+	}
+	var matches []string
+	for line := range strings.SplitSeq(out, "\n") {
+		b := strings.TrimSpace(line)
+		b = strings.TrimPrefix(b, " + ")
+		b = strings.TrimPrefix(b, "+ ")
+		if b != "" && b != canonicalBranch {
+			matches = append(matches, b)
+		}
+	}
+	if len(matches) == 0 {
+		return canonicalBranch
+	}
+	// Multiple slug matches (e.g. re-created tasks): pick the most recent commit.
+	best := matches[0]
+	var bestTs int64 = -1
+	for _, b := range matches {
+		tsOut, err := wm.GitRunInProjectOutput(projectID, "log", "-1", "--format=%ct", b)
+		if err != nil {
+			continue
+		}
+		var ts int64
+		if _, err := fmt.Sscanf(strings.TrimSpace(tsOut), "%d", &ts); err == nil && ts > bestTs {
+			bestTs = ts
+			best = b
+		}
+	}
+	return best
+}
+
+// slugifyBranchTitle converts a task title into a git branch slug, mirroring the
+// executor's slugifyBranchName so the GC recognizes a titled task's Main branch.
+func slugifyBranchTitle(title string) string {
+	s := strings.ToLower(title)
+	var result []rune
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			result = append(result, r)
+		} else if len(result) > 0 && result[len(result)-1] != '-' {
+			result = append(result, '-')
+		}
+	}
+	out := strings.Trim(string(result), "-")
+	const slugMax = 50 - len("task/") // maxBranchName - len("task/")
+	if len(out) > slugMax {
+		out = out[:slugMax]
+	}
+	return out
+}
+
+// taskSlugPrefixSet returns a set of task-branch slug prefixes ("task/<slug>-")
+// for all active titled tasks in a project, so the GC can recognize and keep a
+// titled task's slug-named Main branch even when a fork is the active branch.
+func taskSlugPrefixSet(store *store.Store, projectID string) map[string]bool {
+	set := make(map[string]bool)
+	tasks, err := store.GetTasksByProject(projectID)
+	if err != nil {
+		return set
+	}
+	for i := range tasks {
+		slug := slugifyBranchTitle(tasks[i].Title)
+		if slug != "" {
+			set["task/"+slug+"-"] = true
+		}
+	}
+	return set
 }
 
 // PruneOrphanedBranches removes task/* and thread/* branches from a single project
@@ -2037,6 +2145,16 @@ func (wm *WorktreeManager) ResolveDiffBaseline(taskID, baseRef, taskBranch, fork
 		return baseRef, fmt.Errorf("git merge-base: %w", err)
 	}
 	return strings.TrimSpace(mb), nil
+}
+
+// IsAncestor reports whether `ancestor` is an ancestor of (or equal to) `descendant`.
+func (wm *WorktreeManager) IsAncestor(taskID, ancestor, descendant string) bool {
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return false
+	}
+	cmd := exec.Command("git", "-C", worktreePath, "merge-base", "--is-ancestor", ancestor, descendant)
+	return cmd.Run() == nil
 }
 
 // IsMergedInto checks if the task branch has been merged into the target branch.
