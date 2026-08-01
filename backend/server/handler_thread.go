@@ -200,6 +200,12 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		// Restore worktree from target thread's saved stash hash.
 		if thread.WorktreeStashHash != "" {
 			s.executor.WorktreeMgr().ResetWorktreeTo(taskID, thread.WorktreeStashHash)
+		} else if thread.CheckpointCommitHash != "" {
+			// Fork thread with no stash yet: its clean-slate state is the checkpoint
+			// commit where its branch was created. Resetting to baseRef instead would
+			// discard the fork's file changes (e.g. the created file disappears).
+			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "reset", "--hard", thread.CheckpointCommitHash)
+			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "clean", "-fd")
 		} else {
 			baseRef := task.BaseRef
 			if baseRef == "" {

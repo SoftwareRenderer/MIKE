@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1069,4 +1071,344 @@ func TestMessageListShortReadFileResultNotTruncated(t *testing.T) {
 	if output != shortOutput {
 		t.Fatalf("expected unchanged short output, got: %s", output)
 	}
+}
+
+// TestDeleteMessagesAfterCheckpointRollsBackFork verifies that when a user deletes
+// all messages after a checkpoint (the message just below the checkpoint line),
+// the worktree is rolled back to the checkpoint state so related file changes are
+// discarded. This specifically covers fork threads, where copied messages carry no
+// git_commit_hash, so the last-remaining-message lookup finds nothing and the code
+// must fall back to the thread's checkpoint_commit_hash.
+func TestDeleteMessagesAfterCheckpointRollsBackFork(t *testing.T) {
+	s := testServer(t)
+
+	// Create a project with a git repo that has an initial committed file.
+	tmpDir := t.TempDir()
+	initialContent := "hello world\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte(initialContent), 0o644); err != nil {
+		t.Fatalf("write initial file: %v", err)
+	}
+	initGitRepo(t, tmpDir)
+	mustRunGit(t, tmpDir, "add", "file.txt")
+	mustRunGit(t, tmpDir, "commit", "-m", "Add file.txt")
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{"name": "checkpoint-rollback-test", "path": tmpDir}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
+
+	// Create a task.
+	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
+	withAuthCSRF(taskReq, cookie, csrfToken)
+	taskRR := testResponse(t, s, taskReq)
+	if taskRR.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
+	}
+	taskData := mustJSON[map[string]any](t, taskRR.Body)
+	taskID := taskData["id"].(string)
+
+	// Create worktree (simulating task start).
+	worktreePath, _, err := s.executor.WorktreeMgr().CreateWorktree(projID, taskID, "task/"+taskID, "HEAD")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	// Update task with branch info (required for fork to manipulate the worktree).
+	task, err := s.store.GetTask(projID, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.Branch = "task/" + taskID
+	task.BaseRef = "master"
+	if err := s.store.UpdateTask(task); err != nil {
+		t.Fatalf("update task branch: %v", err)
+	}
+
+	// Main thread: commit a change so there is a real checkpoint commit.
+	friendContent := "hello friend\n"
+	if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte(friendContent), 0o644); err != nil {
+		t.Fatalf("write friend content: %v", err)
+	}
+	mustRunGit(t, worktreePath, "add", "file.txt")
+	mustRunGit(t, worktreePath, "commit", "-m", "friend changes")
+	checkpointCommit := mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD")
+
+	// Get the Main thread.
+	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
+	listRR := testResponseAuth(t, s, listReq)
+	threads := mustJSON[[]map[string]any](t, listRR.Body)
+	mainThreadID := threads[0]["id"].(string)
+
+	// Create messages with explicit, distinct timestamps so the fork point is
+	// deterministically detected: a message carrying the checkpoint commit, then
+	// the checkpoint message itself.
+	baseTime := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:            "cp-prev-msg",
+		TaskID:        taskID,
+		ThreadID:      mainThreadID,
+		Role:          "assistant",
+		Content:       "made friend changes",
+		GitCommitHash: checkpointCommit,
+		CreatedAt:     baseTime,
+	})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        "cp-msg",
+		TaskID:    taskID,
+		ThreadID:  mainThreadID,
+		Role:      "user",
+		Content:   "checkpoint here",
+		CreatedAt: baseTime.Add(time.Second),
+	})
+
+	// Fork at the checkpoint → fork thread gets checkpoint_commit_hash = checkpointCommit.
+	forkReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/fork", map[string]any{
+		"from_thread_id":  mainThreadID,
+		"from_message_id": "cp-msg",
+	})
+	withAuthCSRF(forkReq, cookie, csrfToken)
+	forkRR := testResponse(t, s, forkReq)
+	if forkRR.Code != http.StatusCreated {
+		t.Fatalf("fork: %d %s", forkRR.Code, forkRR.Body.String())
+	}
+
+	// After fork, worktree should be reset to the checkpoint commit (friend content).
+	verifyWorktreeContent(t, worktreePath, "file.txt", friendContent, "after fork reset to checkpoint")
+
+	// In the fork thread, add a message after the checkpoint and commit a change.
+	afterReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
+		"role":    "user",
+		"content": "after checkpoint",
+	})
+	withAuthCSRF(afterReq, cookie, csrfToken)
+	afterRR := testResponse(t, s, afterReq)
+	if afterRR.Code != http.StatusCreated {
+		t.Fatalf("create after-checkpoint message: %d %s", afterRR.Code, afterRR.Body.String())
+	}
+	afterMsg := mustJSON[map[string]any](t, afterRR.Body)
+	afterMsgID := afterMsg["id"].(string)
+
+	forkContent := "hello fork\n"
+	if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte(forkContent), 0o644); err != nil {
+		t.Fatalf("write fork content: %v", err)
+	}
+	mustRunGit(t, worktreePath, "add", "file.txt")
+	mustRunGit(t, worktreePath, "commit", "-m", "fork changes")
+	verifyWorktreeContent(t, worktreePath, "file.txt", forkContent, "fork committed changes")
+
+	// Delete the message just below the checkpoint (removes it and everything after).
+	delReq := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
+		"message_id": afterMsgID,
+	})
+	withAuthCSRF(delReq, cookie, csrfToken)
+	delRR := testResponse(t, s, delReq)
+	if delRR.Code != http.StatusOK {
+		t.Fatalf("delete: %d %s", delRR.Code, delRR.Body.String())
+	}
+
+	// The fork thread now ends at the checkpoint. File changes made after the
+	// checkpoint should be discarded → the worktree rolls back to the checkpoint.
+	verifyWorktreeContent(t, worktreePath, "file.txt", friendContent, "after delete rollback to checkpoint")
+}
+
+// TestDeleteFirstRequestRollsBackToBase verifies that deleting the first real
+// request (and everything after it) rolls the worktree back to the task's base
+// commit. When the deleted portion contained the only checkpoint, no commit hash
+// remains in the thread and the code must fall back to task.BaseCommit so the
+// request's file changes are discarded.
+func TestDeleteFirstRequestRollsBackToBase(t *testing.T) {
+	s := testServer(t)
+
+	// Create a project with a git repo that has an initial committed file.
+	tmpDir := t.TempDir()
+	initialContent := "hello world\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte(initialContent), 0o644); err != nil {
+		t.Fatalf("write initial file: %v", err)
+	}
+	initGitRepo(t, tmpDir)
+	mustRunGit(t, tmpDir, "add", "file.txt")
+	mustRunGit(t, tmpDir, "commit", "-m", "Add file.txt")
+	baseCommit := mustRunGitOutput(t, tmpDir, "rev-parse", "HEAD")
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{"name": "base-rollback-test", "path": tmpDir}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
+
+	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
+	withAuthCSRF(taskReq, cookie, csrfToken)
+	taskRR := testResponse(t, s, taskReq)
+	if taskRR.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
+	}
+	taskData := mustJSON[map[string]any](t, taskRR.Body)
+	taskID := taskData["id"].(string)
+
+	// Create worktree and record the task's base commit.
+	worktreePath, _, err := s.executor.WorktreeMgr().CreateWorktree(projID, taskID, "task/"+taskID, "HEAD")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	task, err := s.store.GetTask(projID, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.Branch = "task/" + taskID
+	task.BaseRef = "master"
+	task.BaseCommit = baseCommit
+	if err := s.store.UpdateTask(task); err != nil {
+		t.Fatalf("update task branch: %v", err)
+	}
+
+	// Get the Main thread.
+	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
+	listRR := testResponseAuth(t, s, listReq)
+	threads := mustJSON[[]map[string]any](t, listRR.Body)
+	mainThreadID := threads[0]["id"].(string)
+
+	// Create a request message + assistant checkpoint with explicit timestamps.
+	baseTime := time.Date(2025, 2, 1, 12, 0, 0, 0, time.UTC)
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:        "req-msg",
+		TaskID:    taskID,
+		ThreadID:  mainThreadID,
+		Role:      "user",
+		Content:   "change file",
+		CreatedAt: baseTime,
+	})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{
+		ID:            "resp-msg",
+		TaskID:        taskID,
+		ThreadID:      mainThreadID,
+		Role:          "assistant",
+		Content:       "done",
+		GitCommitHash: "deadbeef00000000000000000000000000000000", // checkpoint, gets deleted
+		CreatedAt:     baseTime.Add(time.Second),
+	})
+
+	// Simulate the conversation's change in the worktree (uncommitted).
+	changedContent := "hello changed\n"
+	if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte(changedContent), 0o644); err != nil {
+		t.Fatalf("write changed content: %v", err)
+	}
+	verifyWorktreeContent(t, worktreePath, "file.txt", changedContent, "conversation change present")
+
+	// Delete the request message → deletes it and the assistant response after it.
+	delReq := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
+		"message_id": "req-msg",
+	})
+	withAuthCSRF(delReq, cookie, csrfToken)
+	delRR := testResponse(t, s, delReq)
+	if delRR.Code != http.StatusOK {
+		t.Fatalf("delete: %d %s", delRR.Code, delRR.Body.String())
+	}
+
+	// No checkpoint remains, so the worktree should roll back to the base commit.
+	verifyWorktreeContent(t, worktreePath, "file.txt", initialContent, "after delete rollback to base")
+}
+
+// TestDeleteCounterRequestRollsBackToPriorCheckpoint reproduces the user scenario:
+//  1. "Create hello.cs" -> hello.cs WITHOUT counter (checkpoint A, survives)
+//  2. "count to 5"      -> hello.cs WITH counter    (checkpoint B, deleted)
+//  3. delete the "count to 5" message
+// Expected: worktree rolls back to checkpoint A -> hello.cs WITHOUT counter
+// (NOT the base commit, which would remove the file entirely).
+func TestDeleteCounterRequestRollsBackToPriorCheckpoint(t *testing.T) {
+	s := testServer(t)
+
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# base\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	initGitRepo(t, tmpDir)
+	baseCommit := mustRunGitOutput(t, tmpDir, "rev-parse", "HEAD")
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{"name": "prior-checkpoint-test", "path": tmpDir}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
+
+	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
+	withAuthCSRF(taskReq, cookie, csrfToken)
+	taskRR := testResponse(t, s, taskReq)
+	if taskRR.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
+	}
+	taskData := mustJSON[map[string]any](t, taskRR.Body)
+	taskID := taskData["id"].(string)
+
+	worktreePath, _, err := s.executor.WorktreeMgr().CreateWorktree(projID, taskID, "task/"+taskID, "HEAD")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	task, err := s.store.GetTask(projID, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.Branch = "task/" + taskID
+	task.BaseRef = "master"
+	task.BaseCommit = baseCommit
+	if err := s.store.UpdateTask(task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
+	listRR := testResponseAuth(t, s, listReq)
+	threads := mustJSON[[]map[string]any](t, listRR.Body)
+	mainThreadID := threads[0]["id"].(string)
+
+	// Create the two real checkpoint stashes in the worktree.
+	noCounter := "using System;\n\nclass Program\n{\n    static void Main()\n    {\n        Console.WriteLine(\"Hello, World!\");\n    }\n}\n"
+	withCounter := "using System;\n\nclass Program\n{\n    static void Main()\n    {\n        for (int i = 1; i <= 5; i++)\n        {\n            Console.WriteLine(i);\n        }\n    }\n}\n"
+	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte(noCounter), 0o644); err != nil {
+		t.Fatalf("write no-counter: %v", err)
+	}
+	mustRunGit(t, worktreePath, "add", "hello.cs")
+	checkpointA := mustRunGitOutput(t, worktreePath, "stash", "create")
+	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte(withCounter), 0o644); err != nil {
+		t.Fatalf("write with-counter: %v", err)
+	}
+	mustRunGit(t, worktreePath, "add", "hello.cs")
+	checkpointB := mustRunGitOutput(t, worktreePath, "stash", "create")
+	if checkpointA == "" || checkpointB == "" {
+		t.Fatal("expected non-empty checkpoint hashes")
+	}
+
+	// Messages: userA, assistantA(checkpointA), userB(count to 5), assistantB(checkpointB).
+	baseTime := time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{ID: "user-a", TaskID: taskID, ThreadID: mainThreadID, Role: "user", Content: "Create hello.cs", CreatedAt: baseTime})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{ID: "asm-a", TaskID: taskID, ThreadID: mainThreadID, Role: "assistant", Content: "created", GitCommitHash: checkpointA, CreatedAt: baseTime.Add(time.Second)})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{ID: "user-b", TaskID: taskID, ThreadID: mainThreadID, Role: "user", Content: "count to 5", CreatedAt: baseTime.Add(2 * time.Second)})
+	_ = s.store.CreateTaskMessage(&types.TaskMessage{ID: "asm-b", TaskID: taskID, ThreadID: mainThreadID, Role: "assistant", Content: "done", GitCommitHash: checkpointB, CreatedAt: baseTime.Add(3 * time.Second)})
+
+	// Worktree currently holds the with-counter version (staged).
+	verifyWorktreeContent(t, worktreePath, "hello.cs", withCounter, "before delete")
+
+	// Delete the "count to 5" user message (removes it and asm-b).
+	delReq := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
+		"message_id": "user-b",
+	})
+	withAuthCSRF(delReq, cookie, csrfToken)
+	delRR := testResponse(t, s, delReq)
+	if delRR.Code != http.StatusOK {
+		t.Fatalf("delete: %d %s", delRR.Code, delRR.Body.String())
+	}
+
+	// Expected: roll back to checkpoint A -> hello.cs WITHOUT counter.
+	verifyWorktreeContent(t, worktreePath, "hello.cs", noCounter, "after delete rollback to prior checkpoint")
 }

@@ -51,10 +51,21 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	var rows *sql.Rows
 	var err error
 	if threadID != "" {
-		rows, err = s.db.Query(
-			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
-			taskID, threadID,
-		)
+		// A thread belongs to exactly one task, so thread_id alone is sufficient to
+		// identify its messages. When taskID is empty (e.g. getLastCommitHashInThread),
+		// omit the task_id filter so the lookup isn't restricted to task_id = ''. When
+		// taskID is provided, keep both filters for callers that expect them.
+		if taskID != "" {
+			rows, err = s.db.Query(
+				`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
+				taskID, threadID,
+			)
+		} else {
+			rows, err = s.db.Query(
+				`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at FROM task_messages WHERE thread_id = ? ORDER BY created_at ASC`,
+				threadID,
+			)
+		}
 	} else {
 		// For backward compatibility: get messages with no thread_id (legacy) or all messages
 		rows, err = s.db.Query(

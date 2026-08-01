@@ -4,8 +4,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"kanban/backend/types"
 )
 
 func TestThreadList(t *testing.T) {
@@ -687,4 +691,101 @@ func TestThreadForkFromInactiveThread(t *testing.T) {
 	roundTripSwitch("round4 Fork C", initialContent, forkCID)
 	roundTripSwitch("round4 Fork B", choomContent, forkBID)
 	roundTripSwitch("round4 Main", friendContent, mainThreadID)
+}
+
+// TestThreadSwitchRestoresForkCheckpoint verifies that switching back to a fork
+// thread whose changes were committed (so it has no worktree stash) restores the
+// fork's checkpoint commit rather than resetting to baseRef. Bug: handleThreadSwitch
+// fell through to `reset --hard baseRef` for any thread without a stash hash, which
+// discarded the fork's committed file state and left an empty diff.
+func TestThreadSwitchRestoresForkCheckpoint(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	// Create worktree (simulating task start)
+	worktreePath, _, err := s.executor.WorktreeMgr().CreateWorktree(projID, taskID, "task/"+taskID, "HEAD")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	task, err := s.store.GetTask(projID, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.Branch = "task/" + taskID
+	task.BaseRef = "master"
+	if err := s.store.UpdateTask(task); err != nil {
+		t.Fatalf("update task branch: %v", err)
+	}
+
+	// Commit hello.cs to the task branch so the fork's checkpoint contains it.
+	csContent := "class Hello {}\n"
+	if err := os.WriteFile(filepath.Join(worktreePath, "hello.cs"), []byte(csContent), 0o644); err != nil {
+		t.Fatalf("write hello.cs: %v", err)
+	}
+	mustRunGit(t, worktreePath, "add", "hello.cs")
+	mustRunGit(t, worktreePath, "commit", "-m", "Add hello.cs")
+	commitHash := strings.TrimSpace(mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD"))
+
+	// Get the Main thread
+	threads := mustJSON[[]map[string]any](t, testResponseAuth(t, s, testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)).Body)
+	if len(threads) < 1 {
+		t.Fatal("expected at least 1 thread")
+	}
+	mainThreadID := threads[0]["id"].(string)
+
+	// Create an assistant message carrying the commit hash, then a later checkpoint
+	// (user) message. GetLastCommitHashBeforeMessage uses created_at < cutoff, so the
+	// commit hash must live on a message strictly before the checkpoint message.
+	base := time.Now().UTC()
+	assistantMsg := &types.TaskMessage{
+		ID: "forkcheck-msg-assistant", TaskID: taskID, ThreadID: mainThreadID, Role: "assistant",
+		Content: "done", GitCommitHash: commitHash, CreatedAt: base,
+	}
+	if err := s.store.CreateTaskMessage(assistantMsg); err != nil {
+		t.Fatalf("create assistant msg: %v", err)
+	}
+	checkpointMsg := &types.TaskMessage{
+		ID: "forkcheck-msg-checkpoint", TaskID: taskID, ThreadID: mainThreadID, Role: "user",
+		Content: "add a counter to 7", CreatedAt: base.Add(time.Second),
+	}
+	if err := s.store.CreateTaskMessage(checkpointMsg); err != nil {
+		t.Fatalf("create checkpoint msg: %v", err)
+	}
+
+	// Fork from the checkpoint message.
+	forkData := mustJSON[map[string]any](t, testResponseAuth(t, s, testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/fork", map[string]any{
+		"from_thread_id":  mainThreadID,
+		"from_message_id": checkpointMsg.ID,
+	})).Body)
+	forkThreadID := forkData["id"].(string)
+	forkThread, err := s.store.GetThread(forkThreadID)
+	if err != nil {
+		t.Fatalf("get fork thread: %v", err)
+	}
+	if forkThread.CheckpointCommitHash != commitHash {
+		t.Fatalf("expected fork checkpoint_commit_hash=%s, got %s", commitHash, forkThread.CheckpointCommitHash)
+	}
+	if forkThread.WorktreeStashHash != "" {
+		t.Fatal("expected fresh fork to have no worktree stash hash")
+	}
+
+	// The fork branch is checked out at the checkpoint commit with hello.cs present.
+	verifyWorktreeContent(t, worktreePath, "hello.cs", csContent, "after fork")
+
+	// Switch to Main (clean fork -> no stash is created).
+	testResponseAuth(t, s, testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
+		"thread_id": mainThreadID,
+	}))
+	// Main has no stash and no checkpoint -> resets to baseRef (no hello.cs).
+	if _, err := os.Stat(filepath.Join(worktreePath, "hello.cs")); err == nil {
+		t.Fatal("expected hello.cs to be absent in Main (reset to baseRef)")
+	}
+
+	// Switch back to the fork. It has no stash, so it must restore its checkpoint
+	// commit (hello.cs present) instead of resetting to baseRef.
+	testResponseAuth(t, s, testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/switch", map[string]any{
+		"thread_id": forkThreadID,
+	}))
+	verifyWorktreeContent(t, worktreePath, "hello.cs", csContent, "after switch back to fork")
 }

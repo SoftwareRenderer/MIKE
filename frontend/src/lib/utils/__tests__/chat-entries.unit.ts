@@ -420,6 +420,18 @@ describe('getCheckpointThreads', () => {
         const t1 = makeThread('t1', '0001-01-01T00:00:00Z', undefined, true);
         expect(getCheckpointThreads(e, [t1], t1)).toBe(t1);
     });
+
+    it('treats a same-second checkpoint as relevant despite precision mismatch', () => {
+        // checkpoint_message_time is second-precision (RFC3339) while entry created_at
+        // is nanosecond precision. A lexicographic compare would see "...36Z" > "...36.6Z"
+        // and wrongly exclude the fork thread, hiding the thread switcher. Compare as dates.
+        const e = { ...entry('user', 'make it count to 6'), createdAt: '2026-07-31T22:54:36.651306187Z' };
+        const main = makeThread('main', undefined, undefined, false);
+        const fork = makeThread('fork', '2026-07-31T22:54:36Z', 'main', true);
+        expect(getCheckpointThreads(e, [main, fork], fork)).toBe(fork);
+        // And with 2+ relevant threads, requireOptions is satisfied (main + fork).
+        expect(getCheckpointThreads(e, [main, fork], fork, true)).toBe(fork);
+    });
 });
 
 describe('buildEntriesFromMessages', () => {
