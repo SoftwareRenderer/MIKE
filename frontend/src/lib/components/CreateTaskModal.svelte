@@ -1,9 +1,13 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    // UI extension injection point — re-render when extensions change
+    // Anchor element where sandboxed UI extensions mount their iframes.
+    let extAnchor: HTMLElement | null = $state(null);
+    // UI extension injection point — re-render when extensions change.
+    // The returned cleanup tears down the extension channels on unmount.
     $effect(() => {
         const _v = uiInjector.getPointVersion(INJECTION_POINTS.CREATE_TASK);
-        uiInjector.refreshSlot(INJECTION_POINTS.CREATE_TASK, { component: 'CreateTaskModal' });
+        uiInjector.refreshSlot(INJECTION_POINTS.CREATE_TASK, { component: 'CreateTaskModal' }, extAnchor);
+        return () => uiInjector.teardownSlot(INJECTION_POINTS.CREATE_TASK);
     });
     import type { Config, Provider, Task } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
@@ -391,6 +395,8 @@
             </div>
         {/if}
         <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={handleMentionInput} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
+        <!-- Anchor for sandboxed UI extensions (e.g. GitHub issue importer) -->
+        <div bind:this={extAnchor} class="ext-anchor"></div>
     </label>
     <input type="file" accept="image/*" multiple bind:this={fileInput} onchange={handleFileSelect} style="display:none" />
     {#if hasProviders}
@@ -529,6 +535,11 @@
     textarea:focus-visible {
         border-color: var(--color-accent);
         outline: none;
+    }
+    .ext-anchor {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
     }
     .task-attachments {
         display: flex;

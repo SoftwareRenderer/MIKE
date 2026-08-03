@@ -17,6 +17,16 @@ const (
 	ExtensionTypeAgent = "agent"
 )
 
+// maxExtensionValueBytes caps the size of a single storage value (KiB).
+const maxExtensionValueBytes = 64 * 1024
+
+// KVEntry is a single key/value pair in an extension's scoped storage.
+type KVEntry struct {
+	Key       string          `json:"key"`
+	Value     json.RawMessage `json:"value"`
+	UpdatedAt string          `json:"updated_at"`
+}
+
 // Extension represents an installed extension in the system.
 type Extension struct {
 	ID              string            `json:"id"`
@@ -101,16 +111,16 @@ func (c *Capabilities) GetProxy() *ProxyConfig {
 // Headers can use {{property_name}} placeholders which are resolved from
 // the extension's configuration at request time.
 type ProxyConfig struct {
-	AllowedDomains []string          `json:"allowed_domains"`   // whitelist of domains the proxy may contact
+	AllowedDomains []string          `json:"allowed_domains,omitempty"` // whitelist of domains the proxy may contact
 	Headers        map[string]string `json:"headers,omitempty"` // header templates (e.g. "Authorization": "token {{github_token}}")
 }
 
 // LSPConfig defines LSP-specific extension configuration.
 type LSPConfig struct {
-	Command            string         `json:"command"`
-	Args               []string       `json:"args"`
-	Extensions         []string       `json:"extensions"`
-	Language           string         `json:"language"`
+	Command            string         `json:"command,omitempty"`
+	Args               []string       `json:"args,omitempty"`
+	Extensions         []string       `json:"extensions,omitempty"`
+	Language           string         `json:"language,omitempty"`
 	InitParamsOverride map[string]any `json:"initParamsOverride,omitempty"`
 	// EditorEnabled controls whether LSP features (diagnostics, completions,
 	// go-to-definition) are available in the editor. Nil or true = enabled.
@@ -140,21 +150,27 @@ func (c *LSPConfig) IsToolCallsEnabled() bool {
 
 // UIConfig defines UI-specific extension configuration.
 type UIConfig struct {
-	ModuleURL       string   `json:"module_url"`
-	InjectionPoints []string `json:"injection_points"`
+	// InjectionPoints lists the UI injection points the extension targets
+	// (e.g. "createTask", "taskCard"). The entry page is always index.html
+	// in the extension's own directory, so there is no module URL to declare.
+	InjectionPoints []string `json:"injection_points,omitempty"`
+	// Permissions lists the fully-qualified capability names (e.g.
+	// "createTask.description.insertText") the extension requests. The host
+	// grants only the intersection of these and the supported catalog.
+	Permissions []string `json:"permissions,omitempty"`
 }
 
 // CSSConfig defines CSS extension configuration (global stylesheet only).
 // CSS extensions are a separate type from UI extensions — they have no
-// module_url or injection_points, only a css_url.
+// injection_points, only a css_url.
 type CSSConfig struct {
-	CSSURL string `json:"css_url"` // global stylesheet URL (relative to server root)
+	CSSURL string `json:"css_url,omitempty"` // global stylesheet URL (relative to server root)
 }
 
 // AgentConfig defines agent-specific extension configuration.
 // The agent adapter (WASM module) handles all protocol details.
 type AgentConfig struct {
-	WasmModule   string              `json:"wasm_module"`             // path to WASM adapter module (relative to extension dir)
+	WasmModule   string              `json:"wasm_module,omitempty"`   // path to WASM adapter module (relative to extension dir)
 	Description  string              `json:"description,omitempty"`   // short description shown in provider card (markdown)
 	SetupInfo    string              `json:"setup_info,omitempty"`    // setup instructions shown in provider card (markdown, newline-separated items)
 	ConfigSchema *ConfigSchema       `json:"config_schema,omitempty"` // user-configurable options
@@ -237,7 +253,6 @@ func (s *ConfigSchema) resolveTemplate(value string) string {
 type ConfigSchema struct {
 	Type       string       `json:"type"`
 	Properties []SchemaProp `json:"properties,omitempty"`
-	Required   []string     `json:"required,omitempty"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshaling for ConfigSchema.
@@ -247,13 +262,11 @@ func (s *ConfigSchema) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		Type       string          `json:"type"`
 		Properties json.RawMessage `json:"properties,omitempty"`
-		Required   []string        `json:"required,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 	s.Type = raw.Type
-	s.Required = raw.Required
 
 	if len(raw.Properties) == 0 {
 		return nil
@@ -336,9 +349,10 @@ type RegistryEntry struct {
 	Author        string `json:"author"`
 	Homepage      string `json:"homepage,omitempty"`
 	LicenseURL    string `json:"license_url,omitempty"`
-	Image         string `json:"image,omitempty"`          // OCI image reference
-	DockerfileURL string `json:"dockerfile_url,omitempty"` // URL to Dockerfile
-	ManifestURL   string `json:"manifest_url,omitempty"`   // URL to manifest.json
+	Image         string        `json:"image,omitempty"`          // OCI image reference
+	DockerfileURL string        `json:"dockerfile_url,omitempty"` // URL to Dockerfile
+	ManifestURL   string        `json:"manifest_url,omitempty"`   // URL to manifest.json
+	Capabilities  *Capabilities `json:"capabilities,omitempty"`   // capability config (mirrors manifest)
 }
 
 // IsLSP returns true if this extension is an LSP extension.

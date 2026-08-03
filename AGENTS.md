@@ -415,6 +415,15 @@ The context object passed to `init` contains `component` (component name, e.g. `
 
 **Updating:** Edit the `.js` file and `manifest.json` directly. The Go server serves `extensions/` as static files — no build step needed. Browser hard refresh to pick up changes.
 
+**Registry generation:** `extensions/registry.json` is **generated** from the extension manifests — do not edit it by hand. After adding/editing an extension manifest, regenerate it:
+
+```bash
+python3 scripts/gen-registry.py            # regenerate registry.json
+python3 scripts/gen-registry.py --check    # verify it's up to date (CI)
+```
+
+The generator scans `extensions/<type>/<name>/manifest.json` for every extension and emits a minimal registry entry (only the fields the Browse Registry UI renders — e.g. `ui` injection points/permissions and `proxy` allowed domains; the full capability config stays in the manifest).
+
 **Deploying:** Install from registry via Settings → Extensions → "Install from Registry", or create manually via the API (`POST /api/extensions`).
 
 **Key constraints:**

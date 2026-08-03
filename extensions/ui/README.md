@@ -1,147 +1,229 @@
 # UI Extensions
 
-UI extensions enable custom functionality in [MIKE](https://getmike.dev). UI extensions are plain JavaScript modules that run directly in the browser and interact with the DOM.
+UI extensions add custom functionality to [MIKE](https://getmike.dev). Extensions run in a sandboxed iframe and interacts with the app through capabilities declared in `manifest.json`, executed via the `extHost` client API (`host-client.js`).
 
-## Overview
+A working example is [`github-issue-importer`](github-issue-importer/), which imports a GitHub issue when a URL is pasted into a task description.
 
-The system uses a "slot" based injection model where extensions can register themselves to specific parts of the application.
+## Contents
+
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Structure](#structure)
+- [manifest.json](#manifestjson)
+- [MyExtension.js](#myextensionjs)
+- [Capabilities](#capabilities)
+- [extHost client API](#exthost-client-api)
+- [Injection Points (Scopes)](#injection-points-scopes)
+- [Network access](#network-access-networkproxy)
+- [Host-rendered status](#host-rendered-status-uistatus)
+
+## Quick Start
+
+The minimal extension is an HTML entry page plus a script that calls a capability.
+
+```html
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>My Extension</title></head>
+<body>
+    <script src="/host-client.js"></script>
+    <script src="MyExtension.js"></script>
+</body>
+</html>
+```
+
+```js
+extHost.ready().then(function () {
+    extHost.createTask.description.insertText('Hello from an extension');
+});
+```
+
+The extension can only call capabilities it declared in `manifest.json`. For example, `createTask.description.insertText` must be listed under `capabilities.ui.permissions`. Calls for undeclared capabilities are rejected. See [manifest.json](#manifestjson).
+
+## Architecture
+
+```
+App (UIInjector) ── init message (granted caps, config, context) ──► iframe (extHost)
+App (handlers)    ◄──── capability call / event ───────────────────── iframe (extHost)
+```
+
+- The host creates a sandboxed iframe for each extension at its injection point and starts a message channel.
+- The iframe calls capabilities through `window.extHost`; the host resolves them in `frontend/src/lib/extensions/handlers/`.
+- Only capabilities declared in the manifest are callable.
 
 ## Structure
 
-A UI extension is organized as a directory within `extensions/ui/`:
+Extensions are served statically at `/extensions/ui/<name>/`:
 
 ```text
 extensions/ui/<name>/
-├── manifest.json
-└── MyExtension.js
+├── index.html          # sandboxed entry page
+├── MyExtension.js      # your logic (plain JS, uses extHost)
+└── manifest.json
 ```
 
-### manifest.json
+The iframe is hidden by default (`height: 0`); call `extHost.setSize()` to show custom visualizations.
 
-The manifest provides metadata and defines where the extension should be injected into the UI.
+## manifest.json
+
+Declares metadata, integration points, and requested capabilities.
 
 ```json
 {
     "display_name": "My Extension",
     "description": "Adds a custom feature to the UI",
     "author": "Author Name",
+    "homepage": "https://Optional_Author_Homepage",
     "version": "1.0.0",
     "priority": 0,
-    "ui": {
-        "module_url": "/extensions/ui/<name>/MyExtension.js",
-        "injection_points": ["create-task"]
+    "capabilities": {
+        "ui": {
+            "injection_points": ["createTask"],
+            "permissions": [
+                "createTask.events.paste",
+                "network.proxy"
+            ]
+        },
+        "proxy": {
+            "allowed_domains": ["api.example.com"]
+        }
     },
     "config_schema": {
         "type": "object",
-        "properties": {
-            "api_key": { "type": "string", "title": "API Key" }
-        }
+        "properties": [
+            { "key": "api_key", "type": "string", "title": "API Key" }
+        ]
     }
 }
 ```
 
-- `priority`: Controls the loading order. Lower values load first (default `0`).
-- `ui.module_url`: The path to the JavaScript module served by the server.
-- `ui.injection_points`: An array of scopes where the extension should be activated.
+- `priority` — loading order; lower values load first (default `0`).
+- `capabilities.ui.injection_points` — [scopes](#injection-points-scopes) where the extension activates.
+- `capabilities.ui.permissions` — requested capabilities.
+- `capabilities.proxy` — domain allow-list and header templates for `network.proxy`.
+- `config_schema.properties` — array of `{ key, type, title, description?, sensitive? }` fields (array order is preserved). `sensitive` values are encrypted at rest and usable in header templates.
 
-### MyExtension.js
+## MyExtension.js
 
-UI extensions must export a default `init` function. This function is called when the corresponding UI component mounts.
+Plain JavaScript that uses `extHost`. Wait for `ready()`, subscribe to events, call capabilities.
 
 ```js
-export default function init({ component, config, extensionId }) {
-    // 1. Setup: Create elements, add event listeners, etc.
-    const div = document.createElement('div');
-    div.textContent = `Hello from ${config.someSetting}!`;
-    document.body.appendChild(div);
+(function () {
+    'use strict';
 
-    // 2. Cleanup: Return a function to tear down the extension
-    return () => {
-        div.remove();
-    };
-}
+    async function handlePaste(data) {
+        const text = (data && data.text) || '';
+        if (!/example\.com/.test(text)) return;
+
+        extHost.loading('Fetching…');
+        try {
+            const result = await extHost.proxy('https://api.example.com/thing', 'GET', '');
+            await extHost.createTask.description.insertText('# ' + result.title);
+            extHost.hide();
+        } catch (err) {
+            extHost.error('Failed: ' + err.message);
+        }
+    }
+
+    extHost.ready().then(function () {
+        extHost.on('createTask.events.paste', handlePaste);
+    });
+})();
 ```
+
+**Paste ownership.** The host calls `preventDefault()` when forwarding a `createTask.events.paste` event, so the browser never inserts the raw text. The extension must re-insert the original text for any paste it does **not** handle — otherwise the paste is dropped.
+
+### Persisting state (`storage.*`)
+
+`storage.*` provides a namespaced key-value store, scoped to the extension *and* the current project/task (the same key on different tasks never collides). Values may be any JSON; up to 64KiB per value.
+
+```js
+extHost.ready().then(async function () {
+    const count = (await extHost.storage.get('clicks')) || 0;
+    extHost.setSize(24); // reveal a small counter
+    document.body.textContent = 'Clicks: ' + count;
+
+    document.addEventListener('click', async function () {
+        const next = ((await extHost.storage.get('clicks')) || 0) + 1;
+        await extHost.storage.set('clicks', next);
+        document.body.textContent = 'Clicks: ' + next;
+    });
+});
+```
+
+## Capabilities
+
+Capabilities are namespaced (`area.operation`) and come in two kinds:
+
+- **`call`** — request/response; the extension invokes it (e.g. `createTask.description.insertText`).
+- **`event`** — subscription; the host forwards app events to the extension (e.g. `createTask.events.paste`).
+
+| Capability | Kind | Description |
+|---|---|---|
+| `createTask.description.insertText` | call | Insert plain text into the task description at the cursor. |
+| `createTask.events.paste` | event | Receive paste events (clipboard text) from the description. |
+| `network.proxy` | call | HTTP request through the server's domain-allowlisted proxy. |
+| `config.get` | call | Read the extension's own config. *(implicit — no declaration needed)* |
+| `log.write` | call | Emit a namespaced, prefixed console log. |
+| `ui.status` | call | Set a host-rendered status indicator (see below). |
+| `ui.setSize` | call | Set the iframe height in pixels (for custom visualizations). |
+| `storage.get` / `storage.set` / `storage.delete` / `storage.list` | call | Scoped key-value storage. |
+
+References:
+- Available `injection_points` — `./frontend/src/lib/extensions/types.ts`
+- Available `permissions` (handlers) — `./frontend/src/lib/extensions/handlers/`
+
+## extHost client API
+
+`window.extHost` is exposed by `host-client.js`. It resolves once the host `init` message arrives.
+
+| Method | Capability | Description |
+|---|---|---|
+| `ready()` | — | Resolves once the host `init` message is received. |
+| `.granted` | — | Array of granted capability names. |
+| `.config` / `.context` | — | Extension config / host context (after `ready()`). |
+| `getConfig()` | `config.get` | Resolve with the extension's own config. |
+| `proxy(url, method, body)` | `network.proxy` | Proxy an HTTP request via the server (domain-allowlisted). |
+| `createTask.description.insertText(text)` | `createTask.description.insertText` | Insert text into the task description. |
+| `on(cap, handler)` | event caps | Subscribe to an event; returns an unsubscribe function. |
+| `log(level, message)` | `log.write` | Log with a prefix. |
+| `loading(message)` / `error(message)` / `hide()` | `ui.status` | Host-rendered status (see below). |
+| `setSize(heightPx)` | `ui.setSize` | Size the extension iframe. |
+| `storage.get(key)` | `storage.get` | Read a value (resolves `null` if absent). |
+| `storage.set(key, value)` | `storage.set` | Write any JSON value. |
+| `storage.delete(key)` | `storage.delete` | Delete a key (no-op if absent). |
+| `storage.list(prefix?)` | `storage.list` | List stored key/value pairs, optionally by prefix. |
+
+Any call for a capability that was **not granted** is rejected by the host — the extension cannot do more than its `permissions` allow.
 
 ## Injection Points (Scopes)
 
-Extensions can be injected into several named slots across the application. When a component mounts, the `UIInjector` activates all extensions registered for that scope.
+When a component mounts, the `UIInjector` creates a sandboxed iframe for each extension registered at that scope.
 
 | Scope | Component | Purpose |
 |---|---|---|
-| `task-card` | `Card.svelte` | Enhance individual task cards (e.g. custom badges, actions) |
-| `file-editor` | `FileEditor.svelte` | Enhance the code editor (e.g. toolbars, status bars) |
-| `project-board` | `Board.svelte` | Enhance the project board view |
-| `task-chat` | `TaskChat.svelte` | Enhance the chat interface (e.g. input actions) |
-| `project-sidebar` | `Sidebar.svelte` | Enhance the project sidebar |
-| `file-browser` | `FileBrowser` | Enhance the project directory selector modal |
-| `create-task` | `CreateTaskModal.svelte` | Enhance the task creation flow (e.g. external issue import) |
+| `taskCard` | `Card.svelte` | Enhance individual task cards (badges, actions) |
+| `fileEditor` | `FileEditor.svelte` | Enhance the code editor (toolbars, status bars) |
+| `projectBoard` | `Board.svelte` | Enhance the project board view |
+| `taskChat` | `TaskChat.svelte` | Enhance the chat interface (input actions) |
+| `projectSidebar` | `Sidebar.svelte` | Enhance the project sidebar |
+| `fileBrowser` | `FileBrowser.svelte` | Enhance the directory selector modal |
+| `createTask` | `CreateTaskModal.svelte` | Enhance the task creation flow (external issue import) |
 
-## API Calls
+## Network access (`network.proxy`)
 
-To make external API requests securely, UI extensions should use the extension proxy endpoint instead of calling external APIs directly from the browser. This avoids CORS issues and allows the server to handle sensitive API keys from the extension's configuration without exposing them to the client.
+The extension cannot fetch external services directly (it is cross-origin and the app session is out of reach). Instead it calls `extHost.proxy(url, method, body)`, routed through the server. The server enforces the manifest's `allowed_domains` allow-list and resolves header templates (e.g. `Authorization: token {{github_token}}`) from the extension's config — keeping secrets server-side.
 
-### 1. Declare Proxy Capability
+Requests to domains outside the allow-list are rejected server-side.
 
-Your extension must declare the `proxy` capability in its `manifest.json`. This includes an allow-list of domains and optional header templates.
+## Host-rendered status (`ui.status`)
 
-```json
-{
-    "display_name": "My Extension",
-    "capabilities": {
-        "proxy": {
-            "allowed_domains": ["api.example.com", "github.com"],
-            "headers": {
-                "Authorization": "Bearer {{api_key}}",
-                "X-Custom-Header": "my-app-v1"
-            }
-        }
-    },
-    "config_schema": {
-        "type": "object",
-        "properties": {
-            "api_key": { "type": "string", "title": "API Key", "sensitive": true }
-        }
-    }
-}
-```
+Instead of each extension building its own status UI in its (invisible) iframe, use the host-rendered indicators. They render in the parent document at the injection point, matching the app theme:
 
-- `allowed_domains`: Only requests to these domains will be proxied.
-- `headers`: Templates that are resolved using the extension's configuration. Placeholders like `{{api_key}}` are replaced with the corresponding value from the user's settings.
-
-### 2. Making a Request
-
-The proxy endpoint is located at `/api/extensions/{id}/proxy` and requests must be structured as follows:
-
-**Request Body:**
-```json
-{
-    "url": "https://api.example.com/data",
-    "method": "GET",
-    "body": "{\"key\": \"value\"}" 
-}
-```
-- `url` (required): The full target URL.
-- `method` (optional): HTTP method (defaults to `GET`).
-- `body` (optional): The request body as a string.
-
-**Example Usage:**
 ```js
-async function fetchData(extensionId) {
-    const csrfToken = window.__csrfToken;
-
-    const response = await fetch(`/api/extensions/${extensionId}/proxy`, {
-        method: 'POST',
-        headers: { 
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken
-        },
-        body: JSON.stringify({
-            url: 'https://api.example.com/v1/user',
-            method: 'GET'
-        })
-    });
-    
-    if (!response.ok) throw new Error(`Proxy error: ${response.status}`);
-    return await response.json();
-}
+extHost.loading('Importing…');     // spinner + message
+extHost.error('Something failed'); // red error text
+extHost.hide();                    // clear
 ```
+
+Extensions that render their own custom content inside the iframe should call `extHost.setSize(height)` to reveal it.

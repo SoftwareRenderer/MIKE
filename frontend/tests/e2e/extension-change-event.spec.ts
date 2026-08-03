@@ -26,8 +26,7 @@ test.describe('Extension Change WebSocket Event', () => {
           description: '',
           author: '',
           ui: {
-            module_url: '/extensions/test/Test.js',
-            injection_points: ['create-task'],
+            injection_points: ['createTask'],
           },
         },
       },

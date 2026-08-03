@@ -45,6 +45,24 @@ func TestMiddlewarePublicPathSession(t *testing.T) {
 	}
 }
 
+func TestMiddlewarePublicPathExtensions(t *testing.T) {
+	s := testServer(t)
+
+	// Extension static assets must be loadable WITHOUT a session cookie, because
+	// sandboxed UI extensions run in opaque-origin iframes (cross-site) that
+	// cannot send SameSite=Lax session cookies.
+	for _, path := range []string{
+		"/extensions/lib/host-client.js",
+		"/extensions/ui/github-issue-importer/index.html",
+	} {
+		req := testRequest(http.MethodGet, path, nil)
+		rr := testResponse(t, s, req)
+		if rr.Code == http.StatusUnauthorized {
+			t.Fatalf("%s: status = 401; extension assets must be public", path)
+		}
+	}
+}
+
 func TestMiddlewareProtectedPathNoCookie(t *testing.T) {
 	s := testServer(t)
 

@@ -424,6 +424,10 @@ func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, r *http.Request, 
 	// Stop sandbox if running
 	_ = h.sandbox.Destroy(id)
 
+	// Remove scoped storage for this extension so its data is not orphaned,
+	// even if the extension record itself is already gone.
+	_ = h.store.StorageDeleteAll(id)
+
 	if err := h.store.Delete(id); err != nil {
 		httputil.JSONError(w, http.StatusNotFound, "extension not found")
 		return
@@ -997,6 +1001,76 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
+}
+
+// HandleStorage provides scoped key-value storage for an extension.
+// Keys are scoped by (extension, namespace) so extensions cannot read or
+// write each other's data. Namespace is derived from the host injection
+// context (e.g. project/task), keeping the server feature-agnostic.
+func (h *ExtensionHandler) HandleStorage(w http.ResponseWriter, r *http.Request, id string) {
+	if _, err := h.store.GetByID(id); err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "extension not found")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		namespace := r.URL.Query().Get("namespace")
+		key := r.URL.Query().Get("key")
+		if key != "" {
+			entry, err := h.store.StorageGet(id, namespace, key)
+			if err != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to read storage: "+err.Error())
+				return
+			}
+			if entry == nil {
+				httputil.JSONError(w, http.StatusNotFound, "key not found")
+				return
+			}
+			httputil.JSONResponse(w, http.StatusOK, entry)
+			return
+		}
+		entries, err := h.store.StorageList(id, namespace, r.URL.Query().Get("prefix"))
+		if err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to list storage: "+err.Error())
+			return
+		}
+		httputil.JSONResponse(w, http.StatusOK, entries)
+	case http.MethodPut:
+		var req struct {
+			Namespace string          `json:"namespace"`
+			Key       string          `json:"key"`
+			Value     json.RawMessage `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if req.Key == "" {
+			httputil.JSONError(w, http.StatusBadRequest, "key is required")
+			return
+		}
+		entry, err := h.store.StorageSet(id, req.Namespace, req.Key, req.Value)
+		if err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		httputil.JSONResponse(w, http.StatusOK, entry)
+	case http.MethodDelete:
+		namespace := r.URL.Query().Get("namespace")
+		key := r.URL.Query().Get("key")
+		if key == "" {
+			httputil.JSONError(w, http.StatusBadRequest, "key is required")
+			return
+		}
+		if err := h.store.StorageDelete(id, namespace, key); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to delete storage: "+err.Error())
+			return
+		}
+		httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // parseURL parses a URL and returns the parsed URL.
