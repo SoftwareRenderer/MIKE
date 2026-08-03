@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -997,5 +998,141 @@ func TestExtensionResponse_MarshalJSON(t *testing.T) {
 	}
 	if got.Type != ExtensionTypeLSP {
 		t.Errorf("Type = %q, want lsp", got.Type)
+	}
+}
+
+func TestHandleStorage_CRUD(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeUI)
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// PUT
+	body := bytes.NewBufferString(`{"namespace":"p:proj1/t:t1","key":"tags","value":["a","b"]}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext/storage", body)
+	w := httptest.NewRecorder()
+	h.HandleStorage(w, req, "test-ext")
+	if w.Code != http.StatusOK {
+		t.Fatalf("set status = %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+
+	// GET single
+	req = httptest.NewRequest(http.MethodGet, "/api/extensions/test-ext/storage?namespace=p:proj1/t:t1&key=tags", nil)
+	w = httptest.NewRecorder()
+	h.HandleStorage(w, req, "test-ext")
+	if w.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want 200", w.Code)
+	}
+	var got KVEntry
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Key != "tags" || string(got.Value) != `["a","b"]` {
+		t.Fatalf("unexpected entry: %+v", got)
+	}
+
+	// GET missing -> 404
+	req = httptest.NewRequest(http.MethodGet, "/api/extensions/test-ext/storage?namespace=p:proj1/t:t1&key=missing", nil)
+	w = httptest.NewRecorder()
+	h.HandleStorage(w, req, "test-ext")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("missing status = %d, want 404", w.Code)
+	}
+
+	// DELETE
+	req = httptest.NewRequest(http.MethodDelete, "/api/extensions/test-ext/storage?namespace=p:proj1/t:t1&key=tags", nil)
+	w = httptest.NewRecorder()
+	h.HandleStorage(w, req, "test-ext")
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want 200", w.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/extensions/test-ext/storage?namespace=p:proj1/t:t1&key=tags", nil)
+	w = httptest.NewRecorder()
+	h.HandleStorage(w, req, "test-ext")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("post-delete status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleStorage_List(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeUI)
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	h.store.StorageSet("test-ext", "ns", "abc", json.RawMessage(`1`))
+	h.store.StorageSet("test-ext", "ns", "abd", json.RawMessage(`2`))
+	h.store.StorageSet("test-ext", "ns", "x", json.RawMessage(`3`))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/test-ext/storage?namespace=ns&prefix=ab", nil)
+	w := httptest.NewRecorder()
+	h.HandleStorage(w, req, "test-ext")
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", w.Code)
+	}
+	var got []KVEntry
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(got))
+	}
+}
+
+func TestHandleStorage_RejectsOversizedValue(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeUI)
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	big := strings.Repeat("a", maxExtensionValueBytes+1)
+	body := bytes.NewBufferString(`{"namespace":"ns","key":"k","value":"` + big + `"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext/storage", body)
+	w := httptest.NewRecorder()
+	h.HandleStorage(w, req, "test-ext")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleStorage_UnknownExtension(t *testing.T) {
+	h := testHandler(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/nope/storage", nil)
+	w := httptest.NewRecorder()
+	h.HandleStorage(w, req, "nope")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleDelete_CleansStorage(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeUI)
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	h.store.StorageSet("test-ext", "p:proj1", "tags", json.RawMessage(`["a"]`))
+	h.store.StorageSet("test-ext", "global", "prefs", json.RawMessage(`{"x":1}`))
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/extensions/test-ext", nil)
+	w := httptest.NewRecorder()
+	h.HandleDelete(w, req, "test-ext")
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+
+	// Extension gone.
+	if _, err := h.store.GetByID("test-ext"); err == nil {
+		t.Fatal("extension should be deleted")
+	}
+	// Storage gone too — no orphaned data.
+	entries, err := h.store.StorageList("test-ext", "p:proj1", "")
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("expected storage cleaned, got %d entries (%v)", len(entries), err)
+	}
+	entries, _ = h.store.StorageList("test-ext", "global", "")
+	if len(entries) != 0 {
+		t.Fatalf("expected global storage cleaned, got %d", len(entries))
 	}
 }

@@ -31,7 +31,14 @@ var publicPaths = map[string]map[string]struct{}{
 // Static assets (frontend) are always public.
 func isPublicPath(path, method string) bool {
 	// Frontend static assets are always public
-	if path == "/" || strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/favicon") {
+	if path == "/" || path == "/host-client.js" || strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/favicon") {
+		return true
+	}
+	// Extension static assets (extension code, UI entrypoints) are always
+	// public: sandboxed UI extensions run in opaque-origin iframes, which are
+	// cross-site and cannot send SameSite=Lax session cookies to authenticate.
+	// The extension code itself executes inside the sandboxed iframe.
+	if strings.HasPrefix(path, "/extensions/") {
 		return true
 	}
 	// PWA assets (manifest, service worker, icons) are always public
@@ -60,11 +67,10 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 
 		// Security Headers
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 
 		// Content Security Policy
-		csp := "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none';"
+		csp := "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self';"
 		if nonce, ok := r.Context().Value(nonceKey).(string); ok && nonce != "" {
 			csp += fmt.Sprintf(" script-src 'self' 'nonce-%s';", nonce)
 		} else {

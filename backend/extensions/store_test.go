@@ -1,8 +1,10 @@
 package extensions
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,6 +66,41 @@ func TestCreateAndGetExtension(t *testing.T) {
 	if !got.Enabled {
 		t.Error("Enabled = false, want true")
 	}
+}
+
+func TestUIConfigSandboxPermissionsRoundTrip(t *testing.T) {
+	es := testStore(t)
+	ext := makeTestExt("ui-ext", "importer", ExtensionTypeUI)
+	ext.Manifest.Capabilities = &Capabilities{
+		UI: &UIConfig{
+			InjectionPoints: []string{"createTask"},
+			Permissions: []string{
+				"createTask.description.insertText",
+				"createTask.events.paste",
+				"network.proxy",
+				"config.get",
+			},
+		},
+	}
+	if err := es.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := es.GetByID("ui-ext")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	ui := got.Manifest.Capabilities.GetUI()
+	if ui == nil {
+		t.Fatal("GetUI() = nil, want non-nil")
+	}
+	if len(ui.Permissions) != 4 {
+		t.Fatalf("len(Permissions) = %d, want 4", len(ui.Permissions))
+	}
+	if ui.Permissions[0] != "createTask.description.insertText" {
+		t.Errorf("Permissions[0] = %q", ui.Permissions[0])
+	}
+
 }
 
 func TestGetByIDNotFound(t *testing.T) {
@@ -384,4 +421,130 @@ func TestTempDirCleanup(t *testing.T) {
 		t.Error("No files in temp dir")
 	}
 	// t.TempDir() will clean up after test
+}
+
+func TestStorageRoundTrip(t *testing.T) {
+	es := testStore(t)
+	if _, err := es.StorageSet("ext1", "p:proj1", "tags", json.RawMessage(`["a","b"]`)); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	entry, err := es.StorageGet("ext1", "p:proj1", "tags")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if entry == nil || string(entry.Value) != `["a","b"]` {
+		t.Fatalf("unexpected entry: %+v", entry)
+	}
+}
+
+func TestStorageGetMissingReturnsNil(t *testing.T) {
+	es := testStore(t)
+	entry, err := es.StorageGet("ext1", "p:proj1", "nope")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if entry != nil {
+		t.Fatalf("expected nil, got %+v", entry)
+	}
+}
+
+func TestStorageOverwrite(t *testing.T) {
+	es := testStore(t)
+	es.StorageSet("ext1", "p:proj1", "k", json.RawMessage(`1`))
+	es.StorageSet("ext1", "p:proj1", "k", json.RawMessage(`2`))
+	entry, _ := es.StorageGet("ext1", "p:proj1", "k")
+	if string(entry.Value) != `2` {
+		t.Fatalf("expected overwritten value, got %s", entry.Value)
+	}
+}
+
+func TestStorageNamespacesAreIsolated(t *testing.T) {
+	es := testStore(t)
+	es.StorageSet("ext1", "nsA", "k", json.RawMessage(`1`))
+	es.StorageSet("ext1", "nsB", "k", json.RawMessage(`2`))
+	es.StorageSet("ext2", "nsA", "k", json.RawMessage(`3`))
+
+	// Same key in different namespace is distinct.
+	a, _ := es.StorageGet("ext1", "nsA", "k")
+	b, _ := es.StorageGet("ext1", "nsB", "k")
+	if string(a.Value) != `1` || string(b.Value) != `2` {
+		t.Fatalf("namespaces not isolated: %s / %s", a.Value, b.Value)
+	}
+	// Different extension in same namespace is distinct.
+	other, _ := es.StorageGet("ext2", "nsA", "k")
+	if string(other.Value) != `3` {
+		t.Fatalf("extensions not isolated: %s", other.Value)
+	}
+}
+
+func TestStorageListWithPrefix(t *testing.T) {
+	es := testStore(t)
+	es.StorageSet("ext1", "ns", "b", json.RawMessage(`1`))
+	es.StorageSet("ext1", "ns", "abc", json.RawMessage(`2`))
+	es.StorageSet("ext1", "ns", "abd", json.RawMessage(`3`))
+	es.StorageSet("ext1", "ns", "x", json.RawMessage(`4`))
+
+	entries, err := es.StorageList("ext1", "ns", "ab")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	if entries[0].Key != "abc" || entries[1].Key != "abd" {
+		t.Fatalf("unexpected ordering: %+v", entries)
+	}
+}
+
+func TestStorageDelete(t *testing.T) {
+	es := testStore(t)
+	es.StorageSet("ext1", "ns", "k", json.RawMessage(`1`))
+	if err := es.StorageDelete("ext1", "ns", "k"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	entry, _ := es.StorageGet("ext1", "ns", "k")
+	if entry != nil {
+		t.Fatalf("expected deleted, got %+v", entry)
+	}
+}
+
+func TestStorageRejectsInvalidJSON(t *testing.T) {
+	es := testStore(t)
+	if _, err := es.StorageSet("ext1", "ns", "k", json.RawMessage(`not-json`)); err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestStorageRejectsOversizedValue(t *testing.T) {
+	es := testStore(t)
+	big := json.RawMessage(`"` + strings.Repeat("a", maxExtensionValueBytes+1) + `"`)
+	if _, err := es.StorageSet("ext1", "ns", "k", big); err == nil {
+		t.Fatal("expected error for oversized value")
+	}
+}
+
+func TestStorageDeleteAll(t *testing.T) {
+	es := testStore(t)
+	es.StorageSet("ext1", "nsA", "k1", json.RawMessage(`1`))
+	es.StorageSet("ext1", "nsA", "k2", json.RawMessage(`2`))
+	es.StorageSet("ext1", "nsB", "k1", json.RawMessage(`3`))
+	es.StorageSet("ext2", "nsA", "k1", json.RawMessage(`4`))
+
+	if err := es.StorageDeleteAll("ext1"); err != nil {
+		t.Fatalf("delete all: %v", err)
+	}
+	// ext1 storage is gone across all namespaces.
+	entries, err := es.StorageList("ext1", "nsA", "")
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("expected ext1 nsA empty, got %d (%v)", len(entries), err)
+	}
+	entries, _ = es.StorageList("ext1", "nsB", "")
+	if len(entries) != 0 {
+		t.Fatalf("expected ext1 nsB empty, got %d", len(entries))
+	}
+	// ext2 is untouched.
+	other, _ := es.StorageGet("ext2", "nsA", "k1")
+	if other == nil || string(other.Value) != `4` {
+		t.Fatalf("ext2 storage should be untouched, got %+v", other)
+	}
 }

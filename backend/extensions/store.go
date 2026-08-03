@@ -97,6 +97,15 @@ CREATE TABLE IF NOT EXISTS extensions (
     installed_at      TEXT NOT NULL,
     built_at          TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS extension_storage (
+    ext_id     TEXT NOT NULL,
+    namespace  TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (ext_id, namespace, key)
+);
 `
 	_, err := es.db.Exec(schema)
 	if err != nil {
@@ -333,6 +342,101 @@ func (es *ExtensionStore) SetBuiltAt(id string) error {
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("extension not found: %s", id)
+	}
+	return nil
+}
+
+// StorageGet returns the value for a single key in an extension's namespace.
+// Returns (nil, nil) if the key does not exist.
+func (es *ExtensionStore) StorageGet(extID, namespace, key string) (*KVEntry, error) {
+	var value, updatedAt string
+	err := es.db.QueryRow(
+		`SELECT value, updated_at FROM extension_storage WHERE ext_id = ? AND namespace = ? AND key = ?`,
+		extID, namespace, key,
+	).Scan(&value, &updatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query storage: %w", err)
+	}
+	return &KVEntry{Key: key, Value: json.RawMessage(value), UpdatedAt: updatedAt}, nil
+}
+
+// StorageList returns all keys in a namespace, optionally filtered by prefix.
+func (es *ExtensionStore) StorageList(extID, namespace, prefix string) ([]KVEntry, error) {
+	query := `SELECT key, value, updated_at FROM extension_storage WHERE ext_id = ? AND namespace = ?`
+	args := []any{extID, namespace}
+	if prefix != "" {
+		query += ` AND key LIKE ?`
+		args = append(args, prefix+"%")
+	}
+	query += ` ORDER BY key`
+
+	rows, err := es.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query storage list: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []KVEntry
+	for rows.Next() {
+		var e KVEntry
+		var value string
+		if err := rows.Scan(&e.Key, &value, &e.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan storage: %w", err)
+		}
+		e.Value = json.RawMessage(value)
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate storage: %w", err)
+	}
+	return entries, nil
+}
+
+// StorageSet writes (or overwrites) a key in an extension's namespace.
+// The value must be valid JSON. Returns the stored entry.
+func (es *ExtensionStore) StorageSet(extID, namespace, key string, value json.RawMessage) (*KVEntry, error) {
+	if len(value) == 0 || !json.Valid(value) {
+		return nil, fmt.Errorf("value must be valid JSON")
+	}
+	if len(value) > maxExtensionValueBytes {
+		return nil, fmt.Errorf("value exceeds %d bytes", maxExtensionValueBytes)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := es.db.Exec(
+		`INSERT INTO extension_storage (ext_id, namespace, key, value, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(ext_id, namespace, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		extID, namespace, key, string(value), now,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("set storage: %w", err)
+	}
+	return &KVEntry{Key: key, Value: value, UpdatedAt: now}, nil
+}
+
+// StorageDelete removes a key from an extension's namespace. No-op if missing.
+func (es *ExtensionStore) StorageDelete(extID, namespace, key string) error {
+	_, err := es.db.Exec(
+		`DELETE FROM extension_storage WHERE ext_id = ? AND namespace = ? AND key = ?`,
+		extID, namespace, key,
+	)
+	if err != nil {
+		return fmt.Errorf("delete storage: %w", err)
+	}
+	return nil
+}
+
+// StorageDeleteAll removes ALL storage for an extension. Used when the
+// extension is deleted so its scoped data is not orphaned in the database.
+func (es *ExtensionStore) StorageDeleteAll(extID string) error {
+	_, err := es.db.Exec(
+		`DELETE FROM extension_storage WHERE ext_id = ?`,
+		extID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete all storage: %w", err)
 	}
 	return nil
 }

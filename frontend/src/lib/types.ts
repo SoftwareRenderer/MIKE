@@ -448,8 +448,9 @@ export interface LSPConfig {
 }
 
 export interface UIExtensionConfig {
-    module_url: string;
     injection_points: string[];
+    /** Fully-qualified capability names the extension requests (e.g. "createTask.description.insertText"). */
+    permissions?: string[];
 }
 
 export interface CSSExtensionConfig {
@@ -459,7 +460,6 @@ export interface CSSExtensionConfig {
 export interface ConfigSchema {
     type: string;
     properties?: SchemaProperty[]; // array to preserve insertion order
-    required?: string[];
 }
 
 export interface SchemaProperty {
@@ -520,6 +520,7 @@ export interface RegistryEntry {
     image?: string;
     dockerfile_url?: string;
     manifest_url?: string;
+    capabilities?: Record<string, any>;
 }
 
 export interface ExtensionUpdate {

@@ -137,7 +137,7 @@ describe('UIInjector CSS extension handling', () => {
         expect(document.getElementById('kanban-theme-stylesheet')).toBeFalsy();
     });
 
-    it('does not inject for UI extensions (they use module_url, not css_url)', () => {
+    it('does not inject for UI extensions (they use index.html, not css_url)', () => {
         const uiExt: Extension = {
             id: 'ui-ext',
             name: 'ui-ext',
@@ -151,8 +151,7 @@ describe('UIInjector CSS extension handling', () => {
                 version: '1.0.0',
                 capabilities: {
                     ui: {
-                        module_url: '/extensions/ui/test.js',
-                        injection_points: ['task-card'],
+                        injection_points: ['taskCard'],
                     },
                 },
             },
@@ -222,8 +221,7 @@ describe('UIInjector CSS extension handling', () => {
                 priority: 0,
                 capabilities: {
                     ui: {
-                        module_url: '/extensions/low.js',
-                        injection_points: ['task-card'],
+                        injection_points: ['taskCard'],
                     },
                 },
             },
@@ -249,8 +247,7 @@ describe('UIInjector CSS extension handling', () => {
                 priority: 10,
                 capabilities: {
                     ui: {
-                        module_url: '/extensions/high.js',
-                        injection_points: ['task-card'],
+                        injection_points: ['taskCard'],
                     },
                 },
             },
@@ -266,7 +263,7 @@ describe('UIInjector CSS extension handling', () => {
         // Register high-priority extension first in the array
         injector.registerFromExtensions([extHigh, extLow]);
 
-        const regs = injector.getRegistrations('task-card' as any);
+        const regs = injector.getRegistrations('taskCard' as any);
         expect(regs.length).toBe(2);
         // Lower priority value = loaded first
         expect(regs[0].extensionName).toBe('ext-low');
@@ -287,8 +284,7 @@ describe('UIInjector CSS extension handling', () => {
                 version: '1.0.0',
                 capabilities: {
                     ui: {
-                        module_url: '/extensions/default.js',
-                        injection_points: ['task-card'],
+                        injection_points: ['taskCard'],
                     },
                 },
             },
@@ -314,8 +310,7 @@ describe('UIInjector CSS extension handling', () => {
                 priority: 10,
                 capabilities: {
                     ui: {
-                        module_url: '/extensions/ten.js',
-                        injection_points: ['task-card'],
+                        injection_points: ['taskCard'],
                     },
                 },
             },
@@ -330,7 +325,7 @@ describe('UIInjector CSS extension handling', () => {
 
         injector.registerFromExtensions([extTen, extDefault]);
 
-        const regs = injector.getRegistrations('task-card' as any);
+        const regs = injector.getRegistrations('taskCard' as any);
         expect(regs.length).toBe(2);
         expect(regs[0].extensionName).toBe('ext-default');
         expect(regs[0].order).toBe(0);
@@ -353,8 +348,7 @@ describe('UIInjector CSS extension handling', () => {
                 priority: -5,
                 capabilities: {
                     ui: {
-                        module_url: '/extensions/neg.js',
-                        injection_points: ['task-card'],
+                        injection_points: ['taskCard'],
                     },
                 },
             },
@@ -380,8 +374,7 @@ describe('UIInjector CSS extension handling', () => {
                 priority: 0,
                 capabilities: {
                     ui: {
-                        module_url: '/extensions/zero.js',
-                        injection_points: ['task-card'],
+                        injection_points: ['taskCard'],
                     },
                 },
             },
@@ -396,7 +389,7 @@ describe('UIInjector CSS extension handling', () => {
 
         injector.registerFromExtensions([extZero, extNeg]);
 
-        const regs = injector.getRegistrations('task-card' as any);
+        const regs = injector.getRegistrations('taskCard' as any);
         expect(regs.length).toBe(2);
         expect(regs[0].extensionName).toBe('ext-neg');
         expect(regs[0].order).toBe(-5);

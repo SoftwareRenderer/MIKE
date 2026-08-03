@@ -51,13 +51,13 @@
 
     // Human-readable labels for UI injection points
     const INJECTION_POINT_LABELS: Record<string, string> = {
-        'task-card': 'Task Cards',
-        'file-editor': 'File Editor',
-        'project-board': 'Project Board',
-        'task-chat': 'Task Chat',
-        'project-sidebar': 'Project Sidebar',
-        'file-browser': 'File Browser',
-        'create-task': 'Create Task',
+        'taskCard': 'Task Cards',
+        'fileEditor': 'File Editor',
+        'projectBoard': 'Project Board',
+        'taskChat': 'Task Chat',
+        'projectSidebar': 'Project Sidebar',
+        'fileBrowser': 'File Browser',
+        'createTask': 'Create Task',
     };
 
     // Capability descriptions
@@ -84,6 +84,56 @@
         },
     };
 
+    // Human-readable explanations for sandboxed UI extension permissions.
+    // Non-technical, user-facing wording. Unknown permission names fall back
+    // to the raw name in the UI.
+    const PERMISSION_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
+        'createTask.description.insertText': {
+            label: 'Edit the task description',
+            description: 'Can insert text into the task description field.',
+        },
+        'createTask.events.paste': {
+            label: 'See what you paste',
+            description: 'Can see text pasted into the task description so it can act on it.',
+        },
+        'network.proxy': {
+            label: 'Reach external services',
+            description: 'Can make requests to external services through the server, limited to the allowed domains listed below.',
+        },
+        'config.get': {
+            label: 'Read its own settings',
+            description: 'Can read the settings you configured for this extension.',
+        },
+        'log.write': {
+            label: 'Write to the console',
+            description: 'Can write diagnostic entries to the browser developer console.',
+        },
+        'ui.status': {
+            label: 'Show loading/error indicators',
+            description: 'Can show a spinner, error message, or hide its status indicator.',
+        },
+        'ui.setSize': {
+            label: 'Resize its own panel',
+            description: 'Can change the height of the space it occupies on the page.',
+        },
+        'storage.get': {
+            label: 'Read its saved data',
+            description: 'Can read data it previously saved for the current task or project.',
+        },
+        'storage.set': {
+            label: 'Save its own data',
+            description: 'Can save small amounts of data for the current task or project.',
+        },
+        'storage.delete': {
+            label: 'Delete its saved data',
+            description: 'Can remove data it previously saved.',
+        },
+        'storage.list': {
+            label: 'List its saved data',
+            description: 'Can list the data it saved for the current task or project.',
+        },
+    };
+
     // Get list of capability keys for an installed extension
     function getCapabilityKeys(ext: Extension): string[] {
         const caps = ext.manifest.capabilities;
@@ -97,10 +147,28 @@
         return keys;
     }
 
-    // Get capability key from a registry entry type
-    function getRegistryCapabilityKey(entry: RegistryEntry): string | null {
+    // Get capability keys for a registry entry.
+    // Prefers the entry's declared capabilities (which may include e.g. proxy
+    // alongside ui), falling back to the capability implied by its type.
+    function getRegistryCapabilityKeys(entry: RegistryEntry): string[] {
+        if (entry.capabilities && Object.keys(entry.capabilities).length > 0) {
+            return Object.keys(entry.capabilities).filter(k => !!CAPABILITY_DESCRIPTIONS[k]);
+        }
         const capMap: Record<string, string> = { lsp: 'lsp', ui: 'ui', css: 'css', agent: 'agent' };
-        return capMap[entry.type] || null;
+        const k = capMap[entry.type];
+        return k ? [k] : [];
+    }
+
+    // Build a capabilities object for a registry entry. Uses the entry's
+    // declared capability config when present (so the modal can show the same
+    // details as the Installed tab), otherwise empty objects per capability.
+    function getRegistryCapabilities(entry: RegistryEntry): Record<string, any> {
+        if (entry.capabilities && Object.keys(entry.capabilities).length > 0) {
+            return entry.capabilities;
+        }
+        const caps: Record<string, any> = {};
+        for (const k of getRegistryCapabilityKeys(entry)) caps[k] = {};
+        return caps;
     }
 
     // Add extension form
@@ -839,6 +907,29 @@
                                         </div>
                                     </div>
                                 {/if}
+                                <!-- UI: show declared permissions -->
+                                {#if capKey === 'ui' && caps?.ui?.permissions?.length}
+                                    <div class="cap-detail-extra cap-detail-extra-block">
+                                        <span class="cap-detail-label">Permissions:</span>
+                                        <div class="cap-permission-list">
+                                            {#each caps.ui.permissions as perm}
+                                                {@const info = PERMISSION_DESCRIPTIONS[perm]}
+                                                <div class="cap-permission">
+                                                    <span class="cap-permission-name">{info?.label || perm}</span>
+                                                    {#if info?.description}
+                                                        <span class="cap-permission-desc">{info.description}</span>
+                                                    {:else}
+                                                        <span class="cap-permission-desc">Requested a permission this version does not document.</span>
+                                                    {/if}
+                                                </div>
+                                            {/each}
+                                        </div>
+                                        <p class="cap-permission-note">
+                                            These are the permissions the extension declared in its manifest. The host only
+                                            grants ones it recognizes; any capability not declared here is rejected at runtime.
+                                        </p>
+                                    </div>
+                                {/if}
                                 <!-- LSP: show language and extensions -->
                                 {#if capKey === 'lsp' && caps?.lsp}
                                     <div class="cap-detail-extra">
@@ -905,8 +996,7 @@
             {:else}
                 <div class="extension-list">
                     {#each filteredRegistry as entry}
-                        {@const regCapKey = getRegistryCapabilityKey(entry)}
-                        {@const regCapInfo = regCapKey ? CAPABILITY_DESCRIPTIONS[regCapKey] : null}
+                        {@const regCapKeys = getRegistryCapabilityKeys(entry)}
                         <div class="extension-card registry-card">
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'}>
@@ -915,11 +1005,14 @@
                                 <div class="ext-info">
                                     <div class="ext-name-row">
                                         <span class="ext-name">{entry.display_name || entry.name}</span>
-                                        {#if regCapInfo}
+                                        {#if regCapKeys.length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
-                                                <button class="cap-badge" class:cap-lsp={regCapKey === 'lsp'} class:cap-ui={regCapKey === 'ui'} class:cap-css={regCapKey === 'css'} class:cap-agent={regCapKey === 'agent'} class:cap-proxy={regCapKey === 'proxy'} aria-label="{regCapInfo.label} capability for {entry.display_name || entry.name}. {regCapInfo.description}" onclick={() => { const caps: Record<string, any> = {}; caps[regCapKey!] = {}; selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: caps }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>
-                                                    {regCapInfo.label}
-                                                </button>
+                                                {#each regCapKeys as regCapKey}
+                                                    {@const regCapInfo = CAPABILITY_DESCRIPTIONS[regCapKey]}
+                                                    <button class="cap-badge" class:cap-lsp={regCapKey === 'lsp'} class:cap-ui={regCapKey === 'ui'} class:cap-css={regCapKey === 'css'} class:cap-agent={regCapKey === 'agent'} class:cap-proxy={regCapKey === 'proxy'} aria-label="{regCapInfo.label} capability for {entry.display_name || entry.name}. {regCapInfo.description}" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>
+                                                        {regCapInfo.label}
+                                                    </button>
+                                                {/each}
                                             </div>
                                         {/if}
                                     </div>
@@ -1459,6 +1552,46 @@
         border: 1px solid var(--color-border-subtle);
         color: var(--color-text-secondary);
         white-space: nowrap;
+    }
+
+    .cap-detail-extra-block {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .cap-permission-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        width: 100%;
+    }
+
+    .cap-permission {
+        display: flex;
+        flex-direction: column;
+        gap: 0.1rem;
+        padding: 0.4rem 0.55rem;
+        background: var(--color-bg-input);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: 6px;
+    }
+
+    .cap-permission-name {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+
+    .cap-permission-desc {
+        font-size: 0.78rem;
+        color: var(--color-text-secondary);
+        line-height: 1.4;
+    }
+
+    .cap-permission-note {
+        margin: 0;
+        font-size: 0.72rem;
+        color: var(--color-text-tertiary);
     }
 
     /* Radio group (matches SandboxConfigModal) */

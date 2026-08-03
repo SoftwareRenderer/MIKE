@@ -1,5 +1,33 @@
 [
     {
+        "name": "github-issue-importer",
+        "version": "1.0.0",
+        "type": "ui",
+        "display_name": "GitHub Issue Importer",
+        "description": "Automatically imports GitHub issue content when a relevant URL is pasted into task description.",
+        "author": "SoftwareRenderer",
+        "homepage": "https://github.com/SoftwareRenderer",
+        "manifest_url": "ui/github-issue-importer/manifest.json",
+        "capabilities": {
+            "ui": {
+                "injection_points": [
+                    "createTask"
+                ],
+                "permissions": [
+                    "createTask.description.insertText",
+                    "createTask.events.paste",
+                    "network.proxy",
+                    "ui.status"
+                ]
+            },
+            "proxy": {
+                "allowed_domains": [
+                    "api.github.com"
+                ]
+            }
+        }
+    },
+    {
         "name": "gopls",
         "version": "1.0.0",
         "type": "lsp",
@@ -8,30 +36,16 @@
         "author": "Go Team",
         "homepage": "https://github.com/golang/tools/tree/master/gopls",
         "license_url": "https://github.com/golang/tools/blob/master/LICENSE",
+        "manifest_url": "lsp/gopls/manifest.json",
         "dockerfile_url": "lsp/gopls/Dockerfile",
-        "manifest_url": "lsp/gopls/manifest.json"
-    },
-    {
-        "name": "typescript-language-server",
-        "version": "1.0.0",
-        "type": "lsp",
-        "display_name": "TypeScript/JavaScript Language Server",
-        "description": "TypeScript/JavaScript language server. Provides completions, hover, diagnostics, go-to-definition, refactor, and more for TypeScript and JavaScript projects.",
-        "author": "Microsoft",
-        "homepage": "https://github.com/typescript-language-server/typescript-language-server",
-        "license_url": "https://github.com/typescript-language-server/typescript-language-server/blob/master/LICENSE",
-        "dockerfile_url": "lsp/typescript-language-server/Dockerfile",
-        "manifest_url": "lsp/typescript-language-server/manifest.json"
-    },
-    {
-        "name": "github-issue-importer",
-        "version": "1.0.0",
-        "type": "ui",
-        "display_name": "GitHub Issue Importer",
-        "description": "Automatically imports GitHub issue content when a relevant URL is pasted into task description.",
-        "author": "SoftwareRenderer",
-        "homepage": "https://github.com/SoftwareRenderer",
-        "manifest_url": "ui/github-issue-importer/manifest.json"
+        "capabilities": {
+            "lsp": {
+                "language": "go",
+                "extensions": [
+                    "go"
+                ]
+            }
+        }
     },
     {
         "name": "mike-light",
@@ -41,7 +55,10 @@
         "description": "Light color scheme for the Kanban UI.",
         "author": "SoftwareRenderer",
         "homepage": "https://github.com/SoftwareRenderer",
-        "manifest_url": "css/mike-light/manifest.json"
+        "manifest_url": "css/mike-light/manifest.json",
+        "capabilities": {
+            "css": {}
+        }
     },
     {
         "name": "pi",
@@ -52,6 +69,32 @@
         "author": "Pi",
         "homepage": "https://pi.dev/",
         "license_url": "https://github.com/earendil-works/pi/blob/main/LICENSE",
-        "manifest_url": "agent/pi/manifest.json"
+        "manifest_url": "agent/pi/manifest.json",
+        "capabilities": {
+            "agent": {}
+        }
+    },
+    {
+        "name": "typescript-language-server",
+        "version": "1.0.0",
+        "type": "lsp",
+        "display_name": "TypeScript/JavaScript Language Server",
+        "description": "TypeScript/JavaScript language server. Provides completions, hover, diagnostics, go-to-definition, refactor, and more for TypeScript and JavaScript projects.",
+        "author": "Microsoft",
+        "homepage": "https://github.com/typescript-language-server/typescript-language-server",
+        "license_url": "https://github.com/typescript-language-server/typescript-language-server/blob/master/LICENSE",
+        "manifest_url": "lsp/typescript-language-server/manifest.json",
+        "dockerfile_url": "lsp/typescript-language-server/Dockerfile",
+        "capabilities": {
+            "lsp": {
+                "language": "typescript",
+                "extensions": [
+                    "ts",
+                    "tsx",
+                    "js",
+                    "jsx"
+                ]
+            }
+        }
     }
 ]

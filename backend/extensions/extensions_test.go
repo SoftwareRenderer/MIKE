@@ -91,13 +91,13 @@ func TestExtension_HasUIConfig(t *testing.T) {
 		t.Error("HasUIConfig() = true, want false (no UI config)")
 	}
 	// Set UI config
-	ext.Manifest.Capabilities = &Capabilities{UI: &UIConfig{ModuleURL: "/ext/test.js"}}
+	ext.Manifest.Capabilities = &Capabilities{UI: &UIConfig{InjectionPoints: []string{"createTask"}}}
 	if !ext.HasUIConfig() {
 		t.Error("HasUIConfig() = false, want true")
 	}
 	// LSP type with UI config (should still be false)
 	lspExt := makeTestExtension(t, ExtensionTypeLSP, "registry")
-	lspExt.Manifest.Capabilities = &Capabilities{UI: &UIConfig{ModuleURL: "/ext/test.js"}}
+	lspExt.Manifest.Capabilities = &Capabilities{UI: &UIConfig{InjectionPoints: []string{"createTask"}}}
 	if lspExt.HasUIConfig() {
 		t.Error("HasUIConfig() = true for LSP extension, want false")
 	}
@@ -271,7 +271,6 @@ func TestConfigSchema_Properties(t *testing.T) {
 				Default:     true,
 			},
 		},
-		Required: []string{"memoryLimit"},
 	}
 
 	if schema.Type != "object" {
@@ -300,9 +299,6 @@ func TestConfigSchema_Properties(t *testing.T) {
 	if netProp.Type != "boolean" {
 		t.Errorf("networkIsolation.Type = %v, want boolean", netProp.Type)
 	}
-	if len(schema.Required) != 1 || schema.Required[0] != "memoryLimit" {
-		t.Errorf("Required = %v, want [memoryLimit]", schema.Required)
-	}
 }
 
 func TestConfigSchema_JSON_PreservesPropertyOrder(t *testing.T) {
@@ -312,8 +308,7 @@ func TestConfigSchema_JSON_PreservesPropertyOrder(t *testing.T) {
 			{"key": "api_key", "type": "string", "title": "API Key", "sensitive": true},
 			{"key": "memory_limit", "type": "number", "title": "Memory Limit", "default": 256},
 			{"key": "sandbox_mount_mode", "type": "string", "title": "Mount Mode", "default": "rw"}
-		],
-		"required": ["api_key"]
+		]
 	}`
 
 	var schema ConfigSchema

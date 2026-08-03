@@ -423,8 +423,7 @@ test.describe('Extensions Tab', () => {
           author: 'Test',
           capabilities: {
             ui: {
-              module_url: '/extensions/caps-badge-test/module.js',
-              injection_points: ['task-card'],
+              injection_points: ['taskCard'],
             },
           },
         },
@@ -466,8 +465,7 @@ test.describe('Extensions Tab', () => {
           author: 'Test',
           capabilities: {
             ui: {
-              module_url: '/extensions/caps-modal-test/module.js',
-              injection_points: ['task-card'],
+              injection_points: ['taskCard'],
             },
             css: {
               css_url: '/extensions/caps-modal-test/styles.css',
