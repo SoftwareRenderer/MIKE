@@ -1,0 +1,19 @@
+{
+    "display_name": "Markdown Preview",
+    "description": "Adds a Preview button to the editor footer for Markdown files, toggling between the code editor and a rendered preview.",
+    "author": "Kanban",
+    "homepage": "https://getmike.dev",
+    "version": "1.0.0",
+    "priority": 0,
+    "capabilities": {
+        "ui": {
+            "injection_points": ["fileEditor"],
+            "permissions": [
+                "editor.addFooterButton",
+                "editor.getContent",
+                "editor.setOverlay",
+                "editor.contentChange"
+            ]
+        }
+    }
+}

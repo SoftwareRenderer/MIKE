@@ -8,6 +8,9 @@ import {
     CAP_UI_STATUS,
     CAP_UI_SET_SIZE,
     CAP_STORAGE_SET,
+    CAP_LOG_WRITE,
+    CAP_EDITOR_ADD_FOOTER_BUTTON,
+    CAP_EDITOR_REMOVE_FOOTER_BUTTON,
 } from '../capabilities';
 import type { HostRequest } from '../types';
 
@@ -55,7 +58,8 @@ describe('ExtensionHostChannel capability enforcement', () => {
         channel.start();
         const init = messages[0];
         expect(init.type).toBe('init');
-        expect(init.granted).toEqual([CAP_CONFIG_GET]);
+        // config.get and log.write are implicit grants added by the channel.
+        expect(init.granted).toEqual([CAP_CONFIG_GET, CAP_LOG_WRITE]);
         expect(init.config).toEqual({ key: 'value' });
         channel.destroy();
     });
@@ -68,6 +72,31 @@ describe('ExtensionHostChannel capability enforcement', () => {
         // origin on the receive side (see the non-opaque-origin rejection test).
         expect(targets.length).toBeGreaterThan(0);
         expect(targets.every((t) => t === '*')).toBe(true);
+        channel.destroy();
+    });
+
+    it('grants editor.removeFooterButton implicitly when addFooterButton is granted', async () => {
+        // Removing a footer button is intrinsic to adding one — granting
+        // addFooterButton must also grant removeFooterButton (scoped to the
+        // extension's own buttons), even if not declared.
+        const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_ADD_FOOTER_BUTTON]);
+        channel.start();
+        const init = messages[0];
+        expect(init.granted).toContain(CAP_EDITOR_REMOVE_FOOTER_BUTTON);
+        // The call is accepted (not rejected as 'not granted'); it resolves ok
+        // as a no-op here because no button exists in jsdom.
+        send(channel, contentWindow, { type: 'call', id: 'rm', cap: CAP_EDITOR_REMOVE_FOOTER_BUTTON, args: { id: 'x' } });
+        await flush();
+        const resp = messages[messages.length - 1];
+        expect(resp.ok).toBe(true);
+        expect(resp.error).toBeUndefined();
+        channel.destroy();
+    });
+
+    it('does not grant editor.removeFooterButton without addFooterButton', () => {
+        const { channel, messages } = makeChannel([CAP_CONFIG_GET]);
+        channel.start();
+        expect(messages[0].granted).not.toContain(CAP_EDITOR_REMOVE_FOOTER_BUTTON);
         channel.destroy();
     });
 

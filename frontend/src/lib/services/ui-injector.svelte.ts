@@ -25,7 +25,11 @@ export interface InjectionRegistration {
 
 export class UIInjector {
     registrations = $state<InjectionRegistration[]>([]);
-    private channels = new Map<string, ExtensionHostChannel>();
+    // Channels are scoped per anchor element. A point (e.g. `fileEditor`) can
+    // be mounted in many instances at once (one open file each), and each
+    // instance's anchor gets its own independent channel.
+    // Key: anchor element -> ( `${extensionId}::${point}` -> channel ).
+    private channels = new Map<HTMLElement, Map<string, ExtensionHostChannel>>();
     private version = $state(0);
     private activeCSSUrl = $state<string | null>(null);
 
@@ -112,14 +116,22 @@ export class UIInjector {
         const regs = this.getRegistrations(point);
         if (regs.length === 0) return;
 
+        if (!anchor) {
+            for (const reg of regs) {
+                console.warn(`[ui-injector] ${reg.extensionName} at ${point}: no anchor element; skipping sandboxed extension`);
+            }
+            return;
+        }
+
+        let anchorChannels = this.channels.get(anchor);
+        if (!anchorChannels) {
+            anchorChannels = new Map();
+            this.channels.set(anchor, anchorChannels);
+        }
+
         for (const reg of regs) {
             const key = `${reg.extensionId}::${point}`;
-            if (this.channels.has(key)) continue;
-
-            if (!anchor) {
-                console.warn(`[ui-injector] ${reg.extensionName} at ${point}: no anchor element; skipping sandboxed extension`);
-                continue;
-            }
+            if (anchorChannels.has(key)) continue;
 
             try {
                 const iframe = document.createElement('iframe');
@@ -139,7 +151,7 @@ export class UIInjector {
                     anchor,
                     iframe,
                 });
-                this.channels.set(key, channel);
+                anchorChannels.set(key, channel);
                 // Start channel after sandbox loads so init is not missed.
                 iframe.addEventListener('load', () => channel.start());
             } catch (e: any) {
@@ -149,16 +161,44 @@ export class UIInjector {
     }
 
     refreshSlot(point: InjectionPoint, context: InjectionContext, anchor: HTMLElement | null = null): void {
-        this.teardownSlot(point);
+        this.teardownSlot(point, anchor);
         this.renderSlot(point, context, anchor);
     }
 
-    teardownSlot(point: InjectionPoint): void {
-        for (const [key, ch] of this.channels) {
-            if (key.endsWith(`::${point}`)) {
-                ch.destroy();
-                this.channels.delete(key);
+    /**
+     * Forward an app event to the channel mounted at `anchor` for `point`.
+     * Scoped to that specific instance (e.g. a content change from one editor
+     * must only reach that editor's own extension, never a sibling file's
+     * preview).
+     */
+    forwardEvent(point: InjectionPoint, cap: string, data: any, anchor: HTMLElement | null): void {
+        const ac = anchor ? this.channels.get(anchor) : undefined;
+        if (!ac) return;
+        for (const ch of ac.values()) {
+            if (ch.point === point) ch.forward(cap, data);
+        }
+    }
+
+    /**
+     * Tear down channels mounted at `point`. When `anchor` is supplied, only
+     * the channels at that specific instance are destroyed (used when a single
+     * editor closes or its file changes); otherwise all instances at the point
+     * are torn down.
+     */
+    teardownSlot(point: InjectionPoint, anchor?: HTMLElement | null): void {
+        const teardownOne = (ac: Map<string, ExtensionHostChannel>) => {
+            for (const [key, ch] of ac) {
+                if (ch.point === point) {
+                    ch.destroy();
+                    ac.delete(key);
+                }
             }
+        };
+        if (anchor) {
+            const ac = this.channels.get(anchor);
+            if (ac) teardownOne(ac);
+        } else {
+            for (const ac of this.channels.values()) teardownOne(ac);
         }
     }
 
@@ -176,8 +216,8 @@ export class UIInjector {
     }
 
     private destroyAll() {
-        for (const ch of this.channels.values()) {
-            ch.destroy();
+        for (const ac of this.channels.values()) {
+            for (const ch of ac.values()) ch.destroy();
         }
         this.channels.clear();
     }

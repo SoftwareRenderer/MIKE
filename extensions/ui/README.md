@@ -164,10 +164,15 @@ Capabilities are namespaced (`area.operation`) and come in two kinds:
 | `createTask.events.paste` | event | Receive paste events (clipboard text) from the description. |
 | `network.proxy` | call | HTTP request through the server's domain-allowlisted proxy. |
 | `config.get` | call | Read the extension's own config. *(implicit — no declaration needed)* |
-| `log.write` | call | Emit a namespaced, prefixed console log. |
+| `log.write` | call | Emit a namespaced, prefixed console log. *(implicit — no declaration needed)* |
 | `ui.status` | call | Set a host-rendered status indicator (see below). |
 | `ui.setSize` | call | Set the iframe height in pixels (for custom visualizations). |
 | `storage.get` / `storage.set` / `storage.delete` / `storage.list` | call | Scoped key-value storage. |
+| `editor.addFooterButton` | call | Add/update a button in the editor footer (next to "Wrap"). `label`/`active` optional. Also grants `editor.removeFooterButton` and `editor.footerButtonClick` implicitly. |
+| `editor.removeFooterButton` | call | Remove a previously added footer button. *(implicit with `editor.addFooterButton` — no declaration needed)* |
+| `editor.getContent` | call | Resolve with the current editor document text. |
+| `editor.setOverlay` | call | Hide/show the code editor and fill the editor area with the extension iframe (`{ visible }`). |
+| `editor.contentChange` | event | Fired on every editor edit with the new document text (`{ content }`). |
 
 References:
 - Available `injection_points` — `./frontend/src/lib/extensions/types.ts`

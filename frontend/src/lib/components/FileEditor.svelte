@@ -13,10 +13,13 @@
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
-    // UI extension injection point — re-render when extensions change
+    let extAnchorEl = $state<HTMLDivElement | null>(null);
     $effect(() => {
         const _v = uiInjector.getPointVersion(INJECTION_POINTS.FILE_EDITOR);
-        uiInjector.refreshSlot(INJECTION_POINTS.FILE_EDITOR, { component: 'FileEditor', filePath, projectId });
+        const anchorEl = extAnchorEl;
+        if (!anchorEl) return;
+        uiInjector.renderSlot(INJECTION_POINTS.FILE_EDITOR, { component: 'FileEditor', filePath, projectId }, anchorEl);
+        return () => uiInjector.teardownSlot(INJECTION_POINTS.FILE_EDITOR, anchorEl);
     });
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip } from '@codemirror/view';
@@ -360,6 +363,12 @@
                     hasChanges = content !== savedContent;
                     lineCount = update.state.doc.lines;
                     charCount = update.state.doc.length;
+                    // Notify THIS file's file-editor extensions (e.g. a
+                    // markdown preview) that the document changed. Scoped to
+                    // this editor's anchor so a change in one open file never
+                    // renders into another file's preview. Generic — the host
+                    // forwards the text without interpreting it.
+                    uiInjector.forwardEvent(INJECTION_POINTS.FILE_EDITOR, 'editor.contentChange', { content }, extAnchorEl);
                     // Capture delta for undo/redo history persistence.
                     // Only capture user edits (not programmatic changes during restore).
                     if (!(view as any).__restoring) {
@@ -953,6 +962,7 @@
                 <div class="editor-placeholder">File too large to edit (max 1MB)</div>
             {:else}
                 <div class="editor-wrapper" bind:this={editorEl}></div>
+                <div class="ext-anchor" bind:this={extAnchorEl}></div>
                 <div class="search-container" bind:this={searchContainerEl}></div>
             {/if}
         </div>
@@ -1055,5 +1065,24 @@
         right: 0;
         z-index: 100;
         pointer-events: none;
+    }
+
+    /* File-editor UI extension anchor. Overlays the editor content area so an
+       extension can render a full-bleed view (e.g. a rendered preview) over
+       the code editor. Inert by default: pointer-events are only enabled on
+       the extension iframe, so the editor stays interactive when the iframe
+       is collapsed (height 0). */
+    .ext-anchor {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 5;
+        pointer-events: none;
+        overflow: hidden;
+    }
+    .ext-anchor :global(iframe) {
+        pointer-events: auto;
     }
 </style>

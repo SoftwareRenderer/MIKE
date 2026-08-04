@@ -48,6 +48,29 @@
         }
     },
     {
+        "name": "markdown-preview",
+        "version": "1.0.0",
+        "type": "ui",
+        "display_name": "Markdown Preview",
+        "description": "Adds a Preview button to the editor footer for Markdown files, toggling between the code editor and a rendered preview.",
+        "author": "Kanban",
+        "homepage": "https://getmike.dev",
+        "manifest_url": "ui/markdown-preview/manifest.json",
+        "capabilities": {
+            "ui": {
+                "injection_points": [
+                    "fileEditor"
+                ],
+                "permissions": [
+                    "editor.addFooterButton",
+                    "editor.getContent",
+                    "editor.setOverlay",
+                    "editor.contentChange"
+                ]
+            }
+        }
+    },
+    {
         "name": "mike-light",
         "version": "1.0.0",
         "type": "css",
