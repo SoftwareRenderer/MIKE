@@ -62,13 +62,17 @@
 
     // Capability descriptions
     const CAPABILITY_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
+        proxy: {
+            label: 'Proxy',
+            description: 'Enables external API access for specific domains.',
+        },
         lsp: {
             label: 'LSP',
             description: 'Provides a Language Server Protocol server for code intelligence — completions, diagnostics, go-to-definition, and more. Runs in an isolated gVisor sandbox.',
         },
         ui: {
             label: 'UI',
-            description: 'Injects custom JavaScript UI modules into specific parts of the application. Can add buttons, panels, or other interactive elements to task cards, the file editor, chat interface, and other components.',
+            description: 'Customizes interactive elements. The component runs within a sandboxed iframe.',
         },
         css: {
             label: 'CSS',
@@ -76,11 +80,7 @@
         },
         agent: {
             label: 'Agent',
-            description: 'Adds an AI coding agent as a provider option. The agent runs as a subprocess with a WASM adapter for protocol handling, enabling automated code tasks and conversations.',
-        },
-        proxy: {
-            label: 'Proxy',
-            description: 'Declares server-side proxy rules for external API access. The server forwards requests to allowed domains with configurable headers, enabling extensions to access external APIs securely.',
+            description: 'Adds an AI coding agent as a provider option.',
         },
     };
 
@@ -131,6 +131,26 @@
         'storage.list': {
             label: 'List its saved data',
             description: 'Can list the data it saved for the current task or project.',
+        },
+        'editor.addFooterButton': {
+            label: 'Add a button to the editor',
+            description: 'Can add a button to the bottom toolbar of the code editor.',
+        },
+        'editor.removeFooterButton': {
+            label: 'Remove its editor button',
+            description: 'Can remove a button it previously added to the code editor toolbar.',
+        },
+        'editor.getContent': {
+            label: 'Read the open file',
+            description: 'Can read the full contents of the file currently open in the editor.',
+        },
+        'editor.setOverlay': {
+            label: 'Replace the editor view',
+            description: 'Can hide the code editor and show its own view in its place, and restore the editor afterwards.',
+        },
+        'editor.contentChange': {
+            label: 'See file edits',
+            description: 'Can receive updates when the content of the open file changes.',
         },
     };
 
@@ -924,10 +944,6 @@
                                                 </div>
                                             {/each}
                                         </div>
-                                        <p class="cap-permission-note">
-                                            These are the permissions the extension declared in its manifest. The host only
-                                            grants ones it recognizes; any capability not declared here is rejected at runtime.
-                                        </p>
                                     </div>
                                 {/if}
                                 <!-- LSP: show language and extensions -->
@@ -1586,12 +1602,6 @@
         font-size: 0.78rem;
         color: var(--color-text-secondary);
         line-height: 1.4;
-    }
-
-    .cap-permission-note {
-        margin: 0;
-        font-size: 0.72rem;
-        color: var(--color-text-tertiary);
     }
 
     /* Radio group (matches SandboxConfigModal) */

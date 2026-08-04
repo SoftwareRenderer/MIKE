@@ -102,6 +102,17 @@
             },
         },
 
+        editor: {
+            addFooterButton: (id, label, active) => call('editor.addFooterButton', {
+                id: String(id || ''),
+                ...(label !== undefined ? { label: String(label) } : {}),
+                active: !!active,
+            }),
+            removeFooterButton: (id) => call('editor.removeFooterButton', { id: String(id || '') }),
+            getContent: () => call('editor.getContent', {}),
+            setOverlay: (visible) => call('editor.setOverlay', { visible: !!visible }),
+        },
+
         log: (level, message) => call('log.write', { level: level || 'info', message: String(message || '') }),
 
         loading: (message) => call('ui.status', { state: 'loading', message: String(message || '') }),

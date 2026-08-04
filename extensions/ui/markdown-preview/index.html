@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Markdown Preview</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background: var(--color-bg, #0d1117);
+            color: var(--color-text-primary, #e6edf3);
+        }
+        body.preview-off { visibility: hidden; }
+        .md-preview {
+            box-sizing: border-box;
+            height: 100%;
+            overflow: auto;
+            padding: 12px 16px;
+            font-size: 14px;
+            line-height: 1.6;
+            font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+        }
+        .md-preview h1, .md-preview h2, .md-preview h3,
+        .md-preview h4, .md-preview h5, .md-preview h6 {
+            margin: 1em 0 0.5em;
+            line-height: 1.25;
+            font-weight: 600;
+        }
+        .md-preview h1 { font-size: 1.6em; border-bottom: 1px solid var(--color-border, #30363d); padding-bottom: 0.3em; }
+        .md-preview h2 { font-size: 1.35em; border-bottom: 1px solid var(--color-border, #30363d); padding-bottom: 0.3em; }
+        .md-preview h3 { font-size: 1.15em; }
+        .md-preview p { margin: 0 0 1em; }
+        .md-preview a { color: var(--color-accent, #58a6ff); text-decoration: none; }
+        .md-preview a:hover { text-decoration: underline; }
+        .md-preview code {
+            font-family: var(--font-mono, ui-monospace, "SF Mono", monospace);
+            font-size: 0.9em;
+            background: var(--color-surface-2, #161b22);
+            padding: 0.15em 0.35em;
+            border-radius: 3px;
+        }
+        .md-preview pre {
+            background: var(--color-surface-2, #161b22);
+            padding: 12px;
+            border-radius: 6px;
+            overflow: auto;
+        }
+        .md-preview pre code { background: none; padding: 0; }
+        .md-preview blockquote {
+            margin: 0 0 1em;
+            padding: 0 1em;
+            color: var(--color-text-secondary, #8b949e);
+            border-left: 4px solid var(--color-border, #30363d);
+        }
+        .md-preview ul, .md-preview ol { padding-left: 1.6em; margin: 0 0 1em; }
+        .md-preview li { margin: 0.25em 0; }
+        .md-preview hr { border: none; border-top: 1px solid var(--color-border, #30363d); margin: 1.5em 0; }
+        .md-preview img { max-width: 100%; }
+        .md-preview table { border-collapse: collapse; margin: 0 0 1em; }
+        .md-preview th, .md-preview td { border: 1px solid var(--color-border, #30363d); padding: 6px 12px; }
+    </style>
+</head>
+<body class="preview-off">
+    <!-- Loading/error UI is rendered by the host via the ui.* capability API. -->
+    <script src="/host-client.js"></script>
+    <script src="Preview.js"></script>
+</body>
+</html>

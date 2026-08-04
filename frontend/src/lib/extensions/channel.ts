@@ -10,7 +10,8 @@ import type {
     InjectionContext,
     InjectionPoint,
 } from './types';
-import { SUPPORTED_CAPABILITIES } from './capabilities';
+import { SUPPORTED_CAPABILITIES, CAP_EDITOR_ADD_FOOTER_BUTTON, CAP_EDITOR_REMOVE_FOOTER_BUTTON } from './capabilities';
+import { cleanupFooterButtons } from './handlers/editor';
 
 export interface ExtensionHostOptions {
     extensionId: string;
@@ -32,12 +33,23 @@ export class ExtensionHostChannel {
     private destroyed = false;
     private statusEl: HTMLDivElement | null = null;
 
+    /** The injection point this channel is mounted at (public for host bookkeeping). */
+    get point(): InjectionPoint {
+        return this.opts.point;
+    }
+
     constructor(opts: ExtensionHostOptions) {
         this.opts = opts;
         this.iframe = opts.iframe;
         this.granted = new Set(opts.granted);
-        // config.get is implicit — every extension can read its own config.
+
+        // Implicit grants
         this.granted.add('config.get');
+        this.granted.add('log.write');
+        if (this.granted.has(CAP_EDITOR_ADD_FOOTER_BUTTON)) {
+            this.granted.add(CAP_EDITOR_REMOVE_FOOTER_BUTTON);
+        }
+
         this.listener = (ev: MessageEvent) => this.onMessage(ev);
         window.addEventListener('message', this.listener);
     }
@@ -72,6 +84,7 @@ export class ExtensionHostChannel {
     destroy() {
         if (this.destroyed) return;
         this.destroyed = true;
+        cleanupFooterButtons(this.opts.extensionId, this.opts.anchor);
         window.removeEventListener('message', this.listener);
         for (const fn of this.eventCleanups) {
             try { fn(); } catch {}

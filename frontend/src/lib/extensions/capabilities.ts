@@ -11,6 +11,7 @@ import { configCapabilities } from './handlers/config';
 import { logCapabilities } from './handlers/log';
 import { uiCapabilities } from './handlers/ui';
 import { storageCapabilities } from './handlers/storage';
+import { editorCapabilities } from './handlers/editor';
 
 export {
     CAP_CREATE_TASK_INSERT_TEXT,
@@ -35,6 +36,14 @@ export {
     CAP_STORAGE_DELETE,
     CAP_STORAGE_LIST,
 } from './handlers/storage';
+export {
+    CAP_EDITOR_ADD_FOOTER_BUTTON,
+    CAP_EDITOR_REMOVE_FOOTER_BUTTON,
+    CAP_EDITOR_FOOTER_CLICK,
+    CAP_EDITOR_GET_CONTENT,
+    CAP_EDITOR_SET_OVERLAY,
+    CAP_EDITOR_CONTENT_CHANGE,
+} from './handlers/editor';
 
 /** Fully-qualified capability name → definition. */
 export const SUPPORTED_CAPABILITIES: Record<string, CapabilityDef> = {
@@ -44,12 +53,18 @@ export const SUPPORTED_CAPABILITIES: Record<string, CapabilityDef> = {
     ...logCapabilities,
     ...uiCapabilities,
     ...storageCapabilities,
+    ...editorCapabilities,
 };
 
 /**
  * Compute the set of capabilities to grant an extension.
  * Always returns a subset of the manifest's requested permissions that exist
  * in the catalog — least privilege. Unknown/unsupported names are dropped.
+ *
+ * It's not necessary for extensions to grant implied permissions: creating a
+ * button via `editor.addFooterButton` implies `editor.footerButtonClick` (the
+ * click only ever carries the button's own `id`) and `editor.removeFooterButton`
+ * (removal is scoped to the extension's own buttons only).
  */
 export function computeGrants(requested: string[] | undefined): string[] {
     if (!requested || !Array.isArray(requested)) return [];
