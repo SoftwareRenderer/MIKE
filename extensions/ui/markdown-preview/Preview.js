@@ -112,6 +112,53 @@
         observeMenuReorg(container);
     }
 
+    /**
+     * Index (0-based) of the heading whose markdown source line matches
+     * `line` (1-based), or -1 if that line isn't a heading. Used to map an
+     * outline symbol's source line onto the Wordgard document's headings,
+     * which the renderer emits in the same order (one per source heading).
+     */
+    function headingIndexForLine(markdown, line) {
+        const lines = String(markdown || '').split('\n');
+        let index = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (/^(#{1,6})\s+/.test(lines[i].trim())) {
+                index++;
+                if (i + 1 === line) return index;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Scroll the WYSIWYG editor to the heading at markdown source `line`.
+     * Triggered by the host's symbol outline (jump-to-line). When the preview
+     * is off this is a no-op — the host's CodeMirror view handles the jump.
+     */
+    function scrollToSourceLine(line) {
+        if (!previewActive || !wgEditor || !window.WordgardEditor) return;
+        const { Wordgard } = window.WordgardEditor;
+        extHost.editor.getContent().then(function (res) {
+            if (!previewActive || !wgEditor) return; // toggled off meanwhile
+            const index = headingIndexForLine(res && res.content, line);
+            if (index < 0) return; // not a heading line
+            const doc = wgEditor.state.doc;
+            const t = T();
+            let pos = -1;
+            let count = 0;
+            doc.iterate(0, doc.length, function (node, nodePos) {
+                if (node.type === nt(t.Heading)) {
+                    if (count === index) pos = nodePos;
+                    count++;
+                }
+            });
+            if (pos < 0) return;
+            // Align the heading near the top of the viewport (like the host's
+            // code-view jump-to-line), not just minimally into view.
+            wgEditor.dispatch({ effects: [Wordgard.scrollIntoView(pos, { y: 'start', yMargin: 8 })] });
+        }).catch(function () {});
+    }
+
     /** Replace the Wordgard document from new markdown (external change). */
     function replaceDocFromMarkdown(markdown) {
         if (!wgEditor || !window.WordgardDoc) return;
@@ -190,6 +237,9 @@
         addButton();
         extHost.on('editor.footerButtonClick', onFooterClick);
         extHost.on('editor.contentChange', onContentChange);
+        extHost.on('editor.jumpToLine', function (data) {
+            if (data && typeof data.line === 'number') scrollToSourceLine(data.line);
+        });
     });
 
     // ── Wordgard type normalization ────────────────────────────────────────

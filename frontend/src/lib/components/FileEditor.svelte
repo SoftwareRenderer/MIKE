@@ -659,6 +659,7 @@
     function handleJumpToLine(e: Event) {
         const line = (e as CustomEvent).detail.line;
         jumpToLine(line);
+        uiInjector.forwardEvent(INJECTION_POINTS.FILE_EDITOR, 'editor.jumpToLine', { line }, extAnchorEl);
     }
 
     // Handle save requests from the tab bar (only when this editor is active)

@@ -30,6 +30,7 @@ export const CAP_EDITOR_GET_CONTENT = 'editor.getContent';
 export const CAP_EDITOR_SET_CONTENT = 'editor.setContent';
 export const CAP_EDITOR_SET_OVERLAY = 'editor.setOverlay';
 export const CAP_EDITOR_CONTENT_CHANGE = 'editor.contentChange';
+export const CAP_EDITOR_JUMP_TO_LINE = 'editor.jumpToLine';
 
 // Buttons created by extensions, keyed `${extensionId}:${buttonId}`. Because a
 // point (e.g. `fileEditor`) can be mounted in many instances at once (one open
@@ -235,4 +236,5 @@ export const editorCapabilities: Record<string, CapabilityDef> = {
         handler: setOverlay,
     },
     [CAP_EDITOR_CONTENT_CHANGE]: { kind: 'event' },
+    [CAP_EDITOR_JUMP_TO_LINE]: { kind: 'event' },
 };
