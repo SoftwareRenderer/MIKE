@@ -343,7 +343,7 @@ func (a *Adapter) parseMessageEnd(raw map[string]any) *agent.Event {
 	// Return as a stats event so dispatchEvent accumulates it.
 	// The cost field in SessionStatsData is additive per-message.
 	return &agent.Event{
-		Type: agent.EventTypeStats,
+		Type:  agent.EventTypeStats,
 		Stats: agent.SessionStatsData{Cost: cost},
 	}
 }

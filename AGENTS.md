@@ -661,6 +661,64 @@ class MyCache {
 - Add matching `background` color so scrolling content doesn't show through
 - Add `border-bottom` for visual separation from content below
 
+## Licensing
+
+This project is licensed under **Apache 2.0** (`LICENSE`, `NOTICE`). Dependency
+licenses are **not** changed by our license — each library keeps its own license
+and copyright, which must be preserved. The project's dependency inventory and
+license obligations live in `THIRD_PARTY_NOTICES.md`.
+
+### Files
+- `LICENSE` — Full Apache-2.0 text (download from https://www.apache.org/licenses/LICENSE-2.0.txt)
+- `NOTICE` — Project copyright + reproduced NOTICE files from Apache-2.0 deps
+- `THIRD_PARTY_NOTICES.md` — Inventory of Go + frontend deps and their licenses
+
+### Extensions (`./extensions`) — independently-licensed projects
+`./extensions` organizes several **separate projects**, each hosted independently.
+Each extension is therefore licensed on its own and carries its own declarations:
+
+- Every extension directory has its own `LICENSE` (Apache-2.0), `NOTICE`, and
+  `THIRD_PARTY_NOTICES.md`.
+
+**When adding a new extension:** give it its own `LICENSE`, `NOTICE`, and
+`THIRD_PARTY_NOTICES.md`. If it bundles a third-party library, keep that library's
+license notice intact and never label it Apache-2.0. When adding a new dependency
+to an existing extension, update that extension's `THIRD_PARTY_NOTICES.md`.
+
+### Rules
+- **Never remove** a dependency's license/copyright header or NOTICE file.
+- Do **not** introduce **GPL/AGPL** dependencies — they are incompatible with
+  Apache-2.0 and would force the whole project toward GPL. (MPL-2.0 is OK; do
+  not modify MPL-2.0 files unless you can release the changes under MPL-2.0.)
+- Apache-2.0 deps that ship a `NOTICE` file require its content to be preserved
+  in our `NOTICE` file (currently: `wazero`).
+- `lightningcss` (MPL-2.0) and `caniuse-lite` (CC-BY-4.0) are build/dev-only;
+  keep them out of the distributed runtime artifact.
+
+### Keeping Third-Party Notices Updated
+Regenerate the notices **whenever** a dependency is added, removed, or upgraded.
+
+```bash
+# Go — verify every module's license is permissive & update the Go table
+go mod tidy
+go-licenses report ./... --template notices.tmpl   # or inspect `go list -m all`
+
+# Frontend — inspect the production dependency license distribution
+cd frontend && npx license-checker --production --summary
+cd frontend && npx license-checker --production --csv
+```
+
+Then update `THIRD_PARTY_NOTICES.md` to match, and re-check:
+
+1. Any new **Apache-2.0** dep with a `NOTICE` file → append its content to `NOTICE`.
+2. Any new **MPL / CC / copyleft** dep → review compatibility and note it.
+3. Any new **GPL/AGPL** dep → reject it (see Rules above).
+4. Bump the "Last updated" date in `THIRD_PARTY_NOTICES.md`.
+
+- **Third-party bundled files** (e.g. `extensions/ui/markdown-preview/lib/wordgard.js`)
+  must keep their **own** license notice and must **not** get an Apache-2.0 header.
+- After editing Go files, run `gofmt -w` on them.
+
 ## Debugging Checklist
 1. Server running? `ps aux | grep kanban`
 2. Config correct? `curl /api/config`
