@@ -110,6 +110,7 @@
             }),
             removeFooterButton: (id) => call('editor.removeFooterButton', { id: String(id || '') }),
             getContent: () => call('editor.getContent', {}),
+            setContent: (content) => call('editor.setContent', { content: String(content || '') }),
             setOverlay: (visible) => call('editor.setOverlay', { visible: !!visible }),
         },
 
@@ -128,6 +129,11 @@
             set: (key, value) => call('storage.set', { key: String(key || ''), value }),
             delete: (key) => call('storage.delete', { key: String(key || '') }),
             list: (prefix) => call('storage.list', { prefix: prefix ? String(prefix) : '' }),
+        },
+
+        theme: {
+            /** Read the host's current CSS custom properties (see theme.get). */
+            get: () => call('theme.get', {}),
         },
 
         on(cap, handler) {

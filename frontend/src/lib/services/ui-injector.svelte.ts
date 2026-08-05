@@ -1,5 +1,6 @@
 import type { Extension } from '$lib/types';
-import { computeGrants } from '$lib/extensions/capabilities';
+import { computeGrants, CAP_THEME_UPDATE } from '$lib/extensions/capabilities';
+import { readThemeVars } from '$lib/extensions/handlers/theme';
 import { ExtensionHostChannel } from '$lib/extensions/channel';
 import {
     INJECTION_POINTS,
@@ -99,11 +100,32 @@ export class UIInjector {
         link.rel = 'stylesheet';
         link.href = url;
         link.id = THEME_LINK_ID;
+        // The theme variables only resolve after the stylesheet loads. Extensions
+        // pull them via theme.get() on init, which can race the sheet load, so
+        // push them once it's applied to settle mounted extensions on the final
+        // palette. (No immediate broadcast here: registerFromExtensions/clearCache
+        // destroy all channels before calling setThemeCSS, so none exist yet.)
+        link.addEventListener('load', () => this.broadcastTheme());
         document.head.appendChild(link);
 
         try { localStorage.setItem(THEME_CSS_KEY, url); } catch {}
 
         this.activeCSSUrl = url;
+    }
+
+    /**
+     * Push the current host theme variables to every mounted extension channel
+     * so extension-rendered UI (e.g. the WYSIWYG markdown preview) follows the
+     * active theme without the sandboxed iframe needing to inherit the host
+     * stylesheet.
+     */
+    private broadcastTheme(): void {
+        const variables = readThemeVars();
+        for (const ac of this.channels.values()) {
+            for (const ch of ac.values()) {
+                ch.forward(CAP_THEME_UPDATE, { variables });
+            }
+        }
     }
 
     getRegistrations(point: InjectionPoint): InjectionRegistration[] {

@@ -11,6 +11,7 @@
             "permissions": [
                 "editor.addFooterButton",
                 "editor.getContent",
+                "editor.setContent",
                 "editor.setOverlay",
                 "editor.contentChange"
             ]

@@ -5,6 +5,8 @@
  * These are the ONLY way a sandboxed extension can touch the code editor:
  *   - add a button to the editor footer (`editor.addFooterButton`)
  *   - read the current editor content (`editor.getContent`)
+ *   - replace the editor content (`editor.setContent`) — e.g. to push edits made
+ *     in a WYSIWYG overlay back into the code editor
  *   - hide/show the code editor to reveal an extension overlay (`editor.setOverlay`)
  *   - receive editor content updates (`editor.contentChange`)
  *
@@ -25,6 +27,7 @@ export const CAP_EDITOR_ADD_FOOTER_BUTTON = 'editor.addFooterButton';
 export const CAP_EDITOR_REMOVE_FOOTER_BUTTON = 'editor.removeFooterButton';
 export const CAP_EDITOR_FOOTER_CLICK = 'editor.footerButtonClick';
 export const CAP_EDITOR_GET_CONTENT = 'editor.getContent';
+export const CAP_EDITOR_SET_CONTENT = 'editor.setContent';
 export const CAP_EDITOR_SET_OVERLAY = 'editor.setOverlay';
 export const CAP_EDITOR_CONTENT_CHANGE = 'editor.contentChange';
 
@@ -145,6 +148,27 @@ function getContent(ctx: HostContext): { content: string } {
  *
  * The overlay anchor is generic; the extension decides what it renders.
  */
+/**
+ * Replace the entire editor document text. Used by WYSIWYG-style extensions
+ * (e.g. a rich-text markdown preview) to push edits made in an overlay back
+ * into the code editor. The change flows through the editor's normal
+ * `updateListener`, so the editor's `contentChange` event fires back to the
+ * extension with the new text — extensions must guard against that echo.
+ */
+function setContent(ctx: HostContext, args: { content: string }): void {
+    const root = editorRoot(ctx);
+    if (!root) throw new Error('editor not found');
+    const cm = root.querySelector('.cm-editor') as any;
+    const view = cm && cm.__view;
+    if (!view) throw new Error('editor not ready');
+    const current = view.state.doc.toString();
+    if (current === args.content) return; // no-op
+    view.dispatch({
+        changes: { from: 0, to: current.length, insert: args.content },
+        userEvent: 'setContent',
+    });
+}
+
 function setOverlay(ctx: HostContext, args: { visible: boolean }): void {
     const root = editorRoot(ctx);
     if (!root || !ctx.anchor) throw new Error('editor overlay target not found');
@@ -199,6 +223,11 @@ export const editorCapabilities: Record<string, CapabilityDef> = {
         kind: 'call',
         argsSchema: {},
         handler: getContent,
+    },
+    [CAP_EDITOR_SET_CONTENT]: {
+        kind: 'call',
+        argsSchema: { content: 'string' },
+        handler: setContent,
     },
     [CAP_EDITOR_SET_OVERLAY]: {
         kind: 'call',
