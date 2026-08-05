@@ -433,6 +433,22 @@ The generator scans `extensions/<type>/<name>/manifest.json` for every extension
 - CSS is injected via `document.createElement('style')` or inline styles
 - `module_url` is a path served by the Go server's static file handler (`/extensions/...`)
 
+**Bundling a runtime library (isolation):** A UI extension that needs a runtime
+library (e.g. Wordgard for the `markdown-preview` WYSIWYG editor) must keep it
+**inside its own folder** — the core codebase only ships generic capabilities.
+The sandboxed extension iframe loads plain `<script>` tags (CSP `script-src
+'self'`), so an ESM npm package is bundled to a single IIFE committed in the
+extension dir (e.g. `extensions/ui/markdown-preview/lib/wordgard.js`). The
+extension has its own `package.json` declaring that dependency and its own
+build under `build/` (`npm run build` → `node build/build-wordgard.mjs`);
+`node_modules/` and the transient `build/.dist/` are git-ignored. The core
+`frontend/` workspace must NOT gain the extension's runtime dependencies — only
+generic extension capabilities (e.g. `editor.setContent`) belong there.
+Extension-specific tests are colocated under `extensions/<type>/<name>/tests/`
+(loading Playwright from the frontend workspace), not in `frontend/tests/`. Shared
+extension logic (e.g. the markdown↔Wordgard serializer in `serializer.js`) is a
+plain script loaded by both the extension and its tests — never copy it.
+
 **Registry:** URL configurable via `registry_url` in config. Default: `file://./extensions/registry.json`.
 
 **Sandbox:** Each LSP extension runs in a dedicated gVisor sandbox. Bridge protocol uses `MethodLSP` (0x0A) for JSON-RPC passthrough.

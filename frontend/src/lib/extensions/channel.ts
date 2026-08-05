@@ -10,7 +10,7 @@ import type {
     InjectionContext,
     InjectionPoint,
 } from './types';
-import { SUPPORTED_CAPABILITIES, CAP_EDITOR_ADD_FOOTER_BUTTON, CAP_EDITOR_REMOVE_FOOTER_BUTTON } from './capabilities';
+import { SUPPORTED_CAPABILITIES, CAP_EDITOR_ADD_FOOTER_BUTTON, CAP_EDITOR_REMOVE_FOOTER_BUTTON, CAP_THEME_GET } from './capabilities';
 import { cleanupFooterButtons } from './handlers/editor';
 
 export interface ExtensionHostOptions {
@@ -43,9 +43,10 @@ export class ExtensionHostChannel {
         this.iframe = opts.iframe;
         this.granted = new Set(opts.granted);
 
-        // Implicit grants
+        // Implicit and safe grants
         this.granted.add('config.get');
         this.granted.add('log.write');
+        this.granted.add(CAP_THEME_GET);
         if (this.granted.has(CAP_EDITOR_ADD_FOOTER_BUTTON)) {
             this.granted.add(CAP_EDITOR_REMOVE_FOOTER_BUTTON);
         }

@@ -12,6 +12,7 @@ import { logCapabilities } from './handlers/log';
 import { uiCapabilities } from './handlers/ui';
 import { storageCapabilities } from './handlers/storage';
 import { editorCapabilities } from './handlers/editor';
+import { themeCapabilities } from './handlers/theme';
 
 export {
     CAP_CREATE_TASK_INSERT_TEXT,
@@ -41,9 +42,14 @@ export {
     CAP_EDITOR_REMOVE_FOOTER_BUTTON,
     CAP_EDITOR_FOOTER_CLICK,
     CAP_EDITOR_GET_CONTENT,
+    CAP_EDITOR_SET_CONTENT,
     CAP_EDITOR_SET_OVERLAY,
     CAP_EDITOR_CONTENT_CHANGE,
 } from './handlers/editor';
+export {
+    CAP_THEME_GET,
+    CAP_THEME_UPDATE,
+} from './handlers/theme';
 
 /** Fully-qualified capability name → definition. */
 export const SUPPORTED_CAPABILITIES: Record<string, CapabilityDef> = {
@@ -54,6 +60,7 @@ export const SUPPORTED_CAPABILITIES: Record<string, CapabilityDef> = {
     ...uiCapabilities,
     ...storageCapabilities,
     ...editorCapabilities,
+    ...themeCapabilities,
 };
 
 /**
