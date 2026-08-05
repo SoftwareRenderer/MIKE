@@ -21,7 +21,6 @@
         agent_config_dir?: string;
         models: ModelEntry[];
         concurrency: number;
-        default_model: string;
         input_price: number;
         output_price: number;
         cache_read_price: number;
@@ -35,7 +34,7 @@
         testResult: { success: boolean; message: string } | null;
     }
 
-    let { provider, index, defaultProvider, encryptionEnabled, currencySymbol, getModelColor, parseDefaultModel, onDragStart, onRemove, onFetchModels, onTestConnection, onToggleDefaultProvider, onAddModel, onRemoveModel, onSetDefaultModel, onSyncMeta, isDragging, onDirty } = $props();
+    let { provider, index, encryptionEnabled, currencySymbol, getModelColor, onDragStart, onRemove, onFetchModels, onTestConnection, onAddModel, onRemoveModel, onSyncMeta, isDragging, onDirty } = $props();
 
     function handleToggle() {
         provider.expanded = !provider.expanded;
@@ -82,16 +81,9 @@
                     </span>
                 {/if}
                 <span class="provider-display-name">{provider.display_name || 'New Provider'}</span>
-                {#if defaultProvider === provider.name}
-                    <span class="priority-badge">Default</span>
-                {/if}
             </div>
         </div>
         <div class="provider-actions">
-            {#if provider.default_model}
-                {@const defaultModelInfo = parseDefaultModel(provider.default_model)}
-                <span class="default-model-badge" style="color: {getModelColor(defaultModelInfo.name)}; background: {getModelColor(defaultModelInfo.name)}11">{defaultModelInfo.name}</span>
-            {/if}
             <button type="button" class="btn-remove-provider" onclick={handleRemove} title="Remove provider" aria-label="Remove provider">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                     <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -158,9 +150,6 @@
                             Test Connection
                         {/if}
                     </button>
-                    <button type="button" class="btn-default-provider" class:active={defaultProvider === provider.name} onclick={onToggleDefaultProvider} title="Set as default provider">
-                        {defaultProvider === provider.name ? '✓ Default' : 'Set default'}
-                    </button>
                 </div>
                 {#if provider.fetchError}
                     <div class="fetch-error">
@@ -204,11 +193,8 @@
 
                 <ModelList
                     models={provider.models}
-                    defaultModel={provider.default_model}
                     onAdd={onAddModel}
                     onRemove={onRemoveModel}
-                    onSetDefault={onSetDefaultModel}
-                    {getModelColor}
                 />
 
                 <PricingSection {provider} {currencySymbol} {index} onDirty={onDirty} />
@@ -299,16 +285,6 @@
         align-items: center;
         gap: 6px;
         flex-shrink: 0;
-    }
-    .default-model-badge {
-        font-size: 0.6875rem;
-        font-weight: 600;
-        padding: 1px 6px;
-        border-radius: var(--radius-sm);
-        white-space: nowrap;
-        max-width: 120px;
-        overflow: hidden;
-        text-overflow: ellipsis;
     }
     .btn-remove-provider {
         display: flex;
@@ -417,24 +393,6 @@
     }
     @keyframes spin {
         to { transform: rotate(360deg); }
-    }
-    .btn-default-provider {
-        font-size: 0.75rem;
-        padding: 4px 10px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        margin-left: auto;
-    }
-    .btn-default-provider.active {
-        border-color: var(--color-accent);
-        color: var(--color-accent);
-        background: rgba(76, 154, 255, 0.1);
-    }
-    .btn-default-provider:hover:not(.active) {
-        border-color: var(--color-text-secondary);
     }
     .fetch-error {
         display: flex;

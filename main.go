@@ -64,7 +64,7 @@ func main() {
 	// Worktrees directory
 	effectiveWorktreesDir := *worktreesDir
 	if effectiveWorktreesDir == "" {
-				effectiveWorktreesDir = os.Getenv("MIKE_WORKTREES_DIR")
+		effectiveWorktreesDir = os.Getenv("MIKE_WORKTREES_DIR")
 	}
 	if effectiveWorktreesDir == "" {
 		effectiveWorktreesDir = "./worktrees"
@@ -94,7 +94,7 @@ func main() {
 
 	// Warn on weak secrets
 	for _, name := range crypto.WarnWeakSecrets() {
-		log.Printf("⚠ WARNING: %s is less than 8 characters. Use a stronger secret for production use.", name)
+		log.Printf("⚠ WARNING: %s is less than 8 characters. A stronger secret is recommended for production use.", name)
 	}
 
 	// Start flight recorder for crash diagnostics (always-on, ~1% overhead)

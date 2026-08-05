@@ -21,10 +21,8 @@ test.describe('Debug Cards', () => {
           url: 'http://delete-test:9999/v1',
           models: ['zebra', 'alpha', 'mango'],
           concurrency: 1,
-          default_model: '',
         },
       ],
-      default_provider: '',
     });
     await waitForConfig(page, c =>
       c.providers && c.providers.length === 1 && c.providers[0].name === 'delete-test'

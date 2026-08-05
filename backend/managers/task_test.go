@@ -37,7 +37,10 @@ func newTestTaskHandler(t *testing.T) (*TaskHandler, *store.Store, string) {
 
 	s.SetConfigValue("workspace_dir", worktreesDir)
 	s.SetConfigValue("providers", "[]")
-	s.SetConfigValue("default_provider", "test-provider")
+	s.SetConfigValue("worker_provider", "")
+	s.SetConfigValue("worker_model", "")
+	s.SetConfigValue("utility_provider", "")
+	s.SetConfigValue("utility_model", "")
 
 	cfgStore := config.NewConfigStore(s, dbPath, "test")
 	wm := git.NewWorktreeManager(s, cfgStore)

@@ -314,6 +314,34 @@ func (cs *ConfigStore) GetProviderNameByURL(serverURL string) string {
 	return ""
 }
 
+// ResolveProvider returns a copy of the provider matching the given provider name.
+// Returns nil if no matching provider is found.
+func (cs *ConfigStore) ResolveProvider(name string) *types.Provider {
+	if name == "" {
+		return nil
+	}
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return nil
+	}
+	for i := range cfg.Providers {
+		if cfg.Providers[i].Name == name {
+			p := cfg.Providers[i]
+			return &p
+		}
+	}
+	return nil
+}
+
+// GetUtility returns the configured Utility provider name and model.
+func (cs *ConfigStore) GetUtility() (providerName, model string) {
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return "", ""
+	}
+	return cfg.UtilityProvider, cfg.UtilityModel
+}
+
 // GetProviderConcurrency returns the concurrency limit for the provider matching the given server URL.
 // Returns 1 (default minimum) if no matching provider is found or concurrency is not set.
 func (cs *ConfigStore) GetProviderConcurrency(serverURL string) int {

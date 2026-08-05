@@ -337,7 +337,9 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 		messages := buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, false)
 		previousSummary := extractPrevSummary(messages)
 
-		sumResult, err := te.summarizeContext(ctx, messages, task.LlamaServerURL, task.ModelName, previousSummary)
+		// Route summarization through the configured Utility provider/model.
+		serverURL, modelName, _ := te.utilityTarget(task)
+		sumResult, err := te.summarizeContext(ctx, messages, serverURL, modelName, previousSummary)
 		if err != nil {
 			log.Printf("[summarize] task=%s manual summarization failed: %v", taskID, err)
 			return
@@ -359,7 +361,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 			ThreadID:        task.CurrentThreadID,
 			Role:            "summarization",
 			Content:         sumResult.summary,
-			ModelName:       task.ModelName,
+			ModelName:       modelName,
 			PromptTokens:    sumResult.promptTokens,
 			PredictedTokens: sumResult.predictedTokens,
 			PromptMs:        int(sumResult.promptMs),

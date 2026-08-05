@@ -130,7 +130,7 @@ test.describe.serial('Agent + Network Isolation', () => {
       return res.ok ? res.json() : null;
     });
     const defaultProvider = config?.providers?.find(
-      (p: any) => p.name === config?.default_provider
+      (p: any) => p.name === config?.worker_provider
     );
 
     // Create a task with an LLM provider (not an agent)
@@ -139,7 +139,7 @@ test.describe.serial('Agent + Network Isolation', () => {
       body: {
         prompt: `llm-network-test-${Date.now()}`,
         llama_server_url: defaultProvider?.url || '',
-        model_name: defaultProvider?.default_model || '',
+        model_name: config?.worker_model || '',
       },
     });
     expect(result.ok).toBe(true);

@@ -1,16 +1,19 @@
 <script lang="ts">
-    import type { Provider } from '$lib/types';
+    import type { Config, Provider } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
+    import { resolveWorker, getModelName } from '$lib/utils/providers';
 
     let {
         providers,
+        config,
         taskCount,
         taskTitles,
         onClose,
     }: {
         providers: Provider[];
+        config: Config | null;
         taskCount: number;
         taskTitles: string[];
         onClose: () => void;
@@ -28,17 +31,16 @@
     });
     let modalTitle = $derived(`Change Model for ${taskCount} task${taskCount !== 1 ? 's' : ''}`);
 
-    // Pre-select first provider's default model
+    // Pre-select the configured Worker provider/model
     $effect(() => {
         if (providers.length > 0 && !selectedModel) {
-            const firstProvider = providers[0];
-            const _getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
-            if (firstProvider.default_model && firstProvider.models.some(m => _getModelName(m) === firstProvider.default_model)) {
-                selectedUrl = firstProvider.url;
-                selectedModel = firstProvider.default_model;
-            } else if (firstProvider.models.length > 0) {
-                selectedUrl = firstProvider.url;
-                selectedModel = _getModelName(firstProvider.models[0]);
+            const worker = resolveWorker(config);
+            if (worker.provider && worker.modelName) {
+                selectedUrl = worker.url;
+                selectedModel = worker.modelName;
+            } else if (providers[0].models.length > 0) {
+                selectedUrl = providers[0].url;
+                selectedModel = getModelName(providers[0].models[0]);
             }
         }
     });

@@ -127,7 +127,8 @@ test.describe.serial('ModeSelect component', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.default_provider);
+    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
+    const workerModel = config?.worker_model || '';
 
     const csrf = await page.evaluate(async () => {
       const res = await fetch('/api/auth/session');
@@ -136,7 +137,7 @@ test.describe.serial('ModeSelect component', () => {
     });
 
     const uniquePrompt = `mode-persist-${Date.now()}`;
-    const taskId = await page.evaluate(async ({ pid, csrfToken, provider, prompt }) => {
+    const taskId = await page.evaluate(async ({ pid, csrfToken, provider, prompt, modelName }) => {
       const res = await fetch(`/api/projects/${pid}/tasks`, {
         method: 'POST',
         headers: {
@@ -148,12 +149,12 @@ test.describe.serial('ModeSelect component', () => {
           prompt,
           operating_mode: 'plan',
           llama_server_url: provider?.url || '',
-          model_name: provider?.default_model || '',
+          model_name: modelName,
         }),
       });
       const data = await res.json();
       return data.id || '';
-    }, { pid: projectId, csrfToken: csrf, provider: defaultProvider, prompt: uniquePrompt });
+    }, { pid: projectId, csrfToken: csrf, provider: defaultProvider, prompt: uniquePrompt, modelName: workerModel });
 
     if (!taskId) {
       throw new Error('Failed to create task in Plan mode');
@@ -188,7 +189,8 @@ test.describe.serial('ModeSelect component', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.default_provider);
+    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
+    const workerModel = config?.worker_model || '';
 
     const csrf = await page.evaluate(async () => {
       const res = await fetch('/api/auth/session');
@@ -196,7 +198,7 @@ test.describe.serial('ModeSelect component', () => {
       return data.csrf_token || '';
     });
 
-    const taskId = await page.evaluate(async ({ pid, csrfToken, provider }) => {
+    const taskId = await page.evaluate(async ({ pid, csrfToken, provider, modelName }) => {
       const res = await fetch(`/api/projects/${pid}/tasks`, {
         method: 'POST',
         headers: {
@@ -208,12 +210,12 @@ test.describe.serial('ModeSelect component', () => {
           prompt: `plan-mode-llm-test-${Date.now()}`,
           operating_mode: 'plan',
           llama_server_url: provider?.url || '',
-          model_name: provider?.default_model || '',
+          model_name: modelName,
         }),
       });
       const data = await res.json();
       return data.id || '';
-    }, { pid: projectId, csrfToken: csrf, provider: defaultProvider });
+    }, { pid: projectId, csrfToken: csrf, provider: defaultProvider, modelName: workerModel });
 
     if (!taskId) {
       throw new Error('Failed to create task in Plan mode');

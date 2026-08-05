@@ -152,6 +152,14 @@ func extractPrevSummary(messages []types.ChatMessage) string {
 // Summary is injected into the system prompt on the next LLM call.
 func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task, projectID, taskID string, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error) []types.ChatMessage {
 	prevSummary := extractPrevSummary(messages)
+	// Route summarization through the configured Utility provider/model.
+	// Only override the active model when a Utility pair is configured; otherwise
+	// keep the task's active model/URL passed in by the caller.
+	utilURL, utilModel, ok := te.utilityTarget(task)
+	if ok {
+		serverURL = utilURL
+		modelName = utilModel
+	}
 	sumResult, err := te.summarizeContext(ctx, messages, serverURL, modelName, prevSummary)
 	if err != nil {
 		log.Printf("[summarize] task=%s summarization failed: %v", taskID, err)

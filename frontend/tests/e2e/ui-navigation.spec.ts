@@ -7,14 +7,14 @@ async function createSubtaskViaApi(page: test.Page, projectId: string, parentTas
         const res = await fetch('/api/config');
         return res.json();
     });
-    const defaultProvider = config.providers?.find((p: any) => p.name === config.default_provider);
+    const defaultProvider = config.providers?.find((p: any) => p.name === config.worker_provider);
     const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
         method: 'POST',
         body: {
             prompt,
             parent_task_id: parentTaskId,
             llama_server_url: defaultProvider?.url || '',
-            model_name: defaultProvider?.default_model || '',
+            model_name: config?.worker_model || '',
         },
     });
     return result.data.id;

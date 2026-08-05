@@ -215,6 +215,20 @@ type ChatCompletionOpts struct {
 	Thinking        *llama.ThinkingParams // Thinking sets reasoning params directly, overriding ReasoningEffort.
 }
 
+// utilityTarget resolves the configured Utility provider/model pair. It returns
+// the resolved URL/model and whether the configured Utility pair was actually
+// used (ok=true). When utility is unset or unresolvable it falls back to the
+// task's own values and returns ok=false.
+func (te *TaskExecutor) utilityTarget(task *types.Task) (serverURL, model string, ok bool) {
+	providerName, utilModel := te.configStore.GetUtility()
+	if providerName != "" {
+		if p := te.configStore.ResolveProvider(providerName); p != nil {
+			return p.URL, utilModel, true
+		}
+	}
+	return task.LlamaServerURL, task.ModelName, false
+}
+
 // ChatCompletion sends a non-streaming chat request through the concurrency gate.
 func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, opts *ChatCompletionOpts) (*types.ChatUsage, string, error) {
 	reasoningEffort := "off"

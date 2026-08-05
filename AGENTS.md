@@ -284,6 +284,9 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 ### Default Config
 - Partial updates via PUT `/api/config` (only sends changed fields)
 - Provider-based config model loaded from SQLite — no hardcoded defaults
+- **Primary Providers**: config stores two required provider/model pairs — `worker_provider`/`worker_model` (chat responses) and `utility_provider`/`utility_model` (summarization, commit messages, checkpoint labels). Both are required selections in Settings → Providers and may reference LLM or `agent://` providers.
+- **Worker routing**: the frontend defaults chat/task model selection to the configured Worker pair (`resolveWorker` in `$lib/utils/providers.ts`).
+- **Utility routing**: backend `utilityTarget()` in `backend/exec/executor.go` routes commit-message, checkpoint-label, and summarization LLM calls through the configured Utility provider/model, falling back to the task's own URL/model if unset.
 - Test fixtures use `http://neptune:8010/v1` as example endpoint
 - Workspace: `<project-root>/worktrees` (absolute path)
 
