@@ -1611,6 +1611,12 @@
         white-space: nowrap;
     }
 
+    .ext-proxy-domains .cap-detail-tag {
+        color: var(--color-status-red);
+        border-color: var(--color-status-red);
+        background: color-mix(in srgb, var(--color-status-red) 10%, var(--color-bg-input));
+    }
+
     .cap-detail-extra-block {
         flex-direction: column;
         align-items: stretch;
