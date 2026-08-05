@@ -144,6 +144,10 @@
             label: 'Read the open file',
             description: 'Can read the full contents of the file currently open in the editor.',
         },
+        'editor.setContent': {
+            label: 'Write to the open file',
+            description: 'Can write the full contents of the file currently open in the editor.',
+        },
         'editor.setOverlay': {
             label: 'Replace the editor view',
             description: 'Can hide the code editor and show its own view in its place, and restore the editor afterwards.',
@@ -692,6 +696,16 @@
                             {#if ext.manifest.description}
                                 <p class="ext-description">{ext.manifest.description}</p>
                             {/if}
+                            {#if ext.manifest.capabilities?.proxy?.allowed_domains?.length}
+                                <div class="ext-proxy-domains">
+                                    <span class="ext-proxy-label">Connects to:</span>
+                                    <div class="cap-detail-tags">
+                                        {#each ext.manifest.capabilities.proxy.allowed_domains as domain}
+                                            <span class="cap-detail-tag">{domain}</span>
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/if}
                             {#if ext.type === 'agent'}
                                 <p class="ext-note">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -1059,6 +1073,16 @@
                             {#if entry.description}
                                 <p class="ext-description">{entry.description}</p>
                             {/if}
+                            {#if entry.capabilities?.proxy?.allowed_domains?.length}
+                                <div class="ext-proxy-domains">
+                                    <span class="ext-proxy-label">Connects to:</span>
+                                    <div class="cap-detail-tags">
+                                        {#each entry.capabilities.proxy.allowed_domains as domain}
+                                            <span class="cap-detail-tag">{domain}</span>
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/if}
                             {#if entry.type === 'agent'}
                                 <p class="ext-note">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -1380,6 +1404,23 @@
         display: flex;
         align-items: flex-start;
         gap: 0.35rem;
+    }
+
+    .ext-proxy-domains {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.3rem 0.5rem;
+        margin: 0 0 0.75rem;
+        font-size: 0.8rem;
+        color: var(--color-text-tertiary);
+    }
+
+    .ext-proxy-label {
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
     }
 
     .ext-note svg {
