@@ -35,20 +35,25 @@ const cases = [
   ['```js\nconst x = 1;\n```', '```js\nconst x = 1;\n```\n'],
   ['---', '---\n'],
   ['![alt](img.png)', '![alt](img.png)\n'],
+  ['| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |',
+   '| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n'],
+  ['| **Name** | `code` |\n| - | - |\n| *x* | [y](https://z.dev) |',
+   '| **Name** | `code` |\n| --- | --- |\n| *x* | [y](https://z.dev) |\n'],
 ];
 
-// Mirror Preview.js's Wordgard setup (schema + CodeBlockLanguage + history).
+// Mirror Preview.js's Wordgard setup (schema + CodeBlockLanguage + tables + history).
 function roundtrip(md) {
   const { Wordgard } = window.WordgardEditor;
   const { fullSchema } = window.WordgardSchema;
   const { history } = window.WordgardHistory;
+  const { tables } = window.WordgardTable;
   const { GardState } = window.WordgardState;
   const nt = window.MarkdownSerializer.nt;
   const container = document.createElement('div'); document.body.appendChild(container);
   const ed = Wordgard.create({
     parent: container,
     doc: window.MarkdownSerializer.renderMarkdown(md),
-    config: [fullSchema(), GardState.schemaElement.of(nt(window.WordgardTypes.CodeBlockLanguage)), history(), Wordgard.scrolling('100%')],
+    config: [fullSchema(), GardState.schemaElement.of(nt(window.WordgardTypes.CodeBlockLanguage)), ...tables(), history(), Wordgard.scrolling('100%')],
   });
   const out = window.MarkdownSerializer.docToMarkdown(ed.state.doc);
   if (ed.dom && ed.dom.remove) ed.dom.remove();

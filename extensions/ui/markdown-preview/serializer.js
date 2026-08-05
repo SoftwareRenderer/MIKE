@@ -109,7 +109,41 @@
         if (node.type === nt(t.Figure)) {
             return '![' + escapeBrackets(node.mark(nt(t.ImageAlt)) || '') + '](' + node.param + ')';
         }
+        if (node.type === nt(t.Table)) return tableToMarkdown(node);
         return textOf(node);
+    }
+
+    /** Table row node → its array of cell markdown strings. */
+    function rowCells(row) {
+        const t = T();
+        const cells = [];
+        for (const cell of row.content) {
+            if (!(cell.type === nt(t.HeaderCell) || cell.type === nt(t.Cell))) continue;
+            // Escape pipes so they stay literal cell content, not column breaks.
+            cells.push(inlineContent(cell).replace(/\|/g, '\\|'));
+        }
+        return cells;
+    }
+
+    // Serialize a Wordgard Table node back to a GitHub-style pipe table. The
+    // first row is treated as the header; body rows follow. ColSpan/RowSpan
+    // have no Markdown representation, so spanned cells are emitted as-is
+    // (their span is lost on round-trip, which is expected for Markdown).
+    function tableToMarkdown(table) {
+        const rows = table.content.map(rowCells);
+        if (rows.length === 0) return '';
+        const numCols = Math.max.apply(null, rows.map(r => r.length));
+        if (numCols === 0) return '';
+        const pad = row => {
+            const out = row.slice(0, numCols);
+            while (out.length < numCols) out.push('');
+            return out;
+        };
+        const [header, ...body] = rows;
+        const lines = ['| ' + pad(header).join(' | ') + ' |'];
+        lines.push('| ' + Array(numCols).fill('---').join(' | ') + ' |');
+        for (const row of body) lines.push('| ' + pad(row).join(' | ') + ' |');
+        return lines.join('\n');
     }
 
     function listToMarkdown(list, markerKind) {
@@ -172,6 +206,47 @@
     // language across the WYSIWYG round-trip).
     function openPre(lang) {
         return lang ? '<pre data-language="' + lang + '"><code>' : '<pre><code>';
+    }
+
+    // ── GitHub-style pipe tables (markdown → HTML) ─────────────────────────
+    // Splits a pipe-table row into trimmed cell strings. Escaped pipes (\|)
+    // stay within their cell and are un-escaped (a literal pipe in the cell).
+    function splitTableRow(line) {
+        const cells = [];
+        let cur = '';
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === '\\' && i + 1 < line.length && line[i + 1] === '|') {
+                cur += '|';
+                i++;
+            } else if (ch === '|') {
+                cells.push(cur.trim());
+                cur = '';
+            } else {
+                cur += ch;
+            }
+        }
+        cells.push(cur.trim());
+        // Strip the empty cells produced by leading/trailing outer pipes.
+        if (cells.length && cells[0] === '') cells.shift();
+        if (cells.length && cells[cells.length - 1] === '') cells.pop();
+        return cells;
+    }
+
+    // A delimiter row separates a table header from its body. Each cell is
+    // dashes with optional leading/trailing colons (alignment markers).
+    function isDelimiterRow(line) {
+        const cells = splitTableRow(line);
+        return cells.length > 0 && cells.every(c => /^:?-+:?$/.test(c.replace(/\s/g, '')));
+    }
+
+    // Build a <table> that Wordgard parses into its Table/TableRow/Cell types.
+    // The header row maps to <th> (HeaderCell); body rows to <td> (Cell). The
+    // <tbody> wrapper matches Wordgard's Table structure (table > tbody).
+    function renderTable(headers, body) {
+        const head = '<tr>' + headers.map(c => '<th>' + inline(c) + '</th>').join('') + '</tr>';
+        const rows = body.map(r => '<tr>' + r.map(c => '<td>' + inline(c) + '</td>').join('') + '</tr>').join('');
+        return '<table><tbody>' + head + rows + '</tbody></table>';
     }
 
     function renderMarkdown(src) {
@@ -241,6 +316,24 @@
                     i++;
                 }
                 out.push('<blockquote>' + inline(quoteLines.join('\n').trim()) + '</blockquote>');
+                continue;
+            }
+
+            // GitHub-style pipe table: a header row (containing a pipe)
+            // immediately followed by a delimiter row. Consume the header,
+            // delimiter, and all following pipe rows as one <table> block.
+            if (line.includes('|') && i + 1 < lines.length && isDelimiterRow(lines[i + 1])) {
+                flushParagraph();
+                const header = splitTableRow(line);
+                i++; // skip the delimiter row
+                const body = [];
+                while (i + 1 < lines.length) {
+                    const next = lines[i + 1].trim();
+                    if (next === '' || !next.includes('|')) break;
+                    body.push(splitTableRow(next));
+                    i++;
+                }
+                out.push(renderTable(header, body));
                 continue;
             }
 
