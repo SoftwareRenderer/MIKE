@@ -10,6 +10,7 @@ import { fullSchema } from './schema.js';
 import { history } from './history.js';
 import { serialize, parse } from './doc.js';
 import { GardState } from './state.js';
+import { tables } from './table.js';
 import {
     Paragraph,
     Heading,
@@ -33,6 +34,12 @@ import {
     Superscript,
     Subscript,
     ImageAlt,
+    Table,
+    TableRow,
+    Cell,
+    HeaderCell,
+    ColSpan,
+    RowSpan,
 } from './types.js';
 
 window.Wordgard = Wordgard;
@@ -41,9 +48,11 @@ window.WordgardSchema = { fullSchema };
 window.WordgardHistory = { history };
 window.WordgardDoc = { serialize, parse };
 window.WordgardState = { GardState };
+window.WordgardTable = { tables };
 window.WordgardTypes = {
     Paragraph, Heading, CodeBlock, CodeBlockLanguage, Blockquote,
     BulletList, OrderedList, ListItem, InlineListItem, HorizontalRule,
     Figure, Image, LineBreak, Strong, Emphasis, Code, Link, Strikethrough,
     Underline, Superscript, Subscript, ImageAlt,
+    Table, TableRow, Cell, HeaderCell, ColSpan, RowSpan,
 };

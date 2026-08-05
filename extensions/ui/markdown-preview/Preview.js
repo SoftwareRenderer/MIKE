@@ -80,6 +80,7 @@
         const { Wordgard, menuBar } = window.WordgardEditor;
         const { fullSchema } = window.WordgardSchema;
         const { history } = window.WordgardHistory;
+        const { tables } = window.WordgardTable;
         const { GardState } = window.WordgardState;
         const t = T();
 
@@ -96,6 +97,7 @@
                 // mark; without it the fenced code language can't be parsed
                 // (or preserved) across the WYSIWYG round-trip.
                 GardState.schemaElement.of(nt(t.CodeBlockLanguage)),
+                ...tables(),
                 history(),
                 // Formatting toolbar (bold/italic/headings/lists/etc.).
                 // menuBar() returns an array of extensions, so spread it.
