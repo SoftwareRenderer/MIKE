@@ -121,8 +121,36 @@
     function headingIndexForLine(markdown, line) {
         const lines = String(markdown || '').split('\n');
         let index = -1;
+        // Track fenced code blocks (``` or ~~~) so bash comments ("# comment")
+        // inside code blocks are not counted as headings — matching how the
+        // host's outline (highlighter.ts extractMarkdownHeadings) builds the
+        // symbol list. Otherwise the index is inflated by code-block lines and
+        // the outline jumps to the wrong heading.
+        let inCodeBlock = false;
+        let fenceChar = null;
+        let fenceLength = 0;
         for (let i = 0; i < lines.length; i++) {
-            if (/^(#{1,6})\s+/.test(lines[i].trim())) {
+            const raw = lines[i];
+            const fenceMatch = /^(`{3,}|~{3,})(.*)$/.exec(raw);
+            if (fenceMatch) {
+                const char = fenceMatch[1][0];
+                const len = fenceMatch[1].length;
+                if (!inCodeBlock) {
+                    // Opening fence
+                    inCodeBlock = true;
+                    fenceChar = char;
+                    fenceLength = len;
+                } else if (char === fenceChar && len >= fenceLength) {
+                    // Closing fence (same char, at least as long)
+                    inCodeBlock = false;
+                    fenceChar = null;
+                    fenceLength = 0;
+                }
+                continue;
+            }
+            // Skip heading detection inside code blocks
+            if (inCodeBlock) continue;
+            if (/^(#{1,6})\s+/.test(raw.trim())) {
                 index++;
                 if (i + 1 === line) return index;
             }

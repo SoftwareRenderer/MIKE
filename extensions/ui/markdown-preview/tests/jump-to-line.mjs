@@ -23,15 +23,28 @@ const { chromium } = require('playwright');
 
 const BASE = process.env.MARKDOWN_PREVIEW_BASE || 'https://localhost:3000';
 
-// Headings: `# Alpha` (line 1), `## Beta` (line 21), `### Gamma` (line 41).
+// Headings: `# Alpha`, `## Beta`, `### Gamma`.
+// Fenced bash code blocks with `#` comments sit between the sections — these
+// comments must NOT be treated as headings (regression: outline jumps used to
+// count them and land on the wrong heading).
 // Paragraphs are long enough that the later headings start well below the fold.
 const FILLER = 'This is a reasonably long paragraph of body text that keeps the rendered section tall so the headings further down the document sit well below the fold of the preview viewport. It repeats across the sections to force meaningful scrolling.';
 function section(title, lines) {
     return [title, ''].concat(lines).concat(['']);
 }
+const CODE_BLOCK = [
+    '```bash',
+    '# Build for Linux (CGO_ENABLED=0 for static build)',
+    'CGO_ENABLED=0 go build -trimpath -o kanban .',
+    '# another bash comment that is not a heading',
+    '```',
+    '',
+];
 const MD = [
     ...section('# Alpha', [FILLER, '', FILLER, '', FILLER, '']),
+    ...CODE_BLOCK,
     ...section('## Beta', [FILLER, '', FILLER, '', FILLER, '']),
+    ...CODE_BLOCK,
     ...section('### Gamma', [FILLER, '', FILLER, '', FILLER, '']),
 ].join('\n');
 

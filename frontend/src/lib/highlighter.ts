@@ -601,8 +601,37 @@ function extractMarkdownHeadings(source: string, lineInfo: { lineAt: (pos: numbe
     const symbols: Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> = [];
     const lines = source.split('\n');
 
+    // Track fenced code blocks (``` or ~~~) so that lines like bash comments
+    // ("# comment") inside a code block are not mistaken for ATX headings.
+    let inCodeBlock = false;
+    let fenceChar: string | null = null;
+    let fenceLength = 0;
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+
+        // Fenced code block delimiter: ``` or ~~~ (3+ chars), optionally with an info string
+        const fenceMatch = /^(`{3,}|~{3,})(.*)$/.exec(line);
+        if (fenceMatch) {
+            const char = fenceMatch[1][0];
+            const len = fenceMatch[1].length;
+            if (!inCodeBlock) {
+                // Opening fence
+                inCodeBlock = true;
+                fenceChar = char;
+                fenceLength = len;
+            } else if (char === fenceChar && len >= fenceLength) {
+                // Closing fence (same char, at least as long)
+                inCodeBlock = false;
+                fenceChar = null;
+                fenceLength = 0;
+            }
+            continue;
+        }
+
+        // Skip heading detection inside code blocks
+        if (inCodeBlock) continue;
+
         const match = /^(#{1,3})\s+(.+?)\s*$/.exec(line);
         if (match) {
             const level = match[1].length; // 1, 2, or 3
