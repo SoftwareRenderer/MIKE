@@ -213,7 +213,7 @@ async function createSubtaskViaApi(
     return res.json();
   });
   const defaultProvider = config.providers?.find(
-    (p: any) => p.name === config.default_provider
+    (p: any) => p.name === config.worker_provider
   );
   const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
     method: 'POST',
@@ -221,7 +221,7 @@ async function createSubtaskViaApi(
       prompt,
       parent_task_id: parentTaskId,
       llama_server_url: defaultProvider?.url || '',
-      model_name: defaultProvider?.default_model || '',
+      model_name: config?.worker_model || '',
     },
   });
   return result.data.id;

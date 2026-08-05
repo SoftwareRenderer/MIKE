@@ -74,7 +74,10 @@ type Config struct {
 	DatabasePath          string     `json:"database_path"`
 	RegistryURL           string     `json:"registry_url"`
 	Providers             []Provider `json:"providers"`
-	DefaultProvider       string     `json:"default_provider"`
+	WorkerProvider        string     `json:"worker_provider"`
+	WorkerModel           string     `json:"worker_model"`
+	UtilityProvider       string     `json:"utility_provider"`
+	UtilityModel          string     `json:"utility_model"`
 	DefaultAutoCommit     *bool      `json:"default_auto_commit"`
 	DefaultAutoMerge      *bool      `json:"default_auto_merge"`
 	DefaultSubtasksAutoMerge *bool   `json:"default_subtasks_auto_merge"`
@@ -110,7 +113,6 @@ type Provider struct {
 	APIKey          *string       `json:"api_key,omitempty"` // nil=preserve, ""=clear, value=set; encrypted in DB, masked in API responses
 	Models          []ModelConfig `json:"models"`
 	Concurrency     int           `json:"concurrency"`
-	DefaultModel    string        `json:"default_model"`
 	AgentConfigDir  string        `json:"agent_config_dir,omitempty"` // optional host path override for the agent config dir; empty means use extension default
 	AgentDescription string        `json:"agent_description,omitempty"` // agent description text (from manifest); empty for LLM providers
 	AgentSetupInfo    string        `json:"agent_setup_info,omitempty"`  // agent setup instructions (from manifest); empty for LLM providers

@@ -8,13 +8,10 @@
         context_window?: number;
     }
 
-    let { models, defaultModel, onAdd, onRemove, onSetDefault, getModelColor }: {
+    let { models, onAdd, onRemove }: {
         models: ModelEntry[];
-        defaultModel: string;
         onAdd: () => void;
         onRemove: (modelIdx: number) => void;
-        onSetDefault: (modelName: string, reasoningEffort?: string) => void;
-        getModelColor: (modelName: string) => string;
     } = $props();
 </script>
 
@@ -31,15 +28,6 @@
     <div class="models-list">
         {#each models as model, mi}
             <div class="model-row" class:readonly={model.readonly}>
-                {#if model.name}
-                    {@const modelEffort = model.reasoning_effort || 'medium'}
-                    {@const modelCompositeKey = modelEffort !== 'medium' ? `${model.name}|${modelEffort}` : model.name}
-                    <button type="button" class="btn-default" class:active={defaultModel === modelCompositeKey} onclick={() => onSetDefault(model.name, modelEffort)} title="Set as default model" aria-label={`Set ${model.name} as default`} style="{defaultModel === modelCompositeKey ? `color: ${getModelColor(model.name)}; background: ${getModelColor(model.name)}11` : ''}">
-                        {defaultModel === modelCompositeKey ? 'Default' : 'Set default'}
-                    </button>
-                {:else}
-                    <span class="btn-default-placeholder"></span>
-                {/if}
                 <div class="model-name-cell">
                     {#if model.readonly}
                         <span class="model-name-label">{model.name}</span>
@@ -136,28 +124,6 @@
     }
     .model-row.readonly {
         opacity: 0.7;
-    }
-    .btn-default {
-        font-size: 0.6875rem;
-        padding: 2px 8px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-        background: var(--color-surface-1);
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        white-space: nowrap;
-        flex-shrink: 0;
-    }
-    .btn-default.active {
-        border-color: currentColor;
-        font-weight: 600;
-    }
-    .btn-default:hover {
-        border-color: var(--color-text-secondary);
-    }
-    .btn-default-placeholder {
-        width: 72px;
-        flex-shrink: 0;
     }
     .model-name-cell {
         display: flex;

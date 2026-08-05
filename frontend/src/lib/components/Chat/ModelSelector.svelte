@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
+    import { getModelName } from '$lib/utils/providers';
 
     interface Props {
         providers: Provider[];
@@ -182,21 +183,7 @@
             effort: (typeof m === 'object' && m.reasoning_effort) ? m.reasoning_effort : 'medium',
         });
         let modelToSelect: { name: string; effort: string } | null = null;
-        if (provider.default_model) {
-            // Parse composite default: modelName|effort
-            const parts = provider.default_model.split('|');
-            const defaultName = parts[0];
-            const defaultEffort = parts[1] || 'medium';
-            const match = provider.models.map(getModelInfo).find(m => m.name === defaultName && m.effort === defaultEffort);
-            // Fallback: match by name only (backward compat)
-            if (!match) {
-                const nameOnly = provider.models.map(getModelInfo).find(m => m.name === defaultName);
-                if (nameOnly) modelToSelect = nameOnly;
-            } else {
-                modelToSelect = match;
-            }
-        }
-        if (!modelToSelect && provider.models.length > 0) {
+        if (provider.models.length > 0) {
             modelToSelect = getModelInfo(provider.models[0]);
         }
         if (modelToSelect) {
@@ -210,11 +197,8 @@
         selectedProviderUrl = agentProvider.url;
         providerDropdownOpen = false;
         modelDropdownOpen = false;
-        const getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
         // If agent has static models, select one immediately
-        if (agentProvider.default_model && agentProvider.models.some(m => getModelName(m) === agentProvider.default_model)) {
-            onSelect(agentProvider.name, agentProvider.default_model, agentProvider.url);
-        } else if (agentProvider.models.length > 0) {
+        if (agentProvider.models.length > 0) {
             onSelect(agentProvider.name, getModelName(agentProvider.models[0]), agentProvider.url);
         } else {
             // No static models — call onSelect with placeholder so parent updates selectedUrl.
@@ -230,13 +214,6 @@
         if (agentModels.length > 0 && isAgentSelected) {
             const agentProvider = providers.find(p => p.url === selectedProviderUrl);
             if (!agentProvider) return;
-            // Prefer default_model if it matches a fetched model
-            if (agentProvider.default_model && agentModels.some(m => m.name === agentProvider.default_model)) {
-                if (currentModel !== agentProvider.default_model) {
-                    onSelect(agentProvider.name, agentProvider.default_model, agentProvider.url);
-                }
-                return;
-            }
             // Fallback: first fetched model (only if nothing valid selected)
             if (!currentModel || currentModel === (agentProvider.display_name || agentProvider.name)) {
                 onSelect(agentProvider.name, agentModels[0].name, agentProvider.url);

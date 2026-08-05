@@ -290,13 +290,13 @@ export async function navigateToTask(page: Page, taskId: string, projectId?: str
 export async function createTaskViaApi(page: Page, projectId: string, prompt: string): Promise<string> {
   // Create task via API (CSRF-aware)
   const config = await apiGetConfig(page);
-  const defaultProvider = config?.providers?.find((p: any) => p.name === config?.default_provider);
+  const worker = config?.providers?.find((p: any) => p.name === config?.worker_provider);
   const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
     method: 'POST',
     body: {
       prompt,
-      llama_server_url: defaultProvider?.url || '',
-      model_name: defaultProvider?.default_model || '',
+      llama_server_url: worker?.url || '',
+      model_name: config?.worker_model || '',
     },
   });
   if (!result.ok) {

@@ -186,7 +186,10 @@ export interface Config {
     database_path: string;
     version: string;
     providers: Provider[];
-    default_provider: string;
+    worker_provider: string;
+    worker_model: string;
+    utility_provider: string;
+    utility_model: string;
     default_auto_commit?: boolean;
     default_auto_merge?: boolean;
     default_subtasks_auto_merge?: boolean;
@@ -219,7 +222,6 @@ export interface Provider {
     api_key?: string;          // masked ("••••••••••") when read from config, full value when sent
     models: ProviderModel[];
     concurrency: number;
-    default_model?: string;
     agent_config_dir?: string; // optional host path override for agent config dir; empty means use extension default
     input_price?: number;      // USD per 1M input (non-cached) tokens
     output_price?: number;     // USD per 1M output tokens

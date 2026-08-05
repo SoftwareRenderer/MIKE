@@ -2,6 +2,7 @@
     
     import type { Config, Provider, Extension } from '$lib/types';
     import { isAgentProvider, AGENT_URL_PREFIX } from '$lib/types';
+    import { getModelName } from '$lib/utils/providers';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
     import { listExtensions } from '$lib/api/extensions';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
@@ -29,7 +30,10 @@
         return MODEL_COLORS[Math.abs(hash) % MODEL_COLORS.length];
     }
 
-    let defaultProvider = $state('');
+    let workerProvider = $state('');
+    let workerModel = $state('');
+    let utilityProvider = $state('');
+    let utilityModel = $state('');
     let defaultAutoCommit = $state(false);
     let defaultAutoMerge = $state(true);
     let defaultSubtasksAutoMerge = $state(true);
@@ -72,7 +76,6 @@
         agent_config_dir?: string;
         models: ModelEntry[];
         concurrency: number;
-        default_model: string; // per-provider default model
         // Pricing (USD per 1M tokens)
         input_price: number;
         output_price: number;
@@ -128,7 +131,6 @@
     let _providerUidCounter = 0;
 
     function buildProviders(cfg: Config | null): ProviderDraft[] {
-        const oldGlobalDefault = '';
         return (cfg?.providers || []).map(p => {
             // Detect agent provider by kind field, agent:// prefix, or legacy sentinel URL
             const isAgent = p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX);
@@ -138,7 +140,6 @@
                 kind: isAgent ? 'agent' : (p.kind || 'llm'),
                 api_key: p.api_key || '',
                 concurrency: p.concurrency || 1,
-                default_model: p.default_model || '',
                 input_price: p.input_price || 0,
                 output_price: p.output_price || 0,
                 cache_read_price: p.cache_read_price || 0,
@@ -159,17 +160,16 @@
                     return { name: m.name, readonly: false, reasoning_effort: m.reasoning_effort || 'medium' };
                 }).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
             };
-            // Migrate: if old global default_model belongs to this provider and provider has no default set
-            if (!isAgent && !draft.default_model && oldGlobalDefault && p.models?.some(m => (typeof m === 'string' ? m : m.name) === oldGlobalDefault)) {
-                draft.default_model = oldGlobalDefault;
-            }
             return draft;
         });
     }
 
     // Sync form fields and providers from config on mount and when config changes
     $effect(() => {
-        defaultProvider = config?.default_provider || '';
+        workerProvider = config?.worker_provider || '';
+        workerModel = config?.worker_model || '';
+        utilityProvider = config?.utility_provider || '';
+        utilityModel = config?.utility_model || '';
         defaultAutoCommit = config?.default_auto_commit ?? false;
         defaultAutoMerge = config?.default_auto_merge ?? false;
         defaultSubtasksAutoMerge = config?.default_subtasks_auto_merge ?? true;
@@ -209,7 +209,7 @@
                 p.testResult = { success: true, message: 'Agent provider — binary checked at runtime' };
             } else {
                 if (!p.url.trim()) { p.testingConnection = false; return; }
-                const defaultModelName = p.default_model ? parseDefaultModel(p.default_model).name : (p.models.find(m => m.name)?.name || '');
+                const defaultModelName = p.models.find(m => m.name)?.name || '';
                 const apiKey = p.api_key || '';
                 const result = await testConnectionApi(p.url.trim(), defaultModelName, apiKey);
                 p.testResult = {
@@ -234,7 +234,6 @@
             api_key: '',
             models: [],
             concurrency: 1,
-            default_model: '',
             input_price: 0,
             output_price: 0,
             cache_read_price: 0,
@@ -303,7 +302,6 @@
             api_key: '',
             models: [],
             concurrency: 1,
-            default_model: '',
             input_price: 0,
             output_price: 0,
             cache_read_price: 0,
@@ -429,55 +427,41 @@
 
     function removeModelFromProvider(idx: number, modelIdx: number) {
         const p = providers[idx];
-        const removed = p.models[modelIdx];
-        const removedName = removed?.name || '';
-        const removedEffort = removed?.reasoning_effort || 'medium';
-        const removedCompositeKey = removedEffort !== 'medium' ? `${removedName}|${removedEffort}` : removedName;
         p.models.splice(modelIdx, 1);
-        // Clear default if the removed model+effort pair was the default
-        if (p.default_model === removedCompositeKey) {
-            p.default_model = '';
-        }
     }
 
-    function setProviderDefaultModel(idx: number, modelName: string, reasoningEffort?: string) {
-        const p = providers[idx];
-        const compositeKey = reasoningEffort && reasoningEffort !== 'medium' ? `${modelName}|${reasoningEffort}` : modelName;
-        if (p.default_model === compositeKey) {
-            p.default_model = ''; // toggle off
-        } else {
-            p.default_model = compositeKey;
+    /** Validate that both Worker and Utility pairs are selected and reference a valid provider/model. */
+    function validatePrimaryProviders(): string {
+        const workerProv = providers.find(p => p.name === workerProvider) || null;
+        const utilityProv = providers.find(p => p.name === utilityProvider) || null;
+        const modelValid = (prov: ProviderDraft | null, model: string) => {
+            if (!prov) return false;
+            if (prov.kind === 'agent') return !!model;
+            return !!model && prov.models.some(m => m.name.trim() === model);
+        };
+        if (!workerProvider || !workerModel || !modelValid(workerProv, workerModel)) {
+            return 'Please select a Worker provider and model.';
         }
-    }
-
-    /** Parse a default_model value (possibly modelName|effort) into {name, effort}. */
-    function parseDefaultModel(value: string): { name: string; effort: string } {
-        if (!value) return { name: '', effort: '' };
-        const parts = value.split('|');
-        return { name: parts[0], effort: parts[1] || 'medium' };
-    }
-
-    function toggleDefaultProvider(providerName: string) {
-        if (defaultProvider === providerName) {
-            defaultProvider = '';
-        } else {
-            defaultProvider = providerName;
-            // Move default provider to top
-            const idx = providers.findIndex(p => p.name === providerName);
-            if (idx > 0) {
-                const [item] = providers.splice(idx, 1);
-                providers.unshift(item);
-            }
+        if (!utilityProvider || !utilityModel || !modelValid(utilityProv, utilityModel)) {
+            return 'Please select a Utility provider and model.';
         }
+        return '';
     }
 
     async function handleSave() {
+        const validationError = validatePrimaryProviders();
+        if (validationError) {
+            error = validationError;
+            return;
+        }
         loading = true;
         error = '';
         try {
-            const savedProviders: Provider[] = providers
-                .filter(p => p.kind === 'agent' || p.url.trim())
-                .map(p => {
+            // Capture the pre-sync provider names so we can remap worker/utility
+            // references after syncProviderMeta regenerates names from URLs.
+            const filteredProviders = providers.filter(p => p.kind === 'agent' || p.url.trim());
+            const oldNames = filteredProviders.map(p => (p.kind === 'agent' ? '' : p.name.trim()));
+            const savedProviders: Provider[] = filteredProviders.map((p, i) => {
                     if (p.kind !== 'agent') syncProviderMeta(p);
                     const trimmedKey = p.api_key?.trim() || '';
                     // Masked keys are all bullets — don't send them. Only send real values.
@@ -492,7 +476,6 @@
                             reasoning_effort: m.reasoning_effort || 'medium',
                         })),
                         concurrency: Math.max(1, p.concurrency || 1),
-                        default_model: p.default_model || '',
                         agent_config_dir: p.agent_config_dir || '',
                         input_price: p.input_price,
                         output_price: p.output_price,
@@ -506,10 +489,21 @@
                     }
                     return base;
                 });
+            // Remap worker/utility provider names to the post-sync names.
+            let savedWorkerProvider = workerProvider;
+            let savedUtilityProvider = utilityProvider;
+            savedProviders.forEach((p, i) => {
+                const pre = oldNames[i] || '';
+                if (pre && pre === savedWorkerProvider) savedWorkerProvider = p.name;
+                if (pre && pre === savedUtilityProvider) savedUtilityProvider = p.name;
+            });
             const cfg = await updateConfig({
                 workspace_dir: config?.workspace_dir || '',
                 providers: savedProviders,
-                default_provider: defaultProvider,
+                worker_provider: savedWorkerProvider,
+                worker_model: workerModel,
+                utility_provider: savedUtilityProvider,
+                utility_model: utilityModel,
                 default_auto_commit: defaultAutoCommit,
                 default_auto_merge: defaultAutoMerge,
                 default_subtasks_auto_merge: defaultSubtasksAutoMerge,
@@ -606,6 +600,67 @@
         {#if activeTab === 'providers'}
             <div class="section">
                 <div class="section-header">
+                    <h3 class="section-label">Primary Providers</h3>
+                    <span class="field-help">Select default provider/model for each task type.</span>
+                </div>
+                <div class="primary-providers-list">
+                    {#snippet pairRow(title: string, hint: string, kind: 'worker' | 'utility')}
+                        {@const selProvider = kind === 'worker' ? workerProvider : utilityProvider}
+                        {@const selModel = kind === 'worker' ? workerModel : utilityModel}
+                        {@const selProv = providers.find(p => p.name === selProvider) || null}
+                        <div class="primary-provider-row">
+                            <div class="primary-provider-info">
+                                <span class="primary-provider-title">{title}</span>
+                                <span class="field-help">{hint}</span>
+                            </div>
+                            <select
+                                class="primary-provider-select"
+                                value={selProvider}
+                                onchange={(e) => {
+                                    const val = (e.target as HTMLSelectElement).value;
+                                    if (kind === 'worker') { workerProvider = val; workerModel = ''; }
+                                    else { utilityProvider = val; utilityModel = ''; }
+                                    markDirty();
+                                }}
+                                aria-label="{title} provider"
+                            >
+                                <option value="">Select provider</option>
+                                {#each providers as p}
+                                    <option value={p.name}>{p.display_name || p.name}</option>
+                                {/each}
+                            </select>
+                            <select
+                                class="primary-provider-select"
+                                value={selModel}
+                                onchange={(e) => {
+                                    const val = (e.target as HTMLSelectElement).value;
+                                    if (kind === 'worker') { workerModel = val; }
+                                    else { utilityModel = val; }
+                                    markDirty();
+                                }}
+                                disabled={!selProv || (selProv && !isAgentProvider(selProv) && !selProv.models.length)}
+                                aria-label="{title} model"
+                            >
+                                <option value="">Select model</option>
+                                {#if selProv}
+                                    {#if isAgentProvider(selProv)}
+                                        <option value={selProvider} selected={selModel === selProvider}>{selProvider}</option>
+                                    {:else}
+                                        {#each selProv.models.filter(m => m.name.trim()) as m}
+                                            <option value={getModelName(m)} selected={selModel === getModelName(m)}>{getModelName(m)}</option>
+                                        {/each}
+                                    {/if}
+                                {/if}
+                            </select>
+                        </div>
+                    {/snippet}
+                    {@render pairRow('Worker', 'Model used for chat responses', 'worker')}
+                    {@render pairRow('Utility', 'Model for summaries, commit messages, labels', 'utility')}
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
                     <h3 class="section-label">Providers</h3>
                     <div class="section-actions">
                         <button type="button" class="btn-small btn-agent" onclick={toggleAgentMenu} bind:this={agentMenuBtn} title="Add a coding agent" class:open={agentMenuOpen}>
@@ -643,20 +698,16 @@
                         <ProviderCard
                             provider={p}
                             index={i}
-                            {defaultProvider}
                             {encryptionEnabled}
                             {currencySymbol}
                             {getModelColor}
-                            {parseDefaultModel}
                             isDragging={dragIndex === i}
                             onDragStart={(e: PointerEvent) => handleDragStart(e, i)}
                             onRemove={() => removeProvider(i)}
                             onFetchModels={() => fetchModelsForProvider(i)}
                             onTestConnection={() => testProviderConnection(i)}
-                            onToggleDefaultProvider={() => toggleDefaultProvider(p.name)}
                             onAddModel={() => addModelToProvider(i)}
                             onRemoveModel={(mi: number) => removeModelFromProvider(i, mi)}
-                            onSetDefaultModel={(name: string, effort?: string) => setProviderDefaultModel(i, name, effort)}
                             onSyncMeta={() => syncProviderMeta(p)}
                             onDirty={markDirty}
                         />
@@ -975,6 +1026,47 @@
     }
     .btn-small:hover {
         background: var(--color-surface-4);
+    }
+
+    /* Primary Providers list container */
+    .primary-providers-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .primary-provider-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        align-items: center;
+        gap: 10px;
+    }
+    .primary-provider-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+    }
+    .primary-provider-title {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+    .primary-provider-select {
+        font-size: 0.8125rem;
+        padding: 6px 8px;
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        color: var(--color-text-primary);
+        min-width: 0;
+    }
+    .primary-provider-select:focus {
+        outline: none;
+        border-color: var(--color-accent);
+    }
+    .primary-provider-select:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
     }
 
     /* Providers list container */

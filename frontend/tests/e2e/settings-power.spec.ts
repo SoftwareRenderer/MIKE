@@ -9,7 +9,6 @@ const PROVIDER_WITH_POWER = {
   url: 'http://localhost:9999/v1',
   models: ['model-a'],
   concurrency: 1,
-  default_model: 'model-a',
   input_price: 3.0,
   output_price: 5.0,
   cache_read_price: 1.0,
@@ -24,7 +23,6 @@ const PROVIDER_WITH_KEY = {
   url: 'http://localhost:9999/v1',
   models: ['model-a', 'model-b'],
   concurrency: 2,
-  default_model: 'model-a',
 };
 
 /** Clear api_key in providers. */
@@ -41,7 +39,10 @@ function clearAPIKeys(config: Record<string, any>): Record<string, any> {
 
 const POWER_DEFAULT_CONFIG = {
   providers: [PROVIDER_WITH_POWER],
-  default_provider: 'test-localhost-9999',
+  worker_provider: 'test-localhost-9999',
+  worker_model: 'model-a',
+  utility_provider: 'test-localhost-9999',
+  utility_model: 'model-a',
   workspace_dir: './.worktrees',
   default_auto_commit: false,
   default_plan_mode: false,
@@ -50,7 +51,10 @@ const POWER_DEFAULT_CONFIG = {
 
 const API_KEY_DEFAULT_CONFIG = {
   providers: [PROVIDER_WITH_KEY],
-  default_provider: 'test-localhost-9999',
+  worker_provider: 'test-localhost-9999',
+  worker_model: 'model-a',
+  utility_provider: 'test-localhost-9999',
+  utility_model: 'model-a',
   workspace_dir: './.worktrees',
   default_auto_commit: false,
   default_plan_mode: false,
@@ -243,7 +247,10 @@ test.describe.serial('Settings API Key', () => {
     // Set up a provider with an API key via API
     await apiPutConfig(page, {
       providers: [{ ...PROVIDER_WITH_KEY, api_key: 'sk-test-1234567890abcdef' }],
-      default_provider: 'test-localhost-9999',
+      worker_provider: 'test-localhost-9999',
+      worker_model: 'model-a',
+      utility_provider: 'test-localhost-9999',
+      utility_model: 'model-a',
     });
     await waitForConfig(page, c =>
       c.providers && c.providers.length === 1 && c.providers[0].api_key && c.providers[0].api_key.length > 0
@@ -299,7 +306,10 @@ test.describe.serial('Settings API Key', () => {
     // Set up provider with API key
     await apiPutConfig(page, {
       providers: [{ ...PROVIDER_WITH_KEY, api_key: 'sk-secret-key-12345' }],
-      default_provider: 'test-localhost-9999',
+      worker_provider: 'test-localhost-9999',
+      worker_model: 'model-a',
+      utility_provider: 'test-localhost-9999',
+      utility_model: 'model-a',
     });
     await waitForConfig(page, c =>
       c.providers && c.providers[0].api_key && c.providers[0].api_key.length > 0
@@ -412,7 +422,10 @@ test.describe.serial('Settings API Key', () => {
     // Set up provider with API key
     await apiPutConfig(page, {
       providers: [{ ...PROVIDER_WITH_KEY, api_key: 'sk-existing-key' }],
-      default_provider: 'test-localhost-9999',
+      worker_provider: 'test-localhost-9999',
+      worker_model: 'model-a',
+      utility_provider: 'test-localhost-9999',
+      utility_model: 'model-a',
     });
     await waitForConfig(page, c =>
       c.providers && c.providers[0].api_key && c.providers[0].api_key.length > 0

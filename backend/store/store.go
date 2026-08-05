@@ -59,8 +59,6 @@ func NewStore(dbPath string) (*Store, error) {
 	if err := s.initConfigDefaults(); err != nil {
 		return nil, fmt.Errorf("init config defaults: %w", err)
 	}
-	// One-time migration: move global default_model to provider-level
-	_ = s.migrateDefaultModelToProviders() // best-effort, ignore errors
 	return s, nil
 }
 
@@ -364,7 +362,10 @@ func (s *Store) initConfigDefaults() error {
 		"workspace_dir":    "./.worktrees",
 		"registry_url":     "file://./extensions/registry.json",
 		"providers":        "",
-		"default_provider": "",
+		"worker_provider":  "",
+		"worker_model":     "",
+		"utility_provider": "",
+		"utility_model":    "",
 	}
 
 	// Migrate old default worktrees path to hidden .worktrees
@@ -394,77 +395,6 @@ func (s *Store) initConfigDefaults() error {
 		}
 	}
 	return nil
-}
-
-// migrateDefaultModelToProviders migrates the old global default_model to the
-// first provider that contains that model, then clears the global value.
-// This is a one-time migration for the per-provider default model feature.
-func (s *Store) migrateDefaultModelToProviders() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Read global default_model
-	var globalDefaultModel string
-	err := s.db.QueryRow(`SELECT value FROM config WHERE key = 'default_model'`).Scan(&globalDefaultModel)
-	if err == sql.ErrNoRows || globalDefaultModel == "" {
-		return nil // nothing to migrate
-	}
-	if err != nil {
-		return fmt.Errorf("read default_model: %w", err)
-	}
-
-	// Read providers
-	var providersRaw string
-	err = s.db.QueryRow(`SELECT value FROM config WHERE key = 'providers'`).Scan(&providersRaw)
-	if err == sql.ErrNoRows || providersRaw == "" {
-		return nil // no providers to migrate to
-	}
-	if err != nil {
-		return fmt.Errorf("read providers: %w", err)
-	}
-
-	var providers []types.Provider
-	if err := json.Unmarshal([]byte(providersRaw), &providers); err != nil {
-		return fmt.Errorf("unmarshal providers: %w", err)
-	}
-
-	// Find first provider that contains the global default model and set it
-	migrated := false
-	for i := range providers {
-		if providers[i].DefaultModel != "" {
-			continue // already has a default
-		}
-		for _, m := range providers[i].Models {
-			if m.Name == globalDefaultModel {
-				providers[i].DefaultModel = globalDefaultModel
-				migrated = true
-				break
-			}
-		}
-		if migrated {
-			break
-		}
-	}
-
-	if !migrated {
-		// Model not found in any provider, just clear the global value
-		_, err = s.db.Exec(`DELETE FROM config WHERE key = 'default_model'`)
-		return err
-	}
-
-	// Save updated providers
-	providersJSON, err := json.Marshal(providers)
-	if err != nil {
-		return fmt.Errorf("marshal updated providers: %w", err)
-	}
-	_, err = s.db.Exec(`INSERT OR REPLACE INTO config (key, value) VALUES ('providers', ?)`, string(providersJSON))
-	if err != nil {
-		return fmt.Errorf("save migrated providers: %w", err)
-	}
-
-	// Clear global default_model
-	_, err = s.db.Exec(`DELETE FROM config WHERE key = 'default_model'`)
-	return err
 }
 
 // scanner is the common interface for sql.Row and sql.Rows.

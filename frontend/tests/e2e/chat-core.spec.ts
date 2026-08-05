@@ -466,14 +466,14 @@ test.describe('Chat Core', () => {
       const res = await fetch('/api/config');
       return res.json();
     });
-    const defaultProvider = config.providers?.find((p: any) => p.name === config.default_provider);
+    const defaultProvider = config.providers?.find((p: any) => p.name === config.worker_provider);
 
     const taskResult = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
       method: 'POST',
       body: {
         prompt: `visibility-review ${Date.now()}`,
         llama_server_url: defaultProvider?.url || '',
-        model_name: defaultProvider?.default_model || '',
+        model_name: config?.worker_model || '',
       },
     });
     expect(taskResult.ok).toBe(true);
@@ -660,14 +660,14 @@ test.describe('Chat Core', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.default_provider);
+    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
 
     const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
       method: 'POST',
       body: {
         prompt: `Real-time test task ${Date.now()}`,
         llama_server_url: defaultProvider?.url || '',
-        model_name: defaultProvider?.default_model || '',
+        model_name: config?.worker_model || '',
       },
     });
     expect(result.ok).toBe(true);
@@ -704,14 +704,14 @@ test.describe('Chat Core', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.default_provider);
+    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
 
     const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
       method: 'POST',
       body: {
         prompt: `Count test task ${Date.now()}`,
         llama_server_url: defaultProvider?.url || '',
-        model_name: defaultProvider?.default_model || '',
+        model_name: config?.worker_model || '',
       },
     });
     expect(result.ok).toBe(true);
@@ -732,7 +732,7 @@ test.describe('Chat Core', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.default_provider);
+    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
 
     const initialCount = await page.evaluate(async (pid) => {
       const res = await fetch(`/api/projects/${pid}/board`);
@@ -752,7 +752,7 @@ test.describe('Chat Core', () => {
       body: {
         prompt: `Wake test task ${Date.now()}`,
         llama_server_url: defaultProvider?.url || '',
-        model_name: defaultProvider?.default_model || '',
+        model_name: config?.worker_model || '',
       },
     });
     expect(result.ok).toBe(true);
@@ -781,14 +781,14 @@ test.describe('Chat Core', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.default_provider);
+    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
 
     const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
       method: 'POST',
       body: {
         prompt: `Edit test task ${Date.now()}`,
         llama_server_url: defaultProvider?.url || '',
-        model_name: defaultProvider?.default_model || '',
+        model_name: config?.worker_model || '',
       },
     });
     expect(result.ok).toBe(true);

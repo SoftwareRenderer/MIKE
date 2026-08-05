@@ -38,7 +38,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
       const res = await fetch('/api/config');
       return res.json();
     });
-    const defaultProvider = config.providers?.find((p: any) => p.name === config.default_provider);
+    const defaultProvider = config.providers?.find((p: any) => p.name === config.worker_provider);
 
     // Create first child
     const child1Result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
@@ -47,7 +47,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
         prompt: `child-1-${Date.now()}`,
         parent_task_id: parentTaskId,
         llama_server_url: defaultProvider?.url || '',
-        model_name: defaultProvider?.default_model || '',
+        model_name: config?.worker_model || '',
       },
     });
     childTaskId1 = child1Result.data?.id;
@@ -59,7 +59,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
         prompt: `child-2-${Date.now()}`,
         parent_task_id: parentTaskId,
         llama_server_url: defaultProvider?.url || '',
-        model_name: defaultProvider?.default_model || '',
+        model_name: config?.worker_model || '',
       },
     });
     childTaskId2 = child2Result.data?.id;
@@ -71,7 +71,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
         prompt: `grandchild-${Date.now()}`,
         parent_task_id: childTaskId1,
         llama_server_url: defaultProvider?.url || '',
-        model_name: defaultProvider?.default_model || '',
+        model_name: config?.worker_model || '',
       },
     });
     grandchildTaskId = grandchildResult.data?.id;

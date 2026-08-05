@@ -1069,11 +1069,10 @@ func TestAgentBlockedWithNetworkIsolation(t *testing.T) {
 		t.Fatalf("get config: %v", err)
 	}
 	cfg.Providers = append(cfg.Providers, types.Provider{
-		Name:         "test-agent",
-		Kind:         "agent",
-		URL:          "agent://test-agent",
-		Concurrency:  1,
-		DefaultModel: "agent-model",
+		Name:        "test-agent",
+		Kind:        "agent",
+		URL:         "agent://test-agent",
+		Concurrency: 1,
 	})
 	if err := s.configStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)
@@ -1116,11 +1115,10 @@ func TestAgentAllowedWithoutNetworkIsolation(t *testing.T) {
 		t.Fatalf("get config: %v", err)
 	}
 	cfg.Providers = append(cfg.Providers, types.Provider{
-		Name:         "test-agent-2",
-		Kind:         "agent",
-		URL:          "agent://test-agent-2",
-		Concurrency:  1,
-		DefaultModel: "agent-model",
+		Name:        "test-agent-2",
+		Kind:        "agent",
+		URL:         "agent://test-agent-2",
+		Concurrency: 1,
 	})
 	if err := s.configStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)
@@ -1158,11 +1156,10 @@ func TestLLMAllowedWithNetworkIsolation(t *testing.T) {
 		t.Fatalf("get config: %v", err)
 	}
 	cfg.Providers = append(cfg.Providers, types.Provider{
-		Name:         "test-llm",
-		Kind:         "llm",
-		URL:          "http://localhost:9999/v1",
-		Concurrency:  1,
-		DefaultModel: "mock-model",
+		Name:        "test-llm",
+		Kind:        "llm",
+		URL:         "http://localhost:9999/v1",
+		Concurrency: 1,
 	})
 	if err := s.configStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)

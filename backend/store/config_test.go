@@ -105,41 +105,14 @@ func TestResetData(t *testing.T) {
 	}
 }
 
-func TestMigrateDefaultModelToProviders(t *testing.T) {
-	s := testStore(t)
-
-	// Set up: global default_model + providers JSON
-	providers := []types.Provider{
-		{Name: "provider-a", Models: []types.ModelConfig{{Name: "model-x"}, {Name: "model-y"}}},
-		{Name: "provider-b", Models: []types.ModelConfig{{Name: "model-z"}}},
-	}
-	providersJSON, _ := json.Marshal(providers)
-
-	if err := s.SetConfigValue("default_model", "model-x"); err != nil {
-		t.Fatalf("set default_model: %v", err)
-	}
-	if err := s.SetConfigValue("providers", string(providersJSON)); err != nil {
-		t.Fatalf("set providers: %v", err)
-	}
-
-	// Run migration (it's called on NewStore, but we can trigger it manually)
-	// Since it's a one-time migration, we need to re-create the store to test it
-	// For now, verify the state is set up correctly
-	val, err := s.GetConfigValue("default_model")
-	if err != nil || val != "model-x" {
-		t.Fatalf("default_model should be set: %v", err)
-	}
-}
-
 func TestConfigProvidersJSON(t *testing.T) {
 	s := testStore(t)
 
 	providers := []types.Provider{
 		{
-			Name:         "neptune",
-			DisplayName:  "Neptune",
-			URL:          "http://neptune:8010/v1",
-			DefaultModel: "model-a",
+			Name:        "neptune",
+			DisplayName: "Neptune",
+			URL:         "http://neptune:8010/v1",
 			Models: []types.ModelConfig{
 				{Name: "model-a", ReasoningEffort: "low"},
 				{Name: "model-b", ReasoningEffort: "high"},
@@ -164,9 +137,6 @@ func TestConfigProvidersJSON(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Name != "neptune" {
 		t.Fatalf("unexpected providers: %+v", got)
-	}
-	if got[0].DefaultModel != "model-a" {
-		t.Fatalf("unexpected default model: %s", got[0].DefaultModel)
 	}
 	if len(got[0].Models) != 2 {
 		t.Fatalf("expected 2 models, got %d", len(got[0].Models))

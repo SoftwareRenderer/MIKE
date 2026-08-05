@@ -3,18 +3,19 @@
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getTask } from '$lib/api';
-import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
-import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
-import { StreamState } from '$lib/services/stream-state.svelte';
-import { createStreamHandler } from '$lib/services/stream-handler';
-import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
+    import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
+    import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
+    import { StreamState } from '$lib/services/stream-state.svelte';
+    import { createStreamHandler } from '$lib/services/stream-handler';
+    import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     // UI extension injection point — re-render when extensions change
     $effect(() => {
         const _v = uiInjector.getPointVersion(INJECTION_POINTS.TASK_CHAT);
         uiInjector.refreshSlot(INJECTION_POINTS.TASK_CHAT, { component: 'TaskChat', taskId, projectId });
     });
     import { DRAFT_SAVE_DEBOUNCE_MS, SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
-import { mergeQueuedUpdate } from '$lib/utils/task-utils';
+    import { mergeQueuedUpdate } from '$lib/utils/task-utils';
+    import { resolveWorker, getModelName } from '$lib/utils/providers';
     import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
@@ -397,16 +398,15 @@ import { mergeQueuedUpdate } from '$lib/utils/task-utils';
         const cfg = appStore.config;
         if (cfg && cfg.providers) {
             providers = cfg.providers;
-            // Initialize model selection from highest-priority provider's default model
+            // Initialize model selection from the configured Worker provider/model pair
             if (providers.length > 0 && (!selectedModel || !providers.some(p => p.url === selectedUrl))) {
-                const firstProvider = providers[0];
-                const _getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
-                if (firstProvider.default_model && firstProvider.models.some(m => _getModelName(m) === firstProvider.default_model)) {
-                    selectedUrl = firstProvider.url;
-                    selectedModel = firstProvider.default_model;
-                } else if (firstProvider.models.length > 0) {
-                    selectedUrl = firstProvider.url;
-                    selectedModel = _getModelName(firstProvider.models[0]);
+                const worker = resolveWorker(cfg);
+                if (worker.provider && worker.modelName) {
+                    selectedUrl = worker.url;
+                    selectedModel = worker.modelName;
+                } else if (providers[0].models.length > 0) {
+                    selectedUrl = providers[0].url;
+                    selectedModel = getModelName(providers[0].models[0]);
                 }
             }
             updateContextLimit();

@@ -452,7 +452,11 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 // Falls back to the task title on any error.
 func (te *TaskExecutor) GenerateCheckpointLabel(ctx context.Context, taskID, diffStat, turnText string) string {
 	task, err := te.store.GetTaskByTaskID(taskID)
-	if err != nil || task.LlamaServerURL == "" || task.ModelName == "" {
+	if err != nil {
+		return "file changes"
+	}
+	serverURL, modelName, _ := te.utilityTarget(task)
+	if serverURL == "" || modelName == "" {
 		return "file changes"
 	}
 	fallback := task.Title
@@ -463,7 +467,7 @@ func (te *TaskExecutor) GenerateCheckpointLabel(ctx context.Context, taskID, dif
 	labelMessages := buildCheckpointLabelMessages(diffStat, turnText)
 
 	maxTokens := 10
-	_, label, err := te.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
+	_, label, err := te.ChatCompletion(ctx, serverURL, modelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
 	if err != nil {
 		log.Printf("[checkpoint-label] task=%s LLM call failed: %v", taskID, err)
 		return fallback
@@ -480,15 +484,19 @@ func (te *TaskExecutor) GenerateCheckpointLabel(ctx context.Context, taskID, dif
 // and pre-formatted conversation turn text. Falls back to "{title}\n\nCo-authored-by: {model}" on any error.
 func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, taskID, diffStat, turnText string) string {
 	task, err := te.store.GetTaskByTaskID(taskID)
-	if err != nil || task.LlamaServerURL == "" || task.ModelName == "" {
+	if err != nil {
 		return "file changes"
 	}
-	fallback := fmt.Sprintf("%s\n\nCo-authored-by: %s", task.Title, task.ModelName)
+	serverURL, modelName, _ := te.utilityTarget(task)
+	if serverURL == "" || modelName == "" {
+		return "file changes"
+	}
+	fallback := fmt.Sprintf("%s\n\nCo-authored-by: %s", task.Title, modelName)
 
 	labelMessages := buildCommitMessages(diffStat, turnText)
 
 	maxTokens := 128
-	_, label, err := te.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
+	_, label, err := te.ChatCompletion(ctx, serverURL, modelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
 	if err != nil {
 		log.Printf("[checkpoint-label] task=%s LLM call failed: %v", taskID, err)
 		return fallback
@@ -642,8 +650,8 @@ type SSEFlusher interface {
 // tokens as SSE events. No timeout is applied. Caller must set SSE headers first.
 // If multiple models contributed to the task, each gets its own Co-authored-by line.
 func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *types.Task) {
-	serverURL := task.LlamaServerURL
-	if serverURL == "" || task.ModelName == "" {
+	serverURL, modelName, _ := te.utilityTarget(task)
+	if serverURL == "" || modelName == "" {
 		fallback := task.Title
 		if fallback == "" {
 			fallback = "file changes"
@@ -679,7 +687,7 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 		w.Flush()
 	}
 
-	_, err := te.StreamCompletion(ctx, serverURL, task.ModelName, labelMessages,
+	_, err := te.StreamCompletion(ctx, serverURL, modelName, labelMessages,
 		func(choice types.ChatChoice) {
 			if choice.Delta.Content != nil && *choice.Delta.Content != "" {
 				token := *choice.Delta.Content

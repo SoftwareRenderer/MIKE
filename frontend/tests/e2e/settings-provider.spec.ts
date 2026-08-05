@@ -17,7 +17,6 @@ test.describe.serial('Model switcher in task view', () => {
                         { name: 'model-a2', reasoning_effort: 'high' },
                     ],
                     concurrency: 2,
-                    default_model: 'model-a1',
                 },
                 {
                     name: 'provider-b',
@@ -27,10 +26,12 @@ test.describe.serial('Model switcher in task view', () => {
                         { name: 'model-b1', reasoning_effort: 'low' },
                     ],
                     concurrency: 1,
-                    default_model: 'model-b1',
                 },
             ],
-            default_provider: 'provider-a',
+            worker_provider: 'provider-a',
+            worker_model: 'model-a1',
+            utility_provider: 'provider-a',
+            utility_model: 'model-a1',
         });
         await waitForConfig(page, c =>
             c.providers && c.providers.length >= 2
@@ -205,10 +206,12 @@ test.describe.serial('Settings Model Delete', () => {
           url: 'http://delete-test:9999/v1',
           models: ['zebra', 'alpha', 'mango'],
           concurrency: 1,
-          default_model: '',
         },
       ],
-      default_provider: '',
+      worker_provider: 'delete-test',
+      worker_model: 'alpha',
+      utility_provider: 'delete-test',
+      utility_model: 'alpha',
     });
     await waitForConfig(page, c =>
       c.providers && c.providers.length === 1 && c.providers[0].name === 'delete-test'
@@ -305,9 +308,11 @@ test.describe.serial('Reasoning effort setting', () => {
                 url: 'http://localhost:9999/v1',
                 models: ['model-a', 'model-b'],
                 concurrency: 2,
-                default_model: 'model-a',
             }],
-            default_provider: 'test-localhost-9999',
+            worker_provider: 'test-localhost-9999',
+            worker_model: 'model-a',
+            utility_provider: 'test-localhost-9999',
+            utility_model: 'model-a',
         });
         await waitForConfig(page, c =>
             c.providers && c.providers.length >= 1
@@ -430,5 +435,102 @@ test.describe.serial('Reasoning effort setting', () => {
             // Wait for modal to close (replaces waitForTimeout(500))
             await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
         }
+    });
+});
+
+// ─── Primary Providers Tests ────────────────────────────────────────────────
+
+test.describe.serial('Primary Providers', () => {
+    test.beforeEach(async ({ page }) => {
+        await page.keyboard.press('Escape').catch(() => {});
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 2000 }).catch(() => {});
+
+        // Set up two providers
+        await apiPutConfig(page, {
+            providers: [
+                {
+                    name: 'primary-a',
+                    display_name: 'Primary A',
+                    url: 'http://localhost:9999/v1',
+                    models: [{ name: 'model-a1' }, { name: 'model-a2' }],
+                    concurrency: 1,
+                },
+                {
+                    name: 'primary-b',
+                    display_name: 'Primary B',
+                    url: 'http://localhost:9998/v1',
+                    models: [{ name: 'model-b1' }],
+                    concurrency: 1,
+                },
+            ],
+            worker_provider: 'primary-a',
+            worker_model: 'model-a1',
+            utility_provider: 'primary-b',
+            utility_model: 'model-b1',
+        });
+        await waitForConfig(page, c =>
+            c.providers && c.providers.length >= 2 && c.worker_provider === 'primary-a'
+        );
+        await page.goto('/');
+        await page.waitForSelector('.card', { timeout: 10000 });
+    });
+
+    test('should display Worker and Utility rows with provider/model dropdowns', async ({ page }) => {
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+
+        // Primary Providers section exists
+        await expect(page.locator('.primary-provider-row')).toHaveCount(2);
+        await expect(page.locator('.primary-provider-row').nth(0)).toContainText('Worker');
+        await expect(page.locator('.primary-provider-row').nth(1)).toContainText('Utility');
+
+        // Worker provider select has correct value
+        const workerSelects = page.locator('.primary-provider-row').nth(0).locator('.primary-provider-select');
+        await expect(workerSelects.nth(0)).toHaveValue('primary-a');
+        await expect(workerSelects.nth(1)).toHaveValue('model-a1');
+
+        // Utility provider select has correct value
+        const utilitySelects = page.locator('.primary-provider-row').nth(1).locator('.primary-provider-select');
+        await expect(utilitySelects.nth(0)).toHaveValue('primary-b');
+        await expect(utilitySelects.nth(1)).toHaveValue('model-b1');
+    });
+
+    test('should block save when Worker pair is not selected', async ({ page }) => {
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+
+        // Clear the worker provider selection
+        const workerProviderSelect = page.locator('.primary-provider-row').nth(0).locator('.primary-provider-select').nth(0);
+        await workerProviderSelect.selectOption('');
+
+        // Click Save — should be blocked with a validation error
+        await page.click('button:has-text("Save")');
+        await expect(page.locator('#config-error')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('#config-error')).toContainText('Worker');
+        await expect(page.locator('.modal')).toBeVisible();
+    });
+
+    test('should persist worker/utility after save', async ({ page }) => {
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+
+        // Change worker model to model-a2
+        const workerModelSelect = page.locator('.primary-provider-row').nth(0).locator('.primary-provider-select').nth(1);
+        await workerModelSelect.selectOption('model-a2');
+
+        await page.click('button:has-text("Save")');
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
+
+        const config = await apiGetConfig(page);
+        // Provider names are regenerated from URLs on save, so worker/utility
+        // provider references must point at a provider matching the configured URL.
+        expect(config.worker_model).toBe('model-a2');
+        expect(config.utility_model).toBe('model-b1');
+        const workerProvider = config.providers.find((p: any) => p.name === config.worker_provider);
+        const utilityProvider = config.providers.find((p: any) => p.name === config.utility_provider);
+        expect(workerProvider).toBeDefined();
+        expect(workerProvider.url).toBe('http://localhost:9999/v1');
+        expect(utilityProvider).toBeDefined();
+        expect(utilityProvider.url).toBe('http://localhost:9998/v1');
     });
 });

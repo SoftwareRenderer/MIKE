@@ -37,7 +37,10 @@ func newTestExecutor(t *testing.T) *TaskExecutor {
 	// Set workspace_dir (required for GetConfig to work)
 	_ = s.SetConfigValue("workspace_dir", t.TempDir())
 	_ = s.SetConfigValue("providers", "[]")
-	_ = s.SetConfigValue("default_provider", "")
+	_ = s.SetConfigValue("worker_provider", "")
+	_ = s.SetConfigValue("worker_model", "")
+	_ = s.SetConfigValue("utility_provider", "")
+	_ = s.SetConfigValue("utility_model", "")
 	return &TaskExecutor{
 		store:        s,
 		appStreamMgr: appStreamMgr,
@@ -497,7 +500,10 @@ func newTestExecutorWithConfig(t *testing.T, autoMerge, subtasksAutoMerge bool) 
 	// Set workspace_dir (required for GetConfig to work)
 	_ = s.SetConfigValue("workspace_dir", t.TempDir())
 	_ = s.SetConfigValue("providers", "[]")
-	_ = s.SetConfigValue("default_provider", "")
+	_ = s.SetConfigValue("worker_provider", "")
+	_ = s.SetConfigValue("worker_model", "")
+	_ = s.SetConfigValue("utility_provider", "")
+	_ = s.SetConfigValue("utility_model", "")
 	_ = s.SetConfigValue("default_auto_merge", fmt.Sprintf("%t", autoMerge))
 	_ = s.SetConfigValue("default_subtasks_auto_merge", fmt.Sprintf("%t", subtasksAutoMerge))
 	return &TaskExecutor{

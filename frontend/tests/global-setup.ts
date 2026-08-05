@@ -84,9 +84,11 @@ async function setup(): Promise<void> {
                 url: mockUrl,
                 models: [{ name: 'mock-model', reasoning_effort: 'off' }],
                 concurrency: 16,
-                default_model: 'mock-model',
             }],
-            default_provider: 'mock',
+            worker_provider: 'mock',
+            worker_model: 'mock-model',
+            utility_provider: 'mock',
+            utility_model: 'mock-model',
         }, sessionCookie, csrfToken);
         console.log(`[global-setup] Mock provider configured at ${mockUrl}`);
     }
@@ -168,9 +170,11 @@ async function setup(): Promise<void> {
                 url: mockUrl,
                 models: [{ name: 'mock-model', reasoning_effort: 'off' }],
                 concurrency: 16,
-                default_model: 'mock-model',
             }],
-            default_provider: 'mock',
+            worker_provider: 'mock',
+            worker_model: 'mock-model',
+            utility_provider: 'mock',
+            utility_model: 'mock-model',
         }, sessionCookieIso, csrfTokenIso);
         console.log(`[global-setup] Mock provider configured on isolated server`);
     }

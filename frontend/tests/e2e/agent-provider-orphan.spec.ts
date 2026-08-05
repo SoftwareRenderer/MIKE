@@ -21,7 +21,6 @@ test.describe.serial('Agent provider without extension', () => {
                     url: 'agent://pi',
                     models: [],
                     concurrency: 1,
-                    default_model: '',
                 },
             ],
         });
@@ -102,7 +101,6 @@ test.describe.serial('Agent provider without extension', () => {
                     url: 'agent://nonexistent-agent',
                     models: [],
                     concurrency: 1,
-                    default_model: '',
                 },
             ],
         });

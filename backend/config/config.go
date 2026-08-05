@@ -100,7 +100,19 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		}
 	}
 
-	defaultProvider, err := cs.store.GetConfigValue("default_provider")
+	workerProvider, err := cs.store.GetConfigValue("worker_provider")
+	if err != nil {
+		return nil, err
+	}
+	workerModel, err := cs.store.GetConfigValue("worker_model")
+	if err != nil {
+		return nil, err
+	}
+	utilityProvider, err := cs.store.GetConfigValue("utility_provider")
+	if err != nil {
+		return nil, err
+	}
+	utilityModel, err := cs.store.GetConfigValue("utility_model")
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +128,10 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		DatabasePath:    cs.dbPath,
 		RegistryURL:     registryURL,
 		Providers:       providers,
-		DefaultProvider: defaultProvider,
+		WorkerProvider:  workerProvider,
+		WorkerModel:     workerModel,
+		UtilityProvider: utilityProvider,
+		UtilityModel:    utilityModel,
 	}
 	if v, err := parseBoolPtr(defaultAutoCommitRaw); err == nil && v != nil {
 		cfg.DefaultAutoCommit = v
@@ -164,7 +179,16 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	if err := cs.store.SetConfigValue("providers", string(providersJSON)); err != nil {
 		return err
 	}
-	if err := cs.store.SetConfigValue("default_provider", c.DefaultProvider); err != nil {
+	if err := cs.store.SetConfigValue("worker_provider", c.WorkerProvider); err != nil {
+		return err
+	}
+	if err := cs.store.SetConfigValue("worker_model", c.WorkerModel); err != nil {
+		return err
+	}
+	if err := cs.store.SetConfigValue("utility_provider", c.UtilityProvider); err != nil {
+		return err
+	}
+	if err := cs.store.SetConfigValue("utility_model", c.UtilityModel); err != nil {
 		return err
 	}
 	if err := cs.store.SetConfigValue("registry_url", c.RegistryURL); err != nil {
@@ -205,7 +229,10 @@ type configResponse struct {
 	RegistryURL            string           `json:"registry_url"`
 	Version                string           `json:"version"`
 	Providers              []types.Provider `json:"providers"`
-	DefaultProvider        string           `json:"default_provider"`
+	WorkerProvider         string           `json:"worker_provider"`
+	WorkerModel            string           `json:"worker_model"`
+	UtilityProvider        string           `json:"utility_provider"`
+	UtilityModel           string           `json:"utility_model"`
 	DefaultAutoCommit      *bool            `json:"default_auto_commit"`
 	DefaultAutoMerge       *bool            `json:"default_auto_merge"`
 	DefaultSubtasksAutoMerge *bool          `json:"default_subtasks_auto_merge"`
@@ -251,7 +278,10 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		RegistryURL:              cfg.RegistryURL,
 		Version:               cs.version,
 		Providers:             providers,
-		DefaultProvider:       cfg.DefaultProvider,
+		WorkerProvider:        cfg.WorkerProvider,
+		WorkerModel:           cfg.WorkerModel,
+		UtilityProvider:       cfg.UtilityProvider,
+		UtilityModel:          cfg.UtilityModel,
 		DefaultAutoCommit:     cfg.DefaultAutoCommit,
 		DefaultAutoMerge:      cfg.DefaultAutoMerge,
 		DefaultSubtasksAutoMerge: cfg.DefaultSubtasksAutoMerge,
@@ -311,8 +341,17 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		if dp, ok := updates["default_provider"]; ok {
-			current.DefaultProvider = dp.(string)
+		if wp, ok := updates["worker_provider"]; ok {
+			current.WorkerProvider = wp.(string)
+		}
+		if wm, ok := updates["worker_model"]; ok {
+			current.WorkerModel = wm.(string)
+		}
+		if up, ok := updates["utility_provider"]; ok {
+			current.UtilityProvider = up.(string)
+		}
+		if um, ok := updates["utility_model"]; ok {
+			current.UtilityModel = um.(string)
 		}
 		if dac, ok := updates["default_auto_commit"]; ok {
 			if v, ok := dac.(bool); ok {

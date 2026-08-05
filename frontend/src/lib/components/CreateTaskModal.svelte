@@ -19,6 +19,7 @@
     import ToggleSwitch from './ToggleSwitch.svelte';
     import ModeSelect from './ModeSelect.svelte';
     import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
+    import { resolveWorker, getModelName } from '$lib/utils/providers';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
 
@@ -234,17 +235,16 @@
     $effect(() => {
         if (cfg?.providers) {
             providers = cfg.providers;
-            // Pre-select highest-priority provider's default model (only if not already selected)
+            // Pre-select the configured Worker provider/model (only if not already selected)
             if (providers.length > 0 && !selectedModel) {
-                const firstProvider = providers[0];
-                const _getModelName = (m: string | { name: string; reasoning_effort?: string }) => typeof m === 'string' ? m : m.name;
-                if (firstProvider.default_model && firstProvider.models.some(m => _getModelName(m) === firstProvider.default_model)) {
-                    selectedUrl = firstProvider.url;
-                    selectedModel = firstProvider.default_model;
-                } else if (firstProvider.models.length > 0) {
-                    // Fallback: first available model of highest-priority provider
-                    selectedUrl = firstProvider.url;
-                    selectedModel = _getModelName(firstProvider.models[0]);
+                const worker = resolveWorker(cfg);
+                if (worker.provider && worker.modelName) {
+                    selectedUrl = worker.url;
+                    selectedModel = worker.modelName;
+                } else if (providers[0].models.length > 0) {
+                    // Fallback: first available model of the first provider
+                    selectedUrl = providers[0].url;
+                    selectedModel = getModelName(providers[0].models[0]);
                 }
             }
         }

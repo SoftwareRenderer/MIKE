@@ -140,6 +140,7 @@
 {#if showModelModal}
     <ChangeModelModal
         providers={providers}
+        config={appStore.config}
         taskCount={multiSelect.count}
         taskTitles={selectedTaskTitles}
         onClose={closeModelModal}
