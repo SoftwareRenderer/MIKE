@@ -52,9 +52,9 @@
         "version": "1.0.0",
         "type": "ui",
         "display_name": "Markdown Preview",
-        "description": "Adds a Preview button to the editor footer for Markdown files, toggling between the code editor and a rendered preview.",
-        "author": "Kanban",
-        "homepage": "https://getmike.dev",
+        "description": "Adds a Preview button to the editor footer for Markdown files, toggling between the code and WYSIWYG editor.",
+        "author": "SoftwareRenderer",
+        "homepage": "https://github.com/SoftwareRenderer",
         "manifest_url": "ui/markdown-preview/manifest.json",
         "capabilities": {
             "ui": {
