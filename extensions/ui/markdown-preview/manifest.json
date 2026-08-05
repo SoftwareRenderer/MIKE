@@ -13,7 +13,8 @@
                 "editor.getContent",
                 "editor.setContent",
                 "editor.setOverlay",
-                "editor.contentChange"
+                "editor.contentChange",
+                "editor.jumpToLine"
             ]
         }
     }

@@ -38,5 +38,13 @@ describe('computeGrants (manifest permissions ∩ host catalog)', () => {
     it('the catalog contains every capability the tests reference', () => {
         expect(SUPPORTED_CAPABILITIES['config.get']).toBeTruthy();
         expect(SUPPORTED_CAPABILITIES['network.proxy']).toBeTruthy();
+        // editor.jumpToLine is the event the host forwards to a WYSIWYG
+        // extension so it can scroll to a symbol-outline reference.
+        expect(SUPPORTED_CAPABILITIES['editor.jumpToLine']).toEqual({ kind: 'event' });
+    });
+
+    it('grants the editor.jumpToLine event when declared', () => {
+        const granted = computeGrants(['editor.jumpToLine']);
+        expect(granted).toEqual(['editor.jumpToLine']);
     });
 });
