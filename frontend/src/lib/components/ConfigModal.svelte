@@ -34,6 +34,11 @@
     let workerModel = $state('');
     let utilityProvider = $state('');
     let utilityModel = $state('');
+    // Agent model lists fetched for the Primary Providers rows (empty for LLM providers).
+    let workerAgentModels = $state<Array<{ name: string }>>([]);
+    let workerAgentModelsLoading = $state(false);
+    let utilityAgentModels = $state<Array<{ name: string }>>([]);
+    let utilityAgentModelsLoading = $state(false);
     let defaultAutoCommit = $state(false);
     let defaultAutoMerge = $state(true);
     let defaultSubtasksAutoMerge = $state(true);
@@ -420,6 +425,58 @@
         }
     }
 
+    // Fetch the agent's available models for a Primary Providers row when an agent
+    // is selected, mirroring the ModelSelector behavior used when creating a task.
+    async function fetchPrimaryAgentModels(kind: 'worker' | 'utility', url: string) {
+        if (!url) {
+            if (kind === 'worker') workerAgentModels = [];
+            else utilityAgentModels = [];
+            return;
+        }
+        if (kind === 'worker') workerAgentModelsLoading = true;
+        else utilityAgentModelsLoading = true;
+        try {
+            const result = await fetchModelsApi(url);
+            if (!result.error) {
+                const models = (result.models || []).map(m => ({ name: m.name }));
+                models.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+                if (kind === 'worker') workerAgentModels = models;
+                else utilityAgentModels = models;
+                // Auto-select the first available model when nothing is selected yet,
+                // mirroring ModelSelector behavior when creating a task.
+                if (kind === 'worker' && models.length > 0 && (!workerModel || workerModel === workerProvider)) {
+                    workerModel = models[0].name;
+                }
+                if (kind === 'utility' && models.length > 0 && (!utilityModel || utilityModel === utilityProvider)) {
+                    utilityModel = models[0].name;
+                }
+            } else if (kind === 'worker') {
+                workerAgentModels = [];
+            } else {
+                utilityAgentModels = [];
+            }
+        } catch (e) {
+            console.error('Failed to fetch agent models:', e);
+            if (kind === 'worker') workerAgentModels = [];
+            else utilityAgentModels = [];
+        } finally {
+            if (kind === 'worker') workerAgentModelsLoading = false;
+            else utilityAgentModelsLoading = false;
+        }
+    }
+
+    // Fetch agent models for the Primary Providers rows when the selected provider is an agent.
+    $effect(() => {
+        const workerProv = providers.find(p => p.name === workerProvider) || null;
+        if (workerProv && isAgentProvider(workerProv)) fetchPrimaryAgentModels('worker', workerProv.url);
+        else workerAgentModels = [];
+    });
+    $effect(() => {
+        const utilityProv = providers.find(p => p.name === utilityProvider) || null;
+        if (utilityProv && isAgentProvider(utilityProv)) fetchPrimaryAgentModels('utility', utilityProv.url);
+        else utilityAgentModels = [];
+    });
+
     function addModelToProvider(idx: number) {
         providers[idx].models.push({ name: '', readonly: false, reasoning_effort: 'medium' });
         providers[idx].models.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
@@ -644,7 +701,17 @@
                                 <option value="">Select model</option>
                                 {#if selProv}
                                     {#if isAgentProvider(selProv)}
-                                        <option value={selProvider} selected={selModel === selProvider}>{selProvider}</option>
+                                        {@const agentModels = kind === 'worker' ? workerAgentModels : utilityAgentModels}
+                                        {@const agentLoading = kind === 'worker' ? workerAgentModelsLoading : utilityAgentModelsLoading}
+                                        {#if agentLoading}
+                                            <option value="" disabled>Loading models...</option>
+                                        {:else if agentModels.length > 0}
+                                            {#each agentModels as m}
+                                                <option value={m.name} selected={selModel === m.name}>{m.name}</option>
+                                            {/each}
+                                        {:else}
+                                            <option value={selProvider} selected={selModel === selProvider}>{selProvider}</option>
+                                        {/if}
                                     {:else}
                                         {#each selProv.models.filter(m => m.name.trim()) as m}
                                             <option value={getModelName(m)} selected={selModel === getModelName(m)}>{getModelName(m)}</option>
