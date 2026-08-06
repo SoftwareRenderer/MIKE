@@ -117,56 +117,15 @@ func (sm *ExtensionSandboxManager) IsAvailable() bool {
 	return sm.available
 }
 
-// Create creates and starts a sandbox container for an extension.
-// The container runs sleep infinity; the sandbox-bridge is started via podman exec.
-// projectMounts maps host project paths to container mount paths (/mnt/<name>).
-func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[string]string) ([]types.AssignedPort, error) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	if !sm.available {
-		return nil, fmt.Errorf("gVisor not available (runsc not installed)")
-	}
-
-	safeID, err := sm.rt.SanitizeID(ext.ID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid extension ID for sandbox container: %w", err)
-	}
-	containerName := fmt.Sprintf("%s-%s", ExtensionContainerPrefix, safeID)
-
-	// Check if container already exists
-	exists, err := sm.rt.ContainerExists(containerName)
-	if err != nil {
-		return nil, fmt.Errorf("check container: %w", err)
-	}
-	if exists {
-		log.Printf("[ext-sandbox] ext=%s removing stale container %s", ext.ID, containerName)
-		if rmErr := sm.rt.RemoveContainer(containerName); rmErr != nil {
-			return nil, fmt.Errorf("remove stale container %s: %w", containerName, rmErr)
-		}
-	}
-
-	// Resolve agent binary path
-	agentPath, err := sm.rt.GetAgentBinaryPath()
-	if err != nil {
-		return nil, fmt.Errorf("sandbox-bridge binary not found: %w", err)
-	}
-	agentPath, err = filepath.Abs(agentPath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve agent path: %w", err)
-	}
-
-	// Determine image
-	image := ext.ContainerConfig.Image
-	if image == "" {
-		image = "docker.io/library/ubuntu:latest"
-	}
-	if err := sm.rt.ValidateImageRef(image); err != nil {
-		return nil, fmt.Errorf("invalid extension image: %w", err)
-	}
-
-	// Build container create args - container runs sleep infinity
-	// sandbox-bridge is started via podman exec when needed
+// buildExtensionCreateArgs assembles the `podman create` argument list for an
+// extension sandbox container.
+//
+// Extension sandboxes always run with --network none.
+//
+// Returns the create args and the sorted list of mounted host project paths
+// (used to detect mount-set changes).
+func buildExtensionCreateArgs(ext *Extension, containerName, image string, projectMounts map[string]string) ([]string, []string) {
+	// Container runs sleep infinity; sandbox-bridge is started via podman exec when needed.
 	createArgs := []string{
 		"--runtime-flag=overlay2=root:self",
 		"--runtime-flag=ignore-cgroups",
@@ -176,6 +135,7 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		"--security-opt", "label=disable",
 		"--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges",
+		"--network", "none",
 	}
 
 	// Add back explicitly requested capabilities
@@ -230,6 +190,59 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		"/bin/sh", "-c",
 		"chmod +x /sandbox-bridge && sleep infinity",
 	)
+
+	return createArgs, mountedProjects
+}
+
+// Create creates and starts a sandbox container for an extension.
+// The container runs sleep infinity; the sandbox-bridge is started via podman exec.
+// projectMounts maps host project paths to container mount paths (/mnt/<name>).
+func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[string]string) ([]types.AssignedPort, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if !sm.available {
+		return nil, fmt.Errorf("gVisor not available (runsc not installed)")
+	}
+
+	safeID, err := sm.rt.SanitizeID(ext.ID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid extension ID for sandbox container: %w", err)
+	}
+	containerName := fmt.Sprintf("%s-%s", ExtensionContainerPrefix, safeID)
+
+	// Check if container already exists
+	exists, err := sm.rt.ContainerExists(containerName)
+	if err != nil {
+		return nil, fmt.Errorf("check container: %w", err)
+	}
+	if exists {
+		log.Printf("[ext-sandbox] ext=%s removing stale container %s", ext.ID, containerName)
+		if rmErr := sm.rt.RemoveContainer(containerName); rmErr != nil {
+			return nil, fmt.Errorf("remove stale container %s: %w", containerName, rmErr)
+		}
+	}
+
+	// Resolve agent binary path
+	agentPath, err := sm.rt.GetAgentBinaryPath()
+	if err != nil {
+		return nil, fmt.Errorf("sandbox-bridge binary not found: %w", err)
+	}
+	agentPath, err = filepath.Abs(agentPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve agent path: %w", err)
+	}
+
+	// Determine image
+	image := ext.ContainerConfig.Image
+	if image == "" {
+		image = "docker.io/library/ubuntu:latest"
+	}
+	if err := sm.rt.ValidateImageRef(image); err != nil {
+		return nil, fmt.Errorf("invalid extension image: %w", err)
+	}
+
+	createArgs, mountedProjects := buildExtensionCreateArgs(ext, containerName, image, projectMounts)
 
 	// Create container
 	out, err := exec.Command("podman", createArgs...).CombinedOutput()

@@ -392,3 +392,91 @@ func TestCreate_RejectsShellInjectionImage(t *testing.T) {
 		})
 	}
 }
+
+// hasArg reports whether the given flag (with its value as a following arg) is
+// present in the create args. Returns false if the flag is the last element or
+// the value does not immediately follow.
+func hasArgPair(args []string, flag, value string) bool {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func hasArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildExtensionCreateArgs_AlwaysNetworkIsolated(t *testing.T) {
+	// Extension sandboxes must NEVER have network access, regardless of the
+	// network_isolation preference in the config.
+	for _, name := range []string{"isolated", "not_isolated"} {
+		t.Run(name, func(t *testing.T) {
+			ext := &Extension{
+				ID:   "ext-network-test",
+				Name: name,
+				SandboxConfig: SandboxConfig{
+					NetworkIsolation: name == "isolated",
+				},
+			}
+			args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-network-test", "ubuntu:latest", nil)
+			if !hasArgPair(args, "--network", "none") {
+				t.Errorf("args missing --network none (NetworkIsolation=%v): %v", ext.SandboxConfig.NetworkIsolation, args)
+			}
+		})
+	}
+}
+
+func TestBuildExtensionCreateArgs_KeepsHardeningFlags(t *testing.T) {
+	ext := &Extension{ID: "ext-hardening-test"}
+	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-hardening-test", "ubuntu:latest", nil)
+
+	if !hasArgPair(args, "--runtime", "runsc") {
+		t.Error("args missing --runtime runsc")
+	}
+	if !hasArgPair(args, "--cap-drop", "ALL") {
+		t.Error("args missing --cap-drop ALL")
+	}
+	if !hasArgPair(args, "--security-opt", "no-new-privileges") {
+		t.Error("args missing --security-opt no-new-privileges")
+	}
+}
+
+func TestBuildExtensionCreateArgs_MountsProjectsReadOnly(t *testing.T) {
+	ext := &Extension{ID: "ext-mount-test"}
+	projectMounts := map[string]string{
+		"/host/proj-a": "/mnt/proj-a",
+		"/host/proj-b": "/mnt/proj-b",
+	}
+	args, mounted := buildExtensionCreateArgs(ext, "kanban-ext-ext-mount-test", "ubuntu:latest", projectMounts)
+
+	for _, m := range []string{"/host/proj-a:/mnt/proj-a:rprivate,ro", "/host/proj-b:/mnt/proj-b:rprivate,ro"} {
+		if !hasArg(args, m) {
+			t.Errorf("args missing read-only project mount %q: %v", m, args)
+		}
+	}
+
+	// mountedProjects should be sorted for deterministic comparison.
+	if len(mounted) != 2 || mounted[0] != "/host/proj-a" || mounted[1] != "/host/proj-b" {
+		t.Errorf("mountedProjects = %v, want sorted [proj-a proj-b]", mounted)
+	}
+}
+
+func TestBuildExtensionCreateArgs_EntrypointAndImage(t *testing.T) {
+	ext := &Extension{ID: "ext-entry-test"}
+	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-entry-test", "my-custom-image:v1", nil)
+
+	if !hasArg(args, "my-custom-image:v1") {
+		t.Error("args missing image reference")
+	}
+	if !hasArg(args, "chmod +x /sandbox-bridge && sleep infinity") {
+		t.Error("args missing sleep infinity entrypoint")
+	}
+}
