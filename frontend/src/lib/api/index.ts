@@ -119,7 +119,6 @@ export { createTerminal, createProjectTerminal, isTerminalStale } from './termin
 export {
     listExtensions,
     getExtension,
-    createExtension,
     updateExtension,
     updateExtensionImage,
     deleteExtension,

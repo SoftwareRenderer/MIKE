@@ -195,64 +195,6 @@ func (h *ExtensionHandler) HandleGet(w http.ResponseWriter, r *http.Request, id 
 	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, statuses))
 }
 
-// HandleCreate creates a new user-defined extension.
-func (h *ExtensionHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req CreateExtensionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	if req.Name == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "name is required")
-		return
-	}
-	if !isValidExtensionType(req.Type) {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid type: must be 'lsp', 'ui', 'css', or 'agent'")
-		return
-	}
-	if req.Version == "" {
-		req.Version = "1.0.0"
-	}
-
-	// Sanitize manifest URLs to prevent javascript:/data: injection
-	sanitizeManifestURLs(&req.Manifest)
-
-	// Generate ID from name
-	id := fmt.Sprintf("%s-%d", strings.ToLower(req.Name), time.Now().Unix())
-
-	ext := &Extension{
-		ID:              id,
-		Name:            req.Name,
-		Version:         req.Version,
-		Type:            req.Type,
-		Manifest:        req.Manifest,
-		Config:          req.Config,
-		ContainerConfig: req.ContainerConfig,
-		SandboxConfig:   req.SandboxConfig,
-		InstallSource:   "manual",
-		Enabled:         true,
-	}
-
-	if err := h.store.Create(ext); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to create extension: "+err.Error())
-		return
-	}
-
-	statuses := h.sandbox.ListRunning()
-	httputil.JSONResponse(w, http.StatusCreated, h.toResponse(ext, statuses))
-
-	// Notify frontend to refresh UI injection slots
-	if h.onExtensionChanged != nil {
-		h.onExtensionChanged()
-	}
-}
-
 // HandleUpdate updates an existing extension.
 func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
@@ -1090,17 +1032,6 @@ func resolveProxyTemplate(template string, config map[string]any) string {
 
 // --- Request/Response types ---
 
-// CreateExtensionRequest is the request body for creating an extension.
-type CreateExtensionRequest struct {
-	Name            string            `json:"name"`
-	Version         string            `json:"version,omitempty"`
-	Type            string            `json:"type"`
-	Manifest        ExtensionManifest `json:"manifest"`
-	Config          map[string]any    `json:"config,omitempty"`
-	ContainerConfig ContainerConfig   `json:"container_config,omitempty"`
-	SandboxConfig   SandboxConfig     `json:"sandbox_config,omitempty"`
-}
-
 // UpdateExtensionRequest is the request body for updating an extension.
 type UpdateExtensionRequest struct {
 	Version         string            `json:"version,omitempty"`
@@ -1141,15 +1072,6 @@ type ExtensionUpdate struct {
 	Name             string `json:"name"`
 	CurrentVersion   string `json:"current_version"`
 	AvailableVersion string `json:"available_version"`
-}
-
-// isValidExtensionType returns true if the given type is a valid extension type.
-func isValidExtensionType(t string) bool {
-	switch t {
-	case ExtensionTypeLSP, ExtensionTypeUI, ExtensionTypeCSS, ExtensionTypeAgent:
-		return true
-	}
-	return false
 }
 
 // maskConfig masks sensitive config values based on the manifest's config_schema.
