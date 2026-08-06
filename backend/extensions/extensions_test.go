@@ -247,7 +247,6 @@ func TestConfigSchema_Properties(t *testing.T) {
 	minVal := 64.0
 	maxVal := 2048.0
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{
 				Key:         "memoryLimit",
@@ -268,9 +267,6 @@ func TestConfigSchema_Properties(t *testing.T) {
 		},
 	}
 
-	if schema.Type != "object" {
-		t.Errorf("Type = %v, want object", schema.Type)
-	}
 	if len(schema.Properties) != 2 {
 		t.Errorf("Properties count = %v, want 2", len(schema.Properties))
 	}
@@ -298,7 +294,6 @@ func TestConfigSchema_Properties(t *testing.T) {
 
 func TestConfigSchema_JSON_PreservesPropertyOrder(t *testing.T) {
 	jsonData := `{
-		"type": "object",
 		"properties": [
 			{"key": "api_key", "type": "string", "title": "API Key", "sensitive": true},
 			{"key": "memory_limit", "type": "number", "title": "Memory Limit", "default": 256},

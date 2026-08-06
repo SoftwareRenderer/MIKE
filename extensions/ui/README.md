@@ -89,7 +89,6 @@ Declares metadata, integration points, and requested capabilities.
         }
     },
     "config_schema": {
-        "type": "object",
         "properties": [
             { "key": "api_key", "type": "string", "title": "API Key" }
         ]
