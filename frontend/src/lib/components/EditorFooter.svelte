@@ -18,8 +18,6 @@
     let lspTooltipVisible = $state(false);
     let showFileStats = $state(false);
     let wordWrap = $state(false);
-    // svelte-ignore non_reactive_update — DOM ref via bind:this
-    let lspStatusEl: HTMLButtonElement | null = null;
 
     const lspStatusLabel = $derived(lspReady ? lspLanguage || 'LSP' : '-');
 
@@ -39,8 +37,7 @@
             <button
                 type="button"
                 class="footer-btn footer-toggle"
-                class:active={lspReady}
-                bind:this={lspStatusEl}
+                class:active={lspTooltipVisible}
                 onclick={toggleLspTooltip}
                 aria-label="LSP status"
             >
