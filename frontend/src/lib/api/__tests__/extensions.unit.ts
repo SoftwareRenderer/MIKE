@@ -76,26 +76,6 @@ describe('extensions API', () => {
         expect(calls[0][0]).toContain('/api/extensions/gopls-1');
     });
 
-    it('createExtension sends POST with correct body', async () => {
-        const data = {
-            name: 'my-lsp',
-            type: 'lsp' as const,
-            version: '1.0.0',
-            manifest: { display_name: 'My LSP', description: 'Test', author: 'Test', version: '1.0.0', capabilities: { lsp: { command: 'mylsp', args: [], extensions: ['my'], language: 'my' } } },
-        };
-        const result = { id: 'my-lsp-1', ...data, enabled: true, running: false };
-        mockSuccess(result, 201);
-
-        const { createExtension } = await import('$lib/api/extensions');
-        const res = await createExtension(data);
-
-        expect(res).toEqual(result);
-        const calls = apiCalls(mockFetch.mock.calls);
-        expect(calls[0][0]).toContain('/api/extensions');
-        expect(calls[0][1].method).toBe('POST');
-        expect(JSON.parse(calls[0][1].body)).toEqual(data);
-    });
-
     it('updateExtension sends PUT with correct body', async () => {
         const data = { version: '2.0.0' };
         const result = { id: 'gopls-1', name: 'gopls', version: '2.0.0', type: 'lsp', enabled: true };

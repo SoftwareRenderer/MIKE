@@ -107,22 +107,17 @@ func TestExtension_InstallSourceChecks(t *testing.T) {
 	tests := []struct {
 		source       string
 		wantRegistry bool
-		wantManual   bool
 		wantLocal    bool
 	}{
-		{"registry", true, false, false},
-		{"manual", false, true, false},
-		{"local", false, false, true},
-		{"unknown", false, false, false},
+		{"registry", true, false},
+		{"local", false, true},
+		{"unknown", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.source, func(t *testing.T) {
 			ext := makeTestExtension(t, ExtensionTypeLSP, tt.source)
 			if got := ext.IsRegistryInstalled(); got != tt.wantRegistry {
 				t.Errorf("IsRegistryInstalled() = %v, want %v", got, tt.wantRegistry)
-			}
-			if got := ext.IsManualInstalled(); got != tt.wantManual {
-				t.Errorf("IsManualInstalled() = %v, want %v", got, tt.wantManual)
 			}
 			if got := ext.IsLocalInstalled(); got != tt.wantLocal {
 				t.Errorf("IsLocalInstalled() = %v, want %v", got, tt.wantLocal)

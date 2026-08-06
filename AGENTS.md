@@ -322,7 +322,6 @@ The Extensions system replaces hardcoded LSP configurations with user-defined an
 **API endpoints:**
 - `GET /api/extensions` — List all extensions
 - `GET /api/extensions/{id}` — Get single extension
-- `POST /api/extensions` — Create extension
 - `PUT /api/extensions/{id}` — Update extension
 - `DELETE /api/extensions/{id}` — Delete extension
 - `PATCH /api/extensions/{id}/enabled` — Toggle enabled
@@ -427,7 +426,7 @@ python3 scripts/gen-registry.py --check    # verify it's up to date (CI)
 
 The generator scans `extensions/<type>/<name>/manifest.json` for every extension and emits a minimal registry entry (only the fields the Browse Registry UI renders — e.g. `ui` injection points/permissions and `proxy` allowed domains; the full capability config stays in the manifest).
 
-**Deploying:** Install from registry via Settings → Extensions → "Install from Registry", or create manually via the API (`POST /api/extensions`).
+**Deploying:** Install from registry via Settings → Extensions → "Install from Registry".
 
 **Key constraints:**
 - Module must export a `default` function accepting `{ component, config }`

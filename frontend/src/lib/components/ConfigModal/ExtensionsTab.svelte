@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv, SchemaProperty } from '$lib/types';
-    import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage, createExtension, streamBuildProgress } from '$lib/api';
+    import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage, streamBuildProgress } from '$lib/api';
     import type { BuildProgressEvent } from '$lib/api';
     import { getConfig } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
@@ -34,8 +34,6 @@
     let searchQuery = $state('');
 
     // Extension form state
-    let showCreateForm = $state(false);
-    let showAddForm = $state(false);
     let editExtensionId = $state<string | null>(null);
     let editingExtension = $state<Extension | null>(null);
     let editConfig = $state<Record<string, any>>({});
@@ -193,80 +191,6 @@
         const caps: Record<string, any> = {};
         for (const k of getRegistryCapabilityKeys(entry)) caps[k] = {};
         return caps;
-    }
-
-    // Add extension form
-    let addForm = $state({
-        name: '',
-        type: 'lsp' as 'lsp' | 'ui' | 'css',
-        version: '1.0.0',
-        displayName: '',
-        description: '',
-        author: '',
-        licenseUrl: '',
-        language: '',
-        fileExtensions: '',
-    });
-    let adding = $state(false);
-
-    // Reset add form
-    function resetAddForm() {
-        addForm = {
-            name: '',
-            type: 'lsp',
-            version: '1.0.0',
-            displayName: '',
-            description: '',
-            author: '',
-            licenseUrl: '',
-            language: '',
-            fileExtensions: '',
-        };
-    }
-
-    // Handle add extension
-    async function handleAdd() {
-        if (!addForm.name || !addForm.displayName) {
-            error = 'Name and display name are required';
-            return;
-        }
-        adding = true;
-        error = '';
-        try {
-            const manifest: Record<string, any> = {
-                display_name: addForm.displayName,
-                description: addForm.description,
-                author: addForm.author,
-                license_url: addForm.licenseUrl,
-                version: addForm.version || '1.0.0',
-            };
-            const capabilities: Record<string, any> = {};
-            if (addForm.type === 'lsp') {
-                capabilities.lsp = {
-                    command: addForm.name,
-                    extensions: addForm.fileExtensions ? addForm.fileExtensions.split(',').map(s => s.trim()).filter(Boolean) : [],
-                    language: addForm.language || addForm.name,
-                };
-            } else if (addForm.type === 'css') {
-                capabilities.css = {
-                    css_url: `/extensions/${addForm.name}/styles.css`,
-                };
-            }
-            manifest.capabilities = capabilities;
-            await createExtension({
-                name: addForm.name,
-                version: addForm.version,
-                type: addForm.type,
-                manifest,
-            });
-            showAddForm = false;
-            resetAddForm();
-            await loadExtensions();
-        } catch (e: any) {
-            error = e.message || 'Failed to add extension';
-        } finally {
-            adding = false;
-        }
     }
 
     // Load extensions on mount
@@ -576,9 +500,6 @@
                 </button>
             </div>
             <div class="view-tabs-right">
-                <button class="btn btn-primary" onclick={() => { showAddForm = true; resetAddForm(); }}>
-                    + Add Extension
-                </button>
                 <button class="btn btn-secondary" onclick={handleCheckUpdates} disabled={loadingUpdates}>
                     {loadingUpdates ? 'Checking...' : 'Check for Updates'}
                 </button>
@@ -717,59 +638,6 @@
                 </div>
             {/if}
         </div>
-    {/if}
-
-    <!-- Add Extension Modal -->
-    {#if showAddForm}
-        {#snippet addFooter()}
-            <button type="button" class="btn-secondary" onclick={() => { showAddForm = false; resetAddForm(); }}>Cancel</button>
-            <button type="button" class="btn-primary" onclick={handleAdd} disabled={adding}>
-                {adding ? 'Adding...' : 'Add'}
-            </button>
-        {/snippet}
-
-        <BaseModal title="Add Extension" width="480px" footer={addFooter} onClose={() => { showAddForm = false; resetAddForm(); }}>
-            <div class="config-fields">
-                <div class="config-field">
-                    <label class="field-label" for="add-name">Name *</label>
-                    <input id="add-name" type="text" value={addForm.name} oninput={(e) => addForm.name = (e.target as HTMLInputElement).value} class="config-input" placeholder="gopls" />
-                </div>
-                <div class="config-field">
-                    <label class="field-label" for="add-display-name">Display Name *</label>
-                    <input id="add-display-name" type="text" value={addForm.displayName} oninput={(e) => addForm.displayName = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Language Server" />
-                </div>
-                <div class="config-field">
-                    <label class="field-label" for="add-type">Type</label>
-                    <select id="add-type" value={addForm.type} onchange={(e) => addForm.type = (e.target as HTMLSelectElement).value as 'lsp' | 'ui' | 'css'} class="config-input">
-                        <option value="lsp">LSP</option>
-                        <option value="ui">UI</option>
-                        <option value="css">CSS</option>
-                    </select>
-                </div>
-                <div class="config-field">
-                    <label class="field-label" for="add-description">Description</label>
-                    <input id="add-description" type="text" value={addForm.description} oninput={(e) => addForm.description = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go language server" />
-                </div>
-                <div class="config-field">
-                    <label class="field-label" for="add-author">Author</label>
-                    <input id="add-author" type="text" value={addForm.author} oninput={(e) => addForm.author = (e.target as HTMLInputElement).value} class="config-input" placeholder="Go Team" />
-                </div>
-                <div class="config-field">
-                    <label class="field-label" for="add-license-url">License URL</label>
-                    <input id="add-license-url" type="url" value={addForm.licenseUrl} oninput={(e) => addForm.licenseUrl = (e.target as HTMLInputElement).value} class="config-input" placeholder="https://..." />
-                </div>
-                {#if addForm.type === 'lsp'}
-                    <div class="config-field">
-                        <label class="field-label" for="add-language">Language</label>
-                        <input id="add-language" type="text" value={addForm.language} oninput={(e) => addForm.language = (e.target as HTMLInputElement).value} class="config-input" placeholder="go" />
-                    </div>
-                    <div class="config-field">
-                        <label class="field-label" for="add-file-extensions">File Extensions (comma-separated)</label>
-                        <input id="add-file-extensions" type="text" value={addForm.fileExtensions} oninput={(e) => addForm.fileExtensions = (e.target as HTMLInputElement).value} class="config-input" placeholder="go" />
-                    </div>
-                {/if}
-            </div>
-        </BaseModal>
     {/if}
 
     <!-- Edit Extension Modal -->

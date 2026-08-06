@@ -37,7 +37,7 @@ type Extension struct {
 	Config          map[string]any    `json:"config"`
 	ContainerConfig ContainerConfig   `json:"container_config"`
 	SandboxConfig   SandboxConfig     `json:"sandbox_config"`
-	InstallSource   string            `json:"install_source"` // "registry", "manual", "local"
+	InstallSource   string            `json:"install_source"` // "registry", "local"
 	ImageRef        string            `json:"image_ref,omitempty"`
 	Enabled         bool              `json:"enabled"`
 	InstalledAt     string            `json:"installed_at"`
@@ -398,11 +398,6 @@ func (e *Extension) HasAgentConfig() bool {
 // IsRegistryInstalled returns true if this extension was installed from a registry.
 func (e *Extension) IsRegistryInstalled() bool {
 	return e.InstallSource == "registry"
-}
-
-// IsManualInstalled returns true if this extension was manually defined.
-func (e *Extension) IsManualInstalled() bool {
-	return e.InstallSource == "manual"
 }
 
 // IsLocalInstalled returns true if this extension was installed from a local Dockerfile.

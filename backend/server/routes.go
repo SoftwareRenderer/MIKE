@@ -34,7 +34,6 @@ func (s *Server) setupRoutes() {
 
 	// Extensions
 	s.mux.HandleFunc("GET /api/extensions", s.extHandler.HandleList)
-	s.mux.HandleFunc("POST /api/extensions", s.extHandler.HandleCreate)
 	s.mux.HandleFunc("/api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		switch r.Method {

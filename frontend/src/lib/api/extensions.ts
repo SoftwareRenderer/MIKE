@@ -15,25 +15,6 @@ export async function getExtension(id: string): Promise<Extension> {
     return res.json();
 }
 
-/** Create a new user-defined extension. */
-export async function createExtension(data: {
-    name: string;
-    version?: string;
-    type: 'lsp' | 'ui' | 'css';
-    manifest?: Record<string, any>;
-    config?: Record<string, any>;
-    container_config?: Record<string, any>;
-    sandbox_config?: Record<string, any>;
-}): Promise<Extension> {
-    const res = await apiFetch(`${API_BASE}/extensions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to create extension');
-    return res.json();
-}
-
 /** Update an existing extension. */
 export async function updateExtension(id: string, data: {
     version?: string;
