@@ -7,7 +7,6 @@
     "version": "1.0.0",
     "priority": 0,
     "config_schema": {
-        "type": "object",
         "properties": [
             {
                 "key": "sandbox_mount",

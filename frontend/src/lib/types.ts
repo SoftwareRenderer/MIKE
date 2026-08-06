@@ -460,7 +460,6 @@ export interface CSSExtensionConfig {
 }
 
 export interface ConfigSchema {
-    type: string;
     properties?: SchemaProperty[]; // array to preserve insertion order
 }
 

@@ -6,7 +6,6 @@
     "license_url": "https://github.com/golang/tools/blob/master/LICENSE",
     "version": "1.0.0",
     "config_schema": {
-        "type": "object",
         "properties": [
             {
                 "key": "memory_limit",

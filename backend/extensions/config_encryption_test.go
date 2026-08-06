@@ -33,7 +33,6 @@ func TestConfigEncryption_RoundTrip(t *testing.T) {
 
 	// Schema marks github_token as sensitive
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{Key: "github_token",
 				Type:      "string",
@@ -80,7 +79,6 @@ func TestConfigEncryption_EncryptedInDB(t *testing.T) {
 	es := testStore(t)
 
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{Key: "api_key",
 				Type:      "string",
@@ -144,7 +142,6 @@ func TestConfigEncryption_NoKey(t *testing.T) {
 	es := testStore(t)
 
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{Key: "api_key",
 				Type:      "string",
@@ -180,7 +177,6 @@ func TestConfigEncryption_UpdatePreservesEncryption(t *testing.T) {
 	es := testStore(t)
 
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{Key: "token", Type: "string", Sensitive: true},
 			{Key: "username", Type: "string"},
@@ -225,7 +221,6 @@ func TestConfigEncryption_ListAlsoDecrypts(t *testing.T) {
 	es := testStore(t)
 
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{Key: "secret", Type: "string", Sensitive: true},
 		},
@@ -260,7 +255,6 @@ func TestConfigEncryption_MultipleSensitiveFields(t *testing.T) {
 	es := testStore(t)
 
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{Key: "token_a", Type: "string", Sensitive: true},
 			{Key: "token_b", Type: "string", Sensitive: true},
@@ -301,7 +295,6 @@ func TestConfigEncryption_EmptySensitiveValue(t *testing.T) {
 	es := testStore(t)
 
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{Key: "token", Type: "string", Sensitive: true},
 		},
@@ -332,7 +325,6 @@ func TestConfigEncryption_NonStringSensitiveValue(t *testing.T) {
 	es := testStore(t)
 
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{Key: "port", Type: "number", Sensitive: true},
 			{Key: "visible", Type: "number"},
@@ -388,7 +380,6 @@ func configContains(s, substr string) bool {
 
 func TestMaskConfig(t *testing.T) {
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{Key: "token", Type: "string", Sensitive: true},
 			{Key: "username", Type: "string"},
@@ -425,7 +416,6 @@ func TestMaskConfig_NoSchema(t *testing.T) {
 
 func TestMaskConfig_EmptySensitiveValue(t *testing.T) {
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{Key: "token", Type: "string", Sensitive: true},
 		},
@@ -446,7 +436,6 @@ func TestMaskConfig_PreservedOnUpdate(t *testing.T) {
 	h := testHandler(t)
 
 	schema := &ConfigSchema{
-		Type: "object",
 		Properties: []SchemaProp{
 			{Key: "token", Type: "string", Sensitive: true},
 			{Key: "username", Type: "string"},

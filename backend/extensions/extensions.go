@@ -112,7 +112,7 @@ func (c *Capabilities) GetProxy() *ProxyConfig {
 // the extension's configuration at request time.
 type ProxyConfig struct {
 	AllowedDomains []string          `json:"allowed_domains,omitempty"` // whitelist of domains the proxy may contact
-	Headers        map[string]string `json:"headers,omitempty"` // header templates (e.g. "Authorization": "token {{github_token}}")
+	Headers        map[string]string `json:"headers,omitempty"`         // header templates (e.g. "Authorization": "token {{github_token}}")
 }
 
 // LSPConfig defines LSP-specific extension configuration.
@@ -251,7 +251,6 @@ func (s *ConfigSchema) resolveTemplate(value string) string {
 // ConfigSchema is a JSON Schema subset for dynamic form rendering.
 // Properties is an array to preserve insertion order from manifest.json.
 type ConfigSchema struct {
-	Type       string       `json:"type"`
 	Properties []SchemaProp `json:"properties,omitempty"`
 }
 
@@ -260,13 +259,11 @@ type ConfigSchema struct {
 // where keys are property names) or a JSON array (internal representation).
 func (s *ConfigSchema) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Type       string          `json:"type"`
 		Properties json.RawMessage `json:"properties,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	s.Type = raw.Type
 
 	if len(raw.Properties) == 0 {
 		return nil
@@ -341,14 +338,14 @@ type RegistryIndex []RegistryEntry
 
 // RegistryEntry describes a single extension available in the registry.
 type RegistryEntry struct {
-	Name          string `json:"name"`
-	Version       string `json:"version"`
-	Type          string `json:"type"`
-	DisplayName   string `json:"display_name"`
-	Description   string `json:"description"`
-	Author        string `json:"author"`
-	Homepage      string `json:"homepage,omitempty"`
-	LicenseURL    string `json:"license_url,omitempty"`
+	Name          string        `json:"name"`
+	Version       string        `json:"version"`
+	Type          string        `json:"type"`
+	DisplayName   string        `json:"display_name"`
+	Description   string        `json:"description"`
+	Author        string        `json:"author"`
+	Homepage      string        `json:"homepage,omitempty"`
+	LicenseURL    string        `json:"license_url,omitempty"`
 	Image         string        `json:"image,omitempty"`          // OCI image reference
 	DockerfileURL string        `json:"dockerfile_url,omitempty"` // URL to Dockerfile
 	ManifestURL   string        `json:"manifest_url,omitempty"`   // URL to manifest.json
