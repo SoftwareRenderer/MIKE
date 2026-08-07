@@ -1,25 +1,97 @@
 #!/usr/bin/env python3
-"""Generate extensions/registry.json from extension manifests.
+"""Generate ../MIKE-extensions/registry.json from extension manifests.
 
-Scans extensions/<type>/<name>/manifest.json for every extension and emits a
-registry entry carrying only the minimum information the Browse Registry UI
-needs (see AGENTS.md -> Extensions System). The full capability config stays in
-each manifest; the registry only carries what the UI renders.
+Scans ../MIKE-extensions/<type>/<name>/manifest.json for every extension and emits
+a git-pinned registry entry: the repo URL (`repo`), the current HEAD commit of the
+extensions repo (`commit`, a full SHA-1 or SHA-256 hash), and the subdirectory
+within the repo that holds the extension (`subdir`). On install the server clones
+the repo, checks out exactly `commit`, verifies `git rev-parse HEAD` matches, and
+only then installs the `subdir` content into `./extensions/<author>/<name>`. The
+full capability config stays in each manifest; the registry only carries what the
+Browse UI renders.
 
 Usage:
     python3 scripts/gen-registry.py            # regenerate registry.json
     python3 scripts/gen-registry.py --check    # verify it is up to date (CI)
 
-Run after adding/editing an extension manifest.
+Run after adding/editing an extension manifest or bumping a published commit.
 """
 
 import json
 import os
+import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXTENSIONS_DIR = os.path.join(ROOT, 'extensions')
+EXTENSIONS_DIR = os.path.normpath(os.path.join(ROOT, '..', 'MIKE-extensions'))
 REGISTRY_PATH = os.path.join(EXTENSIONS_DIR, 'registry.json')
+
+# A documentation-only template for third-party, self-hosted extensions. It is
+# NOT emitted into the published registry (a live index must not contain a fake,
+# non-installable entry); it documents the git-pinned (commit-verified) format an
+# author would use: host the extension in a git repo, have a curator review a
+# specific commit and pin its full 40-char SHA-1 or 64-char SHA-256 hash, and the
+# server checks out + verifies that exact commit before installing.
+#
+# The values are placeholders: `commit` is deliberately not a valid hash and
+# `repo` is not a real repository, so this entry can never be installed.
+PLACEHOLDER_ENTRY = {
+    'name': 'your-self-hosted-extension',
+    'version': '1.0.0',
+    'type': 'ui',
+    'display_name': 'Your Self-Hosted Extension (template)',
+    'description': 'TEMPLATE - replace this entry with your own. Points at a git '
+                   'repo pinned to a vetted commit. On install the server clones '
+                   'the repo, checks out exactly this commit, verifies git '
+                   'rev-parse HEAD matches, and only then installs. The pinned '
+                   'commit may be a full 40-char SHA-1 or 64-char SHA-256 hash.',
+    'author': 'Your Name',
+    'homepage': 'https://github.com/you',
+    # --- Git-pinned (self-hosted) placeholder properties ---
+    'repo': 'https://github.com/you/kanban-extensions',
+    # Full 40-char SHA-1 or 64-char SHA-256 hash of the reviewed commit (vetted
+    # by the curator). Deliberately not a valid hash so this template cannot be
+    # installed.
+    'commit': 'REPLACE_WITH_40_CHAR_SHA1_OR_64_CHAR_SHA256_OF_VETTED_COMMIT',
+    # Optional: path within the repo to the extension root (repo root if empty).
+    'subdir': 'your-extension',
+    'capabilities': {
+        'ui': {
+            'injection_points': ['createTask'],
+            'permissions': ['createTask.description.insertText'],
+        },
+    },
+}
+
+
+def git_origin():
+    """Return the normalized HTTPS URL of the extensions repo's origin."""
+    try:
+        out = subprocess.run(
+            ['git', '-C', EXTENSIONS_DIR, 'remote', 'get-url', 'origin'],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return 'https://github.com/SoftwareRenderer/MIKE-extensions'
+    # Normalize git@host:owner/repo.git and https://host/owner/repo.git both to
+    # https://host/owner/repo so the registry carries a cloneable HTTPS URL.
+    m = re.match(r'^(?:git@([^:]+):|https?://([^/]+)/)(.+?)(?:\.git)?$', out)
+    host = m.group(1) or m.group(2) if m else ''
+    if m and host:
+        return 'https://{}/{}'.format(host, m.group(3))
+    return out
+
+
+def git_head_commit():
+    """Return the full HEAD commit hash of the extensions repo."""
+    try:
+        return subprocess.run(
+            ['git', '-C', EXTENSIONS_DIR, 'rev-parse', 'HEAD'],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return ''
 
 
 def simplify_capabilities(manifest_caps):
@@ -63,11 +135,13 @@ def simplify_capabilities(manifest_caps):
     return result
 
 
-def build_entry(ext_type, name, manifest_path):
+def build_entry(ext_type, name, manifest_path, repo, commit):
     with open(manifest_path) as f:
         manifest = json.load(f)
 
-    rel = os.path.relpath(manifest_path, EXTENSIONS_DIR).replace(os.sep, '/')
+    # subdir is the extension's directory relative to the repo root
+    # (e.g. "ui/github-issue-importer").
+    subdir = os.path.relpath(os.path.dirname(manifest_path), EXTENSIONS_DIR).replace(os.sep, '/')
     entry = {
         'name': name,
         'version': manifest.get('version', ''),
@@ -80,12 +154,10 @@ def build_entry(ext_type, name, manifest_path):
         if manifest.get(field):
             entry[field] = manifest[field]
 
-    # manifest_url is always present (resolved relative to the registry URL).
-    entry['manifest_url'] = rel
-
-    # LSP extensions also ship a Dockerfile the registry can build from.
-    if ext_type == 'lsp' and os.path.exists(os.path.join(os.path.dirname(manifest_path), 'Dockerfile')):
-        entry['dockerfile_url'] = os.path.join(os.path.dirname(rel), 'Dockerfile').replace(os.sep, '/')
+    # Git-pinned source fields.
+    entry['repo'] = repo
+    entry['commit'] = commit
+    entry['subdir'] = subdir
 
     caps = simplify_capabilities(manifest.get('capabilities'))
     if caps:
@@ -94,6 +166,8 @@ def build_entry(ext_type, name, manifest_path):
 
 
 def collect_entries():
+    repo = git_origin()
+    commit = git_head_commit()
     entries = []
     for dirpath, _dirnames, filenames in os.walk(EXTENSIONS_DIR):
         if 'manifest.json' not in filenames:
@@ -103,7 +177,7 @@ def collect_entries():
         if len(parts) != 2:
             continue  # only extensions/<type>/<name>/manifest.json
         ext_type, name = parts
-        entries.append(build_entry(ext_type, name, os.path.join(dirpath, 'manifest.json')))
+        entries.append(build_entry(ext_type, name, os.path.join(dirpath, 'manifest.json'), repo, commit))
     entries.sort(key=lambda e: e['name'])
     return entries
 
@@ -129,7 +203,7 @@ def main():
         f.write(output)
     print(f'Generated {REGISTRY_PATH} with {len(entries)} entries:')
     for e in entries:
-        print(f"  {e['type']}/{e['name']} v{e['version']}")
+        print(f"  {e['type']}/{e['name']} v{e['version']} @ {e['commit'][:12]}")
 
 
 if __name__ == '__main__':

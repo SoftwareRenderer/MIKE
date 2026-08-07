@@ -360,7 +360,6 @@ func (s *Store) initConfigDefaults() error {
 	defer s.mu.Unlock()
 	defaults := map[string]string{
 		"workspace_dir":    "./.worktrees",
-		"registry_url":     "file://./extensions/registry.json",
 		"providers":        "",
 		"worker_provider":  "",
 		"worker_model":     "",

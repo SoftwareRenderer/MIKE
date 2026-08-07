@@ -14,6 +14,49 @@ export type { InjectionPoint, InjectionContext };
 const THEME_CSS_KEY = 'kanban-theme-css';
 const THEME_LINK_ID = 'kanban-theme-stylesheet';
 
+// authorDir turns a registry author into a safe, single-segment directory name
+// (mirrors backend authorDir). Installed extensions live at
+// ./extensions/<author>/<name>, served as /extensions/<author>/<name>/.
+function authorDir(author?: string): string {
+    let slug = (author ?? '').toLowerCase().trim();
+    if (!slug) return 'unknown';
+    let out = '';
+    let lastDash = false;
+    for (const ch of slug) {
+        const ok =
+            (ch >= 'a' && ch <= 'z') ||
+            (ch >= '0' && ch <= '9') ||
+            ch === '-' ||
+            ch === '_' ||
+            ch === '.';
+        if (!ok) {
+            if (lastDash) continue;
+            out += '-';
+            lastDash = true;
+            continue;
+        }
+        out += ch;
+        lastDash = false;
+    }
+    return (out.trim().replace(/[-._]+$/, '') || 'unknown');
+}
+
+// extBaseURL returns the served base URL for an installed extension directory.
+function extBaseURL(ext: Extension): string {
+    return `/extensions/${authorDir(ext.manifest.author)}/${ext.name}`;
+}
+
+// resolveAssetURL resolves a manifest asset path (e.g. a css_url) against the
+// extension's served base, so a relative path like "./styles.css" or
+// "styles.css" resolves to /extensions/<author>/<name>/styles.css.
+function resolveAssetURL(ext: Extension, asset: string): string {
+    if (!asset) return asset;
+    if (/^([a-z][a-z0-9+.-]*:)?\/\//i.test(asset) || asset.startsWith('/')) {
+        return asset; // absolute URL or server-root path — use as-is
+    }
+    return `${extBaseURL(ext)}/${asset.replace(/^\.?\//, '')}`;
+}
+
 export interface InjectionRegistration {
     extensionId: string;
     extensionName: string;
@@ -46,7 +89,7 @@ export class UIInjector {
             // CSS-type extensions: inject global stylesheet
             if (ext.type === 'css' && ext.manifest.capabilities?.css?.css_url) {
                 if (!cssUrl) {
-                    cssUrl = ext.manifest.capabilities.css.css_url;
+                    cssUrl = resolveAssetURL(ext, ext.manifest.capabilities.css.css_url);
                 }
                 continue;
             }
@@ -56,7 +99,7 @@ export class UIInjector {
             if (ext.type !== 'ui' || !ext.manifest.capabilities?.ui) continue;
             const ui = ext.manifest.capabilities.ui;
             if (!ui.injection_points) continue;
-            const moduleUrl = `/extensions/ui/${ext.name}/index.html`;
+            const moduleUrl = `${extBaseURL(ext)}/index.html`;
 
             // Least privilege: grant only the manifest's requested capabilities
             // that exist in the catalog.
