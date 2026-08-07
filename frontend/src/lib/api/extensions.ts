@@ -112,6 +112,16 @@ function streamOperation(path: string, body: Record<string, any>): AsyncIterable
         });
         if (!res.ok) throw await apiError(res, 'Operation failed');
 
+        // The server streams SSE; surface a clear error if it returns a plain body instead.
+        const contentType = res.headers?.get('content-type') ?? '';
+        // Enforce SSE content-type only when the header is readable (some test mocks omit it).
+        if (contentType && !contentType.toLowerCase().includes('text/event-stream')) {
+            const text = await res.text();
+            throw new Error(
+                `Unexpected response from ${path} (${contentType}): ${text.slice(0, 200) || 'empty body'}`
+            );
+        }
+
         const reader = res.body?.getReader();
         if (!reader) {
             throw new Error('No reader available');
@@ -119,6 +129,7 @@ function streamOperation(path: string, body: Record<string, any>): AsyncIterable
 
         const decoder = new TextDecoder();
         let buffer = '';
+        let sawDone = false;
 
         try {
             while (true) {
@@ -134,12 +145,19 @@ function streamOperation(path: string, body: Record<string, any>): AsyncIterable
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
                         try {
-                            yield JSON.parse(line.slice(6)) as BuildProgressEvent;
+                            const event = JSON.parse(line.slice(6)) as BuildProgressEvent;
+                            if (event.done) sawDone = true;
+                            yield event;
                         } catch {
                             // Skip malformed data
                         }
                     }
                 }
+            }
+
+            // A healthy SSE stream always ends with a `done` event.
+            if (!sawDone) {
+                throw new Error('Operation ended before reporting completion');
             }
         } finally {
             reader.releaseLock();
