@@ -127,6 +127,5 @@ export {
     installExtension,
     checkUpdates,
     getExtensionLogs,
-    streamBuildProgress,
     type BuildProgressEvent,
 } from './extensions';
