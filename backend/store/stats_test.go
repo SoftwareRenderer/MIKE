@@ -220,6 +220,86 @@ func TestGetProjectStatsThroughput(t *testing.T) {
 	}
 }
 
+func TestGetProjectStatsThroughputExcludesNoTimingData(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := newTask("task-1", "proj-1")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Provider with timing data: 500 gen tokens in 2000ms → 250 tok/s
+	msg1 := newMessage("m1", "task-1", "assistant", "provider response")
+	msg1.ModelName = "gpt-4"
+	msg1.PromptTokens = 1000
+	msg1.PredictedTokens = 500
+	msg1.PromptMs = 1000
+	msg1.PredictedMs = 2000
+
+	// Agent provider with NO timing data: 2000 gen tokens, 0ms
+	// This should NOT inflate the overall throughput
+	msg2 := newMessage("m2", "task-1", "assistant", "agent response")
+	msg2.ModelName = "pi"
+	msg2.PromptTokens = 500
+	msg2.PredictedTokens = 2000
+	msg2.PromptMs = 0
+	msg2.PredictedMs = 0
+
+	for _, m := range []*types.TaskMessage{msg1, msg2} {
+		if err := s.CreateTaskMessage(m); err != nil {
+			t.Fatalf("create message: %v", err)
+		}
+	}
+
+	stats, err := s.GetProjectStats("proj-1")
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+
+	// Total tokens include both providers
+	if stats.TotalGeneratedTokens != 2500 {
+		t.Fatalf("expected 2500 total generated tokens, got %d", stats.TotalGeneratedTokens)
+	}
+
+	// With-timing tokens only include the provider with timing data
+	if stats.TotalGeneratedTokensWithTiming != 500 {
+		t.Fatalf("expected 500 generated tokens with timing, got %d", stats.TotalGeneratedTokensWithTiming)
+	}
+
+	// Overall gen TPS should be 500 tokens / 2s = 250 tok/s
+	// NOT (500+2000) tokens / 2s = 1250 tok/s (which would be wrong)
+	if !floatEquals(stats.AvgGenerationTps, 250.0, 1.0) {
+		t.Fatalf("expected ~250 generation tok/s, got %.2f", stats.AvgGenerationTps)
+	}
+
+	// Per-model stats should still show correct individual values
+	if len(stats.ByModel) != 2 {
+		t.Fatalf("expected 2 model groups, got %d", len(stats.ByModel))
+	}
+	var gpt4, pi *types.ModelStats
+	for i := range stats.ByModel {
+		if stats.ByModel[i].ModelName == "gpt-4" {
+			gpt4 = &stats.ByModel[i]
+		} else if stats.ByModel[i].ModelName == "pi" {
+			pi = &stats.ByModel[i]
+		}
+	}
+	if gpt4 == nil || pi == nil {
+		t.Fatal("missing model group")
+	}
+	// gpt-4 has timing data, so its TPS should be correct
+	if !floatEquals(gpt4.AvgGenerationTps, 250.0, 1.0) {
+		t.Fatalf("expected gpt-4 ~250 gen tok/s, got %.2f", gpt4.AvgGenerationTps)
+	}
+	// pi has no timing data, so its TPS should be 0
+	if pi.AvgGenerationTps != 0 {
+		t.Fatalf("expected pi gen tok/s = 0, got %.2f", pi.AvgGenerationTps)
+	}
+}
+
 func TestGetProjectStatsMultipleTasks(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
