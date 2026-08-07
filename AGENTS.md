@@ -411,8 +411,7 @@ The context object passed to `init` contains `component` (component name, e.g. `
     "type": "ui",
     "display_name": "My Extension",
     "description": "Does something useful",
-    "author": "Author",
-    "manifest_url": "my-extension/manifest.json"
+    "author": "Author"
 }
 ```
 
