@@ -522,7 +522,6 @@ export interface RegistryEntry {
     license_url?: string;
     image?: string;
     dockerfile_url?: string;
-    manifest_url?: string;
     repo?: string;
     commit?: string;
     subdir?: string;

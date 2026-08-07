@@ -353,7 +353,6 @@ type RegistryEntry struct {
 	LicenseURL    string        `json:"license_url,omitempty"`
 	Image         string        `json:"image,omitempty"`          // OCI image reference
 	DockerfileURL string        `json:"dockerfile_url,omitempty"` // URL to Dockerfile
-	ManifestURL   string        `json:"manifest_url,omitempty"`   // URL to manifest.json
 	Capabilities  *Capabilities `json:"capabilities,omitempty"`   // capability config (mirrors manifest)
 	// Git-pinned source for self-hosted extensions. When set, install checks
 	// out exactly this commit (verified) instead of fetching URL-based artifacts.
