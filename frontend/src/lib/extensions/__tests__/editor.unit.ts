@@ -233,9 +233,9 @@ describe('editor.getContent and editor.setOverlay', () => {
         send(channel, contentWindow, { type: 'call', id: 'o1', cap: CAP_EDITOR_SET_OVERLAY, args: { visible: true } });
         await flush();
         expect(wrapper.style.display).toBe('none');
-        // iframe height set to the editor content area height (> 0 in jsdom? it
-        // may be 0, but the call must not throw and must toggle visibility).
-        expect(iframe.style.height).toBe('0px');
+        // iframe fills its anchor (100%), which fills .editor-content — so the
+        // overlay tracks editor/panel resizes automatically.
+        expect(iframe.style.height).toBe('100%');
         channel.destroy();
     });
 

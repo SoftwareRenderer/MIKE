@@ -112,6 +112,10 @@ export class ExtensionHostChannel {
                 setError: (message) => this.renderStatus('error', message),
                 hide: () => this.renderStatus('none'),
                 setSize: (height) => { this.iframe.style.height = `${height}px`; },
+                // Fill the anchor element, which already fills the editor content
+                // area (absolute inset:0), so the iframe tracks editor/panel
+                // resizes automatically instead of holding a stale pixel height.
+                setFill: () => { this.iframe.style.height = '100%'; },
             },
         };
     }
