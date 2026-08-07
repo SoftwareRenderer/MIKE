@@ -5,7 +5,7 @@
     import { getGitStatus, getProjectDiff, stageProjectFile, commitProject, getGitLogFull, getCommitDiff } from '$lib/api/git';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
-    import { loadAppSetting, saveAppSetting, clearEditorDraft, clearEditorHistory } from '$lib/storage';
+    import { loadAppSetting, saveAppSetting } from '$lib/storage';
     // Lazy-loaded on first diff view
     let DiffViewerComponent: typeof import('./DiffViewer.svelte').default | null = $state(null);
     let diffViewerLoading = $state(false);
@@ -17,32 +17,16 @@
             diffViewerLoading = false;
         }).catch(() => { diffViewerLoading = false; });
     }
-    // Lazy-loaded on first file edit
-    let FileEditorComponent: typeof import('./FileEditor.svelte').default | null = $state(null);
-    let fileEditorLoading = $state(false);
-    function loadFileEditor(): void {
-        if (FileEditorComponent || fileEditorLoading) return;
-        fileEditorLoading = true;
-        import('./FileEditor.svelte').then((mod) => {
-            FileEditorComponent = mod.default;
-            fileEditorLoading = false;
-        }).catch(() => { fileEditorLoading = false; });
-    }
     import ResizeHandle from './ResizeHandle.svelte';
 
-    let { projectId, projectPath, onClose, isMobile, onUpdateFile, onCommitted }: {
+    let { projectId, projectPath, onClose, isMobile, onCommitted, onEditFile }: {
         projectId: string;
         projectPath: string;
         onClose: () => void;
         isMobile: boolean;
-        onUpdateFile?: (path: string | null) => void;
         onCommitted?: () => void;
+        onEditFile?: (path: string, line?: number) => void;
     } = $props();
-
-    // Editor mode: when a file is opened from the diff, show editor in place of diff viewer
-    let editorFilePath = $state('');
-    let editorTargetLine = $state(0);
-    let editorHasChanges = $state(false);
 
     // Parsed status entries for the sidebar file list
     interface StatusEntry {
@@ -629,43 +613,11 @@
         }
     }
 
-    /** Handle line click from DiffViewer — open file in inline editor at the clicked line. */
+    /** Handle line click from DiffViewer — open file in the shared file editor via the explorer. */
     function handleLineClick(filePath: string, lineNumber: number) {
         // Build absolute path from project root + relative diff path
         const absPath = projectPath.endsWith('/') ? projectPath + filePath : projectPath + '/' + filePath;
-        editorFilePath = absPath;
-        editorTargetLine = lineNumber;
-        if (onUpdateFile) onUpdateFile(absPath);
-        loadFileEditor();
-    }
-
-    /** Close the inline editor and return to diff view. */
-    async function closeInlineEditor() {
-        if (editorHasChanges) {
-            const fileName = editorFilePath.split('/').pop() || editorFilePath;
-            const confirmed = await dialogStore.showConfirm({
-                title: 'Unsaved changes',
-                message: `"${fileName}" has unsaved changes. Discard them?`,
-                confirmText: 'Discard',
-                cancelText: 'Cancel',
-                variant: 'destructive',
-            });
-            if (!confirmed) return;
-            // Clear cached draft and history so changes don't reappear on reopen
-            clearEditorDraft(editorFilePath).catch(() => {});
-            clearEditorHistory(editorFilePath).catch(() => {});
-        }
-        editorFilePath = '';
-        editorTargetLine = 0;
-        if (onUpdateFile) onUpdateFile(null);
-        // Refresh data to pick up any changes
-        const hasChanges = await loadData();
-        await updateCompareMode(hasChanges);
-    }
-
-    /** Called when the inline editor content changes. */
-    function handleInlineEditorHasChanges(_filePath: string, hasChanges: boolean) {
-        editorHasChanges = hasChanges;
+        if (onEditFile) onEditFile(absPath, lineNumber);
     }
 
     function handleKeydown(e: KeyboardEvent) {
@@ -996,30 +948,9 @@
             />
             {/if}
 
-            <!-- Right: Diff viewer or inline editor -->
+            <!-- Right: Diff viewer -->
             <div class="changes-diff">
-                {#if editorFilePath}
-                    <div class="changes-editor-header">
-                        <span class="changes-editor-path" title={editorFilePath}>{editorFilePath.replace(projectPath + '/', '')}</span>
-                    </div>
-                    <div class="changes-editor-body">
-                        {#if FileEditorComponent}
-                            {@const FileEditor = FileEditorComponent}
-                            <FileEditor
-                                projectId={projectId}
-                                filePath={editorFilePath}
-                                targetLine={editorTargetLine}
-                                active={true}
-                                onFocused={() => {}}
-                                onSymbolsUpdate={() => {}}
-                                onHasChanges={handleInlineEditorHasChanges}
-                                onClose={closeInlineEditor}
-                            />
-                        {:else}
-                            <div class="file-editor-loading">Loading editor...</div>
-                        {/if}
-                    </div>
-                {:else if fromCommit !== CURRENT_TREE}
+                {#if fromCommit !== CURRENT_TREE}
                     <!-- Commit comparison diff -->
                     {#if DiffViewerComponent}
                         {@const DiffViewer = DiffViewerComponent}
@@ -1505,34 +1436,6 @@
         overflow: hidden;
     }
 
-    /* Inline editor header (shown when editing a file from diff) */
-    .changes-editor-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 4px 10px;
-        border-bottom: 1px solid var(--color-border);
-        flex-shrink: 0;
-        background: var(--color-surface-2);
-    }
-    .changes-editor-path {
-        flex: 1;
-        min-width: 0;
-        font-size: 0.75rem;
-        font-family: var(--font-mono);
-        color: var(--color-text-secondary);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .changes-editor-body {
-        flex: 1;
-        min-height: 0;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-    }
-    .file-editor-loading,
     .diff-viewer-loading {
         display: flex;
         align-items: center;
