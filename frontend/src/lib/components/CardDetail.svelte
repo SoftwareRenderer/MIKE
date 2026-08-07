@@ -30,16 +30,16 @@
     }
     import CheckpointOverlay from './CardDetail/CheckpointOverlay.svelte';
     import DiffComparison from './CardDetail/DiffComparison.svelte';
-    // Lazy-loaded on first file edit
-    let DiffEditorComponent: typeof import('./DiffEditor.svelte').default | null = $state(null);
-    let diffEditorLoading = $state(false);
+    // Lazy-loaded on first file edit (the diff-panel editor is FileEditor in 'diff' mode)
+    let FileEditorComponent: typeof import('./FileEditor.svelte').default | null = $state(null);
+    let fileEditorLoading = $state(false);
     function loadDiffEditor(): void {
-        if (DiffEditorComponent || diffEditorLoading) return;
-        diffEditorLoading = true;
-        import('./DiffEditor.svelte').then((mod) => {
-            DiffEditorComponent = mod.default;
-            diffEditorLoading = false;
-        }).catch(() => { diffEditorLoading = false; });
+        if (FileEditorComponent || fileEditorLoading) return;
+        fileEditorLoading = true;
+        import('./FileEditor.svelte').then((mod) => {
+            FileEditorComponent = mod.default;
+            fileEditorLoading = false;
+        }).catch(() => { fileEditorLoading = false; });
     }
     import MobileTabBar from './CardDetail/MobileTabBar.svelte';
     import TaskHeader from './CardDetail/TaskHeader.svelte';
@@ -829,11 +829,12 @@
                 <div class="diff-content">
                     {#if editingFile}
                         <!-- Inline file editor (lazy-loaded) -->
-                        {#if DiffEditorComponent}
-                            {@const DiffEditor = DiffEditorComponent}
-                            <DiffEditor
+                        {#if FileEditorComponent}
+                            {@const FileEditor = FileEditorComponent}
+                            <FileEditor
+                                mode="diff"
                                 filePath={editingFile.path}
-                                lineNumber={editingFile.lineNumber}
+                                targetLine={editingFile.lineNumber}
                                 displayPath={editingFile.displayPath}
                                 projectId={task.project_id}
                                 taskId={task.id}
