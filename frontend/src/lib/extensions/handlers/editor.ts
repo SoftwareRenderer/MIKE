@@ -179,8 +179,10 @@ function setOverlay(ctx: HostContext, args: { visible: boolean }): void {
 
     if (args.visible) {
         wrapper.style.display = 'none';
-        // Fill the editor content area (above the footer).
-        ctx.ui.setSize(contentEl.clientHeight);
+        // Fill the editor content area (above the footer). The iframe is sized
+        // to its anchor, which already fills .editor-content, so the overlay
+        // resizes automatically with the editor/panel (no stale pixel height).
+        ctx.ui.setFill();
     } else {
         wrapper.style.display = '';
         ctx.ui.setSize(0);
