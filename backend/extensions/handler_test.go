@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,23 @@ func testHandler(t *testing.T) *ExtensionHandler {
 	}
 	sandbox := NewExtensionSandboxManager(reg, store)
 	return NewExtensionHandler(store, sandbox, reg, cfg)
+}
+
+// readSSEEvents parses the SSE payloads written to a recorder body.
+func readSSEEvents(t *testing.T, body []byte) []sseEvent {
+	t.Helper()
+	var events []sseEvent
+	for _, line := range strings.Split(string(body), "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var ev sseEvent
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &ev); err != nil {
+			t.Fatalf("parse SSE event %q: %v", line, err)
+		}
+		events = append(events, ev)
+	}
+	return events
 }
 
 func TestHandleList_Empty(t *testing.T) {
@@ -686,13 +704,24 @@ func TestHandleInstall_Success(t *testing.T) {
 
 	h.HandleInstall(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Errorf("status = %d, want 201", w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (SSE stream)", w.Code)
 	}
 
-	var result ExtensionResponse
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("decode response: %v", err)
+	events := readSSEEvents(t, w.Body.Bytes())
+	if len(events) == 0 {
+		t.Fatal("expected at least a done SSE event")
+	}
+	last := events[len(events)-1]
+	if !last.Done {
+		t.Fatal("expected final done event")
+	}
+	if last.Error != "" {
+		t.Fatalf("unexpected error on done event: %s", last.Error)
+	}
+	result := last.Result
+	if result == nil {
+		t.Fatal("expected result on done event")
 	}
 	if result.Name != "gopls" {
 		t.Errorf("Name = %q, want gopls", result.Name)
@@ -737,8 +766,8 @@ func TestHandleInstall_GitPinned(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.HandleInstall(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (%s)", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (SSE stream) (%s)", w.Code, w.Body.String())
 	}
 
 	// Files must be materialized from the verified checkout into
@@ -750,10 +779,14 @@ func TestHandleInstall_GitPinned(t *testing.T) {
 		t.Error("extension materialized under old <type>/<name> layout")
 	}
 
-	// Extension must record the pinned commit.
-	var result ExtensionResponse
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("decode: %v", err)
+	// Extension must record the pinned commit (in the final SSE result event).
+	events := readSSEEvents(t, w.Body.Bytes())
+	if len(events) == 0 || !events[len(events)-1].Done {
+		t.Fatalf("expected final done SSE event, got %d events", len(events))
+	}
+	result := events[len(events)-1].Result
+	if result == nil {
+		t.Fatal("expected result on done event")
 	}
 	if result.Repo != repo || result.Commit != commit {
 		t.Errorf("git source not recorded: repo=%q commit=%q", result.Repo, result.Commit)
@@ -795,8 +828,16 @@ func TestHandleInstall_GitPinned_FailsOnBadCommit(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.HandleInstall(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 (unverified commit must not install)", w.Code)
+	// The unverified commit surfaces as an SSE error event (status 200 stream).
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (SSE stream with error event)", w.Code)
+	}
+	events := readSSEEvents(t, w.Body.Bytes())
+	if len(events) == 0 || !events[len(events)-1].Done {
+		t.Fatalf("expected final done SSE event, got %d events", len(events))
+	}
+	if events[len(events)-1].Error == "" {
+		t.Fatal("expected error event for unverified commit")
 	}
 	if _, err := os.Stat(filepath.Join(extDir, "softwarerenderer", "evil")); err == nil {
 		t.Error("extension dir created despite unverified commit")
@@ -917,13 +958,17 @@ func TestHandleInstall_FallbackCopiesLicenseURL(t *testing.T) {
 
 	h.HandleInstall(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", w.Code)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (SSE stream)", w.Code)
 	}
 
-	var result ExtensionResponse
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("decode response: %v", err)
+	events := readSSEEvents(t, w.Body.Bytes())
+	if len(events) == 0 || !events[len(events)-1].Done {
+		t.Fatalf("expected final done SSE event, got %d events", len(events))
+	}
+	result := events[len(events)-1].Result
+	if result == nil {
+		t.Fatal("expected result on done event")
 	}
 	if result.Manifest.LicenseURL != "https://github.com/golang/tools/blob/master/LICENSE" {
 		t.Errorf("Manifest.LicenseURL = %q, want license URL from registry entry", result.Manifest.LicenseURL)
@@ -965,6 +1010,183 @@ func TestHandleInstall_AlreadyInstalled(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Errorf("status = %d, want 409", w.Code)
+	}
+}
+
+func TestHandleInstall_AlreadyInstalled_TimestampedID(t *testing.T) {
+	// Reinstall must be rejected even though records use timestamped IDs.
+	index := RegistryIndex{
+		{
+			Name:        "gopls",
+			Version:     "1.0.0",
+			Type:        ExtensionTypeLSP,
+			DisplayName: "Go Language Server",
+		},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+
+	// Pre-install with a timestamped ID (like a real install).
+	ext := makeTestExt("gopls-9999999999", "gopls", ExtensionTypeLSP)
+	_ = h.store.Create(ext)
+
+	body, _ := json.Marshal(map[string]any{"name": "gopls"})
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleInstall(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (duplicate install with timestamped ID)", w.Code)
+	}
+	exts, _ := h.store.List()
+	if len(exts) != 1 {
+		t.Errorf("expected exactly one installed extension, got %d", len(exts))
+	}
+}
+
+func TestHandleInstall_DuplicateInFlight(t *testing.T) {
+	index := RegistryIndex{
+		{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP, DisplayName: "Go Language Server"},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+
+	// Simulate an in-flight install (e.g. from a closed page).
+	if !h.inFlightOps.begin("gopls") {
+		t.Fatal("failed to mark gopls in-flight for test")
+	}
+	defer h.inFlightOps.end("gopls")
+
+	body, _ := json.Marshal(map[string]any{"name": "gopls"})
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleInstall(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409 (duplicate in-flight install)", w.Code)
+	}
+}
+
+func TestHandleInstall_CompletesAfterClientDisconnect(t *testing.T) {
+	index := RegistryIndex{
+		{Name: "gopls", Version: "1.0.0", Type: ExtensionTypeLSP, DisplayName: "Go Language Server"},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+
+	body, _ := json.Marshal(map[string]any{"name": "gopls"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(body)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		h.HandleInstall(w, req)
+		close(done)
+	}()
+
+	// Cancel the request context to simulate the page closing mid-install.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// handler returned on disconnect
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return after client disconnect")
+	}
+
+	// The install must still complete in the background and write the record.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		exts, _ := h.store.List()
+		for _, e := range exts {
+			if e.Name == "gopls" {
+				return // installed despite client disconnect
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	exts, _ := h.store.List()
+	t.Fatalf("extension not installed after client disconnect; store has %d extensions", len(exts))
+}
+
+func TestHandleUpdateImage_StreamsProgress(t *testing.T) {
+	// Git-pinned with no Dockerfile, so no podman build is needed.
+	repo, commit := makeGitRepo(t, map[string]string{
+		"importer/manifest.json": `{"display_name":"GitHub Importer","description":"d","author":"a","version":"1.0.0","capabilities":{"ui":{"injection_points":["createTask"]}}}`,
+	})
+	index := RegistryIndex{
+		{
+			Name:    "github-issue-importer",
+			Version: "1.0.0",
+			Type:    ExtensionTypeUI,
+			Author:  "Software Renderer",
+			Repo:    repo,
+			Commit:  commit,
+			Subdir:  "importer",
+		},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+	h.config.ExtensionsDir = t.TempDir()
+
+	ext := makeTestExt("importer-1", "github-issue-importer", ExtensionTypeUI)
+	ext.InstallSource = "registry"
+	_ = h.store.Create(ext)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/"+ext.ID+"/update", nil)
+	w := httptest.NewRecorder()
+	h.HandleUpdateImage(w, req, ext.ID)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (SSE stream)", w.Code)
+	}
+	events := readSSEEvents(t, w.Body.Bytes())
+	if len(events) < 2 {
+		t.Fatalf("expected progress + done events, got %d", len(events))
+	}
+	last := events[len(events)-1]
+	if !last.Done {
+		t.Fatal("expected final done event")
+	}
+	if last.Error != "" {
+		t.Fatalf("unexpected error on done event: %s", last.Error)
+	}
+	if last.Result == nil || last.Result.Name != "github-issue-importer" {
+		t.Fatal("expected result on done event")
+	}
+	// The in-flight guard must be released once the background update finishes.
+	if h.inFlightOps.busy["github-issue-importer"] {
+		t.Error("in-flight guard not released after update completed")
 	}
 }
 
