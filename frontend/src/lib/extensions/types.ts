@@ -39,6 +39,9 @@ export interface HostContext {
         setError: (message: string) => void;
         hide: () => void;
         setSize: (height: number) => void;
+        /** Size the iframe to fill its anchor (which fills the editor content
+         * area), so an overlay tracks editor/panel resizes automatically. */
+        setFill: () => void;
     };
 }
 

@@ -45,17 +45,45 @@
     import { goTemplate } from '$lib/gotemplate';
     import { getLanguageTreeFromView } from '$lib/highlighter';
 
-    let { projectId, projectPath, taskId, filePath, targetLine, active, onFocused, onSymbolsUpdate, onHasChanges, onClose }: {
+    let {
+        projectId,
+        projectPath,
+        taskId,
+        filePath,
+        targetLine,
+        active = true,
+        onFocused = () => {},
+        onSymbolsUpdate = () => {},
+        onHasChanges = () => {},
+        onClose,
+        // Presentation mode: 'explorer' (tab bar chrome, external) or 'diff'
+        // (task-view diff-panel editor with its own header + confirm overlay).
+        mode = 'explorer',
+        // Diff-mode props
+        baseRef,
+        workspaceDir,
+        displayPath: displayPathProp,
+        onToggleFullscreen,
+        mobileFullscreen,
+        isMobile,
+    }: {
         projectId: string;
         projectPath?: string;
         taskId?: string;
         filePath: string;
         targetLine: number;
-        active: boolean;
-        onFocused: (focused: boolean) => void;
-        onSymbolsUpdate: (symbols: LSPSymbol[]) => void;
-        onHasChanges: (filePath: string, hasChanges: boolean) => void;
-        onClose: () => void;
+        active?: boolean;
+        onFocused?: (focused: boolean) => void;
+        onSymbolsUpdate?: (symbols: LSPSymbol[]) => void;
+        onHasChanges?: (filePath: string, hasChanges: boolean) => void;
+        onClose: (saved: boolean) => void;
+        mode?: 'explorer' | 'diff';
+        baseRef?: string;
+        workspaceDir?: string;
+        displayPath?: string;
+        onToggleFullscreen?: () => void;
+        mobileFullscreen?: boolean;
+        isMobile?: boolean;
     } = $props();
 
     let content = $state('');
@@ -103,6 +131,10 @@
         wordWrap = saved;
     });
     let lspWorkspace = $state(''); // workspace path the LSP client is connected to
+
+    // Diff-mode state: header display path + unsaved-changes confirm dialog.
+    let displayPath = $state('');
+    let showConfirm = $state(false);
 
     // Notify parent when unsaved changes state changes
     $effect(() => {
@@ -238,7 +270,9 @@
         const initialDoc = historyBase || content;
         const gitGutterExt = gitGutter();
         gitGutterState = gitGutterExt.state;
-        gitGutterExt.state.initialMarkers = gutterMarkers;
+        // Explorer mode uses server-precomputed gutter markers; diff mode computes
+        // the gutter vs the baseline ref (initialMarkers stays null).
+        gitGutterExt.state.initialMarkers = mode === 'diff' ? null : gutterMarkers;
         gitGutterExt.state.baselineContent = baselineContent;
         const extensions = [
             // Explicit setup (replaces basicSetup, excludes searchKeymap)
@@ -332,7 +366,7 @@
                         if (uri && uri.startsWith('file://')) {
                             const defPath = uri.replace('file://', '');
                             // Only valid if definition is within the project workspace
-                            isValid = projectPath ? defPath.startsWith(projectPath) : false;
+                            isValid = lspWorkspaceRoot ? defPath.startsWith(lspWorkspaceRoot) : false;
                         }
                     }
                 } catch (e) {
@@ -506,36 +540,66 @@
             const data = await res.json();
             const fileContent = data.content || '';
 
-            // Parse gutter markers from server (diff vs HEAD)
-            const rawMarkers = data.gutter_markers;
-            if (rawMarkers && typeof rawMarkers === 'object') {
-                const m = new Map<number, string[]>();
-                for (const [ln, types] of Object.entries(rawMarkers)) {
-                    if (Array.isArray(types)) m.set(parseInt(ln, 10), types);
+            if (mode === 'diff') {
+                // Diff mode: header display path + baseline vs baseRef for the gutter.
+                displayPath = displayPathProp || filePath.split('/').pop() || filePath;
+                content = fileContent;
+                baselineContent = '';
+                savedContent = fileContent;
+                hasChanges = content !== savedContent;
+                lineCount = content ? content.split('\n').length : 0;
+                charCount = content.length;
+
+                // Fetch baseline for the git gutter so markers match the diff.
+                // Uses the diff panel's baseRef; on failure (new file) baseline
+                // stays empty — all lines shown as added.
+                const refToUse = baseRef || 'HEAD';
+                const headParams = new URLSearchParams({ path: filePath, ref: refToUse });
+                if (projectId) headParams.set('project', projectId);
+                if (taskId) headParams.set('task', taskId);
+                try {
+                    const headRes = await fetch(`/api/fs/read?${headParams}`);
+                    if (headRes.ok) {
+                        const headData = await headRes.json();
+                        baselineContent = headData.content || '';
+                    } else {
+                        baselineContent = '';
+                    }
+                } catch {
+                    baselineContent = '';
                 }
-                gutterMarkers = m;
             } else {
-                gutterMarkers = null;
-            }
+                // Parse gutter markers from server (diff vs HEAD)
+                const rawMarkers = data.gutter_markers;
+                if (rawMarkers && typeof rawMarkers === 'object') {
+                    const m = new Map<number, string[]>();
+                    for (const [ln, types] of Object.entries(rawMarkers)) {
+                        if (Array.isArray(types)) m.set(parseInt(ln, 10), types);
+                    }
+                    gutterMarkers = m;
+                } else {
+                    gutterMarkers = null;
+                }
 
-            // Use unsaved draft if available, otherwise use current file content
-            const draft = await getEditorDraft(filePath);
-            content = draft !== null ? draft : fileContent;
-            baselineContent = fileContent;
-            savedContent = fileContent;
-            hasChanges = content !== savedContent;
-            lineCount = content ? content.split('\n').length : 0;
-            charCount = content.length;
+                // Use unsaved draft if available, otherwise use current file content
+                const draft = await getEditorDraft(filePath);
+                content = draft !== null ? draft : fileContent;
+                baselineContent = fileContent;
+                savedContent = fileContent;
+                hasChanges = content !== savedContent;
+                lineCount = content ? content.split('\n').length : 0;
+                charCount = content.length;
 
-            // Load persisted undo/redo history (auto-evicted if older than 72h)
-            const savedHistory = await loadEditorHistory(filePath);
-            if (savedHistory && Array.isArray(savedHistory.deltas)) {
-                historyBase = savedHistory.base;
-                historyDeltas = savedHistory.deltas;
-            } else {
-                // No history or expired — start fresh from current file content
-                historyBase = fileContent;
-                historyDeltas = [];
+                // Load persisted undo/redo history (auto-evicted if older than 72h)
+                const savedHistory = await loadEditorHistory(filePath);
+                if (savedHistory && Array.isArray(savedHistory.deltas)) {
+                    historyBase = savedHistory.base;
+                    historyDeltas = savedHistory.deltas;
+                } else {
+                    // No history or expired — start fresh from current file content
+                    historyBase = fileContent;
+                    historyDeltas = [];
+                }
             }
         } catch (e) {
             error = String(e);
@@ -613,21 +677,23 @@
             }
             savedContent = content;
             hasChanges = false;
-            // Update git gutter — disk now matches editor.
-            // The current merged markers (server + delta) represent the diff vs HEAD
-            // for the saved content. Use them as the new server markers.
-            if (view && gitGutterState) {
-                gitGutterState.baselineContent = content;
-                // Convert the current merged map back to a plain Map for server markers
-                const newMarkers = new Map<number, string[]>();
-                for (const [ln, types] of gitGutterState.map) {
-                    newMarkers.set(ln, types as string[]);
+            if (mode === 'explorer') {
+                // Update git gutter — disk now matches editor.
+                // The current merged markers (server + delta) represent the diff vs HEAD
+                // for the saved content. Use them as the new server markers.
+                if (view && gitGutterState) {
+                    gitGutterState.baselineContent = content;
+                    // Convert the current merged map back to a plain Map for server markers
+                    const newMarkers = new Map<number, string[]>();
+                    for (const [ln, types] of gitGutterState.map) {
+                        newMarkers.set(ln, types as string[]);
+                    }
+                    gitGutterState.initialMarkers = newMarkers;
+                    gutterMarkers = newMarkers;
+                    baselineContent = content;
                 }
-                gitGutterState.initialMarkers = newMarkers;
-                gutterMarkers = newMarkers;
-                baselineContent = content;
+                await clearEditorDraft(filePath);
             }
-            await clearEditorDraft(filePath);
         } catch (e) {
             error = String(e);
         } finally {
@@ -681,6 +747,45 @@
         saveAppSetting('editor-word-wrap', enabled).catch(() => {});
     }
 
+    // ---- Diff-mode chrome: header back button, unsaved-changes confirm, keyboard ----
+    function handleClose() {
+        onClose(true);
+    }
+
+    function requestClose() {
+        if (hasChanges) {
+            showConfirm = true;
+        } else {
+            handleClose();
+        }
+    }
+
+    function confirmClose(discard: boolean) {
+        showConfirm = false;
+        if (discard) handleClose();
+    }
+
+    function handleKeyDown(e: KeyboardEvent) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+            e.preventDefault();
+            if (hasChanges && !fileTooLarge || fileNotFound) handleSave();
+            return;
+        }
+        if (e.key === 'Escape') {
+            e.stopPropagation();
+            if (showConfirm) {
+                showConfirm = false;
+                return;
+            }
+            if (mobileFullscreen && onToggleFullscreen) {
+                onToggleFullscreen();
+                return;
+            }
+            requestClose();
+            return;
+        }
+    }
+
     // Jump to targetLine when editor is ready (from diff view click)
     $effect(() => {
         const line = targetLine;
@@ -710,11 +815,26 @@
         }
     });
 
-    // Normalize filePath for LSP: convert sandbox container paths (/home/sandbox/<name>/...)
-    // to host project paths. The LSP sandbox mounts projects at /mnt/<name>, not /home/sandbox/<name>.
-    // Without this normalization, gopls sees file URIs like file:///home/sandbox/kanban/...
-    // which don't match its workspace root (/mnt/kanban), causing "No packages found" errors.
-    const lspFilePath = (() => {
+    // LSP workspace root and file path.
+    // Explorer mode: point the language server at the project root. Sandbox
+    // container paths (/home/sandbox/<name>/...) are normalized to host project
+    // paths — the LSP sandbox mounts projects at /mnt/<name>, not
+    // /home/sandbox/<name>, so without this gopls sees URIs that don't match its
+    // workspace root and reports "No packages found".
+    // Diff mode: point the language server at the task's worktree so the server
+    // analyzes the task's actual working files (not the project HEAD).
+    let lspWorkspaceRoot = $derived.by(() => {
+        if (mode === 'diff' && workspaceDir && projectId && taskId) {
+            return `${workspaceDir.replace(/\/+$/, '')}/${projectId}/${taskId}`;
+        }
+        return projectPath || '';
+    });
+    let lspFilePath = $derived.by(() => {
+        if (mode === 'diff') {
+            if (lspWorkspaceRoot && displayPath) return `${lspWorkspaceRoot}/${displayPath}`;
+            if (projectPath && displayPath) return `${projectPath}/${displayPath}`;
+            return filePath;
+        }
         if (!filePath || !projectPath) return filePath;
         const projectName = projectPath.split('/').filter(Boolean).pop();
         const sandboxPrefix = `/home/sandbox/${projectName}/`;
@@ -722,22 +842,22 @@
             return projectPath + '/' + filePath.slice(sandboxPrefix.length);
         }
         return filePath.startsWith('/') ? filePath : (projectPath + '/' + filePath);
-    })();
+    });
 
     // Initialize LSP after the file and editor are ready
     // Track extension manager state so this effect re-runs when extensions are loaded
     $effect(() => {
         const _editorReady = editorReady;
-        const _projPath = projectPath;
+        const _wsRoot = lspWorkspaceRoot;
         const _projId = projectId;
         // Read extension state to track it as a dependency
         const _extCount = extensionManager.state.extensions.length;
         // Check LSP availability here (outside async) so effect re-runs when extensions load
         const _lspAvail = isLSPAvailable(filePath);
 
-        if (!_editorReady || !view || !_projId || !_projPath) return;
+        if (!_editorReady || !view || !_projId || !_wsRoot) return;
         // Re-initialize if workspace changed (e.g., project switch with same file path)
-        if (lspClient && lspWorkspace === _projPath) return;
+        if (lspClient && lspWorkspace === _wsRoot) return;
 
         async function initLSP() {
             // Check if LSP extension is available for this file
@@ -755,7 +875,7 @@
                 // Request a virtual transport from the shared connection manager.
                 // All editors in the same workspace share one WebSocket.
                 const virtTransport = await requestLSPChannel({
-                    workspace: _projPath!,
+                    workspace: _wsRoot!,
                     filePath: lspFilePath,
                     onDisconnected: () => {
                         lspReady = false;
@@ -783,7 +903,7 @@
 
                 lspClient = new LSPClient({
                     extensions: languageServerExtensions(),
-                    rootUri: `file://${_projPath!}`,
+                    rootUri: `file://${_wsRoot!}`,
                     notificationHandlers: createLSPNotificationHandlers((msg) => {
                         lspMessages = [...lspMessages.slice(-19), msg]; // keep last 20
                     }),
@@ -802,7 +922,7 @@
                 if (!lspReady) {
                     lspReady = true; // fallback for old backend
                 }
-                lspWorkspace = _projPath!; // track which workspace we're connected to
+                lspWorkspace = _wsRoot!; // track which workspace we're connected to
                 // Derive language name from file extension
                 const ext = filePath.split('.').pop()?.toLowerCase() || '';
                 const langMap: Record<string, string> = {
@@ -841,11 +961,11 @@
         const _lspConnecting = lspConnecting;
         const _lspClient = lspClient;
         const _view = view;
-        const _projPath = projectPath;
+        const _wsRoot = lspWorkspaceRoot;
         const _lspAvailable = lspAvailable;
 
         // Only reconnect if we previously had a client but it's now disconnected
-        if (!_lspClient || !_view || !_projPath || !_lspAvailable) return;
+        if (!_lspClient || !_view || !_wsRoot || !_lspAvailable) return;
         if (_lspReady || _lspClient.connected || _lspConnecting) return; // still connected or connecting
 
         async function reconnectLSP() {
@@ -862,7 +982,7 @@
                 _lspClient?.disconnect();
 
                 const virtTransport = await requestLSPChannel({
-                    workspace: _projPath!,
+                    workspace: _wsRoot!,
                     filePath: lspFilePath,
                     onDisconnected: () => {
                         lspReady = false;
@@ -890,7 +1010,7 @@
 
                 const newClient = new LSPClient({
                     extensions: languageServerExtensions(),
-                    rootUri: `file://${_projPath!}`,
+                    rootUri: `file://${_wsRoot!}`,
                     notificationHandlers: createLSPNotificationHandlers((msg) => {
                         lspMessages = [...lspMessages.slice(-19), msg]; // keep last 20
                     }),
@@ -908,7 +1028,7 @@
                 if (!lspReady) {
                     lspReady = true; // fallback for old backend
                 }
-                lspWorkspace = _projPath!;
+                lspWorkspace = _wsRoot!;
 
                 // Re-attach plugin
                 if (_view && newClient) {
@@ -946,7 +1066,52 @@
     });
 </script>
 
-<div class="file-editor" class:has-file={!!filePath} class:active={active}>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions — role="application" makes this an interactive landmark for the diff-mode keyboard handler -->
+<div class="file-editor" role="application" tabindex="-1" class:has-file={!!filePath} class:active={mode === 'diff' ? true : active} class:diff={mode === 'diff'} onkeydown={mode === 'diff' ? handleKeyDown : undefined}>
+    {#if mode === 'diff'}
+        <!-- Diff-mode header -->
+        <div class="editor-header">
+            <div class="header-left">
+                <button class="btn-back" class:unsaved={hasChanges} onclick={requestClose} aria-label="Close editor" title="Close editor">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <circle class="unsaved-circle" cx="8" cy="8" r="6" fill="currentColor"/>
+                        <path class="close-x" d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                </button>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+                    <path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+                </svg>
+                <span class="file-path" title={filePath}>{displayPath}</span>
+            </div>
+            <div class="editor-actions">
+                {#if onToggleFullscreen}
+                    <button type="button" class="editor-icon-btn editor-fullscreen-toggle" onclick={onToggleFullscreen} title="Toggle fullscreen">
+                        {#if mobileFullscreen}
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        {:else}
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2h4v4M6 14H2v-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        {/if}
+                    </button>
+                {/if}
+                <button
+                    class="btn-save"
+                    onclick={handleSave}
+                    disabled={!hasChanges || saving || fileTooLarge}
+                    title="Save (Ctrl+S)"
+                >
+                {#if saving}
+                    <svg class="save-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M12 2a10 10 0 0 1 10 10"/>
+                    </svg>
+                    Saving...
+                {:else}
+                    Save
+                {/if}
+                </button>
+            </div>
+        </div>
+    {/if}
     {#if filePath}
         <!-- Editor content area -->
         <div class="editor-content">
@@ -986,6 +1151,19 @@
                 lspMessage={lspMessageLog}
             />
         {/if}
+    {/if}
+
+    {#if mode === 'diff' && showConfirm}
+        <div class="confirm-overlay" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc">
+            <div class="confirm-dialog" onclick={(e) => e.stopPropagation()} role="presentation">
+                <h3 id="confirm-title">Unsaved Changes</h3>
+                <p id="confirm-desc">You have unsaved changes. Discard them?</p>
+                <div class="confirm-actions">
+                    <button class="btn-confirm-cancel" onclick={() => confirmClose(false)}>Keep Editing</button>
+                    <button class="btn-confirm-discard" onclick={() => confirmClose(true)}>Discard &amp; Close</button>
+                </div>
+            </div>
+        </div>
     {/if}
 
 </div>
@@ -1085,5 +1263,198 @@
     }
     .ext-anchor :global(iframe) {
         pointer-events: auto;
+    }
+
+    /* ---- Diff-mode (task-view diff-panel editor) chrome ---- */
+    .file-editor.diff {
+        display: flex;
+        position: relative;
+    }
+    .file-editor.diff .editor-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 8px;
+        flex-shrink: 0;
+        background: var(--color-surface-2);
+        border-bottom: 1px solid var(--color-border);
+        gap: 8px;
+    }
+    .file-editor.diff .header-left {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex: 1;
+        color: var(--color-text-secondary);
+    }
+    .file-editor.diff .header-left svg {
+        flex-shrink: 0;
+        opacity: 0.6;
+    }
+    .file-editor.diff .file-path {
+        font-size: 0.75rem;
+        font-weight: 500;
+        font-family: var(--font-mono);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .file-editor.diff .btn-back {
+        background: none;
+        border: none;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        padding: 6px;
+        border-radius: var(--radius-sm);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        position: relative;
+    }
+    .file-editor.diff .btn-back:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    /* Unsaved indicator — yellow circle, X appears on hover */
+    .file-editor.diff .btn-back .unsaved-circle {
+        display: none;
+    }
+    .file-editor.diff .btn-back .close-x {
+        display: block;
+    }
+    .file-editor.diff .btn-back.unsaved .unsaved-circle {
+        display: block;
+    }
+    .file-editor.diff .btn-back.unsaved .close-x {
+        display: none;
+    }
+    .file-editor.diff .btn-back.unsaved {
+        color: var(--color-status-yellow, #f0c000);
+    }
+    .file-editor.diff .btn-back.unsaved:hover .unsaved-circle {
+        display: none;
+    }
+    .file-editor.diff .btn-back.unsaved:hover .close-x {
+        display: block;
+    }
+    .file-editor.diff .btn-back.unsaved:hover {
+        color: var(--color-text-primary);
+    }
+    .file-editor.diff .editor-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+    .file-editor.diff .editor-icon-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 4px;
+        flex-shrink: 0;
+    }
+    .file-editor.diff .editor-icon-btn:hover {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+    }
+    .file-editor.diff .editor-fullscreen-toggle {
+        display: flex;
+    }
+    .file-editor.diff .btn-save {
+        padding: 4px 12px;
+        background: var(--color-accent-dark);
+        color: white;
+        border: none;
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-weight: 500;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-family: inherit;
+        flex-shrink: 0;
+    }
+    .file-editor.diff .btn-save:hover:not(:disabled) {
+        background: var(--color-accent-hover);
+    }
+    .file-editor.diff .btn-save:disabled {
+        background: var(--color-surface-3);
+        color: var(--color-text-secondary);
+        cursor: not-allowed;
+    }
+    .file-editor.diff .save-spinner {
+        animation: spin 0.8s linear infinite;
+        transform-origin: center;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    .file-editor.diff .confirm-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+        border-radius: 6px;
+    }
+    .file-editor.diff .confirm-dialog {
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        padding: 20px;
+        width: 320px;
+        max-width: 90%;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    .file-editor.diff .confirm-dialog h3 {
+        margin: 0 0 6px;
+        font-size: 0.9375rem;
+    }
+    .file-editor.diff .confirm-dialog p {
+        margin: 0 0 16px;
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+    }
+    .file-editor.diff .confirm-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+    .file-editor.diff .btn-confirm-cancel {
+        padding: 5px 14px;
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+        border: none;
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .file-editor.diff .btn-confirm-cancel:hover {
+        background: var(--color-surface-4);
+    }
+    .file-editor.diff .btn-confirm-discard {
+        padding: 5px 14px;
+        background: var(--color-status-red-dark);
+        color: white;
+        border: none;
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .file-editor.diff .btn-confirm-discard:hover {
+        opacity: 0.9;
     }
 </style>
