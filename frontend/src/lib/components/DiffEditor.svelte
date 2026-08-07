@@ -35,7 +35,7 @@
     import { svelte } from '@replit/codemirror-lang-svelte';
     import { goTemplate } from '$lib/gotemplate';
 
-    let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId, projectPath, baseRef, onToggleFullscreen, mobileFullscreen, isMobile }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string; projectPath?: string; baseRef?: string; onToggleFullscreen?: () => void; mobileFullscreen?: boolean; isMobile?: boolean } = $props();
+    let { filePath, lineNumber, onClose, displayPath: displayPathProp, projectId, taskId, projectPath, workspaceDir, baseRef, onToggleFullscreen, mobileFullscreen, isMobile }: { filePath: string; lineNumber: number; onClose: (saved: boolean) => void; displayPath?: string; projectId?: string; taskId?: string; projectPath?: string; workspaceDir?: string; baseRef?: string; onToggleFullscreen?: () => void; mobileFullscreen?: boolean; isMobile?: boolean } = $props();
 
     let content = $state('');
     let baselineContent = $state('');
@@ -84,13 +84,18 @@
     let wordWrap = $state(false);
     let lspWorkspace = $state(''); // workspace path the LSP client is connected to
 
-    // LSP file path: uses the real project path so the language server can find the file.
-    // When filePath is a sandbox or worktree path, fall back to projectPath + displayPath.
+    // LSP workspace root and file path: point the language server at the task's worktree
+    let lspWorkspaceRoot = $derived.by(() => {
+        if (workspaceDir && projectId && taskId) {
+            return `${workspaceDir.replace(/\/+$/, '')}/${projectId}/${taskId}`;
+        }
+        return projectPath || '';
+    });
+
+    // LSP file path: the file inside the task worktree. Falls back to the real project
+    // path only when the worktree path is unavailable (no workspaceDir/project/task).
     let lspFilePath = $derived.by(() => {
-        if (!filePath) return '';
-        // If filePath is already under the project path, use it directly
-        if (projectPath && filePath.startsWith(projectPath)) return filePath;
-        // Otherwise construct from projectPath + displayPath (real project path)
+        if (lspWorkspaceRoot && displayPath) return `${lspWorkspaceRoot}/${displayPath}`;
         if (projectPath && displayPath) return `${projectPath}/${displayPath}`;
         return filePath;
     });
@@ -252,8 +257,8 @@
                         const uri = firstLoc && 'target' in firstLoc ? firstLoc.target?.uri : firstLoc?.uri;
                         if (uri && uri.startsWith('file://')) {
                             const defPath = uri.replace('file://', '');
-                            // Only valid if definition is within the project workspace
-                            isValid = projectPath ? defPath.startsWith(projectPath) : false;
+                            // Only valid if definition is within the LSP workspace (task worktree)
+                            isValid = lspWorkspaceRoot ? defPath.startsWith(lspWorkspaceRoot) : false;
                         }
                     }
                 } catch (e) {
@@ -415,19 +420,19 @@
     $effect(() => {
         const _editorReady = editorReady;
         const _loaded = baselineContentLoaded;
-        const _projPath = projectPath;
+        const _wsRoot = lspWorkspaceRoot;
         const _projId = projectId;
         // Read extension state to track it as a dependency
         const _extCount = extensionManager.state.extensions.length;
-        // Use lspFilePath (real project path) for LSP so the server can find the file.
-        // This matters when filePath is a sandbox or worktree path.
+        // Use the worktree file path for LSP so the server analyzes the task's
+        // actual working files (not the project HEAD).
         const _lspFilePath = lspFilePath;
         // Check LSP availability here (outside async) so effect re-runs when extensions load
         const _lspAvail = isLSPAvailable(_lspFilePath);
 
-        if (!_editorReady || !view || !_projId || !_projPath || _loaded === undefined) return;
+        if (!_editorReady || !view || !_projId || !_wsRoot || _loaded === undefined) return;
         // Re-initialize if workspace changed (e.g., project switch with same file path)
-        if (lspClient && lspWorkspace === _projPath) return;
+        if (lspClient && lspWorkspace === _wsRoot) return;
 
         async function initLSP() {
             // Check if LSP extension is available for this file
@@ -443,7 +448,7 @@
                 const readyPromise = new Promise<void>(resolve => { resolveReady = resolve; });
 
                 const virtTransport = await requestLSPChannel({
-                    workspace: _projPath!,
+                    workspace: _wsRoot,
                     filePath: _lspFilePath,
                     onDisconnected: () => {
                         lspReady = false;
@@ -471,7 +476,7 @@
 
                 lspClient = new LSPClient({
                     extensions: languageServerExtensions(),
-                    rootUri: `file://${_projPath!}`,
+                    rootUri: `file://${_wsRoot}`,
                     notificationHandlers: createLSPNotificationHandlers((msg) => {
                         lspMessages = [...lspMessages.slice(-19), msg]; // keep last 20
                     }),
@@ -489,7 +494,7 @@
                 if (!lspReady) {
                     lspReady = true; // fallback for old backend
                 }
-                lspWorkspace = _projPath!; // track which workspace we're connected to
+                lspWorkspace = _wsRoot; // track which workspace we're connected to
 
                 // Derive language name from file extension
                 const ext = _lspFilePath.split('.').pop()?.toLowerCase() || '';
@@ -529,12 +534,12 @@
         const _lspConnecting = lspConnecting;
         const _lspClient = lspClient;
         const _view = view;
-        const _projPath = projectPath;
+        const _wsRoot = lspWorkspaceRoot;
         const _lspAvailable = lspAvailable;
         const _lspFilePath = lspFilePath;
 
         // Only reconnect if we previously had a client but it's now disconnected
-        if (!_lspClient || !_view || !_projPath || !_lspAvailable) return;
+        if (!_lspClient || !_view || !_wsRoot || !_lspAvailable) return;
         if (_lspReady || _lspClient.connected || _lspConnecting) return; // still connected or connecting
 
         async function reconnectLSP() {
@@ -551,7 +556,7 @@
                 _lspClient?.disconnect();
 
                 const virtTransport = await requestLSPChannel({
-                    workspace: _projPath!,
+                    workspace: _wsRoot,
                     filePath: _lspFilePath,
                     onDisconnected: () => {
                         lspReady = false;
@@ -579,7 +584,7 @@
 
                 const newClient = new LSPClient({
                     extensions: languageServerExtensions(),
-                    rootUri: `file://${_projPath!}`,
+                    rootUri: `file://${_wsRoot}`,
                     notificationHandlers: createLSPNotificationHandlers((msg) => {
                         lspMessages = [...lspMessages.slice(-19), msg]; // keep last 20
                     }),
@@ -597,7 +602,7 @@
                 if (!lspReady) {
                     lspReady = true; // fallback for old backend
                 }
-                lspWorkspace = _projPath!;
+                lspWorkspace = _wsRoot;
 
                 // Re-attach plugin
                 if (_view && newClient) {
