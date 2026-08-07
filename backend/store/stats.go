@@ -18,7 +18,9 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 		return nil, err
 	}
 
-	// Read cumulative stats from project_token_stats table
+	// Read cumulative stats from project_token_stats table.
+	// The conditional sums (with_timing) only include entries where timing data is available,
+	// so overall throughput isn't skewed by agent providers that report 0ms.
 	rows, err := s.db.Query(`
 		SELECT
 			model_name,
@@ -31,7 +33,9 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 			CASE WHEN predicted_ms > 0 THEN predicted_tokens * 1000.0 / predicted_ms ELSE 0 END as avg_generation_tps,
 			prompt_ms,
 			predicted_ms,
-			cost
+			cost,
+			SUM(CASE WHEN prompt_ms > 0 THEN prompt_tokens - cache_tokens ELSE 0 END) OVER () as total_processed_with_timing,
+			SUM(CASE WHEN predicted_ms > 0 THEN predicted_tokens ELSE 0 END) OVER () as total_generated_with_timing
 		FROM project_token_stats
 		WHERE project_id = ?
 		ORDER BY predicted_tokens DESC
@@ -42,13 +46,15 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 	defer rows.Close()
 
 	var totalPromptMs, totalGenMs int64
+	var totalProcessedWithTiming, totalGeneratedWithTiming int64
 
 	for rows.Next() {
 		var ms types.ModelStats
 		var promptMsRow int64
 		err := rows.Scan(&ms.ModelName, &ms.ProviderName, &ms.PromptTokens, &ms.CacheTokens,
 			&ms.ProcessedTokens, &ms.GeneratedTokens, &ms.AvgPromptTps, &ms.AvgGenerationTps,
-			&promptMsRow, &ms.PredictedMs, &ms.Cost)
+			&promptMsRow, &ms.PredictedMs, &ms.Cost,
+			&totalProcessedWithTiming, &totalGeneratedWithTiming)
 		if err != nil {
 			continue
 		}
@@ -67,13 +73,17 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 		return nil, err
 	}
 
-	// Compute overall throughput: processed tokens / total time
+	// Compute overall throughput using only entries with timing data.
+	// Agent providers (e.g. Pi) report 0ms, so including their tokens would
+	// artificially inflate throughput since they contribute tokens without time.
 	if totalPromptMs > 0 {
-		stats.AvgPromptTps = float64(stats.TotalProcessedTokens) * 1000.0 / float64(totalPromptMs)
+		stats.AvgPromptTps = float64(totalProcessedWithTiming) * 1000.0 / float64(totalPromptMs)
 	}
 	if totalGenMs > 0 {
-		stats.AvgGenerationTps = float64(stats.TotalGeneratedTokens) * 1000.0 / float64(totalGenMs)
+		stats.AvgGenerationTps = float64(totalGeneratedWithTiming) * 1000.0 / float64(totalGenMs)
 	}
+	stats.TotalProcessedTokensWithTiming = int(totalProcessedWithTiming)
+	stats.TotalGeneratedTokensWithTiming = int(totalGeneratedWithTiming)
 
 	// Compute task_count per model from cumulative task tracking table.
 	taskRows, err := s.db.Query(`
