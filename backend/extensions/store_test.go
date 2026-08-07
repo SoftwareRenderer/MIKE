@@ -142,6 +142,27 @@ func TestGetByIDNotFound(t *testing.T) {
 	}
 }
 
+func TestGetByName(t *testing.T) {
+	es := testStore(t)
+	// GetByName must find records whose ID differs from the name.
+	ext := makeTestExt("gopls-1234567890", "gopls", ExtensionTypeLSP)
+	if err := es.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := es.GetByName("gopls")
+	if err != nil {
+		t.Fatalf("GetByName: %v", err)
+	}
+	if got.ID != "gopls-1234567890" || got.Name != "gopls" {
+		t.Errorf("GetByName = %+v, want timestamped-ID record for gopls", got)
+	}
+
+	if _, err := es.GetByName("nonexistent"); err == nil {
+		t.Error("GetByName(nonexistent) = nil, want error")
+	}
+}
+
 func TestListExtensions(t *testing.T) {
 	es := testStore(t)
 	// Create extensions in reverse alphabetical order

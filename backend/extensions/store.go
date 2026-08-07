@@ -168,6 +168,15 @@ func (es *ExtensionStore) GetByType(extType string) ([]Extension, error) {
 
 // GetByID retrieves an extension by ID.
 func (es *ExtensionStore) GetByID(id string) (*Extension, error) {
+	return es.getBy("id", id)
+}
+
+// GetByName retrieves an extension by name (records have timestamped IDs).
+func (es *ExtensionStore) GetByName(name string) (*Extension, error) {
+	return es.getBy("name", name)
+}
+
+func (es *ExtensionStore) getBy(column, value string) (*Extension, error) {
 	var ext Extension
 	var manifestJSON, configJSON, containerConfigJSON, sandboxConfigJSON, imageRef sql.NullString
 	var extType, installSource string
@@ -176,12 +185,12 @@ func (es *ExtensionStore) GetByID(id string) (*Extension, error) {
 	var repo, commitSHA, subdir string
 
 	err := es.db.QueryRow(
-		`SELECT id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions WHERE id = ?`,
-		id,
+		`SELECT id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions WHERE `+column+` = ?`,
+		value,
 	).Scan(&ext.ID, &ext.Name, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt, &repo, &commitSHA, &subdir)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("extension not found: %s", id)
+			return nil, fmt.Errorf("extension not found: %s", value)
 		}
 		return nil, fmt.Errorf("query extension: %w", err)
 	}
