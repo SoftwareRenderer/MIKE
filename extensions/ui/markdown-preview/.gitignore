@@ -1,5 +1,0 @@
-# Dependencies installed for building the Wordgard bundle.
-node_modules/
-
-# Transient copy of the wordgard dist used during the bundle build.
-build/.dist/

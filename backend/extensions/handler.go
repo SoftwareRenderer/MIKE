@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -124,6 +126,49 @@ type ExtensionHandler struct {
 type ExtensionConfig struct {
 	RegistryURL  string
 	WorkspaceDir string
+	// ExtensionsDir is the directory served as /extensions/ where materialized
+	// extension files are written. Defaults to "extensions".
+	ExtensionsDir string
+}
+
+// ExtensionsDirOrDefault returns the configured extensions directory, defaulting
+// to "extensions" (the directory the static server serves as /extensions/).
+func (c *ExtensionConfig) ExtensionsDirOrDefault() string {
+	if c == nil || c.ExtensionsDir == "" {
+		return "extensions"
+	}
+	return c.ExtensionsDir
+}
+
+// authorDir turns a registry author into a safe, single-segment directory name:
+// lowercased, with any non-alphanumeric character (other than '-', '_', '.')
+// collapsed to '-'. Empty/whitespace authors fall back to "unknown" so the
+// install path never escapes or becomes an empty segment.
+func authorDir(author string) string {
+	slug := strings.ToLower(strings.TrimSpace(author))
+	if slug == "" {
+		return "unknown"
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range slug {
+		ok := r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.'
+		if !ok {
+			if lastDash {
+				continue
+			}
+			b.WriteByte('-')
+			lastDash = true
+			continue
+		}
+		b.WriteRune(r)
+		lastDash = false
+	}
+	out := b.String()
+	if out == "" {
+		return "unknown"
+	}
+	return strings.TrimRight(out, "-._")
 }
 
 // NewExtensionHandler creates a new ExtensionHandler.
@@ -506,9 +551,27 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Fetch manifest if available
+	// Git-pinned (self-hosted) path: the registry entry pins a repo + commit.
+	// Check out and verify the exact commit, materialize its files, and load the
+	// manifest from the verified checkout. Nothing is installed if verification fails.
+	gitPinned := entry.Repo != "" && entry.Commit != ""
 	var manifest ExtensionManifest
-	if entry.ManifestURL != "" {
+	targetDir := filepath.Join(h.config.ExtensionsDirOrDefault(), authorDir(entry.Author), entry.Name)
+	if gitPinned {
+		if err := h.registry.CheckoutExtension(entry.Repo, entry.Commit, entry.Subdir, targetDir); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch extension (commit "+entry.Commit+"): "+err.Error())
+			return
+		}
+		manifestData, err := os.ReadFile(filepath.Join(targetDir, "manifest.json"))
+		if err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "checked-out extension has no manifest.json: "+err.Error())
+			return
+		}
+		if err := json.Unmarshal(manifestData, &manifest); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "invalid manifest.json in checked-out extension: "+err.Error())
+			return
+		}
+	} else if entry.ManifestURL != "" {
 		manifestURL := ResolveURL(url, entry.ManifestURL)
 		manifest, err = h.registry.FetchManifest(manifestURL)
 		if err != nil {
@@ -547,6 +610,9 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		InstallSource: "registry",
 		ImageRef:      entry.Image,
 		Enabled:       true,
+		Repo:          entry.Repo,
+		Commit:        entry.Commit,
+		Subdir:        entry.Subdir,
 	}
 
 	if err := h.store.Create(ext); err != nil {
@@ -554,25 +620,34 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Build image from Dockerfile if no pre-built image is provided
+	// Build/pull image if none is provided pre-built.
 	imageRef := entry.Image
-	if imageRef == "" && entry.DockerfileURL != "" {
-		imageRef = fmt.Sprintf("kanban-ext-%s:%s", entry.Name, entry.Version)
-		dockerfileURL := ResolveURL(url, entry.DockerfileURL)
-		dockerfile, err := h.registry.FetchDockerfile(dockerfileURL)
-		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch dockerfile: "+err.Error())
-			return
+	if imageRef == "" {
+		var dockerfile string
+		if gitPinned {
+			// Build from the verified checkout's Dockerfile.
+			dfPath := filepath.Join(targetDir, "Dockerfile")
+			if data, err := os.ReadFile(dfPath); err == nil {
+				dockerfile = string(data)
+			}
+		} else if entry.DockerfileURL != "" {
+			if dockerfile, err = h.registry.FetchDockerfile(ResolveURL(url, entry.DockerfileURL)); err != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch dockerfile: "+err.Error())
+				return
+			}
 		}
-		if err := h.registry.BuildImageFromReader(dockerfile, imageRef); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to build image: "+err.Error())
-			return
-		}
-		ext.ContainerConfig.Image = imageRef
-		ext.ImageRef = imageRef
-		if err := h.store.Update(ext.ID, ext); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())
-			return
+		if dockerfile != "" {
+			imageRef = fmt.Sprintf("kanban-ext-%s:%s", entry.Name, entry.Version)
+			if err := h.registry.BuildImageFromReader(dockerfile, imageRef); err != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to build image: "+err.Error())
+				return
+			}
+			ext.ContainerConfig.Image = imageRef
+			ext.ImageRef = imageRef
+			if err := h.store.Update(ext.ID, ext); err != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())
+				return
+			}
 		}
 	}
 
@@ -666,17 +741,32 @@ func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Req
 	updates := make([]ExtensionUpdate, 0)
 	for _, ext := range extensions {
 		for _, entry := range index {
-			if entry.Name == ext.Name {
-				if UpdateAvailable(ext.Version, entry.Version) {
+			if entry.Name != ext.Name {
+				continue
+			}
+			// Git-pinned extensions update when the curated (vetted) commit changes.
+			if ext.Commit != "" && entry.Commit != "" {
+				if ext.Commit != entry.Commit {
 					updates = append(updates, ExtensionUpdate{
 						ID:               ext.ID,
 						Name:             ext.Name,
 						CurrentVersion:   ext.Version,
 						AvailableVersion: entry.Version,
+						CurrentCommit:    ext.Commit,
+						AvailableCommit:  entry.Commit,
 					})
 				}
 				break
 			}
+			if UpdateAvailable(ext.Version, entry.Version) {
+				updates = append(updates, ExtensionUpdate{
+					ID:               ext.ID,
+					Name:             ext.Name,
+					CurrentVersion:   ext.Version,
+					AvailableVersion: entry.Version,
+				})
+			}
+			break
 		}
 	}
 
@@ -754,69 +844,102 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Fetch the latest manifest
-	if entry.ManifestURL != "" {
-		manifestURL := ResolveURL(url, entry.ManifestURL)
-		manifest, err := h.registry.FetchManifest(manifestURL)
-		if err == nil {
-			ext.Manifest = manifest
-		}
-		// We don't fail the whole update if manifest fetch fails, but we could log it
-	}
-
 	// Stop sandbox if running
 	_ = h.sandbox.Stop(ext.ID)
 
+	gitPinned := entry.Repo != "" && entry.Commit != ""
 	imageRef := fmt.Sprintf("kanban-ext-%s:%s", ext.Name, entry.Version)
 
-	// Rebuild from Dockerfile if available, otherwise pull image
-	if entry.DockerfileURL != "" {
-		h.progress.StartBuild(ext.Name)
-		dockerfileURL := ResolveURL(url, entry.DockerfileURL)
-		dockerfile, err := h.registry.FetchDockerfile(dockerfileURL)
-		if err != nil {
-			h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to fetch dockerfile: %w", err))
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch dockerfile: "+err.Error())
+	if gitPinned {
+		// Re-checkout the newly vetted commit (verified) and rebuild from it.
+		targetDir := filepath.Join(h.config.ExtensionsDirOrDefault(), authorDir(entry.Author), entry.Name)
+		if err := h.registry.CheckoutExtension(entry.Repo, entry.Commit, entry.Subdir, targetDir); err != nil {
+			httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch extension (commit "+entry.Commit+"): "+err.Error())
 			return
 		}
-
-		errCh := make(chan error, 1)
-		go func() {
-			err := h.registry.BuildImageFromReader(dockerfile, imageRef)
-			errCh <- err
-		}()
-
-		// Stream build output to progress
-		go func() {
-			<-errCh
-		}()
-
-		err = <-errCh
-		if err != nil {
-			h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to build image: %w", err))
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to build image: "+err.Error())
-			return
+		if data, err := os.ReadFile(filepath.Join(targetDir, "manifest.json")); err == nil {
+			var m ExtensionManifest
+			if err := json.Unmarshal(data, &m); err == nil {
+				ext.Manifest = m
+			}
 		}
-		h.progress.CompleteBuild(ext.Name, nil)
-	} else if entry.Image != "" {
-		h.progress.StartBuild(ext.Name)
-		err := h.registry.PullImage(entry.Image)
-		if err != nil {
-			h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to pull image: %w", err))
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to pull image: "+err.Error())
-			return
+		ext.Repo = entry.Repo
+		ext.Commit = entry.Commit
+		ext.Subdir = entry.Subdir
+		if data, err := os.ReadFile(filepath.Join(targetDir, "Dockerfile")); err == nil {
+			h.progress.StartBuild(ext.Name)
+			if err := h.registry.BuildImageFromReader(string(data), imageRef); err != nil {
+				h.progress.CompleteBuild(ext.Name, err)
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to build image: "+err.Error())
+				return
+			}
+			h.progress.CompleteBuild(ext.Name, nil)
+		} else {
+			// No Dockerfile (UI/CSS/agent extension) — nothing to build.
+			imageRef = ""
 		}
-		imageRef = entry.Image
-		h.progress.CompleteBuild(ext.Name, nil)
 	} else {
-		httputil.JSONError(w, http.StatusBadRequest, "extension has no image or dockerfile to update")
-		return
+		// Fetch the latest manifest
+		if entry.ManifestURL != "" {
+			manifestURL := ResolveURL(url, entry.ManifestURL)
+			manifest, err := h.registry.FetchManifest(manifestURL)
+			if err == nil {
+				ext.Manifest = manifest
+			}
+			// We don't fail the whole update if manifest fetch fails, but we could log it
+		}
+
+		// Rebuild from Dockerfile if available, otherwise pull image
+		if entry.DockerfileURL != "" {
+			h.progress.StartBuild(ext.Name)
+			dockerfileURL := ResolveURL(url, entry.DockerfileURL)
+			dockerfile, err := h.registry.FetchDockerfile(dockerfileURL)
+			if err != nil {
+				h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to fetch dockerfile: %w", err))
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch dockerfile: "+err.Error())
+				return
+			}
+
+			errCh := make(chan error, 1)
+			go func() {
+				err := h.registry.BuildImageFromReader(dockerfile, imageRef)
+				errCh <- err
+			}()
+
+			// Stream build output to progress
+			go func() {
+				<-errCh
+			}()
+
+			err = <-errCh
+			if err != nil {
+				h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to build image: %w", err))
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to build image: "+err.Error())
+				return
+			}
+			h.progress.CompleteBuild(ext.Name, nil)
+		} else if entry.Image != "" {
+			h.progress.StartBuild(ext.Name)
+			err := h.registry.PullImage(entry.Image)
+			if err != nil {
+				h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to pull image: %w", err))
+				httputil.JSONError(w, http.StatusInternalServerError, "failed to pull image: "+err.Error())
+				return
+			}
+			imageRef = entry.Image
+			h.progress.CompleteBuild(ext.Name, nil)
+		} else {
+			httputil.JSONError(w, http.StatusBadRequest, "extension has no image or dockerfile to update")
+			return
+		}
 	}
 
-	// Update extension with new image ref and version
+	// Update extension with new image ref, version, and commit
 	ext.Version = entry.Version
-	ext.ImageRef = imageRef
-	ext.ContainerConfig.Image = imageRef
+	if imageRef != "" {
+		ext.ImageRef = imageRef
+		ext.ContainerConfig.Image = imageRef
+	}
 	if err := h.store.Update(id, ext); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())
 		return
@@ -1064,6 +1187,8 @@ type ExtensionResponse struct {
 	Ports           []types.AssignedPort `json:"ports,omitempty"`
 	InstalledAt     string               `json:"installed_at"`
 	BuiltAt         string               `json:"built_at"`
+	Repo            string               `json:"repo,omitempty"`
+	Commit          string               `json:"commit,omitempty"`
 }
 
 // ExtensionUpdate describes an available update.
@@ -1072,6 +1197,8 @@ type ExtensionUpdate struct {
 	Name             string `json:"name"`
 	CurrentVersion   string `json:"current_version"`
 	AvailableVersion string `json:"available_version"`
+	CurrentCommit    string `json:"current_commit,omitempty"`
+	AvailableCommit  string `json:"available_commit,omitempty"`
 }
 
 // maskConfig masks sensitive config values based on the manifest's config_schema.
@@ -1119,5 +1246,7 @@ func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]Extens
 		Ports:           status.Ports,
 		InstalledAt:     ext.InstalledAt,
 		BuiltAt:         ext.BuiltAt,
+		Repo:            ext.Repo,
+		Commit:          ext.Commit,
 	}
 }

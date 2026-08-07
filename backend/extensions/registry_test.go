@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"kanban/pkg/sandboxruntime"
@@ -335,6 +338,231 @@ func TestValidateDockerfilePath(t *testing.T) {
 				t.Errorf("validateDockerfilePath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// makeGitRepo creates a local SHA-256 git repo with the given files (path →
+// content), commits them, and returns (repoPath, commitSHA).
+func makeGitRepo(t *testing.T, files map[string]string) (string, string) {
+	return makeGitRepoFormat(t, files, "sha256")
+}
+
+// makeGitRepoFormat creates a local git repo in the given object format ("sha1",
+// "sha256", or "" for the default) with the given files (path → content),
+// commits them, and returns (repoPath, commitSHA).
+func makeGitRepoFormat(t *testing.T, files map[string]string, objectFormat string) (string, string) {
+	t.Helper()
+	repo := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v (%s)", args, err, out)
+		}
+	}
+	initArgs := []string{"init", "-q", "-b", "main"}
+	if objectFormat != "" {
+		initArgs = append(initArgs, "--object-format="+objectFormat)
+	}
+	run(initArgs...)
+	for path, content := range files {
+		full := filepath.Join(repo, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("add", "-A")
+	run("commit", "-qm", "init")
+	out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	return repo, strings.TrimSpace(string(out))
+}
+
+func TestCheckoutExtension_Success(t *testing.T) {
+	repo, commit := makeGitRepo(t, map[string]string{
+		"myext/manifest.json": `{"display_name":"X","version":"1.0.0"}`,
+		"myext/Dockerfile":    "FROM ubuntu\n",
+	})
+	dest := filepath.Join(t.TempDir(), "ui", "x")
+	rc := NewRegistryClient()
+	if err := rc.CheckoutExtension(repo, commit, "myext", dest); err != nil {
+		t.Fatalf("CheckoutExtension: %v", err)
+	}
+	for _, f := range []string{"manifest.json", "Dockerfile"} {
+		if _, err := os.Stat(filepath.Join(dest, f)); err != nil {
+			t.Errorf("%s not materialized: %v", f, err)
+		}
+	}
+	// Content must match the committed bytes.
+	data, err := os.ReadFile(filepath.Join(dest, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"display_name":"X"`) {
+		t.Errorf("manifest content mismatch: %s", data)
+	}
+}
+
+func TestCheckoutExtension_SubdirEmpty_WholeRepo(t *testing.T) {
+	repo, commit := makeGitRepo(t, map[string]string{
+		"manifest.json": `{"display_name":"X"}`,
+	})
+	dest := filepath.Join(t.TempDir(), "agent", "x")
+	rc := NewRegistryClient()
+	if err := rc.CheckoutExtension(repo, commit, "", dest); err != nil {
+		t.Fatalf("CheckoutExtension: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "manifest.json")); err != nil {
+		t.Errorf("manifest.json not materialized: %v", err)
+	}
+}
+
+func TestCheckoutExtension_VerifyRejectsMissingCommit(t *testing.T) {
+	repo, _ := makeGitRepo(t, map[string]string{
+		"myext/manifest.json": `{"display_name":"X"}`,
+	})
+	dest := filepath.Join(t.TempDir(), "ui", "x")
+	rc := NewRegistryClient()
+	// Valid-format SHA-256 that is not reachable from any ref → checkout must
+	// fail and nothing may be installed.
+	missing := strings.Repeat("deadbeef", 8) // 64-char hex, not present in repo
+	err := rc.CheckoutExtension(repo, missing, "myext", dest)
+	if err == nil {
+		t.Fatal("CheckoutExtension(unreachable commit) = nil, want error")
+	}
+	if _, statErr := os.Stat(dest); statErr == nil {
+		t.Error("dest dir was created despite failed checkout")
+	}
+}
+
+func TestCheckoutExtension_SHA1Commit(t *testing.T) {
+	// A 40-char SHA-1 commit from a SHA-1 repo must install successfully.
+	repo, sha1 := makeGitRepoFormat(t, map[string]string{
+		"myext/manifest.json": `{"display_name":"X"}`,
+		"myext/Dockerfile":    "FROM ubuntu\n",
+	}, "sha1")
+	if len(sha1) != 40 {
+		t.Fatalf("expected SHA-1 repo to yield 40-char hash, got %d (%s)", len(sha1), sha1)
+	}
+	dest := filepath.Join(t.TempDir(), "ui", "x")
+	rc := NewRegistryClient()
+	if err := rc.CheckoutExtension(repo, sha1, "myext", dest); err != nil {
+		t.Fatalf("CheckoutExtension(SHA-1 commit): %v", err)
+	}
+	for _, f := range []string{"manifest.json", "Dockerfile"} {
+		if _, err := os.Stat(filepath.Join(dest, f)); err != nil {
+			t.Errorf("%s not materialized: %v", f, err)
+		}
+	}
+}
+
+func TestCheckoutExtension_SHA1Repo(t *testing.T) {
+	// A SHA-1 object-format repo's own commit must be accepted and installed.
+	repo, sha1 := makeGitRepoFormat(t, map[string]string{
+		"myext/manifest.json": `{"display_name":"X"}`,
+	}, "sha1")
+	dest := filepath.Join(t.TempDir(), "ui", "x")
+	rc := NewRegistryClient()
+	if err := rc.CheckoutExtension(repo, sha1, "myext", dest); err != nil {
+		t.Fatalf("CheckoutExtension(SHA-1 repo commit): %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "manifest.json")); err != nil {
+		t.Errorf("manifest.json not materialized: %v", err)
+	}
+}
+
+func TestCheckoutExtension_ClearsExistingDest(t *testing.T) {
+	// Re-checking out a new vetted revision must clear the previous install so
+	// files removed in the new version do not linger.
+	repoOld, oldCommit := makeGitRepo(t, map[string]string{
+		"myext/manifest.json": `{"display_name":"Old"}`,
+		"myext/stale.txt":     "gone",
+	})
+	repoNew, newCommit := makeGitRepo(t, map[string]string{
+		"myext/manifest.json": `{"display_name":"New"}`,
+		"myext/kept.txt":      "here",
+	})
+	dest := filepath.Join(t.TempDir(), "ui", "x")
+	rc := NewRegistryClient()
+	if err := rc.CheckoutExtension(repoOld, oldCommit, "myext", dest); err != nil {
+		t.Fatalf("CheckoutExtension(old): %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "stale.txt")); err != nil {
+		t.Fatalf("setup: stale.txt not materialized: %v", err)
+	}
+	if err := rc.CheckoutExtension(repoNew, newCommit, "myext", dest); err != nil {
+		t.Fatalf("CheckoutExtension(new): %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "kept.txt")); err != nil {
+		t.Errorf("kept.txt not materialized: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "stale.txt")); err == nil {
+		t.Error("stale.txt still present after re-checkout; old target was not cleared")
+	}
+}
+
+func TestCheckoutExtension_InvalidInput(t *testing.T) {
+	rc := NewRegistryClient()
+	dest := t.TempDir()
+	tests := []struct {
+		name, repo, commit, subdir string
+	}{
+		{"repo dash prefix", "-evil", strings.Repeat("a", 64), ""},
+		{"commit not hex", "https://example.com/r", "not-a-sha", ""},
+		{"commit short sha", "https://example.com/r", "abc123", ""},
+		{"commit bad length", "https://example.com/r", strings.Repeat("a", 41), ""},
+		{"subdir traversal", "https://example.com/r", strings.Repeat("a", 64), "../.."},
+		{"subdir absolute", "https://example.com/r", strings.Repeat("a", 64), "/etc"},
+		{"empty repo", "", strings.Repeat("a", 64), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := rc.CheckoutExtension(tt.repo, tt.commit, tt.subdir, dest); err == nil {
+				t.Errorf("CheckoutExtension(%q) = nil, want error", tt.name)
+			}
+		})
+	}
+}
+
+func TestCopyDirSkipsDotGit(t *testing.T) {
+	src := t.TempDir()
+	dst := filepath.Join(t.TempDir(), "ext")
+
+	// Repo root containing an extension file plus a .git directory.
+	if err := os.WriteFile(filepath.Join(src, "manifest.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitDir := filepath.Join(src, ".git")
+	if err := os.MkdirAll(filepath.Join(gitDir, "objects", "pack"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "objects", "pack", "pack-abc.pack"), []byte("objects"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyDir(src, dst); err != nil {
+		t.Fatalf("copyDir: %v", err)
+	}
+
+	// The extension file must be present, the .git dir must be absent.
+	if _, err := os.Stat(filepath.Join(dst, "manifest.json")); err != nil {
+		t.Errorf("manifest.json not copied: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, ".git")); !os.IsNotExist(err) {
+		t.Errorf("expected .git to be skipped, err=%v", err)
 	}
 }
 
