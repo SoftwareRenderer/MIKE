@@ -106,21 +106,6 @@ func (rc *RegistryClient) FetchIndex(url string) (RegistryIndex, error) {
 	return index, nil
 }
 
-// FetchManifest downloads a single extension manifest.
-func (rc *RegistryClient) FetchManifest(url string) (ExtensionManifest, error) {
-	body, err := rc.fetchContent(url)
-	if err != nil {
-		return ExtensionManifest{}, fmt.Errorf("fetch manifest: %w", err)
-	}
-	defer body.Close()
-
-	var manifest ExtensionManifest
-	if err := json.NewDecoder(body).Decode(&manifest); err != nil {
-		return ExtensionManifest{}, fmt.Errorf("decode manifest: %w", err)
-	}
-	return manifest, nil
-}
-
 // FetchDockerfile downloads a Dockerfile and returns its contents.
 func (rc *RegistryClient) FetchDockerfile(url string) (string, error) {
 	body, err := rc.fetchContent(url)
