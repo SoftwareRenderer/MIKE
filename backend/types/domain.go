@@ -283,16 +283,18 @@ type TaskMessage struct {
 
 // ProjectStats holds aggregated token usage for a project.
 type ProjectStats struct {
-	TotalTasks           int          `json:"total_tasks"`
-	TotalPromptTokens    int          `json:"total_prompt_tokens"`
-	TotalCacheTokens     int          `json:"total_cache_tokens"`
-	TotalProcessedTokens int          `json:"total_processed_tokens"`
-	TotalGeneratedTokens int          `json:"total_generated_tokens"`
-	AvgPromptTps         float64      `json:"avg_prompt_tps"`
-	AvgGenerationTps     float64      `json:"avg_generation_tps"`
-	TotalPowerKwh        float64      `json:"total_power_kwh"`        // kWh
-	ByModel              []ModelStats `json:"by_model"`
-	TotalCost            float64      `json:"total_cost"`             // USD (API + electricity)
+	TotalTasks                    int          `json:"total_tasks"`
+	TotalPromptTokens             int          `json:"total_prompt_tokens"`
+	TotalCacheTokens              int          `json:"total_cache_tokens"`
+	TotalProcessedTokens          int          `json:"total_processed_tokens"`
+	TotalGeneratedTokens          int          `json:"total_generated_tokens"`
+	TotalProcessedTokensWithTiming int         `json:"total_processed_tokens_with_timing"`
+	TotalGeneratedTokensWithTiming int         `json:"total_generated_tokens_with_timing"`
+	AvgPromptTps                  float64      `json:"avg_prompt_tps"`
+	AvgGenerationTps              float64      `json:"avg_generation_tps"`
+	TotalPowerKwh                 float64      `json:"total_power_kwh"`        // kWh
+	ByModel                       []ModelStats `json:"by_model"`
+	TotalCost                     float64      `json:"total_cost"`             // USD (API + electricity)
 }
 
 // ModelStats holds token usage aggregated by provider/model.
