@@ -1070,10 +1070,19 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Get LLM config from the task itself
+		// Resolve the LLM config for title generation through the configured
+		// Utility provider/model, falling back to the task's own values when
+		// Utility is unset (same routing as commit messages, checkpoint labels,
+		// and summarization).
 		task, err := h.store.GetTask(projectID, taskID)
-		if err != nil || task.LlamaServerURL == "" || task.ModelName == "" {
-			log.Printf("[title-gen] task=%s skipping: no LLM config on task (%v)", taskID, err)
+		if err != nil {
+			log.Printf("[title-gen] task=%s skipping: %v", taskID, err)
+			h.finishTitleGeneration(projectID, taskID, true)
+			return
+		}
+		serverURL, modelName := h.executor.ResolveUtilityTarget(task)
+		if serverURL == "" || modelName == "" {
+			log.Printf("[title-gen] task=%s skipping: no LLM config on task", taskID)
 			h.finishTitleGeneration(projectID, taskID, true)
 			return
 		}
@@ -1084,7 +1093,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		}
 
 		maxTokens := 50
-		usage, title, err := h.executor.ChatCompletion(ctx, task.LlamaServerURL, task.ModelName, messages, &exec.ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
+		usage, title, err := h.executor.ChatCompletion(ctx, serverURL, modelName, messages, &exec.ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
 		if err != nil {
 			log.Printf("[title-gen] task=%s LLM call failed: %v", taskID, err)
 			h.finishTitleGeneration(projectID, taskID, true)
@@ -1100,14 +1109,14 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		// Store title generation usage as an invisible message (role='title')
 		// so it appears in project stats but not in the chat UI.
 		if usage != nil {
-			providerName := h.configStore.GetProviderNameByURL(task.LlamaServerURL)
+			providerName := h.configStore.GetProviderNameByURL(serverURL)
 			if err := h.store.CreateTaskMessage(&types.TaskMessage{
 				ID:              uuid.New().String(),
 				TaskID:          taskID,
 				ThreadID:        task.CurrentThreadID,
 				Role:            "title",
 				Content:         title,
-				ModelName:       task.ModelName,
+				ModelName:       modelName,
 				ProviderName:    providerName,
 				PromptTokens:    usage.PromptTokens,
 				PredictedTokens: usage.CompletionTokens,

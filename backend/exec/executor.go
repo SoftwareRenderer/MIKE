@@ -229,6 +229,15 @@ func (te *TaskExecutor) utilityTarget(task *types.Task) (serverURL, model string
 	return task.LlamaServerURL, task.ModelName, false
 }
 
+// ResolveUtilityTarget returns the URL/model to use for utility-type LLM calls
+// (title generation, commit messages, checkpoint labels, summarization). It
+// routes through the configured Utility provider/model, falling back to the
+// task's own URL/model when Utility is unset or unresolvable.
+func (te *TaskExecutor) ResolveUtilityTarget(task *types.Task) (serverURL, model string) {
+	serverURL, model, _ = te.utilityTarget(task)
+	return serverURL, model
+}
+
 // ChatCompletion sends a non-streaming chat request through the concurrency gate.
 func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, opts *ChatCompletionOpts) (*types.ChatUsage, string, error) {
 	reasoningEffort := "off"
