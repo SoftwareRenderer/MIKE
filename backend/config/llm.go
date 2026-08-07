@@ -79,6 +79,28 @@ func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionR
 	return TestConnectionResponse{Success: false, Message: fmt.Sprintf("Connection failed: HTTP %d", resp.StatusCode)}
 }
 
+// ResolveAPIKey returns the effective API key to use for a provider URL.
+// When the client sends back the masked placeholder (or an empty value) — which
+// happens after a key is saved and the Settings modal is revisited — the real
+// stored key is resolved from the config so fetch-models / test-connection keep
+// working without the user re-entering the key.
+func (cs *ConfigStore) ResolveAPIKey(serverURL string, providedKey string) string {
+	if providedKey != "" && providedKey != maskedAPIKey {
+		return providedKey
+	}
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return ""
+	}
+	serverURL = strings.TrimRight(serverURL, "/")
+	for _, provider := range cfg.Providers {
+		if strings.TrimRight(provider.URL, "/") == serverURL {
+			return provider.APIKeyValue()
+		}
+	}
+	return ""
+}
+
 // HandleTestConnection handles POST /api/config/test-connection.
 func (cs *ConfigStore) HandleTestConnection(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -95,6 +117,9 @@ func (cs *ConfigStore) HandleTestConnection(w http.ResponseWriter, r *http.Reque
 		httputil.JSONError(w, http.StatusBadRequest, "llama_server_url is required")
 		return
 	}
+
+	// A masked/empty key means "use the stored key for this provider".
+	req.APIKey = cs.ResolveAPIKey(req.LlamaServerURL, req.APIKey)
 
 	result := cs.TestConnection(req)
 	// Always return 200 so UI can display the message
@@ -270,6 +295,9 @@ func (cs *ConfigStore) HandleFetchModels(w http.ResponseWriter, r *http.Request)
 		httputil.JSONError(w, http.StatusBadRequest, "llama_server_url is required")
 		return
 	}
+
+	// A masked/empty key means "use the stored key for this provider".
+	req.APIKey = cs.ResolveAPIKey(req.LlamaServerURL, req.APIKey)
 
 	result := cs.FetchModels(req)
 	httputil.JSONResponse(w, http.StatusOK, result)

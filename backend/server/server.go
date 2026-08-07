@@ -275,6 +275,8 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fallback to standard LLM fetching.
+	// A masked/empty key means "use the stored key for this provider".
+	req.APIKey = s.configStore.ResolveAPIKey(req.LlamaServerURL, req.APIKey)
 	result := s.configStore.FetchModels(req)
 	httputil.JSONResponse(w, http.StatusOK, result)
 }
