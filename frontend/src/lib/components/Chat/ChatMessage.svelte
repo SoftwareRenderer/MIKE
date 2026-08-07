@@ -497,7 +497,25 @@
 
 {#snippet systemMessage()}
     <div class="message-wrapper system-wrapper">
-        <div class="message-text system-text">{content}</div>
+        <div class="system-card">
+            <div class="system-header">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <span class="system-code">System</span>
+                {#if onDelete}
+                    <button class="btn-dismiss" onclick={onDelete} title="Dismiss message" aria-label="Dismiss message">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                {/if}
+            </div>
+            <div class="system-message">{content}</div>
+        </div>
     </div>
 {/snippet}
 
@@ -587,11 +605,52 @@
         border-left: 2px solid var(--color-accent);
         padding-left: 12px;
     }
-    .system-text {
+    .system-card {
+        background: color-mix(in srgb, var(--color-status-red) 6%, transparent);
+        border: 1px solid color-mix(in srgb, var(--color-status-red) 30%, transparent);
+        border-left: 3px solid var(--color-status-red);
+        border-radius: var(--radius-md);
+        padding: 10px 14px;
+        max-width: 80%;
+    }
+    .system-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
         color: var(--color-status-red);
-        font-style: italic;
+    }
+    .system-code {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    .system-header .btn-dismiss {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        margin-left: auto;
+        background: none;
+        border: none;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.15s ease;
+    }
+    .system-header .btn-dismiss:hover {
+        background: color-mix(in srgb, var(--color-status-red) 15%, transparent);
+        color: var(--color-status-red);
+    }
+    .system-message {
         font-size: 0.8125rem;
-        line-height: 1.5rem;
+        color: var(--color-text-secondary);
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
     }
     .reasoning-block-interleaved {
         margin-bottom: 6px;
