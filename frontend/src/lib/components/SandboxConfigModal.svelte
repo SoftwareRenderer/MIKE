@@ -456,6 +456,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         buildLog = [];
 
         try {
+            if (dockerfileChanged) {
+                await updateProject(project.id, { sandbox_dockerfile_path: sandboxDockerfilePath });
+            }
             await buildSandboxImageStream(project.id, (line: string) => {
                 if (line.startsWith('error: ')) {
                     buildError = line.slice(7);
