@@ -885,8 +885,8 @@ func TestHandleCheckUpdates_NoCommitChange(t *testing.T) {
 	}
 }
 
-func TestHandleInstall_WithoutManifestURL_CopiesLicenseURL(t *testing.T) {
-	// Registry entry without ManifestURL — fallback path should copy LicenseURL
+func TestHandleInstall_FallbackCopiesLicenseURL(t *testing.T) {
+	// Registry entry with no git source (no repo/commit) — fallback path should copy LicenseURL
 	index := RegistryIndex{
 		{
 			Name:        "gopls",

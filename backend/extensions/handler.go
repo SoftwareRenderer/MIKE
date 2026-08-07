@@ -571,13 +571,6 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 			httputil.JSONError(w, http.StatusBadRequest, "invalid manifest.json in checked-out extension: "+err.Error())
 			return
 		}
-	} else if entry.ManifestURL != "" {
-		manifestURL := ResolveURL(url, entry.ManifestURL)
-		manifest, err = h.registry.FetchManifest(manifestURL)
-		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch manifest: "+err.Error())
-			return
-		}
 	} else {
 		manifest = ExtensionManifest{
 			DisplayName: entry.DisplayName,
@@ -879,16 +872,6 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 			imageRef = ""
 		}
 	} else {
-		// Fetch the latest manifest
-		if entry.ManifestURL != "" {
-			manifestURL := ResolveURL(url, entry.ManifestURL)
-			manifest, err := h.registry.FetchManifest(manifestURL)
-			if err == nil {
-				ext.Manifest = manifest
-			}
-			// We don't fail the whole update if manifest fetch fails, but we could log it
-		}
-
 		// Rebuild from Dockerfile if available, otherwise pull image
 		if entry.DockerfileURL != "" {
 			h.progress.StartBuild(ext.Name)
