@@ -6,35 +6,35 @@ import (
 
 // Task represents a card on the Kanban board.
 type Task struct {
-	ID                        string    `json:"id"`
-	ProjectID                 string    `json:"project_id"`
-	Title                     string    `json:"title"`
-	Prompt                    string    `json:"prompt"`
-	Status                    string    `json:"status"`
-	ColumnOrder               int       `json:"column_order"`
-	SessionID                 string    `json:"session_id"`
-	Branch                    string    `json:"branch"`
-	BaseRef                   string    `json:"base_ref,omitempty"`
-	BaseCommit                string    `json:"base_commit,omitempty"` // commit hash of base_ref at task start
-	BranchTip                 string    `json:"branch_tip,omitempty"` // commit hash at time of commit-and-done
-	Output                    string    `json:"output"`
-	ExecutionState            string    `json:"execution_state"`
-	HasMergeConflict          bool      `json:"has_merge_conflict"`
-	LlamaServerURL            string    `json:"llama_server_url"`
-	ModelName                 string    `json:"model_name"`
-	ReasoningEffort           string    `json:"reasoning_effort"`
-	MaxConsecutiveFailedTurns int       `json:"max_consecutive_failed_turns"`
-	AutoCommit                bool      `json:"auto_commit"`
-	AutoMerge                 bool      `json:"auto_merge"`
-	SubtasksAutoMerge         bool      `json:"subtasks_auto_merge"` // parent-only: children inherit this as auto_merge
-	OperatingMode             string    `json:"operating_mode"`      // "act" (default), "plan", or "explore"
-	ParentTaskID              string    `json:"parent_task_id,omitempty"`
-	TitleGenerating           bool      `json:"title_generating"`
-	Summarizing               bool      `json:"summarizing"`
-	CurrentThreadID           string    `json:"current_thread_id,omitempty"`
-	WorktreeExists            bool      `json:"worktree_exists"`
-	CreatedAt                 time.Time `json:"created_at"`
-	UpdatedAt                 time.Time  `json:"updated_at"`
+	ID                        string         `json:"id"`
+	ProjectID                 string         `json:"project_id"`
+	Title                     string         `json:"title"`
+	Prompt                    string         `json:"prompt"`
+	Status                    string         `json:"status"`
+	ColumnOrder               int            `json:"column_order"`
+	SessionID                 string         `json:"session_id"`
+	Branch                    string         `json:"branch"`
+	BaseRef                   string         `json:"base_ref,omitempty"`
+	BaseCommit                string         `json:"base_commit,omitempty"` // commit hash of base_ref at task start
+	BranchTip                 string         `json:"branch_tip,omitempty"`  // commit hash at time of commit-and-done
+	Output                    string         `json:"output"`
+	ExecutionState            string         `json:"execution_state"`
+	HasMergeConflict          bool           `json:"has_merge_conflict"`
+	LlamaServerURL            string         `json:"llama_server_url"`
+	ModelName                 string         `json:"model_name"`
+	ReasoningEffort           string         `json:"reasoning_effort"`
+	MaxConsecutiveFailedTurns int            `json:"max_consecutive_failed_turns"`
+	AutoCommit                bool           `json:"auto_commit"`
+	AutoMerge                 bool           `json:"auto_merge"`
+	SubtasksAutoMerge         bool           `json:"subtasks_auto_merge"` // parent-only: children inherit this as auto_merge
+	OperatingMode             string         `json:"operating_mode"`      // "act" (default), "plan", or "explore"
+	ParentTaskID              string         `json:"parent_task_id,omitempty"`
+	TitleGenerating           bool           `json:"title_generating"`
+	Summarizing               bool           `json:"summarizing"`
+	CurrentThreadID           string         `json:"current_thread_id,omitempty"`
+	WorktreeExists            bool           `json:"worktree_exists"`
+	CreatedAt                 time.Time      `json:"created_at"`
+	UpdatedAt                 time.Time      `json:"updated_at"`
 	AssignedPorts             []AssignedPort `json:"assigned_ports,omitempty"`
 }
 
@@ -70,19 +70,19 @@ type TaskThread struct {
 
 // Config represents global server configuration.
 type Config struct {
-	WorkspaceDir          string     `json:"workspace_dir"`
-	DatabasePath          string     `json:"database_path"`
-	RegistryURL           string     `json:"registry_url"`
-	Providers             []Provider `json:"providers"`
-	WorkerProvider        string     `json:"worker_provider"`
-	WorkerModel           string     `json:"worker_model"`
-	UtilityProvider       string     `json:"utility_provider"`
-	UtilityModel          string     `json:"utility_model"`
-	DefaultAutoCommit     *bool      `json:"default_auto_commit"`
-	DefaultAutoMerge      *bool      `json:"default_auto_merge"`
-	DefaultSubtasksAutoMerge *bool   `json:"default_subtasks_auto_merge"`
-	DefaultOperatingMode  *string    `json:"default_operating_mode"`
-	DefaultMaxFailedTurns *int       `json:"default_max_failed_turns,omitempty"`
+	WorkspaceDir             string     `json:"workspace_dir"`
+	DatabasePath             string     `json:"database_path"`
+	RegistryURL              string     `json:"registry_url"`
+	Providers                []Provider `json:"providers"`
+	WorkerProvider           string     `json:"worker_provider"`
+	WorkerModel              string     `json:"worker_model"`
+	UtilityProvider          string     `json:"utility_provider"`
+	UtilityModel             string     `json:"utility_model"`
+	DefaultAutoCommit        *bool      `json:"default_auto_commit"`
+	DefaultAutoMerge         *bool      `json:"default_auto_merge"`
+	DefaultSubtasksAutoMerge *bool      `json:"default_subtasks_auto_merge"`
+	DefaultOperatingMode     *string    `json:"default_operating_mode"`
+	DefaultMaxFailedTurns    *int       `json:"default_max_failed_turns,omitempty"`
 }
 
 // ModelConfig represents a model with its per-model settings.
@@ -100,28 +100,28 @@ const (
 
 // AgentSandbox describes mounts and env vars for an agent sandbox container.
 type AgentSandbox struct {
-	Mounts []SandboxMount `json:"mount"`  // bind mounts into the container
-	Envs   []SandboxEnv   `json:"env"`    // env vars for the agent process
+	Mounts []SandboxMount `json:"mount"` // bind mounts into the container
+	Envs   []SandboxEnv   `json:"env"`   // env vars for the agent process
 }
 
 // Provider is a named LLM server preset with a list of available models.
 type Provider struct {
-	Name            string        `json:"name"`
-	DisplayName     string        `json:"display_name"`
-	Kind            string        `json:"kind"` // "llm" (default) or "agent"
-	URL             string        `json:"url"`
-	APIKey          *string       `json:"api_key,omitempty"` // nil=preserve, ""=clear, value=set; encrypted in DB, masked in API responses
-	Models          []ModelConfig `json:"models"`
-	Concurrency     int           `json:"concurrency"`
-	AgentConfigDir  string        `json:"agent_config_dir,omitempty"` // optional host path override for the agent config dir; empty means use extension default
-	AgentDescription string        `json:"agent_description,omitempty"` // agent description text (from manifest); empty for LLM providers
-	AgentSetupInfo    string        `json:"agent_setup_info,omitempty"`  // agent setup instructions (from manifest); empty for LLM providers
-	InputPrice            float64 `json:"input_price"`                 // USD per 1M input (non-cached) tokens
-	OutputPrice           float64 `json:"output_price"`                // USD per 1M output tokens
-	CacheReadPrice        float64 `json:"cache_read_price"`            // USD per 1M cache-read tokens
-	CacheWritePrice       float64 `json:"cache_write_price"`           // USD per 1M cache-write tokens (overrides input_price when set)
-	PowerConsumptionW     float64 `json:"power_consumption_w"`         // Watts
-	ElectricityCostPerKwh float64 `json:"electricity_cost_per_kwh"`    // USD per kWh
+	Name                  string        `json:"name"`
+	DisplayName           string        `json:"display_name"`
+	Kind                  string        `json:"kind"` // "llm" (default) or "agent"
+	URL                   string        `json:"url"`
+	APIKey                *string       `json:"api_key,omitempty"` // nil=preserve, ""=clear, value=set; encrypted in DB, masked in API responses
+	Models                []ModelConfig `json:"models"`
+	Concurrency           int           `json:"concurrency"`
+	AgentConfigDir        string        `json:"agent_config_dir,omitempty"`  // optional host path override for the agent config dir; empty means use extension default
+	AgentDescription      string        `json:"agent_description,omitempty"` // agent description text (from manifest); empty for LLM providers
+	AgentSetupInfo        string        `json:"agent_setup_info,omitempty"`  // agent setup instructions (from manifest); empty for LLM providers
+	InputPrice            float64       `json:"input_price"`                 // USD per 1M input (non-cached) tokens
+	OutputPrice           float64       `json:"output_price"`                // USD per 1M output tokens
+	CacheReadPrice        float64       `json:"cache_read_price"`            // USD per 1M cache-read tokens
+	CacheWritePrice       float64       `json:"cache_write_price"`           // USD per 1M cache-write tokens (overrides input_price when set)
+	PowerConsumptionW     float64       `json:"power_consumption_w"`         // Watts
+	ElectricityCostPerKwh float64       `json:"electricity_cost_per_kwh"`    // USD per kWh
 }
 
 // IsAgent returns true if this provider is any coding agent (not a standard LLM).
@@ -172,22 +172,22 @@ type SandboxEnv struct {
 
 // Project represents a workspace project.
 type Project struct {
-	ID                      string        `json:"id"`
-	Name                    string        `json:"name"`
-	Path                    string        `json:"path"`
-	OriginBranch            string        `json:"origin_branch,omitempty"`
-	SandboxEnabled          bool          `json:"sandbox_enabled"`
-	SandboxNetworkIsolation bool          `json:"sandbox_network_isolation"`
-	SandboxImage            string        `json:"sandbox_image,omitempty"`
-	SandboxDockerfilePath   string        `json:"sandbox_dockerfile_path,omitempty"`
-	SandboxMemoryLimit      int           `json:"sandbox_memory_limit"`
+	ID                      string         `json:"id"`
+	Name                    string         `json:"name"`
+	Path                    string         `json:"path"`
+	OriginBranch            string         `json:"origin_branch,omitempty"`
+	SandboxEnabled          bool           `json:"sandbox_enabled"`
+	SandboxNetworkIsolation bool           `json:"sandbox_network_isolation"`
+	SandboxImage            string         `json:"sandbox_image,omitempty"`
+	SandboxDockerfilePath   string         `json:"sandbox_dockerfile_path,omitempty"`
+	SandboxMemoryLimit      int            `json:"sandbox_memory_limit"`
 	ForwardPorts            []PortForward  `json:"forward_ports,omitempty"`
 	SandboxMounts           []SandboxMount `json:"sandbox_mounts,omitempty"`
 	SandboxEnvs             []SandboxEnv   `json:"sandbox_envs,omitempty"`
 	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
 	ActiveTerminalPorts     []AssignedPort `json:"active_terminal_ports,omitempty"` // transient: assigned ports from project-level terminal
-	CreatedAt               time.Time     `json:"created_at"`
-	UpdatedAt               time.Time     `json:"updated_at"`
+	CreatedAt               time.Time      `json:"created_at"`
+	UpdatedAt               time.Time      `json:"updated_at"`
 }
 
 // ProjectCounts holds task counts per status for a project.
@@ -223,7 +223,7 @@ type GitCommit struct {
 	Hash     string   `json:"hash"`
 	Short    string   `json:"short"`
 	Subject  string   `json:"subject"`
-	Body     string   `json:"body,omitempty"`       // full commit message body (excluding subject)
+	Body     string   `json:"body,omitempty"` // full commit message body (excluding subject)
 	Author   string   `json:"author"`
 	Date     string   `json:"date"`
 	Parents  []string `json:"parents,omitempty"`
@@ -233,9 +233,9 @@ type GitCommit struct {
 // GitLogResponse wraps the commit log with branch/origin metadata.
 type GitLogResponse struct {
 	Commits       []GitCommit `json:"commits"`
-	CurrentBranch string      `json:"current_branch"` // name of the checked-out branch
+	CurrentBranch string      `json:"current_branch"`       // name of the checked-out branch
 	OriginTip     string      `json:"origin_tip,omitempty"` // commit hash where origin/<branch> points
-	HasMore       bool        `json:"has_more,omitempty"` // true if more commits available beyond this batch
+	HasMore       bool        `json:"has_more,omitempty"`   // true if more commits available beyond this batch
 }
 
 // GitBranch represents a git branch.
@@ -268,7 +268,7 @@ type TaskMessage struct {
 	ToolCalls        string    `json:"tool_calls,omitempty"`
 	ToolResult       string    `json:"tool_result,omitempty"`
 	ResultTruncated  bool      `json:"result_truncated,omitempty"` // true if tool_result output was truncated
-	Attachments      string    `json:"attachments,omitempty"` // JSON array of {mimeType, data} for images
+	Attachments      string    `json:"attachments,omitempty"`      // JSON array of {mimeType, data} for images
 	ModelName        string    `json:"model_name,omitempty"`
 	ProviderName     string    `json:"provider_name,omitempty"`
 	PromptTokens     int       `json:"prompt_tokens,omitempty"`
@@ -278,23 +278,24 @@ type TaskMessage struct {
 	PredictedMs      int       `json:"predicted_ms,omitempty"`
 	Duration         int64     `json:"duration,omitempty"`
 	GitCommitHash    string    `json:"git_commit_hash,omitempty"`
+	IsLoopHint       bool      `json:"is_loop_hint,omitempty"` // true for injected loop-detection hints (shown in UI, excluded from LLM context)
 	CreatedAt        time.Time `json:"created_at"`
 }
 
 // ProjectStats holds aggregated token usage for a project.
 type ProjectStats struct {
-	TotalTasks                    int          `json:"total_tasks"`
-	TotalPromptTokens             int          `json:"total_prompt_tokens"`
-	TotalCacheTokens              int          `json:"total_cache_tokens"`
-	TotalProcessedTokens          int          `json:"total_processed_tokens"`
-	TotalGeneratedTokens          int          `json:"total_generated_tokens"`
-	TotalProcessedTokensWithTiming int         `json:"total_processed_tokens_with_timing"`
-	TotalGeneratedTokensWithTiming int         `json:"total_generated_tokens_with_timing"`
-	AvgPromptTps                  float64      `json:"avg_prompt_tps"`
-	AvgGenerationTps              float64      `json:"avg_generation_tps"`
-	TotalPowerKwh                 float64      `json:"total_power_kwh"`        // kWh
-	ByModel                       []ModelStats `json:"by_model"`
-	TotalCost                     float64      `json:"total_cost"`             // USD (API + electricity)
+	TotalTasks                     int          `json:"total_tasks"`
+	TotalPromptTokens              int          `json:"total_prompt_tokens"`
+	TotalCacheTokens               int          `json:"total_cache_tokens"`
+	TotalProcessedTokens           int          `json:"total_processed_tokens"`
+	TotalGeneratedTokens           int          `json:"total_generated_tokens"`
+	TotalProcessedTokensWithTiming int          `json:"total_processed_tokens_with_timing"`
+	TotalGeneratedTokensWithTiming int          `json:"total_generated_tokens_with_timing"`
+	AvgPromptTps                   float64      `json:"avg_prompt_tps"`
+	AvgGenerationTps               float64      `json:"avg_generation_tps"`
+	TotalPowerKwh                  float64      `json:"total_power_kwh"` // kWh
+	ByModel                        []ModelStats `json:"by_model"`
+	TotalCost                      float64      `json:"total_cost"` // USD (API + electricity)
 }
 
 // ModelStats holds token usage aggregated by provider/model.
@@ -310,5 +311,5 @@ type ModelStats struct {
 	PredictedMs      int64   `json:"predicted_ms"` // Cumulative generation time in milliseconds
 	PowerKwh         float64 `json:"power_kwh"`    // kWh
 	TaskCount        int     `json:"task_count"`
-	Cost             float64 `json:"cost"`          // USD (API + electricity)
+	Cost             float64 `json:"cost"` // USD (API + electricity)
 }

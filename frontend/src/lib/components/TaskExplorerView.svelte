@@ -57,6 +57,12 @@
     // Review Changes panel state
     let showChanges = $state(false);
 
+    /** Open a file from Review Changes in the usual file editor. */
+    function handleEditFromChanges(path: string, line?: number) {
+        handleFileSelected(path, line);
+        showChanges = false;
+    }
+
     // Find in files panel state
     let showFind = $state(false);
     function toggleFind() {
@@ -553,7 +559,7 @@
                 projectPath={taskPath}
                 onClose={() => showChanges = false}
                 isMobile={isMobileCtx.isMobile}
-                onUpdateFile={onUpdateFile}
+                onEditFile={handleEditFromChanges}
             />
         </div>
         {:else}

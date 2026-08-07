@@ -398,7 +398,7 @@ func TestHandleLoopDetected_IdeationModeSuppressesHints(t *testing.T) {
 	// Task should still be running
 	taskAfter, _ := e.store.GetTaskByTaskID(task.ID)
 	if taskAfter.ExecutionState == "failed" {
-				t.Error("task should not be in failed state in explore mode")
+		t.Error("task should not be in failed state in explore mode")
 	}
 }
 
@@ -2812,6 +2812,28 @@ func TestBuildMessagesFromDB_KeepsReasoningSeparate(t *testing.T) {
 	}
 	if messages[4].ReasoningContent != "I need to reason before acting" {
 		t.Errorf("reasoning-only: expected ReasoningContent='I need to reason before acting', got %q", messages[4].ReasoningContent)
+	}
+}
+
+func TestBuildMessagesFromDB_ExcludesLoopHints(t *testing.T) {
+	taskMsgs := []types.TaskMessage{
+		{Role: "user", Content: "Build a feature"},
+		{Role: "user", Content: "You repeated yourself in your last response.", IsLoopHint: true},
+		{Role: "assistant", Content: "I'll implement it"},
+	}
+
+	task := &types.Task{OperatingMode: "act"}
+	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "proj", false)
+
+	// system + user + assistant = 3 (hint excluded)
+	if len(messages) != 3 {
+		t.Fatalf("expected 3 messages (loop hint excluded), got %d", len(messages))
+	}
+	if messages[1].Role != "user" || messages[1].Content != "Build a feature" {
+		t.Errorf("expected original user message first, got role=%s content=%q", messages[1].Role, messages[1].Content)
+	}
+	if messages[2].Content != "I'll implement it" {
+		t.Errorf("expected assistant message, got %q", messages[2].Content)
 	}
 }
 
