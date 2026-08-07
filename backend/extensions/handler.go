@@ -18,97 +18,39 @@ import (
 	"kanban/backend/types"
 )
 
-// BuildProgress tracks the progress of extension builds.
-type BuildProgress struct {
-	Extension string  `json:"extension"`
-	Progress  float64 `json:"progress"`
-	Message   string  `json:"message"`
-	Done      bool    `json:"done"`
-	Error     string  `json:"error,omitempty"`
+// sseEvent is one SSE payload: progress events, then a final Done=true event
+// carrying the resulting extension (Result) or an Error.
+type sseEvent struct {
+	Extension string             `json:"extension"`
+	Progress  float64            `json:"progress"`
+	Message   string             `json:"message"`
+	Done      bool               `json:"done"`
+	Error     string             `json:"error,omitempty"`
+	Result    *ExtensionResponse `json:"result,omitempty"`
 }
 
-// BuildProgressTracker manages build progress notifications.
-type BuildProgressTracker struct {
-	mu          sync.RWMutex
-	builds      map[string]*BuildProgress
-	subscribers map[string][]chan *BuildProgress
+// inFlight guards concurrent install/update per extension name. The guard stays
+// held until the detached background goroutine finishes, so a reinstall can't
+// race an in-flight one (even after a page close).
+type inFlight struct {
+	mu   sync.Mutex
+	busy map[string]bool
 }
 
-// NewBuildProgressTracker creates a new tracker.
-func NewBuildProgressTracker() *BuildProgressTracker {
-	return &BuildProgressTracker{
-		builds:      make(map[string]*BuildProgress),
-		subscribers: make(map[string][]chan *BuildProgress),
+func (g *inFlight) begin(name string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.busy[name] {
+		return false
 	}
+	g.busy[name] = true
+	return true
 }
 
-// StartBuild registers a new build.
-func (t *BuildProgressTracker) StartBuild(extName string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.builds[extName] = &BuildProgress{
-		Extension: extName,
-		Progress:  0,
-		Message:   "Starting build...",
-	}
-}
-
-// UpdateBuild updates build progress.
-func (t *BuildProgressTracker) UpdateBuild(extName string, progress float64, message string) {
-	t.mu.Lock()
-	if bp, ok := t.builds[extName]; ok {
-		bp.Progress = progress
-		bp.Message = message
-		// Notify subscribers
-		for _, ch := range t.subscribers[extName] {
-			select {
-			case ch <- bp:
-			default:
-			}
-		}
-	}
-	t.mu.Unlock()
-}
-
-// CompleteBuild marks a build as complete.
-func (t *BuildProgressTracker) CompleteBuild(extName string, err error) {
-	t.mu.Lock()
-	if bp, ok := t.builds[extName]; ok {
-		bp.Progress = 100
-		bp.Done = true
-		if err != nil {
-			bp.Error = err.Error()
-			bp.Message = "Build failed"
-		} else {
-			bp.Message = "Build complete"
-		}
-		// Notify subscribers
-		for _, ch := range t.subscribers[extName] {
-			select {
-			case ch <- bp:
-			default:
-			}
-		}
-		// Close channels
-		for _, ch := range t.subscribers[extName] {
-			close(ch)
-		}
-		delete(t.subscribers, extName)
-	}
-	t.mu.Unlock()
-}
-
-// Subscribe returns a channel for build progress updates.
-func (t *BuildProgressTracker) Subscribe(extName string) <-chan *BuildProgress {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	ch := make(chan *BuildProgress, 10)
-	t.subscribers[extName] = append(t.subscribers[extName], ch)
-	// Send current state if available
-	if bp, ok := t.builds[extName]; ok {
-		ch <- bp
-	}
-	return ch
+func (g *inFlight) end(name string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.busy, name)
 }
 
 // ExtensionHandler handles extension API requests.
@@ -117,7 +59,7 @@ type ExtensionHandler struct {
 	sandbox            *ExtensionSandboxManager
 	registry           *RegistryClient
 	config             *ExtensionConfig
-	progress           *BuildProgressTracker
+	inFlightOps        *inFlight
 	onImageUpdated     func(extID string) // callback after successful image update
 	onExtensionChanged func()             // callback after any extension change (enable/disable/create/delete)
 }
@@ -174,11 +116,11 @@ func authorDir(author string) string {
 // NewExtensionHandler creates a new ExtensionHandler.
 func NewExtensionHandler(store *ExtensionStore, sandbox *ExtensionSandboxManager, registry *RegistryClient, cfg *ExtensionConfig) *ExtensionHandler {
 	return &ExtensionHandler{
-		store:    store,
-		sandbox:  sandbox,
-		registry: registry,
-		config:   cfg,
-		progress: NewBuildProgressTracker(),
+		store:       store,
+		sandbox:     sandbox,
+		registry:    registry,
+		config:      cfg,
+		inFlightOps: &inFlight{busy: map[string]bool{}},
 	}
 }
 
@@ -497,7 +439,9 @@ func (h *ExtensionHandler) HandleRegistryIndex(w http.ResponseWriter, r *http.Re
 	httputil.JSONResponse(w, http.StatusOK, index)
 }
 
-// HandleInstall installs an extension from the registry.
+// HandleInstall installs from the registry. Fast validation returns HTTP errors
+// synchronously; the actual install runs in a detached goroutine (so it survives
+// a client disconnect) while this handler streams SSE progress.
 func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -509,13 +453,11 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	if req.Name == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 
-	// Fetch registry index
 	url := req.RegistryURL
 	if url == "" {
 		url = h.config.RegistryURL
@@ -531,7 +473,6 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Find entry
 	var entry *RegistryEntry
 	for i, e := range index {
 		if e.Name == req.Name {
@@ -544,11 +485,35 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Check if already installed
-	existing, _ := h.store.GetByID(entry.Name)
-	if existing != nil {
+	// Check by name — records use timestamped IDs, so an ID lookup misses duplicates.
+	if existing, _ := h.store.GetByName(entry.Name); existing != nil {
 		httputil.JSONError(w, http.StatusConflict, "extension already installed: "+req.Name)
 		return
+	}
+
+	// Prevent racing an in-flight install (e.g. after a page reload).
+	if !h.inFlightOps.begin(req.Name) {
+		httputil.JSONError(w, http.StatusConflict, "install already in progress: "+req.Name)
+		return
+	}
+
+	events := make(chan sseEvent, 16)
+	go h.installInBackground(req.Name, entry, url, events)
+
+	h.streamOperation(w, r, events)
+}
+
+// installInBackground runs the install detached from the request context so it
+// completes even if the client disconnects, reporting progress on events.
+func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry, url string, events chan<- sseEvent) {
+	defer h.inFlightOps.end(name)
+	defer close(events)
+
+	emit := func(pct float64, msg string) {
+		events <- sseEvent{Extension: name, Progress: pct, Message: msg}
+	}
+	fail := func(err error) {
+		events <- sseEvent{Extension: name, Progress: 100, Message: "Install failed", Done: true, Error: err.Error()}
 	}
 
 	// Git-pinned (self-hosted) path: the registry entry pins a repo + commit.
@@ -558,17 +523,18 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 	var manifest ExtensionManifest
 	targetDir := filepath.Join(h.config.ExtensionsDirOrDefault(), authorDir(entry.Author), entry.Name)
 	if gitPinned {
+		emit(10, "Fetching extension...")
 		if err := h.registry.CheckoutExtension(entry.Repo, entry.Commit, entry.Subdir, targetDir); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch extension (commit "+entry.Commit+"): "+err.Error())
+			fail(fmt.Errorf("failed to fetch extension (commit %s): %w", entry.Commit, err))
 			return
 		}
 		manifestData, err := os.ReadFile(filepath.Join(targetDir, "manifest.json"))
 		if err != nil {
-			httputil.JSONError(w, http.StatusBadRequest, "checked-out extension has no manifest.json: "+err.Error())
+			fail(fmt.Errorf("checked-out extension has no manifest.json: %w", err))
 			return
 		}
 		if err := json.Unmarshal(manifestData, &manifest); err != nil {
-			httputil.JSONError(w, http.StatusBadRequest, "invalid manifest.json in checked-out extension: "+err.Error())
+			fail(fmt.Errorf("invalid manifest.json in checked-out extension: %w", err))
 			return
 		}
 	} else {
@@ -607,9 +573,8 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		Commit:        entry.Commit,
 		Subdir:        entry.Subdir,
 	}
-
 	if err := h.store.Create(ext); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to create extension: "+err.Error())
+		fail(fmt.Errorf("failed to create extension: %w", err))
 		return
 	}
 
@@ -624,28 +589,33 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 				dockerfile = string(data)
 			}
 		} else if entry.DockerfileURL != "" {
-			if dockerfile, err = h.registry.FetchDockerfile(ResolveURL(url, entry.DockerfileURL)); err != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch dockerfile: "+err.Error())
+			emit(20, "Fetching Dockerfile...")
+			df, fetchErr := h.registry.FetchDockerfile(ResolveURL(url, entry.DockerfileURL))
+			if fetchErr != nil {
+				fail(fmt.Errorf("failed to fetch dockerfile: %w", fetchErr))
 				return
 			}
+			dockerfile = df
 		}
 		if dockerfile != "" {
+			emit(30, "Building image...")
 			imageRef = fmt.Sprintf("kanban-ext-%s:%s", entry.Name, entry.Version)
 			if err := h.registry.BuildImageFromReader(dockerfile, imageRef); err != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to build image: "+err.Error())
+				fail(fmt.Errorf("failed to build image: %w", err))
 				return
 			}
 			ext.ContainerConfig.Image = imageRef
 			ext.ImageRef = imageRef
 			if err := h.store.Update(ext.ID, ext); err != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())
+				fail(fmt.Errorf("failed to update extension: %w", err))
 				return
 			}
 		}
 	}
 
 	statuses := h.sandbox.ListRunning()
-	httputil.JSONResponse(w, http.StatusCreated, h.toResponse(ext, statuses))
+	result := h.toResponse(ext, statuses)
+	events <- sseEvent{Extension: name, Progress: 100, Message: "Installed", Done: true, Result: &result}
 
 	// Notify frontend to refresh UI injection slots
 	if h.onExtensionChanged != nil {
@@ -653,20 +623,9 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// HandleBuildProgress streams build progress via SSE.
-func (h *ExtensionHandler) HandleBuildProgress(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	extName := r.URL.Query().Get("name")
-	if extName == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
-		return
-	}
-
-	// Set SSE headers
+// streamOperation streams SSE events until Done or client disconnect. The
+// operation runs detached, so returning on disconnect does not cancel it.
+func (h *ExtensionHandler) streamOperation(w http.ResponseWriter, r *http.Request, events <-chan sseEvent) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -674,30 +633,33 @@ func (h *ExtensionHandler) HandleBuildProgress(w http.ResponseWriter, r *http.Re
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		// Streaming unsupported; drain the channel in the background so the
+		// detached operation can still finish without blocking on sends.
+		go func() {
+			for range events {
+			}
+		}()
 		return
 	}
 
-	sub := h.progress.Subscribe(extName)
-
-	// Use request context for cleanup
 	ctx := r.Context()
-	go func() {
-		<-ctx.Done()
-		// Cleanup will happen when channel closes
-	}()
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case bp, ok := <-sub:
+		case ev, ok := <-events:
 			if !ok {
 				return
 			}
-			data, _ := json.Marshal(bp)
+			data, err := json.Marshal(ev)
+			if err != nil {
+				continue
+			}
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
+			if ev.Done {
+				return
+			}
 		}
 	}
 }
@@ -805,49 +767,78 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 		httputil.JSONError(w, http.StatusNotFound, "extension not found")
 		return
 	}
-
 	if ext.InstallSource != "registry" {
 		httputil.JSONError(w, http.StatusBadRequest, "only registry-installed extensions can be updated")
 		return
 	}
 
-	// Fetch registry index
 	url := h.config.RegistryURL
 	if url == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "registry URL not configured")
 		return
 	}
 
-	index, err := h.registry.FetchIndex(url)
-	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch registry: "+err.Error())
+	// Prevent a concurrent update of the same extension.
+	if !h.inFlightOps.begin(ext.Name) {
+		httputil.JSONError(w, http.StatusConflict, "update already in progress: "+ext.Name)
 		return
 	}
 
-	// Find the registry entry
+	events := make(chan sseEvent, 16)
+	go h.updateImageInBackground(id, ext.Name, url, events)
+
+	h.streamOperation(w, r, events)
+}
+
+// updateImageInBackground updates an extension's image, detached like install.
+func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events chan<- sseEvent) {
+	defer h.inFlightOps.end(name)
+	defer close(events)
+
+	emit := func(pct float64, msg string) {
+		events <- sseEvent{Extension: name, Progress: pct, Message: msg}
+	}
+	fail := func(err error) {
+		events <- sseEvent{Extension: name, Progress: 100, Message: "Update failed", Done: true, Error: err.Error()}
+	}
+
+	emit(5, "Fetching registry...")
+	index, err := h.registry.FetchIndex(url)
+	if err != nil {
+		fail(fmt.Errorf("failed to fetch registry: %w", err))
+		return
+	}
+
 	var entry *RegistryEntry
 	for i, e := range index {
-		if e.Name == ext.Name {
+		if e.Name == name {
 			entry = &index[i]
 			break
 		}
 	}
 	if entry == nil {
-		httputil.JSONError(w, http.StatusNotFound, "extension not found in registry: "+ext.Name)
+		fail(fmt.Errorf("extension not found in registry: %s", name))
 		return
 	}
 
 	// Stop sandbox if running
-	_ = h.sandbox.Stop(ext.ID)
+	_ = h.sandbox.Stop(id)
+
+	ext, err := h.store.GetByID(id)
+	if err != nil {
+		fail(fmt.Errorf("extension not found: %w", err))
+		return
+	}
 
 	gitPinned := entry.Repo != "" && entry.Commit != ""
-	imageRef := fmt.Sprintf("kanban-ext-%s:%s", ext.Name, entry.Version)
+	imageRef := fmt.Sprintf("kanban-ext-%s:%s", name, entry.Version)
 
 	if gitPinned {
 		// Re-checkout the newly vetted commit (verified) and rebuild from it.
 		targetDir := filepath.Join(h.config.ExtensionsDirOrDefault(), authorDir(entry.Author), entry.Name)
+		emit(10, "Fetching extension...")
 		if err := h.registry.CheckoutExtension(entry.Repo, entry.Commit, entry.Subdir, targetDir); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch extension (commit "+entry.Commit+"): "+err.Error())
+			fail(fmt.Errorf("failed to fetch extension (commit %s): %w", entry.Commit, err))
 			return
 		}
 		if data, err := os.ReadFile(filepath.Join(targetDir, "manifest.json")); err == nil {
@@ -860,13 +851,11 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 		ext.Commit = entry.Commit
 		ext.Subdir = entry.Subdir
 		if data, err := os.ReadFile(filepath.Join(targetDir, "Dockerfile")); err == nil {
-			h.progress.StartBuild(ext.Name)
+			emit(30, "Building image...")
 			if err := h.registry.BuildImageFromReader(string(data), imageRef); err != nil {
-				h.progress.CompleteBuild(ext.Name, err)
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to build image: "+err.Error())
+				fail(fmt.Errorf("failed to build image: %w", err))
 				return
 			}
-			h.progress.CompleteBuild(ext.Name, nil)
 		} else {
 			// No Dockerfile (UI/CSS/agent extension) — nothing to build.
 			imageRef = ""
@@ -874,45 +863,27 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 	} else {
 		// Rebuild from Dockerfile if available, otherwise pull image
 		if entry.DockerfileURL != "" {
-			h.progress.StartBuild(ext.Name)
+			emit(20, "Fetching Dockerfile...")
 			dockerfileURL := ResolveURL(url, entry.DockerfileURL)
 			dockerfile, err := h.registry.FetchDockerfile(dockerfileURL)
 			if err != nil {
-				h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to fetch dockerfile: %w", err))
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch dockerfile: "+err.Error())
+				fail(fmt.Errorf("failed to fetch dockerfile: %w", err))
 				return
 			}
-
-			errCh := make(chan error, 1)
-			go func() {
-				err := h.registry.BuildImageFromReader(dockerfile, imageRef)
-				errCh <- err
-			}()
-
-			// Stream build output to progress
-			go func() {
-				<-errCh
-			}()
-
-			err = <-errCh
-			if err != nil {
-				h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to build image: %w", err))
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to build image: "+err.Error())
+			emit(30, "Building image...")
+			if err := h.registry.BuildImageFromReader(dockerfile, imageRef); err != nil {
+				fail(fmt.Errorf("failed to build image: %w", err))
 				return
 			}
-			h.progress.CompleteBuild(ext.Name, nil)
 		} else if entry.Image != "" {
-			h.progress.StartBuild(ext.Name)
-			err := h.registry.PullImage(entry.Image)
-			if err != nil {
-				h.progress.CompleteBuild(ext.Name, fmt.Errorf("failed to pull image: %w", err))
-				httputil.JSONError(w, http.StatusInternalServerError, "failed to pull image: "+err.Error())
+			emit(30, "Pulling image...")
+			if err := h.registry.PullImage(entry.Image); err != nil {
+				fail(fmt.Errorf("failed to pull image: %w", err))
 				return
 			}
 			imageRef = entry.Image
-			h.progress.CompleteBuild(ext.Name, nil)
 		} else {
-			httputil.JSONError(w, http.StatusBadRequest, "extension has no image or dockerfile to update")
+			fail(fmt.Errorf("extension has no image or dockerfile to update"))
 			return
 		}
 	}
@@ -924,13 +895,13 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 		ext.ContainerConfig.Image = imageRef
 	}
 	if err := h.store.Update(id, ext); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())
+		fail(fmt.Errorf("failed to update extension: %w", err))
 		return
 	}
 
 	// Update built_at timestamp
 	if err := h.store.SetBuiltAt(id); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to update build timestamp: "+err.Error())
+		fail(fmt.Errorf("failed to update build timestamp: %w", err))
 		return
 	}
 
@@ -940,8 +911,11 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 	}
 
 	statuses := h.sandbox.ListRunning()
-	ext, _ = h.store.GetByID(id)
-	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, statuses))
+	if updated, _ := h.store.GetByID(id); updated != nil {
+		ext = updated
+	}
+	result := h.toResponse(ext, statuses)
+	events <- sseEvent{Extension: name, Progress: 100, Message: "Updated", Done: true, Result: &result}
 }
 
 // HandleProxy proxies requests to external APIs on behalf of an extension.
