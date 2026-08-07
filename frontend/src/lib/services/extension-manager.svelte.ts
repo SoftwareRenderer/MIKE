@@ -101,11 +101,16 @@ export class ExtensionManager {
         }
     }
 
-    /** Install an extension from the registry. */
+    /** Install an extension from the registry (consumes the SSE stream). */
     async install(name: string) {
         this.state.error = '';
         try {
-            await installExtension(name);
+            for await (const ev of installExtension(name)) {
+                if (ev.done && ev.error) {
+                    this.state.error = ev.error;
+                    return;
+                }
+            }
             await this.loadExtensions();
         } catch (e: any) {
             this.state.error = e.message || 'Failed to install extension';

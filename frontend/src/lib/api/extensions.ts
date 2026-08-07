@@ -1,5 +1,5 @@
 import type { Extension, RegistryEntry, ExtensionUpdate } from '../types';
-import { API_BASE, apiFetch, apiError } from './helpers';
+import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
 
 /** Fetch all installed extensions with runtime status. */
 export async function listExtensions(): Promise<Extension[]> {
@@ -59,15 +59,9 @@ export async function getRegistryIndex(url?: string): Promise<RegistryEntry[]> {
     return res.json();
 }
 
-/** Install an extension from the registry. */
-export async function installExtension(name: string, registryUrl?: string): Promise<Extension> {
-    const res = await apiFetch(`${API_BASE}/extensions/install`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, registry_url: registryUrl }),
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to install extension');
-    return res.json();
+/** Stream SSE progress + final result; the install survives a client disconnect. */
+export function installExtension(name: string, registryUrl?: string): AsyncIterable<BuildProgressEvent> {
+    return streamOperation('/extensions/install', { name, registry_url: registryUrl });
 }
 
 /** Check for available updates. */
@@ -78,13 +72,9 @@ export async function checkUpdates(url?: string): Promise<ExtensionUpdate[]> {
     return res.json();
 }
 
-/** Update an extension's image from the registry (rebuild or pull). */
-export async function updateExtensionImage(id: string): Promise<Extension> {
-    const res = await apiFetch(`${API_BASE}/extensions/${id}/update`, {
-        method: 'POST',
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to update extension');
-    return res.json();
+/** Stream SSE progress + final result for an image update (detached, like install). */
+export function updateExtensionImage(id: string): AsyncIterable<BuildProgressEvent> {
+    return streamOperation(`/extensions/${id}/update`, {});
 }
 
 /** Get extension sandbox logs. */
@@ -94,61 +84,67 @@ export async function getExtensionLogs(id: string): Promise<string> {
     return res.text();
 }
 
-/** Build progress event from SSE stream. */
+/** Build progress event from an operation's SSE stream. */
 export interface BuildProgressEvent {
     extension: string;
     progress: number;
     message: string;
     done: boolean;
     error?: string;
+    /** The installed/updated extension on the final `done` event. */
+    result?: Extension;
 }
 
-/**
- * Stream build progress for an extension via SSE.
- * Returns an async iterator that yields BuildProgressEvent objects.
- */
-export function streamBuildProgress(name: string): AsyncIterable<BuildProgressEvent> {
-    const url = `${API_BASE}/extensions/build-progress?name=${encodeURIComponent(name)}`;
+/** POST to a streaming endpoint and parse its SSE response; HTTP errors are thrown. */
+function streamOperation(path: string, body: Record<string, any>): AsyncIterable<BuildProgressEvent> {
+    const url = `${API_BASE}${path}`;
 
-    return {
-        async *[Symbol.asyncIterator]() {
-            const res = await fetch(url);
-            if (!res.ok) {
-                throw new Error(`Failed to connect to build progress: ${res.status}`);
-            }
+    const iterator = async function* () {
+        const token = await ensureCsrfToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['X-CSRF-Token'] = token;
 
-            const reader = res.body?.getReader();
-            if (!reader) {
-                throw new Error('No reader available');
-            }
+        const res = await fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) throw await apiError(res, 'Operation failed');
 
-            const decoder = new TextDecoder();
-            let buffer = '';
+        const reader = res.body?.getReader();
+        if (!reader) {
+            throw new Error('No reader available');
+        }
 
-            try {
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-                    buffer += decoder.decode(value, { stream: true });
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-                    // Parse SSE events
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || ''; // Keep incomplete line in buffer
+                buffer += decoder.decode(value, { stream: true });
 
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            try {
-                                yield JSON.parse(line.slice(6)) as BuildProgressEvent;
-                            } catch {
-                                // Skip malformed data
-                            }
+                // Parse SSE events
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            yield JSON.parse(line.slice(6)) as BuildProgressEvent;
+                        } catch {
+                            // Skip malformed data
                         }
                     }
                 }
-            } finally {
-                reader.releaseLock();
             }
-        },
+        } finally {
+            reader.releaseLock();
+        }
     };
+
+    return { [Symbol.asyncIterator]: iterator };
 }

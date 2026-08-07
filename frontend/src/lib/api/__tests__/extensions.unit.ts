@@ -140,18 +140,52 @@ describe('extensions API', () => {
         expect(calls[0][0]).toContain('url=https%3A%2F%2Fcustom.registry%2Findex.json');
     });
 
-    it('installExtension sends POST with name', async () => {
+    it('installExtension streams SSE progress then final result', async () => {
         const result = { id: 'gopls-1', name: 'gopls', type: 'lsp', enabled: true, install_source: 'registry' };
-        mockSuccess(result, 201);
+        const chunks = [
+            'data: ' + JSON.stringify({ extension: 'gopls', progress: 30, message: 'Building image...', done: false }) + '\n\n',
+            'data: ' + JSON.stringify({ extension: 'gopls', progress: 100, message: 'Installed', done: true, result }) + '\n\n',
+        ];
+        const encoder = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+                for (const c of chunks) controller.enqueue(encoder.encode(c));
+                controller.close();
+            },
+        });
+
+        mockFetch.mockImplementation(async (url: any) => {
+            if (typeof url === 'string' && url.includes('/api/auth/session')) {
+                return { ok: true, status: 200, json: async () => ({ authenticated: true, csrf_token: 'test-token' }) };
+            }
+            return { ok: true, status: 200, body };
+        });
 
         const { installExtension } = await import('$lib/api/extensions');
-        const res = await installExtension('gopls');
+        const events = [];
+        for await (const ev of installExtension('gopls')) {
+            events.push(ev);
+        }
 
-        expect(res).toEqual(result);
+        expect(events).toHaveLength(2);
+        expect(events[0]).toMatchObject({ progress: 30, done: false });
+        expect(events[1]).toMatchObject({ done: true, result });
+
         const calls = apiCalls(mockFetch.mock.calls);
-        expect(calls[0][0]).toContain('/api/extensions/install');
-        expect(calls[0][1].method).toBe('POST');
-        expect(JSON.parse(calls[0][1].body)).toHaveProperty('name', 'gopls');
+        const installCall = calls.find((c) => String(c[0]).includes('/api/extensions/install'));
+        expect(installCall).toBeTruthy();
+        expect(installCall![1].method).toBe('POST');
+        expect(JSON.parse(installCall![1].body)).toHaveProperty('name', 'gopls');
+    });
+
+    it('installExtension throws on HTTP error status', async () => {
+        mockError('install already in progress: gopls', 409);
+
+        const { installExtension } = await import('$lib/api/extensions');
+        const collect = async () => {
+            for await (const _ of installExtension('gopls')) { /* noop */ }
+        };
+        await expect(collect()).rejects.toThrow('install already in progress: gopls');
     });
 
     it('checkUpdates returns available updates', async () => {
