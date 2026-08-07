@@ -108,13 +108,15 @@
         }
     }
 
-    /** Generate a display name from a URL (TitleCase hostname:port). */
+    /** Generate a display name from a URL (TitleCase hostname, omitting the default port). */
     function generateDisplayName(url: string): string {
         try {
             const u = new URL(url);
             const host = u.hostname.charAt(0).toUpperCase() + u.hostname.slice(1);
-            const port = u.port || (u.protocol === 'https:' ? '443' : '80');
-            return `${host}:${port}`;
+            const defaultPort = u.protocol === 'https:' ? '443' : '80';
+            const port = u.port || defaultPort;
+            // Omit the default port (e.g. 443 for https, 80 for http) from the heading.
+            return port === defaultPort ? host : `${host}:${port}`;
         } catch {
             return 'Provider';
         }
