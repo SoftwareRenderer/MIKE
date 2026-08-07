@@ -28,7 +28,7 @@ func TestUtilityTarget_UsesConfiguredUtilityProvider(t *testing.T) {
 	}
 
 	task := &types.Task{
-		ID:            "task-1",
+		ID:             "task-1",
 		LlamaServerURL: "http://worker:8010/v1",
 		ModelName:      "chat-model",
 	}
@@ -95,6 +95,63 @@ func TestUtilityTarget_AgentProvider(t *testing.T) {
 	}
 	if model != "pi" {
 		t.Errorf("model = %q, want agent model", model)
+	}
+}
+
+// --- ResolveUtilityTarget Tests ---
+
+func TestResolveUtilityTarget_UsesConfiguredUtilityProvider(t *testing.T) {
+	e := newTestExecutor(t)
+
+	providers := []types.Provider{
+		{Name: "worker", URL: "http://worker:8010/v1", Models: []types.ModelConfig{{Name: "chat-model"}}},
+		{Name: "utility", URL: "http://utility:8010/v1", Models: []types.ModelConfig{{Name: "cheap-model"}}},
+	}
+	if err := e.configStore.UpdateConfig(&types.Config{
+		Providers:       providers,
+		WorkerProvider:  "worker",
+		WorkerModel:     "chat-model",
+		UtilityProvider: "utility",
+		UtilityModel:    "cheap-model",
+	}); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	task := &types.Task{
+		ID:             "task-1",
+		LlamaServerURL: "http://worker:8010/v1",
+		ModelName:      "chat-model",
+	}
+
+	url, model := e.ResolveUtilityTarget(task)
+	if url != "http://utility:8010/v1" {
+		t.Errorf("url = %q, want utility provider URL", url)
+	}
+	if model != "cheap-model" {
+		t.Errorf("model = %q, want utility model", model)
+	}
+}
+
+func TestResolveUtilityTarget_FallsBackToTaskWhenUnset(t *testing.T) {
+	e := newTestExecutor(t)
+
+	if err := e.configStore.UpdateConfig(&types.Config{
+		Providers: []types.Provider{{Name: "worker", URL: "http://worker:8010/v1"}},
+	}); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	task := &types.Task{
+		LlamaServerURL: "http://task-url:8010/v1",
+		ModelName:      "task-model",
+	}
+
+	url, model := e.ResolveUtilityTarget(task)
+	if url != "http://task-url:8010/v1" {
+		t.Errorf("url = %q, want task URL fallback", url)
+	}
+	if model != "task-model" {
+		t.Errorf("model = %q, want task model fallback", model)
 	}
 }
 
