@@ -49,6 +49,11 @@
     // Review Changes panel state
     let showChanges = $state(false);
 
+    function handleEditFromChanges(path: string, line?: number) {
+        handleFileSelected(path, line);
+        showChanges = false;
+    }
+
     // Find in files panel state
     let showFind = $state(false);
     function toggleFind() {
@@ -670,7 +675,7 @@
                 projectPath={projectPath}
                 onClose={() => showChanges = false}
                 isMobile={isMobileCtx.isMobile}
-                onUpdateFile={onUpdateFile}
+                onEditFile={handleEditFromChanges}
                 onCommitted={() => {
                     loadCommits();
                     loadBranches();

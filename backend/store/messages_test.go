@@ -379,10 +379,46 @@ func TestMessageTokenFields(t *testing.T) {
 	}
 }
 
+func TestMessageLoopHintRoundTrip(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	hint := newMessage("hint-1", "task-1", "user", "You repeated yourself in your last response.")
+	hint.IsLoopHint = true
+	if err := s.CreateTaskMessage(hint); err != nil {
+		t.Fatalf("create hint message: %v", err)
+	}
+
+	got, err := s.GetTaskMessages("task-1", "")
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(got))
+	}
+	if !got[0].IsLoopHint {
+		t.Fatalf("expected IsLoopHint=true to round-trip, got false")
+	}
+
+	single, err := s.GetTaskMessageByID("hint-1")
+	if err != nil {
+		t.Fatalf("get message by id: %v", err)
+	}
+	if !single.IsLoopHint {
+		t.Fatalf("expected IsLoopHint=true via GetTaskMessageByID, got false")
+	}
+}
+
 // TestGetTaskMessagesByThreadEmptyTaskID verifies that a thread-scoped lookup with
 // an empty taskID still returns the thread's messages. This is required by
 // getLastCommitHashInThread, which looks up remaining commit hashes by thread alone.
-// Regression: previously the query filtered by task_id = '' and returned nothing,
+// Regression: previously the query filtered by task_id = ” and returned nothing,
 // so surviving checkpoint messages were never found during delete rollback.
 func TestGetTaskMessagesByThreadEmptyTaskID(t *testing.T) {
 	s := testStore(t)
