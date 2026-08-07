@@ -507,6 +507,8 @@ export interface Extension {
     ports?: AssignedPort[];
     installed_at: string;
     built_at: string;
+    repo?: string;
+    commit?: string;
 }
 
 export interface RegistryEntry {
@@ -521,6 +523,9 @@ export interface RegistryEntry {
     image?: string;
     dockerfile_url?: string;
     manifest_url?: string;
+    repo?: string;
+    commit?: string;
+    subdir?: string;
     capabilities?: Record<string, any>;
 }
 
@@ -529,5 +534,7 @@ export interface ExtensionUpdate {
     name: string;
     current_version: string;
     available_version: string;
+    current_commit?: string;
+    available_commit?: string;
 }
 

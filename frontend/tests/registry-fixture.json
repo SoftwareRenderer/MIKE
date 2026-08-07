@@ -1,0 +1,26 @@
+[
+    {
+        "name": "typescript-language-server",
+        "version": "1.0.0",
+        "type": "lsp",
+        "display_name": "TypeScript/JavaScript Language Server",
+        "description": "TypeScript/JavaScript language server. Provides completions, hover, diagnostics, go-to-definition, refactor, and more for TypeScript and JavaScript projects.",
+        "author": "Microsoft",
+        "homepage": "https://github.com/typescript-language-server/typescript-language-server",
+        "license_url": "https://github.com/typescript-language-server/typescript-language-server/blob/master/LICENSE",
+        "repo": "https://github.com/SoftwareRenderer/MIKE-extensions",
+        "commit": "416abac935e1b9b6b7d91b260db58bb5b11fc3d5",
+        "subdir": "lsp/typescript-language-server",
+        "capabilities": {
+            "lsp": {
+                "language": "typescript",
+                "extensions": [
+                    "ts",
+                    "tsx",
+                    "js",
+                    "jsx"
+                ]
+            }
+        }
+    }
+]

@@ -15,7 +15,6 @@ export class ExtensionManager {
         loadingRegistry: false,
         loadingUpdates: false,
         error: '',
-        registryUrl: '',
     });
 
     /** Load all installed extensions from the server. */
@@ -94,7 +93,7 @@ export class ExtensionManager {
         this.state.loadingRegistry = true;
         this.state.error = '';
         try {
-            this.state.registry = await getRegistryIndex(url || this.state.registryUrl || undefined);
+            this.state.registry = await getRegistryIndex(url);
         } catch (e: any) {
             this.state.error = e.message || 'Failed to load registry';
         } finally {
@@ -106,7 +105,7 @@ export class ExtensionManager {
     async install(name: string) {
         this.state.error = '';
         try {
-            await installExtension(name, this.state.registryUrl || undefined);
+            await installExtension(name);
             await this.loadExtensions();
         } catch (e: any) {
             this.state.error = e.message || 'Failed to install extension';
@@ -140,7 +139,7 @@ export class ExtensionManager {
         this.state.loadingUpdates = true;
         this.state.error = '';
         try {
-            this.state.updates = await checkUpdates(url || this.state.registryUrl || undefined);
+            this.state.updates = await checkUpdates(url);
         } catch (e: any) {
             this.state.error = e.message || 'Failed to check for updates';
         } finally {
@@ -167,11 +166,6 @@ export class ExtensionManager {
     /** Get installed extension by name. */
     getByname(name: string): Extension | undefined {
         return this.state.extensions.find(ext => ext.name === name);
-    }
-
-    /** Update registry URL. */
-    setRegistryUrl(url: string) {
-        this.state.registryUrl = url;
     }
 
     /** Clear error. */
