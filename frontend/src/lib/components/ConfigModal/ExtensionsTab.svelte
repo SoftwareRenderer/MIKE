@@ -1,7 +1,6 @@
 <script lang="ts">
     import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv, SchemaProperty } from '$lib/types';
-    import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage, streamBuildProgress } from '$lib/api';
-    import type { BuildProgressEvent } from '$lib/api';
+    import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
@@ -39,7 +38,8 @@
     let saving = $state(false);
     let installing = $state<Set<string>>(new Set());
     let updating = $state<Set<string>>(new Set());
-    let buildProgress = $state<{ ext: string; progress: number; message: string } | null>(null);
+    // Per-extension build progress, shown compactly in the matching card.
+    let buildProgress = $state<Record<string, { progress: number; message: string; error?: string }>>({});
 
     // Capabilities modal
     let showCapabilitiesModal = $state(false);
@@ -218,42 +218,42 @@
         }
     }
 
-    // Install from registry
+    // Remove a per-extension progress entry (reactive reassignment).
+    function clearBuildProgress(name: string) {
+        const next = { ...buildProgress };
+        delete next[name];
+        buildProgress = next;
+    }
+
+    // Record the latest progress event for an extension.
+    function setBuildProgress(name: string, progress: number, message: string, error?: string) {
+        buildProgress = { ...buildProgress, [name]: { progress, message, error } };
+    }
+
+    // Install from registry, streaming progress into the card as it happens.
     async function handleInstall(name: string) {
         if (installing.has(name)) return;
         error = '';
         installing = new Set(installing).add(name);
-        buildProgress = { ext: name, progress: 0, message: 'Installing...' };
         try {
-            await installExtension(name);
-            buildProgress = { ext: name, progress: 100, message: 'Installed!' };
+            for await (const event of installExtension(name)) {
+                setBuildProgress(event.extension, event.progress, event.message, event.error);
+                if (event.done) {
+                    if (event.error) {
+                        error = event.error;
+                        setTimeout(() => clearBuildProgress(event.extension), 6000);
+                    } else {
+                        setTimeout(() => clearBuildProgress(event.extension), 2000);
+                    }
+                }
+            }
             await loadExtensions();
-            setTimeout(() => buildProgress = null, 2000);
         } catch (e: any) {
             error = e.message || 'Failed to install extension';
-            buildProgress = null;
         } finally {
             const next = new Set(installing);
             next.delete(name);
             installing = next;
-        }
-    }
-
-    // Stream build progress for an extension
-    async function watchBuildProgress(name: string) {
-        try {
-            for await (const event of streamBuildProgress(name)) {
-                buildProgress = { ext: event.extension, progress: event.progress, message: event.message };
-                if (event.done) {
-                    if (event.error) {
-                        error = `Build failed: ${event.error}`;
-                    }
-                    setTimeout(() => buildProgress = null, 3000);
-                }
-            }
-        } catch (e: any) {
-            // Connection closed or error
-            console.log('Build progress stream ended:', e.message);
         }
     }
 
@@ -323,15 +323,21 @@
 
         error = '';
         updating = new Set(updating).add(name);
-        buildProgress = { ext: name, progress: 0, message: 'Updating...' };
         try {
-            await updateExtensionImage(id);
-            buildProgress = { ext: name, progress: 100, message: 'Updated!' };
-            setTimeout(() => buildProgress = null, 2000);
+            for await (const event of updateExtensionImage(id)) {
+                setBuildProgress(event.extension, event.progress, event.message, event.error);
+                if (event.done) {
+                    if (event.error) {
+                        error = event.error;
+                        setTimeout(() => clearBuildProgress(event.extension), 6000);
+                    } else {
+                        setTimeout(() => clearBuildProgress(event.extension), 2000);
+                    }
+                }
+            }
             await loadExtensions();
         } catch (e: any) {
             error = e.message || 'Failed to update extension';
-            buildProgress = null;
         } finally {
             const next = new Set(updating);
             next.delete(name);
@@ -449,16 +455,6 @@
 </script>
 
 <div class="extensions-tab">
-    <!-- Build Progress -->
-    {#if buildProgress}
-        <div class="build-progress">
-            <div class="progress-bar" style="--pct: {buildProgress.progress}">
-                <div class="progress-fill"></div>
-            </div>
-            <span class="progress-text">{buildProgress.message} ({buildProgress.ext})</span>
-        </div>
-    {/if}
-
     {#if error}
         <div class="error-banner" role="button" tabindex="0" onclick={() => error = ''} onkeydown={(e) => e.key === 'Enter' && (error = '')}>
             {error}
@@ -601,6 +597,13 @@
                                     <ToggleSwitch class="card-toggle" checked={ext.enabled} onChange={() => handleToggleEnabled(ext.id, !ext.enabled)} />
                                 </div>
                             </div>
+                            {#if buildProgress[ext.name]}
+                                {@const bp = buildProgress[ext.name]}
+                                <div class="ext-build" class:ext-build-error={!!bp.error}>
+                                    <div class="ext-build-bar"><div class="ext-build-fill" style="--pct: {bp.progress}%"></div></div>
+                                    <span class="ext-build-text">{bp.error || bp.message}</span>
+                                </div>
+                            {/if}
                             {#if ext.manifest.description}
                                 <p class="ext-description">{ext.manifest.description}</p>
                             {/if}
@@ -908,6 +911,13 @@
                                     {/if}
                                 </div>
                             </div>
+                            {#if buildProgress[entry.name]}
+                                {@const bp = buildProgress[entry.name]}
+                                <div class="ext-build" class:ext-build-error={!!bp.error}>
+                                    <div class="ext-build-bar"><div class="ext-build-fill" style="--pct: {bp.progress}%"></div></div>
+                                    <span class="ext-build-text">{bp.error || bp.message}</span>
+                                </div>
+                            {/if}
                             {#if entry.description}
                                 <p class="ext-description">{entry.description}</p>
                             {/if}
@@ -950,37 +960,38 @@
         background: var(--color-surface-1);
     }
 
-    /* Build progress */
-    .build-progress {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        background: rgba(88, 166, 255, 0.08);
-        border: 1px solid rgba(88, 166, 255, 0.2);
-        border-radius: 8px;
-        padding: 0.75rem 1rem;
+    /* In-card build progress (compact) */
+    .ext-build {
+        margin: 0 0 0.75rem;
     }
 
-    .progress-bar {
-        flex: 1;
-        height: 8px;
+    .ext-build-bar {
+        height: 6px;
         background: rgba(88, 166, 255, 0.15);
-        border-radius: 4px;
+        border-radius: 3px;
         overflow: hidden;
     }
 
-    .progress-fill {
+    .ext-build-fill {
         height: 100%;
-        width: var(--pct, 0);
+        width: var(--pct, 0%);
         background: var(--color-accent);
-        border-radius: 4px;
+        border-radius: 3px;
         transition: width 0.3s ease;
     }
 
-    .progress-text {
-        font-size: 0.8rem;
-        color: var(--color-accent);
+    .ext-build-error .ext-build-fill {
+        background: var(--color-status-red);
+    }
+
+    .ext-build-text {
+        display: block;
+        margin-top: 0.25rem;
+        font-size: 0.75rem;
+        color: var(--color-text-tertiary);
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .error-banner {
