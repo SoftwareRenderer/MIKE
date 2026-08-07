@@ -838,6 +838,7 @@
                                 projectId={task.project_id}
                                 taskId={task.id}
                                 projectPath={projectPath}
+                                workspaceDir={workspaceDir}
                                 baseRef={diffCache.state.baseRef}
                                 onClose={closeDiffEditor}
                                 onToggleFullscreen={toggleEditorFullscreen}
