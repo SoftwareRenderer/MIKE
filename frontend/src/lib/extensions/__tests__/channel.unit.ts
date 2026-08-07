@@ -11,6 +11,7 @@ import {
     CAP_LOG_WRITE,
     CAP_EDITOR_ADD_FOOTER_BUTTON,
     CAP_EDITOR_REMOVE_FOOTER_BUTTON,
+    CAP_THEME_GET,
 } from '../capabilities';
 import type { HostRequest } from '../types';
 
@@ -58,8 +59,8 @@ describe('ExtensionHostChannel capability enforcement', () => {
         channel.start();
         const init = messages[0];
         expect(init.type).toBe('init');
-        // config.get and log.write are implicit grants added by the channel.
-        expect(init.granted).toEqual([CAP_CONFIG_GET, CAP_LOG_WRITE]);
+        // config.get, log.write, and theme.get are implicit grants added by the channel.
+        expect(init.granted).toEqual([CAP_CONFIG_GET, CAP_LOG_WRITE, CAP_THEME_GET]);
         expect(init.config).toEqual({ key: 'value' });
         channel.destroy();
     });
