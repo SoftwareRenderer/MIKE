@@ -30,6 +30,9 @@ const STORAGE_STATE_FILE_ISOLATED = '/tmp/kanban-test-storage-state.json.isolate
 const KANBAN_BIN = 'go';
 const KANBAN_RUN_ARGS = ['run', '.'];
 const TEST_PASSWORD = 'test-password-1234';
+// Point the test servers at a local registry fixture so e2e registry tests are
+// deterministic and never depend on the hosted online registry.
+const TEST_REGISTRY_URL = 'file://' + path.join(__dirname, 'registry-fixture.json');
 
 let mockServer: ReturnType<typeof spawn> | null = null;
 let kanbanServer: ReturnType<typeof spawn> | null = null;
@@ -42,7 +45,7 @@ async function setup(): Promise<void> {
     console.log('[global-setup] Starting test kanban server...');
     kanbanServer = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR], {
         cwd: PROJECT_ROOT,
-        env: { ...process.env, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_TLS: '0', DANGER_ZONE: '1' },
+        env: { ...process.env, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1' },
         stdio: 'ignore',
         detached: true,
     });
@@ -130,7 +133,7 @@ async function setup(): Promise<void> {
     console.log('[global-setup] Starting isolated kanban server...');
     kanbanServerIsolated = spawn('setsid', [KANBAN_BIN, ...KANBAN_RUN_ARGS, '--data-dir', TEST_DATA_DIR_ISOLATED, '--port', String(KANBAN_PORT_ISOLATED)], {
         cwd: PROJECT_ROOT,
-        env: { ...process.env, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_TLS: '0', DANGER_ZONE: '1' },
+        env: { ...process.env, MIKE_WORKTREES_DIR: TEST_WORKTREES, MIKE_LOGIN_PASSWORD: TEST_PASSWORD, MIKE_REGISTRY_URL: TEST_REGISTRY_URL, MIKE_TLS: '0', DANGER_ZONE: '1' },
         stdio: 'ignore',
         detached: true,
     });

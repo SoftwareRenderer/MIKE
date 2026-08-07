@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -697,6 +699,189 @@ func TestHandleInstall_Success(t *testing.T) {
 	}
 	if result.InstallSource != "registry" {
 		t.Errorf("InstallSource = %q, want registry", result.InstallSource)
+	}
+}
+
+func TestHandleInstall_GitPinned(t *testing.T) {
+	// A self-hosted extension: a git repo with a manifest (no Dockerfile, so no
+	// image build is attempted).
+	repo, commit := makeGitRepo(t, map[string]string{
+		"github-importer/manifest.json": `{"display_name":"GitHub Importer","description":"d","author":"a","version":"1.0.0","capabilities":{"ui":{"injection_points":["createTask"]}}}`,
+	})
+	index := RegistryIndex{
+		{
+			Name:        "github-issue-importer",
+			Version:     "1.0.0",
+			Type:        ExtensionTypeUI,
+			DisplayName: "GitHub Issue Importer",
+			Author:      "Software Renderer",
+			Repo:        repo,
+			Commit:      commit,
+			Subdir:      "github-importer",
+		},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+	extDir := t.TempDir()
+	h.config.ExtensionsDir = extDir
+
+	body, _ := json.Marshal(map[string]any{"name": "github-issue-importer"})
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleInstall(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (%s)", w.Code, w.Body.String())
+	}
+
+	// Files must be materialized from the verified checkout into
+	// ./extensions/<author>/<name>.
+	if _, err := os.Stat(filepath.Join(extDir, "software-renderer", "github-issue-importer", "manifest.json")); err != nil {
+		t.Errorf("manifest not materialized from checkout: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(extDir, "ui", "github-issue-importer")); err == nil {
+		t.Error("extension materialized under old <type>/<name> layout")
+	}
+
+	// Extension must record the pinned commit.
+	var result ExtensionResponse
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result.Repo != repo || result.Commit != commit {
+		t.Errorf("git source not recorded: repo=%q commit=%q", result.Repo, result.Commit)
+	}
+	if result.Manifest.DisplayName != "GitHub Importer" {
+		t.Errorf("DisplayName = %q, want manifest from checkout", result.Manifest.DisplayName)
+	}
+}
+
+func TestHandleInstall_GitPinned_FailsOnBadCommit(t *testing.T) {
+	repo, _ := makeGitRepo(t, map[string]string{
+		"manifest.json": `{"display_name":"X"}`,
+	})
+	index := RegistryIndex{
+		{
+			Name:    "evil",
+			Version: "1.0.0",
+			Type:    ExtensionTypeUI,
+			Repo:    repo,
+			Author:  "softwarerenderer",
+			// A valid-format SHA-256 that is not reachable — install must be refused.
+			Commit: strings.Repeat("deadbeef", 8),
+		},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+	extDir := t.TempDir()
+	h.config.ExtensionsDir = extDir
+
+	body, _ := json.Marshal(map[string]any{"name": "evil"})
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleInstall(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (unverified commit must not install)", w.Code)
+	}
+	if _, err := os.Stat(filepath.Join(extDir, "softwarerenderer", "evil")); err == nil {
+		t.Error("extension dir created despite unverified commit")
+	}
+	// No extension record should exist.
+	exts, _ := h.store.List()
+	if len(exts) != 0 {
+		t.Errorf("expected no installed extensions, got %d", len(exts))
+	}
+}
+
+func TestHandleCheckUpdates_CommitChange(t *testing.T) {
+	// Curated index pins a newer commit than what is installed.
+	index := RegistryIndex{
+		{
+			Name:    "gopls",
+			Version: "1.0.0",
+			Type:    ExtensionTypeLSP,
+			Commit:  strings.Repeat("b", 64),
+		},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+
+	ext := makeTestExt("gopls", "gopls", ExtensionTypeLSP)
+	ext.Commit = strings.Repeat("a", 64)
+	_ = h.store.Create(ext)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
+	w := httptest.NewRecorder()
+	h.HandleCheckUpdates(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var result []ExtensionUpdate
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("result count = %d, want 1", len(result))
+	}
+	if result[0].CurrentCommit != strings.Repeat("a", 64) || result[0].AvailableCommit != strings.Repeat("b", 64) {
+		t.Errorf("commit update not reported: %+v", result[0])
+	}
+}
+
+func TestHandleCheckUpdates_NoCommitChange(t *testing.T) {
+	index := RegistryIndex{
+		{
+			Name:    "gopls",
+			Version: "1.0.0",
+			Type:    ExtensionTypeLSP,
+			Commit:  strings.Repeat("a", 64),
+		},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+
+	ext := makeTestExt("gopls", "gopls", ExtensionTypeLSP)
+	ext.Commit = strings.Repeat("a", 64)
+	_ = h.store.Create(ext)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
+	w := httptest.NewRecorder()
+	h.HandleCheckUpdates(w, req)
+
+	var result []ExtensionUpdate
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("result count = %d, want 0 (same commit)", len(result))
 	}
 }
 

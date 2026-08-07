@@ -43,6 +43,37 @@ func makeTestExt(id, name, extType string) *Extension {
 	}
 }
 
+func TestGitSourceRoundTrip(t *testing.T) {
+	es := testStore(t)
+	ext := makeTestExt("ext-1", "test-ext", ExtensionTypeUI)
+	ext.Repo = "https://github.com/author/kanban-extensions"
+	ext.Commit = strings.Repeat("deadbeef", 8) // 64-char SHA-256
+	ext.Subdir = "myext"
+	if err := es.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := es.GetByID("ext-1")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Repo != ext.Repo || got.Commit != ext.Commit || got.Subdir != ext.Subdir {
+		t.Errorf("git source roundtrip: repo=%q commit=%q subdir=%q", got.Repo, got.Commit, got.Subdir)
+	}
+	if !got.IsGitPinned() {
+		t.Error("IsGitPinned() = false, want true")
+	}
+
+	// List must also carry the git fields.
+	listed, err := es.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Commit != ext.Commit {
+		t.Errorf("List git source: %+v", listed)
+	}
+}
+
 func TestCreateAndGetExtension(t *testing.T) {
 	es := testStore(t)
 	ext := makeTestExt("ext-1", "test-ext", ExtensionTypeLSP)

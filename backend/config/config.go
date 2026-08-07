@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,6 +20,17 @@ import (
 // Defined as an interface to avoid a circular import between config and agent packages.
 type AgentProviderLister interface {
 	ToProviders() []types.Provider
+}
+
+// RegistryURL returns the extension registry index URL. It is sourced
+// exclusively from the MIKE_REGISTRY_URL environment variable (which takes
+// precedence) and otherwise falls back to the hosted online registry. It is no
+// longer persisted to the database.
+func RegistryURL() string {
+	if v := os.Getenv("MIKE_REGISTRY_URL"); v != "" {
+		return v
+	}
+	return "https://getmike.dev/extensions/registry.json"
 }
 
 // ConfigStore wraps Store for config-specific operations.
@@ -116,7 +128,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	registryURL, _ := cs.store.GetConfigValue("registry_url")
+	registryURL := RegistryURL()
 	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
 	defaultAutoMergeRaw, _ := cs.store.GetConfigValue("default_auto_merge")
 	defaultSubtasksAutoMergeRaw, _ := cs.store.GetConfigValue("default_subtasks_auto_merge")
@@ -189,9 +201,6 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 		return err
 	}
 	if err := cs.store.SetConfigValue("utility_model", c.UtilityModel); err != nil {
-		return err
-	}
-	if err := cs.store.SetConfigValue("registry_url", c.RegistryURL); err != nil {
 		return err
 	}
 	if c.DefaultAutoCommit != nil {
@@ -315,9 +324,6 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// workspace_dir is set at startup via CLI flag / env var — not modifiable at runtime
-		if rurl, ok := updates["registry_url"]; ok {
-			current.RegistryURL = rurl.(string)
-		}
 		if providers, ok := updates["providers"]; ok {
 			if providers != nil {
 				providersJSON, _ := json.Marshal(providers)
