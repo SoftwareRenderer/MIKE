@@ -22,8 +22,7 @@ func TestFetchIndex(t *testing.T) {
 			DisplayName: "Go Language Server",
 			Description: "Go language server",
 			Author:      "Go Team",
-			Image:       "ghcr.io/kanban/gopls:1.0.0",
-			ManifestURL: "https://registry.kanban.dev/extensions/gopls/1.0.0/manifest.json",
+			Image: "ghcr.io/kanban/gopls:1.0.0",
 		},
 		{
 			Name:        "typescript",
@@ -32,8 +31,7 @@ func TestFetchIndex(t *testing.T) {
 			DisplayName: "TypeScript Language Server",
 			Description: "TypeScript language server",
 			Author:      "Microsoft",
-			Image:       "ghcr.io/kanban/typescript:2.0.0",
-			ManifestURL: "https://registry.kanban.dev/extensions/typescript/2.0.0/manifest.json",
+			Image: "ghcr.io/kanban/typescript:2.0.0",
 		},
 	}
 
@@ -83,45 +81,6 @@ func TestFetchIndex_InvalidJSON(t *testing.T) {
 	_, err := rc.FetchIndex(server.URL)
 	if err == nil {
 		t.Error("FetchIndex(invalid json) = nil, want error")
-	}
-}
-
-func TestFetchManifest(t *testing.T) {
-	manifest := ExtensionManifest{
-		DisplayName: "Test Extension",
-		Description: "A test extension",
-		Author:      "Test Author",
-		Homepage:    "https://example.com",
-		Version:     "1.0.0",
-		Capabilities: &Capabilities{
-			LSP: &LSPConfig{
-				Command:    "test-lsp",
-				Args:       []string{"serve"},
-				Extensions: []string{"test"},
-				Language:   "test",
-			},
-		},
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(manifest)
-	}))
-	defer server.Close()
-
-	rc := NewRegistryClient()
-	got, err := rc.FetchManifest(server.URL)
-	if err != nil {
-		t.Fatalf("FetchManifest: %v", err)
-	}
-	if got.DisplayName != "Test Extension" {
-		t.Errorf("DisplayName = %v, want Test Extension", got.DisplayName)
-	}
-	if got.Capabilities.GetLSP() == nil {
-		t.Fatal("LSP config is nil")
-	}
-	if got.Capabilities.GetLSP().Command != "test-lsp" {
-		t.Errorf("LSP.Command = %v, want test-lsp", got.Capabilities.GetLSP().Command)
 	}
 }
 
@@ -246,26 +205,6 @@ func TestFetchIndex_FileNotFound(t *testing.T) {
 	_, err := rc.FetchIndex("file:///nonexistent/path/registry.json")
 	if err == nil {
 		t.Error("FetchIndex(nonexistent file) = nil, want error")
-	}
-}
-
-func TestFetchManifest_FileURL(t *testing.T) {
-	rc := NewRegistryClient()
-
-	// Create a temp file with valid manifest JSON
-	tmp := t.TempDir()
-	manifestPath := tmp + "/manifest.json"
-	data := `{"display_name":"Test","description":"Desc","author":"Auth","version":"1.0.0","capabilities":{"lsp":{"command":"test","extensions":["go"],"language":"go"}}}`
-	if err := os.WriteFile(manifestPath, []byte(data), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	manifest, err := rc.FetchManifest("file://" + manifestPath)
-	if err != nil {
-		t.Fatalf("FetchManifest(file://) = error: %v", err)
-	}
-	if manifest.DisplayName != "Test" {
-		t.Fatalf("DisplayName = %q, want %q", manifest.DisplayName, "Test")
 	}
 }
 
