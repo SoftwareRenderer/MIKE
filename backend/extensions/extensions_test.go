@@ -226,7 +226,6 @@ func TestRegistryEntry_Fields(t *testing.T) {
 		Author:        "Go Team",
 		Image:         "ghcr.io/kanban/gopls:1.0.0",
 		DockerfileURL: "https://registry.kanban.dev/extensions/gopls/1.0.0/Dockerfile",
-		ManifestURL:   "https://registry.kanban.dev/extensions/gopls/1.0.0/manifest.json",
 	}
 
 	if entry.Name != "gopls" {
