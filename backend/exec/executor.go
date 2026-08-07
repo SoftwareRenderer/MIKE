@@ -1770,6 +1770,11 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 	i := 0
 	for i < len(taskMsgs) {
 		m := taskMsgs[i]
+		// keep loop hints out of LLM context
+		if m.IsLoopHint {
+			i++
+			continue
+		}
 		switch m.Role {
 		case "summarization":
 			// buildLLMContext filters these out (summary is in system prompt)

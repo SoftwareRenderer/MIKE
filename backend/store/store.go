@@ -192,6 +192,7 @@ CREATE TABLE IF NOT EXISTS task_messages (
     predicted_ms       INTEGER DEFAULT 0,
     duration           INTEGER DEFAULT 0,
     git_commit_hash    TEXT DEFAULT NULL,
+    is_loop_hint       INTEGER NOT NULL DEFAULT 0,
     created_at         TEXT NOT NULL,
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
@@ -253,6 +254,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN title_generating INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN cache_tokens INTEGER DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN is_loop_hint INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN provider_name TEXT DEFAULT NULL`)
 	// Thread support migrations
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN current_thread_id TEXT NULL`)
@@ -285,8 +287,8 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	// File checkpoint tracking
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN git_commit_hash TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN attachments TEXT DEFAULT NULL`)
-// Add cost column to cumulative token stats (idempotent — ALTER TABLE IF NOT EXISTS is not standard SQLite)
-_, _ = s.db.Exec(`ALTER TABLE project_token_stats ADD COLUMN cost REAL NOT NULL DEFAULT 0`)
+	// Add cost column to cumulative token stats (idempotent — ALTER TABLE IF NOT EXISTS is not standard SQLite)
+	_, _ = s.db.Exec(`ALTER TABLE project_token_stats ADD COLUMN cost REAL NOT NULL DEFAULT 0`)
 	// Separate merge conflict flag so execution_state can stay "running"
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN has_merge_conflict INTEGER NOT NULL DEFAULT 0`)
 	// Operating mode: act (default), plan, or explore
@@ -415,6 +417,14 @@ func i2b(i int) bool {
 }
 
 // ptrStr returns a pointer to a string, or nil if empty.
+// boolInt converts a bool to a 1/0 int for SQLite storage.
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func ptrStr(s string) *string {
 	if s == "" {
 		return nil

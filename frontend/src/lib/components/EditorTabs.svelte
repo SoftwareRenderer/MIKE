@@ -68,7 +68,7 @@
     }
 </script>
 
-<div class="editor-tabs-container">
+<div class="editor-tabs-container branch-editor">
     <!-- Tab bar -->
     <div class="editor-tab-bar" role="tablist" aria-label="Open files">
         {#each openFiles as file (file.path)}
