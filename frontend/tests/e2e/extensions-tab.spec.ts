@@ -175,7 +175,10 @@ test.describe('TypeScript Language Server Extension', () => {
     const tsEntry = index.find((entry: any) => entry.name === 'typescript-language-server');
     expect(tsEntry).toBeDefined();
     expect(tsEntry.type).toBe('lsp');
-    expect(tsEntry.dockerfile_url).toBe('lsp/typescript-language-server/Dockerfile');
-    expect(tsEntry.manifest_url).toBe('lsp/typescript-language-server/manifest.json');
+    // Git-pinned source fields.
+    expect(tsEntry.author).toBe('Microsoft');
+    expect(tsEntry.subdir).toBe('lsp/typescript-language-server');
+    expect(typeof tsEntry.commit).toBe('string');
+    expect(tsEntry.repo).toContain('SoftwareRenderer/MIKE-extensions');
   });
 });

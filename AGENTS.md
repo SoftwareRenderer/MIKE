@@ -74,6 +74,7 @@ The server requires an encryption key to secure sensitive data (like API keys) i
 |---------|-------------|
 | `MIKE_ENCRYPTION_KEY` | A non-blank string used to derive the AES-256-GCM encryption key. |
 | `MIKE_LOGIN_PASSWORD` | The master password used for server authentication and session creation. |
+| `MIKE_REGISTRY_URL` | The extension registry index URL. Sourced exclusively from this env var (not DB-backed), falling back to the hosted online registry `https://getmike.dev/extensions/registry.json`. Bare filesystem paths (no `http(s)://` or `file://` scheme) are treated as local files, resolved against the working directory. |
 
 ### CLI Flags
 
@@ -417,14 +418,24 @@ The context object passed to `init` contains `component` (component name, e.g. `
 
 **Updating:** Edit the `.js` file and `manifest.json` directly. The Go server serves `extensions/` as static files — no build step needed. Browser hard refresh to pick up changes.
 
-**Registry generation:** `extensions/registry.json` is **generated** from the extension manifests — do not edit it by hand. After adding/editing an extension manifest, regenerate it:
+**Registry generation:** the published extensions live in the sibling repo
+`../MIKE-extensions/`, and `registry.json` there is **generated** from the extension
+manifests — do not edit it by hand. After adding/editing an extension manifest or
+bumping a published commit, regenerate it:
 
 ```bash
-python3 scripts/gen-registry.py            # regenerate registry.json
+python3 scripts/gen-registry.py            # regenerate ../MIKE-extensions/registry.json
 python3 scripts/gen-registry.py --check    # verify it's up to date (CI)
 ```
 
-The generator scans `extensions/<type>/<name>/manifest.json` for every extension and emits a minimal registry entry (only the fields the Browse Registry UI renders — e.g. `ui` injection points/permissions and `proxy` allowed domains; the full capability config stays in the manifest).
+The generator scans `../MIKE-extensions/<type>/<name>/manifest.json` for every
+extension and emits a minimal git-pinned registry entry: the repo URL (`repo`),
+the current HEAD commit of the extensions repo (`commit`, a full SHA-1 or SHA-256
+hash), and the extension's subdirectory within the repo (`subdir`). On install the
+verified content is materialized into `./extensions/<author>/<name>` (slugified
+manifest `author`). It also keeps the fields the Browse Registry UI renders
+(e.g. `ui` injection points/permissions and `proxy` allowed domains); the full
+capability config stays in the manifest.
 
 **Deploying:** Install from registry via Settings → Extensions → "Install from Registry".
 
@@ -451,7 +462,7 @@ Extension-specific tests are colocated under `extensions/<type>/<name>/tests/`
 extension logic (e.g. the markdown↔Wordgard serializer in `serializer.js`) is a
 plain script loaded by both the extension and its tests — never copy it.
 
-**Registry:** URL configurable via `registry_url` in config. Default: `file://./extensions/registry.json`.
+**Registry:** URL sourced exclusively from the `MIKE_REGISTRY_URL` env var (no longer DB-backed; default `https://getmike.dev/extensions/registry.json`). Bare filesystem paths (no `http(s)://`/`file://` scheme) are treated as local files resolved against the working directory (e.g. `MIKE_REGISTRY_URL=../MIKE-extensions/registry.json`). Extensions are git-pinned: each entry carries `author`/`repo`/`commit`/`subdir`, and the server clones the repo, checks out exactly `commit` (a full 40-char SHA-1 or 64-char SHA-256 hash), verifies `git rev-parse HEAD` matches, and only then installs the `subdir` content into `./extensions/<author>/<name>`.
 
 **Sandbox:** Each LSP extension runs in a dedicated gVisor sandbox. Bridge protocol uses `MethodLSP` (0x0A) for JSON-RPC passthrough.
 

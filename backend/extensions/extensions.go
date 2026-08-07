@@ -42,6 +42,11 @@ type Extension struct {
 	Enabled         bool              `json:"enabled"`
 	InstalledAt     string            `json:"installed_at"`
 	BuiltAt         string            `json:"built_at"`
+	// Git source info for commit-pinned (self-hosted) extensions.
+	// Empty for first-party/URL-based extensions.
+	Repo   string `json:"repo,omitempty"`
+	Commit string `json:"commit,omitempty"`
+	Subdir string `json:"subdir,omitempty"`
 }
 
 // ExtensionManifest defines the metadata and capabilities of an extension.
@@ -350,6 +355,11 @@ type RegistryEntry struct {
 	DockerfileURL string        `json:"dockerfile_url,omitempty"` // URL to Dockerfile
 	ManifestURL   string        `json:"manifest_url,omitempty"`   // URL to manifest.json
 	Capabilities  *Capabilities `json:"capabilities,omitempty"`   // capability config (mirrors manifest)
+	// Git-pinned source for self-hosted extensions. When set, install checks
+	// out exactly this commit (verified) instead of fetching URL-based artifacts.
+	Repo   string `json:"repo,omitempty"`
+	Commit string `json:"commit,omitempty"`
+	Subdir string `json:"subdir,omitempty"`
 }
 
 // IsLSP returns true if this extension is an LSP extension.
@@ -400,6 +410,11 @@ func (e *Extension) IsRegistryInstalled() bool {
 // IsLocalInstalled returns true if this extension was installed from a local Dockerfile.
 func (e *Extension) IsLocalInstalled() bool {
 	return e.InstallSource == "local"
+}
+
+// IsGitPinned returns true if this extension was installed from a pinned git commit.
+func (e *Extension) IsGitPinned() bool {
+	return e.Repo != "" && e.Commit != ""
 }
 
 // sanitizeURL validates that a URL uses an allowed scheme (http or https).
