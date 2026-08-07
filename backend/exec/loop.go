@@ -943,6 +943,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			// Persist assistant message BEFORE tool calls so DB ordering matches LLM output order
 			msgCountBefore := len(lc.messages)
 			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:msgCountBefore], assistantText, lc.reasoningContent.String())
+			logStatsSpeed(setup.task.ID, activeModel, promptTokens-cacheTokens, predictedTokens, promptMs, predictedMs)
 			assistantCreatedAt := time.Now().UTC()
 			assistantMsgID := uuid.New().String()
 			te.store.CreateTaskMessage(&types.TaskMessage{
@@ -1348,6 +1349,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			}
 			lc.messages = append(lc.messages, assistantMsg)
 			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages[:len(lc.messages)-1], assistantText, lc.reasoningContent.String())
+			logStatsSpeed(setup.task.ID, activeModel, promptTokens-cacheTokens, predictedTokens, promptMs, predictedMs)
 			duration := time.Since(lc.callStartTime).Milliseconds()
 			assistantMsgID := uuid.New().String()
 			te.store.CreateTaskMessage(&types.TaskMessage{
@@ -1441,6 +1443,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 			// Persist the reasoning-only assistant message
 			promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage, lc.messages, "", reasoningText)
+			logStatsSpeed(setup.task.ID, activeModel, promptTokens-cacheTokens, predictedTokens, promptMs, predictedMs)
 			te.store.CreateTaskMessage(&types.TaskMessage{
 				ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "assistant",
 				Content: "", ReasoningContent: reasoningText,
@@ -1664,19 +1667,32 @@ func computeStats(usage *types.ChatUsage, messages []types.ChatMessage, assistan
 	return 0, 0, 0, 0, 0
 }
 
+// logStatsSpeed logs prompt and generation speeds for a turn.
+func logStatsSpeed(taskID, model string, processedTokens, predictedTokens, promptMs, predictedMs int) {
+	var promptTps, genTps float64
+	if promptMs > 0 {
+		promptTps = float64(processedTokens) * 1000.0 / float64(promptMs)
+	}
+	if predictedMs > 0 {
+		genTps = float64(predictedTokens) * 1000.0 / float64(predictedMs)
+	}
+	log.Printf("[stats] task=%s model=%s prompt=%.0f t/s, gen=%.0f t/s (prompt_tokens=%d, gen_tokens=%d, prompt_ms=%d, gen_ms=%d)",
+		taskID, model, promptTps, genTps, processedTokens, predictedTokens, promptMs, predictedMs)
+}
+
 // extractFilesFromBashCommand parses a bash command and extracts file paths that
 // are likely being written to or modified. Only returns paths with known code file
 // extensions (e.g., .go, .ts, .py, .rs) — the triggerLSPDiagnostics function
 // further filters by installed LSP extensions.
 //
 // Handles common patterns:
-//  - Shell redirections: > file, >> file
-//  - echo/cat/printf ... > file
-//  - tee file
-//  - sed -i 's/...' file
-//  - mv old new (returns new)
-//  - cp src dest (returns dest)
-//  - touch file
+//   - Shell redirections: > file, >> file
+//   - echo/cat/printf ... > file
+//   - tee file
+//   - sed -i 's/...' file
+//   - mv old new (returns new)
+//   - cp src dest (returns dest)
+//   - touch file
 func extractFilesFromBashCommand(cmd string) []string {
 	var files []string
 	seen := make(map[string]bool)

@@ -167,6 +167,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	req.Header.Set("Content-Type", "application/json")
 	c.setAuthHeader(req)
 
+	callStart := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("post to llama: %w", err)
@@ -185,6 +186,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	}
 
 	var usage *types.ChatUsage
+	var firstTokenTime time.Time
 	scanner := bufio.NewScanner(resp.Body)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
@@ -245,6 +247,9 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		}
 
 		for _, choice := range cr.Choices {
+			if firstTokenTime.IsZero() && hasContent(choice) {
+				firstTokenTime = time.Now()
+			}
 			cb(choice)
 		}
 	}
@@ -254,7 +259,15 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		return usage, context.DeadlineExceeded
 	}
 
+	// Estimate missing timing from wall-clock.
 	if usage != nil {
+		streamEnd := time.Now()
+		if usage.PromptMs == 0 && !firstTokenTime.IsZero() {
+			usage.PromptMs = firstTokenTime.Sub(callStart).Milliseconds()
+		}
+		if usage.PredictedMs == 0 && !firstTokenTime.IsZero() {
+			usage.PredictedMs = streamEnd.Sub(firstTokenTime).Milliseconds()
+		}
 		log.Printf("[llama] final usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d",
 			usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
 	} else {
@@ -271,8 +284,8 @@ type ThinkingParams struct {
 
 // ChatCompletionOptions holds optional parameters for ChatCompletion.
 type ChatCompletionOptions struct {
-	MaxTokens *int             // MaxTokens caps the response. nil = server default.
-	Thinking  *ThinkingParams  // Thinking overrides reasoning params. nil = client's reasoningEffort.
+	MaxTokens *int            // MaxTokens caps the response. nil = server default.
+	Thinking  *ThinkingParams // Thinking overrides reasoning params. nil = client's reasoningEffort.
 }
 
 // ChatCompletion sends a non-streaming chat completion request and returns the usage data and full text response.
@@ -328,6 +341,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 	req.Header.Set("Content-Type", "application/json")
 	c.setAuthHeader(req)
 
+	callStart := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("post to llama: %w", err)
@@ -376,11 +390,37 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 	}
 
 	if usage != nil {
+		// Estimate missing timing from wall-clock (gen ~5x slower per token than prompt).
+		totalDuration := time.Since(callStart).Milliseconds()
+		if usage.PromptMs == 0 && usage.PredictedMs == 0 && totalDuration > 0 {
+			promptWeight := float64(usage.PromptTokens)
+			genWeight := float64(usage.CompletionTokens) * 5
+			if promptWeight+genWeight > 0 {
+				usage.PromptMs = int64(float64(totalDuration) * promptWeight / (promptWeight + genWeight))
+				usage.PredictedMs = totalDuration - usage.PromptMs
+			}
+		}
 		log.Printf("[llama] non-streaming usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d",
 			usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
 	}
 
 	return usage, strings.TrimSpace(*content), nil
+}
+
+// hasContent reports whether the delta carries output (text, reasoning, or tool calls).
+func hasContent(choice types.ChatChoice) bool {
+	if choice.Delta.ReasoningContent != nil && *choice.Delta.ReasoningContent != "" {
+		return true
+	}
+	if choice.Delta.Content != nil && *choice.Delta.Content != "" {
+		return true
+	}
+	for _, tc := range choice.Delta.ToolCalls {
+		if tc.ID != "" || tc.Function.Name != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // MergeToolCalls merges streaming tool call deltas by index into complete tool calls.
