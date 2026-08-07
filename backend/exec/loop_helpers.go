@@ -288,10 +288,10 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	hintIdx := len(*messages)
 	*messages = append(*messages, types.ChatMessage{Role: "user", Content: hint})
 	detector.recordHintIndex(hintIdx)
-	// Persist the hint as a visible user message so it appears in the chat UI
+
 	te.store.CreateTaskMessage(&types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "user",
-		Content: hint, CreatedAt: time.Now().UTC(),
+		Content: hint, IsLoopHint: true, CreatedAt: time.Now().UTC(),
 	})
 	// Preserve loopStreak across hint cycles so consecutive loops accumulate.
 	// A valid turn (via recordTurn) resets it to 0.
