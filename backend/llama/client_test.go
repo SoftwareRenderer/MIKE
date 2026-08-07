@@ -164,3 +164,268 @@ func TestChatStream_ProductionTimedOutRace(t *testing.T) {
 	listener.Close()
 	wg.Wait()
 }
+
+// TestHasContent verifies the hasContent helper detects meaningful token deltas.
+func TestHasContent(t *testing.T) {
+	tests := []struct {
+		name   string
+		choice types.ChatChoice
+		want   bool
+	}{
+		{
+			name: "reasoning content",
+			choice: types.ChatChoice{
+				Delta: types.ChatChoiceDelta{
+					ReasoningContent: ptrStr("thinking..."),
+				},
+			},
+			want: true,
+		},
+		{
+			name: "text content",
+			choice: types.ChatChoice{
+				Delta: types.ChatChoiceDelta{
+					Content: ptrStr("hello"),
+				},
+			},
+			want: true,
+		},
+		{
+			name: "tool call with id and name",
+			choice: types.ChatChoice{
+				Delta: types.ChatChoiceDelta{
+					ToolCalls: []types.ChatToolCall{
+						{Index: 0, ID: "call_abc", Function: struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						}{Name: "read_file"}, Type: "function"},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "finish reason only",
+			choice: types.ChatChoice{
+				Delta:        types.ChatChoiceDelta{},
+				FinishReason: "stop",
+			},
+			want: false,
+		},
+		{
+			name: "empty choice",
+			choice: types.ChatChoice{
+				Delta: types.ChatChoiceDelta{},
+			},
+			want: false,
+		},
+		{
+			name: "empty reasoning content",
+			choice: types.ChatChoice{
+				Delta: types.ChatChoiceDelta{
+					ReasoningContent: ptrStr(""),
+				},
+			},
+			want: false,
+		},
+		{
+			name: "tool call with only id",
+			choice: types.ChatChoice{
+				Delta: types.ChatChoiceDelta{
+					ToolCalls: []types.ChatToolCall{
+						{Index: 0, ID: "call_abc", Function: struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						}{}, Type: "function"},
+					},
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasContent(tt.choice)
+			if got != tt.want {
+				t.Errorf("hasContent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func ptrStr(s string) *string {
+	return &s
+}
+
+// TestChatStream_WallClockTimingFallback verifies that ChatStream calculates
+// prompt_ms and predicted_ms from wall-clock when the provider doesn't supply Timings.
+func TestChatStream_WallClockTimingFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("no flusher")
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		// Simulate prompt processing delay (no Timings sent)
+		time.Sleep(100 * time.Millisecond)
+
+		// Send a few tokens with small delays
+		for i := 0; i < 3; i++ {
+			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n"))
+			flusher.Flush()
+			time.Sleep(20 * time.Millisecond)
+		}
+
+		// Send usage without timings (simulates a provider that doesn't send Timings)
+		w.Write([]byte("data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":3,\"total_tokens\":103}}\n\n"))
+		flusher.Flush()
+
+		w.Write([]byte("data: [DONE]\n\n"))
+		flusher.Flush()
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	c := NewLlamaClient(server.URL, "test-model", "off", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	usage, err := c.ChatStream(ctx, nil, nil, func(choice types.ChatChoice) {}, nil)
+	if err != nil {
+		t.Fatalf("ChatStream error: %v", err)
+	}
+	if usage == nil {
+		t.Fatal("expected usage, got nil")
+	}
+
+	// Token counts should come from Usage
+	if usage.PromptTokens != 100 {
+		t.Errorf("prompt_tokens = %d, want 100", usage.PromptTokens)
+	}
+	if usage.CompletionTokens != 3 {
+		t.Errorf("completion_tokens = %d, want 3", usage.CompletionTokens)
+	}
+
+	// Timing should be calculated from wall-clock since provider didn't send Timings
+	// Prompt time should be ~100ms (the initial delay before first token)
+	if usage.PromptMs < 80 {
+		t.Errorf("prompt_ms = %d, expected ~100ms (got too low)", usage.PromptMs)
+	}
+	if usage.PromptMs > 200 {
+		t.Errorf("prompt_ms = %d, expected ~100ms (got too high)", usage.PromptMs)
+	}
+
+	// Gen time should be ~60ms (3 tokens * 20ms each)
+	if usage.PredictedMs < 40 {
+		t.Errorf("predicted_ms = %d, expected ~60ms (got too low)", usage.PredictedMs)
+	}
+	if usage.PredictedMs > 200 {
+		t.Errorf("predicted_ms = %d, expected ~60ms (got too high)", usage.PredictedMs)
+	}
+}
+
+// TestChatStream_TimingsFromProvider verifies that provider-supplied Timings
+// take precedence over wall-clock estimation.
+func TestChatStream_TimingsFromProvider(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("no flusher")
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		// Send a token with timings (llama.cpp format)
+		w.Write([]byte("data: {\"timings\":{\"prompt_n\":100,\"prompt_ms\":50.0,\"predicted_n\":1,\"predicted_ms\":30.0,\"cache_n\":0},\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\n"))
+		flusher.Flush()
+
+		// Send final usage with timings
+		w.Write([]byte("data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":1,\"total_tokens\":101},\"timings\":{\"prompt_n\":100,\"prompt_ms\":50.0,\"predicted_n\":1,\"predicted_ms\":30.0,\"cache_n\":0}}\n\n"))
+		flusher.Flush()
+
+		w.Write([]byte("data: [DONE]\n\n"))
+		flusher.Flush()
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	c := NewLlamaClient(server.URL, "test-model", "off", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	usage, err := c.ChatStream(ctx, nil, nil, func(choice types.ChatChoice) {}, nil)
+	if err != nil {
+		t.Fatalf("ChatStream error: %v", err)
+	}
+	if usage == nil {
+		t.Fatal("expected usage, got nil")
+	}
+
+	// Provider-supplied timings should be preserved (not overwritten by wall-clock)
+	if usage.PromptMs != 50 {
+		t.Errorf("prompt_ms = %d, want 50 (from provider Timings)", usage.PromptMs)
+	}
+	if usage.PredictedMs != 30 {
+		t.Errorf("predicted_ms = %d, want 30 (from provider Timings)", usage.PredictedMs)
+	}
+}
+
+// TestChatCompletion_WallClockTimingFallback verifies that ChatCompletion calculates
+// prompt_ms and predicted_ms from wall-clock when the provider doesn't supply Timings.
+func TestChatCompletion_WallClockTimingFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate processing delay
+		time.Sleep(100 * time.Millisecond)
+
+		w.Header().Set("Content-Type", "application/json")
+		// Response with usage but NO timings (simulates provider without Timings)
+		w.Write([]byte(`{
+			"choices": [{"message": {"content": "hello world"}, "finish_reason": "stop"}],
+			"usage": {"prompt_tokens": 50, "completion_tokens": 2, "total_tokens": 52}
+		}`))
+	}))
+	defer server.Close()
+
+	c := NewLlamaClient(server.URL, "test-model", "off", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	usage, content, err := c.ChatCompletion(ctx, nil, nil)
+	if err != nil {
+		t.Fatalf("ChatCompletion error: %v", err)
+	}
+	if content != "hello world" {
+		t.Errorf("content = %q, want %q", content, "hello world")
+	}
+	if usage == nil {
+		t.Fatal("expected usage, got nil")
+	}
+
+	// Token counts should come from Usage
+	if usage.PromptTokens != 50 {
+		t.Errorf("prompt_tokens = %d, want 50", usage.PromptTokens)
+	}
+	if usage.CompletionTokens != 2 {
+		t.Errorf("completion_tokens = %d, want 2", usage.CompletionTokens)
+	}
+
+	// Timing should be estimated from wall-clock (~100ms total)
+	// With 5:1 ratio: prompt ~50/(50+2*5) * 100 = ~83ms, gen ~17ms
+	if usage.PromptMs < 50 {
+		t.Errorf("prompt_ms = %d, expected ~80ms (got too low)", usage.PromptMs)
+	}
+	if usage.PredictedMs < 5 {
+		t.Errorf("predicted_ms = %d, expected ~15ms (got too low)", usage.PredictedMs)
+	}
+	// Total should be close to 100ms
+	totalMs := usage.PromptMs + usage.PredictedMs
+	if totalMs < 80 || totalMs > 200 {
+		t.Errorf("total_ms = %d, expected ~100ms", totalMs)
+	}
+}
