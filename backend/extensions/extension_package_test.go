@@ -7,22 +7,24 @@ import (
 	"testing"
 )
 
-// findExtensionsDir locates the extensions/ directory relative to the repo root.
-// Tests run from the module root, so we walk up from the package dir.
+// findExtensionsDir locates the published-extensions repo (../MIKE-extensions)
+// relative to the repo root. Tests run from the module root, so we walk up from
+// the package dir. An env override (MIKE_EXTENSIONS) takes precedence.
 func findExtensionsDir(t *testing.T) string {
 	t.Helper()
-	// Package is at backend/extensions/, repo root is ../../..  from here
+	// Package is at backend/extensions/; the sibling repo is ../../../MIKE-extensions
 	candidates := []string{
-		"../../extensions",                              // from backend/extensions/
-		"../../../../extensions",                        // deeper nesting
 		filepath.Join(os.Getenv("MIKE_EXTENSIONS"), ""), // env override
+		"../../../MIKE-extensions",                       // sibling repo from backend/extensions/
 	}
 	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
+		if c != "" {
+			if _, err := os.Stat(c); err == nil {
+				return c
+			}
 		}
 	}
-	t.Skip("extensions/ directory not found (skip if running outside repo root)")
+	t.Skip("MIKE-extensions directory not found (skip if running outside repo root)")
 	return ""
 }
 
@@ -148,41 +150,21 @@ func TestExtensionPackage_TypescriptLanguageServer_RegistryEntry(t *testing.T) {
 	if found.DisplayName == "" {
 		t.Error("DisplayName is empty")
 	}
-	if found.DockerfileURL == "" {
-		t.Error("DockerfileURL is empty")
+
+	// Git-pinned source fields must be present and valid.
+	if found.Author == "" {
+		t.Error("Author is empty")
 	}
-	if found.ManifestURL == "" {
-		t.Error("ManifestURL is empty")
+	if found.Repo == "" {
+		t.Error("Repo is empty")
 	}
-
-	// Verify paths reference the correct subdirectory
-	if found.DockerfileURL != "lsp/typescript-language-server/Dockerfile" {
-		t.Errorf("DockerfileURL = %q, want %q", found.DockerfileURL, "lsp/typescript-language-server/Dockerfile")
-	}
-	if found.ManifestURL != "lsp/typescript-language-server/manifest.json" {
-		t.Errorf("ManifestURL = %q, want %q", found.ManifestURL, "lsp/typescript-language-server/manifest.json")
-	}
-}
-
-func TestExtensionPackage_TypescriptLanguageServer_ResolveURLs(t *testing.T) {
-	extDir := findExtensionsDir(t)
-	registryPath := filepath.Join(extDir, "registry.json")
-
-	// Resolve relative URLs against the registry file
-	baseURL := "file://" + registryPath
-
-	manifestURL := ResolveURL(baseURL, "lsp/typescript-language-server/manifest.json")
-	dockerfileURL := ResolveURL(baseURL, "lsp/typescript-language-server/Dockerfile")
-
-	// Verify resolved paths exist
-	manifestPath := manifestURL[len("file://"):]
-	if _, err := os.Stat(manifestPath); err != nil {
-		t.Errorf("Resolved manifest path %q does not exist: %v", manifestPath, err)
+	if !commitHashRe.MatchString(found.Commit) {
+		t.Errorf("Commit %q is not a valid SHA-1/SHA-256 hex hash", found.Commit)
 	}
 
-	dockerfilePath := dockerfileURL[len("file://"):]
-	if _, err := os.Stat(dockerfilePath); err != nil {
-		t.Errorf("Resolved Dockerfile path %q does not exist: %v", dockerfilePath, err)
+	// Verify the subdirectory references the correct repo path.
+	if found.Subdir != "lsp/typescript-language-server" {
+		t.Errorf("Subdir = %q, want %q", found.Subdir, "lsp/typescript-language-server")
 	}
 }
 

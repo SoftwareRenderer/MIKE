@@ -46,6 +46,22 @@ describe('UIInjector CSS extension handling', () => {
         };
     }
 
+    it('resolves a relative css_url against the author/name base', () => {
+        const ext = makeCSSExtension('styles.css');
+        ext.manifest.author = 'softwarerenderer';
+        injector.registerFromExtensions([ext]);
+        const link = document.getElementById('kanban-theme-stylesheet');
+        expect(link?.getAttribute('href')).toBe('/extensions/softwarerenderer/test-theme/styles.css');
+    });
+
+    it('slugifies the author in the resolved css_url', () => {
+        const ext = makeCSSExtension('./styles.css');
+        ext.manifest.author = 'Software Renderer';
+        injector.registerFromExtensions([ext]);
+        const link = document.getElementById('kanban-theme-stylesheet');
+        expect(link?.getAttribute('href')).toBe('/extensions/software-renderer/test-theme/styles.css');
+    });
+
     it('injects a <link> tag when a CSS extension has css_url', () => {
         injector.registerFromExtensions([makeCSSExtension('/extensions/mike-light/styles.css')]);
 

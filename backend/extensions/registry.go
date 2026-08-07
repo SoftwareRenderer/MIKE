@@ -59,9 +59,11 @@ func ResolveURL(base, target string) string {
 	return resolved.String()
 }
 
-// fetchContent fetches content from a URL, supporting both HTTP(S) and file:// schemes.
+// fetchContent fetches content from a URL, supporting both HTTP(S) and file://
+// schemes. Bare filesystem paths (no scheme) are treated as local files, with
+// relative paths resolved against the working directory.
 func (rc *RegistryClient) fetchContent(url string) (io.ReadCloser, error) {
-	if strings.HasPrefix(url, "file://") {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		path := strings.TrimPrefix(url, "file://")
 		// Resolve relative to working directory
 		if !filepath.IsAbs(path) {
@@ -238,6 +240,153 @@ func CompareVersion(a, b string) int {
 // UpdateAvailable returns true if the remote version is newer than the installed version.
 func UpdateAvailable(installed, remote string) bool {
 	return CompareVersion(installed, remote) < 0
+}
+
+// commitHashRe matches a full hex commit hash: 40-char (SHA-1) or 64-char
+// (SHA-256). Both SHA-1 and SHA-256 object-format repos are supported, so both
+// hash lengths are accepted.
+var commitHashRe = regexp.MustCompile(`^[0-9a-fA-F]{40}|[0-9a-fA-F]{64}$`)
+
+// validateGitSource validates a git repo URL and pinned commit for the
+// commit-verified install path. The repo must not start with a dash (to
+// prevent it being parsed as a git flag) and the commit must be a full 40-char
+// SHA-1 or 64-char SHA-256 hex hash so only an exact, content-addressed
+// revision is installed.
+func validateGitSource(repo, commit string) error {
+	if repo == "" {
+		return fmt.Errorf("repo is required")
+	}
+	if strings.HasPrefix(repo, "-") {
+		return fmt.Errorf("repo must not start with a dash: %q", repo)
+	}
+	if !commitHashRe.MatchString(commit) {
+		return fmt.Errorf("commit must be a full 40-char SHA-1 or 64-char SHA-256 hex hash: %q", commit)
+	}
+	return nil
+}
+
+// validateSubdir rejects paths that would escape the checkout root.
+func validateSubdir(subdir string) error {
+	if subdir == "" {
+		return nil
+	}
+	clean := filepath.Clean(subdir)
+	if strings.HasPrefix(clean, "..") || strings.HasPrefix(clean, "/") || filepath.IsAbs(clean) {
+		return fmt.Errorf("invalid subdir: %q", subdir)
+	}
+	return nil
+}
+
+// CheckoutExtension checks out exactly the pinned commit of a git repository
+// and materializes its extension subdirectory into destDir.
+//
+// The checkout is verified cryptographically: after a shallow fetch at the
+// pinned SHA, `git rev-parse HEAD` must equal the pinned commit. Only if the
+// verification passes is the content copied to destDir, so the installed files
+// are guaranteed to be the vetted commit's bytes. Any mismatch or fetch failure
+// returns an error and nothing is written.
+func (rc *RegistryClient) CheckoutExtension(repo, commit, subdir, destDir string) error {
+	if err := validateGitSource(repo, commit); err != nil {
+		return err
+	}
+	if err := validateSubdir(subdir); err != nil {
+		return err
+	}
+
+	tmp, err := os.MkdirTemp("", "kanban-ext-checkout-*")
+	if err != nil {
+		return fmt.Errorf("create checkout dir: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	// A full clone (no checkout) auto-detects the repository's object format
+	// (SHA-1 or SHA-256) and fetches every ref, so any commit reachable from a
+	// branch or tag is present. The pinned commit must therefore be on a
+	// permanent ref.
+	srcDir := filepath.Join(tmp, "src")
+	cloneCmd := exec.Command("git", "clone", "-q", "--no-checkout", repo, srcDir)
+	if out, err := cloneCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("clone %s: %w (output: %s)", repo, err, strings.TrimSpace(string(out)))
+	}
+
+	checkoutCmd := exec.Command("git", "-C", srcDir, "checkout", "-q", commit)
+	if out, err := checkoutCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("checkout pinned commit %s: %w (output: %s)", commit, err, strings.TrimSpace(string(out)))
+	}
+
+	// Verify the checked-out commit is exactly the pinned one before copying.
+	out, err := exec.Command("git", "-C", srcDir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return fmt.Errorf("verify checkout: %w", err)
+	}
+	head := strings.TrimSpace(string(out))
+	if !strings.EqualFold(head, commit) {
+		return fmt.Errorf("commit verification failed: checkout resolved to %s, want %s", head, commit)
+	}
+
+	src := srcDir
+	if subdir != "" {
+		src = filepath.Join(srcDir, subdir)
+	}
+
+	// Clear any existing install before copying the freshly verified checkout.
+	// This runs only after verification succeeded, so a failed/malicious checkout
+	// never touches the destination. Removing first also drops stale files that
+	// were deleted in the newly vetted revision.
+	if err := os.RemoveAll(destDir); err != nil {
+		return fmt.Errorf("clear existing install %s: %w", destDir, err)
+	}
+	if err := copyDir(src, destDir); err != nil {
+		return fmt.Errorf("materialize extension: %w", err)
+	}
+	return nil
+}
+
+// copyDir recursively copies the contents of src into dst, creating dst if
+// needed. Symbolic links are skipped (not followed, not recreated) to avoid
+// escaping the extension directory.
+func copyDir(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", src)
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		// Skip the git metadata directory. It exists when src is the root of a
+		// checked-out repo (e.g. a blank subdir), and installing it would drag
+		// the full object store and history into the extension directory.
+		if e.Name() == ".git" {
+			continue
+		}
+		s := filepath.Join(src, e.Name())
+		d := filepath.Join(dst, e.Name())
+		switch {
+		case e.IsDir():
+			if err := copyDir(s, d); err != nil {
+				return err
+			}
+		case e.Type()&os.ModeSymlink != 0:
+			// Skip symlinks — never follow or recreate them.
+		default:
+			data, err := os.ReadFile(s)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(d, data, 0o644); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // StreamBuildOutput builds an image and streams output via a channel.

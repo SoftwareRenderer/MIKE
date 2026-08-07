@@ -2,7 +2,6 @@
     import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv, SchemaProperty } from '$lib/types';
     import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage, streamBuildProgress } from '$lib/api';
     import type { BuildProgressEvent } from '$lib/api';
-    import { getConfig } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
@@ -25,7 +24,6 @@
     let extensions = $state<Extension[]>([]);
     let registryEntries = $state<RegistryEntry[]>([]);
     let updates = $state<ExtensionUpdate[]>([]);
-    let registryUrl = $state('');
     let activeView = $state<'installed' | 'browse'>('installed');
     let loading = $state(false);
     let loadingRegistry = $state(false);
@@ -212,21 +210,11 @@
         loadingRegistry = true;
         error = '';
         try {
-            registryEntries = await getRegistryIndex(registryUrl || undefined);
+            registryEntries = await getRegistryIndex();
         } catch (e: any) {
             error = e.message || 'Failed to load registry';
         } finally {
             loadingRegistry = false;
-        }
-    }
-
-    // Load config for registry URL
-    async function loadConfig() {
-        try {
-            const config = await getConfig();
-            registryUrl = config.registry_url || '';
-        } catch {
-            // Ignore config load errors
         }
     }
 
@@ -237,7 +225,7 @@
         installing = new Set(installing).add(name);
         buildProgress = { ext: name, progress: 0, message: 'Installing...' };
         try {
-            await installExtension(name, registryUrl || undefined);
+            await installExtension(name);
             buildProgress = { ext: name, progress: 100, message: 'Installed!' };
             await loadExtensions();
             setTimeout(() => buildProgress = null, 2000);
@@ -304,7 +292,7 @@
         loadingUpdates = true;
         error = '';
         try {
-            updates = await checkUpdates(registryUrl || undefined);
+            updates = await checkUpdates();
         } catch (e: any) {
             error = e.message || 'Failed to check for updates';
         } finally {
@@ -455,7 +443,6 @@
     // Initialize on mount
     $effect(() => {
         (async () => {
-            await loadConfig();
             await loadExtensions();
         })();
     });
@@ -475,7 +462,7 @@
     {#if error}
         <div class="error-banner" role="button" tabindex="0" onclick={() => error = ''} onkeydown={(e) => e.key === 'Enter' && (error = '')}>
             {error}
-            <button class="dismiss" aria-label="Dismiss">\u2715</button>
+            <button class="dismiss" aria-label="Dismiss">&#x2715;</button>
         </div>
     {/if}
 
@@ -865,23 +852,6 @@
     <!-- Browse View -->
     {#if activeView === 'browse'}
         <div class="browse-view">
-            <!-- Registry URL -->
-            <div class="registry-url-row">
-                <label class="field-label" for="registry-url">Registry URL</label>
-                <div class="url-input-row">
-                    <input
-                        id="registry-url"
-                        type="url"
-                        placeholder="https://registry.example.com/index.json"
-                        value={registryUrl}
-                        oninput={(e) => registryUrl = (e.target as HTMLInputElement).value}
-                        class="url-input"
-                    />
-                    <button class="btn btn-secondary" onclick={loadRegistry} disabled={loadingRegistry}>
-                        {loadingRegistry ? 'Loading...' : 'Refresh'}
-                    </button>
-                </div>
-            </div>
 
             <!-- Registry List -->
             {#if loadingRegistry}
@@ -1014,8 +984,12 @@
     }
 
     .error-banner {
-        background: rgba(248, 81, 73, 0.15);
-        border: 1px solid rgba(248, 81, 73, 0.3);
+        position: sticky;
+        top: 0;
+        z-index: 11;
+        background: var(--color-surface-1);
+        border: 1px solid rgba(248, 81, 73, 0.4);
+        border-left: 4px solid var(--color-status-red);
         border-radius: 6px;
         padding: 0.75rem 1rem;
         color: var(--color-status-red);
@@ -1023,6 +997,7 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     }
 
     .dismiss {
@@ -1651,36 +1626,11 @@
         to { transform: rotate(360deg); }
     }
 
-    /* Registry URL */
-    .registry-url-row {
-        margin-bottom: 1rem;
-    }
-
     .field-label {
         display: block;
         font-size: 0.8rem;
         color: var(--color-text-tertiary);
         margin-bottom: 0.25rem;
-    }
-
-    .url-input-row {
-        display: flex;
-        gap: 0.5rem;
-    }
-
-    .url-input {
-        flex: 1;
-        background: var(--color-bg-input);
-        border: 1px solid var(--color-border-subtle);
-        border-radius: 6px;
-        padding: 0.5rem 0.75rem;
-        color: var(--color-text-primary);
-        font-size: 0.875rem;
-    }
-
-    .url-input:focus {
-        outline: none;
-        border-color: var(--color-accent);
     }
 
     /* Empty state */
