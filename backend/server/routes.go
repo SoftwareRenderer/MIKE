@@ -53,7 +53,6 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/extensions/registry", s.extHandler.HandleRegistryIndex)
 	s.mux.HandleFunc("POST /api/extensions/install", s.extHandler.HandleInstall)
 	s.mux.HandleFunc("GET /api/extensions/check-updates", s.extHandler.HandleCheckUpdates)
-	s.mux.HandleFunc("GET /api/extensions/build-progress", s.extHandler.HandleBuildProgress)
 	s.mux.HandleFunc("GET /api/extensions/{id}/logs", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleSandboxLogs(w, r, r.PathValue("id"))
 	})
@@ -148,7 +147,6 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/git/log", s.gitHandler.HandleTaskLog)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/git/branches", s.gitHandler.HandleTaskBranches)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/git/checkout", s.gitHandler.HandleTaskCheckout)
-
 
 	// Frontend
 	if s.frontendDist != "" {
