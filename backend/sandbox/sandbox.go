@@ -978,6 +978,7 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 func ProjectImageName(projectName string) string {
 	safeName := strings.ReplaceAll(projectName, " ", "-")
 	safeName = strings.ReplaceAll(safeName, "/", "-")
+    safeName = strings.ToLower(safeName)
 	if ProjectImagePrefix == "" {
 		return safeName
 	}
