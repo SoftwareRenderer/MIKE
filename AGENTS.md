@@ -109,7 +109,7 @@ CLI flags take priority over environment variables.
 2. **Run tests** — Confirm tests fail (red phase)
 3. **Implement feature** — Write minimal code to make tests pass
 4. **Run tests** — Confirm tests pass (green phase)
-5. **Refactor** — Clean up code while keeping tests passing
+5. **Refactor** — Clean up code while keeping tests passing. Keep comments concise.
 6. **Update documentation** — Update AGENTS.md if new patterns are introduced
 
 ### Test-First Guidelines
