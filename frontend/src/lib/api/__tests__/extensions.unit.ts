@@ -188,6 +188,50 @@ describe('extensions API', () => {
         await expect(collect()).rejects.toThrow('install already in progress: gopls');
     });
 
+    it('installExtension surfaces a clear error when the response is not SSE', async () => {
+        // A mismatched backend returning a plain body instead of an SSE stream.
+        mockFetch.mockImplementation(async (url: any) => {
+            if (typeof url === 'string' && url.includes('/api/auth/session')) {
+                return { ok: true, status: 200, json: async () => ({ authenticated: true, csrf_token: 'test-token' }) };
+            }
+            return {
+                ok: true,
+                status: 200,
+                headers: new Headers({ 'Content-Type': 'application/json' }),
+                text: async () => '{"error":"boom"}',
+            };
+        });
+
+        const { installExtension } = await import('$lib/api/extensions');
+        const collect = async () => {
+            for await (const _ of installExtension('gopls')) { /* noop */ }
+        };
+        await expect(collect()).rejects.toThrow(/Unexpected response from \/extensions\/install/);
+    });
+
+    it('installExtension throws when the stream ends without a done event', async () => {
+        const encoder = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(encoder.encode('data: ' + JSON.stringify({ extension: 'gopls', progress: 50, message: 'Building...', done: false }) + '\n\n'));
+                controller.close();
+            },
+        });
+
+        mockFetch.mockImplementation(async (url: any) => {
+            if (typeof url === 'string' && url.includes('/api/auth/session')) {
+                return { ok: true, status: 200, json: async () => ({ authenticated: true, csrf_token: 'test-token' }) };
+            }
+            return { ok: true, status: 200, headers: new Headers({ 'Content-Type': 'text/event-stream' }), body };
+        });
+
+        const { installExtension } = await import('$lib/api/extensions');
+        const collect = async () => {
+            for await (const _ of installExtension('gopls')) { /* noop */ }
+        };
+        await expect(collect()).rejects.toThrow('Operation ended before reporting completion');
+    });
+
     it('checkUpdates returns available updates', async () => {
         const updates = [
             { id: 'gopls-1', name: 'gopls', current_version: '1.0.0', available_version: '2.0.0' },
