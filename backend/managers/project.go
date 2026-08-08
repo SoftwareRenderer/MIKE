@@ -180,8 +180,18 @@ func (h *ProjectHandler) HandleStats(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// applyPricing computes cost (API + electricity) for each model in stats.
-// Agent providers skip power/electricity — they report cost directly.
+// findModelConfig returns the model config matching name, or nil.
+func findModelConfig(p types.Provider, modelName string) *types.ModelConfig {
+	for i := range p.Models {
+		if p.Models[i].Name == modelName {
+			return &p.Models[i]
+		}
+	}
+	return nil
+}
+
+// applyPricing computes cost per model: per-model overrides win, provider values fall back.
+// Agent providers report their own cost directly.
 func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 	cfg, err := h.configStore.GetConfig()
 	if err != nil {
@@ -207,23 +217,49 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 			continue
 		}
 
-		// Use cache_write_price for non-cached input if set, else input_price
+		model := findModelConfig(p, m.ModelName)
+
+		// Effective pricing: model override, else provider default.
 		inputRate := p.InputPrice
-		if p.CacheWritePrice > 0 {
-			inputRate = p.CacheWritePrice
+		cacheRead := p.CacheReadPrice
+		outputRate := p.OutputPrice
+		cacheWrite := p.CacheWritePrice
+		if model != nil {
+			if model.InputPrice != nil {
+				inputRate = *model.InputPrice
+			}
+			if model.CacheReadPrice != nil {
+				cacheRead = *model.CacheReadPrice
+			}
+			if model.OutputPrice != nil {
+				outputRate = *model.OutputPrice
+			}
+			if model.CacheWritePrice != nil {
+				cacheWrite = *model.CacheWritePrice
+			}
+		}
+
+		// Use cache_write_price for non-cached input if set, else input_price
+		if cacheWrite > 0 {
+			inputRate = cacheWrite
 		}
 
 		apiCost := (float64(m.ProcessedTokens)*inputRate +
-			float64(m.CacheTokens)*p.CacheReadPrice +
-			float64(m.GeneratedTokens)*p.OutputPrice) / 1_000_000
+			float64(m.CacheTokens)*cacheRead +
+			float64(m.GeneratedTokens)*outputRate) / 1_000_000
 
 		m.Cost = apiCost
 		stats.TotalCost += apiCost
 
-		// Power consumption and electricity cost (LLM providers only)
-		if p.EffectiveKind() == types.ProviderKindLLM && p.PowerConsumptionW > 0 && m.PredictedMs > 0 {
+		// Power consumption and electricity cost (LLM providers only).
+		// Per-model power overrides the provider-level value when set.
+		powerW := p.PowerConsumptionW
+		if model != nil && model.PowerConsumptionW != nil {
+			powerW = *model.PowerConsumptionW
+		}
+		if p.EffectiveKind() == types.ProviderKindLLM && powerW > 0 && m.PredictedMs > 0 {
 			// predicted_ms is cumulative generation time; convert ms to hours
-			powerKwh := p.PowerConsumptionW * float64(m.PredictedMs) / 3_600_000_000
+			powerKwh := powerW * float64(m.PredictedMs) / 3_600_000_000
 			m.PowerKwh = powerKwh
 			stats.TotalPowerKwh += powerKwh
 
