@@ -1,5 +1,5 @@
 import type { Config, Provider } from '$lib/types';
-import { isAgentProvider } from '$lib/types';
+import { isAgentProvider, AGENT_URL_PREFIX } from '$lib/types';
 
 /** A resolved provider/model pair: the provider, the selected model name, and its URL. */
 export interface ResolvedPair {
@@ -14,22 +14,36 @@ export function getModelName(m: string | { name: string; reasoning_effort?: stri
 }
 
 /**
- * Resolve a configured provider/model pair (worker or utility) from the config.
- * Looks up the provider by name and validates that the model exists in its list.
- * For agent providers the model is the agent's own name and always valid.
- * Returns null provider when the pair cannot be resolved.
+ * The reference string for a provider: its stable integer ID (LLM) or name (agent).
  */
-export function resolvePair(cfg: Config | null, providerName: string, modelName: string): ResolvedPair {
-    if (!cfg || !providerName) {
+export function providerRef(p: { id?: number; name?: string; kind?: string; url?: string }): string {
+    return p.kind === 'agent' || (p.url || '').startsWith(AGENT_URL_PREFIX)
+        ? (p.name || '')
+        : String(p.id ?? 0);
+}
+
+/**
+ * Resolve a configured provider/model pair (worker or utility) from the config.
+ * The reference is the provider's stable integer ID (as a string) for LLM providers,
+ * or the provider name for agent providers. For agent providers the model is the
+ * agent's own name and always valid. Returns null provider when the pair cannot be resolved.
+ */
+export function resolvePair(cfg: Config | null, ref: string, modelName: string): ResolvedPair {
+    if (!cfg || !ref) {
         return { provider: null, modelName: '', url: '' };
     }
-    const provider = cfg.providers.find(p => p.name === providerName) || null;
+    const provider = cfg.providers.find(p => {
+        if (isAgentProvider(p)) return p.name === ref;
+        // LLM providers are referenced by their stable ID; fall back to the
+        // (legacy) name for backward compatibility.
+        return String(p.id) === ref || (!!ref && p.name === ref);
+    }) || null;
     if (!provider) {
         return { provider: null, modelName: '', url: '' };
     }
     // Agent providers don't have a real model list; the model is the agent name.
     if (isAgentProvider(provider)) {
-        return { provider, modelName: providerName, url: provider.url };
+        return { provider, modelName: provider.name || '', url: provider.url };
     }
     if (!modelName) {
         return { provider: null, modelName: '', url: '' };
@@ -51,7 +65,7 @@ export function resolveUtility(cfg: Config | null): ResolvedPair {
 
 /** The subset of provider fields needed to derive a display name. */
 export interface DisplayableProvider {
-    name: string;
+    name?: string;
     url: string;
     kind?: string;
     display_name?: string;

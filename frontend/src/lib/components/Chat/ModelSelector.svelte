@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
-    import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
+    import { getModelName, getProviderDisplayName, providerRef } from '$lib/utils/providers';
 
     interface Props {
         providers: Provider[];
@@ -187,7 +187,7 @@
             modelToSelect = getModelInfo(provider.models[0]);
         }
         if (modelToSelect) {
-            onSelect(provider.name, modelToSelect.name, provider.url, modelToSelect.effort);
+            onSelect(providerRef(provider), modelToSelect.name, provider.url, modelToSelect.effort);
         }
     }
 
@@ -199,11 +199,11 @@
         modelDropdownOpen = false;
         // If agent has static models, select one immediately
         if (agentProvider.models.length > 0) {
-            onSelect(agentProvider.name, getModelName(agentProvider.models[0]), agentProvider.url);
+            onSelect(providerRef(agentProvider), getModelName(agentProvider.models[0]), agentProvider.url);
         } else {
             // No static models — call onSelect with placeholder so parent updates selectedUrl.
             // Real model auto-selected by $effect below when dynamic models are fetched.
-            onSelect(agentProvider.name, getProviderDisplayName(agentProvider, providers), agentProvider.url);
+            onSelect(providerRef(agentProvider), getProviderDisplayName(agentProvider, providers), agentProvider.url);
         }
         // Trigger agent model fetch — auto-select handled by $effect below
         fetchAgentModels(agentProvider.url);
@@ -216,14 +216,14 @@
             if (!agentProvider) return;
             // Fallback: first fetched model (only if nothing valid selected)
             if (!currentModel || currentModel === getProviderDisplayName(agentProvider, providers)) {
-                onSelect(agentProvider.name, agentModels[0].name, agentProvider.url);
+                onSelect(providerRef(agentProvider), agentModels[0].name, agentProvider.url);
             }
         }
     });
 
     function selectModel(modelName: string, reasoningEffort?: string) {
         if (!selectedProvider) return;
-        onSelect(selectedProvider.name, modelName, selectedProvider.url, reasoningEffort);
+        onSelect(providerRef(selectedProvider), modelName, selectedProvider.url, reasoningEffort);
         modelDropdownOpen = false;
     }
 

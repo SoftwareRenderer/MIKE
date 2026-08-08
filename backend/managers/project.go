@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -198,10 +199,12 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 		return // no config, skip pricing
 	}
 
-	// Build provider name -> provider map.
+	// Build provider ID -> provider map.
 	providerMap := make(map[string]types.Provider)
 	for _, p := range cfg.Providers {
-		providerMap[p.Name] = p
+		if p.ID != 0 {
+			providerMap[strconv.Itoa(p.ID)] = p
+		}
 	}
 
 	for i := range stats.ByModel {
