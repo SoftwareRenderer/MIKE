@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch   findProviderByRef,
+} from './helpers';
 
 /**
  * Multi-select in Task View Board Overview sidebar.
@@ -38,7 +39,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
       const res = await fetch('/api/config');
       return res.json();
     });
-    const defaultProvider = config.providers?.find((p: any) => p.name === config.worker_provider);
+    const defaultProvider = findProviderByRef(config.providers || [], config.worker_provider);
 
     // Create first child
     const child1Result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {

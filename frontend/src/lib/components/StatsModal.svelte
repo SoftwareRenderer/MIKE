@@ -1,8 +1,10 @@
 <script lang="ts">
     
-    import type { ProjectStats, ModelStats } from '$lib/types';
+    import { isAgentProvider } from '$lib/types';
+    import type { ProjectStats, ModelStats, Provider } from '$lib/types';
     import { getProjectStats, resetProjectStats } from '$lib/api';
-    import { uiStore } from '$lib/stores';
+    import { uiStore, appStore } from '$lib/stores';
+    import { getProviderDisplayName } from '$lib/utils/providers';
     import BaseModal from './BaseModal.svelte';
 
     let { projectId, onClose }: { projectId: string; onClose: () => void } = $props();
@@ -71,9 +73,18 @@
         return `${(wh * 1000).toFixed(0)} mWh`;
     }
 
+    /** Resolve a provider reference (LLM ID or agent name) to its display name. */
+    function resolveProviderName(ref: string): string {
+        const providers = appStore.config?.providers || [];
+        const p = providers.find((c: Provider) =>
+            isAgentProvider(c) ? c.name === ref : String(c.id) === ref || c.name === ref
+        );
+        return p ? getProviderDisplayName(p, providers) : ref;
+    }
+
     function getTokenLabel(model: ModelStats): string {
         if (model.provider_name) {
-            return `${model.provider_name} / ${model.model_name}`;
+            return `${resolveProviderName(model.provider_name)} / ${model.model_name}`;
         }
         return model.model_name;
     }
