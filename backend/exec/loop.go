@@ -380,7 +380,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	}
 
 	mc := &modelConfig{serverURL: setup.serverURL, modelName: setup.modelName}
-	providerName := te.configStore.GetProviderNameByURL(setup.serverURL)
+	providerName := te.configStore.GetProviderIDByURL(setup.serverURL)
 	reasoningEffort := setup.task.ReasoningEffort
 	if reasoningEffort == "" {
 		reasoningEffort = te.configStore.GetModelReasoningEffort(setup.modelName)

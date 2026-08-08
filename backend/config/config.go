@@ -72,6 +72,88 @@ func filterPersistedProviders(providers []types.Provider) []types.Provider {
 	return filtered
 }
 
+// assignProviderIDs assigns stable integer IDs to LLM providers that don't have one yet.
+// IDs are assigned sequentially starting after the highest existing ID.
+func assignProviderIDs(providers []types.Provider) {
+	maxID := 0
+	for _, p := range providers {
+		if p.ID > maxID {
+			maxID = p.ID
+		}
+	}
+	next := maxID + 1
+	for i := range providers {
+		if providers[i].ID == 0 {
+			providers[i].ID = next
+			next++
+		}
+	}
+}
+
+// MigrateProviderIDs migrates legacy provider configs that stored the provider
+// identity as a URL-derived slug name into the new stable integer ID scheme.
+// It assigns IDs, remaps the worker/utility provider references and the
+// provider_name rows in the message/token tables, and persists the new format.
+// It is idempotent: once every persisted provider has an ID it does nothing.
+func (cs *ConfigStore) MigrateProviderIDs() error {
+	providersRaw, err := cs.store.GetConfigValue("providers")
+	if err != nil {
+		return err
+	}
+	providers := make([]types.Provider, 0)
+	if providersRaw != "" {
+		if err := json.Unmarshal([]byte(providersRaw), &providers); err != nil {
+			return err
+		}
+	}
+	needsMigration := false
+	for _, p := range providers {
+		if !strings.HasPrefix(p.URL, "agent://") && p.ID == 0 {
+			needsMigration = true
+			break
+		}
+	}
+	if !needsMigration {
+		return nil
+	}
+
+	// Build a slug-name -> new-ID map from legacy providers that carry a name.
+	slugToID := make(map[string]string)
+	assignProviderIDs(providers)
+	for i := range providers {
+		p := &providers[i]
+		if p.Name != "" && p.ID != 0 {
+			slugToID[p.Name] = strconv.Itoa(p.ID)
+		}
+		p.Name = "" // slug is no longer persisted; identity is now the ID
+	}
+
+	// Remap worker/utility provider references (which stored the old slug).
+	for _, key := range []string{"worker_provider", "utility_provider"} {
+		raw, _ := cs.store.GetConfigValue(key)
+		if id, ok := slugToID[raw]; ok {
+			if err := cs.store.SetConfigValue(key, id); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Remap provider_name rows in the message/token tables from slug to ID.
+	for _, table := range []string{"task_messages", "project_token_stats", "project_token_tasks"} {
+		for slug, id := range slugToID {
+			if _, err := cs.store.Exec(`UPDATE `+table+` SET provider_name = ? WHERE provider_name = ?`, id, slug); err != nil {
+				return err
+			}
+		}
+	}
+
+	providersJSON, err := json.Marshal(providers)
+	if err != nil {
+		return err
+	}
+	return cs.store.SetConfigValue("providers", string(providersJSON))
+}
+
 // NewConfigStore creates a new ConfigStore.
 func NewConfigStore(store *store.Store, dbPath, version string) *ConfigStore {
 	abs, _ := filepath.Abs(dbPath)
@@ -176,6 +258,8 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 // UpdateConfig persists the full server configuration and updates the in-memory override if set.
 // API keys are encrypted before DB storage.
 func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
+	// Assign stable IDs to providers that don't have one yet (new providers).
+	assignProviderIDs(c.Providers)
 	// Enforce minimum concurrency of 1 and encrypt API keys for all providers
 	for i := range c.Providers {
 		if c.Providers[i].Concurrency < 1 {
@@ -343,13 +427,13 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 					// nil = not provided (preserve), "" = explicitly clear, non-empty = new value.
 					existingByKey := make(map[string]string)
 					for _, p := range current.Providers {
-						if p.APIKey != nil {
-							existingByKey[p.Name] = *p.APIKey
+						if p.APIKey != nil && p.ID != 0 {
+							existingByKey[strconv.Itoa(p.ID)] = *p.APIKey
 						}
 					}
 					for i := range incoming {
-						if incoming[i].APIKey == nil && existingByKey[incoming[i].Name] != "" {
-							key := existingByKey[incoming[i].Name]
+						if incoming[i].APIKey == nil && existingByKey[strconv.Itoa(incoming[i].ID)] != "" {
+							key := existingByKey[strconv.Itoa(incoming[i].ID)]
 							incoming[i].APIKey = &key
 						}
 					}

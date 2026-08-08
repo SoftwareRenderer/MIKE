@@ -144,13 +144,14 @@ func TestApplyPricingBasic(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
 	// Create a task with messages
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "prov-x",
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	// Set up provider with pricing (no power settings)
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
+			ID:             1,
 			Name:           "prov-x",
 			DisplayName:    "Provider X",
 			URL:            "http://localhost:8080/v1",
@@ -183,13 +184,14 @@ func TestApplyPricingWithPower(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
 	// Create a task with messages (5000ms predicted time)
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "prov-x",
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	// Set up provider with pricing AND power settings
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
+			ID:                    1,
 			Name:                  "prov-x",
 			DisplayName:           "Provider X",
 			URL:                   "http://localhost:8080/v1",
@@ -229,14 +231,15 @@ func TestApplyPricingWithPower(t *testing.T) {
 func TestApplyPricingPowerOnlyNoElectricity(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "prov-x",
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	// Set up provider with power but NO electricity cost
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			Name:              "prov-x",
+			ID:               1,
+			Name:             "prov-x",
 			DisplayName:       "Provider X",
 			URL:               "http://localhost:8080/v1",
 			InputPrice:        3.0,
@@ -313,17 +316,18 @@ func TestApplyPricingMultipleProviders(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
 	// Task 1: model-a from prov-x (with power)
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "prov-x",
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	// Task 2: model-b from prov-y (no power)
-	createTestTaskWithMessages(t, h.store, projID, "task-2", "model-b", "prov-y",
+	createTestTaskWithMessages(t, h.store, projID, "task-2", "model-b", "2",
 		2000, 300, 200, 2000, 3000)
 
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			Name:              "prov-x",
+			ID:               1,
+			Name:             "prov-x",
 			DisplayName:       "Provider X",
 			URL:               "http://localhost:8080/v1",
 			InputPrice:        3.0,
@@ -332,6 +336,7 @@ func TestApplyPricingMultipleProviders(t *testing.T) {
 			PowerConsumptionW: 500.0,
 		},
 		{
+			ID:          2,
 			Name:        "prov-y",
 			DisplayName: "Provider Y",
 			URL:         "http://localhost:9090/v1",
@@ -388,7 +393,7 @@ func TestApplyPricingMultipleProviders(t *testing.T) {
 func TestApplyPricingModelPricingOverride(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "prov-x",
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	inputP := 6.0
@@ -397,10 +402,11 @@ func TestApplyPricingModelPricingOverride(t *testing.T) {
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			Name:              "prov-x",
-			DisplayName:       "Provider X",
-			URL:               "http://localhost:8080/v1",
-			InputPrice:        3.0, // provider defaults — must be overridden
+			ID:               1,
+			Name:             "prov-x",
+			DisplayName:      "Provider X",
+			URL:              "http://localhost:8080/v1",
+			InputPrice:       3.0, // provider defaults — must be overridden
 			OutputPrice:       5.0,
 			CacheReadPrice:    1.0,
 			PowerConsumptionW: 500.0,
@@ -433,13 +439,14 @@ func TestApplyPricingModelPricingOverride(t *testing.T) {
 func TestApplyPricingModelPowerOverride(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "prov-x",
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	modelPower := 1000.0 // override: provider says 500W, model says 1000W
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
+			ID:                    1,
 			Name:                  "prov-x",
 			DisplayName:           "Provider X",
 			URL:                   "http://localhost:8080/v1",
@@ -483,14 +490,15 @@ func TestApplyPricingModelPowerOverride(t *testing.T) {
 func TestApplyPricingModelPartialFallback(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "prov-x",
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	cacheWriteP := 2.0 // model only sets cache write
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			Name:              "prov-x",
+			ID:               1,
+			Name:             "prov-x",
 			DisplayName:       "Provider X",
 			URL:               "http://localhost:8080/v1",
 			InputPrice:        3.0,
@@ -525,12 +533,13 @@ func TestApplyPricingModelPartialFallback(t *testing.T) {
 func TestApplyPricingJSONSerialization(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "prov-x",
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
+			ID:                    1,
 			Name:                  "prov-x",
 			DisplayName:           "Provider X",
 			URL:                   "http://localhost:8080/v1",
