@@ -50,15 +50,14 @@ func newTestConn(t *testing.T) *websocket.Conn {
 	return conn
 }
 
-
 // mockSandbox implements sandboxOps for testing without gVisor.
 type mockSandbox struct {
-	mu           sync.Mutex
-	available    bool
-	shells       map[string]*mockShell // taskID -> mockShell
-	stopped      map[string]bool       // taskIDs that had Stop() called
-	stopMu       sync.Mutex
-	imageReady   bool
+	mu            sync.Mutex
+	available     bool
+	shells        map[string]*mockShell // taskID -> mockShell
+	stopped       map[string]bool       // taskIDs that had Stop() called
+	stopMu        sync.Mutex
+	imageReady    bool
 	buildImageErr error
 	startShellErr error
 }
@@ -70,10 +69,10 @@ type mockShell struct {
 
 func newMockSandbox(t *testing.T) *mockSandbox {
 	m := &mockSandbox{
-		available:    true,
-		shells:       make(map[string]*mockShell),
-		stopped:      make(map[string]bool),
-		imageReady:   true,
+		available:  true,
+		shells:     make(map[string]*mockShell),
+		stopped:    make(map[string]bool),
+		imageReady: true,
 	}
 	t.Cleanup(func() {
 		m.mu.Lock()
@@ -87,11 +86,13 @@ func newMockSandbox(t *testing.T) *mockSandbox {
 	return m
 }
 
-func (m *mockSandbox) IsAvailable() bool { return m.available }
-func (m *mockSandbox) ImageReady(string) bool { return m.imageReady }
+func (m *mockSandbox) IsAvailable() bool                { return m.available }
+func (m *mockSandbox) ImageReady(string) bool           { return m.imageReady }
 func (m *mockSandbox) ImageReadyForProject(string) bool { return m.imageReady }
-func (m *mockSandbox) BuildImage(string, string) error { return m.buildImageErr }
-func (m *mockSandbox) BuildImageWithProgress(string, string, func(string)) error { return m.buildImageErr }
+func (m *mockSandbox) BuildImage(string, string) error  { return m.buildImageErr }
+func (m *mockSandbox) BuildImageWithProgress(string, string, func(string)) error {
+	return m.buildImageErr
+}
 func (m *mockSandbox) PullImageWithProgress(string, func(string)) error { return nil }
 
 func (m *mockSandbox) StartShellWithCreate(taskID, worktreePath, projectName, projectPath, projectID string, opts sandbox.SandboxOpts) (*sandbox.ShellProcess, []types.AssignedPort, error) {
@@ -271,37 +272,37 @@ func TestMultiClientResizeSmallestWidthWins(t *testing.T) {
 
 	// Simulate desktop client resize: 80x200
 	sess.handleResize(desktopPtr, 80, 200)
-	_, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 200 {
-		t.Fatalf("after desktop resize cols = %d, want 200", cols)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 200 || rows != 80 {
+		t.Fatalf("after desktop resize size = %dx%d, want 200x80", cols, rows)
 	}
 
-	// Simulate phone client resize: 30x100 — smaller width should win
+	// Simulate phone client resize: 30x100 — smaller width AND height should win
 	sess.handleResize(phonePtr, 30, 100)
-	_, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 100 {
-		t.Fatalf("after phone resize cols = %d, want 100 (smallest width)", cols)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 100 || rows != 30 {
+		t.Fatalf("after phone resize size = %dx%d, want 100x30 (smallest on both axes)", cols, rows)
 	}
 
-	// Desktop resizes again to even wider — should NOT change PTY (phone is still smallest)
+	// Desktop resizes again to even wider/taller — should NOT change PTY (phone is still smallest)
 	sess.handleResize(desktopPtr, 50, 300)
-	_, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 100 {
-		t.Fatalf("after desktop wider resize cols = %d, want 100 (phone still smallest)", cols)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 100 || rows != 30 {
+		t.Fatalf("after desktop larger resize size = %dx%d, want 100x30 (phone still smallest)", cols, rows)
 	}
 
 	// Phone disconnects — desktop size should take over
 	sess.removeConnSize(phonePtr)
-	_, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 300 {
-		t.Fatalf("after phone disconnect cols = %d, want 300 (desktop now only client)", cols)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 300 || rows != 50 {
+		t.Fatalf("after phone disconnect size = %dx%d, want 300x50 (desktop now only client)", cols, rows)
 	}
 
 	// Desktop also disconnects — should revert to default
 	sess.removeConnSize(desktopPtr)
-	_, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 120 {
-		t.Fatalf("after all disconnect cols = %d, want 120 (default)", cols)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 120 || rows != 40 {
+		t.Fatalf("after all disconnect size = %dx%d, want 120x40 (default)", cols, rows)
 	}
 }
 
@@ -338,31 +339,51 @@ func TestMultiClientResizeMultipleClients(t *testing.T) {
 	sess.handleResize(bPtr, 30, 80)  // tablet
 	sess.handleResize(cPtr, 20, 40)  // phone
 
-	// PTY should match smallest width (phone: 40 cols)
-	_, cols, _ := pty.Getsize(sess.ptmx)
-	if cols != 40 {
-		t.Fatalf("with 3 clients cols = %d, want 40 (smallest)", cols)
+	// PTY should match the smallest size on both axes (phone: 20 rows x 40 cols)
+	rows, cols, _ := pty.Getsize(sess.ptmx)
+	if cols != 40 || rows != 20 {
+		t.Fatalf("with 3 clients size = %dx%d, want 40x20 (smallest)", cols, rows)
 	}
 
-	// Phone disconnects → tablet should win (80 cols)
+	// Phone disconnects → tablet should win (30x80)
 	sess.removeConnSize(cPtr)
-	_, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 80 {
-		t.Fatalf("after phone leaves cols = %d, want 80 (tablet)", cols)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 80 || rows != 30 {
+		t.Fatalf("after phone leaves size = %dx%d, want 80x30 (tablet)", cols, rows)
 	}
 
-	// Tablet disconnects → desktop should win (120 cols)
+	// Tablet disconnects → desktop should win (40x120)
 	sess.removeConnSize(bPtr)
-	_, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 120 {
-		t.Fatalf("after tablet leaves cols = %d, want 120 (desktop)", cols)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 120 || rows != 40 {
+		t.Fatalf("after tablet leaves size = %dx%d, want 120x40 (desktop)", cols, rows)
 	}
 
 	// Last client disconnects → should revert to default
 	sess.removeConnSize(aPtr)
-	_, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 120 {
-		t.Fatalf("after all leave cols = %d, want 120 (default)", cols)
+	rows, cols, _ = pty.Getsize(sess.ptmx)
+	if cols != 120 || rows != 40 {
+		t.Fatalf("after all leave size = %dx%d, want 120x40 (default)", cols, rows)
+	}
+}
+
+func TestClampDim(t *testing.T) {
+	cases := []struct {
+		in   int
+		want uint16
+	}{
+		{-5, 1}, // negative wraps through uint16 — clamp up
+		{0, 1},  // zero is invalid for a PTY dimension
+		{1, 1},
+		{80, 80},
+		{1000, 1000},
+		{1001, 1000}, // oversized — clamp down
+		{65535, 1000},
+	}
+	for _, c := range cases {
+		if got := clampDim(c.in); got != c.want {
+			t.Errorf("clampDim(%d) = %d, want %d", c.in, got, c.want)
+		}
 	}
 }
 
