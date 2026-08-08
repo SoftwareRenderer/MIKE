@@ -87,9 +87,14 @@ type Config struct {
 
 // ModelConfig represents a model with its per-model settings.
 type ModelConfig struct {
-	Name            string `json:"name"`
-	ReasoningEffort string `json:"reasoning_effort"`
-	ContextWindow   *int   `json:"context_window,omitempty"` // nil if not reported by LLM
+	Name              string   `json:"name"`
+	ReasoningEffort   string   `json:"reasoning_effort"`
+	ContextWindow     *int     `json:"context_window,omitempty"`      // nil if not reported by LLM
+	InputPrice        *float64 `json:"input_price,omitempty"`         // USD per 1M input (non-cached) tokens; nil = inherit provider default
+	OutputPrice       *float64 `json:"output_price,omitempty"`        // USD per 1M output tokens; nil = inherit provider default
+	CacheReadPrice    *float64 `json:"cache_read_price,omitempty"`    // USD per 1M cache-read tokens; nil = inherit provider default
+	CacheWritePrice   *float64 `json:"cache_write_price,omitempty"`   // USD per 1M cache-write tokens; nil = inherit provider default
+	PowerConsumptionW *float64 `json:"power_consumption_w,omitempty"` // Watts override; nil = inherit provider default
 }
 
 // ProviderKind distinguishes between standard LLM providers and coding agents.
