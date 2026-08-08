@@ -40,7 +40,7 @@
         testResult: { success: boolean; message: string } | null;
     }
 
-    let { providers, provider, index, encryptionEnabled, currencySymbol, getModelColor, onDragStart, onRemove, onFetchModels, onTestConnection, onAddModel, onRemoveModel, onSyncMeta, isDragging, onDirty }: {
+    let { providers, provider, index, encryptionEnabled, currencySymbol, getModelColor, onDragStart, onRemove, onFetchModels, onTestConnection, onAddModel, onRemoveModel, isDragging, onDirty }: {
         providers: ProviderDraft[];
         provider: ProviderDraft;
         index: number;
@@ -53,7 +53,6 @@
         onTestConnection: () => void;
         onAddModel: () => void;
         onRemoveModel: (mi: number) => void;
-        onSyncMeta: () => void;
         isDragging: boolean;
         onDirty: () => void;
     } = $props();
@@ -129,13 +128,13 @@
                 <!-- LLM Provider Fields -->
                 <div class="url-and-key-row">
                     <div class="url-field">
-                        <label class="url-label" for={`provider-url-${provider.name}`}>Provider URL</label>
-                        <input id={`provider-url-${provider.name}`} type="text" bind:value={provider.url} placeholder="http://localhost:8080/v1" oninput={(e) => { onSyncMeta(); onDirty?.(); }} onclick={(e) => e.stopPropagation()} aria-label="Provider URL" />
+                        <label class="url-label" for={`provider-url-${index}`}>Provider URL</label>
+                        <input id={`provider-url-${index}`} type="text" bind:value={provider.url} placeholder="http://localhost:8080/v1" oninput={() => onDirty?.()} onclick={(e) => e.stopPropagation()} aria-label="Provider URL" />
                     </div>
                     <div class="api-key-field">
-                        <label class="api-key-label" for={`provider-key-${provider.name}`}>API key <span class="optional-text">(optional)</span></label>
+                        <label class="api-key-label" for={`provider-key-${index}`}>API key <span class="optional-text">(optional)</span></label>
                         <input
-                            id={`provider-key-${provider.name}`}
+                            id={`provider-key-${index}`}
                             type="password"
                             bind:value={provider.api_key}
                             placeholder="API key..."
