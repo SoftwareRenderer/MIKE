@@ -79,7 +79,6 @@
                         {/if}
                     </div>
                     <div class="ctx-field" title="Context window in tokens. Pre-populated from Fetch Models; edit to override, or leave empty for auto-discovery.">
-                        <span class="ctx-prefix">ctx</span>
                         <input
                             type="number"
                             inputmode="numeric"
@@ -300,17 +299,6 @@
     }
     .ctx-field:focus-within {
         border-color: var(--color-accent);
-    }
-    .ctx-prefix {
-        padding: 1px 5px;
-        font-size: 0.625rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--color-text-secondary);
-        background: var(--color-surface-3);
-        border-right: 1px solid var(--color-border);
-        user-select: none;
     }
     .ctx-input {
         flex: 1;
