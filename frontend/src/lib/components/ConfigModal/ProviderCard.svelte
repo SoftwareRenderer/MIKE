@@ -294,17 +294,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .priority-badge {
-        font-size: 0.6875rem;
-        font-weight: 600;
-        color: var(--color-accent);
-        background: var(--color-accent-dark);
-        background-color: rgba(76, 154, 255, 0.15);
-        padding: 1px 6px;
-        border-radius: var(--radius-sm);
-        white-space: nowrap;
-        flex-shrink: 0;
-    }
     .provider-actions {
         display: flex;
         align-items: center;
