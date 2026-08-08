@@ -2,6 +2,8 @@ package managers
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,21 +73,70 @@ func createTestTaskWithMessages(t *testing.T, s *store.Store, projID, taskID, mo
 	}
 
 	msg := &types.TaskMessage{
-		ID:            taskID + "-msg-1",
-		TaskID:        taskID,
-		Role:          "assistant",
-		Content:       "test response",
-		ModelName:     modelName,
-		ProviderName:  providerName,
-		PromptTokens:  promptTokens,
+		ID:              taskID + "-msg-1",
+		TaskID:          taskID,
+		Role:            "assistant",
+		Content:         "test response",
+		ModelName:       modelName,
+		ProviderName:    providerName,
+		PromptTokens:    promptTokens,
 		PredictedTokens: predictedTokens,
-		CacheTokens:   cacheTokens,
-		PromptMs:      promptMs,
-		PredictedMs:   predictedMs,
-		CreatedAt:     time.Now(),
+		CacheTokens:     cacheTokens,
+		PromptMs:        promptMs,
+		PredictedMs:     predictedMs,
+		CreatedAt:       time.Now(),
 	}
 	if err := s.CreateTaskMessage(msg); err != nil {
 		t.Fatalf("create message: %v", err)
+	}
+}
+
+// doSandboxBuildRequest sends a POST request through a mux serving
+// HandleSandboxBuild and returns the response recorder.
+func doSandboxBuildRequest(t *testing.T, mux *http.ServeMux, projectID string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/sandbox/build", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	return rr
+}
+
+// TestHandleSandboxBuildNoDockerfilePath verifies the build endpoint rejects
+// builds when no Dockerfile path is configured. The frontend must persist the
+// selected Dockerfile path before triggering a build; otherwise the user sees
+// this exact error.
+func TestHandleSandboxBuildNoDockerfilePath(t *testing.T) {
+	h, projID := testProjectHandler(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/projects/{projectID}/sandbox/build", h.HandleSandboxBuild)
+
+	rr := doSandboxBuildRequest(t, mux, projID)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(rr.Body.String(), "no Dockerfile path configured for this project") {
+		t.Fatalf("body = %q, want error message", rr.Body.String())
+	}
+}
+
+// TestHandleSandboxBuildRequiresSandboxManager verifies that once a Dockerfile
+// path is configured, the build proceeds to require a sandbox manager.
+func TestHandleSandboxBuildRequiresSandboxManager(t *testing.T) {
+	h, projID := testProjectHandler(t)
+	if err := h.store.UpdateProjectSandboxDockerfilePath(projID, "/tmp/Dockerfile"); err != nil {
+		t.Fatalf("set dockerfile path: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/projects/{projectID}/sandbox/build", h.HandleSandboxBuild)
+
+	rr := doSandboxBuildRequest(t, mux, projID)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(rr.Body.String(), "sandbox manager not available") {
+		t.Fatalf("body = %q, want error message", rr.Body.String())
 	}
 }
 
@@ -100,11 +151,11 @@ func TestApplyPricingBasic(t *testing.T) {
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			Name:          "prov-x",
-			DisplayName:   "Provider X",
-			URL:           "http://localhost:8080/v1",
-			InputPrice:    3.0,   // $3 per 1M input tokens
-			OutputPrice:   5.0,   // $5 per 1M output tokens
+			Name:           "prov-x",
+			DisplayName:    "Provider X",
+			URL:            "http://localhost:8080/v1",
+			InputPrice:     3.0, // $3 per 1M input tokens
+			OutputPrice:    5.0, // $5 per 1M output tokens
 			CacheReadPrice: 1.0, // $1 per 1M cache-read tokens
 		},
 	}
@@ -139,14 +190,14 @@ func TestApplyPricingWithPower(t *testing.T) {
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			Name:                 "prov-x",
-			DisplayName:          "Provider X",
-			URL:                  "http://localhost:8080/v1",
-			InputPrice:           3.0,
-			OutputPrice:          5.0,
-			CacheReadPrice:       1.0,
-			PowerConsumptionW:    500.0, // 500W GPU
-			ElectricityCostPerKwh: 0.12, // $0.12 per kWh
+			Name:                  "prov-x",
+			DisplayName:           "Provider X",
+			URL:                   "http://localhost:8080/v1",
+			InputPrice:            3.0,
+			OutputPrice:           5.0,
+			CacheReadPrice:        1.0,
+			PowerConsumptionW:     500.0, // 500W GPU
+			ElectricityCostPerKwh: 0.12,  // $0.12 per kWh
 		},
 	}
 	h.configStore.UpdateConfig(cfg)
@@ -228,13 +279,13 @@ func TestApplyPricingAgentProviderSkipped(t *testing.T) {
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			Name:                 "my-agent",
-			DisplayName:          "My Agent",
-			Kind:                 "agent",
-			URL:                  "agent://my-agent",
-			InputPrice:           0,
-			OutputPrice:          0,
-			PowerConsumptionW:    500.0,
+			Name:                  "my-agent",
+			DisplayName:           "My Agent",
+			Kind:                  "agent",
+			URL:                   "agent://my-agent",
+			InputPrice:            0,
+			OutputPrice:           0,
+			PowerConsumptionW:     500.0,
 			ElectricityCostPerKwh: 0.12,
 		},
 	}
@@ -341,13 +392,13 @@ func TestApplyPricingJSONSerialization(t *testing.T) {
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			Name:                 "prov-x",
-			DisplayName:          "Provider X",
-			URL:                  "http://localhost:8080/v1",
-			InputPrice:           3.0,
-			OutputPrice:          5.0,
-			CacheReadPrice:       1.0,
-			PowerConsumptionW:    500.0,
+			Name:                  "prov-x",
+			DisplayName:           "Provider X",
+			URL:                   "http://localhost:8080/v1",
+			InputPrice:            3.0,
+			OutputPrice:           5.0,
+			CacheReadPrice:        1.0,
+			PowerConsumptionW:     500.0,
 			ElectricityCostPerKwh: 0.12,
 		},
 	}
