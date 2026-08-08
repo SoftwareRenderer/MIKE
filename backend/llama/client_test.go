@@ -3,6 +3,7 @@ package llama
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -427,5 +428,96 @@ func TestChatCompletion_WallClockTimingFallback(t *testing.T) {
 	totalMs := usage.PromptMs + usage.PredictedMs
 	if totalMs < 80 || totalMs > 200 {
 		t.Errorf("total_ms = %d, expected ~100ms", totalMs)
+	}
+}
+
+// --- LlamaError Tests ---
+
+func TestLlamaError_ErrorText(t *testing.T) {
+	e := &LlamaError{StatusCode: 429, Body: `{"error":"Rate limit exceeded"}`}
+	got := e.Error()
+	want := `llama error 429: {"error":"Rate limit exceeded"}`
+	if got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestLlamaError_IsRateLimit(t *testing.T) {
+	if !(&LlamaError{StatusCode: 429}).IsRateLimit() {
+		t.Error("IsRateLimit() = false for 429, want true")
+	}
+	if (&LlamaError{StatusCode: 500}).IsRateLimit() {
+		t.Error("IsRateLimit() = true for 500, want false")
+	}
+	if (&LlamaError{StatusCode: 200}).IsRateLimit() {
+		t.Error("IsRateLimit() = true for 200, want false")
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  time.Duration
+	}{
+		{"empty", "", 0},
+		{"seconds", "120", 120 * time.Second},
+		{"seconds with spaces", "  30  ", 30 * time.Second},
+		{"zero", "0", 0},
+		{"http date", time.Now().Add(5 * time.Minute).UTC().Format(http.TimeFormat), 5 * time.Minute},
+		{"garbage", "not-a-duration", 0},
+		{"negative", "-10", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseRetryAfter(tc.input)
+			// Allow small tolerance for the HTTP-date case (time.Until).
+			if diff := got - tc.want; diff < -2*time.Second || diff > 2*time.Second {
+				t.Errorf("parseRetryAfter(%q) = %v, want ~%v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNewLlamaError_ParsesRetryAfter(t *testing.T) {
+	hdr := http.Header{}
+	hdr.Set("Retry-After", "45")
+	e := newLlamaError(429, hdr, "rate limited")
+	if e.StatusCode != 429 {
+		t.Errorf("StatusCode = %d, want 429", e.StatusCode)
+	}
+	if e.RetryAfter != 45*time.Second {
+		t.Errorf("RetryAfter = %v, want 45s", e.RetryAfter)
+	}
+	if !e.IsRateLimit() {
+		t.Error("expected IsRateLimit() = true")
+	}
+}
+
+func TestChatStream_ReturnsLlamaError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "15")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"Rate limit exceeded"}`))
+	}))
+	defer server.Close()
+
+	c := NewLlamaClient(server.URL, "test-model", "off", "")
+	_, err := c.ChatStream(context.Background(), nil, nil, func(types.ChatChoice) {}, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var le *LlamaError
+	if !errors.As(err, &le) {
+		t.Fatalf("expected *LlamaError, got %T: %v", err, err)
+	}
+	if !le.IsRateLimit() {
+		t.Error("expected IsRateLimit() = true for 429")
+	}
+	if le.RetryAfter != 15*time.Second {
+		t.Errorf("RetryAfter = %v, want 15s", le.RetryAfter)
+	}
+	if !strings.Contains(err.Error(), "llama error 429") {
+		t.Errorf("Error() = %q, want to contain llama error 429", err.Error())
 	}
 }
