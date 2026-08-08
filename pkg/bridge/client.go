@@ -94,13 +94,33 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser) *Client {
 	return c
 }
 
-// IsAlive returns true if the readLoop is still running.
+// IsAlive returns true if the client is still usable: it has not been closed
+// AND its readLoop is still running.
+//
+// Checking the closed flag matters: Close() marks the client closed before the
+// readLoop goroutine notices the closed pipe and exits. In that window the old
+// implementation (readDone only) reported true even though every request fails
+// with "client closed", which made SandboxManager.GetClient and recoverBridge
+// reuse a dead client and defeat bridge recovery.
 func (c *Client) IsAlive() bool {
+	c.mu.Lock()
+	closed := c.closed
+	c.mu.Unlock()
+	if closed {
+		return false
+	}
+	return !c.readDoneClosed()
+}
+
+// readDoneClosed reports whether the readLoop has exited. Must be called with
+// c.mu held: readLoop closes readDone while holding c.mu (after delivering
+// errors to pending requests), so this is race-free with request registration.
+func (c *Client) readDoneClosed() bool {
 	select {
 	case <-c.readDone:
-		return false
-	default:
 		return true
+	default:
+		return false
 	}
 }
 
@@ -127,6 +147,10 @@ func (c *Client) writeFrame(frame *protocol.Frame) error {
 func (c *Client) readLoop() {
 	defer func() {
 		c.mu.Lock()
+		// Mark the connection dead BEFORE delivering errors: requests that
+		// arrive after this point fail fast (see waitForCtx) instead of being
+		// registered as pending and hanging forever with no reader.
+		close(c.readDone)
 		// Deliver error to all pending requests
 		for _, p := range c.pending {
 			select {
@@ -141,7 +165,6 @@ func (c *Client) readLoop() {
 			close(s.outputCh)
 		}
 		c.mu.Unlock()
-		close(c.readDone)
 	}()
 
 	for {
@@ -228,6 +251,12 @@ func (c *Client) waitForCtx(ctx context.Context, frame *protocol.Frame, timeout 
 	if c.closed {
 		c.mu.Unlock()
 		return nil, nil, errors.New("client closed")
+	}
+	if c.readDoneClosed() {
+		// readLoop already exited (e.g. bridge died) — fail fast so callers can
+		// trigger bridge recovery instead of hanging forever.
+		c.mu.Unlock()
+		return nil, nil, errors.New("connection closed")
 	}
 	c.pending[msgID] = p
 	c.mu.Unlock()
@@ -441,6 +470,14 @@ func (c *Client) Bash(ctx context.Context, command string, timeout int64) (*Bash
 		close(holder.exitCode)
 		return nil, errors.New("client closed")
 	}
+	if c.readDoneClosed() {
+		// readLoop already exited — fail fast so callers can trigger bridge
+		// recovery instead of blocking until the (very long) bash timeout.
+		c.mu.Unlock()
+		close(holder.outputCh)
+		close(holder.exitCode)
+		return nil, errors.New("connection closed")
+	}
 	c.pending[msgID] = p
 	c.mu.Unlock()
 
@@ -647,6 +684,19 @@ func (c *Client) LSPStart(ctx context.Context, command string, args []string) er
 		return errors.New(final.ErrorMsg())
 	}
 	return nil
+}
+
+// Ping performs a lightweight round-trip to verify the bridge is responsive.
+// Any response — including an error frame — proves the bridge answered, so a
+// TypeError result still counts as a successful ping. Used by bridge recovery
+// to avoid declaring success on a client whose underlying pipes are dead.
+// Bounded internally by a 3s timeout so callers can pass their own (possibly
+// longer-lived) context safely.
+func (c *Client) Ping(ctx context.Context) error {
+	params, _ := json.Marshal(protocol.ReadParams{Path: "."})
+	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodRead, params)
+	_, _, err := c.waitForCtx(ctx, frame, 3*time.Second)
+	return err
 }
 
 // Close closes the client connection and all shell sessions.
