@@ -47,6 +47,9 @@ function createTerminalWS(url: string, term: import('@xterm/xterm').Terminal, on
         terminalActivity.set(ws, Date.now());
         // Replace connecting message: go to row 1 col 1, clear line
         term.write('\x1b[1H\x1b[2K');
+        // Sync viewport size — mount-time fit() fires before this handler
+        // registers, so the backend keeps its default size until resized.
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
     };
     term.onData((data) => {
         // Filter out xterm.js init queries that the PTY echoes back as garbage text.
