@@ -60,8 +60,9 @@
     );
 
     // Elapsed time for pending tool calls — updates every second via timer.
+    // Non-reactive timerRef: state would cause an effect read/write self-loop.
     let elapsedMs = $state(0);
-    let timerRef = $state<ReturnType<typeof setInterval> | null>(null);
+    let timerRef: ReturnType<typeof setInterval> | null = null;
 
     $effect(() => {
         const pending = tc.isPending;
