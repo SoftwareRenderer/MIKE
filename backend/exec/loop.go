@@ -306,15 +306,25 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			te.taskMu.Unlock()
 
 			log.Printf("[bridge-recovery] task=%s attempt %d: trying client reconnect", setup.task.ID, attempt)
-			// Tier 1: try to get a fresh client from existing agent pipes
+			// Tier 1: try to get a fresh client from existing agent pipes.
+			// Ping subsumes the IsAlive check: it fails fast on closed/dead clients
+			// (see Client.Ping) and verifies the bridge actually responds — a client
+			// built on dead pipes can still report IsAlive until its readLoop
+			// notices, which would make the retry fail again with the same bridge
+			// error ("client closed" / "broken pipe").
 			newClient, err := te.sandboxMgr.GetClient(setup.task.ID)
-			if err == nil && newClient.IsAlive() {
-				log.Printf("[bridge-recovery] task=%s client reconnect successful", setup.task.ID)
-				te.taskMu.Lock()
-				state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(newClient)
-				state.bridgeRecoveryAttempts = 0 // reset on success
-				te.taskMu.Unlock()
-				return true
+			if err == nil {
+				probeErr := newClient.Ping(setup.ctx)
+				if probeErr == nil {
+					log.Printf("[bridge-recovery] task=%s client reconnect successful", setup.task.ID)
+					te.taskMu.Lock()
+					state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(newClient)
+					state.bridgeRecoveryAttempts = 0 // reset on success
+					te.taskMu.Unlock()
+					return true
+				}
+				log.Printf("[bridge-recovery] task=%s client probe failed: %v, escalating to sandbox recreation", setup.task.ID, probeErr)
+				err = probeErr
 			}
 
 			// Tier 2: agent is dead — recreate the sandbox
@@ -343,8 +353,12 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				return false
 			}
 			newClient, clientErr := te.sandboxMgr.GetClient(setup.task.ID)
-			if clientErr != nil || !newClient.IsAlive() {
+			if clientErr != nil {
 				log.Printf("[bridge-recovery] task=%s failed to connect after recreation: %v", setup.task.ID, clientErr)
+				return false
+			}
+			if probeErr := newClient.Ping(setup.ctx); probeErr != nil {
+				log.Printf("[bridge-recovery] task=%s probe failed after recreation: %v", setup.task.ID, probeErr)
 				return false
 			}
 

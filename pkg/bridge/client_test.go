@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -137,6 +138,144 @@ func TestBashContextCancellation(t *testing.T) {
 // non-EOF read error as fatal — it exits, becoming unreachable, and every
 // subsequent tool call fails with "send bash request: write header: write |1:
 // broken pipe". This test reproduces that scenario and asserts no corruption.
+// TestIsAliveFalseAfterClose verifies that IsAlive() returns false as soon as
+// Close() marks the client closed — not only after the readLoop goroutine
+// notices the closed pipe and exits.
+//
+// This is the root cause of persistent "read: client closed" tool failures:
+// SandboxManager.GetClient and recoverBridge use IsAlive() to decide whether a
+// stored client can be reused. If IsAlive() returns true for a closed client,
+// recovery "succeeds" by swapping in the same closed client, the retry fails,
+// and every tool call reports "Error: read: client closed".
+func TestIsAliveFalseAfterClose(t *testing.T) {
+	agentReadPr, agentReadPw := io.Pipe()   // client → agent
+	clientReadPr, clientReadPw := io.Pipe() // agent → client
+	defer clientReadPw.Close()
+
+	client := NewClient(agentReadPw, clientReadPr)
+	if !client.IsAlive() {
+		t.Fatal("expected IsAlive() true before Close")
+	}
+
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Immediately after Close the client must report not alive, even though the
+	// readLoop goroutine may not have exited yet.
+	if client.IsAlive() {
+		t.Fatal("IsAlive() returned true after Close — client is closed and unusable")
+	}
+
+	// Every request against the closed client fails fast with "client closed".
+	if _, _, err := client.ReadFile(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "client closed") {
+		t.Fatalf("ReadFile on closed client: err=%v, want 'client closed'", err)
+	}
+	_ = agentReadPr.Close()
+}
+
+// TestReadFileFailsFastWhenReadLoopExits verifies that a request made after the
+// readLoop has exited returns "connection closed" immediately instead of
+// hanging forever. This lets executeTool trigger bridge recovery rather than
+// stalling the whole LLM turn.
+func TestReadFileFailsFastWhenReadLoopExits(t *testing.T) {
+	agentReadPr, agentReadPw := io.Pipe()   // client → agent
+	clientReadPr, clientReadPw := io.Pipe() // agent → client
+
+	client := NewClient(agentReadPw, clientReadPr)
+	defer client.Close()
+
+	// Close the agent → client pipe so the readLoop exits (simulates the bridge
+	// dying without Client.Close() being called).
+	clientReadPw.Close()
+
+	// Wait for the readLoop to actually exit.
+	deadline := time.Now().Add(5 * time.Second)
+	for client.IsAlive() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if client.IsAlive() {
+		t.Fatal("readLoop did not exit after pipe close")
+	}
+
+	// The request must fail fast, well before the context deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, _, err := client.ReadFile(ctx, "x")
+	if err == nil {
+		t.Fatal("expected error from ReadFile on dead connection")
+	}
+	if !strings.Contains(err.Error(), "connection closed") {
+		t.Fatalf("unexpected error: %v, want 'connection closed'", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("ReadFile did not fail fast: took %v", elapsed)
+	}
+	_ = agentReadPr.Close()
+}
+
+// TestPing verifies the liveness probe: a responsive bridge answers (even with
+// an error frame) so Ping succeeds; a dead connection fails quickly.
+func TestPing(t *testing.T) {
+	t.Run("responsive bridge", func(t *testing.T) {
+		agentReadPr, agentReadPw := io.Pipe()   // client → agent
+		clientReadPr, clientReadPw := io.Pipe() // agent → client
+		defer agentReadPr.Close()
+		defer clientReadPw.Close()
+
+		client := NewClient(agentReadPw, clientReadPr)
+		defer client.Close()
+
+		// Mock bridge: reply to every request with an error frame (proving the
+		// transport works — a TypeError still counts as a successful ping).
+		go func() {
+			for {
+				frame, err := protocol.ReadFrame(agentReadPr)
+				if err != nil {
+					return
+				}
+				_ = protocol.WriteFrame(clientReadPw, protocol.NewError(frame.MsgID, "probe error"))
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := client.Ping(ctx); err != nil {
+			t.Fatalf("Ping on responsive bridge: %v", err)
+		}
+	})
+
+	t.Run("dead connection", func(t *testing.T) {
+		agentReadPr, agentReadPw := io.Pipe()   // client → agent
+		clientReadPr, clientReadPw := io.Pipe() // agent → client
+
+		client := NewClient(agentReadPw, clientReadPr)
+		defer client.Close()
+
+		// Kill the readLoop by closing the agent → client pipe.
+		clientReadPw.Close()
+		deadline := time.Now().Add(5 * time.Second)
+		for client.IsAlive() && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if client.IsAlive() {
+			t.Fatal("readLoop did not exit after pipe close")
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		start := time.Now()
+		if err := client.Ping(ctx); err == nil {
+			t.Fatal("expected Ping to fail on dead connection")
+		}
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("Ping did not fail fast: took %v", elapsed)
+		}
+		_ = agentReadPr.Close()
+	})
+}
+
 func TestConcurrentWritesNoCorruption(t *testing.T) {
 	agentReadPr, agentReadPw := io.Pipe() // client → reader (frames written by client)
 	clientReadPr, _ := io.Pipe()          // reader → client (responses; unused here)
