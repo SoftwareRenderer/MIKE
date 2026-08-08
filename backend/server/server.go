@@ -81,6 +81,9 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	}
 
 	cfgStore := config.NewConfigStore(store, dbPath, Version)
+	if err := cfgStore.MigrateProviderIDs(); err != nil {
+		return nil, fmt.Errorf("migrate provider IDs: %w", err)
+	}
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("get config: %w", err)

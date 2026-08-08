@@ -78,8 +78,9 @@
     }
 
     interface ProviderDraft {
-        uid: string; // stable id for {#each} key — never changes after creation
-        name: string;
+        uid: string; // stable key for {#each} — never changes after creation
+        id: number; // stable identifier for LLM providers; 0 = new/unsaved
+        name: string; // agent provider name (manifest-derived); empty for LLM providers
         display_name?: string; // only agent providers carry a manifest-derived display name
         kind: 'llm' | 'agent';
         url: string;
@@ -102,22 +103,15 @@
         testResult: { success: boolean; message: string } | null;
     }
 
-    /** Generate a provider name from a URL (hostname-port slug). */
-    function generateProviderName(url: string): string {
-        try {
-            const u = new URL(url);
-            const host = u.hostname.replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-            const port = u.port || (u.protocol === 'https:' ? '443' : '80');
-            return `${host}-${port}`;
-        } catch {
-            return `provider-${Date.now()}`;
-        }
+    /** The reference string for a provider: its stable ID (LLM) or name (agent). */
+    function providerRef(p: { id?: number; name?: string; kind?: string }): string {
+        return p.kind === 'agent' ? (p.name || '') : String(p.id ?? 0);
     }
 
-    /** Derive the provider name slug from its URL. Display names are derived dynamically
-     *  (see getProviderDisplayName) and are never stored on the provider. */
-    function syncProviderMeta(p: ProviderDraft) {
-        p.name = p.url.trim() ? generateProviderName(p.url.trim()) : '';
+    /** Find a provider draft by its reference string (LLM ID or agent name). */
+    function findProviderByRef(ref: string) {
+        if (!ref) return null;
+        return providers.find(p => providerRef(p) === ref) || null;
     }
 
     let providers = $state<ProviderDraft[]>([]);
@@ -129,7 +123,9 @@
             // Detect agent provider by kind field, agent:// prefix, or legacy sentinel URL
             const isAgent = p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX);
             const draft: ProviderDraft = {
-                uid: p.name, // use existing name as stable uid for loaded providers
+                uid: isAgent ? (p.name || p.url) : String(p.id ?? `new-${Date.now()}-${Math.random()}`),
+                id: p.id || 0,
+                name: p.name || '',
                 ...p,
                 kind: isAgent ? 'agent' : (p.kind || 'llm'),
                 api_key: p.api_key || '',
@@ -231,6 +227,7 @@
     function addProvider() {
         providers.push({
             uid: `new-${++_providerUidCounter}-${Date.now()}`,
+            id: 0,
             name: '',
             kind: 'llm',
             url: '',
@@ -297,6 +294,7 @@
         agentMenuRect = null;
         providers.push({
             uid: `agent-${ext.name}`,
+            id: 0,
             name: ext.name,
             display_name: ext.manifest.display_name || ext.name,
             kind: 'agent',
@@ -479,12 +477,12 @@
 
     // Fetch agent models for the Primary Providers rows when the selected provider is an agent.
     $effect(() => {
-        const workerProv = providers.find(p => p.name === workerProvider) || null;
+        const workerProv = findProviderByRef(workerProvider);
         if (workerProv && isAgentProvider(workerProv)) fetchPrimaryAgentModels('worker', workerProv.url);
         else workerAgentModels = [];
     });
     $effect(() => {
-        const utilityProv = providers.find(p => p.name === utilityProvider) || null;
+        const utilityProv = findProviderByRef(utilityProvider);
         if (utilityProv && isAgentProvider(utilityProv)) fetchPrimaryAgentModels('utility', utilityProv.url);
         else utilityAgentModels = [];
     });
@@ -501,8 +499,8 @@
 
     /** Validate that both Worker and Utility pairs are selected and reference a valid provider/model. */
     function validatePrimaryProviders(): string {
-        const workerProv = providers.find(p => p.name === workerProvider) || null;
-        const utilityProv = providers.find(p => p.name === utilityProvider) || null;
+        const workerProv = findProviderByRef(workerProvider);
+        const utilityProv = findProviderByRef(utilityProvider);
         const modelValid = (prov: ProviderDraft | null, model: string) => {
             if (!prov) return false;
             if (prov.kind === 'agent') return !!model;
@@ -526,17 +524,14 @@
         loading = true;
         error = '';
         try {
-            // Capture the pre-sync provider names so we can remap worker/utility
-            // references after syncProviderMeta regenerates names from URLs.
             const filteredProviders = providers.filter(p => p.kind === 'agent' || p.url.trim());
-            const oldNames = filteredProviders.map(p => (p.kind === 'agent' ? '' : p.name.trim()));
-            const savedProviders: Provider[] = filteredProviders.map((p, i) => {
-                    if (p.kind !== 'agent') syncProviderMeta(p);
+            const savedProviders: Provider[] = filteredProviders.map((p) => {
                     const trimmedKey = p.api_key?.trim() || '';
                     // Masked keys are all bullets — don't send them. Only send real values.
                     const isMasked = trimmedKey && trimmedKey.replace(/•/g, '').length === 0;
                     const base: Provider = {
-                        name: p.name.trim(),
+                        id: p.id || undefined,
+                        name: p.kind === 'agent' ? p.name.trim() : '',
                         kind: p.kind,
                         url: p.url.trim(),
                         models: p.models.filter(m => m.name.trim()).map(m => ({
@@ -569,20 +564,12 @@
                     }
                     return base;
                 });
-            // Remap worker/utility provider names to the post-sync names.
-            let savedWorkerProvider = workerProvider;
-            let savedUtilityProvider = utilityProvider;
-            savedProviders.forEach((p, i) => {
-                const pre = oldNames[i] || '';
-                if (pre && pre === savedWorkerProvider) savedWorkerProvider = p.name;
-                if (pre && pre === savedUtilityProvider) savedUtilityProvider = p.name;
-            });
             const cfg = await updateConfig({
                 workspace_dir: config?.workspace_dir || '',
                 providers: savedProviders,
-                worker_provider: savedWorkerProvider,
+                worker_provider: workerProvider,
                 worker_model: workerModel,
-                utility_provider: savedUtilityProvider,
+                utility_provider: utilityProvider,
                 utility_model: utilityModel,
                 default_auto_commit: defaultAutoCommit,
                 default_auto_merge: defaultAutoMerge,
@@ -687,7 +674,7 @@
                     {#snippet pairRow(title: string, hint: string, kind: 'worker' | 'utility')}
                         {@const selProvider = kind === 'worker' ? workerProvider : utilityProvider}
                         {@const selModel = kind === 'worker' ? workerModel : utilityModel}
-                        {@const selProv = providers.find(p => p.name === selProvider) || null}
+                        {@const selProv = findProviderByRef(selProvider)}
                         <div class="primary-provider-row">
                             <div class="primary-provider-info">
                                 <span class="primary-provider-title">{title}</span>
@@ -706,7 +693,7 @@
                             >
                                 <option value="">Select provider</option>
                                 {#each providers as p}
-                                    <option value={p.name}>{getProviderDisplayName(p, providers)}</option>
+                                    <option value={providerRef(p)}>{getProviderDisplayName(p, providers)}</option>
                                 {/each}
                             </select>
                             <select
@@ -799,7 +786,6 @@
                             onTestConnection={() => testProviderConnection(i)}
                             onAddModel={() => addModelToProvider(i)}
                             onRemoveModel={(mi: number) => removeModelFromProvider(i, mi)}
-                            onSyncMeta={() => syncProviderMeta(p)}
                             onDirty={markDirty}
                         />
                     {/each}
