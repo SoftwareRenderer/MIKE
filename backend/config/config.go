@@ -101,6 +101,12 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 			return nil, err
 		}
 	}
+	// Display names are derived dynamically from the URL on the frontend
+	for i := range providers {
+		if !strings.HasPrefix(providers[i].URL, "agent://") && providers[i].Kind != "agent" {
+			providers[i].DisplayName = ""
+		}
+	}
 	// Decrypt API keys
 	for i := range providers {
 		if providers[i].APIKey != nil && *providers[i].APIKey != "" {
@@ -182,6 +188,10 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			}
 			c.Providers[i].APIKey = &encrypted
 		}
+		// Display names are derived dynamically from the URL on the frontend
+		if !strings.HasPrefix(c.Providers[i].URL, "agent://") && c.Providers[i].Kind != "agent" {
+			c.Providers[i].DisplayName = ""
+		}
 	}
 	providersJSON, err := json.Marshal(c.Providers)
 	if err != nil {
@@ -233,21 +243,21 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 
 // configResponse wraps Config with additional metadata for API responses.
 type configResponse struct {
-	WorkspaceDir           string           `json:"workspace_dir"`
-	DatabasePath           string           `json:"database_path"`
-	RegistryURL            string           `json:"registry_url"`
-	Version                string           `json:"version"`
-	Providers              []types.Provider `json:"providers"`
-	WorkerProvider         string           `json:"worker_provider"`
-	WorkerModel            string           `json:"worker_model"`
-	UtilityProvider        string           `json:"utility_provider"`
-	UtilityModel           string           `json:"utility_model"`
-	DefaultAutoCommit      *bool            `json:"default_auto_commit"`
-	DefaultAutoMerge       *bool            `json:"default_auto_merge"`
-	DefaultSubtasksAutoMerge *bool          `json:"default_subtasks_auto_merge"`
-	DefaultOperatingMode   *string          `json:"default_operating_mode"`
-	DefaultMaxFailedTurns  *int             `json:"default_max_failed_turns,omitempty"`
-	EncryptionEnabled      bool             `json:"encryption_enabled"`
+	WorkspaceDir             string           `json:"workspace_dir"`
+	DatabasePath             string           `json:"database_path"`
+	RegistryURL              string           `json:"registry_url"`
+	Version                  string           `json:"version"`
+	Providers                []types.Provider `json:"providers"`
+	WorkerProvider           string           `json:"worker_provider"`
+	WorkerModel              string           `json:"worker_model"`
+	UtilityProvider          string           `json:"utility_provider"`
+	UtilityModel             string           `json:"utility_model"`
+	DefaultAutoCommit        *bool            `json:"default_auto_commit"`
+	DefaultAutoMerge         *bool            `json:"default_auto_merge"`
+	DefaultSubtasksAutoMerge *bool            `json:"default_subtasks_auto_merge"`
+	DefaultOperatingMode     *string          `json:"default_operating_mode"`
+	DefaultMaxFailedTurns    *int             `json:"default_max_failed_turns,omitempty"`
+	EncryptionEnabled        bool             `json:"encryption_enabled"`
 }
 
 // maskAPIKeys replaces non-empty API keys with a masked placeholder.
@@ -285,18 +295,18 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		WorkspaceDir:             cfg.WorkspaceDir,
 		DatabasePath:             cfg.DatabasePath,
 		RegistryURL:              cfg.RegistryURL,
-		Version:               cs.version,
-		Providers:             providers,
-		WorkerProvider:        cfg.WorkerProvider,
-		WorkerModel:           cfg.WorkerModel,
-		UtilityProvider:       cfg.UtilityProvider,
-		UtilityModel:          cfg.UtilityModel,
-		DefaultAutoCommit:     cfg.DefaultAutoCommit,
-		DefaultAutoMerge:      cfg.DefaultAutoMerge,
+		Version:                  cs.version,
+		Providers:                providers,
+		WorkerProvider:           cfg.WorkerProvider,
+		WorkerModel:              cfg.WorkerModel,
+		UtilityProvider:          cfg.UtilityProvider,
+		UtilityModel:             cfg.UtilityModel,
+		DefaultAutoCommit:        cfg.DefaultAutoCommit,
+		DefaultAutoMerge:         cfg.DefaultAutoMerge,
 		DefaultSubtasksAutoMerge: cfg.DefaultSubtasksAutoMerge,
-		DefaultOperatingMode:  cfg.DefaultOperatingMode,
-		DefaultMaxFailedTurns: cfg.DefaultMaxFailedTurns,
-		EncryptionEnabled:     crypto.IsEnabled(),
+		DefaultOperatingMode:     cfg.DefaultOperatingMode,
+		DefaultMaxFailedTurns:    cfg.DefaultMaxFailedTurns,
+		EncryptionEnabled:        crypto.IsEnabled(),
 	}
 }
 

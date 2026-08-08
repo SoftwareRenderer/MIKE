@@ -188,13 +188,10 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 		return // no config, skip pricing
 	}
 
-	// Build provider name -> provider map (match by both Name and DisplayName)
+	// Build provider name -> provider map.
 	providerMap := make(map[string]types.Provider)
 	for _, p := range cfg.Providers {
 		providerMap[p.Name] = p
-		if p.DisplayName != "" && p.DisplayName != p.Name {
-			providerMap[p.DisplayName] = p
-		}
 	}
 
 	for i := range stats.ByModel {
@@ -353,7 +350,7 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			req.SandboxMemoryLimit != nil || req.SandboxForwardPorts != nil ||
 			req.SandboxMounts != nil || req.SandboxEnvs != nil ||
 			req.SandboxCapabilities != nil
-		
+
 		// Block sandbox setting changes if any task that is actually "In Progress" is running.
 		// If no "In Progress" tasks are running, we can safely stop any other running executors
 		// (which are stale) and apply the settings.

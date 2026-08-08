@@ -4,7 +4,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
-    import { resolveWorker, getModelName } from '$lib/utils/providers';
+    import { resolveWorker, getModelName, getProviderDisplayName } from '$lib/utils/providers';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
@@ -390,7 +390,7 @@
         if (task.llama_server_url?.startsWith(AGENT_URL_PREFIX)) {
             // Look up the agent provider's display name from the config
             const agentProvider = providers.find(p => p.url === task.llama_server_url);
-            const agentText = agentProvider?.display_name || 'Coding Agent';
+            const agentText = agentProvider ? getProviderDisplayName(agentProvider, providers) : 'Coding Agent';
             return { text: agentText, provider: null, model: null, color: '#A371F7', isAgent: true };
         }
         // Use task model if set, otherwise fall back to the configured Worker model
@@ -401,7 +401,7 @@
         const provider = providers.find(p => p.url === task.llama_server_url);
         // Auto: show provider name only when 2+ providers
         const showProvider = providers.length > 1;
-        const provName = showProvider && provider ? provider.display_name : null;
+        const provName = showProvider && provider ? getProviderDisplayName(provider, providers) : null;
         const text = provName ? `${provName} · ${activeModel}` : activeModel;
         return { text, provider: provName, model: activeModel, color: getModelColor(activeModel), isAgent: false };
     });
