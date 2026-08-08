@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolvePair, resolveWorker, resolveUtility, getModelName } from '../providers';
+import { resolvePair, resolveWorker, resolveUtility, getModelName, extractDomain, getProviderDisplayName } from '../providers';
 import type { Config, Provider } from '$lib/types';
 
 function makeConfig(partial: Partial<Config>): Config {
@@ -109,5 +109,67 @@ describe('resolveWorker / resolveUtility', () => {
     it('returns empty for null config', () => {
         expect(resolveWorker(null).provider).toBeNull();
         expect(resolveUtility(null).provider).toBeNull();
+    });
+});
+
+describe('extractDomain', () => {
+    it('strips a single subdomain', () => {
+        expect(extractDomain('api.example.com')).toBe('example.com');
+        expect(extractDomain('neptune.example.com')).toBe('example.com');
+    });
+
+    it('keeps bare hosts and two-label domains', () => {
+        expect(extractDomain('example.com')).toBe('example.com');
+        expect(extractDomain('localhost')).toBe('localhost');
+        expect(extractDomain('pi')).toBe('pi');
+    });
+
+    it('keeps IP addresses unchanged', () => {
+        expect(extractDomain('127.0.0.1')).toBe('127.0.0.1');
+        expect(extractDomain('10.0.0.1')).toBe('10.0.0.1');
+    });
+
+    it('keeps hostnames with ports unchanged', () => {
+        expect(extractDomain('localhost:11434')).toBe('localhost:11434');
+    });
+});
+
+describe('getProviderDisplayName', () => {
+    it('does not auto-capitalize the hostname', () => {
+        const p = { name: 'n', url: 'http://neptune.example.com/v1', kind: 'llm' };
+        expect(getProviderDisplayName(p, [p])).toBe('example.com');
+        expect(getProviderDisplayName({ ...p, url: 'http://openai.example.com/v1' }, [p])).toBe('example.com');
+    });
+
+    it('strips the subdomain when only one provider shares the domain', () => {
+        const p = { name: 'n', url: 'https://api.openai.com/v1', kind: 'llm' };
+        expect(getProviderDisplayName(p, [p])).toBe('openai.com');
+    });
+
+    it('keeps the subdomain when multiple providers share the same domain', () => {
+        const a = { name: 'a', url: 'https://neptune.example.com/v1', kind: 'llm' };
+        const b = { name: 'b', url: 'https://other.example.com/v1', kind: 'llm' };
+        expect(getProviderDisplayName(a, [a, b])).toBe('neptune.example.com');
+        expect(getProviderDisplayName(b, [a, b])).toBe('other.example.com');
+    });
+
+    it('omits the default port but keeps a non-default port', () => {
+        expect(getProviderDisplayName({ name: 'n', url: 'https://example.com/v1', kind: 'llm' }, [])).toBe('example.com');
+        expect(getProviderDisplayName({ name: 'n', url: 'http://example.com:8080/v1', kind: 'llm' }, [])).toBe('example.com:8080');
+    });
+
+    it('handles localhost and IPs without mangling', () => {
+        expect(getProviderDisplayName({ name: 'n', url: 'http://localhost:11434/v1', kind: 'llm' }, [])).toBe('localhost:11434');
+        expect(getProviderDisplayName({ name: 'n', url: 'http://127.0.0.1:8080/v1', kind: 'llm' }, [])).toBe('127.0.0.1:8080');
+    });
+
+    it('uses the manifest display name for agent providers', () => {
+        const agent = { name: 'pi', url: 'agent://pi', kind: 'agent', display_name: 'Pi Coding Agent' };
+        expect(getProviderDisplayName(agent, [agent])).toBe('Pi Coding Agent');
+    });
+
+    it('falls back to provider name when URL is invalid or empty', () => {
+        expect(getProviderDisplayName({ name: 'n', url: '', kind: 'llm' }, [])).toBe('n');
+        expect(getProviderDisplayName({ name: 'n', url: 'not a url', kind: 'llm' }, [])).toBe('n');
     });
 });
