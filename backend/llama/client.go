@@ -9,12 +9,57 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"kanban/backend/types"
 )
+
+// LlamaError is a structured error returned by the llama.cpp-compatible server
+// when it responds with a non-200 status code. It carries the HTTP status code
+// and any Retry-After header so callers can implement rate-limit-aware backoff.
+type LlamaError struct {
+	StatusCode int
+	RetryAfter time.Duration // 0 when the server did not send a Retry-After header
+	Body       string
+}
+
+// Error implements the error interface, preserving the original text format.
+func (e *LlamaError) Error() string {
+	return fmt.Sprintf("llama error %d: %s", e.StatusCode, e.Body)
+}
+
+// IsRateLimit reports whether this error is a 429 Too Many Requests response.
+func (e *LlamaError) IsRateLimit() bool {
+	return e.StatusCode == http.StatusTooManyRequests
+}
+
+// newLlamaError builds a LlamaError from a non-200 response, parsing the
+// Retry-After header (integer-seconds or HTTP-date form) when present.
+func newLlamaError(statusCode int, header http.Header, body string) *LlamaError {
+	return &LlamaError{
+		StatusCode: statusCode,
+		RetryAfter: parseRetryAfter(header.Get("Retry-After")),
+		Body:       body,
+	}
+}
+
+// parseRetryAfter parses a Retry-After header value into a duration.
+// It returns 0 when the value is empty or unparseable.
+func parseRetryAfter(v string) time.Duration {
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		return time.Until(t)
+	}
+	return 0
+}
 
 // Reasoning effort to token budget mapping.
 var reasoningEffortTokens = map[string]int{
@@ -182,7 +227,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("llama error %d: %s", resp.StatusCode, string(body))
+		return nil, newLlamaError(resp.StatusCode, resp.Header, string(body))
 	}
 
 	var usage *types.ChatUsage
@@ -348,7 +393,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, "", fmt.Errorf("llama error %d: %s", resp.StatusCode, string(body))
+		return nil, "", newLlamaError(resp.StatusCode, resp.Header, string(body))
 	}
 
 	var result types.ChatResponse

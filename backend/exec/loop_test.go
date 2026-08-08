@@ -3,11 +3,13 @@ package exec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"kanban/backend/llama"
 	"kanban/backend/store"
 	"kanban/backend/stream"
 	"kanban/backend/types"
@@ -3172,5 +3174,65 @@ func TestBuildContextReplay_WithSummarization(t *testing.T) {
 	}
 	if !strings.Contains(result, "Summary of earlier conversation") {
 		t.Error("expected summary content")
+	}
+}
+
+// --- Backoff Policy Tests ---
+
+func TestBackoffFor_RateLimitedWithRetryAfter(t *testing.T) {
+	// Retry-After is honored verbatim.
+	err := &llama.LlamaError{StatusCode: 429, RetryAfter: 20 * time.Second}
+	for attempt := 0; attempt < 3; attempt++ {
+		if got := backoffFor(attempt, err); got != 20*time.Second {
+			t.Errorf("attempt %d: backoff = %v, want 20s", attempt, got)
+		}
+	}
+}
+
+func TestBackoffFor_RateLimitedRetryAfterCapped(t *testing.T) {
+	// A huge Retry-After is capped at rateLimitMaxBackoff.
+	err := &llama.LlamaError{StatusCode: 429, RetryAfter: 10 * time.Hour}
+	if got := backoffFor(0, err); got != rateLimitMaxBackoff {
+		t.Errorf("backoff = %v, want %v", got, rateLimitMaxBackoff)
+	}
+}
+
+func TestBackoffFor_RateLimitedExponential(t *testing.T) {
+	// No Retry-After -> exponential 2s, 4s, 8s.
+	err := &llama.LlamaError{StatusCode: 429}
+	wants := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+	for attempt, want := range wants {
+		if got := backoffFor(attempt, err); got != want {
+			t.Errorf("attempt %d: backoff = %v, want %v", attempt, got, want)
+		}
+	}
+}
+
+func TestBackoffFor_RateLimitedExponentialCapped(t *testing.T) {
+	// High attempt counts cap at rateLimitMaxBackoff.
+	err := &llama.LlamaError{StatusCode: 429}
+	for attempt := 6; attempt < 10; attempt++ {
+		if got := backoffFor(attempt, err); got != rateLimitMaxBackoff {
+			t.Errorf("attempt %d: backoff = %v, want %v", attempt, got, rateLimitMaxBackoff)
+		}
+	}
+}
+
+func TestBackoffFor_GenericLinear(t *testing.T) {
+	// Non-rate-limit errors keep the linear 2s, 4s, 6s schedule.
+	err := errors.New("connection reset")
+	wants := []time.Duration{2 * time.Second, 4 * time.Second, 6 * time.Second}
+	for attempt, want := range wants {
+		if got := backoffFor(attempt, err); got != want {
+			t.Errorf("attempt %d: backoff = %v, want %v", attempt, got, want)
+		}
+	}
+}
+
+func TestBackoffFor_GenericLlamaErrorNotRateLimited(t *testing.T) {
+	// A LlamaError with a non-429 code falls back to the linear schedule.
+	err := &llama.LlamaError{StatusCode: 500, RetryAfter: 30 * time.Second}
+	if got := backoffFor(0, err); got != 2*time.Second {
+		t.Errorf("backoff = %v, want 2s", got)
 	}
 }
