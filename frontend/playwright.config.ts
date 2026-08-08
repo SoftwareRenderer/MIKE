@@ -25,7 +25,7 @@ export default defineConfig({
           storageState: STORAGE_STATE,
       },
       // Exclude config-modifying suites (run on isolated server)
-      testMatch: /\/tests\/e2e\/(?!settings-provider|settings-power|settings-model-pricing|debug-cards|mode-select).*\.spec\.ts$/,
+      testMatch: /\/tests\/e2e\/(?!settings-provider|settings-power|settings-model-pricing|debug-cards|mode-select|cost-badge).*\.spec\.ts$/,
     },
     {
       name: 'isolated',
@@ -35,7 +35,7 @@ export default defineConfig({
           storageState: STORAGE_STATE_ISOLATED,
       },
       // Config-modifying suites on isolated server; serialized to avoid races
-      testMatch: ['**/settings-provider.spec.ts', '**/settings-power.spec.ts', '**/settings-model-pricing.spec.ts', '**/debug-cards.spec.ts', '**/mode-select.spec.ts'],
+      testMatch: ['**/settings-provider.spec.ts', '**/settings-power.spec.ts', '**/settings-model-pricing.spec.ts', '**/debug-cards.spec.ts', '**/mode-select.spec.ts', '**/cost-badge.spec.ts'],
       fullyParallel: false,
       workers: 1,
     },

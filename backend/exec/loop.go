@@ -232,7 +232,8 @@ type loopContext struct {
 	sandboxEnabled   bool
 	callStartTime    time.Time // start of current LLM call (for per-call Duration)
 	usage            *types.ChatUsage
-	checkpointIdx    int // messages index of last checkpoint
+	sessionCost      float64 // accumulated API cost (USD) of completed calls for this task run
+	checkpointIdx    int     // messages index of last checkpoint
 }
 
 func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
@@ -858,6 +859,21 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					if streamErr == nil {
 						break
 					}
+				}
+			}
+
+			// Emit accumulated session cost (LLM providers only; agents report their own).
+			if streamErr == nil && lc.usage != nil {
+				curURL, _ := lc.mc.get()
+				if cost := te.configStore.EstimateCallCost(curURL, activeModel, lc.usage); cost > 0 {
+					lc.sessionCost += cost
+					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
+						"model_name":       activeModel,
+						"prompt_tokens":    lc.usage.PromptTokens,
+						"predicted_tokens": lc.usage.CompletionTokens,
+						"predicted_ms":     lc.usage.PredictedMs,
+						"cost":             lc.sessionCost,
+					}})
 				}
 			}
 

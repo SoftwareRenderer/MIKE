@@ -106,6 +106,22 @@ function buildNonStreamingResponse(parsed, chunks) {
 }
 
 /**
+ * Fill timings.prompt_n/cache_n/predicted_n from usage — fixtures only set
+ * prompt_ms/predicted_ms, and the client zeroes usage without the token counts.
+ */
+function enrichTimings(chunk) {
+    if (!chunk.timings || !chunk.usage) return chunk;
+    const t = { ...chunk.timings };
+    if (t.prompt_n === undefined && t.cache_n === undefined && t.predicted_n === undefined) {
+        const cached = chunk.usage.prompt_tokens_details?.cached_tokens || 0;
+        t.prompt_n = (chunk.usage.prompt_tokens || 0) - cached;
+        t.cache_n = cached;
+        t.predicted_n = chunk.usage.completion_tokens || 0;
+    }
+    return { ...chunk, timings: t };
+}
+
+/**
  * Select fixture based on request body content.
  * Returns { chunks, chunkDelay } where chunkDelay is ms between SSE frames.
  */
@@ -297,7 +313,7 @@ const server = http.createServer((req, res) => {
                             res.end();
                             return;
                         }
-                        res.write(`data: ${JSON.stringify(chunks[i])}\n\n`);
+                        res.write(`data: ${JSON.stringify(enrichTimings(chunks[i]))}\n\n`);
                         i++;
                         setTimeout(sendNext, chunkDelay);
                     };
