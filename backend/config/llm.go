@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -323,34 +324,56 @@ func (cs *ConfigStore) GetModelReasoningEffort(modelName string) string {
 	return types.DefaultReasoningEffort
 }
 
-// GetProviderNameByURL returns the stable name of the provider matching the given server URL.
-// Returns empty string if no match.
-func (cs *ConfigStore) GetProviderNameByURL(serverURL string) string {
-	cfg, err := cs.GetConfig()
-	if err != nil {
+// GetProviderIDByURL returns the stable ID (as a string) of the provider matching the given server URL.
+// Returns empty string if no match. Used to record the provider on message/token rows.
+func (cs *ConfigStore) GetProviderIDByURL(serverURL string) string {
+	p := cs.ResolveProviderByURL(serverURL)
+	if p == nil || p.ID == 0 {
 		return ""
 	}
-	serverURL = strings.TrimRight(serverURL, "/")
-	for _, provider := range cfg.Providers {
-		if strings.TrimRight(provider.URL, "/") == serverURL {
-			return provider.Name
-		}
-	}
-	return ""
+	return strconv.Itoa(p.ID)
 }
 
-// ResolveProvider returns a copy of the provider matching the given provider name.
+// ResolveProviderByURL returns a copy of the provider matching the given server URL.
 // Returns nil if no matching provider is found.
-func (cs *ConfigStore) ResolveProvider(name string) *types.Provider {
-	if name == "" {
+func (cs *ConfigStore) ResolveProviderByURL(serverURL string) *types.Provider {
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return nil
+	}
+	serverURL = strings.TrimRight(serverURL, "/")
+	for i := range cfg.Providers {
+		if strings.TrimRight(cfg.Providers[i].URL, "/") == serverURL {
+			p := cfg.Providers[i]
+			return &p
+		}
+	}
+	return nil
+}
+
+// ResolveProvider returns a copy of the provider matching the given reference.
+// The reference is the provider's stable integer ID (as a string) for LLM providers,
+// or the provider name for agent providers. Returns nil if no matching provider is found.
+func (cs *ConfigStore) ResolveProvider(ref string) *types.Provider {
+	if ref == "" {
 		return nil
 	}
 	cfg, err := cs.GetConfig()
 	if err != nil {
 		return nil
 	}
+	if id, aerr := strconv.Atoi(ref); aerr == nil && id != 0 {
+		for i := range cfg.Providers {
+			if cfg.Providers[i].ID == id {
+				p := cfg.Providers[i]
+				return &p
+			}
+		}
+		return nil
+	}
+	// Non-integer references are agent provider names.
 	for i := range cfg.Providers {
-		if cfg.Providers[i].Name == name {
+		if cfg.Providers[i].Name == ref {
 			p := cfg.Providers[i]
 			return &p
 		}

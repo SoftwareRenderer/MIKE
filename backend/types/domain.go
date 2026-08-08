@@ -111,7 +111,8 @@ type AgentSandbox struct {
 
 // Provider is a named LLM server preset with a list of available models.
 type Provider struct {
-	Name                  string        `json:"name"`
+	ID                    int           `json:"id"`   // stable identifier for LLM providers (agents use Name); URL stays editable
+	Name                  string        `json:"name"` // agent provider name (manifest-derived); empty for LLM providers
 	DisplayName           string        `json:"display_name"`
 	Kind                  string        `json:"kind"` // "llm" (default) or "agent"
 	URL                   string        `json:"url"`

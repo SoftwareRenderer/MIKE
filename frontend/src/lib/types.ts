@@ -220,7 +220,8 @@ export const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string; tok
 ];
 
 export interface Provider {
-    name: string;
+    id?: number;               // stable identifier for LLM providers; URL stays editable
+    name?: string;             // agent provider name (from manifest); empty for LLM providers
     display_name?: string;    // only populated for agent providers (from manifest); LLM display names are derived from URL
     kind?: 'llm' | 'agent';    // "llm" (default) or "agent"
     url: string;

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted   findProviderByRef,
+} from './helpers';
 
 // Helper: create a subtask via API (CSRF-aware)
 async function createSubtaskViaApi(page: test.Page, projectId: string, parentTaskId: string, prompt: string): Promise<string> {
@@ -7,7 +8,7 @@ async function createSubtaskViaApi(page: test.Page, projectId: string, parentTas
         const res = await fetch('/api/config');
         return res.json();
     });
-    const defaultProvider = config.providers?.find((p: any) => p.name === config.worker_provider);
+    const defaultProvider = findProviderByRef(config.providers || [], config.worker_provider);
     const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
         method: 'POST',
         body: {

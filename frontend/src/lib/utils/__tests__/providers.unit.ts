@@ -17,7 +17,8 @@ function makeConfig(partial: Partial<Config>): Config {
 }
 
 const llmProvider: Provider = {
-    name: 'llm',
+    id: 1,
+    name: '',
     display_name: 'LLM',
     url: 'http://llm:8010/v1',
     kind: 'llm',
@@ -42,10 +43,10 @@ describe('getModelName', () => {
 });
 
 describe('resolvePair', () => {
-    it('resolves an LLM provider/model pair', () => {
+    it('resolves an LLM provider/model pair by its ID', () => {
         const cfg = makeConfig({ providers: [llmProvider] });
-        const r = resolvePair(cfg, 'llm', 'model-a');
-        expect(r.provider?.name).toBe('llm');
+        const r = resolvePair(cfg, '1', 'model-a');
+        expect(r.provider?.id).toBe(1);
         expect(r.modelName).toBe('model-a');
         expect(r.url).toBe('http://llm:8010/v1');
     });
@@ -61,12 +62,12 @@ describe('resolvePair', () => {
     it('returns null provider for empty name', () => {
         const cfg = makeConfig({ providers: [llmProvider] });
         expect(resolvePair(cfg, '', 'model-a').provider).toBeNull();
-        expect(resolvePair(null, 'llm', 'model-a').provider).toBeNull();
+        expect(resolvePair(null, '1', 'model-a').provider).toBeNull();
     });
 
     it('returns null provider when model not set for LLM provider', () => {
         const cfg = makeConfig({ providers: [llmProvider] });
-        expect(resolvePair(cfg, 'llm', '').provider).toBeNull();
+        expect(resolvePair(cfg, '1', '').provider).toBeNull();
     });
 
     it('agent provider model is the provider name and always valid', () => {
@@ -83,10 +84,10 @@ describe('resolvePair', () => {
 });
 
 describe('resolveWorker / resolveUtility', () => {
-    it('resolves worker pair from config', () => {
+    it('resolves worker pair from config by ID', () => {
         const cfg = makeConfig({
             providers: [llmProvider, agentProvider],
-            worker_provider: 'llm',
+            worker_provider: '1',
             worker_model: 'model-b',
         });
         const r = resolveWorker(cfg);
