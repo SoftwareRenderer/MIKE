@@ -2,7 +2,7 @@
     
     import type { Config, Provider, Extension } from '$lib/types';
     import { isAgentProvider, AGENT_URL_PREFIX } from '$lib/types';
-    import { getModelName } from '$lib/utils/providers';
+    import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
     import { listExtensions } from '$lib/api/extensions';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
@@ -74,7 +74,7 @@
     interface ProviderDraft {
         uid: string; // stable id for {#each} key — never changes after creation
         name: string;
-        display_name: string;
+        display_name?: string; // only agent providers carry a manifest-derived display name
         kind: 'llm' | 'agent';
         url: string;
         api_key: string; // full value when editing, masked ("••••••••••") when loaded from config
@@ -108,29 +108,10 @@
         }
     }
 
-    /** Generate a display name from a URL (TitleCase hostname, omitting the default port). */
-    function generateDisplayName(url: string): string {
-        try {
-            const u = new URL(url);
-            const host = u.hostname.charAt(0).toUpperCase() + u.hostname.slice(1);
-            const defaultPort = u.protocol === 'https:' ? '443' : '80';
-            const port = u.port || defaultPort;
-            // Omit the default port (e.g. 443 for https, 80 for http) from the heading.
-            return port === defaultPort ? host : `${host}:${port}`;
-        } catch {
-            return 'Provider';
-        }
-    }
-
-    /** Derive name and display_name from URL for a provider draft. */
+    /** Derive the provider name slug from its URL. Display names are derived dynamically
+     *  (see getProviderDisplayName) and are never stored on the provider. */
     function syncProviderMeta(p: ProviderDraft) {
-        if (p.url.trim()) {
-            p.name = generateProviderName(p.url.trim());
-            p.display_name = generateDisplayName(p.url.trim());
-        } else {
-            p.name = '';
-            p.display_name = '';
-        }
+        p.name = p.url.trim() ? generateProviderName(p.url.trim()) : '';
     }
 
     let providers = $state<ProviderDraft[]>([]);
@@ -235,7 +216,6 @@
         providers.push({
             uid: `new-${++_providerUidCounter}-${Date.now()}`,
             name: '',
-            display_name: '',
             kind: 'llm',
             url: '',
             api_key: '',
@@ -527,7 +507,6 @@
                     const isMasked = trimmedKey && trimmedKey.replace(/•/g, '').length === 0;
                     const base: Provider = {
                         name: p.name.trim(),
-                        display_name: p.display_name.trim(),
                         kind: p.kind,
                         url: p.url.trim(),
                         models: p.models.filter(m => m.name.trim()).map(m => ({
@@ -545,6 +524,11 @@
                     };
                     if (!isMasked && p.kind !== 'agent') {
                         base.api_key = trimmedKey;
+                    }
+                    // Only agent providers carry a (manifest-derived) display name — LLM display
+                    // names are derived dynamically from the URL and are never persisted.
+                    if (p.kind === 'agent') {
+                        base.display_name = p.display_name?.trim() || '';
                     }
                     return base;
                 });
@@ -685,7 +669,7 @@
                             >
                                 <option value="">Select provider</option>
                                 {#each providers as p}
-                                    <option value={p.name}>{p.display_name || p.name}</option>
+                                    <option value={p.name}>{getProviderDisplayName(p, providers)}</option>
                                 {/each}
                             </select>
                             <select
@@ -765,6 +749,7 @@
                 <div class="providers-list">
                     {#each providers as p, i (p.uid)}
                         <ProviderCard
+                            {providers}
                             provider={p}
                             index={i}
                             {encryptionEnabled}
