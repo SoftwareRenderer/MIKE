@@ -19,9 +19,9 @@ type handler struct {
 	nextSession uint32
 	bashProcs   map[uint32]*bashProc // msgID → running bash process
 	lsp         *lspState            // LSP server state (one per connection)
-	writeMu     sync.Mutex        // serializes all writes to conn (shell readLoop + dispatch + read loop)
-	closed      atomic.Bool       // set true when connection is torn down (atomic: accessed from readLoop + close)
-	fileLocks   sync.Map          // path → *sync.Mutex, prevents concurrent read-modify-write on same file
+	writeMu     sync.Mutex           // serializes all writes to conn (shell readLoop + dispatch + read loop)
+	closed      atomic.Bool          // set true when connection is torn down (atomic: accessed from readLoop + close)
+	fileLocks   sync.Map             // path → *sync.Mutex, prevents concurrent read-modify-write on same file
 }
 
 // lockFile returns a lock for the given file path and an unlock function.
@@ -35,8 +35,8 @@ func (h *handler) lockFile(path string) func() {
 
 // bashProc tracks a running bash command for cancellation.
 type bashProc struct {
-	cmd    *exec.Cmd
-	done   chan struct{} // closed when the process exits (normal, killed, or cancelled)
+	cmd  *exec.Cmd
+	done chan struct{} // closed when the process exits (normal, killed, or cancelled)
 }
 
 func newHandler() *handler {
@@ -47,6 +47,19 @@ func newHandler() *handler {
 	}
 	h.closed.Store(true) // set to false by caller when connection is ready
 	return h
+}
+
+// recoverPanic is a deferred recovery for handler goroutines
+func (h *handler) recoverPanic(conn net.Conn, msgID uint32) {
+	if r := recover(); r != nil {
+		log.Printf("agent: recovered panic (MsgID=%d): %v", msgID, r)
+		// Best-effort: report the error to the host so the pending request resolves
+		// instead of hanging until a timeout. Notifications (msgID 0) have no
+		// pending request to resolve.
+		if msgID != 0 {
+			_ = h.writeFrame(conn, protocol.NewError(msgID, fmt.Sprintf("agent panic: %v", r)))
+		}
+	}
 }
 
 // writeFrame sends a frame to conn under the write lock.
@@ -147,6 +160,7 @@ func (h *handler) handleConn(conn net.Conn) error {
 
 // dispatch parses JSON params and routes to the appropriate handler.
 func (h *handler) dispatch(conn net.Conn, req *protocol.Request) {
+	defer h.recoverPanic(conn, req.MsgID)
 	var err error
 	switch req.Method {
 	case protocol.MethodRead:
