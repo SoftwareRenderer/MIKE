@@ -222,8 +222,6 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 
 		if cr.Usage != nil {
 			usage = cr.Usage
-			log.Printf("[llama] usage: prompt_tokens=%d, completion_tokens=%d, cache_tokens=%d, prompt_ms=%d, predicted_ms=%d",
-				usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
 		}
 		// Always process Timings (per-frame for llama.cpp) to get intermediate token counts.
 		// Timings.PredictedN gives cumulative completion tokens generated so far.
