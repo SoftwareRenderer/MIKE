@@ -1109,7 +1109,7 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 		// Store title generation usage as an invisible message (role='title')
 		// so it appears in project stats but not in the chat UI.
 		if usage != nil {
-			providerName := h.configStore.GetProviderNameByURL(serverURL)
+			providerName := h.configStore.GetProviderIDByURL(serverURL)
 			if err := h.store.CreateTaskMessage(&types.TaskMessage{
 				ID:              uuid.New().String(),
 				TaskID:          taskID,

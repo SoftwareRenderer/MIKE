@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
-    import { getProviderDisplayName } from '$lib/utils/providers';
+    import { getProviderDisplayName, providerRef } from '$lib/utils/providers';
 
     let {
         providers,
@@ -37,7 +37,7 @@
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         {/if}
     </button>
-    {#each providers as provider (provider.name)}
+    {#each providers as provider (providerRef(provider))}
         {#if provider.models.length > 0}
             {@const provUrl = provider.url}
             {@const pairs = (() => {
