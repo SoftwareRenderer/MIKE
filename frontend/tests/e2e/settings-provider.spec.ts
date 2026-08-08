@@ -386,8 +386,12 @@ test.describe.serial('Reasoning effort setting', () => {
         const defaultValue = await lastSelect.inputValue();
         expect(defaultValue).toBe('medium');
 
-        // Cancel without saving
+        // Cancel — model edits mark the form dirty; dismiss the discard dialog.
         await page.click('button:has-text("Cancel")');
+        const discardBtn = page.getByRole('button', { name: 'Discard' });
+        if (await discardBtn.isVisible().catch(() => false)) {
+            await discardBtn.click();
+        }
         // Wait for modal to close (replaces waitForTimeout(300))
         await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
     });

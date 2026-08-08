@@ -10,7 +10,12 @@
         name: string;
         readonly: boolean;
         reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
-        context_window?: number;
+        context_window?: number | null;
+        input_price?: number | null;
+        output_price?: number | null;
+        cache_read_price?: number | null;
+        cache_write_price?: number | null;
+        power_consumption_w?: number | null;
     }
 
     interface ProviderDraft {
@@ -212,6 +217,9 @@
                     models={provider.models}
                     onAdd={onAddModel}
                     onRemove={onRemoveModel}
+                    {currencySymbol}
+                    {index}
+                    onDirty={onDirty}
                 />
 
                 <PricingSection {provider} {currencySymbol} {index} onDirty={onDirty} />
