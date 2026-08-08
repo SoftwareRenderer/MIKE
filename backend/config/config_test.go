@@ -172,7 +172,7 @@ func TestBuildConfigResponseMergesAgentProviders(t *testing.T) {
 		providers: []types.Provider{
 			{Name: "pi", Kind: "agent", DisplayName: "Pi Coding Agent", URL: "agent://pi", Concurrency: 1},
 		},
-		})
+	})
 
 	resp = cs.buildConfigResponse(readCfg)
 	if len(resp.Providers) != 2 {
@@ -191,5 +191,62 @@ func TestBuildConfigResponseMergesAgentProviders(t *testing.T) {
 	}
 	if !found {
 		t.Error("agent://pi provider not found in response")
+	}
+}
+
+func TestDisplayNameNotPersistedForLLM(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			// Even if a caller supplies a display name for an LLM provider, it must not be persisted.
+			{Name: "llm", Kind: "llm", DisplayName: "Stale Display", URL: "http://localhost:8080/v1", Concurrency: 1},
+			{Name: "pi", Kind: "agent", DisplayName: "Pi Coding Agent", URL: "agent://pi", Concurrency: 1},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+
+	for _, p := range read.Providers {
+		if p.Name == "llm" {
+			if p.DisplayName != "" {
+				t.Errorf("LLM provider display name should be cleared, got %q", p.DisplayName)
+			}
+		}
+		if p.Name == "pi" {
+			if p.DisplayName != "Pi Coding Agent" {
+				t.Errorf("agent provider display name should be preserved, got %q", p.DisplayName)
+			}
+		}
+	}
+}
+
+func TestGetProviderNameByURLReturnsName(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			{Name: "llm", Kind: "llm", DisplayName: "Stale Display", URL: "http://localhost:8080/v1", Concurrency: 1},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	// ProviderName attribution must use the stable name slug, not the (uncached) display name.
+	if got := cs.GetProviderNameByURL("http://localhost:8080/v1"); got != "llm" {
+		t.Errorf("GetProviderNameByURL = %q, want %q", got, "llm")
+	}
+	if got := cs.GetProviderNameByURL("http://localhost:8080/v1/"); got != "llm" {
+		t.Errorf("GetProviderNameByURL (trailing slash) = %q, want %q", got, "llm")
+	}
+	if got := cs.GetProviderNameByURL("http://unknown/v1"); got != "" {
+		t.Errorf("GetProviderNameByURL (unknown) = %q, want empty", got)
 	}
 }
