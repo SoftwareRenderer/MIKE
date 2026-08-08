@@ -4,6 +4,7 @@ import {
   navigateToTask,
   ensureTaskStarted,
   sendMessage,
+  findProviderByRef,
 } from './helpers';
 
 test.describe.serial('ModeSelect component', () => {
@@ -127,7 +128,7 @@ test.describe.serial('ModeSelect component', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
+    const defaultProvider = findProviderByRef(config?.providers || [], config?.worker_provider);
     const workerModel = config?.worker_model || '';
 
     const csrf = await page.evaluate(async () => {
@@ -189,7 +190,7 @@ test.describe.serial('ModeSelect component', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
+    const defaultProvider = findProviderByRef(config?.providers || [], config?.worker_provider);
     const workerModel = config?.worker_model || '';
 
     const csrf = await page.evaluate(async () => {

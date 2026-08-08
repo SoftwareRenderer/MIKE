@@ -9,6 +9,7 @@ import {
   csrfFetch,
   ensureChatForm,
   ensureTaskStarted,
+  findProviderByRef,
 } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
@@ -466,7 +467,7 @@ test.describe('Chat Core', () => {
       const res = await fetch('/api/config');
       return res.json();
     });
-    const defaultProvider = config.providers?.find((p: any) => p.name === config.worker_provider);
+    const defaultProvider = findProviderByRef(config.providers || [], config.worker_provider);
 
     const taskResult = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
       method: 'POST',
@@ -660,7 +661,7 @@ test.describe('Chat Core', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
+    const defaultProvider = findProviderByRef(config?.providers || [], config?.worker_provider);
 
     const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
       method: 'POST',
@@ -704,7 +705,7 @@ test.describe('Chat Core', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
+    const defaultProvider = findProviderByRef(config?.providers || [], config?.worker_provider);
 
     const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
       method: 'POST',
@@ -732,7 +733,7 @@ test.describe('Chat Core', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
+    const defaultProvider = findProviderByRef(config?.providers || [], config?.worker_provider);
 
     const initialCount = await page.evaluate(async (pid) => {
       const res = await fetch(`/api/projects/${pid}/board`);
@@ -781,7 +782,7 @@ test.describe('Chat Core', () => {
       const res = await fetch('/api/config');
       return res.ok ? res.json() : null;
     });
-    const defaultProvider = config?.providers?.find((p: any) => p.name === config?.worker_provider);
+    const defaultProvider = findProviderByRef(config?.providers || [], config?.worker_provider);
 
     const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
       method: 'POST',

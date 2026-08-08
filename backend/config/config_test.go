@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strconv"
 	"testing"
 
 	"kanban/backend/store"
@@ -227,7 +228,7 @@ func TestDisplayNameNotPersistedForLLM(t *testing.T) {
 	}
 }
 
-func TestGetProviderNameByURLReturnsName(t *testing.T) {
+func TestGetProviderIDByURLReturnsID(t *testing.T) {
 	cs := testConfigStore(t)
 
 	cfg := &types.Config{
@@ -239,14 +240,87 @@ func TestGetProviderNameByURLReturnsName(t *testing.T) {
 		t.Fatalf("update config: %v", err)
 	}
 
-	// ProviderName attribution must use the stable name slug, not the (uncached) display name.
-	if got := cs.GetProviderNameByURL("http://localhost:8080/v1"); got != "llm" {
-		t.Errorf("GetProviderNameByURL = %q, want %q", got, "llm")
+	// ProviderName attribution must use the stable provider ID, not the (uncached) display name.
+	if got := cs.GetProviderIDByURL("http://localhost:8080/v1"); got != "1" {
+		t.Errorf("GetProviderIDByURL = %q, want %q", got, "1")
 	}
-	if got := cs.GetProviderNameByURL("http://localhost:8080/v1/"); got != "llm" {
-		t.Errorf("GetProviderNameByURL (trailing slash) = %q, want %q", got, "llm")
+	if got := cs.GetProviderIDByURL("http://localhost:8080/v1/"); got != "1" {
+		t.Errorf("GetProviderIDByURL (trailing slash) = %q, want %q", got, "1")
 	}
-	if got := cs.GetProviderNameByURL("http://unknown/v1"); got != "" {
-		t.Errorf("GetProviderNameByURL (unknown) = %q, want empty", got)
+	if got := cs.GetProviderIDByURL("http://unknown/v1"); got != "" {
+		t.Errorf("GetProviderIDByURL (unknown) = %q, want empty", got)
+	}
+}
+
+func TestUpdateConfigAssignsProviderIDs(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			{ID: 5, URL: "http://a/v1", Concurrency: 1},
+			{URL: "http://b/v1", Concurrency: 1},
+			{URL: "http://c/v1", Concurrency: 1},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	got, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if got.Providers[0].ID != 5 {
+		t.Errorf("existing provider ID changed: got %d want 5", got.Providers[0].ID)
+	}
+	if got.Providers[1].ID != 6 || got.Providers[2].ID != 7 {
+		t.Errorf("new provider IDs not sequential after max: got %d, %d want 6, 7", got.Providers[1].ID, got.Providers[2].ID)
+	}
+}
+
+func TestMigrateProviderIDs(t *testing.T) {
+	cs := testConfigStore(t)
+
+	// Seed legacy config directly (bypassing UpdateConfig, which assigns IDs):
+	// providers carry slug names and no IDs, worker/utility reference the slugs.
+	legacyJSON := `[{"name":"neptune-8010","kind":"llm","url":"http://neptune:8010/v1","concurrency":1,"models":[]},{"name":"other-9000","kind":"llm","url":"http://other:9000/v1","concurrency":1,"models":[]}]`
+	if err := cs.store.SetConfigValue("providers", legacyJSON); err != nil {
+		t.Fatalf("seed legacy providers: %v", err)
+	}
+	if err := cs.store.SetConfigValue("worker_provider", "neptune-8010"); err != nil {
+		t.Fatalf("seed worker_provider: %v", err)
+	}
+	if err := cs.store.SetConfigValue("utility_provider", "other-9000"); err != nil {
+		t.Fatalf("seed utility_provider: %v", err)
+	}
+	// Simulate existing message/token rows attributed to the legacy slugs.
+	cs.store.Exec(`INSERT INTO projects (id, name, path, created_at, updated_at) VALUES ('p1', 'proj', '/tmp/proj', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
+	cs.store.Exec(`INSERT INTO tasks (id, project_id, title, prompt, llama_server_url, model_name, created_at, updated_at) VALUES ('t1', 'p1', 'task', 'prompt', '', '', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
+	cs.store.Exec(`INSERT INTO task_messages (id, task_id, role, content, provider_name, created_at) VALUES ('m1', 't1', 'user', 'hi', 'neptune-8010', '2024-01-01T00:00:00Z')`)
+
+	if err := cs.MigrateProviderIDs(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	got, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	// IDs assigned, slugs cleared.
+	if got.Providers[0].ID == 0 || got.Providers[0].Name != "" {
+		t.Errorf("provider not migrated: got ID=%d Name=%q", got.Providers[0].ID, got.Providers[0].Name)
+	}
+	id := strconv.Itoa(got.Providers[0].ID)
+	// worker/utility references remapped to IDs.
+	if got.WorkerProvider != id {
+		t.Errorf("worker_provider not remapped: got %q want %q", got.WorkerProvider, id)
+	}
+	// DB rows remapped to the ID.
+	var stored string
+	err = cs.store.QueryRow(`SELECT provider_name FROM task_messages WHERE id = 'm1'`).Scan(&stored)
+	if err != nil {
+		t.Fatalf("query row: %v", err)
+	}
+	if stored != id {
+		t.Errorf("task_messages provider_name not remapped: got %q want %q", stored, id)
 	}
 }
