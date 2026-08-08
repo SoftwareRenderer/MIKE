@@ -383,6 +383,145 @@ func TestApplyPricingMultipleProviders(t *testing.T) {
 }
 
 // Test JSON serialization of new fields
+// TestApplyPricingModelPricingOverride verifies per-model pricing overrides
+// provider-level defaults when computing API cost.
+func TestApplyPricingModelPricingOverride(t *testing.T) {
+	h, projID := testProjectHandler(t)
+
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "prov-x",
+		1000, 500, 100, 1000, 5000)
+
+	inputP := 6.0
+	outputP := 9.0
+	cacheReadP := 2.0
+	cfg, _ := h.configStore.GetConfig()
+	cfg.Providers = []types.Provider{
+		{
+			Name:              "prov-x",
+			DisplayName:       "Provider X",
+			URL:               "http://localhost:8080/v1",
+			InputPrice:        3.0, // provider defaults — must be overridden
+			OutputPrice:       5.0,
+			CacheReadPrice:    1.0,
+			PowerConsumptionW: 500.0,
+			Models: []types.ModelConfig{
+				{Name: "model-a", InputPrice: &inputP, OutputPrice: &outputP, CacheReadPrice: &cacheReadP},
+			},
+		},
+	}
+	h.configStore.UpdateConfig(cfg)
+
+	stats, err := h.store.GetProjectStats(projID)
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	h.applyPricing(stats)
+
+	if len(stats.ByModel) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(stats.ByModel))
+	}
+	m := stats.ByModel[0]
+	// API cost: (900 * 6 + 100 * 2 + 500 * 9) / 1M = (5400 + 200 + 4500) / 1M = 0.0101
+	floatApprox(t, m.Cost, 0.0101, 0.0001)
+	floatApprox(t, stats.TotalCost, 0.0101, 0.0001)
+	// Provider power is still the fallback (no model power override) — computed
+	floatApprox(t, m.PowerKwh, 500.0*5000.0/3_600_000_000, 0.000001)
+}
+
+// TestApplyPricingModelPowerOverride verifies a per-model power override
+// replaces the provider-level power when computing kWh and electricity cost.
+func TestApplyPricingModelPowerOverride(t *testing.T) {
+	h, projID := testProjectHandler(t)
+
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "prov-x",
+		1000, 500, 100, 1000, 5000)
+
+	modelPower := 1000.0 // override: provider says 500W, model says 1000W
+	cfg, _ := h.configStore.GetConfig()
+	cfg.Providers = []types.Provider{
+		{
+			Name:                  "prov-x",
+			DisplayName:           "Provider X",
+			URL:                   "http://localhost:8080/v1",
+			InputPrice:            3.0,
+			OutputPrice:           5.0,
+			CacheReadPrice:        1.0,
+			PowerConsumptionW:     500.0,
+			ElectricityCostPerKwh: 0.12,
+			Models: []types.ModelConfig{
+				{Name: "model-a", PowerConsumptionW: &modelPower},
+			},
+		},
+	}
+	h.configStore.UpdateConfig(cfg)
+
+	stats, err := h.store.GetProjectStats(projID)
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	h.applyPricing(stats)
+
+	if len(stats.ByModel) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(stats.ByModel))
+	}
+	m := stats.ByModel[0]
+
+	// Power uses the model override: 1000W * 5000ms / 3.6e9 = 0.00138889 kWh
+	expectedKwh := 1000.0 * 5000.0 / 3_600_000_000
+	floatApprox(t, m.PowerKwh, expectedKwh, 0.000001)
+	floatApprox(t, stats.TotalPowerKwh, expectedKwh, 0.000001)
+
+	// Electricity cost uses the provider rate: kWh * 0.12
+	expectedTotalCost := 0.0053 + expectedKwh*0.12
+	floatApprox(t, m.Cost, expectedTotalCost, 0.0001)
+	floatApprox(t, stats.TotalCost, expectedTotalCost, 0.0001)
+}
+
+// TestApplyPricingModelPartialFallback verifies that when only some per-model
+// fields are set, the remaining fields inherit provider-level defaults, and that
+// a model-level cache_write_price overrides the input rate.
+func TestApplyPricingModelPartialFallback(t *testing.T) {
+	h, projID := testProjectHandler(t)
+
+	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "prov-x",
+		1000, 500, 100, 1000, 5000)
+
+	cacheWriteP := 2.0 // model only sets cache write
+	cfg, _ := h.configStore.GetConfig()
+	cfg.Providers = []types.Provider{
+		{
+			Name:              "prov-x",
+			DisplayName:       "Provider X",
+			URL:               "http://localhost:8080/v1",
+			InputPrice:        3.0,
+			OutputPrice:       5.0,
+			CacheReadPrice:    1.0,
+			PowerConsumptionW: 500.0,
+			Models: []types.ModelConfig{
+				{Name: "model-a", CacheWritePrice: &cacheWriteP},
+			},
+		},
+	}
+	h.configStore.UpdateConfig(cfg)
+
+	stats, err := h.store.GetProjectStats(projID)
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	h.applyPricing(stats)
+
+	if len(stats.ByModel) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(stats.ByModel))
+	}
+	m := stats.ByModel[0]
+	// inputRate = model cache write (2.0); cache read + output inherit provider (1.0, 5.0)
+	// (900 * 2 + 100 * 1 + 500 * 5) / 1M = (1800 + 100 + 2500) / 1M = 0.0044
+	floatApprox(t, m.Cost, 0.0044, 0.0001)
+	floatApprox(t, stats.TotalCost, 0.0044, 0.0001)
+	// Power inherits provider default (500W)
+	floatApprox(t, m.PowerKwh, 500.0*5000.0/3_600_000_000, 0.000001)
+}
+
 func TestApplyPricingJSONSerialization(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
