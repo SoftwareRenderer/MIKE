@@ -323,8 +323,8 @@ func (cs *ConfigStore) GetModelReasoningEffort(modelName string) string {
 	return types.DefaultReasoningEffort
 }
 
-// GetProviderNameByURL returns the display name of the provider matching the given server URL.
-// Returns empty string if no matching provider is found.
+// GetProviderNameByURL returns the stable name of the provider matching the given server URL.
+// Returns empty string if no match.
 func (cs *ConfigStore) GetProviderNameByURL(serverURL string) string {
 	cfg, err := cs.GetConfig()
 	if err != nil {
@@ -333,9 +333,6 @@ func (cs *ConfigStore) GetProviderNameByURL(serverURL string) string {
 	serverURL = strings.TrimRight(serverURL, "/")
 	for _, provider := range cfg.Providers {
 		if strings.TrimRight(provider.URL, "/") == serverURL {
-			if provider.DisplayName != "" {
-				return provider.DisplayName
-			}
 			return provider.Name
 		}
 	}

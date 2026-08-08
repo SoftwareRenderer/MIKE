@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
+    import { getProviderDisplayName } from '$lib/utils/providers';
 
     let {
         providers,
@@ -53,7 +54,7 @@
                 }
                 return result;
             })()}
-            <div class="picker-provider-header">{provider.display_name || provider.name}</div>
+            <div class="picker-provider-header">{getProviderDisplayName(provider, providers)}</div>
             {#each pairs as m (m.name + '|' + m.effort)}
                 {@const isActive = m.name === currentModel && m.effort === (currentEffort || 'medium')}
                 <button type="button" class="picker-model-option" class:active={isActive} onclick={() => onSelectModel(provUrl, m.name, m.effort)} role="option" aria-selected={isActive}>

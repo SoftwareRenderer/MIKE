@@ -1,6 +1,7 @@
 <script lang="ts">
     import { slide } from 'svelte/transition';
     import { dialogStore } from '$lib/stores';
+    import { getProviderDisplayName } from '$lib/utils/providers';
     import AgentSection from './AgentSection.svelte';
     import ModelList from './ModelList.svelte';
     import PricingSection from './PricingSection.svelte';
@@ -14,7 +15,7 @@
 
     interface ProviderDraft {
         name: string;
-        display_name: string;
+        display_name?: string; // only agent providers carry a manifest-derived display name
         kind: 'llm' | 'agent';
         url: string;
         api_key: string;
@@ -34,7 +35,23 @@
         testResult: { success: boolean; message: string } | null;
     }
 
-    let { provider, index, encryptionEnabled, currencySymbol, getModelColor, onDragStart, onRemove, onFetchModels, onTestConnection, onAddModel, onRemoveModel, onSyncMeta, isDragging, onDirty } = $props();
+    let { providers, provider, index, encryptionEnabled, currencySymbol, getModelColor, onDragStart, onRemove, onFetchModels, onTestConnection, onAddModel, onRemoveModel, onSyncMeta, isDragging, onDirty }: {
+        providers: ProviderDraft[];
+        provider: ProviderDraft;
+        index: number;
+        encryptionEnabled: boolean;
+        currencySymbol: string;
+        getModelColor: (m: string) => string;
+        onDragStart: (e: PointerEvent) => void;
+        onRemove: () => void;
+        onFetchModels: () => void;
+        onTestConnection: () => void;
+        onAddModel: () => void;
+        onRemoveModel: (mi: number) => void;
+        onSyncMeta: () => void;
+        isDragging: boolean;
+        onDirty: () => void;
+    } = $props();
 
     function handleToggle() {
         provider.expanded = !provider.expanded;
@@ -55,7 +72,7 @@
 
 <div class="provider-card" data-index={index} class:dragging={isDragging}>
     <!-- Card header: always visible -->
-    <div class="provider-card-header" onclick={handleToggle} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleToggle(); } }} role="button" aria-expanded={provider.expanded} aria-label={`Toggle ${provider.display_name || provider.name} settings`} tabindex="0">
+    <div class="provider-card-header" onclick={handleToggle} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleToggle(); } }} role="button" aria-expanded={provider.expanded} aria-label={`Toggle ${provider.name || provider.url ? getProviderDisplayName(provider, providers) : 'New Provider'} settings`} tabindex="0">
         <div class="reorder-buttons">
             <button type="button" class="btn-drag-handle" onpointerdown={onDragStart} title="Drag to reorder" aria-label="Drag to reorder provider">
                 <svg width="16" height="16" viewBox="0 0 16 20" fill="currentColor">
@@ -80,7 +97,7 @@
                         </svg>
                     </span>
                 {/if}
-                <span class="provider-display-name">{provider.display_name || 'New Provider'}</span>
+                <span class="provider-display-name">{provider.name || provider.url ? getProviderDisplayName(provider, providers) : 'New Provider'}</span>
             </div>
         </div>
         <div class="provider-actions">

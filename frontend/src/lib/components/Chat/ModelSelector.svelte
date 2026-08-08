@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
-    import { getModelName } from '$lib/utils/providers';
+    import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
 
     interface Props {
         providers: Provider[];
@@ -203,7 +203,7 @@
         } else {
             // No static models — call onSelect with placeholder so parent updates selectedUrl.
             // Real model auto-selected by $effect below when dynamic models are fetched.
-            onSelect(agentProvider.name, agentProvider.display_name || agentProvider.name, agentProvider.url);
+            onSelect(agentProvider.name, getProviderDisplayName(agentProvider, providers), agentProvider.url);
         }
         // Trigger agent model fetch — auto-select handled by $effect below
         fetchAgentModels(agentProvider.url);
@@ -215,7 +215,7 @@
             const agentProvider = providers.find(p => p.url === selectedProviderUrl);
             if (!agentProvider) return;
             // Fallback: first fetched model (only if nothing valid selected)
-            if (!currentModel || currentModel === (agentProvider.display_name || agentProvider.name)) {
+            if (!currentModel || currentModel === getProviderDisplayName(agentProvider, providers)) {
                 onSelect(agentProvider.name, agentModels[0].name, agentProvider.url);
             }
         }
@@ -347,7 +347,7 @@
                 <path d="M6 8h4M8 6v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
             <span class="selector-label">
-                {isAgentSelected ? (selectedProvider?.display_name || selectedProvider?.name || 'Agent') : (selectedProvider?.display_name || selectedProvider?.name || 'Provider')}
+                {isAgentSelected ? (selectedProvider ? getProviderDisplayName(selectedProvider, providers) : 'Agent') : (selectedProvider ? getProviderDisplayName(selectedProvider, providers) : 'Provider')}
             </span>
             <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -395,7 +395,7 @@
                     <circle cx="6" cy="9" r="1" fill="currentColor"/>
                     <circle cx="10" cy="9" r="1" fill="currentColor"/>
                 </svg>
-                <span class="provider-name">{agentProvider?.display_name || agentProvider?.name || 'Agent'}</span>
+                <span class="provider-name">{agentProvider ? getProviderDisplayName(agentProvider, providers) : 'Agent'}</span>
                 {#if isAgentSelected}
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                         <path d="M3 8l4 4 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -405,7 +405,7 @@
         {/if}
         {#each activeProviders as provider}
             <button type="button" class="provider-option" class:active={provider.url === selectedProviderUrl} onclick={() => selectProvider(provider)} role="option" aria-selected={provider.url === selectedProviderUrl}>
-                <span class="provider-name">{provider.display_name || provider.name}</span>
+                <span class="provider-name">{getProviderDisplayName(provider, providers)}</span>
                 <span class="model-count">{provider.models.length} model{provider.models.length !== 1 ? 's' : ''}</span>
                 {#if provider.url === selectedProviderUrl}
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
