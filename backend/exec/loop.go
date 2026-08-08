@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -45,6 +46,34 @@ func unstageNewBinaryFiles(wm *git.WorktreeManager, taskID string) {
 	}
 	paths := binaryPathsFromStaged(out)
 	unstagePaths(wm, taskID, paths)
+}
+
+// Rate-limit backoff bounds for LLM streaming retries.
+const (
+	rateLimitRetryAttempts = 3
+	rateLimitMaxBackoff    = 60 * time.Second
+)
+
+// backoffFor returns the duration to wait before the next LLM retry attempt.
+// For a 429 rate-limit error it honors the upstream Retry-After header (capped
+// at rateLimitMaxBackoff) when present; otherwise it backs off exponentially.
+// All other transient errors use a fixed linear schedule (2s, 4s, 6s).
+func backoffFor(attempt int, err error) time.Duration {
+	var le *llama.LlamaError
+	if errors.As(err, &le) && le.IsRateLimit() {
+		if le.RetryAfter > 0 {
+			if le.RetryAfter > rateLimitMaxBackoff {
+				return rateLimitMaxBackoff
+			}
+			return le.RetryAfter
+		}
+		d := time.Duration(1<<attempt) * 2 * time.Second // 2s, 4s, 8s
+		if d > rateLimitMaxBackoff {
+			return rateLimitMaxBackoff
+		}
+		return d
+	}
+	return time.Duration(attempt+1) * 2 * time.Second
 }
 
 // streamFlusher batches token, reasoning, and tool_call WebSocket events
@@ -780,17 +809,19 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb)
 
 			// Retry on transient errors (skip if cancelled by user message).
+			// Rate-limit errors (429) wait for the upstream Retry-After or back off
+			// exponentially; other transient errors use a fixed linear schedule.
 			if streamErr != nil && callCtx.Err() == nil {
-				for i := range 3 {
+				for i := range rateLimitRetryAttempts {
 					select {
 					case <-callCtx.Done():
 						flusher.flush()
 						close(streamDone)
 						return
-					case <-time.After(time.Duration(i+1) * 2 * time.Second):
+					case <-time.After(backoffFor(i, streamErr)):
 					}
 					// Notify user of retry attempt
-					retryMsg := fmt.Sprintf("Connection interrupted (%v), retrying... (attempt %d/3)", streamErr, i+1)
+					retryMsg := fmt.Sprintf("Connection interrupted (%v), retrying... (attempt %d/%d)", streamErr, i+1, rateLimitRetryAttempts)
 					log.Printf("[retry] setup.task=%s %s", setup.task.ID, retryMsg)
 					te.store.CreateTaskMessage(&types.TaskMessage{
 						ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "system",
