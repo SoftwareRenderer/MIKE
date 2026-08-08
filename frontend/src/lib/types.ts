@@ -216,7 +216,7 @@ export const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string; tok
 
 export interface Provider {
     name: string;
-    display_name: string;
+    display_name?: string;    // only populated for agent providers (from manifest); LLM display names are derived from URL
     kind?: 'llm' | 'agent';    // "llm" (default) or "agent"
     url: string;
     api_key?: string;          // masked ("••••••••••") when read from config, full value when sent
@@ -234,8 +234,8 @@ export interface Provider {
 /** URL prefix for agent providers (e.g., 'agent://pi'). */
 export const AGENT_URL_PREFIX = 'agent://';
 
-/** Check if a provider is an agent (non-LLM kind). */
-export function isAgentProvider(p: Provider): boolean {
+/** Check if a provider is an agent (non-LLM kind). Accepts any provider-shaped object. */
+export function isAgentProvider(p: { kind?: string; url: string }): boolean {
     return p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX);
 }
 
