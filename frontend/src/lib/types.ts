@@ -203,6 +203,11 @@ export interface ProviderModel {
     name: string;
     reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
     context_window?: number; // nil if not reported by LLM
+    input_price?: number;
+    output_price?: number;
+    cache_read_price?: number;
+    cache_write_price?: number;
+    power_consumption_w?: number;
 }
 
 /** Reasoning effort options for the settings UI. */
