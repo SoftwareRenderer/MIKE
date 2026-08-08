@@ -214,38 +214,17 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 			continue // no pricing configured for this provider
 		}
 
-		// Agent providers report their own cost — use the DB-accumulated value.
-		// GetProjectStats already scanned cost into m.Cost and added it to stats.TotalCost.
+		// Agent providers report their own cost — keep the DB-accumulated value.
+		// GetProjectStats already scanned cost into m.Cost and stats.TotalCost.
 		if p.EffectiveKind() == types.ProviderKindAgent {
 			continue
 		}
 
 		model := findModelConfig(p, m.ModelName)
 
-		// Effective pricing: model override, else provider default.
-		inputRate := p.InputPrice
-		cacheRead := p.CacheReadPrice
-		outputRate := p.OutputPrice
-		cacheWrite := p.CacheWritePrice
-		if model != nil {
-			if model.InputPrice != nil {
-				inputRate = *model.InputPrice
-			}
-			if model.CacheReadPrice != nil {
-				cacheRead = *model.CacheReadPrice
-			}
-			if model.OutputPrice != nil {
-				outputRate = *model.OutputPrice
-			}
-			if model.CacheWritePrice != nil {
-				cacheWrite = *model.CacheWritePrice
-			}
-		}
-
-		// Use cache_write_price for non-cached input if set, else input_price
-		if cacheWrite > 0 {
-			inputRate = cacheWrite
-		}
+		// Model overrides win over provider defaults; cache_write_price replaces
+		// input_price for non-cached input (same rules as EstimateCallCost).
+		inputRate, cacheRead, outputRate := config.ResolveProviderPricing(&p, m.ModelName)
 
 		apiCost := (float64(m.ProcessedTokens)*inputRate +
 			float64(m.CacheTokens)*cacheRead +

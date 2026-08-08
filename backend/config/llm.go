@@ -80,11 +80,8 @@ func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionR
 	return TestConnectionResponse{Success: false, Message: fmt.Sprintf("Connection failed: HTTP %d", resp.StatusCode)}
 }
 
-// ResolveAPIKey returns the effective API key to use for a provider URL.
-// When the client sends back the masked placeholder (or an empty value) — which
-// happens after a key is saved and the Settings modal is revisited — the real
-// stored key is resolved from the config so fetch-models / test-connection keep
-// working without the user re-entering the key.
+// ResolveAPIKey returns the effective API key for a provider URL, substituting
+// the stored key when the client sends the masked placeholder or an empty value.
 func (cs *ConfigStore) ResolveAPIKey(serverURL string, providedKey string) string {
 	if providedKey != "" && providedKey != maskedAPIKey {
 		return providedKey
@@ -195,9 +192,8 @@ func (cs *ConfigStore) FetchModels(req FetchModelsRequest) FetchModelsResponse {
 	return FetchModelsResponse{Models: models}
 }
 
-// DiscoverContextWindow queries the llama-swap upstream endpoint to find a model's context window.
-// Returns nil if the server is not llama-swap or the query fails/times out.
-// This is called just-in-time before LLM calls when context window is not yet known.
+// DiscoverContextWindow queries the llama-swap upstream endpoint for a model's
+// context window; nil if the server is not llama-swap or the query fails.
 func (cs *ConfigStore) DiscoverContextWindow(modelName, providerURL string) *int {
 	// Check if this is a llama-swap server
 	baseURL := strings.TrimRight(providerURL, "/")
@@ -260,8 +256,8 @@ func (cs *ConfigStore) DiscoverContextWindow(modelName, providerURL string) *int
 	return nil
 }
 
-// extractContextWindow extracts the context window from various LLM response fields.
-// Priority: max_model_len > meta.n_ctx > max_tokens > metadata["max_model_len"] > metadata["max_tokens"] > metadata["context_length"]
+// extractContextWindow pulls the context window from LLM response fields.
+// Priority: max_model_len > meta.n_ctx > max_tokens > metadata keys.
 func extractContextWindow(maxModelLen, maxTokens int, nContext *int, metadata map[string]int) *int {
 	if maxModelLen > 0 {
 		return &maxModelLen
@@ -324,8 +320,8 @@ func (cs *ConfigStore) GetModelReasoningEffort(modelName string) string {
 	return types.DefaultReasoningEffort
 }
 
-// GetProviderIDByURL returns the stable ID (as a string) of the provider matching the given server URL.
-// Returns empty string if no match. Used to record the provider on message/token rows.
+// GetProviderIDByURL returns the provider's stable ID (as a string) for a
+// server URL, or "" if no match. Used to record the provider on token rows.
 func (cs *ConfigStore) GetProviderIDByURL(serverURL string) string {
 	p := cs.ResolveProviderByURL(serverURL)
 	if p == nil || p.ID == 0 {
@@ -334,8 +330,7 @@ func (cs *ConfigStore) GetProviderIDByURL(serverURL string) string {
 	return strconv.Itoa(p.ID)
 }
 
-// ResolveProviderByURL returns a copy of the provider matching the given server URL.
-// Returns nil if no matching provider is found.
+// ResolveProviderByURL returns a copy of the provider matching a server URL, or nil.
 func (cs *ConfigStore) ResolveProviderByURL(serverURL string) *types.Provider {
 	cfg, err := cs.GetConfig()
 	if err != nil {
@@ -351,9 +346,8 @@ func (cs *ConfigStore) ResolveProviderByURL(serverURL string) *types.Provider {
 	return nil
 }
 
-// ResolveProvider returns a copy of the provider matching the given reference.
-// The reference is the provider's stable integer ID (as a string) for LLM providers,
-// or the provider name for agent providers. Returns nil if no matching provider is found.
+// ResolveProvider returns a copy of the provider for a reference: the stable
+// integer ID (as a string) for LLM providers, or the name for agent providers.
 func (cs *ConfigStore) ResolveProvider(ref string) *types.Provider {
 	if ref == "" {
 		return nil
@@ -379,6 +373,64 @@ func (cs *ConfigStore) ResolveProvider(ref string) *types.Provider {
 		}
 	}
 	return nil
+}
+
+// ResolveProviderPricing returns the effective per-1M-token prices (USD) for a
+// provider and model: model overrides win over provider defaults; cache_write
+// replaces input_price for non-cached input. Zeros for agent/unknown providers.
+func ResolveProviderPricing(p *types.Provider, modelName string) (inputRate, cacheReadRate, outputRate float64) {
+	if p == nil || p.EffectiveKind() != types.ProviderKindLLM {
+		return 0, 0, 0
+	}
+	inputRate = p.InputPrice
+	cacheReadRate = p.CacheReadPrice
+	outputRate = p.OutputPrice
+	cacheWrite := p.CacheWritePrice
+	for i := range p.Models {
+		m := &p.Models[i]
+		if m.Name != modelName {
+			continue
+		}
+		if m.InputPrice != nil {
+			inputRate = *m.InputPrice
+		}
+		if m.CacheReadPrice != nil {
+			cacheReadRate = *m.CacheReadPrice
+		}
+		if m.OutputPrice != nil {
+			outputRate = *m.OutputPrice
+		}
+		if m.CacheWritePrice != nil {
+			cacheWrite = *m.CacheWritePrice
+		}
+		break
+	}
+	// cache_write_price overrides input_price for non-cached input tokens.
+	if cacheWrite > 0 {
+		inputRate = cacheWrite
+	}
+	return inputRate, cacheReadRate, outputRate
+}
+
+// EstimateCallCost returns the API cost (USD) of one LLM call from token usage.
+// Returns 0 when the provider has no per-token pricing, is an agent provider
+// (they report their own cost), is unknown, or usage is nil.
+func (cs *ConfigStore) EstimateCallCost(serverURL, modelName string, usage *types.ChatUsage) float64 {
+	if usage == nil {
+		return 0
+	}
+	inputRate, cacheReadRate, outputRate := ResolveProviderPricing(cs.ResolveProviderByURL(serverURL), modelName)
+	if inputRate <= 0 && cacheReadRate <= 0 && outputRate <= 0 {
+		return 0
+	}
+	cached := usage.PromptTokensDetails.CachedTokens
+	nonCachedInput := usage.PromptTokens - cached
+	if nonCachedInput < 0 {
+		nonCachedInput = 0
+	}
+	return (float64(nonCachedInput)*inputRate +
+		float64(cached)*cacheReadRate +
+		float64(usage.CompletionTokens)*outputRate) / 1_000_000
 }
 
 // GetUtility returns the configured Utility provider name and model.
