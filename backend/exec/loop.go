@@ -790,7 +790,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					case <-time.After(time.Duration(i+1) * 2 * time.Second):
 					}
 					// Notify user of retry attempt
-					retryMsg := fmt.Sprintf("Connection interrupted (%v), retrying... (attempt %d/3)", streamErr, i+2)
+					retryMsg := fmt.Sprintf("Connection interrupted (%v), retrying... (attempt %d/3)", streamErr, i+1)
 					log.Printf("[retry] setup.task=%s %s", setup.task.ID, retryMsg)
 					te.store.CreateTaskMessage(&types.TaskMessage{
 						ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "system",
