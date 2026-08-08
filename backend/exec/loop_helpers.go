@@ -50,7 +50,7 @@ func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, serv
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
 	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
-	providerName := te.configStore.GetProviderNameByURL(serverURL)
+	providerName := te.configStore.GetProviderIDByURL(serverURL)
 
 	var contextWindow *int
 	if discoverContext {
