@@ -30,11 +30,11 @@
     });
 </script>
 
-<!-- Pricing Section -->
+<!-- Pricing Section (provider-level defaults) -->
 <div class="pricing-section">
     <button type="button" class="pricing-header" onclick={() => pricingExpanded = !pricingExpanded} aria-expanded={pricingExpanded}>
-        <span class="pricing-label">Pricing (USD per 1M tokens)</span>
-        <span class="help-icon" title="Set token pricing to track costs in project stats. If Cache Write is set, it replaces Input for non-cached tokens.">
+        <span class="pricing-label">Pricing Defaults (USD per 1M tokens)</span>
+        <span class="help-icon" title="Provider-wide defaults applied to every model that doesn't set its own pricing. Set per-model prices by expanding a model row above. If Cache Write is set, it replaces Input for non-cached tokens.">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                 <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
@@ -80,11 +80,11 @@
     {/if}
 </div>
 
-<!-- Power & Electricity Section -->
+<!-- Power & Electricity Section (provider-level defaults) -->
 <div class="currency-section">
     <button type="button" class="currency-header" onclick={() => powerExpanded = !powerExpanded} aria-expanded={powerExpanded}>
-        <span class="currency-label">Power & Electricity</span>
-        <span class="help-icon" title="Estimate energy cost from system power draw. Power (W) × generation time gives kWh. Combined with electricity rate, adds to total cost.">
+        <span class="currency-label">Power & Electricity Defaults</span>
+        <span class="help-icon" title="Provider-wide defaults. Power (W) × generation time gives kWh; combined with the electricity rate, adds to total cost. A model can override power via its own row; the electricity rate always applies.">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                 <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
