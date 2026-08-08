@@ -1,5 +1,17 @@
 import { expect, Page, Locator } from '@playwright/test';
 
+/**
+ * Find a provider by its reference string: the stable integer ID (as a string)
+ * for LLM providers, or the provider name for agent providers.
+ */
+export function findProviderByRef(providers: any[], ref: string): any | undefined {
+  return providers.find((p: any) =>
+    p.kind === 'agent' || (p.url || '').startsWith('agent://')
+      ? p.name === ref
+      : String(p.id) === ref || p.name === ref
+  );
+}
+
 // --- Shared API helpers (replaces duplicate code in individual test files) ---
 
 /** Get the server origin from the page, navigating first if needed. */
@@ -290,7 +302,7 @@ export async function navigateToTask(page: Page, taskId: string, projectId?: str
 export async function createTaskViaApi(page: Page, projectId: string, prompt: string): Promise<string> {
   // Create task via API (CSRF-aware)
   const config = await apiGetConfig(page);
-  const worker = config?.providers?.find((p: any) => p.name === config?.worker_provider);
+  const worker = findProviderByRef(config?.providers || [], config?.worker_provider);
   const result = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
     method: 'POST',
     body: {
