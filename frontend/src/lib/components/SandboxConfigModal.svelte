@@ -456,6 +456,13 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         buildLog = [];
 
         try {
+            // Persist the Dockerfile path first if it hasn't been saved yet, so
+            // the backend knows which Dockerfile to build. Without this, building
+            // a newly-selected (unsaved) Dockerfile fails with
+            // "no Dockerfile path configured for this project".
+            if (dockerfileChanged) {
+                await updateProject(project.id, { sandbox_dockerfile_path: sandboxDockerfilePath });
+            }
             await buildSandboxImageStream(project.id, (line: string) => {
                 if (line.startsWith('error: ')) {
                     buildError = line.slice(7);
