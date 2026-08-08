@@ -257,6 +257,7 @@ type lspState struct {
 // The first request with a non-empty Command starts the LSP server.
 // Subsequent requests forward the raw JSON-RPC message.
 func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
+	defer h.recoverPanic(conn, req.MsgID)
 	var p protocol.LSPParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, fmt.Sprintf("parse lsp params: %v", err)))
@@ -351,6 +352,7 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 // handleLSPNotify handles LSP notification frames (no response expected).
 // Forwards raw JSON-RPC notifications to the LSP server.
 func (h *handler) handleLSPNotify(_ net.Conn, frame *protocol.Frame) {
+	defer h.recoverPanic(nil, 0)
 	// Extract JSON params from frame payload: [method:1][reserved:1][jsonLen:4][json:params]
 	if len(frame.Payload) < 6 {
 		log.Printf("lsp: notification payload too short")

@@ -23,19 +23,20 @@ type pipeConn struct {
 	writer io.WriteCloser
 }
 
-func (c *pipeConn) Read(b []byte) (int, error)       { return c.reader.Read(b) }
-func (c *pipeConn) Write(b []byte) (int, error)      { return c.writer.Write(b) }
-func (c *pipeConn) Close() error                     { return c.reader.Close() }
-func (c *pipeConn) LocalAddr() net.Addr              { return &net.UnixAddr{Net: "pipe", Name: "stdin"} }
-func (c *pipeConn) RemoteAddr() net.Addr             { return &net.UnixAddr{Net: "pipe", Name: "stdout"} }
-func (c *pipeConn) SetDeadline(t time.Time) error    { return nil }
-func (c *pipeConn) SetReadDeadline(t time.Time) error { return nil }
+func (c *pipeConn) Read(b []byte) (int, error)         { return c.reader.Read(b) }
+func (c *pipeConn) Write(b []byte) (int, error)        { return c.writer.Write(b) }
+func (c *pipeConn) Close() error                       { return c.reader.Close() }
+func (c *pipeConn) LocalAddr() net.Addr                { return &net.UnixAddr{Net: "pipe", Name: "stdin"} }
+func (c *pipeConn) RemoteAddr() net.Addr               { return &net.UnixAddr{Net: "pipe", Name: "stdout"} }
+func (c *pipeConn) SetDeadline(t time.Time) error      { return nil }
+func (c *pipeConn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *pipeConn) SetWriteDeadline(t time.Time) error { return nil }
 
 // Client connects to a sandbox bridge.
 // It handles request/response correlation and chunk streaming.
 type Client struct {
 	mu       sync.Mutex
+	writeMu  sync.Mutex // serializes writes to conn (see writeFrame)
 	conn     net.Conn
 	nextID   atomic.Uint32
 	pending  map[uint32]*pendingReq
@@ -49,7 +50,7 @@ type Client struct {
 
 // shellSessionState tracks a persistent shell session.
 type shellSessionState struct {
-	outputCh chan []byte // output chunks arrive here
+	outputCh chan []byte   // output chunks arrive here
 	done     chan struct{} // closed when session ends
 }
 
@@ -112,6 +113,13 @@ func (c *Client) LSPNotificationCh() <-chan json.RawMessage {
 // nextMsgID returns the next unique message ID.
 func (c *Client) nextMsgID() uint32 {
 	return c.nextID.Add(1) - 1
+}
+
+// writeFrame serializes writes to the underlying connection.
+func (c *Client) writeFrame(frame *protocol.Frame) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return protocol.WriteFrame(c.conn, frame)
 }
 
 // readLoop reads frames from the connection and dispatches them to pending requests
@@ -224,7 +232,7 @@ func (c *Client) waitForCtx(ctx context.Context, frame *protocol.Frame, timeout 
 	c.pending[msgID] = p
 	c.mu.Unlock()
 
-	if err := protocol.WriteFrame(c.conn, frame); err != nil {
+	if err := c.writeFrame(frame); err != nil {
 		c.cleanup(msgID)
 		p.closeChunk()
 		p.closeDone()
@@ -436,7 +444,7 @@ func (c *Client) Bash(ctx context.Context, command string, timeout int64) (*Bash
 	c.pending[msgID] = p
 	c.mu.Unlock()
 
-	if err := protocol.WriteFrame(c.conn, frame); err != nil {
+	if err := c.writeFrame(frame); err != nil {
 		c.cleanup(msgID)
 		close(holder.outputCh)
 		close(holder.exitCode)
@@ -450,7 +458,7 @@ func (c *Client) Bash(ctx context.Context, command string, timeout int64) (*Bash
 		case <-ctx.Done():
 			// Send cancel frame to agent (fire-and-forget)
 			cancelFrame := protocol.NewBashCancelRequest(c.nextMsgID(), msgID)
-			_ = protocol.WriteFrame(c.conn, cancelFrame)
+			_ = c.writeFrame(cancelFrame)
 		case <-cancelled:
 			// Request completed normally, no need to cancel
 		}
@@ -546,7 +554,7 @@ func (c *Client) ShellOpen(shell string, rows, cols uint16) (uint32, error) {
 // ShellIO sends input to a shell session.
 func (c *Client) ShellIO(sessionID uint32, input []byte) error {
 	frame := protocol.NewShellIORequest(c.nextMsgID(), sessionID, input)
-	return protocol.WriteFrame(c.conn, frame)
+	return c.writeFrame(frame)
 }
 
 // ShellOutput returns an io.Reader that yields shell output for a session.
@@ -577,7 +585,7 @@ func (c *Client) ShellOutput(sessionID uint32) io.Reader {
 // ShellResize resizes a shell session's PTY.
 func (c *Client) ShellResize(sessionID uint32, rows, cols uint16) error {
 	frame := protocol.NewShellResizeRequest(c.nextMsgID(), sessionID, rows, cols)
-	return protocol.WriteFrame(c.conn, frame)
+	return c.writeFrame(frame)
 }
 
 // ShellClose terminates a shell session.
@@ -590,7 +598,7 @@ func (c *Client) ShellClose(sessionID uint32) error {
 	c.mu.Unlock()
 
 	frame := protocol.NewShellCloseRequest(c.nextMsgID(), sessionID)
-	return protocol.WriteFrame(c.conn, frame)
+	return c.writeFrame(frame)
 }
 
 // LSPSend sends a raw JSON-RPC message to the LSP server and waits for the response.
@@ -621,7 +629,7 @@ func (c *Client) LSPNotify(_ context.Context, raw json.RawMessage) error {
 	binary.BigEndian.PutUint32(payload[2:6], uint32(len(params)))
 	copy(payload[6:], params)
 	frame := &protocol.Frame{MsgID: 0, Type: protocol.TypeNotification, Payload: payload}
-	return protocol.WriteFrame(c.conn, frame)
+	return c.writeFrame(frame)
 }
 
 // LSPStart starts the LSP server process inside the sandbox.
