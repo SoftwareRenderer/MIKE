@@ -41,6 +41,11 @@
         onToggleFullScreen: () => void;
         onAddProject: () => void;
     } = $props();
+
+    // Sort projects alphabetically (case-insensitive) for display — without mutating the source array
+    const sortedProjects = $derived(
+        [...projects].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    );
 </script>
 
 <aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
@@ -56,7 +61,7 @@
         </button>
     </div>
     <nav class="project-list" aria-label="Projects">
-        {#each projects as p (p.id)}
+        {#each sortedProjects as p (p.id)}
             <div class="project-item-wrapper" class:active={currentProject?.id === p.id} class:has-review={projectCounts[p.id]?.review > 0}>
                 <div class="project-item-content">
                     <button
