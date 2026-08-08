@@ -2,7 +2,9 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -125,6 +127,92 @@ func TestBashContextCancellation(t *testing.T) {
 	client.Close()
 }
 
+// TestConcurrentWritesNoCorruption verifies that concurrent writes from multiple
+// goroutines to the same Client do not corrupt the protocol stream.
+//
+// Previously writes to the underlying pipe were unsynchronized. protocol.WriteFrame
+// issues two separate Write calls (a 9-byte header, then the payload), so when
+// several goroutines wrote concurrently, bytes from different frames could
+// interleave. The bridge reads frames with a single goroutine and treats any
+// non-EOF read error as fatal — it exits, becoming unreachable, and every
+// subsequent tool call fails with "send bash request: write header: write |1:
+// broken pipe". This test reproduces that scenario and asserts no corruption.
+func TestConcurrentWritesNoCorruption(t *testing.T) {
+	agentReadPr, agentReadPw := io.Pipe() // client → reader (frames written by client)
+	clientReadPr, _ := io.Pipe()          // reader → client (responses; unused here)
+
+	client := NewClient(agentReadPw, clientReadPr)
+	defer client.Close()
+
+	const goroutines = 16
+	const payloadSize = 8 * 1024 // larger than PIPE_BUF so frames span multiple Write calls
+
+	seen := make(map[string]bool)
+	var seenMu sync.Mutex
+	var wg sync.WaitGroup
+
+	// Reader: parse every frame and record which payloads arrived intact.
+	recvErr := make(chan error, 1)
+	go func() {
+		for {
+			frame, err := protocol.ReadFrame(agentReadPr)
+			if err != nil {
+				return // pipe closed
+			}
+			params, err := protocol.ParseShellIOParams(frame)
+			if err != nil {
+				recvErr <- fmt.Errorf("corrupted/parse error frame: %v", err)
+				return
+			}
+			seenMu.Lock()
+			seen[string(params.Input)] = true
+			seenMu.Unlock()
+		}
+	}()
+
+	// Fire all writers concurrently from distinct goroutines.
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			payload := make([]byte, payloadSize)
+			for j := range payload {
+				payload[j] = byte(i)
+			}
+			_ = client.ShellIO(uint32(i), payload)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	// Give the reader a moment to drain the pipe.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-recvErr:
+			t.Fatalf("reader reported corruption: %v", err)
+		default:
+		}
+		seenMu.Lock()
+		n := len(seen)
+		seenMu.Unlock()
+		if n >= goroutines {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	seenMu.Lock()
+	defer seenMu.Unlock()
+	if len(seen) != goroutines {
+		t.Fatalf("received %d/%d intact frames; protocol corrupted or frames lost", len(seen), goroutines)
+	}
+
+	_ = agentReadPw.Close() // end the reader goroutine
+}
+
 func waitForFrame(t *testing.T, ch <-chan *protocol.Frame, label string) *protocol.Frame {
 	t.Helper()
 	select {
@@ -138,8 +226,3 @@ func waitForFrame(t *testing.T, ch <-chan *protocol.Frame, label string) *protoc
 	}
 	return nil // unreachable
 }
-
-
-
-
-
