@@ -50,20 +50,45 @@ type taskTerminal struct {
 }
 
 // defaultTermSize is the fallback PTY size when no clients have reported dimensions.
-const defaultCols = 120
+const (
+	defaultRows = 40
+	defaultCols = 120
+)
 
-// minCols returns the smallest cols across all connected clients, or defaultCols if none.
-func (t *taskTerminal) minCols() uint16 {
-	min := uint16(0)
+// minSize returns the smallest rows/cols across connected clients (defaults if
+// none), so the PTY fits inside every client's viewport.
+func (t *taskTerminal) minSize() (rows, cols uint16) {
+	minRows, minCols := uint16(0), uint16(0)
 	for _, sz := range t.connSizes {
-		if min == 0 || sz.cols < min {
-			min = sz.cols
+		if sz.rows == 0 || sz.cols == 0 {
+			continue
+		}
+		if minRows == 0 || sz.rows < minRows {
+			minRows = sz.rows
+		}
+		if minCols == 0 || sz.cols < minCols {
+			minCols = sz.cols
 		}
 	}
-	if min == 0 {
-		return defaultCols
+	if minRows == 0 {
+		minRows = defaultRows
 	}
-	return min
+	if minCols == 0 {
+		minCols = defaultCols
+	}
+	return minRows, minCols
+}
+
+// clampDim bounds a client-reported dimension to 1..1000, preventing
+// malformed values from wrapping through uint16.
+func clampDim(v int) uint16 {
+	if v < 1 {
+		return 1
+	}
+	if v > 1000 {
+		return 1000
+	}
+	return uint16(v)
 }
 
 // applySize sets the PTY to the given rows/cols if it differs from current size.
@@ -81,27 +106,24 @@ func (t *taskTerminal) applySize(rows, cols uint16) {
 	}
 }
 
-// handleResize records a client's terminal size and applies the smallest width
-// across all connected clients. This ensures narrow devices (phones) dictate
-// the PTY width so output wraps correctly on all screens.
+// handleResize records a client's size and applies the smallest rows/cols
+// across all connected clients, so narrow devices dictate the PTY size.
 func (t *taskTerminal) handleResize(conn *websocket.Conn, rows, cols uint16) {
 	t.mu.Lock()
 	t.connSizes[conn] = connSize{rows: rows, cols: cols}
-	min := t.minCols()
-	// Use rows from the resizing client (most recent), cols from the minimum.
+	r, c := t.minSize()
 	t.mu.Unlock()
-	t.applySize(rows, min)
+	t.applySize(r, c)
 }
 
-// removeConnSize removes a client's tracked dimensions and re-applies the
-// smallest width among remaining clients.
+// removeConnSize drops a client's size and re-applies the smallest among remaining clients.
 func (t *taskTerminal) removeConnSize(conn *websocket.Conn) {
 	t.mu.Lock()
 	delete(t.conns, conn)
 	delete(t.connSizes, conn)
-	min := t.minCols()
+	r, c := t.minSize()
 	t.mu.Unlock()
-	t.applySize(40, min)
+	t.applySize(r, c)
 }
 
 // sandboxOps is the subset of sandbox.SandboxManager methods used by the terminal manager.
@@ -120,13 +142,13 @@ type sandboxOps interface {
 
 // TerminalManager manages per-task persistent terminal sessions.
 type TerminalManager struct {
-	mu                    sync.RWMutex
-	sessions              map[string]*taskTerminal
-	store                 *store.Store
-	cfgStore              *config.ConfigStore
-	sandboxMgr            sandboxOps
-	agentRegistry         *agent.AgentRegistry
-	onPortsAssigned       func(taskID, projectID string, ports []types.AssignedPort) // callback when task ports are assigned
+	mu                     sync.RWMutex
+	sessions               map[string]*taskTerminal
+	store                  *store.Store
+	cfgStore               *config.ConfigStore
+	sandboxMgr             sandboxOps
+	agentRegistry          *agent.AgentRegistry
+	onPortsAssigned        func(taskID, projectID string, ports []types.AssignedPort) // callback when task ports are assigned
 	onProjectPortsAssigned func(projectID string, ports []types.AssignedPort)         // callback when project-level terminal ports are assigned
 }
 
@@ -628,7 +650,7 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 		case "input":
 			session.ptmx.Write([]byte(msg.Data))
 		case "resize":
-			session.handleResize(conn, uint16(msg.Rows), uint16(msg.Cols))
+			session.handleResize(conn, clampDim(msg.Rows), clampDim(msg.Cols))
 		}
 	}
 }
