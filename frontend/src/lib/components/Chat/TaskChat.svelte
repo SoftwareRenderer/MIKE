@@ -36,6 +36,8 @@
     } | null = $state(null);
     // Hide entries until scrolled to bottom (avoids flash)
     let entriesReady = $state(false);
+    // True while the initial conversation history is being fetched
+    let historyLoading = $state(false);
 
     let atBottom = $state(true);
     let userInputPending = false;
@@ -1171,7 +1173,12 @@
             }
 
             // 4. Load history from DB (merges with buffer entries via ID-based dedup).
-            await loadHistory();
+            historyLoading = true;
+            try {
+                await loadHistory();
+            } finally {
+                historyLoading = false;
+            }
 
             // 5. Allow live events — buffer replay is done, DB state is loaded.
             suppressEvents = false;
@@ -1327,6 +1334,7 @@
         onScrollElChange={(el) => scrollEl = el}
         onVirtualListChange={(comp) => virtualList = comp}
         {entriesReady}
+        {historyLoading}
     />
     {#if showStartButton}
         <StartPanel
