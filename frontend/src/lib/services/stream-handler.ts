@@ -126,7 +126,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'tool_result': {
-                const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string };
+                const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string; result_truncated?: boolean; original_lines?: number; original_bytes?: number; streamed?: boolean; message_id?: string };
                 const ref = s.activeToolCalls.get(data.tool_id);
                 const newActive = new Map(s.activeToolCalls);
                 newActive.delete(data.tool_id);
@@ -136,7 +136,13 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     const entry = s.entries.find(e => e.id === ref.entryId);
                     const tc = entry?.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id);
                     if (tc) {
-                        tc.result = data.output;
+                        // When streamed=true and output was already accumulated via tool_output,
+                        // keep the full streamed content instead of overwriting with the preview.
+                        if (data.streamed && tc.result) {
+                            // keep tc.result as-is (full streamed content)
+                        } else {
+                            tc.result = data.output;
+                        }
                         tc.success = data.success;
                         tc.duration = data.duration;
                         tc.isPending = false;
@@ -144,6 +150,10 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         if (data.raw_args) tc.raw_args = data.raw_args;
                         if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
                         if (data.path !== undefined) tc.path = data.path;
+                        if (data.result_truncated !== undefined) tc.resultTruncated = data.result_truncated;
+                        if (data.original_lines !== undefined) tc.originalLines = data.original_lines;
+                        if (data.original_bytes !== undefined) tc.originalBytes = data.original_bytes;
+                        if (data.message_id) tc.messageId = data.message_id;
                     }
                 } else {
                     // Tool call loaded from DB after page refresh — not in activeToolCalls.
@@ -151,7 +161,12 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     for (const entry of s.entries) {
                         const tc = entry.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id && t.isPending);
                         if (tc) {
-                            tc.result = data.output;
+                            // Same logic: preserve streamed output when available
+                            if (data.streamed && tc.result) {
+                                // keep tc.result as-is
+                            } else {
+                                tc.result = data.output;
+                            }
                             tc.success = data.success;
                             tc.duration = data.duration;
                             tc.isPending = false;
@@ -159,6 +174,10 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                             if (data.raw_args) tc.raw_args = data.raw_args;
                             if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
                             if (data.path !== undefined) tc.path = data.path;
+                            if (data.result_truncated !== undefined) tc.resultTruncated = data.result_truncated;
+                            if (data.original_lines !== undefined) tc.originalLines = data.original_lines;
+                            if (data.original_bytes !== undefined) tc.originalBytes = data.original_bytes;
+                            if (data.message_id) tc.messageId = data.message_id;
                             break;
                         }
                     }

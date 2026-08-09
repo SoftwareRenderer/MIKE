@@ -54,6 +54,211 @@ describe('StreamState', () => {
     });
 });
 
+describe('tool_result truncation metadata', () => {
+    function setup() {
+        const cb = makeCallbacks();
+        const stream = new StreamState();
+        const handleEvent = createStreamHandler(stream, cb);
+        return { cb, stream, handleEvent };
+    }
+
+    it('streamed bash: keeps accumulated output, stores truncation metadata', () => {
+        const { stream, handleEvent } = setup();
+        // Start assistant
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        // tool_call for bash
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-bash', tool_name: 'bash', args: { command: 'make build' } } }, false, 'p1', 't1');
+        // Several tool_output chunks accumulate the full streamed content
+        handleEvent({ type: 'tool_output', data: { tool_id: 'tc-bash', text: 'Compiling module A...\n' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_output', data: { tool_id: 'tc-bash', text: 'Compiling module B...\n' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_output', data: { tool_id: 'tc-bash', text: 'Compiling module C...\n' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_output', data: { tool_id: 'tc-bash', text: 'Build succeeded in 42s\n' } }, false, 'p1', 't1');
+
+        const fullStreamed = 'Compiling module A...\nCompiling module B...\nCompiling module C...\nBuild succeeded in 42s\n';
+        expect(stream.state.entries[0].toolCalls![0].result).toBe(fullStreamed);
+
+        // tool_result arrives with streamed=true and a truncated preview
+        handleEvent({
+            type: 'tool_result',
+            data: {
+                tool_id: 'tc-bash',
+                success: true,
+                output: 'Compiling module A...\n...\nBuild succeeded in 42s', // truncated preview
+                duration: 42000,
+                result_truncated: true,
+                original_lines: 150,
+                original_bytes: 8192,
+                streamed: true,
+                message_id: 'msg-bash-123',
+            },
+        }, false, 'p1', 't1');
+
+        const tc = stream.state.entries[0].toolCalls![0];
+        // Should KEEP the full streamed content, NOT the truncated preview
+        expect(tc.result).toBe(fullStreamed);
+        expect(tc.resultTruncated).toBe(true);
+        expect(tc.originalLines).toBe(150);
+        expect(tc.originalBytes).toBe(8192);
+        expect(tc.messageId).toBe('msg-bash-123');
+        expect(tc.success).toBe(true);
+        expect(tc.duration).toBe(42000);
+        expect(tc.isPending).toBe(false);
+    });
+
+    it('read_file (not streamed): uses preview output and stores metadata', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-read', tool_name: 'read_file', args: { path: 'large.go' } } }, false, 'p1', 't1');
+
+        // No tool_output events — read_file does not stream
+        // tool_result with truncated preview
+        handleEvent({
+            type: 'tool_result',
+            data: {
+                tool_id: 'tc-read',
+                success: true,
+                output: 'package main\n\nimport "fmt"\n... (truncated)\n',
+                duration: 5,
+                result_truncated: true,
+                original_lines: 500,
+                original_bytes: 15000,
+                streamed: false,
+                message_id: 'msg-read-456',
+            },
+        }, false, 'p1', 't1');
+
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.result).toBe('package main\n\nimport "fmt"\n... (truncated)\n');
+        expect(tc.resultTruncated).toBe(true);
+        expect(tc.originalLines).toBe(500);
+        expect(tc.originalBytes).toBe(15000);
+        expect(tc.messageId).toBe('msg-read-456');
+        expect(tc.isPending).toBe(false);
+    });
+
+    it('non-truncated tool (e.g. view_tasks): full output, no truncation fields', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-view', tool_name: 'view_tasks', args: {} } }, false, 'p1', 't1');
+
+        handleEvent({
+            type: 'tool_result',
+            data: {
+                tool_id: 'tc-view',
+                success: true,
+                output: 'Task 1: hello\nTask 2: world\n',
+                duration: 10,
+                // No truncation fields present
+            },
+        }, false, 'p1', 't1');
+
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.result).toBe('Task 1: hello\nTask 2: world\n');
+        expect(tc.resultTruncated).toBeUndefined();
+        expect(tc.originalLines).toBeUndefined();
+        expect(tc.originalBytes).toBeUndefined();
+        expect(tc.messageId).toBeUndefined();
+        expect(tc.isPending).toBe(false);
+    });
+
+    it('streamed=true but tc.result is empty: falls back to preview', () => {
+        // Client missed the tool_output stream — streamed flag is true but
+        // nothing was accumulated. Should use the preview.
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-miss', tool_name: 'bash', args: {} } }, false, 'p1', 't1');
+        // No tool_output events (missed the stream)
+
+        handleEvent({
+            type: 'tool_result',
+            data: {
+                tool_id: 'tc-miss',
+                success: true,
+                output: 'preview only',
+                duration: 100,
+                result_truncated: true,
+                original_lines: 50,
+                original_bytes: 2000,
+                streamed: true,
+                message_id: 'msg-miss-789',
+            },
+        }, false, 'p1', 't1');
+
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.result).toBe('preview only');
+        expect(tc.resultTruncated).toBe(true);
+        expect(tc.originalLines).toBe(50);
+        expect(tc.messageId).toBe('msg-miss-789');
+    });
+
+    it('regression: DB-loaded pending tool call stores metadata', () => {
+        // Simulates page refresh: entry loaded from DB with isPending=true,
+        // but activeToolCalls is empty.
+        const { stream, handleEvent } = setup();
+        stream.state.entries = [{
+            id: 'db-assistant', role: 'assistant', content: '', isStreaming: false,
+            createdAt: new Date().toISOString(),
+            toolCalls: [{
+                toolId: 'db-tc1', toolName: 'bash', displayName: 'Execute',
+                args: { command: 'make test', timeout: 60 }, raw_args: '{"command":"make test"}',
+                isPending: true, startedAt: Date.now() - 10000,
+            }],
+        }];
+        stream.state.activeToolCalls = new Map();
+
+        handleEvent({
+            type: 'tool_result',
+            data: {
+                tool_id: 'db-tc1',
+                success: true,
+                output: 'ok 123 tests',
+                duration: 10000,
+                result_truncated: true,
+                original_lines: 200,
+                original_bytes: 5000,
+                streamed: false,
+                message_id: 'msg-db-111',
+            },
+        }, false, 'p1', 't1');
+
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.isPending).toBe(false);
+        expect(tc.result).toBe('ok 123 tests');
+        expect(tc.success).toBe(true);
+        expect(tc.duration).toBe(10000);
+        expect(tc.resultTruncated).toBe(true);
+        expect(tc.originalLines).toBe(200);
+        expect(tc.originalBytes).toBe(5000);
+        expect(tc.messageId).toBe('msg-db-111');
+    });
+
+    it('metadata fields only stored when present in event', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-partial', tool_name: 'bash', args: {} } }, false, 'p1', 't1');
+
+        // Only some metadata fields present
+        handleEvent({
+            type: 'tool_result',
+            data: {
+                tool_id: 'tc-partial',
+                success: true,
+                output: 'partial meta',
+                duration: 50,
+                result_truncated: true,
+                // original_lines, original_bytes, message_id absent
+            },
+        }, false, 'p1', 't1');
+
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.result).toBe('partial meta');
+        expect(tc.resultTruncated).toBe(true);
+        expect(tc.originalLines).toBeUndefined();
+        expect(tc.originalBytes).toBeUndefined();
+        expect(tc.messageId).toBeUndefined();
+    });
+});
+
 describe('createStreamHandler', () => {
     function setup() {
         const cb = makeCallbacks();
