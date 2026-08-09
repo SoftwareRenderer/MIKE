@@ -543,6 +543,17 @@ describe('buildEntriesFromMessages', () => {
         expect(entries[0].stats!.prompt_tokens).toBe(100);
     });
 
+    it('carries severity on system entries', () => {
+        const messages = [
+            { id: 's1', role: 'system', content: 'Synced main into task branch (no conflicts).', severity: 'info', created_at: '2025-01-01T00:00:00Z' },
+            { id: 's2', role: 'system', content: 'Merge conflict detected in: a.ts', created_at: '2025-01-01T00:00:01Z' },
+        ];
+        const { entries } = buildEntriesFromMessages(messages);
+        expect(entries[0].severity).toBe('info');
+        // default (warning) severity is left undefined
+        expect(entries[1].severity).toBeUndefined();
+    });
+
     it('handles merge_resolution entries', () => {
         const messages = [
             { id: 'm1', role: 'merge_resolution', content: 'Merged successfully', created_at: '2025-01-01T00:00:00Z' },

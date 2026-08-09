@@ -157,6 +157,7 @@ export function buildEntriesFromMessages(
         prompt_ms?: number;
         predicted_ms?: number;
         duration?: number;
+        severity?: string;
     }>,
 ): { entries: ChatEntry[]; checkpointHashes: Map<string, string> } {
     const checkpointHashes = new Map<string, string>();
@@ -222,6 +223,7 @@ export function buildEntriesFromMessages(
 
         const entry: Partial<ChatEntry> = {
             ...base, id: m.id, role: m.role, content: m.content,
+            severity: m.severity,
             reasoningContent: m.reasoning_content, hasReasoning: m.has_reasoning,
             attachments: parsedAttachments, isStreaming: false, createdAt: m.created_at,
         };
