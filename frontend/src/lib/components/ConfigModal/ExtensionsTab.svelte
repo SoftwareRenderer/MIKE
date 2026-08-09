@@ -508,7 +508,7 @@
                     class:active={activeView === 'browse'}
                     onclick={() => { activeView = 'browse'; loadLocalExtensions(); if (registryEntries.length === 0) loadRegistry(); }}
                 >
-                    Browse Registry
+                    Browse
                 </button>
             </div>
             <div class="view-tabs-right">
@@ -557,7 +557,7 @@
                     <p>No extensions installed</p>
                     <p class="help">Install extensions from the registry to add LSP servers and UI plugins.</p>
                     <button class="btn btn-primary" onclick={() => { activeView = 'browse'; loadLocalExtensions(); loadRegistry(); }}>
-                        Browse Registry
+                        Browse
                     </button>
                 </div>
             {:else}
@@ -573,7 +573,7 @@
                                     <div class="ext-name-row">
                                         <span class="ext-name">{ext.manifest.display_name || ext.name}</span>
                                         {#if isLocal}
-                                            <span class="unpublished-badge" title="Installed from the local extensions directory rather than a registry.">Local</span>
+                                            <span class="unpublished-badge" title="Installed from the local extensions directory.">Local</span>
                                         {/if}
                                         {#if getCapabilityKeys(ext).length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
