@@ -354,11 +354,10 @@ type RegistryEntry struct {
 	Image         string        `json:"image,omitempty"`          // OCI image reference
 	DockerfileURL string        `json:"dockerfile_url,omitempty"` // URL to Dockerfile
 	Capabilities  *Capabilities `json:"capabilities,omitempty"`   // capability config (mirrors manifest)
-	// Git-pinned source for self-hosted extensions. When set, install checks
-	// out exactly this commit (verified) instead of fetching URL-based artifacts.
 	Repo   string `json:"repo,omitempty"`
 	Commit string `json:"commit,omitempty"`
 	Subdir string `json:"subdir,omitempty"`
+	localDir string
 }
 
 // IsLSP returns true if this extension is an LSP extension.
