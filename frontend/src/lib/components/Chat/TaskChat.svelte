@@ -1252,6 +1252,10 @@
 
     onDestroy(() => {
         destroyed = true;
+        // Clear the global streaming flag so the card's "Running" badge
+        // doesn't persist after the detail is closed while the task streams.
+        // The card falls back to execution_state === 'running' for the authoritative state.
+        markNotStreaming();
         if (inputTimeout) clearTimeout(inputTimeout);
         unsubQueue?.();
         window.removeEventListener('beforeunload', handleBeforeUnload);
