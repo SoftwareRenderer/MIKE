@@ -70,15 +70,3 @@ func (s *Store) DeleteDependency(parentTaskID, childTaskID string) error {
 	_, err := s.db.Exec(`DELETE FROM task_dependencies WHERE parent_task_id = ? AND child_task_id = ?`, parentTaskID, childTaskID)
 	return err
 }
-
-// DependencyExists checks if a dependency link exists.
-func (s *Store) DependencyExists(parentTaskID, childTaskID string) (bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var count int
-	err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM task_dependencies WHERE parent_task_id = ? AND child_task_id = ?`,
-		parentTaskID, childTaskID,
-	).Scan(&count)
-	return count > 0, err
-}
