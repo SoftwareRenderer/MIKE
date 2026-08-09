@@ -14,13 +14,13 @@ import (
 )
 
 // commitMessagePrompt is the system prompt for generating commit messages.
-const commitMessagePrompt = "You are a commit message generator. Given a git diff --stat output and the conversation that led to the changes, generate a concise commit message. Simple changes only need a title. Titles must not have more than 80 characters. Explain key decisions ONLY IF changes include complex logic."
+const commitMessagePrompt = "You are a commit message generator. Given the conversation that led to the changes, generate a concise commit message. Simple changes only need a title. Titles must not have more than 80 characters. Explain key decisions ONLY IF changes include complex logic."
 
 // buildCommitMessages creates the chat messages for commit message generation.
-func buildCommitMessages(diffStat, turnText string) []types.ChatMessage {
+func buildCommitMessages(turnText string) []types.ChatMessage {
 	return []types.ChatMessage{
 		{Role: "system", Content: commitMessagePrompt},
-		{Role: "user", Content: fmt.Sprintf("Conversation context:\n\n%s\n\nGit diff --stat:\n\n%s", turnText, diffStat)},
+		{Role: "user", Content: fmt.Sprintf("Conversation context:\n\n%s", turnText)},
 	}
 }
 
@@ -482,7 +482,7 @@ func (te *TaskExecutor) GenerateCheckpointLabel(ctx context.Context, taskID, dif
 
 // GenerateCommitMessage uses the LLM to generate a descriptive commit label from git diff stat
 // and pre-formatted conversation turn text. Falls back to "{title}\n\nCo-authored-by: {model}" on any error.
-func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, taskID, diffStat, turnText string) string {
+func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, taskID, turnText string) string {
 	task, err := te.store.GetTaskByTaskID(taskID)
 	if err != nil {
 		return "file changes"
@@ -493,7 +493,7 @@ func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, taskID, diffS
 	}
 	fallback := fmt.Sprintf("%s\n\nCo-authored-by: %s", task.Title, modelName)
 
-	labelMessages := buildCommitMessages(diffStat, turnText)
+	labelMessages := buildCommitMessages(turnText)
 
 	maxTokens := 128
 	_, label, err := te.ChatCompletion(ctx, serverURL, modelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
@@ -613,13 +613,9 @@ func buildCommitMessageWithCoAuthors(body string, models []string) string {
 // message generation across all commit paths (auto-commit, manual commit-and-done).
 // If multiple models contributed to the task, each gets its own Co-authored-by line.
 func (te *TaskExecutor) GenerateCommitMessageForTask(ctx context.Context, taskID string, task *types.Task) string {
-	diffStat, _ := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
-	if diffStat == "" {
-		diffStat = "no diff available"
-	}
 	taskMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
 	conversation := BuildConversationFromTaskMessages(taskMsgs)
-	commitMsg := te.GenerateCommitMessage(ctx, taskID, diffStat, FormatConversationTurns(ExtractCommitContext(conversation)))
+	commitMsg := te.GenerateCommitMessage(ctx, taskID, FormatConversationTurns(ExtractCommitContext(conversation)))
 	// GenerateCommitMessage returns "file changes" as a generic fallback when LLM is unavailable.
 	// Use the task title instead for a more useful commit message.
 	if commitMsg == "file changes" && task.Title != "" {
@@ -660,14 +656,10 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 		return
 	}
 
-	diffStat, _ := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat", "HEAD")
-	if diffStat == "" {
-		diffStat = "no diff available"
-	}
 	taskMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
 	conversation := BuildConversationFromTaskMessages(taskMsgs)
 	turnText := FormatConversationTurns(ExtractCommitContext(conversation))
-	labelMessages := buildCommitMessages(diffStat, turnText)
+	labelMessages := buildCommitMessages(turnText)
 
 	// Collect all unique models that contributed to this task.
 	models := collectUniqueModels(taskMsgs)
