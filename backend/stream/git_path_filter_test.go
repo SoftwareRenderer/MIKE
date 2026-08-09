@@ -2,6 +2,8 @@ package stream
 
 import (
 	"testing"
+
+	"kanban/backend/git"
 )
 
 // TestIsInternalFile verifies that internal files (.git + flight recorder) are detected.
@@ -15,7 +17,7 @@ func TestIsInternalFile(t *testing.T) {
 		{"src/main.go", false},
 		{"README.md", false},
 		{"data/kanban.db", false},
-		{"kanban.trace.bak", false}, // not the exact name
+		{"kanban.trace.bak", false},  // not the exact name
 		{"trace/kanban.trace", true}, // basename is kanban.trace, matches
 
 		// .git paths — should be filtered (via isGitPath)
@@ -34,9 +36,9 @@ func TestIsInternalFile(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.path, func(t *testing.T) {
-			got := isInternalFile(tc.path)
+			got := git.IsInternalFile(tc.path)
 			if got != tc.expected {
-				t.Errorf("isInternalFile(%q) = %v, want %v", tc.path, got, tc.expected)
+				t.Errorf("git.IsInternalFile(%q) = %v, want %v", tc.path, got, tc.expected)
 			}
 		})
 	}

@@ -17,15 +17,15 @@ import (
 
 // DiffStatsEvent holds data for a diff stats broadcast to clients.
 type DiffStatsEvent struct {
-	ProjectID       string
-	TaskID          string
-	DiffHash        string
-	ShortStat       string // full diff shortstat (for logging); do NOT use for card display
-	FilesN          int
-	UntrackedN      int
-	UntrackedLines  int
-	TrackedAdd      int    // additions from truncated manifest (for card display)
-	TrackedDel      int    // deletions from truncated manifest (for card display)
+	ProjectID           string
+	TaskID              string
+	DiffHash            string
+	ShortStat           string // full diff shortstat (for logging); do NOT use for card display
+	FilesN              int
+	UntrackedN          int
+	UntrackedLines      int
+	TrackedAdd          int // additions from truncated manifest (for card display)
+	TrackedDel          int // deletions from truncated manifest (for card display)
 	ChangedHashes       map[string]string
 	RemovedFiles        []string
 	StagedPaths         []string
@@ -66,7 +66,7 @@ type WorktreeWatcher struct {
 	pathCache      map[string]string // dir path -> taskID for O(1) lookup
 	indexDirToTask map[string]string // git index dir -> taskID
 
-	jobCh    chan diffJob      // bounded worker pool
+	jobCh    chan diffJob // bounded worker pool
 	doneCh   chan struct{}
 	workerWg sync.WaitGroup
 	inFlight map[string]bool // taskID in pool or being processed
@@ -521,13 +521,13 @@ func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.T
 
 	filteredNew := make(map[string]string, len(newHashes))
 	for path, hash := range newHashes {
-		if !isInternalFile(path) {
+		if !git.IsInternalFile(path) {
 			filteredNew[path] = hash
 		}
 	}
 	filteredPrev := make(map[string]string, len(prevHashes))
 	for path, hash := range prevHashes {
-		if !isInternalFile(path) {
+		if !git.IsInternalFile(path) {
 			filteredPrev[path] = hash
 		}
 	}
@@ -553,14 +553,14 @@ func computeDiffDelta(taskID string, newHashes map[string]string, newDiff *git.T
 // excluding internal files. This matches what the diff panel displays.
 func countManifestChanges(d *git.TaskDiff) (add, del int) {
 	for path, f := range d.Tracked {
-		if isInternalFile(path) {
+		if git.IsInternalFile(path) {
 			continue
 		}
 		add += f.Added
 		del += f.Removed
 	}
 	for _, u := range d.Untracked {
-		if isInternalFile(u.Path) {
+		if git.IsInternalFile(u.Path) {
 			continue
 		}
 		if u.OrigAdded > 0 {
@@ -576,12 +576,12 @@ func countManifestChanges(d *git.TaskDiff) (add, del int) {
 // This matches the file count shown in the diff panel.
 func countManifestFiles(d *git.TaskDiff) (tracked, untracked int) {
 	for path := range d.Tracked {
-		if !isInternalFile(path) {
+		if !git.IsInternalFile(path) {
 			tracked++
 		}
 	}
 	for _, u := range d.Untracked {
-		if !isInternalFile(u.Path) {
+		if !git.IsInternalFile(u.Path) {
 			untracked++
 		}
 	}
@@ -592,7 +592,7 @@ func countManifestFiles(d *git.TaskDiff) (tracked, untracked int) {
 func countVisibleUntrackedLines(untracked []git.UntrackedFile) int {
 	total := 0
 	for _, u := range untracked {
-		if isInternalFile(u.Path) {
+		if git.IsInternalFile(u.Path) {
 			continue
 		}
 		if u.OrigAdded > 0 {
