@@ -1310,7 +1310,8 @@
     }
 
     .cap-badge:hover {
-        filter: brightness(1.2);
+        filter: brightness(1.3);
+        border-color: currentColor;
     }
 
     .cap-lsp {
