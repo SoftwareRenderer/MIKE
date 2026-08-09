@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const cardPath = resolve(__dirname, '../Card.svelte');
 const cardDetailPath = resolve(__dirname, '../CardDetail.svelte');
+const taskChatPath = resolve(__dirname, '../Chat/TaskChat.svelte');
 const source = readFileSync(cardPath, 'utf-8');
 const cardDetailSource = readFileSync(cardDetailPath, 'utf-8');
+const taskChatSource = readFileSync(taskChatPath, 'utf-8');
 
 describe('Card status rendering', () => {
     it('shows status badge for task', () => {
@@ -66,5 +68,17 @@ describe('Card status rendering', () => {
 
     it('shows task as draggable', () => {
         expect(source).toContain('draggable');
+    });
+
+    it('clears streamingIds in TaskChat onDestroy to prevent persistent "Running" badge', () => {
+        // When TaskChat unmounts (detail closed), it must call markNotStreaming()
+        // so the global streamingIds store doesn't retain a stale entry.
+        // Without this, the card's status badge shows "Running" forever even
+        // after the task completes (execution_state → idle) because streamingIds
+        // still has the task ID.
+        // Verify markNotStreaming is called within the onDestroy callback.
+        const onDestroyMatch = taskChatSource.match(/onDestroy\(\(\)\s*=>\s*\{[^}]*\}/s);
+        expect(onDestroyMatch).not.toBeNull();
+        expect(onDestroyMatch![0]).toContain('markNotStreaming');
     });
 });
