@@ -280,6 +280,16 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 	client.taskSub[key]++
 	asm.mu.Unlock()
 
+	// Done tasks are not watched at startup to avoid unnecessary fsnotify watchers.
+	// Start watching the worktree when the user opens the task so live diff updates
+	// (e.g. branch merges) are still reflected.
+	if asm.watcher != nil && asm.store != nil && asm.worktreeMgr != nil {
+		if task, err := asm.store.GetTaskByTaskID(taskID); err == nil && task.Status == "done" {
+			baseRef := asm.getDiffBaseline(*task)
+			asm.WatchWorktree(taskID, projectID, baseRef)
+		}
+	}
+
 	// Send per-task buffer so the client can catch up on missed events
 	// (e.g., tokens streamed while the page was reloading).
 	buf := asm.getTaskBuffer(key)
@@ -871,9 +881,11 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		default:
 		}
 		baseRef := asm.getDiffBaseline(task)
-		// Watch worktrees for tasks in active states or with an initialized worktree
-		// Use resolved baseline (same as panel) so card stats match panel display
-		if task.Status == "in_progress" || task.Status == "review" || task.Branch != "" {
+		// Watch worktrees for tasks in active states or with an initialized worktree.
+		// Done tasks are excluded here — their watcher is started lazily when the user
+		// opens the task (see subscribeTask) to avoid unnecessary fsnotify watchers.
+		// Use resolved baseline (same as panel) so card stats match panel display.
+		if task.Status != "done" && (task.Status == "in_progress" || task.Status == "review" || task.Branch != "") {
 			asm.WatchWorktree(task.ID, projectID, baseRef)
 		}
 		headRef := ""
