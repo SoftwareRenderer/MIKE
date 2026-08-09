@@ -60,7 +60,7 @@
     const CAPABILITY_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
         proxy: {
             label: 'Proxy',
-            description: 'Enables external API access for specific domains.',
+            description: 'Enables external API access for specific domains, within the boundaries of declared capabilities.',
         },
         lsp: {
             label: 'LSP',
@@ -612,7 +612,7 @@
                                     <span class="ext-proxy-label">Connects to:</span>
                                     <div class="cap-detail-tags">
                                         {#each ext.manifest.capabilities.proxy.allowed_domains as domain}
-                                            <span class="cap-detail-tag">{domain}</span>
+                                            <button class="cap-detail-tag" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>{domain}</button>
                                         {/each}
                                     </div>
                                 </div>
@@ -926,7 +926,7 @@
                                     <span class="ext-proxy-label">Connects to:</span>
                                     <div class="cap-detail-tags">
                                         {#each entry.capabilities.proxy.allowed_domains as domain}
-                                            <span class="cap-detail-tag">{domain}</span>
+                                            <button class="cap-detail-tag" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>{domain}</button>
                                         {/each}
                                     </div>
                                 </div>
@@ -1463,6 +1463,19 @@
         border: 1px solid var(--color-border-subtle);
         color: var(--color-text-secondary);
         white-space: nowrap;
+    }
+
+    button.cap-detail-tag {
+        cursor: pointer;
+        transition: all 0.15s;
+        font: inherit;
+        text-align: inherit;
+    }
+
+    button.cap-detail-tag:hover {
+        background: var(--color-surface-2);
+        border-color: var(--color-border-hover);
+        color: var(--color-text-primary);
     }
 
     .ext-proxy-domains .cap-detail-tag {
