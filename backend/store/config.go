@@ -19,4 +19,3 @@ func (s *Store) SetConfigValue(key, value string) error {
 	_, err := s.db.Exec(`INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)`, key, value)
 	return err
 }
-
