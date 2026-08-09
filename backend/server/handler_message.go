@@ -3,11 +3,11 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"kanban/backend/toolresult"
 	"kanban/backend/types"
 )
 
@@ -389,41 +389,14 @@ func truncateToolResult(msg *types.TaskMessage) bool {
 	if !ok {
 		return false
 	}
-	// Check if truncation is needed
-	lines := strings.Split(output, "\n")
-	if len(lines) <= 10 && len(output) <= 1024 {
+	// Delegate truncation to the shared helper
+	preview, originalLines, originalBytes, truncated := toolresult.Truncate(output)
+	if !truncated {
 		return false
 	}
-	// Find how many lines fit within 1KB
-	var bytesAt1KB int
-	byteTotal := 0
-	for i, line := range lines {
-		sep := 0
-		if i > 0 {
-			sep = 1
-		}
-		byteTotal += len(line) + sep
-		if byteTotal > 1024 {
-			bytesAt1KB = i
-			break
-		}
-		bytesAt1KB = i + 1
-	}
-	maxLines := 10
-	if bytesAt1KB < maxLines {
-		maxLines = bytesAt1KB
-	}
-	// Truncate
-	var truncated string
-	if maxLines > 1 {
-		truncated = strings.Join(lines[:maxLines-1], "\n") + "\n... (truncated)"
-	} else {
-		truncated = output[:1024] + "... (truncated)"
-	}
-	result["output"] = truncated
-	// Store original stats for the frontend "Show all" button
-	result["original_lines"] = len(lines)
-	result["original_bytes"] = len(output)
+	result["output"] = preview
+	result["original_lines"] = originalLines
+	result["original_bytes"] = originalBytes
 	data, err := json.Marshal(result)
 	if err != nil {
 		return false
