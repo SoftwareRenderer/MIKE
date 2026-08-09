@@ -33,6 +33,9 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		}
 	}()
 
+	// Reset session cost for this run — it accumulates per-run, not across runs.
+	task.SessionCost = 0
+
 	sessionName := fmt.Sprintf("kanban-%s", task.ID)
 
 	// Extract agent name from URL: "agent://pi" -> "pi"
@@ -484,6 +487,9 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		te.store.AccumulateProjectStats(projectID, modelName, providerName, finalCost)
 		log.Printf("[agent] task=%s accumulated session cost=%f for model=%s provider=%s", task.ID, finalCost, modelName, providerName)
 	}
+	// Persist session cost to the task so it's available when viewing non-streaming tasks.
+	task.SessionCost = finalCost
+	te.store.UpdateTask(task)
 
 	// Broadcast complete event to clear streaming state on the frontend.
 	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
