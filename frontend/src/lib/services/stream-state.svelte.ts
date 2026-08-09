@@ -71,7 +71,9 @@ export class StreamState {
         this.state.processedToolIds = new Set();
         this.state.streamTokenCount = 0;
         this.state.awaitingResponse = false;
-        this.state.sessionCost = 0;
+        // Note: sessionCost is NOT reset here — it reflects the task's accumulated
+        // session cost, which persists across thread switches and is restored
+        // from the persisted task.session_cost on load.
     }
 
     /** Clear retry state. */

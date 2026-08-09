@@ -86,6 +86,7 @@ export interface Task {
     updated_at: string;
     assigned_ports?: AssignedPort[];
     base_ref?: string;
+    session_cost?: number;
 }
 
 export interface Thread {
