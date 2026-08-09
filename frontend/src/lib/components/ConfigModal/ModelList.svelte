@@ -229,6 +229,13 @@
         gap: 8px;
         align-items: center;
     }
+
+    @media (max-width: 600px) {
+        .models-col-headers,
+        .model-row {
+            grid-template-columns: minmax(100px, 1fr) 70px 90px 22px 22px;
+        }
+    }
     .models-col-headers {
         padding: 0 8px;
         border: 1px solid transparent;
@@ -394,6 +401,12 @@
         grid-template-columns: repeat(5, 1fr);
         gap: 6px;
         align-items: end;
+    }
+
+    @media (max-width: 600px) {
+        .model-price-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
     }
     .mp-field {
         display: flex;
