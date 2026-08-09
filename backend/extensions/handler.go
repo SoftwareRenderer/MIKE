@@ -414,6 +414,121 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// inferExtensionType returns the extension type implied by its capabilities,
+// in priority order (lsp > ui > css > agent). Returns "" when no capability
+// maps to a type.
+func inferExtensionType(caps *Capabilities) string {
+	if caps == nil {
+		return ""
+	}
+	switch {
+	case caps.LSP != nil:
+		return ExtensionTypeLSP
+	case caps.UI != nil:
+		return ExtensionTypeUI
+	case caps.CSS != nil:
+		return ExtensionTypeCSS
+	case caps.Agent != nil:
+		return ExtensionTypeAgent
+	}
+	return ""
+}
+
+// localExtension is a discovered extension in the local extensions directory.
+type localExtension struct {
+	Name     string
+	Dir      string
+	Type     string
+	Manifest ExtensionManifest
+}
+
+// scanLocalExtensions walks the extensions directory and returns every local
+// extension found there (a directory containing a manifest.json), sorted by
+// name. Unreadable/malformed entries are skipped. The name is the manifest's
+// parent directory (extensions/<author>/<name>/manifest.json).
+func scanLocalExtensions(root string) ([]localExtension, error) {
+	var found []localExtension
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			// Skip unreadable entries (e.g. missing dir, permission errors).
+			return nil
+		}
+		if d.IsDir() || d.Name() != "manifest.json" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		var manifest ExtensionManifest
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			return nil
+		}
+		found = append(found, localExtension{
+			Name:     filepath.Base(filepath.Dir(path)),
+			Dir:      filepath.Dir(path),
+			Type:     inferExtensionType(manifest.Capabilities),
+			Manifest: manifest,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].Name < found[j].Name })
+	return found, nil
+}
+
+// findLocalExtensionByName returns the local extension with the given name, or
+// nil if no such extension exists in the local extensions directory.
+func findLocalExtensionByName(root, name string) *localExtension {
+	found, err := scanLocalExtensions(root)
+	if err != nil {
+		return nil
+	}
+	for i := range found {
+		if found[i].Name == name {
+			return &found[i]
+		}
+	}
+	return nil
+}
+
+// HandleLocalExtensions lists extensions present in the local extensions
+// directory (on the filesystem) as registry-style entries. These are the
+// extensions available locally that are not necessarily published in a registry.
+// Each entry's name is derived from the manifest's parent directory
+// (extensions/<author>/<name>/manifest.json).
+func (h *ExtensionHandler) HandleLocalExtensions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	found, err := scanLocalExtensions(h.config.ExtensionsDirOrDefault())
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to scan extensions directory: "+err.Error())
+		return
+	}
+
+	index := make(RegistryIndex, 0, len(found))
+	for _, le := range found {
+		index = append(index, RegistryEntry{
+			Name:         le.Name,
+			Version:      le.Manifest.Version,
+			Type:         le.Type,
+			DisplayName:  le.Manifest.DisplayName,
+			Description:  le.Manifest.Description,
+			Author:       le.Manifest.Author,
+			Homepage:     le.Manifest.Homepage,
+			LicenseURL:   le.Manifest.LicenseURL,
+			Capabilities: le.Manifest.Capabilities,
+		})
+	}
+
+	httputil.JSONResponse(w, http.StatusOK, index)
+}
+
 // HandleRegistryIndex fetches the registry index.
 func (h *ExtensionHandler) HandleRegistryIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -503,6 +618,63 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 	h.streamOperation(w, r, events)
 }
 
+// HandleInstallLocal installs an extension from the local extensions directory
+// on the filesystem (an "unpublished" extension). Unlike HandleInstall it does
+// not consult the registry, so it works even when no registry is reachable. The
+// actual install runs in a detached goroutine and streams SSE progress.
+func (h *ExtensionHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req InstallExtensionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	local := findLocalExtensionByName(h.config.ExtensionsDirOrDefault(), req.Name)
+	if local == nil {
+		httputil.JSONError(w, http.StatusNotFound, "local extension not found: "+req.Name)
+		return
+	}
+
+	entry := &RegistryEntry{
+		Name:         local.Name,
+		Version:      local.Manifest.Version,
+		Type:         local.Type,
+		DisplayName:  local.Manifest.DisplayName,
+		Description:  local.Manifest.Description,
+		Author:       local.Manifest.Author,
+		Homepage:     local.Manifest.Homepage,
+		LicenseURL:   local.Manifest.LicenseURL,
+		Capabilities: local.Manifest.Capabilities,
+		localDir:     local.Dir,
+	}
+
+	// Check by name — records use timestamped IDs, so an ID lookup misses duplicates.
+	if existing, _ := h.store.GetByName(entry.Name); existing != nil {
+		httputil.JSONError(w, http.StatusConflict, "extension already installed: "+req.Name)
+		return
+	}
+
+	// Prevent racing an in-flight install (e.g. after a page reload).
+	if !h.inFlightOps.begin(entry.Name) {
+		httputil.JSONError(w, http.StatusConflict, "install already in progress: "+req.Name)
+		return
+	}
+
+	events := make(chan sseEvent, 16)
+	go h.installInBackground(entry.Name, entry, "", events)
+
+	h.streamOperation(w, r, events)
+}
+
 // installInBackground runs the install detached from the request context so it
 // completes even if the client disconnects, reporting progress on events.
 func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry, url string, events chan<- sseEvent) {
@@ -516,13 +688,23 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		events <- sseEvent{Extension: name, Progress: 100, Message: "Install failed", Done: true, Error: err.Error()}
 	}
 
-	// Git-pinned (self-hosted) path: the registry entry pins a repo + commit.
-	// Check out and verify the exact commit, materialize its files, and load the
-	// manifest from the verified checkout. Nothing is installed if verification fails.
+	// Local (filesystem) extension: files are already materialized, so load the
+	// manifest in place rather than fetching from a registry or git repo.
 	gitPinned := entry.Repo != "" && entry.Commit != ""
 	var manifest ExtensionManifest
 	targetDir := filepath.Join(h.config.ExtensionsDirOrDefault(), authorDir(entry.Author), entry.Name)
-	if gitPinned {
+	if entry.localDir != "" {
+		targetDir = entry.localDir
+		manifestData, err := os.ReadFile(filepath.Join(targetDir, "manifest.json"))
+		if err != nil {
+			fail(fmt.Errorf("local extension has no manifest.json: %w", err))
+			return
+		}
+		if err := json.Unmarshal(manifestData, &manifest); err != nil {
+			fail(fmt.Errorf("invalid manifest.json in local extension: %w", err))
+			return
+		}
+	} else if gitPinned {
 		emit(10, "Fetching extension...")
 		if err := h.registry.CheckoutExtension(entry.Repo, entry.Commit, entry.Subdir, targetDir); err != nil {
 			fail(fmt.Errorf("failed to fetch extension (commit %s): %w", entry.Commit, err))
@@ -550,6 +732,11 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	// Sanitize manifest URLs to prevent javascript:/data: injection
 	sanitizeManifestURLs(&manifest)
 
+	installSource := "registry"
+	if entry.localDir != "" {
+		installSource = "local"
+	}
+
 	// Create extension record
 	id := fmt.Sprintf("%s-%d", strings.ToLower(entry.Name), time.Now().Unix())
 	ext := &Extension{
@@ -566,12 +753,13 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 			NetworkIsolation: true,
 			MemoryLimit:      DefaultExtensionMemory,
 		},
-		InstallSource: "registry",
-		ImageRef:      entry.Image,
-		Enabled:       true,
-		Repo:          entry.Repo,
-		Commit:        entry.Commit,
-		Subdir:        entry.Subdir,
+		InstallSource: installSource,
+
+		ImageRef: entry.Image,
+		Enabled:  true,
+		Repo:     entry.Repo,
+		Commit:   entry.Commit,
+		Subdir:   entry.Subdir,
 	}
 	if err := h.store.Create(ext); err != nil {
 		fail(fmt.Errorf("failed to create extension: %w", err))
@@ -582,13 +770,20 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	imageRef := entry.Image
 	if imageRef == "" {
 		var dockerfile string
-		if gitPinned {
+		switch {
+		case entry.localDir != "":
+			// Build from the local extension's Dockerfile.
+			emit(20, "Reading Dockerfile...")
+			if data, err := os.ReadFile(filepath.Join(entry.localDir, "Dockerfile")); err == nil {
+				dockerfile = string(data)
+			}
+		case gitPinned:
 			// Build from the verified checkout's Dockerfile.
 			dfPath := filepath.Join(targetDir, "Dockerfile")
 			if data, err := os.ReadFile(dfPath); err == nil {
 				dockerfile = string(data)
 			}
-		} else if entry.DockerfileURL != "" {
+		case entry.DockerfileURL != "":
 			emit(20, "Fetching Dockerfile...")
 			df, fetchErr := h.registry.FetchDockerfile(ResolveURL(url, entry.DockerfileURL))
 			if fetchErr != nil {
