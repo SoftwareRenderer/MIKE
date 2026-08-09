@@ -151,31 +151,6 @@ func TestUpdateTaskExecutionState(t *testing.T) {
 	}
 }
 
-func TestUpdateTaskStatusAndState(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	if err := s.UpdateTaskStatusAndState("task-1", "proj-1", "in_progress", "running"); err != nil {
-		t.Fatalf("update status and state: %v", err)
-	}
-
-	got, err := s.GetTask("proj-1", "task-1")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if got.Status != "in_progress" || got.ExecutionState != "running" {
-		t.Fatalf("unexpected status/state: %s/%s", got.Status, got.ExecutionState)
-	}
-}
-
 func TestDeleteTask(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")

@@ -264,25 +264,6 @@ func (s *Store) GetLastCommitHashBeforeMessage(messageID, threadID string) (stri
 	return hash, err
 }
 
-// GetLastAssistantMessageIdBeforeMessage walks backward from the given message
-// to find the last assistant message. Returns the message ID or empty string.
-func (s *Store) GetLastAssistantMessageIdBeforeMessage(messageID, threadID string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var cutoffTime string
-	err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, messageID).Scan(&cutoffTime)
-	if err != nil {
-		return "", err
-	}
-	var id string
-	query := `SELECT id FROM task_messages WHERE task_id = (SELECT task_id FROM task_messages WHERE id = ?) AND thread_id = ? AND role = 'assistant' AND created_at <= ? ORDER BY created_at DESC LIMIT 1`
-	err = s.db.QueryRow(query, messageID, threadID, cutoffTime).Scan(&id)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	return id, err
-}
-
 // FixPostSummaryTimestamps updates messages created between anchorTime
 // and summaryTime to sort after the summary. This fixes ordering for
 // messages sent during a summarization window, which have earlier
