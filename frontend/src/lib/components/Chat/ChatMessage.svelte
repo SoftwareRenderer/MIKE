@@ -34,6 +34,7 @@
 
     interface Props {
         role: string;
+        severity?: string;
         content: string;
         reasoningContent?: string;
         hasReasoning?: boolean;
@@ -66,7 +67,7 @@
         onReasoningResolved?: (content: string) => void;
     }
 
-    let { role, content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onEdit, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
+    let { role, severity = '', content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onEdit, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
 
     // Edit state
     let isEditing = $state(false);
@@ -497,13 +498,21 @@
 
 {#snippet systemMessage()}
     <div class="message-wrapper system-wrapper">
-        <div class="system-card">
+        <div class="system-card" class:system-info={severity === 'info'}>
             <div class="system-header">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                    <line x1="12" y1="9" x2="12" y2="13"/>
-                    <line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
+                {#if severity === 'info'}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="16" x2="12" y2="12"/>
+                        <line x1="12" y1="8" x2="12.01" y2="8"/>
+                    </svg>
+                {:else}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                {/if}
                 <span class="system-code">System</span>
                 {#if onDelete}
                     <button class="btn-dismiss" onclick={onDelete} title="Dismiss message" aria-label="Dismiss message">
@@ -613,12 +622,20 @@
         padding: 10px 14px;
         max-width: 80%;
     }
+    .system-card.system-info {
+        background: color-mix(in srgb, var(--color-surface-3) 70%, transparent);
+        border: 1px solid var(--color-border);
+        border-left: 3px solid var(--color-text-tertiary);
+    }
     .system-header {
         display: flex;
         align-items: center;
         gap: 6px;
         margin-bottom: 4px;
         color: var(--color-status-red);
+    }
+    .system-card.system-info .system-header {
+        color: var(--color-text-tertiary);
     }
     .system-code {
         font-size: 0.75rem;
