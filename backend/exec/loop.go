@@ -190,6 +190,10 @@ func (f *streamFlusher) flush() {
 			if d.startArgLen == 0 {
 				// New tool call — send full raw_args.
 				data["raw_args"] = d.args
+			} else if d.currentArgLen <= d.startArgLen || d.currentArgLen > len(d.args) {
+				// Defensive: invalid/empty delta bounds — send full raw_args instead of
+				// panicking on an out-of-range slice (e.g. slice bounds out of range [217:194]).
+				data["raw_args"] = d.args
 			} else {
 				// Update — send delta from start position.
 				data["raw_args_delta"] = d.args[d.startArgLen:d.currentArgLen]
