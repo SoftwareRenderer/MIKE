@@ -46,6 +46,7 @@
         onScrollElChange,
         onVirtualListChange,
         entriesReady,
+        historyLoading = false,
     }: {
         entries: ChatEntry[];
         entryMetas: EntryMeta[];
@@ -84,6 +85,7 @@
         onScrollElChange?: (el: HTMLElement | null) => void;
         onVirtualListChange?: (comp: { scrollToBottom: () => void } | null) => void;
         entriesReady?: boolean;
+        historyLoading?: boolean;
     } = $props();
 
     function isOptimisticId(id: string): boolean {
@@ -318,13 +320,20 @@
 
     {#if entries.length === 0}
         <div class="chat-messages" bind:this={scrollEl} role="region" aria-label="Chat messages" tabindex="-1">
-            <div class="chat-empty">
-                <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
-                    <path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity="0.3"/>
-                </svg>
-                <p>No messages yet</p>
-                <span class="hint">Send a message to start the conversation</span>
-            </div>
+            {#if historyLoading}
+                <div class="chat-loading">
+                    <span class="spinner"></span>
+                    <p>Loading conversation…</p>
+                </div>
+            {:else}
+                <div class="chat-empty">
+                    <svg width="32" height="32" viewBox="0 0 16 16" fill="none">
+                        <path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity="0.3"/>
+                    </svg>
+                    <p>No messages yet</p>
+                    <span class="hint">Send a message to start the conversation</span>
+                </div>
+            {/if}
         </div>
     {:else}
         <VirtualList
@@ -546,6 +555,25 @@
     }
     .chat-empty p { font-size: 0.875rem; margin: 0; font-weight: 500; }
     .chat-empty .hint { font-size: 0.75rem; }
+    .chat-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 48px 16px;
+        color: var(--color-text-tertiary);
+        text-align: center;
+        height: 100%;
+    }
+    .chat-loading p { font-size: 0.875rem; margin: 0; font-weight: 500; }
+    .chat-loading .spinner {
+        width: 20px;
+        height: 20px;
+        border-width: 2px;
+        border-color: var(--color-accent);
+        border-top-color: transparent;
+    }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
     .spinner {
         display: inline-block;
