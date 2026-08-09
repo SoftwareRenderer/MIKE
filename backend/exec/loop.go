@@ -18,6 +18,7 @@ import (
 	"kanban/backend/prompts"
 	kanban_sandbox "kanban/backend/sandbox"
 	"kanban/backend/stream"
+	"kanban/backend/toolresult"
 	"kanban/backend/types"
 
 	sandbox "kanban/pkg/bridge"
@@ -1070,7 +1071,9 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				te.taskMu.Unlock()
 				// Serialize tool writes against subtask merges into this worktree.
 				te.GetWorktreeMu(setup.task.ID).Lock()
+				streamed := false
 				result, success := te.executeTool(setup.ctx, tc.Function.Name, args, setup.worktreePath, setup.task, state, func(toolID string, text string) {
+					streamed = true
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
 				})
 
@@ -1117,7 +1120,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				te.GetWorktreeMu(setup.task.ID).Unlock()
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name)
-				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: map[string]any{"tool_id": tc.ID, "success": success, "output": result, "duration": toolDuration, "args": args, "raw_args": tc.Function.Arguments, "path": extractPathFromArgs(tc.Function.Arguments), "sandbox": isSandboxed}})
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tc.ID, tc.Function.Name, result, success, toolDuration, args, tc.Function.Arguments, extractPathFromArgs(tc.Function.Arguments), isSandboxed, streamed, toolCallMsgID)})
 				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
 
 				// Update tool_call message with result after execution completes.
@@ -1980,4 +1983,34 @@ func splitChainedCommands(line string) []string {
 	}
 
 	return parts
+}
+
+// buildToolResultEvent constructs the data payload for a WSTypeToolResult event.
+// For bash and read_file tools, the output is truncated to ~1KB/10 lines with
+// metadata about the full output. For all other tools, the full output is sent.
+func buildToolResultEvent(toolID, toolName, result string, success bool, duration int64,
+	args map[string]any, rawArgs, path string, sandbox, streamed bool, messageID string) map[string]any {
+	data := map[string]any{
+		"tool_id":  toolID,
+		"success":  success,
+		"duration": duration,
+		"args":     args,
+		"raw_args": rawArgs,
+		"path":     path,
+		"sandbox":  sandbox,
+	}
+
+	if toolName == "bash" || toolName == "read_file" {
+		preview, originalLines, originalBytes, truncated := toolresult.Truncate(result)
+		data["output"] = preview
+		data["result_truncated"] = truncated
+		data["original_lines"] = originalLines
+		data["original_bytes"] = originalBytes
+		data["streamed"] = streamed
+		data["message_id"] = messageID
+	} else {
+		data["output"] = result
+	}
+
+	return data
 }
