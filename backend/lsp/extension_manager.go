@@ -16,6 +16,15 @@ import (
 	sandbox "kanban/pkg/bridge"
 )
 
+// ServerConfig holds the configuration for a single language server.
+type ServerConfig struct {
+	Command            string         // binary to execute (e.g., "gopls")
+	Args               []string       // args template, {workspace} replaced with workspace path
+	Extensions         []string       // file extensions (without dot), e.g., []string{"go"}
+	Language           string         // language identifier, e.g., "go", "typescript"
+	InitParamsOverride map[string]any // merged into initialize params sent to server
+}
+
 // ExtensionLSPManager manages LSP processes through extension sandboxes.
 // It implements the lspManager interface and uses the extension system
 // to discover available language servers and run them in sandboxes.
@@ -662,7 +671,7 @@ func (m *ExtensionLSPManager) lspDidOpen(ctx context.Context, sc *sandboxClient,
 
 // lookupExtensionByFile finds the matching LSP extension for a given file path.
 func (m *ExtensionLSPManager) lookupExtensionByFile(filePath string) (*extensions.Extension, error) {
-extensions, err := m.extStore.GetByType(extensions.ExtensionTypeLSP)
+	extensions, err := m.extStore.GetByType(extensions.ExtensionTypeLSP)
 	if err != nil {
 		return nil, err
 	}
@@ -742,7 +751,7 @@ func (m *ExtensionLSPManager) lookupExtension(language string) (*extensions.Exte
 }
 
 // ExtensionRegistry provides language server configuration from installed extensions.
-// It implements a lookup interface compatible with the existing Registry.
+// It implements the lspRegistry interface used by the LSP handler.
 type ExtensionRegistry struct {
 	extStore *extensions.ExtensionStore
 }
@@ -810,7 +819,7 @@ func (r *ExtensionRegistry) GetAvailable() []string {
 // tool calls enabled. This is used to determine whether LSP tools should be
 // available to agent tool calls.
 func (r *ExtensionRegistry) HasAnyLSPToolCallsExtension() bool {
-extensions, err := r.extStore.GetByType(extensions.ExtensionTypeLSP)
+	extensions, err := r.extStore.GetByType(extensions.ExtensionTypeLSP)
 	if err != nil {
 		return false
 	}
