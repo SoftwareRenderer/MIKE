@@ -1424,7 +1424,7 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 	_, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", targetBranch, "--no-edit")
 	if mergeErr == nil {
 		log.Printf("[sync-merge] task=%s synced %s into %s cleanly", taskID, targetBranch, taskBranch)
-		te.logSystemMessage(taskID, task.CurrentThreadID,
+		te.logSystemMessage(taskID, task.CurrentThreadID, "info",
 			fmt.Sprintf("Synced %s into task branch (no conflicts).", targetBranch))
 		// Pop stash — restore user's unstaged changes.
 		// If stash pop conflicts, drop it to avoid leaving markers.
@@ -1445,7 +1445,7 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 	log.Printf("[sync-merge] task=%s conflict syncing %s into %s, setting merge conflict flag", taskID, targetBranch, taskBranch)
 	_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
 	task.HasMergeConflict = true
-	te.logSystemMessage(taskID, task.CurrentThreadID,
+	te.logSystemMessage(taskID, task.CurrentThreadID, "warning",
 		fmt.Sprintf("Conflicts detected when syncing %s into task branch. Resolve the conflicted files using your tools — the backend will commit and continue the merge automatically.", targetBranch))
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	// Keep merge in progress — do NOT abort. LLM will resolve with file tools.
@@ -1519,7 +1519,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
 		if err != nil {
 			log.Printf("[merge] task=%s parent_task_id=%s not found: %v, aborting merge", taskID, task.ParentTaskID, err)
-			te.logSystemMessage(taskID, task.CurrentThreadID,
+			te.logSystemMessage(taskID, task.CurrentThreadID, "error",
 				fmt.Sprintf("Error: parent task %s not found — merge aborted.", task.ParentTaskID))
 			return fmt.Errorf("parent task %s not found", task.ParentTaskID)
 		}
@@ -1529,7 +1529,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			log.Printf("[merge] task=%s parent %s has no branch, creating it now", taskID, parent.ID)
 			if err := te.EnsureParentBranch(projectID, parent); err != nil {
 				log.Printf("[merge] task=%s failed to create parent branch: %v, aborting merge", taskID, err)
-				te.logSystemMessage(taskID, task.CurrentThreadID,
+				te.logSystemMessage(taskID, task.CurrentThreadID, "error",
 					fmt.Sprintf("Error: could not create branch for parent task %q — merge aborted: %v", parent.Title, err))
 				return fmt.Errorf("create parent branch: %w", err)
 			}
@@ -1593,7 +1593,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			createCmd := osexec.Command("git", "-C", project.Path, "branch", targetBranch, startPoint)
 			if out, err := createCmd.CombinedOutput(); err != nil {
 				log.Printf("[merge] task=%s failed to create branch %q from %q: %s", taskID, targetBranch, startPoint, string(out))
-				te.logSystemMessage(taskID, task.CurrentThreadID,
+				te.logSystemMessage(taskID, task.CurrentThreadID, "error",
 					fmt.Sprintf("Error: could not create branch %q from %q — merge skipped.", targetBranch, startPoint))
 				return fmt.Errorf("create branch %q: %w", targetBranch, err)
 			}

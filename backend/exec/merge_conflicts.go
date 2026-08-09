@@ -202,7 +202,7 @@ func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID, targetB
 		taskID, len(conflictedFiles), strings.Join(conflictedFiles, ", "))
 
 	// Log conflict detection as system message
-	te.logSystemMessage(taskID, task.CurrentThreadID,
+	te.logSystemMessage(taskID, task.CurrentThreadID, "error",
 		fmt.Sprintf("Merge conflict detected in: %s", strings.Join(conflictedFiles, ", ")))
 
 	_ = runGitDir(dir, "merge", "--abort")
@@ -210,7 +210,9 @@ func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID, targetB
 }
 
 // logSystemMessage creates a system message in the task's conversation thread.
-func (te *TaskExecutor) logSystemMessage(taskID, threadID, content string) {
+// severity is "info" for informational notices or "error" for problems;
+// empty severity renders as the default warning style.
+func (te *TaskExecutor) logSystemMessage(taskID, threadID, severity, content string) {
 	if threadID == "" {
 		return
 	}
@@ -219,6 +221,7 @@ func (te *TaskExecutor) logSystemMessage(taskID, threadID, content string) {
 		TaskID:    taskID,
 		ThreadID:  threadID,
 		Role:      "system",
+		Severity:  severity,
 		Content:   content,
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -255,10 +258,10 @@ func (te *TaskExecutor) logMergeFailed(taskID, threadID, errorMsg string) {
 	task, _ := te.store.GetTaskByTaskID(taskID)
 	if task != nil && te.appStreamMgr != nil {
 		te.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]any{
-			"id":        msgID,
-			"content":   errorMsg,
-			"label":     "Merge failed",
-			"is_error":  true,
+			"id":         msgID,
+			"content":    errorMsg,
+			"label":      "Merge failed",
+			"is_error":   true,
 			"created_at": time.Now().UTC().Format(time.RFC3339),
 		}})
 	}
@@ -365,4 +368,3 @@ func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath
 	updatedTask, _ = te.store.GetTaskByTaskID(taskID)
 	return commitOK, updatedTask
 }
-

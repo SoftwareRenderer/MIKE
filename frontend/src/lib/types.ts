@@ -106,6 +106,7 @@ export interface ChatEntry {
     id: string;
     role: string;
     content: string;
+    severity?: string;
     mergeLabel?: string;
     isError?: boolean;
     reasoningContent?: string;
