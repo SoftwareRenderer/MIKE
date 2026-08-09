@@ -36,6 +36,7 @@ type Task struct {
 	CreatedAt                 time.Time      `json:"created_at"`
 	UpdatedAt                 time.Time      `json:"updated_at"`
 	AssignedPorts             []AssignedPort `json:"assigned_ports,omitempty"`
+	SessionCost               float64        `json:"session_cost"`
 }
 
 // IsPlanMode returns true if the task is in plan mode.
