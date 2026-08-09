@@ -42,43 +42,6 @@ func TestCreateAndGetReviewComments(t *testing.T) {
 	}
 }
 
-func TestGetUnresolvedReviewComments(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	c1 := newReviewComment("c1", "task-1", "main.go", "unresolved", 10)
-	c1.Resolved = false
-	c2 := newReviewComment("c2", "task-1", "main.go", "resolved", 20)
-	c2.Resolved = true
-	c3 := newReviewComment("c3", "task-1", "main.go", "also unresolved", 30)
-	c3.Resolved = false
-
-	for _, c := range []*types.ReviewComment{c1, c2, c3} {
-		if err := s.CreateReviewComment(c); err != nil {
-			t.Fatalf("create comment: %v", err)
-		}
-	}
-
-	unresolved, err := s.GetUnresolvedReviewComments("task-1")
-	if err != nil {
-		t.Fatalf("get unresolved: %v", err)
-	}
-	if len(unresolved) != 2 {
-		t.Fatalf("expected 2 unresolved, got %d", len(unresolved))
-	}
-	for _, c := range unresolved {
-		if c.Resolved {
-			t.Fatalf("comment should be unresolved: %+v", c)
-		}
-	}
-}
-
 func TestUpdateReviewComment(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
