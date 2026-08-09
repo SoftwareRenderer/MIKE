@@ -21,20 +21,13 @@ import (
 )
 
 // adapterRegistry holds registered adapter factories.
-// Used by tests to inject mock adapters. Production uses WASM loading.
+// Production uses WASM loading; tests inject mock adapters via
+// RegisterAdapterFactory (defined in loader_test.go).
 var adapterRegistry = struct {
 	sync.RWMutex
 	factories map[string]agent.AdapterFactory
 }{
 	factories: make(map[string]agent.AdapterFactory),
-}
-
-// RegisterAdapterFactory registers an adapter factory for an extension name.
-// Used by tests to inject mock adapters.
-func RegisterAdapterFactory(name string, fn agent.AdapterFactory) {
-	adapterRegistry.Lock()
-	defer adapterRegistry.Unlock()
-	adapterRegistry.factories[name] = fn
 }
 
 // wasmAdapter wraps a wazero-loaded WASI reactor module behind the AgentAdapter interface.
