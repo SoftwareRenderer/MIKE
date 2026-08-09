@@ -77,9 +77,7 @@ func backoffFor(attempt int, err error) time.Duration {
 	return time.Duration(attempt+1) * 2 * time.Second
 }
 
-// streamFlusher batches token, reasoning, and tool_call WebSocket events
-// and sends them at most once every throttleInterval (100ms).
-// This reduces WebSocket write overhead during fast LLM streaming.
+// streamFlusher batches streaming events to reduce WebSocket write overhead.
 type streamFlusher struct {
 	mu             sync.Mutex
 	tokenBuf       strings.Builder
@@ -430,10 +428,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	taskMsgs, _ := te.store.GetTaskMessages(setup.task.ID, setup.task.CurrentThreadID)
 	messages := buildMessagesFromDB(setup.task, taskMsgs, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 
-	// During regeneration, HandleSend creates the re-sent user message in the DB.
-	// If the DELETE hasn't completed yet (race between DELETE and POST handlers),
-	// the old user message may still be in the DB alongside the new one, creating
-	// duplicate consecutive user messages. Remove the stale copy.
+	// Remove duplicate user messages that may occur during regeneration due to
+	// race conditions between DELETE and POST handlers.
 	if setup.regenerate {
 		messages = removeDuplicateUserMessage(messages)
 	}
@@ -734,8 +730,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		te.store.UpdateTask(setup.task)
 		te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 
-		// Stream flusher: batches token/reasoning/tool_call events and sends
-		// at most once every 500ms to reduce WebSocket write overhead.
+		// streamFlusher batches streaming events to reduce WebSocket write overhead.
 		flusher := newStreamFlusher(setup.projectID, setup.task.ID, lc.sandboxEnabled,
 			te.appStreamMgr.SendTaskEvent, lc.detector)
 		flushDone := make(chan struct{})

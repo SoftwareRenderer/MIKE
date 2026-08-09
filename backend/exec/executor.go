@@ -85,7 +85,7 @@ type executionState struct {
 	}
 	compactCh    chan chan *CompactResult // send a channel, receives result from agent compaction
 	agentRunner  *agent.AgentRunner       // Agent runner — kept alive after completion for on-demand compaction
-	runnerClosed bool                     // true when agentRunner has been closed (prevents double-close)
+	runnerClosed bool
 	projectName  string
 	createdIDs   []string // task IDs created by create_task during this execution
 	executorType string   // "llm" or "agent" — tracks which executor type is active
@@ -98,18 +98,14 @@ type executionState struct {
 	sandboxExecStream execStreamFunc
 	sandboxRead       readFunc
 	sandboxWrite      writeFunc
-	// Operating mode at container creation time — used to detect mode changes
-	// and recreate the container with the correct mount mode (ro vs rw).
+	// Sandbox operating mode (ro vs rw) at container creation time.
 	sandboxOperatingMode string
-	// Agent sandbox config snapshot at container creation time — used to detect
-	// extension config changes and recreate the container.
+	// Agent sandbox config hash at container creation time.
 	agentSandboxHash string
 	// os.Root handle for non-sandbox write isolation.
 	root *os.Root
 	// recoverBridge attempts to reconnect the sandbox bridge (client reconnect or
-	// full sandbox recreation). Returns true if recovery succeeded (callbacks and
-	// client are updated inside the callback). Only non-nil when sandbox is enabled.
-	// Guards against infinite loops via bridgeRecoveryAttempts.
+	// full sandbox recreation). Returns true if success. Only non-nil when sandbox is enabled.
 	recoverBridge          func() bool
 	bridgeRecoveryAttempts int
 	// Closed by executor defer so ForwardUserMessage type-switch can wait for clean exit.
@@ -195,10 +191,8 @@ func (te *TaskExecutor) WorktreeMgr() *git.WorktreeManager {
 }
 
 // RunWithGate executes fn while holding a concurrency gate slot for the given provider.
-// Blocks until a slot is available, respecting per-provider concurrency limits.
-// Queueing is transparent to the caller — if the gate can't be acquired (e.g. context
-// timeout), the function is not run and the gate error is returned. Any error from fn
-// is returned directly. The caller treats both cases identically.
+// Blocks until a slot is available. If the gate can't be acquired (e.g. timeout),
+// the function is not run and the gate error is returned.
 func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn func() error) error {
 	concurrency := te.configStore.GetProviderConcurrency(serverURL)
 	if _, _, err := te.gate.Acquire(ctx, serverURL, concurrency); err != nil {
