@@ -316,10 +316,10 @@ func TestExecuteTool_ReadFile_OffsetLimit(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "offset past end returns empty message",
+			name:    "offset past end returns error to inform the LLM",
 			args:    map[string]any{"path": "test.txt", "offset": float64(100)},
-			want:    "(empty — offset past end of file)",
-			wantErr: false,
+			want:    "Error: offset 100 is past the end of the file (file has 10 line(s)). Use a valid offset.",
+			wantErr: true,
 		},
 		{
 			name:    "limit larger than file returns full file",

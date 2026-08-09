@@ -37,7 +37,7 @@ func makeTestTask(t *testing.T, s *store.Store, projectID, taskID string) *types
 		Title:          "Test Task",
 		Prompt:         "Test prompt",
 		Status:         "in_progress",
-		ExecutionState:    "running",
+		ExecutionState: "running",
 		LlamaServerURL: "http://test:8080",
 		ModelName:      "test-model",
 		OperatingMode:  "act",
@@ -233,17 +233,116 @@ func TestReadFile_OffsetPastEnd(t *testing.T) {
 		t.Fatalf("write test file: %v", err)
 	}
 
-	// Read with offset past end
+	// Read with offset past end: the LLM must be made aware of the invalid offset
+	// so it can correct its request. This is reported as a failed tool call with a
+	// descriptive message (not a silent empty result), and must not panic.
 	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
 		"path":   filePath,
 		"offset": float64(100),
 	}, dir, task, &executionState{}, nil)
 
-	if !ok {
-		t.Fatalf("expected success, got error: %s", result)
+	if ok {
+		t.Fatalf("expected failure for offset past end, got success: %s", result)
 	}
-	if !strings.Contains(result, "empty") {
-		t.Errorf("expected empty result for offset past end, got: %s", result)
+	if !strings.Contains(result, "Error") || !strings.Contains(result, "offset") {
+		t.Errorf("expected error message informing about the invalid offset, got: %s", result)
+	}
+	if !strings.Contains(result, "10") {
+		t.Errorf("expected error message to include the file line count, got: %s", result)
+	}
+}
+
+// TestReadFile_OffsetPastEnd_NoPanic is a regression test for the production panic
+// `slice bounds out of range [217:194]` (read_file with offset beyond the file's
+// line count must surface an error, never panic).
+func TestReadFile_OffsetPastEnd_NoPanic(t *testing.T) {
+	dir := t.TempDir()
+	te := newReadTestExecutor(t, dir)
+	task := makeTestTask(t, te.store, "proj-read-8", "task-read-8")
+
+	// 194 lines exactly (matches the panic: len(lines) == 194).
+	lines := make([]string, 194)
+	for i := range lines {
+		lines[i] = "line_" + string(rune('0'+i%10))
+	}
+	content := strings.Join(lines, "\n")
+	filePath := "repro-panic.txt"
+	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	// offset=218 -> offsetIdx=217 > len(lines)=194. Must NOT panic.
+	_, ok := te.executeTool(context.Background(), "read_file", map[string]any{
+		"path":   filePath,
+		"offset": float64(218),
+	}, dir, task, &executionState{}, nil)
+	if ok {
+		t.Fatal("expected failure for offset past end")
+	}
+}
+
+// TestReadFile_OffsetValid_LimitClamped verifies that a valid offset with an
+// oversized limit is silently clamped to the remaining lines (no error).
+func TestReadFile_OffsetValid_LimitClamped(t *testing.T) {
+	dir := t.TempDir()
+	te := newReadTestExecutor(t, dir)
+	task := makeTestTask(t, te.store, "proj-read-9", "task-read-9")
+
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = "line_" + string(rune('0'+i%10))
+	}
+	content := strings.Join(lines, "\n")
+	filePath := "clamp.txt"
+	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	// offset=90, limit=500 (limit exceeds the 11 remaining lines) -> clamped to 11 lines.
+	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
+		"path":   filePath,
+		"offset": float64(90),
+		"limit":  float64(500),
+	}, dir, task, &executionState{}, nil)
+	if !ok {
+		t.Fatalf("expected success with clamped limit, got error: %s", result)
+	}
+	resultLines := strings.Split(result, "\n")
+	if len(resultLines) != 11 {
+		t.Errorf("expected 11 remaining lines (offset 90..100), got %d: %v", len(resultLines), resultLines)
+	}
+	if resultLines[0] != "line_9" {
+		t.Errorf("expected first line 'line_9', got %q", resultLines[0])
+	}
+}
+
+// TestReadFile_LimitOnly_Clamped verifies an oversized limit without an offset is
+// silently clamped to the total line count.
+func TestReadFile_LimitOnly_Clamped(t *testing.T) {
+	dir := t.TempDir()
+	te := newReadTestExecutor(t, dir)
+	task := makeTestTask(t, te.store, "proj-read-10", "task-read-10")
+
+	lines := make([]string, 50)
+	for i := range lines {
+		lines[i] = "line_" + string(rune('0'+i%10))
+	}
+	content := strings.Join(lines, "\n")
+	filePath := "clamp-limit.txt"
+	if err := os.WriteFile(filepath.Join(dir, filePath), []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{
+		"path":  filePath,
+		"limit": float64(1000),
+	}, dir, task, &executionState{}, nil)
+	if !ok {
+		t.Fatalf("expected success with clamped limit, got error: %s", result)
+	}
+	resultLines := strings.Split(result, "\n")
+	if len(resultLines) != 50 {
+		t.Errorf("expected all 50 lines (limit clamped), got %d", len(resultLines))
 	}
 }
 
