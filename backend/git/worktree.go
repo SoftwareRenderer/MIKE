@@ -724,128 +724,6 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 	return removed
 }
 
-// GitDiffRaw returns a snapshot of the worktree's change state for polling.
-// Uses git diff --raw which outputs per-file blob hashes — any content change
-// (even same-line same-character-count edits) produces a new hash.
-// Appends untracked file paths + sizes with | separator.
-// Returns empty string when there are no changes at all.
-func (wm *WorktreeManager) GitDiffRaw(taskID, baseRef string) (string, error) {
-	worktreePath, err := wm.WorktreePath(taskID)
-	if err != nil {
-		return "", err
-	}
-
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return "", fmt.Errorf("worktree not found")
-	}
-
-	target := "HEAD"
-	if baseRef != "" {
-		target = baseRef
-	}
-
-	// Tracked file changes: --raw outputs blob hashes, any content change = new hash.
-	// git diff exits 0 = no changes (empty output), 1 = changes (output on stdout).
-	trackedOut, trackedErr := wm.gitRunOutput(worktreePath, "diff", "--raw", target)
-	if trackedErr != nil {
-		// Exit code 1 means files differ — output is valid, ignore the error.
-		// Any other error (e.g., missing repo) is a real failure.
-		if exitErr, ok := trackedErr.(*exec.ExitError); ok {
-			if exitErr.ExitCode() == 1 {
-				// Changes exist, trackedOut has the raw output — continue
-			} else {
-				return "", fmt.Errorf("git diff --raw: %w", trackedErr)
-			}
-		} else {
-			return "", fmt.Errorf("git diff --raw: %w", trackedErr)
-		}
-	}
-	trackedOut = strings.TrimSpace(trackedOut)
-
-	// Untracked files
-	untrackedOut, err := wm.gitRunOutput(worktreePath, "ls-files", "--others", "--exclude-standard")
-	if err != nil {
-		return "", fmt.Errorf("git ls-files: %w", err)
-	}
-	untrackedSnap := wm.buildUntrackedSnapshot(worktreePath, untrackedOut)
-
-	// Combine: "raw_output|untracked_snapshot"
-	// Empty string when nothing changed (no tracked diffs, no untracked files).
-	if trackedOut == "" && untrackedSnap == "" {
-		return "", nil
-	}
-	return fmt.Sprintf("%s|%s", trackedOut, untrackedSnap), nil
-}
-
-// GitShortstat returns a snapshot of the worktree's change state for polling.
-// Combines tracked file changes (git diff <baseRef> --shortstat) with a hash of untracked
-// file paths + sizes. This detects both content changes to existing files AND
-// new/modified/deleted untracked files.
-func (wm *WorktreeManager) GitShortstat(taskID, baseRef string) (string, error) {
-	worktreePath, err := wm.WorktreePath(taskID)
-	if err != nil {
-		return "", err
-	}
-
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return "", fmt.Errorf("worktree not found")
-	}
-
-	target := "HEAD"
-	if baseRef != "" {
-		target = baseRef
-	}
-
-	// Use HEAD as baseline when working tree is dirty to capture deletions
-	// of files created after baseRef (git diff baseRef misses them).
-	statusOut, statusErr := wm.gitRunOutput(worktreePath, "status", "--porcelain", "--untracked-files=no")
-	workingTreeClean := statusErr != nil || len(strings.TrimSpace(statusOut)) == 0
-	if !workingTreeClean {
-		target = "HEAD"
-	}
-
-	// Tracked file changes (line counts — changes when content changes).
-	// git diff exits 1 when changes exist — output is still valid.
-	trackedOut, trackedErr := wm.gitRunOutput(worktreePath, "diff", target, "--shortstat")
-	if trackedErr != nil {
-		if exitErr, ok := trackedErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			// Changes exist, trackedOut has the shortstat output — continue
-		} else {
-			return "", fmt.Errorf("git diff --shortstat: %w", trackedErr)
-		}
-	}
-
-	// Untracked files: list path + size to detect new/modified/deleted untracked files.
-	// git ls-files gives us the paths; we append file size as a content-change proxy.
-	untrackedOut, err := wm.gitRunOutput(worktreePath, "ls-files", "--others", "--exclude-standard")
-	if err != nil {
-		return "", fmt.Errorf("git ls-files: %w", err)
-	}
-	untrackedSnap := wm.buildUntrackedSnapshot(worktreePath, untrackedOut)
-
-	// Combine into a single snapshot string
-	return fmt.Sprintf("%s|%s", strings.TrimSpace(trackedOut), untrackedSnap), nil
-}
-
-// buildUntrackedSnapshot creates a deterministic string from untracked file paths and sizes.
-// When any untracked file is created, deleted, or modified (size changes), this string changes.
-func (wm *WorktreeManager) buildUntrackedSnapshot(worktreePath, untrackedList string) string {
-	var parts []string
-	for line := range strings.SplitSeq(untrackedList, "\n") {
-		path := strings.TrimSpace(line)
-		if path == "" {
-			continue
-		}
-		fullPath := filepath.Join(worktreePath, path)
-		info, err := os.Stat(fullPath)
-		if err != nil {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("%s:%d", path, info.Size()))
-	}
-	return strings.Join(parts, "\n")
-}
-
 // walkUntrackedEntries expands git status --porcelain "?? " entries into individual file paths.
 // When a whole directory is untracked, git status returns "?? dir/" — this function walks
 // the directory and returns all regular file paths (relative to worktreePath).
@@ -937,19 +815,19 @@ type InlineDiffSegment struct {
 
 // TrackedDiffFile holds the parsed diff for a single tracked file.
 type TrackedDiffFile struct {
-	Path        string    `json:"path"`
-	OrigPath    string    `json:"origPath,omitempty"` // original path for renames (a/ path when different from b/)
+	Path          string    `json:"path"`
+	OrigPath      string    `json:"origPath,omitempty"`      // original path for renames (a/ path when different from b/)
 	CommittedRows []DiffRow `json:"committedRows,omitempty"` // changes committed to branch since baseRef
-	Rows        []DiffRow `json:"rows"`
-	Added       int       `json:"added"`
-	Removed     int       `json:"removed"`
-	FileSize    *int64    `json:"fileSize,omitempty"`  // set for binary/large files
-	IsBinary    bool      `json:"isBinary,omitempty"`  // true when file is binary (git-detected)
-	IsNew       bool      `json:"isNew,omitempty"`     // true when file is newly created (from "new file mode" marker)
-	IsDeleted   bool      `json:"isDeleted,omitempty"` // true when file is deleted (from "deleted file mode" marker)
-	Truncated   bool      `json:"truncated,omitempty"`
-	OrigAdded   int       `json:"origAdded,omitempty"`
-	OrigRemoved int       `json:"origRemoved,omitempty"`
+	Rows          []DiffRow `json:"rows"`
+	Added         int       `json:"added"`
+	Removed       int       `json:"removed"`
+	FileSize      *int64    `json:"fileSize,omitempty"`  // set for binary/large files
+	IsBinary      bool      `json:"isBinary,omitempty"`  // true when file is binary (git-detected)
+	IsNew         bool      `json:"isNew,omitempty"`     // true when file is newly created (from "new file mode" marker)
+	IsDeleted     bool      `json:"isDeleted,omitempty"` // true when file is deleted (from "deleted file mode" marker)
+	Truncated     bool      `json:"truncated,omitempty"`
+	OrigAdded     int       `json:"origAdded,omitempty"`
+	OrigRemoved   int       `json:"origRemoved,omitempty"`
 }
 
 // TaskDiff holds the diff output and list of untracked files for a task.
@@ -1393,28 +1271,6 @@ func SplitLines(content string) []string {
 
 var hunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?(.*)@@`)
 
-// GetDiff returns the git diff for a task's worktree relative to baseRef (or HEAD if empty).
-func (wm *WorktreeManager) GetDiff(taskID, baseRef string) (string, error) {
-	worktreePath, err := wm.WorktreePath(taskID)
-	if err != nil {
-		return "", err
-	}
-
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return "", fmt.Errorf("worktree not found")
-	}
-
-	target := "HEAD"
-	if baseRef != "" {
-		target = baseRef
-	}
-	out, err := wm.gitRunOutput(worktreePath, "diff", target)
-	if err != nil {
-		return "", fmt.Errorf("git diff: %w", err)
-	}
-	return out, nil
-}
-
 // kanbanLabelPrefixes are the stash message prefixes used by kanban operations.
 var kanbanLabelPrefixes = []string{
 	"kanban-switch-",
@@ -1660,16 +1516,16 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 					tf.CommittedRows = cf.Rows
 				} else {
 					tracked[path] = &TrackedDiffFile{
-						Path: path,
-						Rows: nil,
+						Path:          path,
+						Rows:          nil,
 						CommittedRows: cf.Rows,
-						Added: cf.Added,
-						Removed: cf.Removed,
-						FileSize: cf.FileSize,
-						IsBinary: cf.IsBinary,
-						Truncated: cf.Truncated,
-						OrigAdded: cf.OrigAdded,
-						OrigRemoved: cf.OrigRemoved,
+						Added:         cf.Added,
+						Removed:       cf.Removed,
+						FileSize:      cf.FileSize,
+						IsBinary:      cf.IsBinary,
+						Truncated:     cf.Truncated,
+						OrigAdded:     cf.OrigAdded,
+						OrigRemoved:   cf.OrigRemoved,
 					}
 				}
 			}
@@ -1696,49 +1552,6 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 		StagedHash:        stagedHash,
 		StagedPaths:       stagedPathsList,
 	}, nil
-}
-
-// GetDiffStats returns the git diff shortstat, untracked file count, and untracked line count for a task.
-// baseRef is the branch/ref to diff against (e.g., "master"). If empty, uses HEAD.
-// Checkpoints commit to the branch, so changes are always visible in the working tree.
-func (wm *WorktreeManager) GetDiffStats(taskID, baseRef string) (shortStat string, untrackedN int, untrackedLines int, err error) {
-	worktreePath, err := wm.WorktreePath(taskID)
-	if err != nil {
-		return "", 0, 0, err
-	}
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return "", 0, 0, fmt.Errorf("worktree not found")
-	}
-	target := "HEAD"
-	if baseRef != "" {
-		target = baseRef
-	}
-	// "git diff --shortstat target" = working tree vs target (staged + unstaged).
-	shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", target)
-	// If working tree is clean, fall back to committed changes
-	if shortStat == "" {
-		shortStat, _ = wm.gitRunOutput(worktreePath, "diff", "--shortstat", fmt.Sprintf("%s..HEAD", target))
-	}
-	statusOut, _ := wm.gitRunOutput(worktreePath, "status", "--porcelain")
-	for line := range strings.SplitSeq(statusOut, "\n") {
-		if len(line) >= 4 && strings.HasPrefix(line, "?? ") {
-			path := strings.TrimSpace(line[3:])
-			if path == "" {
-				continue
-			}
-			// Expand directories into individual file paths
-			filePaths := walkUntrackedEntries(worktreePath, path)
-			for _, filePath := range filePaths {
-				untrackedN++
-				// Count lines in new (untracked) files
-				fullPath := filepath.Join(worktreePath, filePath)
-				if data, err := os.ReadFile(fullPath); err == nil {
-					untrackedLines += strings.Count(string(data), "\n")
-				}
-			}
-		}
-	}
-	return shortStat, untrackedN, untrackedLines, nil
 }
 
 // -- Helper functions --
