@@ -343,6 +343,12 @@
         gap: 8px;
         margin-top: 12px;
     }
+
+    @media (max-width: 600px) {
+        .url-and-key-row {
+            grid-template-columns: 1fr;
+        }
+    }
     .url-field,
     .api-key-field {
         display: flex;
