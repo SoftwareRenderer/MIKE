@@ -21,17 +21,13 @@ import (
 
 var toolCallMarker = []byte(`"event":"tool_call"`)
 
-func isInternalFile(path string) bool {
-	return git.IsInternalFile(path)
-}
-
 func filterInternalPathsFromHashes(hashes map[string]string) map[string]string {
 	if len(hashes) == 0 {
 		return nil
 	}
 	filtered := make(map[string]string, len(hashes))
 	for path, hash := range hashes {
-		if !isInternalFile(path) {
+		if !git.IsInternalFile(path) {
 			filtered[path] = hash
 		}
 	}
@@ -47,7 +43,7 @@ func filterInternalPathsFromList(paths []string) []string {
 	}
 	filtered := make([]string, 0, len(paths))
 	for _, p := range paths {
-		if !isInternalFile(p) {
+		if !git.IsInternalFile(p) {
 			filtered = append(filtered, p)
 		}
 	}
@@ -489,7 +485,7 @@ func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
 
 // BroadcastFsEvent sends an fs_event to all clients of a project.
 func (asm *AppStreamManager) BroadcastFsEvent(projectID, op, path string) {
-	if isInternalFile(path) {
+	if git.IsInternalFile(path) {
 		return
 	}
 	asm.sendBoardPayload(projectID, map[string]any{
@@ -924,7 +920,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			}
 			files := make(map[string]map[string]any)
 			for path, f := range diffResult.Tracked {
-				if isInternalFile(path) {
+				if git.IsInternalFile(path) {
 					continue
 				}
 				_, isStaged := stagedSet[path]
@@ -947,7 +943,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 				files[path] = entry
 			}
 			for _, u := range diffResult.Untracked {
-				if isInternalFile(u.Path) {
+				if git.IsInternalFile(u.Path) {
 					continue
 				}
 				// Skip untracked files already in the tracked section
