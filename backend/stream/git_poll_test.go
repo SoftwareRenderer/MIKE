@@ -361,23 +361,17 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	// Verify that the worktree manager can detect changes
 	worktreePath := filepath.Join(worktreesDir, projID, taskID)
 
-	// Initial state — no diff
-	raw1, err := wm.GitDiffRaw(taskID, "")
-	if err != nil {
-		t.Fatalf("initial diff raw: %v", err)
+	// Initial state — no changes
+	if wm.HasWorktreeChanges(taskID) {
+		t.Fatal("expected no worktree changes before file creation")
 	}
 
 	// Make a change
 	writeFile(t, worktreePath, "new_file.txt", "Hello, world!\n")
 
-	// After change — should detect diff
-	raw2, err := wm.GitDiffRaw(taskID, "")
-	if err != nil {
-		t.Fatalf("diff raw after change: %v", err)
-	}
-
-	if raw1 == raw2 {
-		t.Fatal("expected git diff raw to change after file creation")
+	// After change — the worktree manager should detect the new file
+	if !wm.HasWorktreeChanges(taskID) {
+		t.Fatal("expected worktree manager to detect changes after file creation")
 	}
 
 	// Verify full diff is available (untracked files show in Untracked, not Diff)
