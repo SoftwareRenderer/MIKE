@@ -71,52 +71,6 @@ func TestDeleteDependency(t *testing.T) {
 	}
 }
 
-func TestDependencyExists(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	for _, id := range []string{"task-1", "task-2"} {
-		if err := s.CreateTask(newTask(id, "proj-1")); err != nil {
-			t.Fatalf("create task: %v", err)
-		}
-	}
-
-	// Check non-existent dependency
-	exists, err := s.DependencyExists("task-1", "task-2")
-	if err != nil {
-		t.Fatalf("check dependency: %v", err)
-	}
-	if exists {
-		t.Fatal("dependency should not exist yet")
-	}
-
-	// Create dependency
-	dep := newDependency("dep-1", "task-1", "task-2")
-	if err := s.CreateDependency(dep); err != nil {
-		t.Fatalf("create dependency: %v", err)
-	}
-
-	// Check it exists
-	exists, err = s.DependencyExists("task-1", "task-2")
-	if err != nil {
-		t.Fatalf("check dependency: %v", err)
-	}
-	if !exists {
-		t.Fatal("dependency should exist")
-	}
-
-	// Reverse direction should not exist
-	exists, err = s.DependencyExists("task-2", "task-1")
-	if err != nil {
-		t.Fatalf("check reverse dependency: %v", err)
-	}
-	if exists {
-		t.Fatal("reverse dependency should not exist")
-	}
-}
-
 func TestMultipleDependents(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")

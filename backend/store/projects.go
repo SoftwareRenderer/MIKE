@@ -259,14 +259,6 @@ func (s *Store) UpdateProjectSandboxCapabilities(id string, capabilities []strin
 	return err
 }
 
-// DeleteProject removes a project row (relies on CASCADE for related data).
-func (s *Store) DeleteProject(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err := s.db.Exec(`DELETE FROM projects WHERE id = ?`, id)
-	return err
-}
-
 // DeleteProjectWithData explicitly deletes all data related to a project,
 // including tasks, messages, threads, dependencies, reviews, home agent messages,
 // and token stats. This is the primary cleanup mechanism — CASCADE constraints
