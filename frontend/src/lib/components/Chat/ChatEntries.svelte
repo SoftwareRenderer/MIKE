@@ -6,6 +6,7 @@
     import QueueIndicator from './QueueIndicator.svelte';
     import VirtualList from '$lib/components/VirtualList.svelte';
     import { formatToolArgs } from '$lib/utils/toolArgs';
+    import { SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
 
     let {
         entries,
@@ -183,6 +184,9 @@
         } | null;
     } | null = $state(null);
 
+    // Track whether the user is scrolled to the bottom of the chat
+    let atBottom = $state(true);
+
     // Expose VirtualList ref to parent
     $effect(() => {
         if (onVirtualListChange) {
@@ -266,20 +270,34 @@
         }
     }
 
-    /** Combined scroll handler: calls parent onScroll + computes sticky header. */
+    /** Combined scroll handler: calls parent onScroll + computes sticky header + atBottom. */
     function getEntryKey(_entry: ChatEntry, index: number): string {
         return String(index);
     }
     function handleCombinedScroll() {
         onScroll?.();
         computeStickyFromScroll();
+        // Compute atBottom from the scroll element
+        if (chatScrollEl) {
+            const gap = chatScrollEl.scrollHeight - chatScrollEl.scrollTop - chatScrollEl.clientHeight;
+            atBottom = gap < SCROLL_BOTTOM_THRESHOLD;
+        }
     }
 
-    // Recompute sticky header when entries change (e.g. new messages arrive).
+    // Recompute sticky header and atBottom when entries change (e.g. new messages arrive).
     $effect(() => {
         entries.length;
         computeStickyFromScroll();
+        // When entries change, the user is effectively at the bottom (new content appended)
+        atBottom = true;
     });
+
+    /** Scroll to the latest message and hide the jump button. */
+    function handleJumpLatest() {
+        virtualListComp?.scrollToBottom();
+        requestAnimationFrame(() => virtualListComp?.scrollToBottom());
+        atBottom = true;
+    }
 </script>
 
 <div class="chat-messages-wrapper" style={!entriesReady ? 'opacity: 0;' : ''}>
@@ -421,6 +439,20 @@
                 {/if}
             {/snippet}
         </VirtualList>
+
+        {#if !atBottom && entries.length > 0}
+            <button
+                class="chat-jump-latest"
+                onclick={handleJumpLatest}
+                title="Scroll to latest message"
+                aria-label="Scroll to latest message"
+            >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="chat-jump-latest-label">Latest</span>
+            </button>
+        {/if}
 
         {#if awaitingResponse && connected && taskExecutionState === 'running'}
             <QueueIndicator
@@ -663,6 +695,41 @@
         color: var(--color-text-secondary);
         line-height: 1.5;
         white-space: pre-wrap;
+    }
+
+    /* Jump to latest button */
+    .chat-jump-latest {
+        position: absolute;
+        bottom: 12px;
+        right: 12px;
+        z-index: 4;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 10px;
+        min-width: 32px;
+        min-height: 32px;
+        border-radius: var(--radius-md);
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        font-size: 0.75rem;
+        font-weight: 500;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+        transition: opacity 0.2s ease, transform 0.2s ease, background 0.15s ease;
+        animation: chat-jump-latest-in 0.2s ease-out;
+    }
+    .chat-jump-latest:hover {
+        background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+        color: var(--color-text-primary);
+    }
+    .chat-jump-latest-label {
+        line-height: 1;
+    }
+    @keyframes chat-jump-latest-in {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
     }
 
 </style>
