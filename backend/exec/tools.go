@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/git"
 	"kanban/backend/types"
 	sandbox "kanban/pkg/bridge"
 
@@ -514,13 +515,13 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 			var summary string
 			if independentCount > 0 && nestedCount > 0 {
 				summary = fmt.Sprintf("Plan created with %d task%s and %d subtask%s. Awaiting approval.",
-					independentCount, pluralS(independentCount), nestedCount, pluralS(nestedCount))
+					independentCount, git.PluralS(independentCount), nestedCount, git.PluralS(nestedCount))
 			} else if independentCount > 0 {
 				summary = fmt.Sprintf("Plan created with %d task%s. Awaiting approval.",
-					independentCount, pluralS(independentCount))
+					independentCount, git.PluralS(independentCount))
 			} else {
 				summary = fmt.Sprintf("Plan created with %d subtask%s. Awaiting approval.",
-					nestedCount, pluralS(nestedCount))
+					nestedCount, git.PluralS(nestedCount))
 			}
 			log.Printf("[request_review] plan mode: %s", summary)
 		}
@@ -1113,14 +1114,6 @@ func formatHoverResult(result any) string {
 	// Fallback: marshal the whole thing
 	data, _ := json.MarshalIndent(contents, "", "  ")
 	return string(data)
-}
-
-// pluralS returns "s" if count > 1, empty string otherwise.
-func pluralS(count int) string {
-	if count == 1 {
-		return ""
-	}
-	return "s"
 }
 
 // stripANSI removes ANSI escape sequences from terminal output.
