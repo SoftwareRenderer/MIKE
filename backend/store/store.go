@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS task_messages (
     task_id            TEXT NOT NULL,
     thread_id          TEXT NULL,
     role               TEXT NOT NULL,
+    severity           TEXT DEFAULT NULL,
     content            TEXT NOT NULL,
     reasoning_content  TEXT DEFAULT NULL,
     tool_calls         TEXT DEFAULT NULL,
@@ -287,6 +288,7 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	// File checkpoint tracking
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN git_commit_hash TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN attachments TEXT DEFAULT NULL`)
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN severity TEXT DEFAULT NULL`)
 	// Add cost column to cumulative token stats (idempotent — ALTER TABLE IF NOT EXISTS is not standard SQLite)
 	_, _ = s.db.Exec(`ALTER TABLE project_token_stats ADD COLUMN cost REAL NOT NULL DEFAULT 0`)
 	// Separate merge conflict flag so execution_state can stay "running"
