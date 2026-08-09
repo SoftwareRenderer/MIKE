@@ -51,7 +51,9 @@ func (s *Server) setupRoutes() {
 		s.extHandler.HandleSetEnabled(w, r, r.PathValue("id"))
 	})
 	s.mux.HandleFunc("GET /api/extensions/registry", s.extHandler.HandleRegistryIndex)
+	s.mux.HandleFunc("GET /api/extensions/local", s.extHandler.HandleLocalExtensions)
 	s.mux.HandleFunc("POST /api/extensions/install", s.extHandler.HandleInstall)
+	s.mux.HandleFunc("POST /api/extensions/install-local", s.extHandler.HandleInstallLocal)
 	s.mux.HandleFunc("GET /api/extensions/check-updates", s.extHandler.HandleCheckUpdates)
 	s.mux.HandleFunc("GET /api/extensions/{id}/logs", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleSandboxLogs(w, r, r.PathValue("id"))

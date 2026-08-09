@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv, SchemaProperty } from '$lib/types';
-    import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage } from '$lib/api';
+    import { listExtensions, listLocalExtensions, getRegistryIndex, installExtension, installLocalExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
@@ -22,6 +22,7 @@
     // State
     let extensions = $state<Extension[]>([]);
     let registryEntries = $state<RegistryEntry[]>([]);
+    let localExtensions = $state<RegistryEntry[]>([]);
     let updates = $state<ExtensionUpdate[]>([]);
     let activeView = $state<'installed' | 'browse'>('installed');
     let loading = $state(false);
@@ -205,6 +206,16 @@
         }
     }
 
+    // Load extensions present in the local extensions directory (filesystem).
+    // Best-effort: a failure here should not block browsing the registry.
+    async function loadLocalExtensions() {
+        try {
+            localExtensions = await listLocalExtensions();
+        } catch {
+            localExtensions = [];
+        }
+    }
+
     // Load registry
     async function loadRegistry() {
         loadingRegistry = true;
@@ -230,13 +241,15 @@
         buildProgress = { ...buildProgress, [name]: { progress, message, error } };
     }
 
-    // Install from registry, streaming progress into the card as it happens.
-    async function handleInstall(name: string) {
+    // Install an extension, streaming progress into the card as it happens.
+    // Local (unpublished) extensions install from the filesystem, bypassing the registry.
+    async function handleInstall(name: string, isLocal = false) {
         if (installing.has(name)) return;
         error = '';
         installing = new Set(installing).add(name);
         try {
-            for await (const event of installExtension(name)) {
+            const stream = isLocal ? installLocalExtension(name) : installExtension(name);
+            for await (const event of stream) {
                 setBuildProgress(event.extension, event.progress, event.message, event.error);
                 if (event.done) {
                     if (event.error) {
@@ -425,21 +438,37 @@
         return `Built ${date.toLocaleDateString()}`;
     }
 
-    // Filter extensions by search
+    // Filter extensions by search, with local (unpublished) extensions first
     let filteredExtensions = $derived.by(() => {
-        if (!searchQuery) return extensions;
-        const q = searchQuery.toLowerCase();
-        return extensions.filter(ext =>
-            ext.name.toLowerCase().includes(q) ||
-            ext.manifest.display_name.toLowerCase().includes(q) ||
-            ext.type.includes(q)
+        const list = searchQuery
+            ? extensions.filter(ext =>
+                ext.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                ext.manifest.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                ext.type.includes(searchQuery.toLowerCase())
+            )
+            : extensions;
+        return [...list].sort((a, b) =>
+            (b.install_source === 'local' ? 1 : 0) - (a.install_source === 'local' ? 1 : 0)
         );
     });
 
-    let filteredRegistry = $derived.by(() => {
-        if (!searchQuery) return registryEntries;
+    // Names of local (filesystem-only) extensions that are not in the registry.
+    let unpublishedNames = $derived.by(() => {
+        const registryNames = new Set(registryEntries.map(e => e.name));
+        return new Set(localExtensions.filter(ext => !registryNames.has(ext.name)).map(e => e.name));
+    });
+
+    // Combined list for the browse view: unpublished (filesystem-only, not in
+    // the registry) extensions at the top, then registry entries.
+    let browseList = $derived.by(() => {
+        const registryNames = new Set(registryEntries.map(e => e.name));
+        const unpublished = localExtensions.filter(ext => !registryNames.has(ext.name));
+        
+        const combined = [...unpublished, ...registryEntries];
+
+        if (!searchQuery) return combined;
         const q = searchQuery.toLowerCase();
-        return registryEntries.filter(entry =>
+        return combined.filter(entry =>
             entry.name.toLowerCase().includes(q) ||
             entry.display_name.toLowerCase().includes(q) ||
             entry.description.toLowerCase().includes(q)
@@ -477,7 +506,7 @@
                 <button
                     class="view-tab"
                     class:active={activeView === 'browse'}
-                    onclick={() => { activeView = 'browse'; if (registryEntries.length === 0) loadRegistry(); }}
+                    onclick={() => { activeView = 'browse'; loadLocalExtensions(); if (registryEntries.length === 0) loadRegistry(); }}
                 >
                     Browse Registry
                 </button>
@@ -527,14 +556,15 @@
                 <div class="empty-state">
                     <p>No extensions installed</p>
                     <p class="help">Install extensions from the registry to add LSP servers and UI plugins.</p>
-                    <button class="btn btn-primary" onclick={() => { activeView = 'browse'; loadRegistry(); }}>
+                    <button class="btn btn-primary" onclick={() => { activeView = 'browse'; loadLocalExtensions(); loadRegistry(); }}>
                         Browse Registry
                     </button>
                 </div>
             {:else}
                 <div class="extension-list">
                     {#each filteredExtensions as ext}
-                        <div class="extension-card" class:disabled={!ext.enabled}>
+                        {@const isLocal = ext.install_source === 'local'}
+                        <div class="extension-card" class:disabled={!ext.enabled} class:unpublished-card={isLocal}>
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'} class:ext-agent={ext.type === 'agent'}>
                                     {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : ext.type === 'agent' ? 'AGENT' : 'UI'}
@@ -542,6 +572,9 @@
                                 <div class="ext-info">
                                     <div class="ext-name-row">
                                         <span class="ext-name">{ext.manifest.display_name || ext.name}</span>
+                                        {#if isLocal}
+                                            <span class="unpublished-badge" title="Installed from the local extensions directory rather than a registry.">Local</span>
+                                        {/if}
                                         {#if getCapabilityKeys(ext).length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
                                                 {#each getCapabilityKeys(ext) as capKey}
@@ -859,16 +892,17 @@
             <!-- Registry List -->
             {#if loadingRegistry}
                 <div class="loading">Loading registry...</div>
-            {:else if filteredRegistry.length === 0}
+            {:else if browseList.length === 0}
                 <div class="empty-state">
                     <p>No extensions in registry</p>
                     <p class="help">Check the registry URL or try a different source.</p>
                 </div>
             {:else}
                 <div class="extension-list">
-                    {#each filteredRegistry as entry}
+                    {#each browseList as entry}
                         {@const regCapKeys = getRegistryCapabilityKeys(entry)}
-                        <div class="extension-card registry-card">
+                        {@const isUnpublished = unpublishedNames.has(entry.name)}
+                        <div class="extension-card registry-card" class:unpublished-card={isUnpublished}>
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'}>
                                     {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : entry.type === 'agent' ? 'AGENT' : 'UI'}
@@ -876,6 +910,9 @@
                                 <div class="ext-info">
                                     <div class="ext-name-row">
                                         <span class="ext-name">{entry.display_name || entry.name}</span>
+                                        {#if isUnpublished}
+                                            <span class="unpublished-badge" title="Present in the local extensions directory but not published in the registry.">Local</span>
+                                        {/if}
                                         {#if regCapKeys.length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
                                                 {#each regCapKeys as regCapKey}
@@ -900,7 +937,7 @@
                                     {#if extensions.some(e => e.name === entry.name)}
                                         <span class="installed-badge">Installed</span>
                                     {:else}
-                                        <button class="btn btn-primary btn-small" onclick={() => handleInstall(entry.name)} disabled={installing.has(entry.name)}>
+                                        <button class="btn btn-primary btn-small" onclick={() => handleInstall(entry.name, isUnpublished)} disabled={installing.has(entry.name)}>
                                             {#if installing.has(entry.name)}
                                                 <span class="spinner"></span>
                                                 Installing...
@@ -1146,6 +1183,52 @@
 
     .registry-card {
         border-style: dashed;
+    }
+
+    .unpublished-card {
+        position: relative;
+        border-color: transparent;
+        background: color-mix(in srgb, var(--color-status-yellow) 6%, var(--color-bg-card));
+    }
+
+    .unpublished-card::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        padding: 2px; /* stripe border thickness */
+        background: repeating-linear-gradient(
+            45deg,
+            var(--color-status-yellow) 0 8px,
+            #111 8px 16px
+        );
+        -webkit-mask:
+            linear-gradient(#fff 0 0) content-box,
+            linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor;
+        mask:
+            linear-gradient(#fff 0 0) content-box,
+            linear-gradient(#fff 0 0);
+        mask-composite: exclude;
+        pointer-events: none;
+    }
+
+    .unpublished-card:hover {
+        filter: brightness(1.02);
+    }
+
+    .unpublished-badge {
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        padding: 0.12rem 0.5rem;
+        border-radius: 4px;
+        background: var(--color-status-yellow);
+        color: #111;
+        border: 1px solid #111;
+        white-space: nowrap;
+        flex-shrink: 0;
     }
 
     .card-header {

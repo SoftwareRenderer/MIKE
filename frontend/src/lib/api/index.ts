@@ -118,6 +118,7 @@ export { createTerminal, createProjectTerminal, isTerminalStale } from './termin
 // -- Extensions --
 export {
     listExtensions,
+    listLocalExtensions,
     getExtension,
     updateExtension,
     updateExtensionImage,
@@ -125,6 +126,7 @@ export {
     setExtensionEnabled,
     getRegistryIndex,
     installExtension,
+    installLocalExtension,
     checkUpdates,
     getExtensionLogs,
     type BuildProgressEvent,
