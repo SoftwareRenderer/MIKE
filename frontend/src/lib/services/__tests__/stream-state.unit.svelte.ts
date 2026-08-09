@@ -208,4 +208,23 @@ describe('StreamState', () => {
         expect(s.state.entries[1].isStreaming).toBe(false);
         expect(s.state.entries[2].isStreaming).toBe(true); // current one still streaming
     });
+
+    it('resetStreaming preserves sessionCost', () => {
+        const s = new StreamState();
+        s.state.sessionCost = 0.42;
+        s.ensureAssistantEntry(() => 'id-1');
+        s.resetStreaming();
+        expect(s.state.sessionCost).toBe(0.42);
+        expect(s.state.streamTokenCount).toBe(0);
+        expect(s.state.awaitingResponse).toBe(false);
+    });
+
+    it('full reset clears sessionCost', () => {
+        const s = new StreamState();
+        s.state.sessionCost = 1.5;
+        s.ensureAssistantEntry(() => 'id-1');
+        s.reset();
+        expect(s.state.sessionCost).toBe(0);
+        expect(s.state.entries).toEqual([]);
+    });
 });

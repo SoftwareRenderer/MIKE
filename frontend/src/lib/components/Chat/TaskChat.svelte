@@ -1195,6 +1195,9 @@
                 if (task.reasoning_effort) {
                     selectedReasoningEffort = task.reasoning_effort;
                 }
+                // Restore session cost from the persisted task value so the badge
+                // appears for non-streaming tasks.
+                stream.state.sessionCost = task.session_cost || 0;
                 // Recalculate context limit now that task-specific model is set
                 updateContextLimit();
             } catch {

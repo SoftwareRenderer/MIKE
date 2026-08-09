@@ -238,8 +238,15 @@ type loopContext struct {
 }
 
 func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
+	// Declare lc at function scope so the defer can reference it.
+	var lc *loopContext
 	defer func() {
 		close(setup.done) // signal executor exit for ForwardUserMessage type-switch
+		// Persist accumulated session cost for this task run.
+		if lc != nil {
+			setup.task.SessionCost = lc.sessionCost
+			te.store.UpdateTask(setup.task)
+		}
 		if r := recover(); r != nil {
 			log.Printf("[panic] setup.task=%s recovered from panic: %v", setup.task.ID, r)
 			te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
@@ -443,7 +450,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	}
 
 	// Consolidate all mutable loop state into a single struct.
-	lc := &loopContext{
+	lc = &loopContext{
 		messages:         messages,
 		pendingToolCalls: nil,
 		prevArgLens:      make(map[string]int),
@@ -457,6 +464,9 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	}
 	// Sync once more to ensure we have the latest DB state (e.g. if messages were added/deleted)
 	lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+
+	// Reset session cost for this run — it accumulates per-run, not across runs.
+	setup.task.SessionCost = 0
 
 	for {
 		select {

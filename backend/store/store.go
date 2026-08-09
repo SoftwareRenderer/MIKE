@@ -294,6 +294,8 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	// Operating mode: act (default), plan, or explore
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN operating_mode TEXT NOT NULL DEFAULT 'act'`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN summarizing INTEGER NOT NULL DEFAULT 0`)
+	// Accumulated API cost (USD) for the last task run
+	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN session_cost REAL NOT NULL DEFAULT 0`)
 	// Cumulative token stats table (survives task deletion)
 	_, _ = s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS project_token_stats (
@@ -461,7 +463,7 @@ func scanTask(s scanner, t *types.Task) error {
 	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
 		&t.SessionID, &t.Branch, &baseRef, &baseCommit, &branchTip, &t.Output, &t.ExecutionState, &hasMergeConflict,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &titleGenerating, &summarizing, &currentThreadID, &createdAt, &updatedAt, &assignedPortsJSON)
+		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &titleGenerating, &summarizing, &currentThreadID, &createdAt, &updatedAt, &assignedPortsJSON, &t.SessionCost)
 	if err != nil {
 		return err
 	}

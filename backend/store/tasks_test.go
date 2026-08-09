@@ -599,3 +599,54 @@ func TestClearTaskBranch_WrongProject(t *testing.T) {
 		t.Fatalf("expected branch unchanged, got %q", got.Branch)
 	}
 }
+
+func TestTaskSessionCost(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Create task with session cost
+	task := newTask("task-1", "proj-1")
+	task.SessionCost = 0.42
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Verify session cost is persisted
+	got, err := s.GetTask("proj-1", "task-1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.SessionCost != 0.42 {
+		t.Fatalf("expected session_cost 0.42, got %f", got.SessionCost)
+	}
+
+	// Update session cost
+	got.SessionCost = 1.23
+	if err := s.UpdateTask(got); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	got2, err := s.GetTask("proj-1", "task-1")
+	if err != nil {
+		t.Fatalf("get task after update: %v", err)
+	}
+	if got2.SessionCost != 1.23 {
+		t.Fatalf("expected session_cost 1.23, got %f", got2.SessionCost)
+	}
+
+	// Default session cost should be 0
+	task2 := newTask("task-2", "proj-1")
+	if err := s.CreateTask(task2); err != nil {
+		t.Fatalf("create task2: %v", err)
+	}
+	got3, err := s.GetTask("proj-1", "task-2")
+	if err != nil {
+		t.Fatalf("get task2: %v", err)
+	}
+	if got3.SessionCost != 0 {
+		t.Fatalf("expected default session_cost 0, got %f", got3.SessionCost)
+	}
+}
