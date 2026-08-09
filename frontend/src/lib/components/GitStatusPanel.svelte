@@ -124,6 +124,27 @@
 
     function handleFromKeydown(e: KeyboardEvent) {
         const items = fromDropdownEl?.querySelectorAll('.commit-dropdown-item') as NodeListOf<HTMLButtonElement> | undefined;
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            // 1. If an item is highlighted, select it
+            if (items && activeFromIndex >= 0 && activeFromIndex < items.length) {
+                items[activeFromIndex]?.click();
+            } else {
+                // 2. Otherwise, use the raw input value directly
+                const trimmed = fromInputValue.trim();
+                if (trimmed) {
+                    if (trimmed.toLowerCase() === 'current') {
+                        fromCommit = CURRENT_TREE;
+                    } else {
+                        const matched = commits.find(c => c.hash === trimmed || c.short === trimmed);
+                        fromCommit = matched ? matched.hash : trimmed;
+                    }
+                }
+                closeDropdowns();
+                fromInputEl?.blur();
+            }
+            return;
+        }
         if (!items || items.length === 0) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -148,21 +169,28 @@
             e.preventDefault();
             closeDropdowns();
             fromInputEl?.focus();
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            showFromDropdown = true;
-            showToDropdown = false;
-            // Select the highlighted item, or the first item if none highlighted
-            if (activeFromIndex >= 0 && activeFromIndex < items.length) {
-                items[activeFromIndex]?.click();
-            } else if (items.length > 0) {
-                items[0]?.click();
-            }
         }
     }
 
     function handleToKeydown(e: KeyboardEvent) {
         const items = toDropdownEl?.querySelectorAll('.commit-dropdown-item') as NodeListOf<HTMLButtonElement> | undefined;
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            // 1. If an item is highlighted, select it
+            if (items && activeToIndex >= 0 && activeToIndex < items.length) {
+                items[activeToIndex]?.click();
+            } else {
+                // 2. Otherwise, use the raw input value directly
+                const trimmed = toInputValue.trim();
+                if (trimmed) {
+                    const matched = commits.find(c => c.hash === trimmed || c.short === trimmed);
+                    toCommit = matched ? matched.hash : trimmed;
+                }
+                closeDropdowns();
+                toInputEl?.blur();
+            }
+            return;
+        }
         if (!items || items.length === 0) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -187,16 +215,6 @@
             e.preventDefault();
             closeDropdowns();
             toInputEl?.focus();
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            showToDropdown = true;
-            showFromDropdown = false;
-            // Select the highlighted item, or the first item if none highlighted
-            if (activeToIndex >= 0 && activeToIndex < items.length) {
-                items[activeToIndex]?.click();
-            } else if (items.length > 0) {
-                items[0]?.click();
-            }
         }
     }
 
