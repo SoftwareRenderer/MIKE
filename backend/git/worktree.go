@@ -1242,17 +1242,18 @@ func shortStatFromDiff(diff string) string {
 		return ""
 	}
 	parts := make([]string, 0, 3)
-	parts = append(parts, fmt.Sprintf("%d file%s changed", files, pluralS(files)))
+	parts = append(parts, fmt.Sprintf("%d file%s changed", files, PluralS(files)))
 	if totalAdded > 0 {
-		parts = append(parts, fmt.Sprintf("%d insertion%s(+)", totalAdded, pluralS(totalAdded)))
+		parts = append(parts, fmt.Sprintf("%d insertion%s(+)", totalAdded, PluralS(totalAdded)))
 	}
 	if totalRemoved > 0 {
-		parts = append(parts, fmt.Sprintf("%d deletion%s(-)", totalRemoved, pluralS(totalRemoved)))
+		parts = append(parts, fmt.Sprintf("%d deletion%s(-)", totalRemoved, PluralS(totalRemoved)))
 	}
 	return strings.Join(parts, ", ")
 }
 
-func pluralS(n int) string {
+// PluralS returns "s" if count is not 1, empty string otherwise.
+func PluralS(n int) string {
 	if n == 1 {
 		return ""
 	}
