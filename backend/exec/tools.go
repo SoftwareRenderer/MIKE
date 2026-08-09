@@ -228,15 +228,18 @@ func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[s
 			lines := strings.Split(content, "\n")
 			offsetIdx := int(offset) - 1 // 1-indexed to 0-indexed
 			if offsetIdx >= len(lines) {
-				return "(empty — offset past end of file)", true
+				// Invalid offset: surface an explicit error so the LLM is made aware
+				// and can correct its request, instead of silently returning empty.
+				return fmt.Sprintf("Error: offset %d is past the end of the file (file has %d line(s)). Use a valid offset.", int(offset), len(lines)), false
 			}
 			lines = lines[offsetIdx:]
+			// Valid offset: silently clamp an oversized limit to the remaining lines.
 			if limit, ok := args["limit"].(float64); ok && int(limit) > 0 && int(limit) < len(lines) {
 				lines = lines[:int(limit)]
 			}
 			content = strings.Join(lines, "\n")
 		} else if limit, ok := args["limit"].(float64); ok && int(limit) > 0 {
-			// limit without offset: take first N lines
+			// limit without offset: take first N lines, silently clamping an oversized limit.
 			lines := strings.Split(content, "\n")
 			if int(limit) < len(lines) {
 				lines = lines[:int(limit)]
