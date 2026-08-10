@@ -167,16 +167,6 @@ func (s *Store) SetTaskMergeConflict(taskID, projectID string, hasConflict bool)
 	return err
 }
 
-// UpdateTaskStatusAndState updates both status and execution_state of a task.
-func (s *Store) UpdateTaskStatusAndState(taskID, projectID, status, executionState string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE tasks SET status = ?, execution_state = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
-		status, executionState, now.Format(time.RFC3339), taskID, projectID)
-	return err
-}
-
 // DeleteTask removes a task.
 func (s *Store) DeleteTask(projectID, taskID string) error {
 	s.mu.Lock()
@@ -287,29 +277,6 @@ func (s *Store) GetAllDescendants(taskID string) ([]types.Task, error) {
 		descendants = append(descendants, grandchildren...)
 	}
 	return descendants, nil
-}
-
-// GetAncestorChain walks up the parent_task_id chain and returns all ancestors (immediate parent first).
-func (s *Store) GetAncestorChain(taskID string) ([]types.Task, error) {
-	var chain []types.Task
-	currentID := taskID
-	for {
-		task, err := s.GetTaskByTaskID(currentID)
-		if err != nil {
-			return chain, nil // stop on missing ancestor
-		}
-		if task.ParentTaskID == "" {
-			break
-		}
-		// Get the parent
-		parent, err := s.GetTaskByTaskID(task.ParentTaskID)
-		if err != nil {
-			break
-		}
-		chain = append(chain, *parent)
-		currentID = parent.ID
-	}
-	return chain, nil
 }
 
 // ClearStaleTitleGenerating sets title_generating to false for all tasks.

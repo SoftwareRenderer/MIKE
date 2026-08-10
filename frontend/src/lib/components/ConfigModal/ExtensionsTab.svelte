@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv, SchemaProperty } from '$lib/types';
-    import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage } from '$lib/api';
+    import { listExtensions, listLocalExtensions, getRegistryIndex, installExtension, installLocalExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
@@ -19,14 +19,49 @@
         }
     }
 
+    /**
+     * Normalize an author to a directory-style slug, mirroring the backend's
+     * authorDir(): lowercase, non-alphanumeric characters (other than '-' '_'
+     * '.') collapsed to a single '-', trailing separators trimmed. This aligns
+     * registry display authors (e.g. "Go Team") with their on-disk namespace
+     * directory ("go-team") so identity comparisons line up.
+     */
+    function slugify(author: string | undefined): string {
+        const slug = (author ?? '').trim().toLowerCase();
+        if (!slug) return 'unknown';
+        let out = '';
+        let lastDash = false;
+        for (const ch of slug) {
+            const ok = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch === '-' || ch === '_' || ch === '.';
+            if (!ok) {
+                if (lastDash) continue;
+                out += '-';
+                lastDash = true;
+                continue;
+            }
+            out += ch;
+            lastDash = false;
+        }
+        if (!out) return 'unknown';
+        return out.replace(/[-._]+$/, '');
+    }
+
+    /** Canonical identity key for an extension: <author>/<name>. */
+    function identityKey(author: string | undefined, name: string): string {
+        return `${slugify(author)}/${name}`;
+    }
+
     // State
     let extensions = $state<Extension[]>([]);
     let registryEntries = $state<RegistryEntry[]>([]);
+    let localExtensions = $state<RegistryEntry[]>([]);
     let updates = $state<ExtensionUpdate[]>([]);
     let activeView = $state<'installed' | 'browse'>('installed');
     let loading = $state(false);
     let loadingRegistry = $state(false);
     let loadingUpdates = $state(false);
+    let hasCheckedUpdates = $state(false);
+    let updatingAll = $state(false);
     let error = $state('');
     let searchQuery = $state('');
 
@@ -60,7 +95,7 @@
     const CAPABILITY_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
         proxy: {
             label: 'Proxy',
-            description: 'Enables external API access for specific domains.',
+            description: 'Enables external API access for specific domains, within the boundaries of declared capabilities.',
         },
         lsp: {
             label: 'LSP',
@@ -152,6 +187,14 @@
             label: 'See file edits',
             description: 'Can receive updates when the content of the open file changes.',
         },
+        'editor.jumpToLine': {
+            label: 'Jump to a line in the file',
+            description: 'Can scroll the editor to a specific line.',
+        },
+        'editor.save': {
+            label: 'Save the open file',
+            description: 'Can save the file currently open in the editor.',
+        },
     };
 
     // Get list of capability keys for an installed extension
@@ -205,6 +248,16 @@
         }
     }
 
+    // Load extensions present in the local extensions directory (filesystem).
+    // Best-effort: a failure here should not block browsing the registry.
+    async function loadLocalExtensions() {
+        try {
+            localExtensions = await listLocalExtensions();
+        } catch {
+            localExtensions = [];
+        }
+    }
+
     // Load registry
     async function loadRegistry() {
         loadingRegistry = true;
@@ -230,13 +283,15 @@
         buildProgress = { ...buildProgress, [name]: { progress, message, error } };
     }
 
-    // Install from registry, streaming progress into the card as it happens.
-    async function handleInstall(name: string) {
+    // Install an extension, streaming progress into the card as it happens.
+    // Local (unpublished) extensions install from the filesystem, bypassing the registry.
+    async function handleInstall(name: string, isLocal = false, author?: string) {
         if (installing.has(name)) return;
         error = '';
         installing = new Set(installing).add(name);
         try {
-            for await (const event of installExtension(name)) {
+            const stream = isLocal ? installLocalExtension(author ?? '', name) : installExtension(name);
+            for await (const event of stream) {
                 setBuildProgress(event.extension, event.progress, event.message, event.error);
                 if (event.done) {
                     if (event.error) {
@@ -293,6 +348,7 @@
         error = '';
         try {
             updates = await checkUpdates();
+            hasCheckedUpdates = true;
         } catch (e: any) {
             error = e.message || 'Failed to check for updates';
         } finally {
@@ -300,15 +356,60 @@
         }
     }
 
-    // Update an extension
-    async function handleUpdate(id: string) {
-        error = '';
+    // Perform the real file/image replacement for one extension by streaming the
+    // registry update operation. Returns true on success, false on failure.
+    async function applyExtensionUpdate(id: string, name: string): Promise<boolean> {
+        let ok = true;
+        updating = new Set(updating).add(name);
         try {
-            await updateExtension(id, {});
-            await loadExtensions();
-            updates = updates.filter(u => u.id !== id);
+            for await (const event of updateExtensionImage(id)) {
+                setBuildProgress(event.extension, event.progress, event.message, event.error);
+                if (event.done) {
+                    if (event.error) {
+                        error = event.error;
+                        ok = false;
+                        setTimeout(() => clearBuildProgress(event.extension), 6000);
+                    } else {
+                        setTimeout(() => clearBuildProgress(event.extension), 2000);
+                    }
+                }
+            }
         } catch (e: any) {
             error = e.message || 'Failed to update extension';
+            ok = false;
+        } finally {
+            const next = new Set(updating);
+            next.delete(name);
+            updating = next;
+        }
+        return ok;
+    }
+
+    // Update a single extension — performs the actual file/image replacement.
+    async function handleUpdate(update: ExtensionUpdate) {
+        error = '';
+        const ok = await applyExtensionUpdate(update.id, update.name);
+        await loadExtensions();
+        if (ok) {
+            updates = updates.filter(u => u.id !== update.id);
+        }
+    }
+
+    // Update all available extensions, sequentially, performing real replacements.
+    async function handleUpdateAll() {
+        updatingAll = true;
+        error = '';
+        try {
+            for (const update of [...updates]) {
+                const ok = await applyExtensionUpdate(update.id, update.name);
+                if (ok) {
+                    updates = updates.filter(u => u.id !== update.id);
+                }
+                // On failure the error is already set; continue with the rest.
+            }
+            await loadExtensions();
+        } finally {
+            updatingAll = false;
         }
     }
 
@@ -322,26 +423,10 @@
         if (!confirmed) return;
 
         error = '';
-        updating = new Set(updating).add(name);
-        try {
-            for await (const event of updateExtensionImage(id)) {
-                setBuildProgress(event.extension, event.progress, event.message, event.error);
-                if (event.done) {
-                    if (event.error) {
-                        error = event.error;
-                        setTimeout(() => clearBuildProgress(event.extension), 6000);
-                    } else {
-                        setTimeout(() => clearBuildProgress(event.extension), 2000);
-                    }
-                }
-            }
-            await loadExtensions();
-        } catch (e: any) {
-            error = e.message || 'Failed to update extension';
-        } finally {
-            const next = new Set(updating);
-            next.delete(name);
-            updating = next;
+        const ok = await applyExtensionUpdate(id, name);
+        await loadExtensions();
+        if (ok) {
+            updates = updates.filter(u => u.id !== id);
         }
     }
 
@@ -425,21 +510,41 @@
         return `Built ${date.toLocaleDateString()}`;
     }
 
-    // Filter extensions by search
+    // Filter extensions by search, with local (unpublished) extensions first
     let filteredExtensions = $derived.by(() => {
-        if (!searchQuery) return extensions;
-        const q = searchQuery.toLowerCase();
-        return extensions.filter(ext =>
-            ext.name.toLowerCase().includes(q) ||
-            ext.manifest.display_name.toLowerCase().includes(q) ||
-            ext.type.includes(q)
+        const list = searchQuery
+            ? extensions.filter(ext =>
+                ext.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                ext.manifest.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                ext.type.includes(searchQuery.toLowerCase())
+            )
+            : extensions;
+        return [...list].sort((a, b) =>
+            (b.install_source === 'local' ? 1 : 0) - (a.install_source === 'local' ? 1 : 0)
         );
     });
 
-    let filteredRegistry = $derived.by(() => {
-        if (!searchQuery) return registryEntries;
+    // Identity keys of local (filesystem-only) extensions that are not in the
+    // registry, matched by author/name so a local fork of a published extension
+    // (different author namespace) is not hidden by a name-only collision.
+    let unpublishedKeys = $derived.by(() => {
+        const registryKeys = new Set(registryEntries.map(e => identityKey(e.author, e.name)));
+        return new Set(localExtensions
+            .filter(ext => !registryKeys.has(identityKey(ext.author, ext.name)))
+            .map(e => identityKey(e.author, e.name)));
+    });
+
+    // Combined list for the browse view: unpublished (filesystem-only, not in
+    // the registry) extensions at the top, then registry entries.
+    let browseList = $derived.by(() => {
+        const registryKeys = new Set(registryEntries.map(e => identityKey(e.author, e.name)));
+        const unpublished = localExtensions.filter(ext => !registryKeys.has(identityKey(ext.author, ext.name)));
+        
+        const combined = [...unpublished, ...registryEntries];
+
+        if (!searchQuery) return combined;
         const q = searchQuery.toLowerCase();
-        return registryEntries.filter(entry =>
+        return combined.filter(entry =>
             entry.name.toLowerCase().includes(q) ||
             entry.display_name.toLowerCase().includes(q) ||
             entry.description.toLowerCase().includes(q)
@@ -477,9 +582,9 @@
                 <button
                     class="view-tab"
                     class:active={activeView === 'browse'}
-                    onclick={() => { activeView = 'browse'; if (registryEntries.length === 0) loadRegistry(); }}
+                    onclick={() => { activeView = 'browse'; loadLocalExtensions(); if (registryEntries.length === 0) loadRegistry(); }}
                 >
-                    Browse Registry
+                    Browse
                 </button>
             </div>
             <div class="view-tabs-right">
@@ -505,16 +610,41 @@
     {#if activeView === 'installed'}
         <div class="installed-view">
             <!-- Updates Available -->
-            {#if updates.length > 0}
+            {#if hasCheckedUpdates && updates.length === 0}
+                <div class="updates-section updates-none">
+                    <h3>No Updates Available</h3>
+                    <p class="updates-no-result">All installed extensions are up to date.</p>
+                </div>
+            {:else if updates.length > 0}
                 <div class="updates-section">
-                    <h3>Updates Available</h3>
+                    <div class="updates-header">
+                        <h3>Updates Available</h3>
+                        <button class="btn btn-primary btn-small" onclick={handleUpdateAll} disabled={updatingAll}>
+                            {updatingAll ? 'Updating...' : 'Update All'}
+                        </button>
+                    </div>
                     {#each updates as update}
-                        <div class="update-item">
+                        {@const newPerms = update.new_permissions ?? []}
+                        <div class="update-item" class:has-new-perms={newPerms.length > 0}>
                             <div class="update-info">
                                 <span class="update-name">{update.name}</span>
-                                <span class="update-versions">{update.current_version} \u2192 {update.available_version}</span>
+                                <span class="update-versions">{update.current_version} → {update.available_version}</span>
                             </div>
-                            <button class="btn btn-primary btn-small" onclick={() => handleUpdate(update.id)}>Update</button>
+                            {#if newPerms.length > 0}
+                                <div class="update-new-perms">
+                                    <div class="update-new-perms-title">This update requests new permissions:</div>
+                                    <ul class="update-new-perms-list">
+                                        {#each newPerms as perm}
+                                            {@const info = PERMISSION_DESCRIPTIONS[perm]}
+                                            <li class="update-new-perm">
+                                                <span class="update-new-perm-name">{info?.label || perm}</span>
+                                                {#if info?.description}<span class="update-new-perm-desc">{info.description}</span>{/if}
+                                            </li>
+                                        {/each}
+                                    </ul>
+                                </div>
+                            {/if}
+                            <button class="btn btn-primary btn-small" onclick={() => handleUpdate(update)}>Update</button>
                         </div>
                     {/each}
                 </div>
@@ -527,14 +657,15 @@
                 <div class="empty-state">
                     <p>No extensions installed</p>
                     <p class="help">Install extensions from the registry to add LSP servers and UI plugins.</p>
-                    <button class="btn btn-primary" onclick={() => { activeView = 'browse'; loadRegistry(); }}>
-                        Browse Registry
+                    <button class="btn btn-primary" onclick={() => { activeView = 'browse'; loadLocalExtensions(); loadRegistry(); }}>
+                        Browse
                     </button>
                 </div>
             {:else}
                 <div class="extension-list">
                     {#each filteredExtensions as ext}
-                        <div class="extension-card" class:disabled={!ext.enabled}>
+                        {@const isLocal = ext.install_source === 'local'}
+                        <div class="extension-card" class:disabled={!ext.enabled} class:unpublished-card={isLocal}>
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'} class:ext-agent={ext.type === 'agent'}>
                                     {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : ext.type === 'agent' ? 'AGENT' : 'UI'}
@@ -542,6 +673,9 @@
                                 <div class="ext-info">
                                     <div class="ext-name-row">
                                         <span class="ext-name">{ext.manifest.display_name || ext.name}</span>
+                                        {#if isLocal}
+                                            <span class="unpublished-badge" title="Installed from the local extensions directory.">Local</span>
+                                        {/if}
                                         {#if getCapabilityKeys(ext).length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
                                                 {#each getCapabilityKeys(ext) as capKey}
@@ -612,7 +746,7 @@
                                     <span class="ext-proxy-label">Connects to:</span>
                                     <div class="cap-detail-tags">
                                         {#each ext.manifest.capabilities.proxy.allowed_domains as domain}
-                                            <span class="cap-detail-tag">{domain}</span>
+                                            <button class="cap-detail-tag" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>{domain}</button>
                                         {/each}
                                     </div>
                                 </div>
@@ -859,16 +993,17 @@
             <!-- Registry List -->
             {#if loadingRegistry}
                 <div class="loading">Loading registry...</div>
-            {:else if filteredRegistry.length === 0}
+            {:else if browseList.length === 0}
                 <div class="empty-state">
                     <p>No extensions in registry</p>
                     <p class="help">Check the registry URL or try a different source.</p>
                 </div>
             {:else}
                 <div class="extension-list">
-                    {#each filteredRegistry as entry}
+                    {#each browseList as entry}
                         {@const regCapKeys = getRegistryCapabilityKeys(entry)}
-                        <div class="extension-card registry-card">
+                        {@const isUnpublished = unpublishedKeys.has(identityKey(entry.author, entry.name))}
+                        <div class="extension-card registry-card" class:unpublished-card={isUnpublished}>
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'}>
                                     {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : entry.type === 'agent' ? 'AGENT' : 'UI'}
@@ -876,6 +1011,9 @@
                                 <div class="ext-info">
                                     <div class="ext-name-row">
                                         <span class="ext-name">{entry.display_name || entry.name}</span>
+                                        {#if isUnpublished}
+                                            <span class="unpublished-badge" title="Present in the local extensions directory but not published in the registry.">Local</span>
+                                        {/if}
                                         {#if regCapKeys.length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
                                                 {#each regCapKeys as regCapKey}
@@ -897,10 +1035,10 @@
                                     </span>
                                 </div>
                                 <div class="ext-action">
-                                    {#if extensions.some(e => e.name === entry.name)}
+                                    {#if extensions.some(e => identityKey(e.author, e.name) === identityKey(entry.author, entry.name))}
                                         <span class="installed-badge">Installed</span>
                                     {:else}
-                                        <button class="btn btn-primary btn-small" onclick={() => handleInstall(entry.name)} disabled={installing.has(entry.name)}>
+                                        <button class="btn btn-primary btn-small" onclick={() => handleInstall(entry.name, isUnpublished, entry.author)} disabled={installing.has(entry.name)}>
                                             {#if installing.has(entry.name)}
                                                 <span class="spinner"></span>
                                                 Installing...
@@ -926,7 +1064,7 @@
                                     <span class="ext-proxy-label">Connects to:</span>
                                     <div class="cap-detail-tags">
                                         {#each entry.capabilities.proxy.allowed_domains as domain}
-                                            <span class="cap-detail-tag">{domain}</span>
+                                            <button class="cap-detail-tag" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>{domain}</button>
                                         {/each}
                                     </div>
                                 </div>
@@ -1093,20 +1231,44 @@
     }
 
     .updates-section h3 {
-        margin: 0 0 0.75rem;
+        margin: 0;
         font-size: 0.875rem;
         color: var(--color-accent);
     }
 
-    .update-item {
+    .updates-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
+        margin-bottom: 0.5rem;
+        gap: 1rem;
+    }
+
+    .updates-none .updates-no-result {
+        margin: 0.25rem 0 0;
+        font-size: 0.85rem;
+        color: var(--color-text-secondary);
+    }
+
+    .update-item {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem 1rem;
         padding: 0.5rem 0;
     }
 
     .update-item:not(:last-child) {
         border-bottom: 1px solid rgba(88, 166, 255, 0.15);
+    }
+
+    .update-item.has-new-perms {
+        padding: 0.75rem;
+        margin: 0.5rem 0;
+        background: rgba(255, 166, 0, 0.1);
+        border: 1px solid rgba(255, 166, 0, 0.4);
+        border-radius: 8px;
     }
 
     .update-name {
@@ -1118,6 +1280,49 @@
         font-size: 0.8rem;
         color: var(--color-text-tertiary);
         margin-left: 0.5rem;
+    }
+
+    .update-new-perms {
+        flex-basis: 100%;
+        margin: 0.25rem 0 0.5rem;
+        padding: 0.6rem 0.75rem;
+        background: rgba(255, 166, 0, 0.12);
+        border: 1px solid rgba(255, 166, 0, 0.35);
+        border-radius: 6px;
+    }
+
+    .update-new-perms-title {
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: var(--color-warning, #e0a030);
+        margin-bottom: 0.4rem;
+    }
+
+    .update-new-perms-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+    }
+
+    .update-new-perm {
+        display: flex;
+        flex-direction: column;
+        gap: 0.05rem;
+    }
+
+    .update-new-perm-name {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+
+    .update-new-perm-desc {
+        font-size: 0.78rem;
+        color: var(--color-text-secondary);
+        line-height: 1.4;
     }
 
     /* Extension list */
@@ -1146,6 +1351,52 @@
 
     .registry-card {
         border-style: dashed;
+    }
+
+    .unpublished-card {
+        position: relative;
+        border-color: transparent;
+        background: color-mix(in srgb, var(--color-status-yellow) 6%, var(--color-bg-card));
+    }
+
+    .unpublished-card::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        padding: 2px; /* stripe border thickness */
+        background: repeating-linear-gradient(
+            45deg,
+            var(--color-status-yellow) 0 8px,
+            #111 8px 16px
+        );
+        -webkit-mask:
+            linear-gradient(#fff 0 0) content-box,
+            linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor;
+        mask:
+            linear-gradient(#fff 0 0) content-box,
+            linear-gradient(#fff 0 0);
+        mask-composite: exclude;
+        pointer-events: none;
+    }
+
+    .unpublished-card:hover {
+        filter: brightness(1.02);
+    }
+
+    .unpublished-badge {
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        padding: 0.12rem 0.5rem;
+        border-radius: 4px;
+        background: var(--color-status-yellow);
+        color: #111;
+        border: 1px solid #111;
+        white-space: nowrap;
+        flex-shrink: 0;
     }
 
     .card-header {
@@ -1310,7 +1561,8 @@
     }
 
     .cap-badge:hover {
-        filter: brightness(1.2);
+        filter: brightness(1.3);
+        border-color: currentColor;
     }
 
     .cap-lsp {
@@ -1463,6 +1715,19 @@
         border: 1px solid var(--color-border-subtle);
         color: var(--color-text-secondary);
         white-space: nowrap;
+    }
+
+    button.cap-detail-tag {
+        cursor: pointer;
+        transition: all 0.15s;
+        font: inherit;
+        text-align: inherit;
+    }
+
+    button.cap-detail-tag:hover {
+        background: var(--color-surface-2);
+        border-color: var(--color-border-hover);
+        color: var(--color-text-primary);
     }
 
     .ext-proxy-domains .cap-detail-tag {

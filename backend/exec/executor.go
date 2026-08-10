@@ -85,7 +85,7 @@ type executionState struct {
 	}
 	compactCh    chan chan *CompactResult // send a channel, receives result from agent compaction
 	agentRunner  *agent.AgentRunner       // Agent runner — kept alive after completion for on-demand compaction
-	runnerClosed bool                     // true when agentRunner has been closed (prevents double-close)
+	runnerClosed bool
 	projectName  string
 	createdIDs   []string // task IDs created by create_task during this execution
 	executorType string   // "llm" or "agent" — tracks which executor type is active
@@ -98,18 +98,14 @@ type executionState struct {
 	sandboxExecStream execStreamFunc
 	sandboxRead       readFunc
 	sandboxWrite      writeFunc
-	// Operating mode at container creation time — used to detect mode changes
-	// and recreate the container with the correct mount mode (ro vs rw).
+	// Sandbox operating mode (ro vs rw) at container creation time.
 	sandboxOperatingMode string
-	// Agent sandbox config snapshot at container creation time — used to detect
-	// extension config changes and recreate the container.
+	// Agent sandbox config hash at container creation time.
 	agentSandboxHash string
 	// os.Root handle for non-sandbox write isolation.
 	root *os.Root
 	// recoverBridge attempts to reconnect the sandbox bridge (client reconnect or
-	// full sandbox recreation). Returns true if recovery succeeded (callbacks and
-	// client are updated inside the callback). Only non-nil when sandbox is enabled.
-	// Guards against infinite loops via bridgeRecoveryAttempts.
+	// full sandbox recreation). Returns true if success. Only non-nil when sandbox is enabled.
 	recoverBridge          func() bool
 	bridgeRecoveryAttempts int
 	// Closed by executor defer so ForwardUserMessage type-switch can wait for clean exit.
@@ -195,10 +191,8 @@ func (te *TaskExecutor) WorktreeMgr() *git.WorktreeManager {
 }
 
 // RunWithGate executes fn while holding a concurrency gate slot for the given provider.
-// Blocks until a slot is available, respecting per-provider concurrency limits.
-// Queueing is transparent to the caller — if the gate can't be acquired (e.g. context
-// timeout), the function is not run and the gate error is returned. Any error from fn
-// is returned directly. The caller treats both cases identically.
+// Blocks until a slot is available. If the gate can't be acquired (e.g. timeout),
+// the function is not run and the gate error is returned.
 func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn func() error) error {
 	concurrency := te.configStore.GetProviderConcurrency(serverURL)
 	if _, _, err := te.gate.Acquire(ctx, serverURL, concurrency); err != nil {
@@ -1424,7 +1418,7 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 	_, mergeErr := te.worktreeMgr.GitRunInDirOutput(worktreePath, "merge", targetBranch, "--no-edit")
 	if mergeErr == nil {
 		log.Printf("[sync-merge] task=%s synced %s into %s cleanly", taskID, targetBranch, taskBranch)
-		te.logSystemMessage(taskID, task.CurrentThreadID,
+		te.logSystemMessage(taskID, task.CurrentThreadID, "info",
 			fmt.Sprintf("Synced %s into task branch (no conflicts).", targetBranch))
 		// Pop stash — restore user's unstaged changes.
 		// If stash pop conflicts, drop it to avoid leaving markers.
@@ -1445,7 +1439,7 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 	log.Printf("[sync-merge] task=%s conflict syncing %s into %s, setting merge conflict flag", taskID, targetBranch, taskBranch)
 	_ = te.store.SetTaskMergeConflict(taskID, projectID, true)
 	task.HasMergeConflict = true
-	te.logSystemMessage(taskID, task.CurrentThreadID,
+	te.logSystemMessage(taskID, task.CurrentThreadID, "warning",
 		fmt.Sprintf("Conflicts detected when syncing %s into task branch. Resolve the conflicted files using your tools — the backend will commit and continue the merge automatically.", targetBranch))
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	// Keep merge in progress — do NOT abort. LLM will resolve with file tools.
@@ -1519,7 +1513,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
 		if err != nil {
 			log.Printf("[merge] task=%s parent_task_id=%s not found: %v, aborting merge", taskID, task.ParentTaskID, err)
-			te.logSystemMessage(taskID, task.CurrentThreadID,
+			te.logSystemMessage(taskID, task.CurrentThreadID, "error",
 				fmt.Sprintf("Error: parent task %s not found — merge aborted.", task.ParentTaskID))
 			return fmt.Errorf("parent task %s not found", task.ParentTaskID)
 		}
@@ -1529,7 +1523,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			log.Printf("[merge] task=%s parent %s has no branch, creating it now", taskID, parent.ID)
 			if err := te.EnsureParentBranch(projectID, parent); err != nil {
 				log.Printf("[merge] task=%s failed to create parent branch: %v, aborting merge", taskID, err)
-				te.logSystemMessage(taskID, task.CurrentThreadID,
+				te.logSystemMessage(taskID, task.CurrentThreadID, "error",
 					fmt.Sprintf("Error: could not create branch for parent task %q — merge aborted: %v", parent.Title, err))
 				return fmt.Errorf("create parent branch: %w", err)
 			}
@@ -1593,7 +1587,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			createCmd := osexec.Command("git", "-C", project.Path, "branch", targetBranch, startPoint)
 			if out, err := createCmd.CombinedOutput(); err != nil {
 				log.Printf("[merge] task=%s failed to create branch %q from %q: %s", taskID, targetBranch, startPoint, string(out))
-				te.logSystemMessage(taskID, task.CurrentThreadID,
+				te.logSystemMessage(taskID, task.CurrentThreadID, "error",
 					fmt.Sprintf("Error: could not create branch %q from %q — merge skipped.", targetBranch, startPoint))
 				return fmt.Errorf("create branch %q: %w", targetBranch, err)
 			}

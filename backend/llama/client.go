@@ -95,12 +95,6 @@ func NewLlamaClient(baseURL, modelName, reasoningEffort, apiKey string) *LlamaCl
 	}
 }
 
-// SetReadIdleTimeout sets the read idle timeout for streaming responses.
-// If no data arrives for this duration, the stream is aborted.
-func (c *LlamaClient) SetReadIdleTimeout(d time.Duration) {
-	c.readIdleTimeout = d
-}
-
 // setAuthHeader sets the Authorization header on a request if an API key is configured.
 func (c *LlamaClient) setAuthHeader(req *http.Request) {
 	if c.apiKey != "" {
