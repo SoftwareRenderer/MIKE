@@ -63,6 +63,124 @@ test.describe('Extensions Tab', () => {
     await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
   });
 
+  test('should show unpublished extensions at the top of Browse Registry', async ({ page }) => {
+    // Open settings modal
+    await page.click('.icon-btn[aria-label="Settings"]');
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Compute unpublished extensions from the API: present in the local
+    // extensions dir but absent from the registry index.
+    const unpublished = await page.evaluate(async () => {
+      const localRes = await fetch('/api/extensions/local');
+      const regRes = await fetch('/api/extensions/registry');
+      if (!localRes.ok || !regRes.ok) return [];
+      const local = (await localRes.json()) as any[];
+      const registry = (await regRes.json()) as any[];
+      const registryNames = new Set(registry.map((e: any) => e.name));
+      return local
+        .filter((e: any) => !registryNames.has(e.name))
+        .map((e: any) => e.display_name || e.name);
+    });
+
+    // The test is only meaningful when there is at least one unpublished extension.
+    expect(unpublished.length).toBeGreaterThan(0);
+
+    // Switch to Browse Registry
+    await page.click('text=Browse Registry');
+    await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
+
+    // Wait for cards to render
+    await expect(page.locator('.registry-card').first()).toBeVisible({ timeout: 10000 });
+
+    // The first cards (in API order) must be exactly the unpublished extensions.
+    const cardNames = await page
+      .locator('.registry-card .ext-name')
+      .evaluateAll((els) => els.map((e) => (e.textContent || '').trim()));
+    expect(cardNames.slice(0, unpublished.length)).toEqual(unpublished);
+
+    // The unpublished svelte-language-server should appear before the published
+    // TypeScript server (the only entry in the registry fixture).
+    const svelteIdx = cardNames.indexOf('Svelte Language Server');
+    const tsIdx = cardNames.indexOf('TypeScript/JavaScript Language Server');
+    expect(svelteIdx).toBeGreaterThanOrEqual(0);
+    expect(tsIdx).toBeGreaterThan(svelteIdx);
+
+    // Local cards should carry the prominent unpublished styling + badge.
+    const unpublishedCards = page.locator('.registry-card.unpublished-card');
+    await expect(unpublishedCards).toHaveCount(unpublished.length);
+    await expect(unpublishedCards.first().locator('.unpublished-badge')).toHaveText('Local');
+
+    // The published (registry) card must not be styled as unpublished.
+    const tsCard = page.locator('.registry-card', { hasText: 'TypeScript/JavaScript Language Server' });
+    await expect(tsCard).not.toHaveClass(/unpublished-card/);
+    await expect(tsCard.locator('.unpublished-badge')).toHaveCount(0);
+  });
+
+  test('should install a local extension via the install-local endpoint', async ({ page }) => {
+    // Intercept the install-local request so the test avoids a real (slow)
+    // container image build while still verifying the routing.
+    let installLocalCalled = false;
+    await page.route('**/api/extensions/install-local', async (route) => {
+      installLocalCalled = true;
+      await route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+        body: 'data: ' + JSON.stringify({ extension: 'svelte-language-server', progress: 100, message: 'Installed', done: true, result: {} }) + '\n\n',
+      });
+    });
+
+    // Open settings > Extensions > Browse Registry
+    await page.click('.icon-btn[aria-label="Settings"]');
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+    await page.click('text=Browse Registry');
+    await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
+
+    // Click Install on a local (unpublished) card.
+    const svelteCard = page.locator('.registry-card', { hasText: 'Svelte Language Server' });
+    await expect(svelteCard).toBeVisible({ timeout: 10000 });
+    await svelteCard.locator('button:has-text("Install")').click();
+
+    // The request must have gone to the install-local endpoint (not /install).
+    await expect.poll(() => installLocalCalled).toBe(true);
+  });
+
+  test('should style local extensions in the Installed list', async ({ page }) => {
+    // Install a local CSS extension (no Dockerfile, so no image build).
+    await page.click('.icon-btn[aria-label="Settings"]');
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Go to Browse Registry and install the local "Light Mode" extension.
+    await page.click('text=Browse Registry');
+    await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
+    const lightCard = page.locator('.registry-card', { hasText: 'Light Mode' });
+    await expect(lightCard).toBeVisible({ timeout: 10000 });
+    await lightCard.locator('button:has-text("Install")').click();
+
+    // Wait for it to be marked installed in the browse list.
+    await expect(lightCard.locator('.installed-badge')).toBeVisible({ timeout: 10000 });
+
+    // Switch to Installed and verify the local card carries the same styling
+    // (hazard-stripe card + "Local" badge).
+    await page.click('.view-tab:has-text("Installed")');
+    const installedLight = page.locator('.extension-card', { hasText: 'Light Mode' });
+    await expect(installedLight).toBeVisible({ timeout: 10000 });
+    await expect(installedLight).toHaveClass(/unpublished-card/);
+    await expect(installedLight.locator('.unpublished-badge')).toHaveText('Local');
+
+    // Local extensions should be listed first (at the top of the Installed list).
+    const firstName = await page
+      .locator('.extension-card .ext-name')
+      .first()
+      .textContent();
+    expect(firstName).toBe('Light Mode');
+  });
+
   test('should show capability badges in Browse Registry view', async ({ page }) => {
     // Navigate and check registry URL is configured
     await page.goto('/');

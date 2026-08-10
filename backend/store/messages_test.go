@@ -415,6 +415,50 @@ func TestMessageLoopHintRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMessageSeverityRoundTrip(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	info := newMessage("info-1", "task-1", "system", "Synced main into task branch (no conflicts).")
+	info.Severity = "info"
+	if err := s.CreateTaskMessage(info); err != nil {
+		t.Fatalf("create info message: %v", err)
+	}
+	// Default (no severity) system message stays empty.
+	warn := newMessage("warn-1", "task-1", "system", "Merge conflict detected")
+	if err := s.CreateTaskMessage(warn); err != nil {
+		t.Fatalf("create warn message: %v", err)
+	}
+
+	got, err := s.GetTaskMessages("task-1", "")
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(got))
+	}
+	if got[0].Severity != "info" {
+		t.Fatalf("expected severity=info, got %q", got[0].Severity)
+	}
+	if got[1].Severity != "" {
+		t.Fatalf("expected empty severity for default, got %q", got[1].Severity)
+	}
+
+	single, err := s.GetTaskMessageByID("info-1")
+	if err != nil {
+		t.Fatalf("get message by id: %v", err)
+	}
+	if single.Severity != "info" {
+		t.Fatalf("expected severity=info via GetTaskMessageByID, got %q", single.Severity)
+	}
+}
+
 // TestGetTaskMessagesByThreadEmptyTaskID verifies that a thread-scoped lookup with
 // an empty taskID still returns the thread's messages. This is required by
 // getLastCommitHashInThread, which looks up remaining commit hashes by thread alone.

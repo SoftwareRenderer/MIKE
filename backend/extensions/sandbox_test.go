@@ -1,6 +1,7 @@
 package extensions
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -478,5 +479,73 @@ func TestBuildExtensionCreateArgs_EntrypointAndImage(t *testing.T) {
 	}
 	if !hasArg(args, "chmod +x /sandbox-bridge && sleep infinity") {
 		t.Error("args missing sleep infinity entrypoint")
+	}
+}
+
+func TestFindLocalDockerfile(t *testing.T) {
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+
+	// Build a temp extensions directory with a nested Dockerfile.
+	extRoot := t.TempDir()
+	dfDir := filepath.Join(extRoot, "sveltejs", "svelte-language-server")
+	if err := os.MkdirAll(dfDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dfDir, "Dockerfile"), []byte("FROM node:22-alpine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A sibling extension with no Dockerfile should not interfere.
+	if err := os.MkdirAll(filepath.Join(extRoot, "some-author", "other-ext"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sm.extensionsDir = extRoot
+
+	// Matches by extension name regardless of the author segment.
+	got, err := sm.findLocalDockerfile("svelte-language-server")
+	if err != nil {
+		t.Fatalf("findLocalDockerfile error: %v", err)
+	}
+	want := filepath.Join(dfDir, "Dockerfile")
+	if got != want {
+		t.Errorf("findLocalDockerfile = %q, want %q", got, want)
+	}
+
+	// No Dockerfile for an unknown extension.
+	got, err = sm.findLocalDockerfile("does-not-exist")
+	if err != nil {
+		t.Fatalf("findLocalDockerfile(unknown) error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("findLocalDockerfile(unknown) = %q, want empty", got)
+	}
+
+	// Missing extensions dir returns empty (no error).
+	sm.extensionsDir = filepath.Join(t.TempDir(), "nope")
+	got, err = sm.findLocalDockerfile("svelte-language-server")
+	if err != nil {
+		t.Fatalf("findLocalDockerfile(missing dir) error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("findLocalDockerfile(missing dir) = %q, want empty", got)
+	}
+}
+
+func TestEnsureExtensionImage_NoDockerfileLeavesToPodman(t *testing.T) {
+	// When no local Dockerfile exists for the extension, ensureExtensionImage
+	// must return nil (letting podman pull a fully-qualified image normally)
+	// rather than erroring out.
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+	sm.extensionsDir = filepath.Join(t.TempDir(), "extensions")
+
+	ext := &Extension{
+		ID:   "ext-no-df",
+		Name: "some-pulled-image",
+	}
+	// ImageExists consults podman; use a fully-qualified ref that is guaranteed
+	// missing so the path exercises the "no Dockerfile -> return nil" branch.
+	if err := sm.ensureExtensionImage(ext, "docker.io/library/definitely-not-pulled:latest"); err != nil {
+		t.Errorf("ensureExtensionImage with no Dockerfile = %v, want nil (leave to podman)", err)
 	}
 }

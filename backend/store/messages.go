@@ -13,8 +13,8 @@ func (s *Store) CreateTaskMessage(m *types.TaskMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_messages (id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, ptrStr(m.Attachments), m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, ptrStr(m.GitCommitHash), boolInt(m.IsLoopHint), m.CreatedAt.Format(time.RFC3339Nano),
+		`INSERT INTO task_messages (id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, ptrStr(m.Severity), m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, ptrStr(m.Attachments), m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, ptrStr(m.GitCommitHash), boolInt(m.IsLoopHint), m.CreatedAt.Format(time.RFC3339Nano),
 	)
 	if err != nil {
 		return err
@@ -57,19 +57,19 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 		// taskID is provided, keep both filters for callers that expect them.
 		if taskID != "" {
 			rows, err = s.db.Query(
-				`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
+				`SELECT id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
 				taskID, threadID,
 			)
 		} else {
 			rows, err = s.db.Query(
-				`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE thread_id = ? ORDER BY created_at ASC`,
+				`SELECT id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE thread_id = ? ORDER BY created_at ASC`,
 				threadID,
 			)
 		}
 	} else {
 		// For backward compatibility: get messages with no thread_id (legacy) or all messages
 		rows, err = s.db.Query(
-			`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
+			`SELECT id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
 			taskID,
 		)
 	}
@@ -81,12 +81,15 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	for rows.Next() {
 		var m types.TaskMessage
 		var createdAt string
-		var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent, gitCommitHash, attachments sql.NullString
-		if err := rows.Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &attachments, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &gitCommitHash, &m.IsLoopHint, &createdAt); err != nil {
+		var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent, gitCommitHash, attachments, severity sql.NullString
+		if err := rows.Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &severity, &m.Content, &reasoningContent, &toolCalls, &toolResult, &attachments, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &gitCommitHash, &m.IsLoopHint, &createdAt); err != nil {
 			return nil, err
 		}
 		if threadID.Valid {
 			m.ThreadID = threadID.String
+		}
+		if severity.Valid {
+			m.Severity = severity.String
 		}
 		if reasoningContent.Valid {
 			m.ReasoningContent = reasoningContent.String
@@ -121,16 +124,19 @@ func (s *Store) GetTaskMessageByID(messageID string) (*types.TaskMessage, error)
 	defer s.mu.RUnlock()
 	var m types.TaskMessage
 	var createdAt string
-	var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent, gitCommitHash, attachments sql.NullString
+	var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent, gitCommitHash, attachments, severity sql.NullString
 	err := s.db.QueryRow(
-		`SELECT id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE id = ?`,
+		`SELECT id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE id = ?`,
 		messageID,
-	).Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &m.Content, &reasoningContent, &toolCalls, &toolResult, &attachments, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &gitCommitHash, &m.IsLoopHint, &createdAt)
+	).Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &severity, &m.Content, &reasoningContent, &toolCalls, &toolResult, &attachments, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &gitCommitHash, &m.IsLoopHint, &createdAt)
 	if err != nil {
 		return nil, err
 	}
 	if threadID.Valid {
 		m.ThreadID = threadID.String
+	}
+	if severity.Valid {
+		m.Severity = severity.String
 	}
 	if reasoningContent.Valid {
 		m.ReasoningContent = reasoningContent.String
@@ -262,25 +268,6 @@ func (s *Store) GetLastCommitHashBeforeMessage(messageID, threadID string) (stri
 		return "", nil
 	}
 	return hash, err
-}
-
-// GetLastAssistantMessageIdBeforeMessage walks backward from the given message
-// to find the last assistant message. Returns the message ID or empty string.
-func (s *Store) GetLastAssistantMessageIdBeforeMessage(messageID, threadID string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var cutoffTime string
-	err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, messageID).Scan(&cutoffTime)
-	if err != nil {
-		return "", err
-	}
-	var id string
-	query := `SELECT id FROM task_messages WHERE task_id = (SELECT task_id FROM task_messages WHERE id = ?) AND thread_id = ? AND role = 'assistant' AND created_at <= ? ORDER BY created_at DESC LIMIT 1`
-	err = s.db.QueryRow(query, messageID, threadID, cutoffTime).Scan(&id)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	return id, err
 }
 
 // FixPostSummaryTimestamps updates messages created between anchorTime

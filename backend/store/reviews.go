@@ -41,29 +41,6 @@ func (s *Store) GetReviewComments(taskID string) ([]types.ReviewComment, error) 
 	return comments, rows.Err()
 }
 
-// GetUnresolvedReviewComments returns only unresolved review comments for a task.
-func (s *Store) GetUnresolvedReviewComments(taskID string) ([]types.ReviewComment, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	rows, err := s.db.Query(
-		`SELECT id, task_id, file_path, line_num, comment, resolved, created_at, updated_at FROM review_comments WHERE task_id = ? AND resolved = 0 ORDER BY file_path, line_num`,
-		taskID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	comments := []types.ReviewComment{}
-	for rows.Next() {
-		var c types.ReviewComment
-		if err := scanReviewComment(rows, &c); err != nil {
-			return nil, err
-		}
-		comments = append(comments, c)
-	}
-	return comments, rows.Err()
-}
-
 // UpdateReviewComment updates a review comment's text and/or resolved status.
 func (s *Store) UpdateReviewComment(id string, comment *string, resolved *bool) (*types.ReviewComment, error) {
 	s.mu.Lock()

@@ -106,6 +106,7 @@ export interface ChatEntry {
     id: string;
     role: string;
     content: string;
+    severity?: string;
     mergeLabel?: string;
     isError?: boolean;
     reasoningContent?: string;
@@ -501,6 +502,7 @@ export interface ExtensionSandboxConfig {
 export interface Extension {
     id: string;
     name: string;
+    author?: string;
     version: string;
     type: ExtensionType;
     manifest: ExtensionManifest;
@@ -542,5 +544,7 @@ export interface ExtensionUpdate {
     available_version: string;
     current_commit?: string;
     available_commit?: string;
+    /** UI permissions this update would newly grant (present in the registry version but not installed). */
+    new_permissions?: string[];
 }
 

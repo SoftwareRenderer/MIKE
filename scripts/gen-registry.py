@@ -165,9 +165,33 @@ def build_entry(ext_type, name, manifest_path, repo, commit):
     return entry
 
 
-def collect_entries():
+def read_existing_registry():
+    """Return a dict keyed by (type, name) of the previously generated registry."""
+    existing = {}
+    try:
+        with open(REGISTRY_PATH) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return existing
+    for entry in data:
+        if isinstance(entry, dict) and 'name' in entry and 'type' in entry:
+            existing[(entry['type'], entry['name'])] = entry
+    return existing
+
+
+def entry_matches(entry, other):
+    """True if two entries are identical except for the pinned `commit`."""
+    if not other:
+        return False
+    e, o = dict(entry), dict(other)
+    e.pop('commit', None)
+    o.pop('commit', None)
+    return e == o
+
+
+def collect_entries(existing):
     repo = git_origin()
-    commit = git_head_commit()
+    head = git_head_commit()
     entries = []
     for dirpath, _dirnames, filenames in os.walk(EXTENSIONS_DIR):
         if 'manifest.json' not in filenames:
@@ -177,14 +201,22 @@ def collect_entries():
         if len(parts) != 2:
             continue  # only extensions/<type>/<name>/manifest.json
         ext_type, name = parts
-        entries.append(build_entry(ext_type, name, os.path.join(dirpath, 'manifest.json'), repo, commit))
+        entry = build_entry(ext_type, name, os.path.join(dirpath, 'manifest.json'), repo, head)
+        # Only bump the commit hash when the extension actually changed. If the
+        # extension content is unchanged from the last published registry, keep
+        # its previously pinned commit so the registry stays stable across runs
+        # that don't touch that extension.
+        prev = existing.get((ext_type, name))
+        if entry_matches(entry, prev) and prev.get('commit'):
+            entry['commit'] = prev['commit']
+        entries.append(entry)
     entries.sort(key=lambda e: e['name'])
     return entries
 
 
 def main():
     check_only = '--check' in sys.argv
-    entries = collect_entries()
+    entries = collect_entries(read_existing_registry())
     output = json.dumps(entries, indent=4, ensure_ascii=False) + '\n'
 
     if check_only:
