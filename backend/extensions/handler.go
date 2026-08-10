@@ -541,6 +541,7 @@ func (h *ExtensionHandler) HandleLocalExtensions(w http.ResponseWriter, r *http.
 			Homepage:     le.Manifest.Homepage,
 			LicenseURL:   le.Manifest.LicenseURL,
 			Capabilities: le.Manifest.Capabilities,
+			LocalPath:    le.Dir,
 		})
 	}
 
@@ -1360,6 +1361,7 @@ type ExtensionResponse struct {
 	ImageRef        string               `json:"image_ref,omitempty"`
 	Enabled         bool                 `json:"enabled"`
 	Running         bool                 `json:"running"`
+	LocalPath       string               `json:"local_path,omitempty"`
 	Ports           []types.AssignedPort `json:"ports,omitempty"`
 	InstalledAt     string               `json:"installed_at"`
 	BuiltAt         string               `json:"built_at"`
@@ -1410,7 +1412,7 @@ func maskConfig(config map[string]any, schema *ConfigSchema) map[string]any {
 // toResponse converts an Extension to an ExtensionResponse with runtime status.
 func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]ExtensionRuntimeStatus) ExtensionResponse {
 	status, ok := statuses[ext.ID]
-	return ExtensionResponse{
+	resp := ExtensionResponse{
 		ID:              ext.ID,
 		Name:            ext.Name,
 		Author:          ext.Author,
@@ -1430,4 +1432,17 @@ func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]Extens
 		Repo:            ext.Repo,
 		Commit:          ext.Commit,
 	}
+	// Local (filesystem) extensions have a concrete on-disk path. For an
+	// author-namespaced extension that is <extensions>/<author>/<name>; an
+	// extension not organized under an author folder (author "local") lives
+	// directly at <extensions>/<name>.
+	if ext.InstallSource == "local" {
+		root := h.config.ExtensionsDirOrDefault()
+		if ext.Author != "" && ext.Author != "local" {
+			resp.LocalPath = filepath.Join(root, ext.Author, ext.Name)
+		} else {
+			resp.LocalPath = filepath.Join(root, ext.Name)
+		}
+	}
+	return resp
 }

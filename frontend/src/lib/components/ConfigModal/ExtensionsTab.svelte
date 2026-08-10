@@ -79,6 +79,8 @@
     // Capabilities modal
     let showCapabilitiesModal = $state(false);
     let selectedExtension: Extension | null = $state(null);
+    // Extension id whose local path is revealed (clicked its "Local" badge).
+    let revealedLocalPath = $state<string | null>(null);
 
     // Human-readable labels for UI injection points
     const INJECTION_POINT_LABELS: Record<string, string> = {
@@ -674,7 +676,13 @@
                                     <div class="ext-name-row">
                                         <span class="ext-name">{ext.manifest.display_name || ext.name}</span>
                                         {#if isLocal}
-                                            <span class="unpublished-badge" title="Installed from the local extensions directory.">Local</span>
+                                            <button
+                                                class="unpublished-badge"
+                                                type="button"
+                                                title="Installed from the local extensions directory. Click to show its path."
+                                                aria-expanded={revealedLocalPath === ext.id}
+                                                onclick={(e) => { e.stopPropagation(); revealedLocalPath = revealedLocalPath === ext.id ? null : ext.id; }}
+                                            >Local</button>
                                         {/if}
                                         {#if getCapabilityKeys(ext).length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
@@ -736,6 +744,17 @@
                                 <div class="ext-build" class:ext-build-error={!!bp.error}>
                                     <div class="ext-build-bar"><div class="ext-build-fill" style="--pct: {bp.progress}%"></div></div>
                                     <span class="ext-build-text">{bp.error || bp.message}</span>
+                                </div>
+                            {/if}
+                            {#if isLocal && revealedLocalPath === ext.id}
+                                {@const p = ext.local_path}
+                                <div class="local-path">
+                                    <span class="local-path-label">Path</span>
+                                    {#if p}
+                                        <code class="local-path-code" title={p}>{p}</code>
+                                    {:else}
+                                        <span class="local-path-unknown">Path unavailable</span>
+                                    {/if}
                                 </div>
                             {/if}
                             {#if ext.manifest.description}
@@ -1012,7 +1031,13 @@
                                     <div class="ext-name-row">
                                         <span class="ext-name">{entry.display_name || entry.name}</span>
                                         {#if isUnpublished}
-                                            <span class="unpublished-badge" title="Present in the local extensions directory but not published in the registry.">Local</span>
+                                            <button
+                                                class="unpublished-badge"
+                                                type="button"
+                                                title="Present in the local extensions directory but not published in the registry. Click to show its path."
+                                                aria-expanded={revealedLocalPath === identityKey(entry.author, entry.name)}
+                                                onclick={(e) => { e.stopPropagation(); const k = identityKey(entry.author, entry.name); revealedLocalPath = revealedLocalPath === k ? null : k; }}
+                                            >Local</button>
                                         {/if}
                                         {#if regCapKeys.length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
@@ -1054,6 +1079,17 @@
                                 <div class="ext-build" class:ext-build-error={!!bp.error}>
                                     <div class="ext-build-bar"><div class="ext-build-fill" style="--pct: {bp.progress}%"></div></div>
                                     <span class="ext-build-text">{bp.error || bp.message}</span>
+                                </div>
+                            {/if}
+                            {#if isUnpublished && revealedLocalPath === identityKey(entry.author, entry.name)}
+                                {@const p = entry.local_path}
+                                <div class="local-path">
+                                    <span class="local-path-label">Path</span>
+                                    {#if p}
+                                        <code class="local-path-code" title={p}>{p}</code>
+                                    {:else}
+                                        <span class="local-path-unknown">Path unavailable</span>
+                                    {/if}
                                 </div>
                             {/if}
                             {#if entry.description}
@@ -1397,6 +1433,52 @@
         border: 1px solid #111;
         white-space: nowrap;
         flex-shrink: 0;
+    }
+
+    /* In the Installed view the badge is a button that reveals the path. */
+    .extension-card .unpublished-badge[type='button'] {
+        cursor: pointer;
+        text-decoration: none;
+    }
+    .extension-card .unpublished-badge[type='button']:hover {
+        filter: brightness(1.08);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-status-yellow) 40%, transparent);
+    }
+    .extension-card .unpublished-badge[type='button'][aria-expanded='true'] {
+        box-shadow: 0 0 0 2px var(--color-status-yellow);
+    }
+
+    .local-path {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        margin: 0 0 0.5rem;
+        padding: 0.35rem 0.6rem;
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--color-status-yellow) 10%, var(--color-bg-card));
+        border: 1px solid color-mix(in srgb, var(--color-status-yellow) 35%, transparent);
+        font-size: 0.75rem;
+        overflow: hidden;
+    }
+    .local-path-label {
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: 0.65rem;
+        color: color-mix(in srgb, var(--color-text) 70%, transparent);
+        flex-shrink: 0;
+    }
+    .local-path-code {
+        font-family: var(--font-mono, monospace);
+        font-size: 0.75rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--color-text);
+    }
+    .local-path-unknown {
+        color: color-mix(in srgb, var(--color-text) 55%, transparent);
+        font-style: italic;
     }
 
     .card-header {
