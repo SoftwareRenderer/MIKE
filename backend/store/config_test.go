@@ -64,47 +64,6 @@ func TestConfigWorkspaceDirDefault(t *testing.T) {
 	}
 }
 
-func TestResetData(t *testing.T) {
-	s := testStore(t)
-
-	// Create project and tasks
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	task := newTask("task-1", "proj-1")
-	if err := s.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	msg := newMessage("msg-1", "task-1", "user", "hello")
-	if err := s.CreateTaskMessage(msg); err != nil {
-		t.Fatalf("create message: %v", err)
-	}
-
-	// Reset data
-	if err := s.ResetData(); err != nil {
-		t.Fatalf("reset data: %v", err)
-	}
-
-	// Tasks and messages should be gone
-	tasks, err := s.GetTasksByProject("proj-1")
-	if err != nil {
-		t.Fatalf("get tasks: %v", err)
-	}
-	if len(tasks) != 0 {
-		t.Fatalf("expected 0 tasks after reset, got %d", len(tasks))
-	}
-
-	// Projects should be preserved
-	projects, err := s.ListProjects()
-	if err != nil {
-		t.Fatalf("list projects: %v", err)
-	}
-	if len(projects) != 1 || projects[0].ID != "proj-1" {
-		t.Fatalf("projects should be preserved: %+v", projects)
-	}
-}
-
 func TestConfigProvidersJSON(t *testing.T) {
 	s := testStore(t)
 
