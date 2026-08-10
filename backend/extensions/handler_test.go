@@ -607,6 +607,103 @@ func TestHandleRegistryIndex_NoURL(t *testing.T) {
 	}
 }
 
+func TestHandleLocalExtensions(t *testing.T) {
+	// Build a temp extensions dir with manifests for an LSP and a UI extension.
+	extDir := t.TempDir()
+	writeManifest := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(extDir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", filepath.Dir(p), err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", p, err)
+		}
+	}
+	writeManifest("sveltejs/svelte-language-server/manifest.json", `{
+		"display_name": "Svelte Language Server",
+		"description": "Svelte language server",
+		"author": "Svelte",
+		"version": "1.0.0",
+		"capabilities": {"lsp": {"command": "svelte-language-server", "args": ["--stdio"], "extensions": ["svelte"], "language": "svelte"}}
+	}`)
+	writeManifest("softwarerenderer/markdown-preview/manifest.json", `{
+		"display_name": "Markdown Preview",
+		"description": "Preview markdown",
+		"author": "SoftwareRenderer",
+		"version": "1.0.0",
+		"capabilities": {"ui": {"injection_points": ["task-card"]}}
+	}`)
+	// A malformed manifest should be skipped, not fail the scan.
+	writeManifest("bad/broken/manifest.json", `{not valid json`)
+
+	h := testHandler(t)
+	h.config.ExtensionsDir = extDir
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/local", nil)
+	w := httptest.NewRecorder()
+
+	h.HandleLocalExtensions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var result RegistryIndex
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("result count = %d, want 2", len(result))
+	}
+
+	// Sort is by author then name: softwarerenderer/markdown-preview comes
+	// before sveltejs/svelte-language-server.
+	if result[0].Name != "markdown-preview" || result[0].Type != ExtensionTypeUI {
+		t.Errorf("result[0] = %+v, want markdown-preview/ui", result[0])
+	}
+	if result[0].Author != "softwarerenderer" {
+		t.Errorf("result[0].Author = %q, want softwarerenderer (on-disk namespace)", result[0].Author)
+	}
+	if result[0].DisplayName != "Markdown Preview" {
+		t.Errorf("result[0].DisplayName = %q, want Markdown Preview", result[0].DisplayName)
+	}
+
+	if result[1].Name != "svelte-language-server" || result[1].Type != ExtensionTypeLSP {
+		t.Errorf("result[1] = %+v, want svelte-language-server/lsp", result[1])
+	}
+	if result[1].Author != "sveltejs" {
+		t.Errorf("result[1].Author = %q, want sveltejs (on-disk namespace)", result[1].Author)
+	}
+	if result[1].DisplayName != "Svelte Language Server" {
+		t.Errorf("result[1].DisplayName = %q, want Svelte Language Server", result[1].DisplayName)
+	}
+	if result[1].Capabilities == nil || result[1].Capabilities.GetLSP() == nil {
+		t.Error("result[1].Capabilities.GetLSP() = nil, want LSP config")
+	}
+}
+
+func TestHandleLocalExtensions_EmptyDir(t *testing.T) {
+	h := testHandler(t)
+	h.config.ExtensionsDir = t.TempDir()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/local", nil)
+	w := httptest.NewRecorder()
+
+	h.HandleLocalExtensions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var result RegistryIndex
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("result count = %d, want 0", len(result))
+	}
+}
+
 func TestHandleRegistryIndex_WithMock(t *testing.T) {
 	// Create mock registry server
 	index := RegistryIndex{
@@ -728,6 +825,92 @@ func TestHandleInstall_Success(t *testing.T) {
 	}
 	if result.InstallSource != "registry" {
 		t.Errorf("InstallSource = %q, want registry", result.InstallSource)
+	}
+}
+
+func TestHandleInstallLocal(t *testing.T) {
+	h := testHandler(t)
+	extDir := t.TempDir()
+	h.config.ExtensionsDir = extDir
+
+	// A local extension with a manifest but no Dockerfile, so the test does not
+	// attempt an actual container image build.
+	extPath := filepath.Join(extDir, "sveltejs", "svelte-language-server")
+	if err := os.MkdirAll(extPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	manifest := `{
+		"display_name": "Svelte Language Server",
+		"description": "Svelte language server",
+		"author": "Svelte",
+		"version": "1.0.0",
+		"capabilities": {"lsp": {"command": "svelte-language-server", "args": ["--stdio"], "extensions": ["svelte"], "language": "svelte"}}
+	}`
+	if err := os.WriteFile(filepath.Join(extPath, "manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("WriteFile manifest: %v", err)
+	}
+
+	body := map[string]any{"author": "sveltejs", "name": "svelte-language-server"}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install-local", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.HandleInstallLocal(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (SSE stream)", w.Code)
+	}
+
+	events := readSSEEvents(t, w.Body.Bytes())
+	if len(events) == 0 {
+		t.Fatal("expected at least a done SSE event")
+	}
+	last := events[len(events)-1]
+	if !last.Done {
+		t.Fatal("expected final done event")
+	}
+	if last.Error != "" {
+		t.Fatalf("unexpected error on done event: %s", last.Error)
+	}
+	if last.Result == nil {
+		t.Fatal("expected result on done event")
+	}
+	if last.Result.Name != "svelte-language-server" {
+		t.Errorf("Name = %q, want svelte-language-server", last.Result.Name)
+	}
+	if last.Result.InstallSource != "local" {
+		t.Errorf("InstallSource = %q, want local", last.Result.InstallSource)
+	}
+	if last.Result.Type != ExtensionTypeLSP {
+		t.Errorf("Type = %q, want lsp", last.Result.Type)
+	}
+
+	// The extension record should be persisted with the local install source.
+	stored, err := h.store.GetByName("svelte-language-server")
+	if err != nil {
+		t.Fatalf("GetByName: %v", err)
+	}
+	if stored.InstallSource != "local" {
+		t.Errorf("stored InstallSource = %q, want local", stored.InstallSource)
+	}
+}
+
+func TestHandleInstallLocal_NotFound(t *testing.T) {
+	// No local extension with this name => 404, regardless of registry.
+	h := testHandler(t)
+	h.config.ExtensionsDir = t.TempDir()
+
+	body := map[string]any{"author": "sveltejs", "name": "does-not-exist"}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install-local", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.HandleInstallLocal(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
 	}
 }
 
@@ -923,6 +1106,66 @@ func TestHandleCheckUpdates_NoCommitChange(t *testing.T) {
 	}
 	if len(result) != 0 {
 		t.Errorf("result count = %d, want 0 (same commit)", len(result))
+	}
+}
+
+func TestHandleCheckUpdates_NewPermissions(t *testing.T) {
+	// Registry version requests more UI permissions than the installed version.
+	index := RegistryIndex{
+		{
+			Name:    "preview",
+			Version: "2.0.0",
+			Type:    ExtensionTypeUI,
+			Capabilities: &Capabilities{
+				UI: &UIConfig{
+					Permissions: []string{
+						"editor.getContent", // already installed
+						"editor.setContent", // new
+						"editor.save",       // new
+					},
+				},
+			},
+		},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+
+	ext := makeTestExt("preview", "preview", ExtensionTypeUI)
+	ext.Version = "1.0.0"
+	ext.Manifest.Capabilities = &Capabilities{
+		UI: &UIConfig{Permissions: []string{"editor.getContent"}},
+	}
+	_ = h.store.Create(ext)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
+	w := httptest.NewRecorder()
+	h.HandleCheckUpdates(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var result []ExtensionUpdate
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("result count = %d, want 1", len(result))
+	}
+	got := result[0].NewPermissions
+	want := []string{"editor.setContent", "editor.save"}
+	if len(got) != len(want) {
+		t.Fatalf("new_permissions = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("new_permissions[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
 

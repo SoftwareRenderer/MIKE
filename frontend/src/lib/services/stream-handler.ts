@@ -225,11 +225,11 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'user_message': {
-                const data = event.data as { id?: string; role: string; content: string; thread_id?: string; attachments?: Array<{ mimeType: string; data: string }> };
+                const data = event.data as { id?: string; role: string; content: string; thread_id?: string; severity?: string; attachments?: Array<{ mimeType: string; data: string }> };
                 // Echo handling is done in component (lastSentMessage check)
                 if (data.id && s.entries.some(e => e.id === data.id)) break;
                 stream.closeCurrentAssistant();
-                s.entries = [...s.entries, { id: data.id || genId(), role: data.role, content: data.content, threadId: data.thread_id, isStreaming: false, createdAt: new Date().toISOString() }];
+                s.entries = [...s.entries, { id: data.id || genId(), role: data.role, severity: data.severity, content: data.content, threadId: data.thread_id, isStreaming: false, createdAt: new Date().toISOString() }];
                 break;
             }
             case 'complete': {

@@ -5,12 +5,36 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 )
+
+// mockRegistry is a test double for lspRegistry. It resolves .go files to a
+// gopls ServerConfig (mirroring the default registry behavior the handler
+// tests depend on) and returns nil for everything else.
+type mockRegistry struct{}
+
+// newTestRegistry returns an lspRegistry test double.
+func newTestRegistry() lspRegistry {
+	return mockRegistry{}
+}
+
+func (mockRegistry) Lookup(fileOrPath string) *ServerConfig {
+	ext := strings.TrimPrefix(filepath.Ext(fileOrPath), ".")
+	if ext == "go" {
+		return &ServerConfig{
+			Command:  "gopls",
+			Args:     []string{"serve"},
+			Language: "go",
+		}
+	}
+	return nil
+}
 
 // mockProcessManager is a test double for ProcessManager that captures sent messages
 // and can inject server responses.
@@ -237,7 +261,7 @@ func subscribeClientDefault(t *testing.T, url, workspace, file string) *testClie
 
 func TestIDRemapping(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -298,7 +322,7 @@ func TestIDRemapping(t *testing.T) {
 
 func TestInitializeCaching(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -406,7 +430,7 @@ func TestInitializeCaching(t *testing.T) {
 
 func TestDisconnectCleanup(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -434,7 +458,7 @@ func TestDisconnectCleanup(t *testing.T) {
 
 func TestMultipleRequestRemapping(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -501,7 +525,7 @@ func TestMultipleRequestRemapping(t *testing.T) {
 
 func TestInitializedNotificationForwarded(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -534,7 +558,7 @@ func TestInitializedNotificationForwarded(t *testing.T) {
 
 func TestTwoClientsDifferentWorkspaces(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -589,7 +613,7 @@ func TestTwoClientsDifferentWorkspaces(t *testing.T) {
 
 func TestTwoClientsSameWorkspace(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -644,7 +668,7 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 	// Two channels on the same WebSocket connection, each subscribed to a different workspace.
 	// Verifies that requests are routed to the correct workspace and responses go to the correct channel.
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -767,7 +791,7 @@ func TestRouteServerRequest(t *testing.T) {
 	// must respond to. We currently don't implement server request handling,
 	// but the message should be silently dropped rather than logged as an error.
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -786,7 +810,7 @@ func TestRouteMalformedMessage(t *testing.T) {
 	// Messages with neither id nor method can occur during process teardown
 	// (partial reads dispatch truncated bodies). Should be silently dropped.
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -803,7 +827,7 @@ func TestRouteMalformedMessage(t *testing.T) {
 func TestRouteEmptyMessage(t *testing.T) {
 	// An empty JSON object should be silently dropped.
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -815,7 +839,7 @@ func TestRouteEmptyMessage(t *testing.T) {
 
 func TestUnknownExtensionRejected(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -841,7 +865,7 @@ func TestUnknownExtensionRejected(t *testing.T) {
 
 func TestLSPReadyNotification(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
@@ -913,7 +937,7 @@ func TestLSPReadyNotification(t *testing.T) {
 
 func TestLSPReadyNotificationCachedResponse(t *testing.T) {
 	mgr := newMockProcessManager()
-	reg := NewRegistry()
+	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
 	defer handler.Close()
 
