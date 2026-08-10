@@ -925,6 +925,7 @@ func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Req
 						AvailableVersion: entry.Version,
 						CurrentCommit:    ext.Commit,
 						AvailableCommit:  entry.Commit,
+						NewPermissions:   newPermissions(ext.Manifest.Capabilities, entry.Capabilities),
 					})
 				}
 				break
@@ -935,6 +936,7 @@ func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Req
 					Name:             ext.Name,
 					CurrentVersion:   ext.Version,
 					AvailableVersion: entry.Version,
+					NewPermissions:   newPermissions(ext.Manifest.Capabilities, entry.Capabilities),
 				})
 			}
 			break
@@ -1368,12 +1370,15 @@ type ExtensionResponse struct {
 
 // ExtensionUpdate describes an available update.
 type ExtensionUpdate struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	CurrentVersion   string `json:"current_version"`
-	AvailableVersion string `json:"available_version"`
-	CurrentCommit    string `json:"current_commit,omitempty"`
-	AvailableCommit  string `json:"available_commit,omitempty"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	CurrentVersion   string   `json:"current_version"`
+	AvailableVersion string   `json:"available_version"`
+	CurrentCommit    string   `json:"current_commit,omitempty"`
+	AvailableCommit  string   `json:"available_commit,omitempty"`
+	// NewPermissions lists the UI permissions the update would newly grant
+	// (present in the registry version but not the installed one).
+	NewPermissions []string `json:"new_permissions,omitempty"`
 }
 
 // maskConfig masks sensitive config values based on the manifest's config_schema.
