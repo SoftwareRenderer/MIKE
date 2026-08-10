@@ -436,6 +436,7 @@ func inferExtensionType(caps *Capabilities) string {
 
 // localExtension is a discovered extension in the local extensions directory.
 type localExtension struct {
+	Author   string
 	Name     string
 	Dir      string
 	Type     string
@@ -464,9 +465,21 @@ func scanLocalExtensions(root string) ([]localExtension, error) {
 		if err := json.Unmarshal(data, &manifest); err != nil {
 			return nil
 		}
+		dir := filepath.Dir(path)
+		name := filepath.Base(dir)
+		// The extension is expected to live at extensions/<author>/<name>/.
+		// The author is the on-disk namespace directory; if the manifest sits
+		// directly under the extensions root there is no author folder, so it
+		// is treated as a "local" extension.
+		parent := filepath.Dir(dir)
+		author := filepath.Base(parent)
+		if filepath.Clean(parent) == filepath.Clean(root) {
+			author = "local"
+		}
 		found = append(found, localExtension{
-			Name:     filepath.Base(filepath.Dir(path)),
-			Dir:      filepath.Dir(path),
+			Author:   author,
+			Name:     name,
+			Dir:      dir,
 			Type:     inferExtensionType(manifest.Capabilities),
 			Manifest: manifest,
 		})
@@ -475,19 +488,24 @@ func scanLocalExtensions(root string) ([]localExtension, error) {
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(found, func(i, j int) bool { return found[i].Name < found[j].Name })
+	sort.Slice(found, func(i, j int) bool {
+		if found[i].Author != found[j].Author {
+			return found[i].Author < found[j].Author
+		}
+		return found[i].Name < found[j].Name
+	})
 	return found, nil
 }
 
-// findLocalExtensionByName returns the local extension with the given name, or
-// nil if no such extension exists in the local extensions directory.
-func findLocalExtensionByName(root, name string) *localExtension {
+// findLocalExtension returns the local extension with the given author and
+// name, or nil if no such extension exists in the local extensions directory.
+func findLocalExtension(root, author, name string) *localExtension {
 	found, err := scanLocalExtensions(root)
 	if err != nil {
 		return nil
 	}
 	for i := range found {
-		if found[i].Name == name {
+		if found[i].Author == author && found[i].Name == name {
 			return &found[i]
 		}
 	}
@@ -519,7 +537,7 @@ func (h *ExtensionHandler) HandleLocalExtensions(w http.ResponseWriter, r *http.
 			Type:         le.Type,
 			DisplayName:  le.Manifest.DisplayName,
 			Description:  le.Manifest.Description,
-			Author:       le.Manifest.Author,
+			Author:       le.Author,
 			Homepage:     le.Manifest.Homepage,
 			LicenseURL:   le.Manifest.LicenseURL,
 			Capabilities: le.Manifest.Capabilities,
@@ -600,9 +618,11 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Check by name — records use timestamped IDs, so an ID lookup misses duplicates.
-	if existing, _ := h.store.GetByName(entry.Name); existing != nil {
-		httputil.JSONError(w, http.StatusConflict, "extension already installed: "+req.Name)
+	// Check by identity — records use timestamped IDs, so an ID lookup misses
+	// duplicates. Author is normalized to the on-disk namespace slug.
+	author := authorDir(entry.Author)
+	if existing, _ := h.store.GetByAuthorName(author, entry.Name); existing != nil {
+		httputil.JSONError(w, http.StatusConflict, "extension already installed: "+author+"/"+entry.Name)
 		return
 	}
 
@@ -633,14 +653,14 @@ func (h *ExtensionHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Req
 		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Name == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "name is required")
+	if req.Name == "" || req.Author == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "author and name are required")
 		return
 	}
 
-	local := findLocalExtensionByName(h.config.ExtensionsDirOrDefault(), req.Name)
+	local := findLocalExtension(h.config.ExtensionsDirOrDefault(), req.Author, req.Name)
 	if local == nil {
-		httputil.JSONError(w, http.StatusNotFound, "local extension not found: "+req.Name)
+		httputil.JSONError(w, http.StatusNotFound, "local extension not found: "+req.Author+"/"+req.Name)
 		return
 	}
 
@@ -650,16 +670,15 @@ func (h *ExtensionHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Req
 		Type:         local.Type,
 		DisplayName:  local.Manifest.DisplayName,
 		Description:  local.Manifest.Description,
-		Author:       local.Manifest.Author,
+		Author:       local.Author,
 		Homepage:     local.Manifest.Homepage,
 		LicenseURL:   local.Manifest.LicenseURL,
 		Capabilities: local.Manifest.Capabilities,
 		localDir:     local.Dir,
 	}
 
-	// Check by name — records use timestamped IDs, so an ID lookup misses duplicates.
-	if existing, _ := h.store.GetByName(entry.Name); existing != nil {
-		httputil.JSONError(w, http.StatusConflict, "extension already installed: "+req.Name)
+	if existing, _ := h.store.GetByAuthorName(entry.Author, entry.Name); existing != nil {
+		httputil.JSONError(w, http.StatusConflict, "extension already installed: "+entry.Author+"/"+entry.Name)
 		return
 	}
 
@@ -738,10 +757,12 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	}
 
 	// Create extension record
-	id := fmt.Sprintf("%s-%d", strings.ToLower(entry.Name), time.Now().Unix())
+	author := authorDir(entry.Author)
+	id := fmt.Sprintf("%s-%s-%d", author, strings.ToLower(entry.Name), time.Now().Unix())
 	ext := &Extension{
 		ID:       id,
 		Name:     entry.Name,
+		Author:   author,
 		Version:  entry.Version,
 		Type:     entry.Type,
 		Manifest: manifest,
@@ -1319,6 +1340,7 @@ type UpdateExtensionRequest struct {
 // InstallExtensionRequest is the request body for installing from registry.
 type InstallExtensionRequest struct {
 	Name        string `json:"name"`
+	Author      string `json:"author,omitempty"`
 	RegistryURL string `json:"registry_url,omitempty"`
 }
 
@@ -1341,6 +1363,7 @@ type ExtensionResponse struct {
 	BuiltAt         string               `json:"built_at"`
 	Repo            string               `json:"repo,omitempty"`
 	Commit          string               `json:"commit,omitempty"`
+	Author          string               `json:"author,omitempty"`
 }
 
 // ExtensionUpdate describes an available update.
@@ -1385,6 +1408,7 @@ func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]Extens
 	return ExtensionResponse{
 		ID:              ext.ID,
 		Name:            ext.Name,
+		Author:          ext.Author,
 		Version:         ext.Version,
 		Type:            ext.Type,
 		Manifest:        ext.Manifest,
