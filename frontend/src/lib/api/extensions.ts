@@ -72,8 +72,8 @@ export function installExtension(name: string, registryUrl?: string): AsyncItera
 }
 
 /** Install a local (unpublished) extension from the local extensions directory. */
-export function installLocalExtension(name: string): AsyncIterable<BuildProgressEvent> {
-    return streamOperation('/extensions/install-local', { name });
+export function installLocalExtension(author: string, name: string): AsyncIterable<BuildProgressEvent> {
+    return streamOperation('/extensions/install-local', { author, name });
 }
 
 /** Check for available updates. */

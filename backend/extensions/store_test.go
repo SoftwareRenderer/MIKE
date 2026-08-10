@@ -32,6 +32,7 @@ func makeTestExt(id, name, extType string) *Extension {
 	return &Extension{
 		ID:            id,
 		Name:          name,
+		Author:        "unknown", // authorDir("") default, matches installs with no registry author
 		Version:       "1.0.0",
 		Type:          extType,
 		Manifest:      ExtensionManifest{DisplayName: name},
@@ -160,6 +161,39 @@ func TestGetByName(t *testing.T) {
 
 	if _, err := es.GetByName("nonexistent"); err == nil {
 		t.Error("GetByName(nonexistent) = nil, want error")
+	}
+}
+
+func TestGetByAuthorName(t *testing.T) {
+	es := testStore(t)
+	// Same name from two different authors must be distinct identities.
+	if err := es.Create(makeTestExt("a-1", "markdown-preview", ExtensionTypeUI)); err != nil {
+		t.Fatalf("Create(a-1): %v", err)
+	}
+	ext := makeTestExt("dev-1", "markdown-preview", ExtensionTypeUI)
+	ext.Author = "dev"
+	if err := es.Create(ext); err != nil {
+		t.Fatalf("Create(dev-1): %v", err)
+	}
+
+	got, err := es.GetByAuthorName("unknown", "markdown-preview")
+	if err != nil {
+		t.Fatalf("GetByAuthorName(unknown, markdown-preview): %v", err)
+	}
+	if got.ID != "a-1" {
+		t.Errorf("GetByAuthorName(unknown) ID = %q, want a-1", got.ID)
+	}
+
+	got, err = es.GetByAuthorName("dev", "markdown-preview")
+	if err != nil {
+		t.Fatalf("GetByAuthorName(dev, markdown-preview): %v", err)
+	}
+	if got.ID != "dev-1" {
+		t.Errorf("GetByAuthorName(dev) ID = %q, want dev-1", got.ID)
+	}
+
+	if _, err := es.GetByAuthorName("dev", "nonexistent"); err == nil {
+		t.Error("GetByAuthorName(dev, nonexistent) = nil, want error")
 	}
 }
 
