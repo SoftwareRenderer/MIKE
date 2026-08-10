@@ -33,8 +33,8 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		}
 	}()
 
-	// Reset session cost for this run — it accumulates per-run, not across runs.
-	task.SessionCost = 0
+	// Keep the task's accumulated session cost (from prior runs/executors) intact
+	// so the badge reflects the full session cost across provider/model switches.
 
 	sessionName := fmt.Sprintf("kanban-%s", task.ID)
 
@@ -488,7 +488,8 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		log.Printf("[agent] task=%s accumulated session cost=%f for model=%s provider=%s", task.ID, finalCost, modelName, providerName)
 	}
 	// Persist session cost to the task so it's available when viewing non-streaming tasks.
-	task.SessionCost = finalCost
+	// Accumulate onto any previously carried-over cost (e.g. from a prior executor run).
+	task.SessionCost += finalCost
 	te.store.UpdateTask(task)
 
 	// Broadcast complete event to clear streaming state on the frontend.
