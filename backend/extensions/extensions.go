@@ -358,7 +358,10 @@ type RegistryEntry struct {
 	Repo   string `json:"repo,omitempty"`
 	Commit string `json:"commit,omitempty"`
 	Subdir string `json:"subdir,omitempty"`
-	localDir string
+	// LocalPath is the absolute on-disk directory of a filesystem (unpublished)
+	// extension, as returned by the local-extensions endpoint.
+	LocalPath string `json:"local_path,omitempty"`
+	localDir  string
 }
 
 // IsLSP returns true if this extension is an LSP extension.
