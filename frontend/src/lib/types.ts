@@ -544,5 +544,7 @@ export interface ExtensionUpdate {
     available_version: string;
     current_commit?: string;
     available_commit?: string;
+    /** UI permissions this update would newly grant (present in the registry version but not installed). */
+    new_permissions?: string[];
 }
 
