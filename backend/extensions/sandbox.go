@@ -31,14 +31,15 @@ const (
 
 // ExtensionSandboxManager manages gVisor sandbox containers for extensions.
 type ExtensionSandboxManager struct {
-	mu        sync.Mutex
-	rt        *sandboxruntime.Runtime
-	clients   map[string]*sandbox.Client        // extID -> bridge client
-	refs      map[string]int                    // extID -> active client count
-	states    map[string]*extensionSandboxState // extID -> runtime state
-	registry  *RegistryClient
-	store     *ExtensionStore
-	available bool
+	mu            sync.Mutex
+	rt            *sandboxruntime.Runtime
+	clients       map[string]*sandbox.Client        // extID -> bridge client
+	refs          map[string]int                    // extID -> active client count
+	states        map[string]*extensionSandboxState // extID -> runtime state
+	registry      *RegistryClient
+	store         *ExtensionStore
+	available     bool
+	extensionsDir string
 }
 
 // extensionSandboxState tracks the runtime state of an extension sandbox.
@@ -66,13 +67,14 @@ type extensionSandboxState struct {
 func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *ExtensionSandboxManager {
 	rt := sandboxruntime.NewRuntime()
 	sm := &ExtensionSandboxManager{
-		rt:        rt,
-		clients:   make(map[string]*sandbox.Client),
-		refs:      make(map[string]int),
-		states:    make(map[string]*extensionSandboxState),
-		registry:  reg,
-		store:     store,
-		available: checkExtensionSandboxAvailable(),
+		rt:            rt,
+		clients:       make(map[string]*sandbox.Client),
+		refs:          make(map[string]int),
+		states:        make(map[string]*extensionSandboxState),
+		registry:      reg,
+		store:         store,
+		available:     checkExtensionSandboxAvailable(),
+		extensionsDir: "extensions",
 	}
 	if sm.available {
 		log.Println("[ext-sandbox] gVisor available, extension sandboxing enabled")
@@ -240,6 +242,10 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	}
 	if err := sm.rt.ValidateImageRef(image); err != nil {
 		return nil, fmt.Errorf("invalid extension image: %w", err)
+	}
+
+	if err := sm.ensureExtensionImage(ext, image); err != nil {
+		return nil, err
 	}
 
 	createArgs, mountedProjects := buildExtensionCreateArgs(ext, containerName, image, projectMounts)
@@ -467,9 +473,7 @@ func (sm *ExtensionSandboxManager) Close() {
 
 	for _, extID := range extIDs {
 		log.Printf("[ext-sandbox] shutdown: stopping ext=%s", extID)
-		if err := sm.Destroy(extID); err != nil {
-			log.Printf("[ext-sandbox] shutdown: failed to stop ext=%s: %v", extID, err)
-		}
+		sm.Stop(extID)
 	}
 }
 
@@ -562,6 +566,60 @@ type ExtensionRuntimeStatus struct {
 	Ports     []types.AssignedPort `json:"ports,omitempty"`
 	RefCount  int                  `json:"ref_count"`
 	CreatedAt time.Time            `json:"created_at"`
+}
+
+// ensureExtensionImage verifies the extension's container image exists locally,
+// rebuilding it from the extension's Dockerfile if it has gone missing
+func (sm *ExtensionSandboxManager) ensureExtensionImage(ext *Extension, image string) error {
+	if sm.registry.ImageExists(image) {
+		return nil
+	}
+
+	dfPath, err := sm.findLocalDockerfile(ext.Name)
+	if err != nil {
+		return fmt.Errorf("locate Dockerfile for extension %s: %w", ext.Name, err)
+	}
+	if dfPath == "" {
+		// No local Dockerfile to rebuild from — leave it to podman to pull (e.g.
+		// a fully-qualified registry image or the default base).
+		return nil
+	}
+
+	data, err := os.ReadFile(dfPath)
+	if err != nil {
+		return fmt.Errorf("read Dockerfile %s: %w", dfPath, err)
+	}
+	log.Printf("[ext-sandbox] ext=%s image %s missing; rebuilding from %s", ext.ID, image, dfPath)
+	if err := sm.registry.BuildImageFromReader(string(data), image); err != nil {
+		return fmt.Errorf("rebuild image %s from %s: %w", image, dfPath, err)
+	}
+	return nil
+}
+
+// findLocalDockerfile locates the Dockerfile for a locally-installed extension by
+// walking the extensions directory for a subdirectory whose basename matches the
+// extension name (extensions/<author>/<name>/Dockerfile). Returns "" if none is
+// found.
+func (sm *ExtensionSandboxManager) findLocalDockerfile(name string) (string, error) {
+	var found string
+	err := filepath.WalkDir(sm.extensionsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			// Skip unreadable entries (e.g. missing dir, permission errors).
+			return nil
+		}
+		if d.IsDir() || d.Name() != "Dockerfile" {
+			return nil
+		}
+		if filepath.Base(filepath.Dir(path)) == name {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return found, nil
 }
 
 // InstallAndCreate installs an extension from a registry entry and creates its sandbox.

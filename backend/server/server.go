@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	stdtls "crypto/tls"
 	"os"
 	"path/filepath"
 	"slices"
@@ -284,6 +286,23 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, result)
 }
 
+func (s *Server) RedirectHTTPSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.tlsConfig == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+		if !isHTTPS {
+			target := fmt.Sprintf("https://%s%s", r.Host, r.URL.RequestURI())
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // withNonce wraps an http.Handler (the frontend file server) and intercepts
 // requests for "/" to serve index.html with a request-specific CSP nonce.
 // All other requests are passed through to the underlying handler.
@@ -318,6 +337,50 @@ func (s *Server) withNonce(next http.Handler) http.Handler {
 
 type Middleware func(http.Handler) http.Handler
 
+// hybridListener handles both TLS and plain HTTP on the same port.
+type hybridListener struct {
+	net.Listener
+	stdTlsConfig *stdtls.Config
+}
+
+func (l *hybridListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+
+	buf := make([]byte, 1)
+	if _, err := conn.Read(buf); err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	if buf[0] == 0x16 {
+		return stdtls.Server(newPeekConn(conn, buf), l.stdTlsConfig), nil
+	}
+
+	return newPeekConn(conn, buf), nil
+}
+
+type peekConn struct {
+	net.Conn
+	buf []byte
+	pos int
+}
+
+func newPeekConn(conn net.Conn, buf []byte) *peekConn {
+	return &peekConn{Conn: conn, buf: buf}
+}
+
+func (p *peekConn) Read(b []byte) (n int, err error) {
+	if p.pos < len(p.buf) {
+		n = copy(b, p.buf[p.pos:])
+		p.pos += n
+		return n, nil
+	}
+	return p.Conn.Read(b)
+}
+
 // AddMiddleware wraps successive middleware within each other
 func AddMiddleware(h http.Handler, middleware ...Middleware) http.Handler {
 
@@ -328,10 +391,19 @@ func AddMiddleware(h http.Handler, middleware ...Middleware) http.Handler {
 	return h
 }
 
+func (s *Server) tlsConfigToStd() *stdtls.Config {
+	cert, err := stdtls.LoadX509KeyPair(s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
+	if err != nil {
+		log.Printf("failed to load key pair: %v", err)
+		return nil
+	}
+	return &stdtls.Config{Certificates: []stdtls.Certificate{cert}}
+}
 func (s *Server) Serve() error {
 	srv := &http.Server{
 		Addr: s.addr,
 		Handler: AddMiddleware(s.mux,
+			s.RedirectHTTPSMiddleware,
 			PanicRecoveryMiddleware,
 			NonceMiddleware,
 			s.CORSMiddleware,
@@ -345,11 +417,19 @@ func (s *Server) Serve() error {
 
 	if s.tlsConfig != nil {
 		log.Printf("Server starting on https://%s (TLS: %s, %s)", s.addr, s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
-		return srv.ListenAndServeTLS(s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
+		l, err := net.Listen("tcp", s.addr)
+		if err != nil {
+			return fmt.Errorf("listen: %w", err)
+		}
+		return srv.Serve(newHybridListener(l, s.tlsConfigToStd()))
 	}
 
 	log.Printf("Server starting on http://%s", s.addr)
 	return srv.ListenAndServe()
+}
+
+func newHybridListener(l net.Listener, stdCfg *stdtls.Config) *hybridListener {
+	return &hybridListener{Listener: l, stdTlsConfig: stdCfg}
 }
 
 // Shutdown gracefully shuts down the server.

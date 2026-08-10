@@ -51,6 +51,13 @@ export async function setExtensionEnabled(id: string, enabled: boolean): Promise
     return res.json();
 }
 
+/** Fetch extensions present in the local extensions directory (filesystem). */
+export async function listLocalExtensions(): Promise<RegistryEntry[]> {
+    const res = await apiFetch(`${API_BASE}/extensions/local`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch local extensions');
+    return res.json();
+}
+
 /** Fetch the registry index. */
 export async function getRegistryIndex(url?: string): Promise<RegistryEntry[]> {
     const params = url ? `?url=${encodeURIComponent(url)}` : '';
@@ -62,6 +69,11 @@ export async function getRegistryIndex(url?: string): Promise<RegistryEntry[]> {
 /** Stream SSE progress + final result; the install survives a client disconnect. */
 export function installExtension(name: string, registryUrl?: string): AsyncIterable<BuildProgressEvent> {
     return streamOperation('/extensions/install', { name, registry_url: registryUrl });
+}
+
+/** Install a local (unpublished) extension from the local extensions directory. */
+export function installLocalExtension(author: string, name: string): AsyncIterable<BuildProgressEvent> {
+    return streamOperation('/extensions/install-local', { author, name });
 }
 
 /** Check for available updates. */

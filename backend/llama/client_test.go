@@ -34,7 +34,7 @@ func TestChatStream_ReadIdleTimeout(t *testing.T) {
 	defer server.Close()
 
 	c := NewLlamaClient(server.URL, "test-model", "off", "")
-	c.SetReadIdleTimeout(100 * time.Millisecond)
+	c.readIdleTimeout = 100 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -70,7 +70,7 @@ func TestChatStream_TimedOutRace(t *testing.T) {
 	}()
 
 	c := NewLlamaClient("http://"+listener.Addr().String(), "test-model", "off", "")
-	c.SetReadIdleTimeout(50 * time.Millisecond)
+	c.readIdleTimeout = 50 * time.Millisecond
 
 	for range 20 {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -154,7 +154,7 @@ func TestChatStream_ProductionTimedOutRace(t *testing.T) {
 	}()
 
 	c := NewLlamaClient("http://"+listener.Addr().String(), "test-model", "off", "")
-	c.SetReadIdleTimeout(50 * time.Millisecond)
+	c.readIdleTimeout = 50 * time.Millisecond
 
 	for range 200 {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

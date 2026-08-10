@@ -269,6 +269,7 @@ type TaskMessage struct {
 	TaskID           string    `json:"task_id"`
 	ThreadID         string    `json:"thread_id,omitempty"`
 	Role             string    `json:"role"`
+	Severity         string    `json:"severity,omitempty"` // system-message severity: "" (default/warning), "info", "error"
 	Content          string    `json:"content"`
 	ReasoningContent string    `json:"reasoning_content,omitempty"`
 	HasReasoning     bool      `json:"has_reasoning,omitempty"` // true if message has reasoning (even if suppressed)

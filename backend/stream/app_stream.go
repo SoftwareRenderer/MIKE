@@ -21,17 +21,13 @@ import (
 
 var toolCallMarker = []byte(`"event":"tool_call"`)
 
-func isInternalFile(path string) bool {
-	return git.IsInternalFile(path)
-}
-
 func filterInternalPathsFromHashes(hashes map[string]string) map[string]string {
 	if len(hashes) == 0 {
 		return nil
 	}
 	filtered := make(map[string]string, len(hashes))
 	for path, hash := range hashes {
-		if !isInternalFile(path) {
+		if !git.IsInternalFile(path) {
 			filtered[path] = hash
 		}
 	}
@@ -47,7 +43,7 @@ func filterInternalPathsFromList(paths []string) []string {
 	}
 	filtered := make([]string, 0, len(paths))
 	for _, p := range paths {
-		if !isInternalFile(p) {
+		if !git.IsInternalFile(p) {
 			filtered = append(filtered, p)
 		}
 	}
@@ -74,9 +70,9 @@ type UserMessage struct {
 	ModelName       string
 	ServerURL       string
 	ReasoningEffort string
-	Attachments    string
-	Regenerate     bool
-	ContextChanged bool
+	Attachments     string
+	Regenerate      bool
+	ContextChanged  bool
 }
 
 // LazyStartHandler is called when a user message arrives for a task with no active executor.
@@ -103,8 +99,6 @@ type AppStreamSubscription struct {
 	ProjectID string `json:"project_id"`
 	TaskID    string `json:"task_id,omitempty"`
 }
-
-
 
 // AppStreamManager manages the /api/stream WebSocket for all app events.
 type AppStreamManager struct {
@@ -351,11 +345,6 @@ func (asm *AppStreamManager) hasTaskSubscribers(projectID, taskID string) bool {
 
 // -- Broadcast methods --
 
-// SendBoardEvent sends a board-level event to all clients subscribed to the project.
-func (asm *AppStreamManager) SendBoardEvent(projectID string, event types.StreamEvent) {
-	asm.sendBoardPayload(projectID, event.Data)
-}
-
 func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 	asm.mu.RLock()
 	targets := make([]*clientState, 0)
@@ -496,7 +485,7 @@ func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
 
 // BroadcastFsEvent sends an fs_event to all clients of a project.
 func (asm *AppStreamManager) BroadcastFsEvent(projectID, op, path string) {
-	if isInternalFile(path) {
+	if git.IsInternalFile(path) {
 		return
 	}
 	asm.sendBoardPayload(projectID, map[string]any{
@@ -924,69 +913,69 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			conn.Write(ctx, websocket.MessageText, statsMsg)
 			client.writeMu.Unlock()
 
-		// Send manifest for detail view (per-file metadata, no diff content)
-		stagedSet := make(map[string]struct{}, len(diffResult.StagedPaths))
-		for _, p := range diffResult.StagedPaths {
-			stagedSet[p] = struct{}{}
-		}
-		files := make(map[string]map[string]any)
-		for path, f := range diffResult.Tracked {
-			if isInternalFile(path) {
-				continue
+			// Send manifest for detail view (per-file metadata, no diff content)
+			stagedSet := make(map[string]struct{}, len(diffResult.StagedPaths))
+			for _, p := range diffResult.StagedPaths {
+				stagedSet[p] = struct{}{}
 			}
-			_, isStaged := stagedSet[path]
-			entry := map[string]any{
-				"hash":        git.ComputeFileHash(f),
-				"type":        "tracked",
-				"added":       f.Added,
-				"removed":     f.Removed,
-				"truncated":   f.Truncated,
-				"origAdded":   f.OrigAdded,
-				"origRemoved": f.OrigRemoved,
-				"staged":      isStaged,
+			files := make(map[string]map[string]any)
+			for path, f := range diffResult.Tracked {
+				if git.IsInternalFile(path) {
+					continue
+				}
+				_, isStaged := stagedSet[path]
+				entry := map[string]any{
+					"hash":        git.ComputeFileHash(f),
+					"type":        "tracked",
+					"added":       f.Added,
+					"removed":     f.Removed,
+					"truncated":   f.Truncated,
+					"origAdded":   f.OrigAdded,
+					"origRemoved": f.OrigRemoved,
+					"staged":      isStaged,
+				}
+				if f.FileSize != nil {
+					entry["file_size"] = *f.FileSize
+				}
+				if f.IsBinary {
+					entry["is_binary"] = true
+				}
+				files[path] = entry
 			}
-			if f.FileSize != nil {
-				entry["file_size"] = *f.FileSize
+			for _, u := range diffResult.Untracked {
+				if git.IsInternalFile(u.Path) {
+					continue
+				}
+				// Skip untracked files already in the tracked section
+				if _, exists := files[u.Path]; exists {
+					continue
+				}
+				lineCount := len(u.Lines)
+				if u.OrigAdded > 0 {
+					lineCount = u.OrigAdded
+				}
+				entry := map[string]any{
+					"hash":       git.ComputeUntrackedHash(u),
+					"type":       "untracked",
+					"line_count": lineCount,
+					"file_size":  u.FileSize,
+					"added":      lineCount,
+				}
+				if u.IsBinary {
+					entry["is_binary"] = true
+				}
+				files[u.Path] = entry
 			}
-			if f.IsBinary {
-				entry["is_binary"] = true
-			}
-			files[path] = entry
-		}
-		for _, u := range diffResult.Untracked {
-			if isInternalFile(u.Path) {
-				continue
-			}
-			// Skip untracked files already in the tracked section
-			if _, exists := files[u.Path]; exists {
-				continue
-			}
-			lineCount := len(u.Lines)
-			if u.OrigAdded > 0 {
-				lineCount = u.OrigAdded
-			}
-			entry := map[string]any{
-				"hash":       git.ComputeUntrackedHash(u),
-				"type":       "untracked",
-				"line_count": lineCount,
-				"file_size":  u.FileSize,
-				"added":       lineCount,
-			}
-			if u.IsBinary {
-				entry["is_binary"] = true
-			}
-			files[u.Path] = entry
-		}
-		msg, _ := json.Marshal(map[string]any{
-			"type":       "task_diff",
-			"task_id":    task.ID,
-			"hash":       hash,
-			"files":      files,
-			"short_stat": diffResult.ShortStat,
-		})
-		client.writeMu.Lock()
-		conn.Write(ctx, websocket.MessageText, msg)
-		client.writeMu.Unlock()
+			msg, _ := json.Marshal(map[string]any{
+				"type":       "task_diff",
+				"task_id":    task.ID,
+				"hash":       hash,
+				"files":      files,
+				"short_stat": diffResult.ShortStat,
+			})
+			client.writeMu.Lock()
+			conn.Write(ctx, websocket.MessageText, msg)
+			client.writeMu.Unlock()
 		}
 	}
 
@@ -1002,5 +991,3 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 		client.writeMu.Unlock()
 	}
 }
-
-

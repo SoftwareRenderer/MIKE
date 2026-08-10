@@ -46,6 +46,7 @@ export {
     CAP_EDITOR_SET_OVERLAY,
     CAP_EDITOR_CONTENT_CHANGE,
     CAP_EDITOR_JUMP_TO_LINE,
+    CAP_EDITOR_SAVE,
 } from './handlers/editor';
 export {
     CAP_THEME_GET,
