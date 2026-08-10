@@ -60,6 +60,8 @@
     let loading = $state(false);
     let loadingRegistry = $state(false);
     let loadingUpdates = $state(false);
+    let hasCheckedUpdates = $state(false);
+    let updatingAll = $state(false);
     let error = $state('');
     let searchQuery = $state('');
 
@@ -346,6 +348,7 @@
         error = '';
         try {
             updates = await checkUpdates();
+            hasCheckedUpdates = true;
         } catch (e: any) {
             error = e.message || 'Failed to check for updates';
         } finally {
@@ -353,15 +356,60 @@
         }
     }
 
-    // Update an extension
-    async function handleUpdate(id: string) {
-        error = '';
+    // Perform the real file/image replacement for one extension by streaming the
+    // registry update operation. Returns true on success, false on failure.
+    async function applyExtensionUpdate(id: string, name: string): Promise<boolean> {
+        let ok = true;
+        updating = new Set(updating).add(name);
         try {
-            await updateExtension(id, {});
-            await loadExtensions();
-            updates = updates.filter(u => u.id !== id);
+            for await (const event of updateExtensionImage(id)) {
+                setBuildProgress(event.extension, event.progress, event.message, event.error);
+                if (event.done) {
+                    if (event.error) {
+                        error = event.error;
+                        ok = false;
+                        setTimeout(() => clearBuildProgress(event.extension), 6000);
+                    } else {
+                        setTimeout(() => clearBuildProgress(event.extension), 2000);
+                    }
+                }
+            }
         } catch (e: any) {
             error = e.message || 'Failed to update extension';
+            ok = false;
+        } finally {
+            const next = new Set(updating);
+            next.delete(name);
+            updating = next;
+        }
+        return ok;
+    }
+
+    // Update a single extension — performs the actual file/image replacement.
+    async function handleUpdate(update: ExtensionUpdate) {
+        error = '';
+        const ok = await applyExtensionUpdate(update.id, update.name);
+        await loadExtensions();
+        if (ok) {
+            updates = updates.filter(u => u.id !== update.id);
+        }
+    }
+
+    // Update all available extensions, sequentially, performing real replacements.
+    async function handleUpdateAll() {
+        updatingAll = true;
+        error = '';
+        try {
+            for (const update of [...updates]) {
+                const ok = await applyExtensionUpdate(update.id, update.name);
+                if (ok) {
+                    updates = updates.filter(u => u.id !== update.id);
+                }
+                // On failure the error is already set; continue with the rest.
+            }
+            await loadExtensions();
+        } finally {
+            updatingAll = false;
         }
     }
 
@@ -375,26 +423,10 @@
         if (!confirmed) return;
 
         error = '';
-        updating = new Set(updating).add(name);
-        try {
-            for await (const event of updateExtensionImage(id)) {
-                setBuildProgress(event.extension, event.progress, event.message, event.error);
-                if (event.done) {
-                    if (event.error) {
-                        error = event.error;
-                        setTimeout(() => clearBuildProgress(event.extension), 6000);
-                    } else {
-                        setTimeout(() => clearBuildProgress(event.extension), 2000);
-                    }
-                }
-            }
-            await loadExtensions();
-        } catch (e: any) {
-            error = e.message || 'Failed to update extension';
-        } finally {
-            const next = new Set(updating);
-            next.delete(name);
-            updating = next;
+        const ok = await applyExtensionUpdate(id, name);
+        await loadExtensions();
+        if (ok) {
+            updates = updates.filter(u => u.id !== id);
         }
     }
 
@@ -578,16 +610,41 @@
     {#if activeView === 'installed'}
         <div class="installed-view">
             <!-- Updates Available -->
-            {#if updates.length > 0}
+            {#if hasCheckedUpdates && updates.length === 0}
+                <div class="updates-section updates-none">
+                    <h3>No Updates Available</h3>
+                    <p class="updates-no-result">All installed extensions are up to date.</p>
+                </div>
+            {:else if updates.length > 0}
                 <div class="updates-section">
-                    <h3>Updates Available</h3>
+                    <div class="updates-header">
+                        <h3>Updates Available</h3>
+                        <button class="btn btn-primary btn-small" onclick={handleUpdateAll} disabled={updatingAll}>
+                            {updatingAll ? 'Updating...' : 'Update All'}
+                        </button>
+                    </div>
                     {#each updates as update}
-                        <div class="update-item">
+                        {@const newPerms = update.new_permissions ?? []}
+                        <div class="update-item" class:has-new-perms={newPerms.length > 0}>
                             <div class="update-info">
                                 <span class="update-name">{update.name}</span>
-                                <span class="update-versions">{update.current_version} \u2192 {update.available_version}</span>
+                                <span class="update-versions">{update.current_version} → {update.available_version}</span>
                             </div>
-                            <button class="btn btn-primary btn-small" onclick={() => handleUpdate(update.id)}>Update</button>
+                            {#if newPerms.length > 0}
+                                <div class="update-new-perms">
+                                    <div class="update-new-perms-title">This update requests new permissions:</div>
+                                    <ul class="update-new-perms-list">
+                                        {#each newPerms as perm}
+                                            {@const info = PERMISSION_DESCRIPTIONS[perm]}
+                                            <li class="update-new-perm">
+                                                <span class="update-new-perm-name">{info?.label || perm}</span>
+                                                {#if info?.description}<span class="update-new-perm-desc">{info.description}</span>{/if}
+                                            </li>
+                                        {/each}
+                                    </ul>
+                                </div>
+                            {/if}
+                            <button class="btn btn-primary btn-small" onclick={() => handleUpdate(update)}>Update</button>
                         </div>
                     {/each}
                 </div>
@@ -1174,20 +1231,44 @@
     }
 
     .updates-section h3 {
-        margin: 0 0 0.75rem;
+        margin: 0;
         font-size: 0.875rem;
         color: var(--color-accent);
     }
 
-    .update-item {
+    .updates-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
+        margin-bottom: 0.5rem;
+        gap: 1rem;
+    }
+
+    .updates-none .updates-no-result {
+        margin: 0.25rem 0 0;
+        font-size: 0.85rem;
+        color: var(--color-text-secondary);
+    }
+
+    .update-item {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem 1rem;
         padding: 0.5rem 0;
     }
 
     .update-item:not(:last-child) {
         border-bottom: 1px solid rgba(88, 166, 255, 0.15);
+    }
+
+    .update-item.has-new-perms {
+        padding: 0.75rem;
+        margin: 0.5rem 0;
+        background: rgba(255, 166, 0, 0.1);
+        border: 1px solid rgba(255, 166, 0, 0.4);
+        border-radius: 8px;
     }
 
     .update-name {
@@ -1199,6 +1280,49 @@
         font-size: 0.8rem;
         color: var(--color-text-tertiary);
         margin-left: 0.5rem;
+    }
+
+    .update-new-perms {
+        flex-basis: 100%;
+        margin: 0.25rem 0 0.5rem;
+        padding: 0.6rem 0.75rem;
+        background: rgba(255, 166, 0, 0.12);
+        border: 1px solid rgba(255, 166, 0, 0.35);
+        border-radius: 6px;
+    }
+
+    .update-new-perms-title {
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: var(--color-warning, #e0a030);
+        margin-bottom: 0.4rem;
+    }
+
+    .update-new-perms-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+    }
+
+    .update-new-perm {
+        display: flex;
+        flex-direction: column;
+        gap: 0.05rem;
+    }
+
+    .update-new-perm-name {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+
+    .update-new-perm-desc {
+        font-size: 0.78rem;
+        color: var(--color-text-secondary);
+        line-height: 1.4;
     }
 
     /* Extension list */
