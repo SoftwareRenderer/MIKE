@@ -70,6 +70,19 @@ export async function getProjectDiff(projectId: string, options?: { base?: strin
     return res.text();
 }
 
+/** Fetch the content (or metadata) of a single file in the project repo.
+ * When meta=true, only line_count/file_size/isBinary are returned (cheap).
+ * Otherwise returns the unified diff plus the full file lines.
+ * Works for tracked and untracked files. */
+export async function getProjectDiffFile(projectId: string, path: string, options?: { meta?: boolean; staged?: boolean }): Promise<{ diff?: string; lines?: string[]; line_count?: number; file_size?: number; isBinary?: boolean }> {
+    const params = new URLSearchParams({ path });
+    if (options?.meta) params.set('meta', '1');
+    if (options?.staged) params.set('staged', 'true');
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/diff/file?${params}`);
+    if (!res.ok) throw await apiError(res, 'Failed to fetch file');
+    return res.json();
+}
+
 /** Stage or unstage a single file in the project repo. */
 export async function stageProjectFile(projectId: string, path: string, stage: boolean): Promise<{ status: string; action: string }> {
     const csrfToken = await ensureCsrfToken();

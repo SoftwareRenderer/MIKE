@@ -1,6 +1,7 @@
 package managers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -138,6 +139,7 @@ func newTestGitMux(h *GitHandler) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/projects/{projectID}/git/log", h.HandleLog)
 	mux.HandleFunc("GET /api/projects/{projectID}/git/diff", h.HandleDiff)
+	mux.HandleFunc("GET /api/projects/{projectID}/git/diff/file", h.HandleProjectDiffFile)
 	mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/git/log", h.HandleTaskLog)
 	mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/diff", h.HandleTaskDiff)
 	return mux
@@ -293,6 +295,76 @@ func TestHandleDiff_ValidRefs(t *testing.T) {
 	rr := doRequest(t, mux, "GET", "/api/projects/diff-proj-valid/git/diff?base=HEAD&head=HEAD")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 for valid refs, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// --- HandleProjectDiffFile tests ---
+
+func TestHandleProjectDiffFile_Meta_Untracked(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	// Untracked file (created but not added/committed)
+	createFile(t, projPath, "untracked.txt", "line1\nline2\nline3\n")
+	proj := &types.Project{ID: "diff-file-meta-proj", Name: "diff-file-meta-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := newTestGitMux(h)
+
+	// meta mode returns lightweight metadata without diff/lines
+	rr := doRequest(t, mux, "GET", "/api/projects/diff-file-meta-proj/git/diff/file?path=untracked.txt&meta=1")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		LineCount int   `json:"line_count"`
+		FileSize  int64 `json:"file_size"`
+		IsBinary  bool  `json:"isBinary"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.LineCount != 3 {
+		t.Fatalf("expected line_count 3, got %d", resp.LineCount)
+	}
+	if want := int64(len("line1\nline2\nline3\n")); resp.FileSize != want {
+		t.Fatalf("expected file_size %d, got %d", want, resp.FileSize)
+	}
+	if resp.IsBinary {
+		t.Fatal("expected not binary")
+	}
+}
+
+func TestHandleProjectDiffFile_Content_Untracked(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	createFile(t, projPath, "untracked.txt", "hello\nworld\n")
+	proj := &types.Project{ID: "diff-file-content-proj", Name: "diff-file-content-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := newTestGitMux(h)
+
+	rr := doRequest(t, mux, "GET", "/api/projects/diff-file-content-proj/git/diff/file?path=untracked.txt")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Lines     []string `json:"lines"`
+		LineCount int      `json:"line_count"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.LineCount != 2 {
+		t.Fatalf("expected line_count 2, got %d", resp.LineCount)
+	}
+	if len(resp.Lines) != 2 || resp.Lines[0] != "hello" || resp.Lines[1] != "world" {
+		t.Fatalf("unexpected lines: %v", resp.Lines)
 	}
 }
 
