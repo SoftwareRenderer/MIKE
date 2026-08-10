@@ -19,6 +19,38 @@
         }
     }
 
+    /**
+     * Normalize an author to a directory-style slug, mirroring the backend's
+     * authorDir(): lowercase, non-alphanumeric characters (other than '-' '_'
+     * '.') collapsed to a single '-', trailing separators trimmed. This aligns
+     * registry display authors (e.g. "Go Team") with their on-disk namespace
+     * directory ("go-team") so identity comparisons line up.
+     */
+    function slugify(author: string | undefined): string {
+        const slug = (author ?? '').trim().toLowerCase();
+        if (!slug) return 'unknown';
+        let out = '';
+        let lastDash = false;
+        for (const ch of slug) {
+            const ok = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch === '-' || ch === '_' || ch === '.';
+            if (!ok) {
+                if (lastDash) continue;
+                out += '-';
+                lastDash = true;
+                continue;
+            }
+            out += ch;
+            lastDash = false;
+        }
+        if (!out) return 'unknown';
+        return out.replace(/[-._]+$/, '');
+    }
+
+    /** Canonical identity key for an extension: <author>/<name>. */
+    function identityKey(author: string | undefined, name: string): string {
+        return `${slugify(author)}/${name}`;
+    }
+
     // State
     let extensions = $state<Extension[]>([]);
     let registryEntries = $state<RegistryEntry[]>([]);
@@ -153,6 +185,14 @@
             label: 'See file edits',
             description: 'Can receive updates when the content of the open file changes.',
         },
+        'editor.jumpToLine': {
+            label: 'Jump to a line in the file',
+            description: 'Can scroll the editor to a specific line.',
+        },
+        'editor.save': {
+            label: 'Save the open file',
+            description: 'Can save the file currently open in the editor.',
+        },
     };
 
     // Get list of capability keys for an installed extension
@@ -243,12 +283,12 @@
 
     // Install an extension, streaming progress into the card as it happens.
     // Local (unpublished) extensions install from the filesystem, bypassing the registry.
-    async function handleInstall(name: string, isLocal = false) {
+    async function handleInstall(name: string, isLocal = false, author?: string) {
         if (installing.has(name)) return;
         error = '';
         installing = new Set(installing).add(name);
         try {
-            const stream = isLocal ? installLocalExtension(name) : installExtension(name);
+            const stream = isLocal ? installLocalExtension(author ?? '', name) : installExtension(name);
             for await (const event of stream) {
                 setBuildProgress(event.extension, event.progress, event.message, event.error);
                 if (event.done) {
@@ -452,17 +492,21 @@
         );
     });
 
-    // Names of local (filesystem-only) extensions that are not in the registry.
-    let unpublishedNames = $derived.by(() => {
-        const registryNames = new Set(registryEntries.map(e => e.name));
-        return new Set(localExtensions.filter(ext => !registryNames.has(ext.name)).map(e => e.name));
+    // Identity keys of local (filesystem-only) extensions that are not in the
+    // registry, matched by author/name so a local fork of a published extension
+    // (different author namespace) is not hidden by a name-only collision.
+    let unpublishedKeys = $derived.by(() => {
+        const registryKeys = new Set(registryEntries.map(e => identityKey(e.author, e.name)));
+        return new Set(localExtensions
+            .filter(ext => !registryKeys.has(identityKey(ext.author, ext.name)))
+            .map(e => identityKey(e.author, e.name)));
     });
 
     // Combined list for the browse view: unpublished (filesystem-only, not in
     // the registry) extensions at the top, then registry entries.
     let browseList = $derived.by(() => {
-        const registryNames = new Set(registryEntries.map(e => e.name));
-        const unpublished = localExtensions.filter(ext => !registryNames.has(ext.name));
+        const registryKeys = new Set(registryEntries.map(e => identityKey(e.author, e.name)));
+        const unpublished = localExtensions.filter(ext => !registryKeys.has(identityKey(ext.author, ext.name)));
         
         const combined = [...unpublished, ...registryEntries];
 
@@ -901,7 +945,7 @@
                 <div class="extension-list">
                     {#each browseList as entry}
                         {@const regCapKeys = getRegistryCapabilityKeys(entry)}
-                        {@const isUnpublished = unpublishedNames.has(entry.name)}
+                        {@const isUnpublished = unpublishedKeys.has(identityKey(entry.author, entry.name))}
                         <div class="extension-card registry-card" class:unpublished-card={isUnpublished}>
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'}>
@@ -934,10 +978,10 @@
                                     </span>
                                 </div>
                                 <div class="ext-action">
-                                    {#if extensions.some(e => e.name === entry.name)}
+                                    {#if extensions.some(e => identityKey(e.author, e.name) === identityKey(entry.author, entry.name))}
                                         <span class="installed-badge">Installed</span>
                                     {:else}
-                                        <button class="btn btn-primary btn-small" onclick={() => handleInstall(entry.name, isUnpublished)} disabled={installing.has(entry.name)}>
+                                        <button class="btn btn-primary btn-small" onclick={() => handleInstall(entry.name, isUnpublished, entry.author)} disabled={installing.has(entry.name)}>
                                             {#if installing.has(entry.name)}
                                                 <span class="spinner"></span>
                                                 Installing...

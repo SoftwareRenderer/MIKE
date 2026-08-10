@@ -502,6 +502,7 @@ export interface ExtensionSandboxConfig {
 export interface Extension {
     id: string;
     name: string;
+    author?: string;
     version: string;
     type: ExtensionType;
     manifest: ExtensionManifest;
