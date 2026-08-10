@@ -31,6 +31,7 @@ type KVEntry struct {
 type Extension struct {
 	ID              string            `json:"id"`
 	Name            string            `json:"name"`
+	Author          string            `json:"author,omitempty"`
 	Version         string            `json:"version"`
 	Type            string            `json:"type"`
 	Manifest        ExtensionManifest `json:"manifest"`

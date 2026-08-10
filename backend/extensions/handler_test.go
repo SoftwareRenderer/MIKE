@@ -657,9 +657,13 @@ func TestHandleLocalExtensions(t *testing.T) {
 		t.Fatalf("result count = %d, want 2", len(result))
 	}
 
-	// Sort is by name, so markdown-preview comes before svelte-language-server.
+	// Sort is by author then name: softwarerenderer/markdown-preview comes
+	// before sveltejs/svelte-language-server.
 	if result[0].Name != "markdown-preview" || result[0].Type != ExtensionTypeUI {
 		t.Errorf("result[0] = %+v, want markdown-preview/ui", result[0])
+	}
+	if result[0].Author != "softwarerenderer" {
+		t.Errorf("result[0].Author = %q, want softwarerenderer (on-disk namespace)", result[0].Author)
 	}
 	if result[0].DisplayName != "Markdown Preview" {
 		t.Errorf("result[0].DisplayName = %q, want Markdown Preview", result[0].DisplayName)
@@ -667,6 +671,9 @@ func TestHandleLocalExtensions(t *testing.T) {
 
 	if result[1].Name != "svelte-language-server" || result[1].Type != ExtensionTypeLSP {
 		t.Errorf("result[1] = %+v, want svelte-language-server/lsp", result[1])
+	}
+	if result[1].Author != "sveltejs" {
+		t.Errorf("result[1].Author = %q, want sveltejs (on-disk namespace)", result[1].Author)
 	}
 	if result[1].DisplayName != "Svelte Language Server" {
 		t.Errorf("result[1].DisplayName = %q, want Svelte Language Server", result[1].DisplayName)
@@ -843,7 +850,7 @@ func TestHandleInstallLocal(t *testing.T) {
 		t.Fatalf("WriteFile manifest: %v", err)
 	}
 
-	body := map[string]any{"name": "svelte-language-server"}
+	body := map[string]any{"author": "sveltejs", "name": "svelte-language-server"}
 	bodyBytes, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install-local", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
@@ -894,7 +901,7 @@ func TestHandleInstallLocal_NotFound(t *testing.T) {
 	h := testHandler(t)
 	h.config.ExtensionsDir = t.TempDir()
 
-	body := map[string]any{"name": "does-not-exist"}
+	body := map[string]any{"author": "sveltejs", "name": "does-not-exist"}
 	bodyBytes, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/api/extensions/install-local", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
