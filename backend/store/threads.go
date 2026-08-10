@@ -164,15 +164,15 @@ func (s *Store) GetThreadsByCheckpointMessageTime(messageTime string) ([]types.T
 
 // copyMsg holds the fields needed to copy a message.
 type copyMsg struct {
-	role, content, createdAt      string
-	reasoningContent, toolCalls   *string
-	toolResult, modelName         *string
-	providerName                  *string
-	promptTokens, predictedTokens int
-	cacheTokens                   int
-	promptMs, predictedMs         int
-	duration                      int64
-	gitCommitHash                 *string
+	role, content, createdAt              string
+	severity, reasoningContent, toolCalls *string
+	toolResult, modelName                 *string
+	providerName                          *string
+	promptTokens, predictedTokens         int
+	cacheTokens                           int
+	promptMs, predictedMs                 int
+	duration                              int64
+	gitCommitHash                         *string
 }
 
 // CopyMessagesToThread copies messages from a source thread up to and including a specific message into a target thread.
@@ -193,7 +193,7 @@ func (s *Store) CopyMessagesToThread(sourceThreadID, targetThreadID, upToMessage
 	}
 	// Fetch all source messages into memory first (SQLite doesn't allow writes with open read cursors)
 	sourceRows, err := s.db.Query(`
-		SELECT role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at
+		SELECT role, severity, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at
 		FROM task_messages
 		WHERE thread_id = ? AND created_at <= ?
 		ORDER BY created_at ASC
@@ -205,12 +205,13 @@ func (s *Store) CopyMessagesToThread(sourceThreadID, targetThreadID, upToMessage
 	var messages []copyMsg
 	for sourceRows.Next() {
 		var m copyMsg
-		var rc, tc, tr, mn, pn, gch sql.NullString
-		if err := sourceRows.Scan(&m.role, &m.content, &rc, &tc, &tr, &mn, &pn, &m.promptTokens, &m.predictedTokens, &m.cacheTokens, &m.promptMs, &m.predictedMs, &m.duration, &gch, &m.createdAt); err != nil {
+		var rc, tc, tr, mn, pn, gch, sev sql.NullString
+		if err := sourceRows.Scan(&m.role, &sev, &m.content, &rc, &tc, &tr, &mn, &pn, &m.promptTokens, &m.predictedTokens, &m.cacheTokens, &m.promptMs, &m.predictedMs, &m.duration, &gch, &m.createdAt); err != nil {
 			sourceRows.Close()
 			return fmt.Errorf("scan source message: %w", err)
 		}
 		m.reasoningContent = nullStr(rc)
+		m.severity = nullStr(sev)
 		// Clear tool_calls and tool_result so the LLM doesn't see stale parent-thread
 		// tool invocations. The fork starts with a clean file state; the LLM will
 		// re-execute tools as needed.
@@ -231,9 +232,9 @@ func (s *Store) CopyMessagesToThread(sourceThreadID, targetThreadID, upToMessage
 	for _, m := range messages {
 		newID := uuid.New().String()
 		_, err := s.db.Exec(`
-			INSERT INTO task_messages (id, task_id, thread_id, role, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, newID, taskID, targetThreadID, m.role, m.content,
+			INSERT INTO task_messages (id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, newID, taskID, targetThreadID, m.role, m.severity, m.content,
 			m.reasoningContent, m.toolCalls, m.toolResult,
 			m.modelName, m.providerName,
 			m.promptTokens, m.predictedTokens, m.cacheTokens, m.promptMs, m.predictedMs, m.duration, m.gitCommitHash, m.createdAt)
