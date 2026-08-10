@@ -459,13 +459,13 @@
                     staged.push({ path: filePath, status: indexChar });
                 }
                 // Working tree changes (unstaged)
-                if (workChar !== ' ' && workChar !== '?' && workChar !== indexChar) {
+                if (workChar === '?') {
+                    unstaged.push({ path: filePath, status: '?' });
+                } else if (workChar !== ' ' && workChar !== indexChar) {
                     const existing = staged.find(s => s.path === filePath);
                     if (!existing) {
                         unstaged.push({ path: filePath, status: workChar });
                     }
-                } else if (workChar === '?' && indexChar === ' ') {
-                    unstaged.push({ path: filePath, status: '?' });
                 }
             }
 
