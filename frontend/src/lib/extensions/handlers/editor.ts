@@ -31,6 +31,7 @@ export const CAP_EDITOR_SET_CONTENT = 'editor.setContent';
 export const CAP_EDITOR_SET_OVERLAY = 'editor.setOverlay';
 export const CAP_EDITOR_CONTENT_CHANGE = 'editor.contentChange';
 export const CAP_EDITOR_JUMP_TO_LINE = 'editor.jumpToLine';
+export const CAP_EDITOR_SAVE = 'editor.save';
 
 // Buttons created by extensions, keyed `${extensionId}:${buttonId}`. Because a
 // point (e.g. `fileEditor`) can be mounted in many instances at once (one open
@@ -190,6 +191,18 @@ function setOverlay(ctx: HostContext, args: { visible: boolean }): void {
 }
 
 /**
+ * Request the host save the current file.
+ *
+ * The FileEditor listens for the `editor-save-request` window event and
+ * performs the save, guarded by its own active/unsaved/disabled checks.
+ */
+function saveFile(ctx: HostContext): void {
+    const root = editorRoot(ctx);
+    if (!root) throw new Error('editor not found');
+    window.dispatchEvent(new CustomEvent('editor-save-request'));
+}
+
+/**
  * Remove all footer buttons registered by an extension. Called by the host
  * when an extension channel is destroyed (e.g. editor closes, file changes).
  */
@@ -239,4 +252,9 @@ export const editorCapabilities: Record<string, CapabilityDef> = {
     },
     [CAP_EDITOR_CONTENT_CHANGE]: { kind: 'event' },
     [CAP_EDITOR_JUMP_TO_LINE]: { kind: 'event' },
+    [CAP_EDITOR_SAVE]: {
+        kind: 'call',
+        argsSchema: {},
+        handler: saveFile,
+    },
 };

@@ -112,6 +112,7 @@
             getContent: () => call('editor.getContent', {}),
             setContent: (content) => call('editor.setContent', { content: String(content || '') }),
             setOverlay: (visible) => call('editor.setOverlay', { visible: !!visible }),
+            save: () => call('editor.save', {}),
         },
 
         log: (level, message) => call('log.write', { level: level || 'info', message: String(message || '') }),

@@ -7,6 +7,7 @@ import {
     CAP_EDITOR_GET_CONTENT,
     CAP_EDITOR_SET_OVERLAY,
     CAP_EDITOR_CONTENT_CHANGE,
+    CAP_EDITOR_SAVE,
 } from '../capabilities';
 import { computeGrants, SUPPORTED_CAPABILITIES } from '../capabilities';
 import { cleanupFooterButtons } from '../handlers/editor';
@@ -253,5 +254,43 @@ describe('editor.getContent and editor.setOverlay', () => {
     it('editor.contentChange is a grantable event capability', () => {
         expect(SUPPORTED_CAPABILITIES[CAP_EDITOR_CONTENT_CHANGE].kind).toBe('event');
         expect(computeGrants([CAP_EDITOR_CONTENT_CHANGE])).toContain(CAP_EDITOR_CONTENT_CHANGE);
+    });
+});
+
+describe('editor.save', () => {
+    let root: HTMLElement, anchor: HTMLElement, footerLeft: HTMLElement;
+    beforeEach(() => { ({ root, anchor, footerLeft } = buildEditorDom()); });
+    afterEach(() => cleanupFooterButtons('ext-md'));
+
+    it('is a grantable call capability', () => {
+        expect(SUPPORTED_CAPABILITIES[CAP_EDITOR_SAVE].kind).toBe('call');
+        expect(computeGrants([CAP_EDITOR_SAVE])).toContain(CAP_EDITOR_SAVE);
+    });
+
+    it('dispatches an editor-save-request event on window', async () => {
+        const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_SAVE], anchor);
+        const listener = vi.fn();
+        window.addEventListener('editor-save-request', listener);
+        channel.start();
+        send(channel, contentWindow, { type: 'call', id: 's1', cap: CAP_EDITOR_SAVE, args: {} });
+        await flush();
+
+        expect(listener).toHaveBeenCalledTimes(1);
+        const resp = messages[messages.length - 1];
+        expect(resp.ok).toBe(true);
+        window.removeEventListener('editor-save-request', listener);
+        channel.destroy();
+    });
+
+    it('rejects when the editor root is missing', async () => {
+        const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_SAVE], anchor);
+        channel.start();
+        anchor.closest = () => null as any; // simulate no .file-editor ancestor
+        send(channel, contentWindow, { type: 'call', id: 's1', cap: CAP_EDITOR_SAVE, args: {} });
+        await flush();
+        const resp = messages[messages.length - 1];
+        expect(resp.ok).toBe(false);
+        expect(resp.error).toContain('editor not found');
+        channel.destroy();
     });
 });
