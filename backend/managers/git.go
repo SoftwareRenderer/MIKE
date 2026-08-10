@@ -404,6 +404,8 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 // Query params: path (file path relative to project root), staged (true/false).
 // When staged=true, returns staged (index) diff. When false/omitted, returns working tree diff.
 // Also returns the full file content (from working tree or index) so the frontend can render it.
+// When meta=true, only lightweight metadata (line_count, file_size, is_binary) is returned,
+// skipping the diff and full file lines — used to list untracked files cheaply.
 func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -421,6 +423,7 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	staged := r.URL.Query().Get("staged") == "true"
+	metaOnly := r.URL.Query().Get("meta") == "1"
 
 	// Get the diff for this file
 	var c *exec.Cmd
@@ -478,6 +481,21 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// File size from disk (used for metadata and binary detection)
+	var fileSize int64
+	if st, err := os.Stat(filepath.Join(project.Path, filePath)); err == nil {
+		fileSize = st.Size()
+	}
+
+	if metaOnly {
+		httputil.JSONResponse(w, http.StatusOK, map[string]any{
+			"line_count": lineCount,
+			"file_size":  fileSize,
+			"isBinary":   isBinary,
+		})
+		return
+	}
+
 	// Split content into lines
 	var lines []string
 	if !isBinary && fileContent != "" {
@@ -492,6 +510,7 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		"diff":       string(out),
 		"lines":      lines,
 		"line_count": lineCount,
+		"file_size":  fileSize,
 		"isBinary":   isBinary,
 	})
 }

@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { DiffFile } from '$lib/types/diff';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
-    import { getGitStatus, getProjectDiff, stageProjectFile, commitProject, getGitLogFull, getCommitDiff } from '$lib/api/git';
+    import { getGitStatus, getProjectDiff, getProjectDiffFile, stageProjectFile, commitProject, getGitLogFull, getCommitDiff } from '$lib/api/git';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
@@ -34,12 +34,24 @@
         status: string; // M, A, D, ?, R, U, C
     }
 
+    // Untracked file entry for the DiffViewer (content loaded on-demand)
+    interface UntrackedEntry {
+        path: string;
+        fileSize?: number;
+        isBinary?: boolean;
+        truncated?: boolean;
+        origAdded?: number;
+        loading?: boolean;
+        file: DiffFile;
+    }
+
     let stagedEntries = $state<StatusEntry[]>([]);
     let unstagedEntries = $state<StatusEntry[]>([]);
 
     // Diff data for DiffViewer
     let stagedDiffFiles = $state<DiffFile[]>([]);
     let unstagedDiffFiles = $state<DiffFile[]>([]);
+    let unstagedUntracked = $state<UntrackedEntry[]>([]);
 
     let loading = $state(true);
     let selectedPath = $state('');
@@ -403,6 +415,7 @@
         unstagedDiffFiles.length > 0 ||
         stagedEntries.length > 0 ||
         unstagedEntries.length > 0 ||
+        unstagedUntracked.length > 0 ||
         compareDiff.length > 0 ||
         compareLoading
     );
@@ -445,6 +458,7 @@
             authorEmail = email;
             const staged: StatusEntry[] = [];
             const unstaged: StatusEntry[] = [];
+            const untrackedPaths: string[] = [];
 
             for (const line of status.split('\n').filter(l => l.trim())) {
                 const indexChar = line[0];
@@ -461,6 +475,7 @@
                 // Working tree changes (unstaged)
                 if (workChar === '?') {
                     unstaged.push({ path: filePath, status: '?' });
+                    untrackedPaths.push(filePath);
                 } else if (workChar !== ' ' && workChar !== indexChar) {
                     const existing = staged.find(s => s.path === filePath);
                     if (!existing) {
@@ -472,14 +487,32 @@
             stagedEntries = staged;
             unstagedEntries = unstaged;
 
-            // Fetch diffs for DiffViewer
-            const [stagedDiff, unstagedDiff] = await Promise.all([
+            // Fetch diffs for DiffViewer and metadata for untracked files
+            const [stagedDiff, unstagedDiff, untrackedMeta] = await Promise.all([
                 getProjectDiff(projectId, { cached: true }).catch(() => ''),
                 getProjectDiff(projectId).catch(() => ''),
+                Promise.all(untrackedPaths.map(async (path) => {
+                    try {
+                        return { path, meta: await getProjectDiffFile(projectId, path, { meta: true }) };
+                    } catch {
+                        return { path, meta: undefined };
+                    }
+                })),
             ]);
 
             stagedDiffFiles = parseUnifiedDiff(stagedDiff);
             unstagedDiffFiles = parseUnifiedDiff(unstagedDiff);
+            unstagedUntracked = untrackedMeta.flatMap(({ path, meta }) => {
+                if (!meta) return [];
+                const added = meta.line_count ?? 0;
+                return [{
+                    path,
+                    fileSize: meta.file_size,
+                    isBinary: meta.isBinary,
+                    origAdded: added,
+                    file: { path, rows: [], added, removed: 0 },
+                }];
+            });
 
             return stagedEntries.length > 0 || unstagedEntries.length > 0;
         } catch (e) {
@@ -517,6 +550,31 @@
     async function handleRefresh() {
         const hasChanges = await loadData();
         await updateCompareMode(hasChanges);
+    }
+
+    /** Load the full content of an untracked file on-demand for the DiffViewer. */
+    async function loadUntrackedFile(path: string) {
+        const entry = unstagedUntracked.find(e => e.path === path);
+        if (!entry || entry.loading) return;
+        entry.loading = true;
+        try {
+            const data = await getProjectDiffFile(projectId, path);
+            if (data.lines) {
+                entry.file = {
+                    path,
+                    rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })),
+                    added: data.line_count ?? data.lines.length,
+                    removed: 0,
+                    isBinary: false,
+                };
+            } else if (data.isBinary) {
+                entry.file = { path, rows: [], added: data.line_count ?? 0, removed: 0, isBinary: true, fileSize: data.file_size };
+            }
+        } catch (e) {
+            console.error('Failed to load untracked file:', e);
+        } finally {
+            entry.loading = false;
+        }
     }
 
     function toggleSection(id: string) {
@@ -984,16 +1042,18 @@
                     {#if compareError}
                         <div class="compare-error" role="alert">{compareError}</div>
                     {/if}
-                {:else if stagedEntries.length > 0 || unstagedEntries.length > 0 || fromCommit === CURRENT_TREE}
+                {:else if stagedEntries.length > 0 || unstagedEntries.length > 0 || unstagedUntracked.length > 0 || fromCommit === CURRENT_TREE}
                     {#if DiffViewerComponent}
                         {@const DiffViewer = DiffViewerComponent}
                         <DiffViewer
                             stagedFiles={sortedStagedFiles}
                             unstagedFiles={sortedUnstagedFiles}
+                            unstagedUntracked={unstagedUntracked}
                             selectedPath={selectedPath}
                             onStageFile={handleStageFile}
                             onStageAll={handleStageAll}
                             onUnstageAll={handleUnstageAll}
+                            onExpandUntracked={loadUntrackedFile}
                             onLineClick={handleLineClick}
                         />
                     {:else}
