@@ -85,6 +85,7 @@ func (es *ExtensionStore) InitSchema() error {
 CREATE TABLE IF NOT EXISTS extensions (
     id                TEXT PRIMARY KEY,
     name              TEXT NOT NULL,
+    author            TEXT NOT NULL DEFAULT '',
     version           TEXT NOT NULL,
     type              TEXT NOT NULL,
     manifest          TEXT NOT NULL,
@@ -123,9 +124,12 @@ CREATE TABLE IF NOT EXISTS extension_storage (
 		`ALTER TABLE extensions ADD COLUMN repo TEXT DEFAULT ''`,
 		`ALTER TABLE extensions ADD COLUMN commit_sha TEXT DEFAULT ''`,
 		`ALTER TABLE extensions ADD COLUMN subdir TEXT DEFAULT ''`,
+		`ALTER TABLE extensions ADD COLUMN author TEXT DEFAULT ''`,
 	} {
 		_, _ = es.db.Exec(stmt)
 	}
+
+	_, _ = es.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_extensions_author_name ON extensions (author, name)`)
 
 	return nil
 }
@@ -140,10 +144,10 @@ func (es *ExtensionStore) GetByType(extType string) ([]Extension, error) {
 	var query string
 	var args []any
 	if extType != "" {
-		query = `SELECT id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions WHERE type = ? ORDER BY name`
+		query = `SELECT id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions WHERE type = ? ORDER BY name`
 		args = append(args, extType)
 	} else {
-		query = `SELECT id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions ORDER BY name`
+		query = `SELECT id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions ORDER BY name`
 	}
 
 	rows, err := es.db.Query(query, args...)
@@ -185,12 +189,69 @@ func (es *ExtensionStore) getBy(column, value string) (*Extension, error) {
 	var repo, commitSHA, subdir string
 
 	err := es.db.QueryRow(
-		`SELECT id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions WHERE `+column+` = ?`,
+		`SELECT id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions WHERE `+column+` = ?`,
 		value,
-	).Scan(&ext.ID, &ext.Name, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt, &repo, &commitSHA, &subdir)
+	).Scan(&ext.ID, &ext.Name, &ext.Author, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt, &repo, &commitSHA, &subdir)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("extension not found: %s", value)
+		}
+		return nil, fmt.Errorf("query extension: %w", err)
+	}
+
+	ext.Type = extType
+	ext.InstallSource = installSource
+	ext.ImageRef = imageRef.String
+	ext.Enabled = i2b(enabled)
+	ext.InstalledAt = installedAt
+	ext.BuiltAt = builtAt
+	ext.Repo = repo
+	ext.Commit = commitSHA
+	ext.Subdir = subdir
+
+	if manifestJSON.Valid {
+		if err := json.Unmarshal([]byte(manifestJSON.String), &ext.Manifest); err != nil {
+			return nil, fmt.Errorf("unmarshal manifest: %w", err)
+		}
+	}
+	if configJSON.Valid {
+		if err := json.Unmarshal([]byte(configJSON.String), &ext.Config); err != nil {
+			return nil, fmt.Errorf("unmarshal config: %w", err)
+		}
+	} else {
+		ext.Config = map[string]any{}
+	}
+	ext.Config = decryptConfigValues(ext.Config, ext.Manifest.ConfigSchema)
+	if containerConfigJSON.Valid {
+		if err := json.Unmarshal([]byte(containerConfigJSON.String), &ext.ContainerConfig); err != nil {
+			return nil, fmt.Errorf("unmarshal container config: %w", err)
+		}
+	}
+	if sandboxConfigJSON.Valid {
+		if err := json.Unmarshal([]byte(sandboxConfigJSON.String), &ext.SandboxConfig); err != nil {
+			return nil, fmt.Errorf("unmarshal sandbox config: %w", err)
+		}
+	}
+
+	return &ext, nil
+}
+
+// GetByAuthorName retrieves an extension by its author/name identity key.
+func (es *ExtensionStore) GetByAuthorName(author, name string) (*Extension, error) {
+	var ext Extension
+	var manifestJSON, configJSON, containerConfigJSON, sandboxConfigJSON, imageRef sql.NullString
+	var extType, installSource string
+	var enabled int
+	var installedAt, builtAt string
+	var repo, commitSHA, subdir string
+
+	err := es.db.QueryRow(
+		`SELECT id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions WHERE author = ? AND name = ?`,
+		author, name,
+	).Scan(&ext.ID, &ext.Name, &ext.Author, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt, &repo, &commitSHA, &subdir)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("extension not found: %s/%s", author, name)
 		}
 		return nil, fmt.Errorf("query extension: %w", err)
 	}
@@ -272,8 +333,8 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 	}
 
 	_, err = es.db.Exec(
-		`INSERT INTO extensions (id, name, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ext.ID, ext.Name, ext.Version, ext.Type, string(manifestJSON), string(configJSON), string(containerConfigJSON), string(sandboxConfigJSON), ext.InstallSource, ext.ImageRef, b2i(ext.Enabled), ext.InstalledAt, ext.BuiltAt, ext.Repo, ext.Commit, ext.Subdir,
+		`INSERT INTO extensions (id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ext.ID, ext.Name, ext.Author, ext.Version, ext.Type, string(manifestJSON), string(configJSON), string(containerConfigJSON), string(sandboxConfigJSON), ext.InstallSource, ext.ImageRef, b2i(ext.Enabled), ext.InstalledAt, ext.BuiltAt, ext.Repo, ext.Commit, ext.Subdir,
 	)
 	if err != nil {
 		return fmt.Errorf("insert extension: %w", err)
@@ -475,7 +536,7 @@ func scanExtension(s scanner) (*Extension, error) {
 	var installedAt, builtAt string
 	var repo, commitSHA, subdir string
 
-	err := s.Scan(&ext.ID, &ext.Name, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt, &repo, &commitSHA, &subdir)
+	err := s.Scan(&ext.ID, &ext.Name, &ext.Author, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt, &repo, &commitSHA, &subdir)
 	if err != nil {
 		return nil, err
 	}
