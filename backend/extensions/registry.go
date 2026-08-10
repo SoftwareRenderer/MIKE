@@ -227,6 +227,29 @@ func UpdateAvailable(installed, remote string) bool {
 	return CompareVersion(installed, remote) < 0
 }
 
+// newPermissions returns the UI permissions present in the remote (registry)
+// capabilities but absent from the installed extension's manifest — i.e. the
+// newly requested permissions a user would grant by updating. Unknown
+// permission names are passed through as-is.
+func newPermissions(installed, remote *Capabilities) []string {
+	if remote == nil || remote.UI == nil || len(remote.UI.Permissions) == 0 {
+		return nil
+	}
+	current := make(map[string]struct{})
+	if installed != nil && installed.UI != nil {
+		for _, p := range installed.UI.Permissions {
+			current[p] = struct{}{}
+		}
+	}
+	added := make([]string, 0, len(remote.UI.Permissions))
+	for _, p := range remote.UI.Permissions {
+		if _, ok := current[p]; !ok {
+			added = append(added, p)
+		}
+	}
+	return added
+}
+
 // commitHashRe matches a full hex commit hash: 40-char (SHA-1) or 64-char
 // (SHA-256). Both SHA-1 and SHA-256 object-format repos are supported, so both
 // hash lengths are accepted.
