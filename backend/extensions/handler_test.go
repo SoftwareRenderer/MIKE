@@ -1109,6 +1109,66 @@ func TestHandleCheckUpdates_NoCommitChange(t *testing.T) {
 	}
 }
 
+func TestHandleCheckUpdates_NewPermissions(t *testing.T) {
+	// Registry version requests more UI permissions than the installed version.
+	index := RegistryIndex{
+		{
+			Name:    "preview",
+			Version: "2.0.0",
+			Type:    ExtensionTypeUI,
+			Capabilities: &Capabilities{
+				UI: &UIConfig{
+					Permissions: []string{
+						"editor.getContent", // already installed
+						"editor.setContent", // new
+						"editor.save",       // new
+					},
+				},
+			},
+		},
+	}
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(index)
+	}))
+	defer mockServer.Close()
+
+	h := testHandler(t)
+	h.config.RegistryURL = mockServer.URL
+
+	ext := makeTestExt("preview", "preview", ExtensionTypeUI)
+	ext.Version = "1.0.0"
+	ext.Manifest.Capabilities = &Capabilities{
+		UI: &UIConfig{Permissions: []string{"editor.getContent"}},
+	}
+	_ = h.store.Create(ext)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
+	w := httptest.NewRecorder()
+	h.HandleCheckUpdates(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var result []ExtensionUpdate
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("result count = %d, want 1", len(result))
+	}
+	got := result[0].NewPermissions
+	want := []string{"editor.setContent", "editor.save"}
+	if len(got) != len(want) {
+		t.Fatalf("new_permissions = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("new_permissions[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestHandleInstall_FallbackCopiesLicenseURL(t *testing.T) {
 	// Registry entry with no git source (no repo/commit) — fallback path should copy LicenseURL
 	index := RegistryIndex{
