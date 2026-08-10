@@ -571,6 +571,35 @@ func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectNam
 		if _, err := sm.Create(taskID, projectPath, projectName, "", opts); err != nil {
 			return fmt.Errorf("create sandbox container: %w", err)
 		}
+		return nil
+	}
+
+	// A running container may be stale: its worktree bind mount may point at an
+	// old directory (e.g. the project was moved and its path updated). Reuse the
+	// container only when the mounted host path still matches the current
+	// project path; otherwise stop and recreate it so the file browser and other
+	// FS operations reflect the project's current location.
+	absWorktree, err := filepath.Abs(projectPath)
+	if err != nil {
+		return fmt.Errorf("resolve project path: %w", err)
+	}
+	mountPath := "/home/sandbox/" + projectName
+	sm.mu.Lock()
+	containerName := sm.active[taskID]
+	sm.mu.Unlock()
+	source, err := sm.rt.GetContainerMountSource(containerName, mountPath)
+	if err != nil {
+		// If we can't inspect the container, assume it's stale and recreate it
+		// rather than risk serving a stale mount.
+		log.Printf("[sandbox] project=%s cannot inspect mount source (recreating): %v", projectID, err)
+		source = ""
+	}
+	if filepath.Clean(source) != filepath.Clean(absWorktree) {
+		log.Printf("[sandbox] project=%s mount source %q != worktree %q (recreating stale container)", projectID, source, absWorktree)
+		_ = sm.Stop(taskID)
+		if _, err := sm.Create(taskID, projectPath, projectName, "", opts); err != nil {
+			return fmt.Errorf("create sandbox container: %w", err)
+		}
 	}
 	return nil
 }
