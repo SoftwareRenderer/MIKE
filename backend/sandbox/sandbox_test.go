@@ -1068,6 +1068,62 @@ func TestEnsureProjectContainer_RecreatesWhenStopped(t *testing.T) {
 	}
 }
 
+func TestEnsureProjectContainer_RecreatesWhenMountStale(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	projectID := "test-stale-mount-proj"
+	projectName := "test-stale-mount"
+	taskID := "proj:" + projectID
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	// Create the project container at dir1, then "move" the project to dir2.
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	if err := sm.ensureProjectContainer(taskID, dir1, projectName, projectID, SandboxOpts{}); err != nil {
+		t.Fatalf("initial ensureProjectContainer: %v", err)
+	}
+
+	// Verify the running container's mount points at dir1.
+	sm.mu.Lock()
+	containerName := sm.active[taskID]
+	sm.mu.Unlock()
+	mountPath := "/home/sandbox/" + projectName
+	source, err := sm.rt.GetContainerMountSource(containerName, mountPath)
+	if err != nil {
+		t.Fatalf("GetContainerMountSource: %v", err)
+	}
+	if filepath.Clean(source) != filepath.Clean(dir1) {
+		t.Fatalf("expected mount source %q, got %q", dir1, source)
+	}
+
+	// ensureProjectContainer with the new path must recreate the container
+	// (the old one is still running) so its mount points at dir2.
+	if err := sm.ensureProjectContainer(taskID, dir2, projectName, projectID, SandboxOpts{}); err != nil {
+		t.Fatalf("ensureProjectContainer after move: %v", err)
+	}
+
+	sm.mu.Lock()
+	containerName = sm.active[taskID]
+	sm.mu.Unlock()
+	source, err = sm.rt.GetContainerMountSource(containerName, mountPath)
+	if err != nil {
+		t.Fatalf("GetContainerMountSource after move: %v", err)
+	}
+	if filepath.Clean(source) != filepath.Clean(dir2) {
+		t.Fatalf("expected recreated mount source %q, got %q", dir2, source)
+	}
+}
+
 func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 	agentPath := findAgentBinary(t)
 	os.Setenv("MIKE_AGENT_PATH", agentPath)

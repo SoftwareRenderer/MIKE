@@ -2,6 +2,7 @@ package sandboxruntime
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -158,6 +159,33 @@ func (r *Runtime) IsRunning(name string) (bool, error) {
 		return false, err
 	}
 	return strings.TrimSpace(string(out)) == "true", nil
+}
+
+// GetContainerMountSource returns the host source path for the bind mount whose
+// destination (path inside the container) equals dest. It returns an empty string
+// if no matching mount is found, and an error only if the container cannot be
+// inspected. This is used to detect stale containers whose worktree bind mount no
+// longer matches the current project path.
+func (r *Runtime) GetContainerMountSource(name, dest string) (string, error) {
+	out, err := r.PodmanExec("inspect", "-f", "{{json .Mounts}}", name)
+	if err != nil {
+		return "", err
+	}
+	var mounts []struct {
+		Type        string `json:"Type"`
+		Source      string `json:"Source"`
+		Destination string `json:"Destination"`
+	}
+	if err := json.Unmarshal(out, &mounts); err != nil {
+		return "", fmt.Errorf("parse container mounts: %w", err)
+	}
+	cleanDest := filepath.Clean(dest)
+	for _, m := range mounts {
+		if m.Type == "bind" && filepath.Clean(m.Destination) == cleanDest {
+			return m.Source, nil
+		}
+	}
+	return "", nil
 }
 
 // GetAgentBinaryPath resolves the path to the sandbox-bridge binary.
