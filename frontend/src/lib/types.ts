@@ -512,6 +512,8 @@ export interface Extension {
     install_source: string;
     image_ref?: string;
     enabled: boolean;
+    /** Absolute filesystem path of the extension (only for local installs). */
+    local_path?: string;
     running: boolean;
     ports?: AssignedPort[];
     installed_at: string;
@@ -535,6 +537,8 @@ export interface RegistryEntry {
     commit?: string;
     subdir?: string;
     capabilities?: Record<string, any>;
+    /** Absolute on-disk directory for filesystem (unpublished) local extensions. */
+    local_path?: string;
 }
 
 export interface ExtensionUpdate {

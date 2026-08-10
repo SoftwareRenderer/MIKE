@@ -668,6 +668,10 @@ func TestHandleLocalExtensions(t *testing.T) {
 	if result[0].DisplayName != "Markdown Preview" {
 		t.Errorf("result[0].DisplayName = %q, want Markdown Preview", result[0].DisplayName)
 	}
+	want0 := filepath.Join(extDir, "softwarerenderer", "markdown-preview")
+	if result[0].LocalPath != want0 {
+		t.Errorf("result[0].LocalPath = %q, want %q", result[0].LocalPath, want0)
+	}
 
 	if result[1].Name != "svelte-language-server" || result[1].Type != ExtensionTypeLSP {
 		t.Errorf("result[1] = %+v, want svelte-language-server/lsp", result[1])
@@ -881,6 +885,10 @@ func TestHandleInstallLocal(t *testing.T) {
 	}
 	if last.Result.InstallSource != "local" {
 		t.Errorf("InstallSource = %q, want local", last.Result.InstallSource)
+	}
+	wantPath := filepath.Join(extDir, "sveltejs", "svelte-language-server")
+	if last.Result.LocalPath != wantPath {
+		t.Errorf("LocalPath = %q, want %q", last.Result.LocalPath, wantPath)
 	}
 	if last.Result.Type != ExtensionTypeLSP {
 		t.Errorf("Type = %q, want lsp", last.Result.Type)
