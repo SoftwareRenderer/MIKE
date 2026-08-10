@@ -469,8 +469,9 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	// Sync once more to ensure we have the latest DB state (e.g. if messages were added/deleted)
 	lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 
-	// Reset session cost for this run — it accumulates per-run, not across runs.
-	setup.task.SessionCost = 0
+	// Carry over the accumulated session cost from prior runs/executors so the badge
+	// reflects the full session cost across provider/model switches and executor restarts.
+	lc.sessionCost = setup.task.SessionCost
 
 	for {
 		select {
