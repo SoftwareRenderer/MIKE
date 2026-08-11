@@ -157,7 +157,7 @@
             entries = (data.entries || [])
                 .filter((e: any) => {
                     if (e.name === '..') return false; // handled separately
-                    if (e.name.startsWith('.')) return false;
+                    // Show all dot files; only filter ignored directories (e.g. .git, node_modules)
                     if (e.isDir && ignoredDirs.has(e.name)) return false;
                     return true;
                 })
