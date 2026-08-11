@@ -189,19 +189,23 @@ export class DiffCache {
             this.applyStagedPaths(stagedPaths);
             this.tracker.stagedPathsKey = stagedKey;
 
+            // Update file hashes before any fetch so stale deltas don't re-fetch.
+            const oldHashes = { ...this.fileHashes };
+            this.fileHashes = { ...this.fileHashes, ...fileHashes };
+
             if (!fileHashes || Object.keys(fileHashes).length === 0) {
+                // No per-file hashes were supplied (e.g. a staging-only change or a
+                // missed delta). Reconcile the full manifest so the panel never goes
+                // stale when the backend broadcasts a hash change without file hashes.
+                this.fetchFullManifest(oldHashes);
                 return;
             }
 
             // If untracked file count changed, fetch full manifest to discover new/removed untracked files.
             // Otherwise, do a cheaper delta fetch for tracked files only.
             if (untrackedChanged) {
-                const oldHashes = { ...this.fileHashes };
-                this.fileHashes = { ...this.fileHashes, ...fileHashes };
                 this.fetchFullManifest(oldHashes);
-            } else if (fileHashes && !diffLoading) {
-                const oldHashes = { ...this.fileHashes };
-                this.fileHashes = { ...this.fileHashes, ...fileHashes };
+            } else if (!diffLoading) {
                 const stagedSet = stagedPaths ? new Set(stagedPaths) : undefined;
                 this.fetchDeltaFiles(fileHashes, oldHashes, stagedSet);
             }

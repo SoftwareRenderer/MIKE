@@ -4,9 +4,109 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"kanban/backend/config"
 	"kanban/backend/git"
+	"kanban/backend/store"
+	"kanban/backend/types"
 )
+
+// TestWorktreeWatcherRetriesWhileInFlight verifies that a pending diff is not
+// dropped when the throttle fires while a compute is already in flight. The
+// watcher must re-arm a retry timer instead of discarding the change, otherwise
+// the diff panel goes stale until the next fsnotify event or a page refresh.
+func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	worktreesDir := filepath.Join(tmpDir, "worktrees")
+	os.MkdirAll(repoDir, 0o755)
+	os.MkdirAll(worktreesDir, 0o755)
+
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "user.name", "Test")
+	writeFile(t, repoDir, "README.md", "# Test\n")
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	s, err := store.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	defer s.Close()
+
+	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfg, err := cfgStore.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	_ = s.SetConfigValue("workspace_dir", worktreesDir)
+	if err := cfgStore.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	projID := "test-project"
+	proj := &types.Project{ID: projID, Name: "test", Path: repoDir}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	taskID := "test-task"
+	branchName := "kanban/" + taskID
+	task := &types.Task{
+		ID:             taskID,
+		ProjectID:      projID,
+		Title:          "Test task",
+		Prompt:         "Test prompt",
+		Status:         "in_progress",
+		ExecutionState: "running",
+		Branch:         branchName,
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	wm := git.NewWorktreeManager(s, cfgStore)
+	_, _, err = wm.CreateWorktree(projID, taskID, branchName, "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	ww, err := NewWorktreeWatcher(wm, func(event DiffStatsEvent) {}, nil, nil)
+	if err != nil {
+		t.Skipf("skip retry test (inotify limit): %v", err)
+	}
+	go ww.StartEventLoop()
+	defer ww.Close()
+
+	if err := ww.Watch(taskID, projID, ""); err != nil {
+		t.Fatalf("watch task: %v", err)
+	}
+
+	// Simulate a diff compute already in flight for the task.
+	ww.mu.Lock()
+	ww.inFlight[taskID] = true
+	ww.mu.Unlock()
+
+	// Trigger a filesystem change -> handleEvent arms the 1s throttle timer.
+	worktreePath := filepath.Join(worktreesDir, projID, taskID)
+	writeFile(t, worktreePath, "new.txt", "hello\n")
+
+	// Wait long enough for the 1s throttle to fire (while still in flight).
+	time.Sleep(1400 * time.Millisecond)
+
+	// A retry timer must have been re-armed, proving the pending change was
+	// preserved rather than dropped. With the old code throttles[taskID] would
+	// be nil here (the pending change silently lost).
+	ww.mu.Lock()
+	retryArmed := ww.throttles[taskID] != nil
+	ww.mu.Unlock()
+	if !retryArmed {
+		t.Fatal("pending diff was dropped: no retry timer re-armed while in flight")
+	}
+}
 
 func TestResolveGitIndexDir_Worktree(t *testing.T) {
 	dir := t.TempDir()
@@ -127,8 +227,8 @@ func TestCountManifestChanges(t *testing.T) {
 			untracked: []git.UntrackedFile{
 				{Path: "new.txt", Lines: []string{"line1", "line2", "line3"}},
 			},
-			wantAdd:   6, // 3 tracked + 3 untracked
-			wantDel:   2,
+			wantAdd: 6, // 3 tracked + 3 untracked
+			wantDel: 2,
 		},
 		{
 			name: "untracked with OrigAdded (truncated)",
@@ -138,8 +238,8 @@ func TestCountManifestChanges(t *testing.T) {
 			untracked: []git.UntrackedFile{
 				{Path: "new.txt", Lines: []string{"line1"}, OrigAdded: 100, Truncated: true},
 			},
-			wantAdd:   101, // 1 tracked + 100 untracked (OrigAdded)
-			wantDel:   1,
+			wantAdd: 101, // 1 tracked + 100 untracked (OrigAdded)
+			wantDel: 1,
 		},
 		{
 			name: "truncated tracked file uses truncated counts",
@@ -155,11 +255,11 @@ func TestCountManifestChanges(t *testing.T) {
 		{
 			name: "excludes internal files from tracked",
 			tracked: map[string]*git.TrackedDiffFile{
-				"a.txt":      {Path: "a.txt", Added: 5, Removed: 3},
+				"a.txt":       {Path: "a.txt", Added: 5, Removed: 3},
 				".git/config": {Path: ".git/config", Added: 100, Removed: 200},
 			},
 			untracked: nil,
-			wantAdd:   5,   // only a.txt, NOT .git/config
+			wantAdd:   5, // only a.txt, NOT .git/config
 			wantDel:   3,
 		},
 		{
@@ -171,8 +271,8 @@ func TestCountManifestChanges(t *testing.T) {
 				{Path: "new.txt", Lines: []string{"line1"}},
 				{Path: ".git/new", Lines: []string{"spam1", "spam2", "spam3", "spam4"}},
 			},
-			wantAdd:   2, // 1 tracked + 1 untracked (new.txt), NOT .git/new
-			wantDel:   1,
+			wantAdd: 2, // 1 tracked + 1 untracked (new.txt), NOT .git/new
+			wantDel: 1,
 		},
 	}
 
@@ -192,11 +292,11 @@ func TestCountManifestChanges(t *testing.T) {
 
 func TestCountManifestFiles(t *testing.T) {
 	tests := []struct {
-		name            string
-		tracked         map[string]*git.TrackedDiffFile
-		untracked       []git.UntrackedFile
-		wantTracked     int
-		wantUntracked   int
+		name          string
+		tracked       map[string]*git.TrackedDiffFile
+		untracked     []git.UntrackedFile
+		wantTracked   int
+		wantUntracked int
 	}{
 		{
 			name:          "empty",
@@ -208,9 +308,9 @@ func TestCountManifestFiles(t *testing.T) {
 		{
 			name: "mixed with internal files",
 			tracked: map[string]*git.TrackedDiffFile{
-				"a.txt":       {Path: "a.txt"},
-				"b.txt":       {Path: "b.txt"},
-				".git/config": {Path: ".git/config"},
+				"a.txt":        {Path: "a.txt"},
+				"b.txt":        {Path: "b.txt"},
+				".git/config":  {Path: ".git/config"},
 				"kanban.trace": {Path: "kanban.trace"},
 			},
 			untracked: []git.UntrackedFile{
