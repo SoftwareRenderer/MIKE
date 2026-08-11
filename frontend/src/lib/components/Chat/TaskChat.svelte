@@ -40,8 +40,6 @@
     let historyLoading = $state(false);
 
     let atBottom = $state(true);
-    let userInputPending = false;
-    let inputTimeout: ReturnType<typeof setTimeout> | null = null;
     let inputValue = $state('');
     let draftAttachments = $state<Array<{ file: File; preview: string; mimeType: string; base64: string }>>([]);
 
@@ -586,30 +584,14 @@
         scrollEl.scrollTop = scrollEl.scrollHeight;
     }
 
-    // rAF-throttled scroll handler — at most once per frame.
-    let scrollRafPending = false;
+    // Scroll handler — updates atBottom synchronously so a user scroll-up is
+    // registered before any token-triggered scroll() runs in the same frame.
+    // Once the user scrolls away from the bottom, auto-scroll stops immediately;
+    // scrolling back to the bottom resumes it.
     function onScroll() {
-        markUserInput();
-        if (scrollRafPending) return;
-        scrollRafPending = true;
-        requestAnimationFrame(doCheckScroll);
-    }
-    function doCheckScroll() {
-        scrollRafPending = false;
         if (!scrollEl) return;
-        // Sticky header is now computed inside ChatEntries from entry data.
-        // This handler only manages atBottom detection and input tracking.
-        if (!userInputPending) return;
-        // Don't clear flag here — keep it active during inertial scrolling.
-        // Reset a timeout instead; flag clears when scrolling settles.
-        if (inputTimeout) clearTimeout(inputTimeout);
-        inputTimeout = setTimeout(() => { userInputPending = false; inputTimeout = null; }, 300);
         const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
         atBottom = gap < SCROLL_BOTTOM_THRESHOLD;
-    }
-
-    function markUserInput() {
-        userInputPending = true;
     }
 
     async function handleSend(msg: string, attachments?: Array<{ mimeType: string; data: string }>) {
@@ -1114,15 +1096,6 @@
         // Config changes are now tracked via $effect on appStore.config
         updateProvidersFromStore();
         unsubViewport = setupViewportListener();
-        const handleKeydown = (e: KeyboardEvent) => {
-            if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(e.key)) {
-                // Skip if focus is inside an input/textarea — those keys move the cursor, not scroll
-                const target = e.target as HTMLElement;
-                if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
-                markUserInput();
-            }
-        };
-        window.addEventListener('keydown', handleKeydown);
 
         (async () => {
             await loadThreads();
@@ -1244,7 +1217,6 @@
         return () => {
             window.removeEventListener('urlchanged', handleUrlChange);
             unsubViewport?.();
-            window.removeEventListener('keydown', handleKeydown);
             unsubTaskEvent?.();
             window.removeEventListener('visibilitychange', handleTabVisibility);
         };
@@ -1256,7 +1228,6 @@
         // doesn't persist after the detail is closed while the task streams.
         // The card falls back to execution_state === 'running' for the authoritative state.
         markNotStreaming();
-        if (inputTimeout) clearTimeout(inputTimeout);
         unsubQueue?.();
         window.removeEventListener('beforeunload', handleBeforeUnload);
         // Flush pending draft save on navigation/component destroy
@@ -1322,8 +1293,6 @@
         {projectId}
         {taskId}
         onScroll={onScroll}
-        onWheel={markUserInput}
-        onTouchStart={markUserInput}
         onDismissError={handleDismissError}
         onRetryConnect={handleRetryConnect}
         onThreadSwitch={handleThreadSwitch}
