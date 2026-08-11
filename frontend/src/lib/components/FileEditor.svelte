@@ -5,7 +5,7 @@
     import { EditorView } from 'codemirror';
     import { EditorState, Compartment, StateField, StateEffect } from '@codemirror/state';
     import { keymap } from '@codemirror/view';
-    import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+    import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
     import { LSPClient, languageServerExtensions } from '@codemirror/lsp-client';
@@ -305,14 +305,6 @@
             }),
             drawSelection(),
             dropCursor(),
-            EditorView.domEventHandlers({
-                keydown: (e, view) => {
-                    if (e.key === 'Tab') {
-                        e.preventDefault();
-                    }
-                    return false;
-                },
-            }),
             EditorState.allowMultipleSelections.of(true),
             indentOnInput(),
             syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
@@ -325,6 +317,7 @@
             highlightSelectionMatches({ style: true } as any),
             searchKeymapOverride,
             keymap.of([
+                indentWithTab,
                 ...closeBracketsKeymap,
                 ...defaultKeymap,
                 ...historyKeymap,
