@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { StreamState } from '$lib/services/stream-state.svelte';
+import type { ChatEntry } from '$lib/types';
 
 describe('StreamState', () => {
     it('starts with empty state', () => {
@@ -228,3 +229,31 @@ describe('StreamState', () => {
         expect(s.state.entries).toEqual([]);
     });
 });
+
+describe('buildLog reactivity (proxy)', () => {
+    it('mutating the proxied entry returned after creation notifies effects', async () => {
+        const s = new StreamState();
+        let observedLen = -1;
+        const unsub = $effect.root(() => {
+            $effect(() => {
+                for (const e of s.state.entries) {
+                    if (e.buildLog) observedLen = e.buildLog.lines.length;
+                }
+            });
+        });
+
+        // Simulate ensureBuildLogEntry: assign raw entry, then re-read through the proxy.
+        const raw: ChatEntry = { id: 'b1', role: 'system', content: 'Building...', isStreaming: false, createdAt: new Date().toISOString(), buildLog: { title: 'Building...', lines: [] } };
+        s.state.entries = [...s.state.entries, raw];
+        const proxied = s.state.entries[s.state.entries.length - 1]!;
+        proxied.buildLog!.lines.push('Step 1/5');
+        await Promise.resolve();
+        expect(observedLen).toBe(1);
+        proxied.buildLog!.lines.push('Step 2/5');
+        await Promise.resolve();
+        expect(observedLen).toBe(2);
+        unsub();
+    });
+});
+
+
