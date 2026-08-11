@@ -13,6 +13,7 @@ import (
 
 	"kanban/backend/extensions"
 	"kanban/backend/store"
+	"kanban/backend/types"
 	sandbox "kanban/pkg/bridge"
 )
 
@@ -206,7 +207,7 @@ func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *S
 	// When reusing an existing sandbox (grace period), the LSP process from the
 	// previous workspace may still be running. LSPStart handles this by restarting
 	// the LSP process to get a fresh session for the new workspace.
-	bridgeClient, _, err := m.getOrCreateSandbox(ext, projectMounts)
+	bridgeClient, _, err := m.getOrCreateSandbox(ext, workspacePath, projectMounts)
 	if err != nil {
 		return nil, err
 	}
@@ -283,12 +284,22 @@ func (m *ExtensionLSPManager) Release(workspacePath, language string) {
 // getOrCreateSandbox gets or creates an extension sandbox.
 // Returns the bridge client and a boolean indicating whether a NEW sandbox was created.
 // When reusing an existing sandbox (grace period), newSandbox is false.
-func (m *ExtensionLSPManager) getOrCreateSandbox(ext *extensions.Extension, projectMounts map[string]string) (*sandbox.Client, bool, error) {
+func (m *ExtensionLSPManager) getOrCreateSandbox(ext *extensions.Extension, workspacePath string, projectMounts map[string]string) (*sandbox.Client, bool, error) {
+	// Build the desired custom mounts (user's Sandbox Configuration + project
+	// custom mounts adapted for the LSP sandbox) so we can check compatibility
+	// with an existing sandbox.
+	wsContainer := containerWorkspacePath(workspacePath, projectMounts)
+	desiredMounts := resolveWorkspaceMounts(ext.SandboxConfig.Mounts, workspacePath, projectMounts)
+	projectMountsRO := m.adaptProjectMounts(workspacePath, wsContainer)
+	if len(projectMountsRO) > 0 {
+		desiredMounts = append(desiredMounts, projectMountsRO...)
+	}
+
 	// Check if sandbox already exists and is alive
 	bridgeClient, err := m.extSandbox.GetOrCreate(ext.ID)
 	if err == nil && bridgeClient != nil && bridgeClient.IsAlive() {
 		// Existing sandbox — check if mounts are compatible
-		if m.extSandbox.MountsCompatible(ext.ID, projectMounts) {
+		if m.extSandbox.MountsCompatible(ext.ID, projectMounts, desiredMounts) {
 			log.Printf("[lsp] reusing existing sandbox for extension %s", ext.ID)
 			return bridgeClient, false, nil
 		}
@@ -297,9 +308,15 @@ func (m *ExtensionLSPManager) getOrCreateSandbox(ext *extensions.Extension, proj
 		_ = m.extSandbox.Stop(ext.ID)
 	}
 
-	// Create a new sandbox
+	// Create a new sandbox. Resolve {workspace} in the user's Sandbox Configuration
+	// mounts and examine the project's Sandbox Configuration for a node_modules
+	// mount — if found, adapt it for the LSP sandbox so the language server can
+	// resolve its dependencies. Applied to a copy so the shared extension record
+	// isn't mutated.
 	log.Printf("[lsp] creating sandbox for extension %s", ext.ID)
-	_, err = m.extSandbox.Create(ext, projectMounts)
+	extCopy := *ext
+	extCopy.SandboxConfig.Mounts = desiredMounts
+	_, err = m.extSandbox.Create(&extCopy, projectMounts)
 	if err != nil {
 		return nil, false, fmt.Errorf("create extension sandbox: %w", err)
 	}
@@ -463,6 +480,74 @@ func (m *ExtensionLSPManager) collectProjectMounts(workspacePath string) map[str
 	return mounts
 }
 
+// findProjectForWorkspace returns the registered project that owns the given
+// workspace path (worktree or main project directory).
+func (m *ExtensionLSPManager) findProjectForWorkspace(workspacePath string) (*types.Project, error) {
+	if m.projects == nil {
+		return nil, fmt.Errorf("no project store")
+	}
+	projects, err := m.projects.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	absWorkspace, err := filepath.Abs(workspacePath)
+	if err != nil {
+		return nil, err
+	}
+	// Find the longest matching project path prefix.
+	var bestPath string
+	var bestProject *types.Project
+	for i := range projects {
+		absPath, err := filepath.Abs(projects[i].Path)
+		if err != nil {
+			continue
+		}
+		if strings.HasPrefix(absWorkspace, absPath) && (bestProject == nil || len(absPath) > len(bestPath)) {
+			bestPath = absPath
+			bestProject = &projects[i]
+		}
+	}
+	if bestProject == nil {
+		return nil, fmt.Errorf("no project found for workspace %s", workspacePath)
+	}
+	return bestProject, nil
+}
+
+// adaptProjectMounts takes the project's Sandbox Configuration mounts and adapts
+// them for the LSP sandbox. Mounts whose container path lives under the task
+// sandbox project root (/home/sandbox/<project-name>) are remapped relative to
+// the LSP workspace container path. Global paths (e.g. /go, /root/.cache) pass
+// through unchanged. All mounts are forced to read-only mode.
+func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath, wsContainerPath string) []types.SandboxMount {
+	project, err := m.findProjectForWorkspace(workspacePath)
+	if err != nil {
+		log.Printf("[lsp] adaptProjectMounts: %v", err)
+		return nil
+	}
+	if len(project.SandboxMounts) == 0 {
+		return nil
+	}
+	taskRoot := "/home/sandbox/" + project.Name
+	var adapted []types.SandboxMount
+	for _, mo := range project.SandboxMounts {
+		cp := mo.ContainerPath
+		// If the mount lives under the task sandbox project root, remap it
+		// relative to the LSP workspace container path.
+		if strings.HasPrefix(cp, taskRoot+"/") {
+			rel := strings.TrimPrefix(cp, taskRoot+"/")
+			cp = filepath.Join(wsContainerPath, rel)
+		}
+		lspMount := types.SandboxMount{
+			HostPath:      mo.HostPath,
+			ContainerPath: cp,
+			Mode:          "ro",
+		}
+		log.Printf("[lsp] adapted project mount: %s -> %s (ro)", lspMount.HostPath, lspMount.ContainerPath)
+		adapted = append(adapted, lspMount)
+	}
+	return adapted
+}
+
 // LSPRequest makes a synchronous JSON-RPC request to the LSP server for the
 // given file. It looks up the matching extension by file path, gets/creates
 // the sandbox client, sends the request with URI translation, and returns
@@ -492,7 +577,7 @@ func (m *ExtensionLSPManager) LSPRequest(workspacePath, filePath, method string,
 			return nil, fmt.Errorf("no server config for language %q", language)
 		}
 		projectMounts := m.collectProjectMounts(workspacePath)
-		bridgeClient, _, err := m.getOrCreateSandbox(ext, projectMounts)
+		bridgeClient, _, err := m.getOrCreateSandbox(ext, workspacePath, projectMounts)
 		if err != nil {
 			return nil, fmt.Errorf("create sandbox: %w", err)
 		}
@@ -851,35 +936,10 @@ func (r *ExtensionRegistry) GetConfig(language string) *ServerConfig {
 }
 
 // toServerConfig converts an Extension to a ServerConfig.
-// It applies runtime overrides for known extensions (e.g., tsserver.path for TypeScript).
 func (r *ExtensionRegistry) toServerConfig(ext *extensions.Extension) *ServerConfig {
 	lspCfg := ext.Manifest.Capabilities.GetLSP()
 	if lspCfg == nil {
 		return nil
-	}
-
-	initParams := lspCfg.InitParamsOverride
-
-	// Ensure typescript-language-server has tsserver.path pointing to global install.
-	// The sandbox image installs TypeScript globally, not in the workspace.
-	// typescript-language-server expects: initializationOptions.tsserver.path (nested object).
-	if lspCfg.Language == "typescript" || strings.Contains(ext.Name, "typescript") {
-		if initParams == nil {
-			initParams = make(map[string]any)
-		}
-		opts, ok := initParams["initializationOptions"].(map[string]any)
-		if !ok {
-			opts = make(map[string]any)
-			initParams["initializationOptions"] = opts
-		}
-		tsserverOpts, ok := opts["tsserver"].(map[string]any)
-		if !ok {
-			tsserverOpts = make(map[string]any)
-			opts["tsserver"] = tsserverOpts
-		}
-		if _, hasPath := tsserverOpts["path"]; !hasPath {
-			tsserverOpts["path"] = "/usr/local/lib/node_modules/typescript"
-		}
 	}
 
 	return &ServerConfig{
@@ -887,6 +947,6 @@ func (r *ExtensionRegistry) toServerConfig(ext *extensions.Extension) *ServerCon
 		Command:            lspCfg.Command,
 		Args:               lspCfg.Args,
 		Extensions:         lspCfg.Extensions,
-		InitParamsOverride: initParams,
+		InitParamsOverride: lspCfg.InitParamsOverride,
 	}
 }
