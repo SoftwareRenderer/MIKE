@@ -487,12 +487,19 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		fileSize = st.Size()
 	}
 
+	// Only report file_size when the file is binary or too large to render inline
+	const maxDiffSize = 1 << 20 // 1MB
+	reportFileSize := isBinary || (!isBinary && fileSize > maxDiffSize)
+
 	if metaOnly {
-		httputil.JSONResponse(w, http.StatusOK, map[string]any{
+		resp := map[string]any{
 			"line_count": lineCount,
-			"file_size":  fileSize,
 			"isBinary":   isBinary,
-		})
+		}
+		if reportFileSize {
+			resp["file_size"] = fileSize
+		}
+		httputil.JSONResponse(w, http.StatusOK, resp)
 		return
 	}
 
@@ -506,13 +513,16 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	httputil.JSONResponse(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"diff":       string(out),
 		"lines":      lines,
 		"line_count": lineCount,
-		"file_size":  fileSize,
 		"isBinary":   isBinary,
-	})
+	}
+	if reportFileSize {
+		resp["file_size"] = fileSize
+	}
+	httputil.JSONResponse(w, http.StatusOK, resp)
 }
 
 // HandleCheckout checks out a branch.
@@ -957,14 +967,14 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef
 			lineCount = u.OrigAdded
 		}
 		manifest.Files[u.Path] = diffManifestFile{
-			Hash:        git.ComputeUntrackedHash(u),
-			Type:        "untracked",
-			LineCount:   lineCount,
-			FileSize:    u.FileSize,
-			Added:       lineCount,
-			Truncated:   u.Truncated,
-			OrigAdded:   u.OrigAdded,
-			IsBinary:    u.IsBinary,
+			Hash:      git.ComputeUntrackedHash(u),
+			Type:      "untracked",
+			LineCount: lineCount,
+			FileSize:  u.FileSize,
+			Added:     lineCount,
+			Truncated: u.Truncated,
+			OrigAdded: u.OrigAdded,
+			IsBinary:  u.IsBinary,
 		}
 	}
 	return manifest

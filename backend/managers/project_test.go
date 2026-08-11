@@ -5,15 +5,98 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"kanban/backend/config"
+	"kanban/backend/git"
 	"kanban/backend/store"
 	"kanban/backend/types"
 )
+
+// createBareRepo creates a bare git repository at the given path to act as a
+// clone source for tests.
+func createBareRepo(t *testing.T, path string) {
+	t.Helper()
+	cmd := exec.Command("git", "init", "--bare", path)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v (%s)", err, out)
+	}
+}
+
+// TestRepoNameFromGitURL verifies repository name extraction for both SSH and
+// HTTPS git URLs, plus local paths.
+func TestRepoNameFromGitURL(t *testing.T) {
+	cases := []struct {
+		url  string
+		want string
+	}{
+		{"https://github.com/org/repo.git", "repo"},
+		{"https://github.com/org/repo", "repo"},
+		{"https://github.com/org/my.repo.git", "my.repo"},
+		{"git@github.com:org/repo.git", "repo"},
+		{"ssh://git@github.com/org/repo.git", "repo"},
+		{filepath.Join("local", "path", "to", "repo"), "repo"},
+	}
+	for _, c := range cases {
+		got, err := repoNameFromGitURL(c.url)
+		if err != nil {
+			t.Fatalf("repoNameFromGitURL(%q) error: %v", c.url, err)
+		}
+		if got != c.want {
+			t.Fatalf("repoNameFromGitURL(%q) = %q, want %q", c.url, got, c.want)
+		}
+	}
+	if _, err := repoNameFromGitURL(""); err == nil {
+		t.Fatal("expected error for empty URL")
+	}
+	if _, err := repoNameFromGitURL("/"); err == nil {
+		t.Fatal("expected error for root URL")
+	}
+}
+
+// TestHandleCreateClone verifies that HandleCreate clones a repo into a
+// subdirectory of the target parent and creates the project from it.
+func TestHandleCreateClone(t *testing.T) {
+	t.Setenv("DANGER_ZONE", "1")
+	h, _ := testProjectHandler(t)
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "my-remote-repo")
+	createBareRepo(t, remote)
+	workspace := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+
+	body, _ := json.Marshal(types.CreateProjectRequest{
+		Path:   workspace,
+		GitUrl: remote,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/projects", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	h.HandleCreate(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var proj types.Project
+	if err := json.Unmarshal(rr.Body.Bytes(), &proj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	expectedPath := filepath.Join(workspace, "my-remote-repo")
+	if proj.Path != expectedPath {
+		t.Fatalf("expected path %q, got %q", expectedPath, proj.Path)
+	}
+	if proj.Name != "my-remote-repo" {
+		t.Fatalf("expected name %q, got %q", "my-remote-repo", proj.Name)
+	}
+	if !git.IsGitRepo(expectedPath) {
+		t.Fatal("cloned path is not a git repository")
+	}
+}
 
 // floatApprox checks if two floats are approximately equal within a tolerance.
 func floatApprox(t *testing.T, got, want, tol float64) {

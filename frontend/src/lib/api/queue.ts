@@ -457,7 +457,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             await reorderTasksRaw(p.projectId, p.reorders);
             break;
         case 'createProject':
-            await createProjectRaw(p.path, p.sandboxEnabled);
+            await createProjectRaw(p.path, p.sandboxEnabled, p.gitUrl);
             break;
         case 'updateProject':
             await updateProjectRaw(p.id, p.updates);
@@ -507,8 +507,11 @@ export async function queueWrite<T>(type: ActionType, params: Record<string, any
 // =============================================================================
 
 // -- Project endpoints --
-async function createProjectRaw(path: string, sandboxEnabled = false): Promise<Project> {
+async function createProjectRaw(path: string, sandboxEnabled = false, gitUrl?: string): Promise<Project> {
     const body: Record<string, unknown> = { path, sandbox_enabled: sandboxEnabled };
+    if (gitUrl) {
+        body.git_url = gitUrl;
+    }
     if (sandboxEnabled) {
         body.sandbox_network_isolation = true;
     }
