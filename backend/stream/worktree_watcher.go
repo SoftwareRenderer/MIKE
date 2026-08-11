@@ -384,16 +384,21 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 
 	projectID := info.projectID
 	baseRef := info.baseRef
-	timer := time.AfterFunc(1000*time.Millisecond, func() {
+
+	// scheduleDiff arms a diff-compute timer for the task. If a compute is already
+	// in flight when the timer fires, it re-arms with a short delay instead of
+	// dropping the pending change — otherwise a burst of writes during a slow
+	// compute (git diff can exceed the 1s throttle on large repos) would leave the
+	// diff panel stale until the next filesystem event or a page refresh.
+	var scheduleDiff func()
+	scheduleDiff = func() {
 		ww.mu.Lock()
-		if t, exists := ww.throttles[taskID]; exists {
-			t.Stop()
-			delete(ww.throttles, taskID)
-		}
 		if ww.inFlight[taskID] {
+			ww.throttles[taskID] = time.AfterFunc(250*time.Millisecond, scheduleDiff)
 			ww.mu.Unlock()
 			return
 		}
+		delete(ww.throttles, taskID)
 		ww.inFlight[taskID] = true
 		ww.mu.Unlock()
 
@@ -404,8 +409,8 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 			delete(ww.inFlight, taskID)
 			ww.mu.Unlock()
 		}
-	})
-	ww.throttles[taskID] = timer
+	}
+	ww.throttles[taskID] = time.AfterFunc(1000*time.Millisecond, scheduleDiff)
 	ww.mu.Unlock()
 }
 
