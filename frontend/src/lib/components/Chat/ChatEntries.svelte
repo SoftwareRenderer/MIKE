@@ -27,8 +27,6 @@
         projectId,
         taskId,
         onScroll,
-        onWheel,
-        onTouchStart,
         onDismissError,
         onRetryConnect,
         onThreadSwitch,
@@ -66,8 +64,6 @@
         projectId: string;
         taskId: string;
         onScroll?: () => void;
-        onWheel?: () => void;
-        onTouchStart?: () => void;
         onDismissError: (messageId: string) => Promise<void>;
         onRetryConnect: () => void;
         onThreadSwitch: (threadId: string) => Promise<void>;
@@ -286,12 +282,22 @@
         }
     }
 
-    // Recompute sticky header and atBottom when entries change (e.g. new messages arrive).
+    // Recompute sticky header when entries change (e.g. new messages arrive).
+    // If the user is at the bottom, keep the viewport pinned so new content
+    // stays visible; if they scrolled up to read, leave them alone (the jump
+    // button stays visible so they can return to the latest message).
     $effect(() => {
         entries.length;
         computeStickyFromScroll();
-        // When entries change, the user is effectively at the bottom (new content appended)
-        atBottom = true;
+        if (atBottom) {
+            // VirtualList always exposes scrollToBottom, but unit tests may stub
+            // the component — only pin the viewport when the method is available.
+            if (typeof virtualListComp?.scrollToBottom === 'function') {
+                virtualListComp.scrollToBottom();
+                requestAnimationFrame(() => virtualListComp?.scrollToBottom());
+            }
+            atBottom = true;
+        }
     });
 
     /** Scroll to the latest message and hide the jump button. */
@@ -343,8 +349,6 @@
             overscan={5}
             onScrollElChange={handleScrollElChange}
             onscroll={handleCombinedScroll}
-            onwheel={onWheel}
-            ontouchstart={onTouchStart}
             bind:this={virtualListComp}
         >
             {#snippet children({ item: entry, index: entryIdx })}
