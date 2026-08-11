@@ -61,6 +61,10 @@ type extensionSandboxState struct {
 	// mountedProjects is the sorted list of host paths that were mounted,
 	// used to detect when the project set has changed.
 	mountedProjects []string
+	// customMounts is the sorted list of "host:container:mode" strings for the
+	// extension's SandboxConfig.Mounts, used to detect when custom mounts
+	// (e.g. a node_modules mount) have changed and the container needs recreation.
+	customMounts []string
 }
 
 // NewExtensionSandboxManager creates a new ExtensionSandboxManager.
@@ -272,6 +276,9 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 
 	log.Printf("[ext-sandbox] ext=%s created and started container %s (mounts: %d projects)", ext.ID, containerName, len(projectMounts))
 
+	// Snapshot of the extension's custom mounts for compatibility checks.
+	customMounts := customMountSnapshot(ext.SandboxConfig.Mounts)
+
 	// Store state
 	sm.states[ext.ID] = &extensionSandboxState{
 		containerName:   containerName,
@@ -280,6 +287,7 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		isAlive:         true,
 		projectMounts:   projectMounts,
 		mountedProjects: mountedProjects,
+		customMounts:    customMounts,
 	}
 
 	return nil, nil
@@ -516,14 +524,29 @@ func (sm *ExtensionSandboxManager) MountMapping(extID string) map[string]string 
 	return result
 }
 
+// customMountSnapshot returns a sorted list of "host:container:mode" strings
+// for the given mounts, suitable for equality comparison.
+func customMountSnapshot(mounts []types.SandboxMount) []string {
+	if len(mounts) == 0 {
+		return nil
+	}
+	snap := make([]string, len(mounts))
+	for i, m := range mounts {
+		snap[i] = m.HostPath + ":" + m.ContainerPath + ":" + m.Mode
+	}
+	sort.Strings(snap)
+	return snap
+}
+
 // MountsCompatible checks if the current sandbox mounts match the desired set.
-// Returns true if the mounted projects match, false if the container needs recreation.
-func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[string]string) bool {
+// Returns true if the mounted projects and custom extension mounts match,
+// false if the container needs recreation.
+func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[string]string, desiredCustom []types.SandboxMount) bool {
 	state := sm.states[extID]
 	if state == nil {
 		return false
 	}
-	// Compare sorted lists of host paths
+	// Compare sorted lists of project host paths
 	desiredSorted := make([]string, 0, len(desired))
 	for p := range desired {
 		desiredSorted = append(desiredSorted, p)
@@ -534,6 +557,16 @@ func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[st
 	}
 	for i := range desiredSorted {
 		if desiredSorted[i] != state.mountedProjects[i] {
+			return false
+		}
+	}
+	// Compare custom extension mounts (e.g. node_modules)
+	desiredCustomSnap := customMountSnapshot(desiredCustom)
+	if len(desiredCustomSnap) != len(state.customMounts) {
+		return false
+	}
+	for i := range desiredCustomSnap {
+		if desiredCustomSnap[i] != state.customMounts[i] {
 			return false
 		}
 	}

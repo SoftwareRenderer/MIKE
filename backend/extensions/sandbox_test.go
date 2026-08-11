@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"kanban/backend/types"
 	"kanban/pkg/sandboxruntime"
 )
 
@@ -547,5 +548,74 @@ func TestEnsureExtensionImage_NoDockerfileLeavesToPodman(t *testing.T) {
 	// missing so the path exercises the "no Dockerfile -> return nil" branch.
 	if err := sm.ensureExtensionImage(ext, "docker.io/library/definitely-not-pulled:latest"); err != nil {
 		t.Errorf("ensureExtensionImage with no Dockerfile = %v, want nil (leave to podman)", err)
+	}
+}
+
+func TestCustomMountSnapshot(t *testing.T) {
+	// Empty mounts -> nil.
+	if got := customMountSnapshot(nil); got != nil {
+		t.Errorf("customMountSnapshot(nil) = %v, want nil", got)
+	}
+
+	// Single mount.
+	mounts := []types.SandboxMount{
+		{HostPath: "/a", ContainerPath: "/b", Mode: "ro"},
+	}
+	snap := customMountSnapshot(mounts)
+	if len(snap) != 1 || snap[0] != "/a:/b:ro" {
+		t.Errorf("customMountSnapshot = %v, want [\"/a:/b:ro\"]", snap)
+	}
+
+	// Multiple mounts are sorted.
+	mounts2 := []types.SandboxMount{
+		{HostPath: "/z", ContainerPath: "/y", Mode: "rw"},
+		{HostPath: "/a", ContainerPath: "/b", Mode: "ro"},
+	}
+	snap2 := customMountSnapshot(mounts2)
+	if len(snap2) != 2 || snap2[0] != "/a:/b:ro" || snap2[1] != "/z:/y:rw" {
+		t.Errorf("customMountSnapshot = %v, want sorted", snap2)
+	}
+}
+
+func TestMountsCompatible_CustomMounts(t *testing.T) {
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+
+	// Simulate a state with no custom mounts.
+	sm.states["ext1"] = &extensionSandboxState{
+		containerName:   "test",
+		mountedProjects: []string{"/proj"},
+		customMounts:    nil,
+	}
+
+	// Same project mounts, no custom mounts -> compatible.
+	if !sm.MountsCompatible("ext1", map[string]string{"/proj": "/mnt/proj"}, nil) {
+		t.Error("expected compatible with no custom mounts")
+	}
+
+	// Same project mounts, but new custom mount -> NOT compatible (needs recreation).
+	newMounts := []types.SandboxMount{
+		{HostPath: "/tmp/node_modules", ContainerPath: "/mnt/proj/frontend/node_modules", Mode: "ro"},
+	}
+	if sm.MountsCompatible("ext1", map[string]string{"/proj": "/mnt/proj"}, newMounts) {
+		t.Error("expected incompatible when custom mounts are added")
+	}
+
+	// State with custom mounts, same custom mounts -> compatible.
+	sm.states["ext2"] = &extensionSandboxState{
+		containerName:   "test2",
+		mountedProjects: []string{"/proj"},
+		customMounts:    customMountSnapshot(newMounts),
+	}
+	if !sm.MountsCompatible("ext2", map[string]string{"/proj": "/mnt/proj"}, newMounts) {
+		t.Error("expected compatible with same custom mounts")
+	}
+
+	// State with custom mounts, different custom mounts -> NOT compatible.
+	diffMounts := []types.SandboxMount{
+		{HostPath: "/other/node_modules", ContainerPath: "/mnt/proj/src/node_modules", Mode: "ro"},
+	}
+	if sm.MountsCompatible("ext2", map[string]string{"/proj": "/mnt/proj"}, diffMounts) {
+		t.Error("expected incompatible when custom mounts differ")
 	}
 }
