@@ -3,12 +3,14 @@ package lsp
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"kanban/backend/extensions"
 	"kanban/backend/store"
+	"kanban/backend/types"
 )
 
 func testExtensionStore(t *testing.T) *extensions.ExtensionStore {
@@ -242,99 +244,6 @@ func TestExtensionRegistry_NoLSPConfig(t *testing.T) {
 	}
 }
 
-func TestToServerConfig_TypescriptTsserverPath(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	// Create a TypeScript extension WITHOUT tsserver.path in InitParamsOverride
-	// (simulating an old manifest from the registry)
-	ext := makeTestLSPExt("typescript-language-server", "typescript")
-	ext.Manifest.Capabilities.GetLSP().InitParamsOverride = map[string]any{
-		"preferences": map[string]any{
-			"includeCompletionsForModuleExports": true,
-		},
-	}
-	if err := store.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	reg := NewExtensionRegistry(store)
-	cfg := reg.Lookup("hello.ts")
-	if cfg == nil {
-		t.Fatal("Lookup(hello.ts) = nil, want config")
-	}
-
-	// tsserver.path should be injected inside initializationOptions.tsserver.path
-	if cfg.InitParamsOverride == nil {
-		t.Fatal("InitParamsOverride = nil, want non-nil")
-	}
-	opts, ok := cfg.InitParamsOverride["initializationOptions"].(map[string]any)
-	if !ok {
-		t.Fatal("initializationOptions not found in InitParamsOverride")
-	}
-	tsserverOpts, ok := opts["tsserver"].(map[string]any)
-	if !ok {
-		t.Fatal("tsserver not found in initializationOptions")
-	}
-	tsserverPath, ok := tsserverOpts["path"]
-	if !ok {
-		t.Fatal("path not found in initializationOptions.tsserver")
-	}
-	if tsserverPath != "/usr/local/lib/node_modules/typescript" {
-		t.Errorf("path = %v, want /usr/local/lib/node_modules/typescript", tsserverPath)
-	}
-	// Original preferences should be preserved
-	prefs, ok := cfg.InitParamsOverride["preferences"].(map[string]any)
-	if !ok {
-		t.Fatal("preferences not preserved")
-	}
-	if prefs["includeCompletionsForModuleExports"] != true {
-		t.Error("original preferences not preserved")
-	}
-}
-
-func TestToServerConfig_TypescriptNilInitParams(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	// Create a TypeScript extension with NO InitParamsOverride at all
-	ext := makeTestLSPExt("typescript-language-server", "typescript")
-	ext.Manifest.Capabilities.GetLSP().InitParamsOverride = nil
-	if err := store.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	reg := NewExtensionRegistry(store)
-	cfg := reg.Lookup("hello.ts")
-	if cfg == nil {
-		t.Fatal("Lookup(hello.ts) = nil, want config")
-	}
-
-	// tsserver.path should still be injected inside initializationOptions.tsserver.path
-	if cfg.InitParamsOverride == nil {
-		t.Fatal("InitParamsOverride = nil, want non-nil")
-	}
-	opts, ok := cfg.InitParamsOverride["initializationOptions"].(map[string]any)
-	if !ok {
-		t.Fatal("initializationOptions not found in InitParamsOverride")
-	}
-	tsserverOpts, ok := opts["tsserver"].(map[string]any)
-	if !ok {
-		t.Fatal("tsserver not found in initializationOptions")
-	}
-	tsserverPath, ok := tsserverOpts["path"]
-	if !ok {
-		t.Fatal("path not found in initializationOptions.tsserver")
-	}
-	if tsserverPath != "/usr/local/lib/node_modules/typescript" {
-		t.Errorf("path = %v, want /usr/local/lib/node_modules/typescript", tsserverPath)
-	}
-}
-
 func TestToServerConfig_NonTypescriptNoOverride(t *testing.T) {
 	store := testExtensionStore(t)
 	if err := store.InitSchema(); err != nil {
@@ -356,12 +265,9 @@ func TestToServerConfig_NonTypescriptNoOverride(t *testing.T) {
 		t.Fatal("Lookup(main.go) = nil, want config")
 	}
 
-	// Non-TypeScript extensions should NOT get tsserver.path
+	// InitParamsOverride should pass through unchanged from the manifest.
 	if cfg.InitParamsOverride == nil {
 		t.Fatal("InitParamsOverride = nil")
-	}
-	if _, hasPath := cfg.InitParamsOverride["tsserver.path"]; hasPath {
-		t.Error("non-TypeScript extension should not have tsserver.path")
 	}
 	if cfg.InitParamsOverride["staticcheck"] != true {
 		t.Error("original config not preserved")
@@ -673,5 +579,137 @@ func TestIsToolCallsEnabledForFile(t *testing.T) {
 	// Unknown file type — no LSP extension
 	if mgr.IsToolCallsEnabledForFile("README.md") {
 		t.Error("IsToolCallsEnabledForFile(README.md) = true, want false (no LSP extension)")
+	}
+}
+
+func TestResolveWorkspaceMounts(t *testing.T) {
+	projectMounts := map[string]string{
+		"/home/user/projects/kanban/worktrees/MIKE/steel-prism-crypt": "/mnt/steel-prism-crypt",
+	}
+	wsHost := "/home/user/projects/kanban/worktrees/MIKE/steel-prism-crypt"
+
+	mounts := []types.SandboxMount{
+		{
+			HostPath:      "/host/share/node_modules",
+			ContainerPath: "{workspace}/frontend/node_modules",
+			Mode:          "ro",
+		},
+	}
+	resolved := resolveWorkspaceMounts(mounts, wsHost, projectMounts)
+
+	if len(resolved) != 1 {
+		t.Fatalf("resolveWorkspaceMounts returned %d mounts, want 1", len(resolved))
+	}
+	// {workspace} is replaced with the container path of the opened workspace.
+	if resolved[0].ContainerPath != "/mnt/steel-prism-crypt/frontend/node_modules" {
+		t.Errorf("ContainerPath = %q, want %q", resolved[0].ContainerPath, "/mnt/steel-prism-crypt/frontend/node_modules")
+	}
+	// Non-placeholder fields pass through unchanged.
+	if resolved[0].HostPath != "/host/share/node_modules" {
+		t.Errorf("HostPath = %q, want %q", resolved[0].HostPath, "/host/share/node_modules")
+	}
+	if resolved[0].Mode != "ro" {
+		t.Errorf("Mode = %q, want ro", resolved[0].Mode)
+	}
+
+	// No mounts -> no-op (nil).
+	if got := resolveWorkspaceMounts(nil, wsHost, projectMounts); got != nil {
+		t.Errorf("resolveWorkspaceMounts(nil) = %v, want nil", got)
+	}
+
+	// The original slice is not mutated.
+	if mounts[0].ContainerPath != "{workspace}/frontend/node_modules" {
+		t.Errorf("original mount mutated: %q", mounts[0].ContainerPath)
+	}
+}
+
+func TestAdaptProjectMounts(t *testing.T) {
+	root := t.TempDir()
+	projPath := filepath.Join(root, "MIKE")
+	if err := os.MkdirAll(filepath.Join(projPath, "worktrees", "MIKE", "flint"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wsPath := filepath.Join(projPath, "worktrees", "MIKE", "flint")
+
+	projStore, err := store.NewStore(filepath.Join(t.TempDir(), "proj.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { projStore.Close() })
+	if err := projStore.CreateProject(&types.Project{
+		ID:   "MIKE",
+		Name: "MIKE",
+		Path: projPath,
+		SandboxMounts: []types.SandboxMount{
+			{HostPath: "/tmp/kanban-mount/node_modules", ContainerPath: "/home/sandbox/MIKE/frontend/node_modules", Mode: "rw"},
+			{HostPath: "/tmp/kanban-mount/go", ContainerPath: "/go", Mode: "rw"},
+			{HostPath: "/tmp/kanban-mount/.cache", ContainerPath: "/root/.cache", Mode: "rw"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := NewExtensionLSPManager(nil, nil, projStore)
+	wsContainer := "/mnt/flint"
+
+	// All project mounts are adapted: project-relative paths remapped, global
+	// paths pass through, all forced to ro.
+	mounts := mgr.adaptProjectMounts(wsPath, wsContainer)
+	if len(mounts) != 3 {
+		t.Fatalf("adaptProjectMounts returned %d mounts, want 3", len(mounts))
+	}
+
+	// Project-relative mount: remapped from /home/sandbox/MIKE/ to /mnt/flint/.
+	nm := mounts[0]
+	if nm.HostPath != "/tmp/kanban-mount/node_modules" {
+		t.Errorf("node_modules HostPath = %q", nm.HostPath)
+	}
+	if nm.ContainerPath != "/mnt/flint/frontend/node_modules" {
+		t.Errorf("node_modules ContainerPath = %q, want /mnt/flint/frontend/node_modules", nm.ContainerPath)
+	}
+	if nm.Mode != "ro" {
+		t.Errorf("node_modules Mode = %q, want ro", nm.Mode)
+	}
+
+	// Global mount: passes through unchanged (except mode -> ro).
+	goMount := mounts[1]
+	if goMount.ContainerPath != "/go" {
+		t.Errorf("go ContainerPath = %q, want /go", goMount.ContainerPath)
+	}
+	if goMount.Mode != "ro" {
+		t.Errorf("go Mode = %q, want ro", goMount.Mode)
+	}
+
+	// Another global mount.
+	cacheMount := mounts[2]
+	if cacheMount.ContainerPath != "/root/.cache" {
+		t.Errorf("cache ContainerPath = %q, want /root/.cache", cacheMount.ContainerPath)
+	}
+
+	// No project store -> nil.
+	nilMgr := NewExtensionLSPManager(nil, nil, nil)
+	if got := nilMgr.adaptProjectMounts(wsPath, wsContainer); got != nil {
+		t.Errorf("adaptProjectMounts(nil projects) = %v, want nil", got)
+	}
+
+	// No SandboxMounts -> nil.
+	projStore2, err := store.NewStore(filepath.Join(t.TempDir(), "proj2.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { projStore2.Close() })
+	if err := projStore2.CreateProject(&types.Project{
+		ID:   "empty",
+		Name: "empty",
+		Path: filepath.Join(root, "empty"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	emptyMgr := NewExtensionLSPManager(nil, nil, projStore2)
+	if got := emptyMgr.adaptProjectMounts(filepath.Join(root, "empty"), "/mnt/empty"); got != nil {
+		t.Errorf("adaptProjectMounts(no mounts) = %v, want nil", got)
 	}
 }
