@@ -4,7 +4,7 @@
     import MultiSelectBar from './MultiSelectBar.svelte';
     import { tick, onMount } from 'svelte';
     import { moveTask, reorderTasks, clearDoneTasks, deleteTask, startTask } from '$lib/api';
-import { sortByActivity } from '$lib/utils/sort-tasks';
+    import { sortByActivity } from '$lib/utils/sort-tasks';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
