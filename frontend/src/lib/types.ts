@@ -113,6 +113,11 @@ export interface ChatEntry {
     hasReasoning?: boolean;
     isStreaming?: boolean;
     threadId?: string;
+    buildLog?: {
+        title: string;
+        lines: string[];
+        done?: boolean;
+    };
     attachments?: Array<{ mimeType: string; data: string }>;
     toolCalls?: Array<{
         toolId: string;

@@ -96,6 +96,13 @@
         if (entry.role === 'error') return padding + estimateTextHeight(entry.content, 50);
         if (entry.role === 'summarization') return padding + estimateTextHeight(entry.content, 70);
         if (entry.role === 'merge_resolution') return padding + estimateTextHeight(entry.content, 60);
+        if (entry.buildLog) {
+            // Header (~32px) + scrollable log box (max 180px, ~16px per line).
+            const header = 32;
+            const lineCount = Math.min(entry.buildLog.lines.length, 200);
+            const logHeight = Math.min(180, Math.max(18, lineCount * 16) + 6);
+            return padding + header + logHeight + 12;
+        }
         if (entry.role === 'user') {
             let h = padding + estimateTextHeight(entry.content, 60);
             if (entry.attachments?.length) h += entry.attachments.length * 80;
@@ -196,6 +203,32 @@
     // so state survives item unmount/remount during scroll.
     // Keyed by toolId; undefined = use default (auto-expand for trivial diffs).
     let editDiffOverrides = $state<Record<string, boolean>>({});
+
+    // Build/pull progress box DOM refs + at-bottom tracking (keyed by entry id) —
+    // used to auto-scroll the box log while lines stream in, mirroring the
+    // Sandbox config modal's build log behavior.
+    let buildLogEls = $state<Record<string, HTMLDivElement | undefined>>({});
+    let buildLogAtBottom = $state<Record<string, boolean>>({});
+
+    function onBuildLogScroll(entryId: string) {
+        const el = buildLogEls[entryId];
+        if (!el) return;
+        const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+        buildLogAtBottom = { ...buildLogAtBottom, [entryId]: gap < 50 };
+    }
+
+    // Auto-scroll build boxes to the bottom as new lines arrive, but only when
+    // the user is already at the bottom of that box (don't fight manual scroll).
+    $effect(() => {
+        const _els = buildLogEls;
+        const _atBottom = buildLogAtBottom;
+        for (const entry of entries) {
+            if (!entry.buildLog) continue;
+            const el = _els[entry.id];
+            if (!el || entry.buildLog.lines.length === 0) continue;
+            if (_atBottom[entry.id] ?? true) el.scrollTop = el.scrollHeight;
+        }
+    });
 
     // Reasoning expand/collapse overrides — survives item unmount/remount during scroll.
     let reasoningExpandedOverrides = $state<Record<string, boolean>>({});
@@ -444,6 +477,39 @@
                 {:else if entry.role === 'user'}
                     <div class="sticky-user-message" data-user-msg-first-line={entry.content.split('\n')[0]}>
                         <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
+                    </div>
+                {:else if entry.buildLog}
+                    <div class="build-box">
+                        <div class="build-box-header">
+                            {#if entry.buildLog.done}
+                                <svg class="build-box-icon build-box-ok" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                                    <polyline points="22 4 12 14.01 9 11.01"/>
+                                </svg>
+                            {:else}
+                                <svg class="spin build-box-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                                    <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
+                                </svg>
+                            {/if}
+                            <span class="build-box-title">{entry.buildLog.title}</span>
+                            {#if entry.buildLog.done}
+                                <span class="build-box-status">Done</span>
+                            {/if}
+                        </div>
+                        <div
+                            class="build-box-log"
+                            role="log"
+                            aria-label="Build output"
+                            bind:this={buildLogEls[entry.id]}
+                            onscroll={() => onBuildLogScroll(entry.id)}
+                        >
+                            {#each entry.buildLog.lines as line}
+                                <div class="build-box-line">{line}</div>
+                            {/each}
+                            {#if entry.buildLog.lines.length === 0 && !entry.buildLog.done}
+                                <div class="build-box-pending">Building...</div>
+                            {/if}
+                        </div>
                     </div>
                 {:else}
                     <div>
@@ -762,6 +828,68 @@
     @keyframes chat-jump-latest-in {
         from { opacity: 0; transform: translateY(8px); }
         to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Sandbox build/pull progress box — mirrors the Sandbox config modal's build log */
+    .build-box {
+        padding: 8px 0;
+        max-width: 100%;
+    }
+    .spin {
+        animation: spin 1s linear infinite;
+    }
+    .build-box-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        background: var(--color-bg-elevated);
+        border: 1px solid var(--color-border);
+        border-bottom: none;
+        border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+    }
+    .build-box-icon {
+        flex-shrink: 0;
+        color: var(--color-status-yellow);
+    }
+    .build-box-icon.build-box-ok {
+        color: var(--color-status-green, #3fb950);
+    }
+    .build-box-title {
+        font-weight: 500;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .build-box-status {
+        margin-left: auto;
+        flex-shrink: 0;
+        font-size: 0.6875rem;
+        color: var(--color-status-green, #3fb950);
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    .build-box-log {
+        max-height: 180px;
+        overflow-y: auto;
+        padding: 8px 10px;
+        background: var(--color-bg-elevated);
+        border: 1px solid var(--color-border);
+        border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        line-height: 1.5;
+        color: var(--color-text-secondary);
+    }
+    .build-box-line {
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+    .build-box-pending {
+        color: var(--color-text-tertiary);
+        font-style: italic;
     }
 
 </style>

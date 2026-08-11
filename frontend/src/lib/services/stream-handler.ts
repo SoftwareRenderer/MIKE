@@ -49,6 +49,31 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
         return stream.ensureAssistantEntry(genId);
     }
 
+    // Max lines kept in a build/pull progress box — bounds memory for long builds.
+    const MAX_BUILD_LOG_LINES = 200;
+
+    /**
+     * Returns the active (in-progress) build/pull progress box entry, creating one
+     * if needed. A completed box (done === true) is never reused — a later build
+     * opens a fresh box.
+     */
+    function ensureBuildLogEntry(title: string): ChatEntry {
+        const active = [...s.entries].reverse().find(e => e.buildLog && !e.buildLog.done);
+        if (active) return active;
+        const entry: ChatEntry = {
+            id: genId(), role: 'system', content: title, isStreaming: false,
+            createdAt: new Date().toISOString(),
+            buildLog: { title, lines: [] },
+        };
+        s.entries = [...s.entries, entry];
+        // Re-read through the reactive proxy so in-place mutations (lines push,
+        // done flag) notify subscribers — the raw `entry` object is not proxied.
+        // Scroll the chat to reveal the newly-appeared box (line-by-line growth
+        // is handled inside the box itself, so we don't fight the user's scroll).
+        scheduleScroll();
+        return s.entries[s.entries.length - 1]!;
+    }
+
     return function handleEvent(event: StreamEvent, suppressEvents: boolean, projectId: string, taskId: string) {
         switch (event.type) {
             case 'token': {
@@ -269,6 +294,12 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 stream.closeCurrentAssistant();
                 const data = event.data as { message: string; code?: string };
                 const code = data.code || 'error';
+                // Sandbox setup failures (e.g. Dockerfile build) leave the progress box
+                // open — mark it done so the spinner stops and the error card stands out.
+                if (code === 'setup_failed') {
+                    const buildEntry = s.entries.find(e => e.buildLog && !e.buildLog.done);
+                    if (buildEntry && buildEntry.buildLog) buildEntry.buildLog.done = true;
+                }
                 if (code === 'ws_error' || code === 'stopped') break;
                 const message = data.message || 'An error occurred';
                 const entry: ChatEntry = { id: genId(), role: 'error', content: message, isStreaming: false, error: { code, message }, createdAt: new Date().toISOString() };
@@ -282,12 +313,15 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const data = event.data as { state: string; activity?: string };
                 if (data.state === 'pulling_image') {
                     const imgName = data.activity?.replace('Pulling ', '') || 'sandbox image';
-                    s.entries = [...s.entries, { id: genId(), role: 'system', content: `Pulling ${imgName}...`, isStreaming: false, createdAt: new Date().toISOString() }];
+                    ensureBuildLogEntry(`Pulling ${imgName}...`);
                 } else if (data.state === 'building_image') {
-                    s.entries = [...s.entries, { id: genId(), role: 'system', content: 'Building sandbox image from Dockerfile...', isStreaming: false, createdAt: new Date().toISOString() }];
+                    ensureBuildLogEntry('Building sandbox image from Dockerfile...');
                 } else if (data.state === 'starting_container') {
                     s.entries = [...s.entries, { id: genId(), role: 'system', content: 'Starting sandbox container...', isStreaming: false, createdAt: new Date().toISOString() }];
                 } else if (data.state === 'running') {
+                    // The sandbox container started — any build/pull box is complete.
+                    const buildEntry = s.entries.find(e => e.buildLog && !e.buildLog.done);
+                    if (buildEntry && buildEntry.buildLog) buildEntry.buildLog.done = true;
                     if (s.currentAssistantId) {
                         const entry = s.entries.find(e => e.id === s.currentAssistantId);
                         if (!entry || (!entry.content && !entry.reasoningContent)) stream.closeCurrentAssistant();
@@ -335,7 +369,12 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             case 'build_progress': {
                 const data = event.data as { line: string };
                 if (data.line) {
-                    s.entries = [...s.entries, { id: genId(), role: 'system', content: data.line, isStreaming: false, createdAt: new Date().toISOString() }];
+                    const entry = ensureBuildLogEntry('Building sandbox image from Dockerfile...');
+                    const log = entry.buildLog!;
+                    log.lines.push(data.line);
+                    if (log.lines.length > MAX_BUILD_LOG_LINES) {
+                        log.lines.splice(0, log.lines.length - MAX_BUILD_LOG_LINES);
+                    }
                 }
                 break;
             }
