@@ -329,7 +329,44 @@ func TestHandleProjectDiffFile_Meta_Untracked(t *testing.T) {
 	if resp.LineCount != 3 {
 		t.Fatalf("expected line_count 3, got %d", resp.LineCount)
 	}
-	if want := int64(len("line1\nline2\nline3\n")); resp.FileSize != want {
+	// Small untracked files must NOT report file_size — a present file_size means
+	// "large/binary file" to the frontend (would render a "Large file" notice).
+	if resp.FileSize != 0 {
+		t.Fatalf("expected no file_size for small file, got %d", resp.FileSize)
+	}
+	if resp.IsBinary {
+		t.Fatal("expected not binary")
+	}
+}
+
+func TestHandleProjectDiffFile_Meta_LargeUntracked(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	// Untracked file larger than the 1MB diff threshold
+	largeContent := strings.Repeat("x", 1<<20+1) + "\n"
+	createFile(t, projPath, "large.txt", largeContent)
+	proj := &types.Project{ID: "diff-file-meta-large-proj", Name: "diff-file-meta-large-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := newTestGitMux(h)
+
+	rr := doRequest(t, mux, "GET", "/api/projects/diff-file-meta-large-proj/git/diff/file?path=large.txt&meta=1")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		LineCount int   `json:"line_count"`
+		FileSize  int64 `json:"file_size"`
+		IsBinary  bool  `json:"isBinary"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// Large untracked files DO report file_size so the UI shows a "Large file" notice.
+	if want := int64(len(largeContent)); resp.FileSize != want {
 		t.Fatalf("expected file_size %d, got %d", want, resp.FileSize)
 	}
 	if resp.IsBinary {

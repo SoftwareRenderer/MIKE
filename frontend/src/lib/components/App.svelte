@@ -857,6 +857,21 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
     }
 
+    async function handleCloneProject(gitUrl: string, targetDir: string, sandboxEnabled: boolean) {
+        showFileBrowserVal = false;
+        addProjectError = '';
+        try {
+            const proj = await createProject(targetDir, sandboxEnabled, gitUrl);
+            projects.push(proj);
+            appStore.projects = projects;
+            clearTaskDetail();
+            selectProject(proj);
+        } catch (e) {
+            addProjectError = String(e);
+            showFileBrowserVal = true;
+        }
+    }
+
     function toggleSidebar() {
         collapsed = !collapsed;
         appStore.sidebarCollapsed = collapsed;
@@ -1226,6 +1241,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         <FileBrowser
             onClose={() => showFileBrowserVal = false}
             onSelect={handleSelectProjectPath}
+            onClone={handleCloneProject}
         />
     {/if}
     {#if uiStore.showSandboxConfig && currentProject}

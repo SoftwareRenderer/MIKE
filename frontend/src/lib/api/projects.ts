@@ -63,15 +63,15 @@ export async function resetProjectStats(projectId: string, modelName: string, pr
     return resetProjectStatsRaw(projectId, modelName, providerName);
 }
 
-/** Create a new project at the given filesystem path. Queued when offline. */
-export async function createProject(path: string, sandboxEnabled = false): Promise<Project> {
+/** Create a new project at the given filesystem path (or from a git repo). Queued when offline. */
+export async function createProject(path: string, sandboxEnabled = false, gitUrl?: string): Promise<Project> {
     if (getOfflineStatus()) {
-        return await queueWrite('createProject', { path, sandboxEnabled }, {
+        return await queueWrite('createProject', { path, sandboxEnabled, gitUrl }, {
             id: '', name: path, path, sandbox_enabled: sandboxEnabled,
             created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         } as Project);
     }
-    return createProjectRaw(path, sandboxEnabled);
+    return createProjectRaw(path, sandboxEnabled, gitUrl);
 }
 
 /** Update project metadata (name, sandbox settings). Queued when offline. */
