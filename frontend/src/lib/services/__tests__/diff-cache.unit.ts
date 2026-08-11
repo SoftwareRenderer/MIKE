@@ -202,6 +202,35 @@ describe('DiffCache', () => {
         expect(cache.state.files['b.ts'].staged).toBe(false);
     });
 
+    it('processStats reconciles full manifest when hash changes with no file_hashes', async () => {
+        const getTaskDiff = vi.fn(async () => ({
+            files: {
+                'a.ts': { hash: 'h1', type: 'tracked', added: 5, removed: 2, staged: false },
+            },
+        }));
+        const getDiffFile = vi.fn(async () => ({ rows: [] }));
+        const cache = new DiffCache(makeApis({ getTaskDiff, getDiffFile }), () => 'proj-1', () => 'task-1');
+        cache.state.files = { 'a.ts': { path: 'a.ts', rows: [], added: 0, removed: 0 } };
+        cache.tracker.hash = 'old-hash';
+        // Hash changed but file_hashes omitted/empty — must not silently ignore it.
+        cache.processStats({ hash: 'new-hash', files: 1, additions: 0, deletions: 0 }, false);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(getTaskDiff).toHaveBeenCalled();
+    });
+
+    it('processStats fetches delta files on hash change with file_hashes', async () => {
+        const getDiffFile = vi.fn(async () => ({ rows: [] }));
+        const cache = new DiffCache(makeApis({ getDiffFile }), () => 'proj-1', () => 'task-1');
+        cache.fileHashes = { 'a.ts': 'h-old' };
+        cache.state.files = { 'a.ts': { path: 'a.ts', rows: [{ lineNumber: 1, variant: 'added', text: 'x' }], added: 1, removed: 0 } };
+        cache.tracker.hash = 'old-hash';
+        cache.processStats({ hash: 'new-hash', files: 1, additions: 0, deletions: 0, file_hashes: { 'a.ts': 'h-new' } }, false);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(getDiffFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', expect.anything());
+    });
+
     it('processStats removes files via spread for Svelte reactivity', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = {
