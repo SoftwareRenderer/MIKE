@@ -258,7 +258,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 if (lastAssistant && data.predicted_tokens !== undefined) {
                     lastAssistant.stats = { model_name: data.model_name, prompt_tokens: data.prompt_tokens, predicted_tokens: data.predicted_tokens, prompt_ms: data.prompt_ms, predicted_ms: data.predicted_ms, duration: data.duration };
                 }
-                scroll(true);
+                // Non-forced scroll: pin to the bottom only if the user is already
+                // there — a user who scrolled up to read keeps their position.
+                scroll();
                 break;
             }
             case 'error': {

@@ -31,6 +31,37 @@ describe('ChatEntries — Jump to latest button', () => {
         expect(source).toMatch(/\$effect[^{]*\{[^}]*(entries\.length|computeStickyFromScroll)[^}]*atBottom/s);
     });
 
+    it('only pins the viewport / hides the jump button when the user is at the bottom', () => {
+        // A user who scrolled up to read must keep their position: the effect must
+        // gate its scroll-to-bottom + atBottom=true on the current scroll position
+        // instead of unconditionally forcing atBottom to true on every entries change.
+        const effectBlock = source.match(/\$effect\s*\(\s*\(\s*\)\s*=>\s*\{[^}]*entries\.length[^}]*\}/s);
+        expect(effectBlock).toBeTruthy();
+        // Extract the entries-change effect block (from its opening to the first
+        // `});`) rather than using the pre-existing capture regex, which stops at
+        // the first `}` and would miss the guarded assignment.
+        const effectStart = source.indexOf('$effect(() => {\n        entries.length');
+        expect(effectStart).toBeGreaterThan(-1);
+        const effectEnd = source.indexOf('});', effectStart);
+        expect(effectEnd).toBeGreaterThan(effectStart);
+        const effectBody = source.slice(effectStart, effectEnd);
+        // The effect must guard on atBottom
+        expect(effectBody).toMatch(/if\s*\(\s*atBottom\s*\)/);
+        // atBottom = true must only appear inside that guard — i.e. after the
+        // guard opens, never unconditionally before it.
+        const guardIdx = effectBody.indexOf('if (atBottom)');
+        const assignIdx = effectBody.indexOf('atBottom = true');
+        expect(guardIdx).toBeGreaterThan(-1);
+        expect(assignIdx).toBeGreaterThan(guardIdx);
+    });
+
+    it('pins the viewport to the bottom when new entries arrive while at the bottom', () => {
+        // When the user is at the bottom, the effect must keep up with new content
+        // by scrolling the virtual list to the bottom (immediate + next frame).
+        expect(source).toContain('virtualListComp?.scrollToBottom()');
+        expect(source).toMatch(/requestAnimationFrame\s*\(\s*\(\s*\)\s*=>\s*virtualListComp\?\.scrollToBottom\(\)/);
+    });
+
     it('renders a jump-to-latest button with class chat-jump-latest', () => {
         expect(source).toContain('chat-jump-latest');
     });
