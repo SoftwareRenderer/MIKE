@@ -426,9 +426,6 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			if entry == "" || entry == "." || entry == ".." {
 				continue
 			}
-			if entry[0] == '.' {
-				continue
-			}
 			// ls -p appends '/' to directory names
 			isDir := strings.HasSuffix(entry, "/")
 			name := strings.TrimSuffix(entry, "/")
@@ -463,9 +460,6 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, e := range entries {
-		if e.Name()[0] == '.' {
-			continue
-		}
 		if !includeFiles && !e.IsDir() {
 			continue
 		}
