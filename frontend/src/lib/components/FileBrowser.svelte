@@ -13,7 +13,17 @@
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
 
-    let { onClose, onSelect }: { onClose: () => void; onSelect: (path: string, sandboxEnabled: boolean) => void } = $props();
+    let {
+        onClose,
+        onSelect,
+        onClone,
+    }: {
+        onClose: () => void;
+        onSelect: (path: string, sandboxEnabled: boolean) => void;
+        onClone: (gitUrl: string, targetDir: string, sandboxEnabled: boolean) => Promise<void>;
+    } = $props();
+
+    let activeTab = $state<'browse' | 'clone'>('browse');
 
     let sandboxEnabled = $state(true);
 
@@ -26,6 +36,11 @@
     let showNewFolder = $state(false);
     let newFolderName = $state('');
     let mkdirLoading = $state(false);
+
+    // Clone tab state
+    let cloneUrl = $state('');
+    let cloneLoading = $state(false);
+    let cloneError = $state('');
 
     async function loadDir(path: string) {
         loading = true;
@@ -130,6 +145,28 @@
         }
     }
 
+    async function handleClone() {
+        const url = cloneUrl.trim();
+        if (!url) {
+            cloneError = 'Please enter a git repository URL';
+            return;
+        }
+        cloneError = '';
+        cloneLoading = true;
+        try {
+            await onClone(url, currentPath, sandboxEnabled);
+        } catch (e) {
+            cloneError = String(e);
+        } finally {
+            cloneLoading = false;
+        }
+    }
+
+    function switchTab(tab: 'browse' | 'clone') {
+        cloneError = '';
+        activeTab = tab;
+    }
+
     // Load user's home directory on mount
     onMount(() => {
         fetch('/api/home')
@@ -147,84 +184,131 @@
     }
 </script>
 
-<BaseModal title="Select Project Directory" width="560px" zIndex={300} onClose={handleClose}>
+<BaseModal title="Add Project" width="560px" zIndex={300} onClose={handleClose}>
         {#snippet toolbar()}
-            <div class="path-bar">
-            <div class="path-bar-row">
-                <button class="home-btn" onclick={() => { fetch('/api/home').then(r => r.json()).then(d => loadDir(d.home)).catch(() => loadDir('/home')); }} aria-label="Go to home directory" title="Go to home directory">
-                    <Icon src={homeIcon} color="#8B949E" width={18} height={18} />
+            <div class="tabs">
+                <button
+                    type="button"
+                    class={`tab${activeTab === 'browse' ? ' active' : ''}`}
+                    onclick={() => switchTab('browse')}
+                    title="Browse for an existing directory"
+                >
+                    Browse
                 </button>
-                <input
-                    type="text"
-                    class="path-input"
-                    bind:value={currentPath}
-                    onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
-                    placeholder="Enter path or browse..."
-                    aria-label="File path"
-                />
-                <button class="icon-btn-sm" onclick={toggleNewFolder} aria-label="New folder" title="New folder" disabled={loading}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-                        <line x1="12" y1="10" x2="12" y2="16"/>
-                        <line x1="9" y1="13" x2="15" y2="13"/>
-                    </svg>
+                <button
+                    type="button"
+                    class={`tab${activeTab === 'clone' ? ' active' : ''}`}
+                    onclick={() => switchTab('clone')}
+                    title="Clone a git repository"
+                >
+                    Clone from Git
                 </button>
             </div>
-            {#if showNewFolder}
-                <div class="new-folder-row">
-                    <!-- svelte-ignore a11y_autofocus -->
+            {#if activeTab === 'browse'}
+                <div class="path-bar">
+                <div class="path-bar-row">
+                    <button class="home-btn" onclick={() => { fetch('/api/home').then(r => r.json()).then(d => loadDir(d.home)).catch(() => loadDir('/home')); }} aria-label="Go to home directory" title="Go to home directory">
+                        <Icon src={homeIcon} color="#8B949E" width={18} height={18} />
+                    </button>
                     <input
                         type="text"
-                        class="folder-name-input"
-                        bind:value={newFolderName}
-                        placeholder="Folder name"
-                        onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') showNewFolder = false; }}
-                        autofocus
-                        aria-label="New folder name"
+                        class="path-input"
+                        bind:value={currentPath}
+                        onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
+                        placeholder="Enter path or browse..."
+                        aria-label="File path"
                     />
-                    <button class="btn-mini" onclick={handleCreateFolder} disabled={mkdirLoading || !newFolderName.trim()} title="Create">{mkdirLoading ? '...' : 'Create'}</button>
-                    <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title="Cancel">✕</button>
+                    <button class="icon-btn-sm" onclick={toggleNewFolder} aria-label="New folder" title="New folder" disabled={loading}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                            <line x1="12" y1="10" x2="12" y2="16"/>
+                            <line x1="9" y1="13" x2="15" y2="13"/>
+                        </svg>
+                    </button>
+                </div>
+                {#if showNewFolder}
+                    <div class="new-folder-row">
+                        <!-- svelte-ignore a11y_autofocus -->
+                        <input
+                            type="text"
+                            class="folder-name-input"
+                            bind:value={newFolderName}
+                            placeholder="Folder name"
+                            onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') showNewFolder = false; }}
+                            autofocus
+                            aria-label="New folder name"
+                        />
+                        <button class="btn-mini" onclick={handleCreateFolder} disabled={mkdirLoading || !newFolderName.trim()} title="Create">{mkdirLoading ? '...' : 'Create'}</button>
+                        <button class="btn-mini btn-mini-cancel" onclick={() => { showNewFolder = false; newFolderName = ''; }} title="Cancel">✕</button>
+                    </div>
+                {/if}
                 </div>
             {/if}
-            </div>
         {/snippet}
 
         <div class="body-wrapper">
-            {#if error}
-                <div class="error">{error}</div>
-            {/if}
-
-            {#if loading}
-                <div class="loading">Loading...</div>
-            {:else}
-                <!-- Git indicator -->
-                {#if isGitRepo}
-                    <div class="git-indicator">✓ This is a git repository</div>
+            {#if activeTab === 'browse'}
+                {#if error}
+                    <div class="error">{error}</div>
                 {/if}
 
-                <!-- File list -->
-                <div class="file-list" role="list" aria-label="Directory contents">
-                    {#each entries as entry}
-                        <button
-                            type="button"
-                            class={`file-entry${entry.isDir ? ' dir' : ''}${entry.isGitRepo ? ' git-repo' : ''}`}
-                            onclick={() => handleClick(entry)}
-                            aria-label={`${entry.isDir ? 'Folder' : 'File'}: ${entry.name}${entry.isGitRepo ? ', git repository' : ''}`}
-                            title={`${entry.isDir ? 'Open folder' : 'File'}: ${entry.name}${entry.isGitRepo ? ' (git repository)' : ''}`}
-                        >
-                            <span class="icon" aria-hidden="true">
-                                {#if entry.isDir}
-                                    <Icon src={folderIcon} color="#6E7681" width={16} height={16} />
-                                {:else}
-                                    <Icon src={fileIcon} color="#6E7681" width={16} height={16} />
+                {#if loading}
+                    <div class="loading">Loading...</div>
+                {:else}
+                    <!-- Git indicator -->
+                    {#if isGitRepo}
+                        <div class="git-indicator">✓ This is a git repository</div>
+                    {/if}
+
+                    <!-- File list -->
+                    <div class="file-list" role="list" aria-label="Directory contents">
+                        {#each entries as entry}
+                            <button
+                                type="button"
+                                class={`file-entry${entry.isDir ? ' dir' : ''}${entry.isGitRepo ? ' git-repo' : ''}`}
+                                onclick={() => handleClick(entry)}
+                                aria-label={`${entry.isDir ? 'Folder' : 'File'}: ${entry.name}${entry.isGitRepo ? ', git repository' : ''}`}
+                                title={`${entry.isDir ? 'Open folder' : 'File'}: ${entry.name}${entry.isGitRepo ? ' (git repository)' : ''}`}
+                            >
+                                <span class="icon" aria-hidden="true">
+                                    {#if entry.isDir}
+                                        <Icon src={folderIcon} color="#6E7681" width={16} height={16} />
+                                    {:else}
+                                        <Icon src={fileIcon} color="#6E7681" width={16} height={16} />
+                                    {/if}
+                                </span>
+                                <span class="name">{entry.name}</span>
+                                {#if entry.isGitRepo}
+                                    <span class="git-badge">git</span>
                                 {/if}
-                            </span>
-                            <span class="name">{entry.name}</span>
-                            {#if entry.isGitRepo}
-                                <span class="git-badge">git</span>
-                            {/if}
-                        </button>
-                    {/each}
+                            </button>
+                        {/each}
+                    </div>
+                {/if}
+            {:else}
+                <div class="clone-form">
+                    <label class="clone-label" for="clone-url">Git repository URL</label>
+                    <!-- svelte-ignore a11y_autofocus -->
+                    <input
+                        id="clone-url"
+                        type="text"
+                        class="clone-url-input"
+                        bind:value={cloneUrl}
+                        placeholder="https://github.com/org/repo.git"
+                        onkeydown={(e) => { if (e.key === 'Enter' && !cloneLoading) handleClone(); }}
+                        autofocus
+                        aria-label="Git repository URL"
+                    />
+                    <div class="clone-help">Supports HTTPS and SSH URLs (e.g. <code>git@github.com:org/repo.git</code>).</div>
+
+                    <div class="clone-target">
+                        <span class="clone-target-label">Clone into</span>
+                        <span class="clone-target-path">{formatPath(currentPath)}</span>
+                    </div>
+
+                    {#if cloneError}
+                        <div class="error">{cloneError}</div>
+                    {/if}
                 </div>
             {/if}
         </div>
@@ -238,13 +322,19 @@
                     <span>Use Sandbox</span>
                 </label>
                 <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel">Cancel</button>
-                {#if isGitRepo}
-                    <button type="button" class="btn-primary" onclick={handleSelect} title="Select this directory as project">
-                        Select
-                    </button>
+                {#if activeTab === 'browse'}
+                    {#if isGitRepo}
+                        <button type="button" class="btn-primary" onclick={handleSelect} title="Select this directory as project">
+                            Select
+                        </button>
+                    {:else}
+                        <button type="button" class="btn-primary" onclick={handleInitGit} disabled={initGitLoading} title="Initialize git repository in this directory">
+                            {initGitLoading ? 'Initializing...' : 'Initialize Git'}
+                        </button>
+                    {/if}
                 {:else}
-                    <button type="button" class="btn-primary" onclick={handleInitGit} disabled={initGitLoading} title="Initialize git repository in this directory">
-                        {initGitLoading ? 'Initializing...' : 'Initialize Git'}
+                    <button type="button" class="btn-primary" onclick={handleClone} disabled={cloneLoading || !cloneUrl.trim()} title="Clone repository into the current directory">
+                        {cloneLoading ? 'Cloning...' : 'Clone'}
                     </button>
                 {/if}
                 </div>
@@ -272,6 +362,39 @@
     .body-wrapper,
     .footer-wrapper {
         display: contents;
+    }
+    .tabs {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 8px;
+        background: var(--color-surface-2);
+        border-radius: var(--radius-md);
+        padding: 4px;
+    }
+    .tab {
+        flex: 1;
+        padding: 8px 12px;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-sm);
+        color: var(--color-text-secondary);
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        white-space: nowrap;
+        text-align: center;
+    }
+    .tab:hover {
+        color: var(--color-text-primary);
+        background: var(--color-surface-3);
+    }
+    .tab.active {
+        background: var(--color-accent-dark);
+        color: white;
+    }
+    .tab.active:hover {
+        background: var(--color-accent-hover);
+        color: white;
     }
     .path-bar {
         display: flex;
@@ -346,6 +469,63 @@
         font-size: 0.875rem;
         font-family: var(--font-mono);
         outline: none;
+    }
+    .clone-form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 8px 0;
+    }
+    .clone-label {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+    .clone-url-input {
+        width: 100%;
+        padding: 10px 12px;
+        background: var(--color-surface-2);
+        border: 1px solid var(--color-surface-4);
+        border-radius: var(--radius-md);
+        color: var(--color-text-primary);
+        font-size: 0.875rem;
+        font-family: var(--font-mono);
+        outline: none;
+    }
+    .clone-url-input:focus-visible {
+        border-color: var(--color-accent);
+    }
+    .clone-help {
+        font-size: 0.8rem;
+        color: var(--color-text-tertiary);
+    }
+    .clone-help code {
+        font-family: var(--font-mono);
+        background: var(--color-surface-2);
+        padding: 1px 4px;
+        border-radius: var(--radius-sm);
+    }
+    .clone-target {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        background: var(--color-surface-2);
+        border-radius: var(--radius-md);
+    }
+    .clone-target-label {
+        font-size: 0.8rem;
+        color: var(--color-text-secondary);
+        white-space: nowrap;
+    }
+    .clone-target-path {
+        flex: 1;
+        font-size: 0.8rem;
+        font-family: var(--font-mono);
+        color: var(--color-text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .btn-mini {
         padding: 8px 12px;

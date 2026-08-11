@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -71,6 +72,37 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.Path = strings.TrimSpace(req.Path)
+
+	// If git_url is provided, clone the repo into <path>/<repo-name> first,
+	// then proceed with normal project creation from the cloned directory.
+	if req.GitUrl != "" {
+		repoName, err := repoNameFromGitURL(req.GitUrl)
+		if err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// Validate the target parent exists and is a directory.
+		info, err := os.Stat(req.Path)
+		if err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "clone target parent does not exist: "+err.Error())
+			return
+		}
+		if !info.IsDir() {
+			httputil.JSONError(w, http.StatusBadRequest, "clone target parent is not a directory")
+			return
+		}
+		targetPath := filepath.Join(req.Path, repoName)
+		if _, err := os.Stat(targetPath); err == nil {
+			httputil.JSONError(w, http.StatusBadRequest, "target directory already exists: "+targetPath)
+			return
+		}
+		cmd := osexec.Command("git", "clone", req.GitUrl, targetPath)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, "git clone failed: "+strings.TrimSpace(string(out)))
+			return
+		}
+		req.Path = targetPath
+	}
 
 	info, err := os.Stat(req.Path)
 	if err != nil {
@@ -510,6 +542,27 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// repoNameFromGitURL extracts the repository name from a git URL.
+// Supports HTTPS (https://host/user/repo.git) and SSH (git@host:user/repo.git) forms.
+func repoNameFromGitURL(gitURL string) (string, error) {
+	s := strings.TrimSpace(gitURL)
+	if s == "" {
+		return "", fmt.Errorf("git_url is required")
+	}
+	// SSH form uses ':' as the separator after the host (no scheme present).
+	if strings.Contains(s, ":") && !strings.Contains(s, "://") {
+		idx := strings.LastIndex(s, ":")
+		s = s[idx+1:]
+	}
+	s = strings.TrimSuffix(s, ".git")
+	s = strings.TrimSuffix(s, "/")
+	base := filepath.Base(s)
+	if base == "" || base == "." || base == "/" {
+		return "", fmt.Errorf("could not determine repository name from git URL")
+	}
+	return base, nil
 }
 
 // generateProjectID generates a project ID from path (basename or slugified).
