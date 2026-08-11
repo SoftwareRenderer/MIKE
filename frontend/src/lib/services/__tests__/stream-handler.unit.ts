@@ -603,6 +603,99 @@ describe('createStreamHandler', () => {
             expect(stream.state.entries.length).toBe(1);
         });
     });
+
+    describe('sandbox build progress consolidation', () => {
+        function setup() {
+            const cb = makeCallbacks();
+            const stream = new StreamState();
+            const handleEvent = createStreamHandler(stream, cb);
+            return { cb, stream, handleEvent };
+        }
+
+        it('status:building_image creates a single buildLog entry (not a plain system message)', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'status', data: { state: 'building_image', activity: 'Building sandbox image from Dockerfile' } }, false, 'p1', 't1');
+            expect(stream.state.entries).toHaveLength(1);
+            const entry = stream.state.entries[0];
+            expect(entry.role).toBe('system');
+            expect(entry.buildLog).toBeDefined();
+            expect(entry.buildLog!.title).toBe('Building sandbox image from Dockerfile...');
+            expect(entry.buildLog!.lines).toEqual([]);
+        });
+
+        it('build_progress lines accumulate into a single entry', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'status', data: { state: 'building_image' } }, false, 'p1', 't1');
+            handleEvent({ type: 'build_progress', data: { line: 'Step 1/5 : FROM node:20' } }, false, 'p1', 't1');
+            handleEvent({ type: 'build_progress', data: { line: 'Step 2/5 : RUN npm ci' } }, false, 'p1', 't1');
+            handleEvent({ type: 'build_progress', data: { line: 'Step 3/5 : COPY . .' } }, false, 'p1', 't1');
+            expect(stream.state.entries).toHaveLength(1);
+            expect(stream.state.entries[0].buildLog!.lines).toEqual([
+                'Step 1/5 : FROM node:20',
+                'Step 2/5 : RUN npm ci',
+                'Step 3/5 : COPY . .',
+            ]);
+        });
+
+        it('build_progress without a prior status creates the box entry on demand', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'build_progress', data: { line: 'Step 1/5 : FROM node:20' } }, false, 'p1', 't1');
+            handleEvent({ type: 'build_progress', data: { line: 'Step 2/5 : RUN npm ci' } }, false, 'p1', 't1');
+            expect(stream.state.entries).toHaveLength(1);
+            expect(stream.state.entries[0].buildLog!.lines).toHaveLength(2);
+        });
+
+        it('status:pulling_image creates a buildLog entry with the pull title', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'status', data: { state: 'pulling_image', activity: 'Pulling ubuntu:24.04' } }, false, 'p1', 't1');
+            handleEvent({ type: 'build_progress', data: { line: 'Pulling fs layer...' } }, false, 'p1', 't1');
+            expect(stream.state.entries).toHaveLength(1);
+            expect(stream.state.entries[0].buildLog!.title).toBe('Pulling ubuntu:24.04...');
+            expect(stream.state.entries[0].buildLog!.lines).toEqual(['Pulling fs layer...']);
+        });
+
+        it('status:running marks the active buildLog entry as done', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'status', data: { state: 'building_image' } }, false, 'p1', 't1');
+            handleEvent({ type: 'build_progress', data: { line: 'naming to sandbox-image' } }, false, 'p1', 't1');
+            handleEvent({ type: 'status', data: { state: 'running', activity: 'Sandbox container started' } }, false, 'p1', 't1');
+            expect(stream.state.entries).toHaveLength(1);
+            expect(stream.state.entries[0].buildLog!.done).toBe(true);
+        });
+
+        it('a new build after a completed one starts a fresh box entry', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'status', data: { state: 'building_image' } }, false, 'p1', 't1');
+            handleEvent({ type: 'build_progress', data: { line: 'first build line' } }, false, 'p1', 't1');
+            handleEvent({ type: 'status', data: { state: 'running' } }, false, 'p1', 't1');
+            // Second build on a later task run
+            handleEvent({ type: 'status', data: { state: 'building_image' } }, false, 'p1', 't1');
+            handleEvent({ type: 'build_progress', data: { line: 'second build line' } }, false, 'p1', 't1');
+            expect(stream.state.entries).toHaveLength(2);
+            expect(stream.state.entries[0].buildLog!.done).toBe(true);
+            expect(stream.state.entries[1].buildLog!.done).toBeUndefined();
+            expect(stream.state.entries[1].buildLog!.lines).toEqual(['second build line']);
+        });
+
+        it('build_progress caps the line count to the last N lines', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'status', data: { state: 'building_image' } }, false, 'p1', 't1');
+            for (let i = 0; i < 250; i++) {
+                handleEvent({ type: 'build_progress', data: { line: `line ${i}` } }, false, 'p1', 't1');
+            }
+            expect(stream.state.entries[0].buildLog!.lines).toHaveLength(200);
+            expect(stream.state.entries[0].buildLog!.lines[0]).toBe('line 50');
+            expect(stream.state.entries[0].buildLog!.lines[199]).toBe('line 249');
+        });
+
+        it('setup_failed error marks the active buildLog entry done (stops the spinner)', () => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'status', data: { state: 'building_image' } }, false, 'p1', 't1');
+            handleEvent({ type: 'build_progress', data: { line: 'ERROR: failed to solve' } }, false, 'p1', 't1');
+            handleEvent({ type: 'error', data: { code: 'setup_failed', message: 'failed to build sandbox image' } }, false, 'p1', 't1');
+            expect(stream.state.entries[0].buildLog!.done).toBe(true);
+        });
+    });
 });
 
 
