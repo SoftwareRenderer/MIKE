@@ -7,6 +7,7 @@
     import ReasoningBlock from './ReasoningBlock.svelte';
     import MessageStats from './MessageStats.svelte';
     import { formatTimestamp } from '$lib/utils/format-time';
+    import { computeInterleavedLayout } from '$lib/utils/chat-layout';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
 
     interface ToolCallInfo {
@@ -118,43 +119,10 @@
             : ''
     );
 
-    /** Build interleaved segments for reasoning-region. Returns layout or null. */
-    type Segment = { type: 'reasoning', text: string } | { type: 'tool', tc: ToolCallInfo };
-
-    function _computeLayout(tcs: ToolCallInfo[] | undefined, reasoning: string | undefined, txt: string | undefined): { reasoningSegments: Segment[]; trailingContent: string; trailingTools: ToolCallInfo[] } | null {
-        if (!tcs || tcs.length === 0) return null;
-        const hasPositionData = tcs.some(tc => tc.contentIndex !== undefined && tc.reasoningIndex !== undefined);
-        if (!hasPositionData) return null;
-
-        const reasoningText = reasoning || '';
-        const contentText = txt || '';
-        const positioned = tcs.filter(tc => tc.contentIndex !== undefined && tc.reasoningIndex !== undefined);
-        const unpositioned = tcs.filter(tc => tc.contentIndex === undefined || tc.reasoningIndex === undefined);
-        const withinReasoning = positioned.filter(tc => reasoningText.length > 0 && (tc.reasoningIndex || 0) <= reasoningText.length).sort((a, b) => (a.reasoningIndex || 0) - (b.reasoningIndex || 0));
-        const afterReasoning = positioned.filter(tc => reasoningText.length === 0 || (tc.reasoningIndex || 0) > reasoningText.length).sort((a, b) => (a.contentIndex || 0) - (b.contentIndex || 0));
-
-        const reasoningSegments: Segment[] = [];
-        let lastIdx = 0;
-        for (const tc of withinReasoning) {
-            const rIdx = tc.reasoningIndex || 0;
-            if (rIdx > lastIdx) {
-                reasoningSegments.push({ type: 'reasoning', text: reasoningText.slice(lastIdx, rIdx) });
-            }
-            reasoningSegments.push({ type: 'tool', tc });
-            lastIdx = rIdx;
-        }
-        if (lastIdx < reasoningText.length) {
-            reasoningSegments.push({ type: 'reasoning', text: reasoningText.slice(lastIdx) });
-        }
-        if (withinReasoning.length === 0) return null;
-
-        return { reasoningSegments, trailingContent: contentText, trailingTools: afterReasoning.concat(unpositioned) };
-    }
-
     // Resolved reasoning for interleaved layout (fetched on-demand)
     let resolvedReasoningContent = $state<string | undefined>();
     let effectiveReasoning = $derived(resolvedReasoningContent ?? reasoningContent);
-    let interleavedLayout = $derived(_computeLayout(toolCalls, effectiveReasoning, content));
+    let interleavedLayout = $derived(computeInterleavedLayout(toolCalls, effectiveReasoning, content));
 
     function toggleArgs(toolId: string) {
         const next = new Set(expandedArgs);
