@@ -1354,7 +1354,7 @@
             bind:attachments={draftAttachments}
             disabled={disabled}
             isLoading={isLoading}
-            placeholder="Send a message to the agent..."
+            placeholder="Send a message..."
             providers={providers}
             selectedModel={selectedModel}
             selectedUrl={selectedUrl}
