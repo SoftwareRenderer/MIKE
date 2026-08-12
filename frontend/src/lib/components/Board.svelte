@@ -18,7 +18,7 @@
         uiInjector.refreshSlot(INJECTION_POINTS.PROJECT_BOARD, { component: 'Board', projectId });
     });
 
-    let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, scrollToColumn }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; scrollToColumn?: string | null } = $props();
+    let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, onSelectTask, scrollToColumn }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; onSelectTask?: (task: Task) => void; scrollToColumn?: string | null } = $props();
     let expandedTasksContext = getExpandedTasksContext();
 
     // Multi-select actions (wires up floating bar events)
@@ -113,6 +113,7 @@
     });
 
     function handleSelectTask(t: Task) {
+        onSelectTask?.(t);
         // Push state first so the URL is updated before the subscription fires
         const url = new URL(location.href);
         url.searchParams.set('task', t.id);
