@@ -167,6 +167,10 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if wtDir := os.Getenv("MIKE_WORKTREES_DIR"); wtDir != "" {
+		workspaceDir = wtDir
+	}
 	// Resolve relative paths to absolute so the frontend can display them correctly
 	if workspaceDir != "" && !filepath.IsAbs(workspaceDir) {
 		if abs, err := filepath.Abs(workspaceDir); err == nil {
