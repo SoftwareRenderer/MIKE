@@ -24,6 +24,7 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     import Toast from './Toast.svelte';
     import ConfirmationDialog from './ConfirmationDialog.svelte';
     import CommitDialog from './Chat/CommitDialog.svelte';
+    import CompressContextDialog from './Chat/CompressContextDialog.svelte';
     import LoginModal from './LoginModal.svelte';
     import SandboxConfigModal from './SandboxConfigModal.svelte';
     import ExplorerView from './ExplorerView.svelte';
@@ -1258,6 +1259,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     <Toast />
     <ConfirmationDialog />
     <CommitDialog />
+    <CompressContextDialog />
     <SWUpdateBanner />
 </div>
 {/if}

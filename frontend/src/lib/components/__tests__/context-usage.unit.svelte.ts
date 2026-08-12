@@ -10,14 +10,23 @@ const source = readFileSync(contextUsagePath, 'utf-8');
 describe('ContextUsage rendering', () => {
     it('shows token usage when used > 0', () => {
         expect(source).toContain('used > 0');
-        expect(source).toContain('usage-text');
+        expect(source).toContain('tooltip');
     });
 
-    it('shows usage bar with percentage when limit is set', () => {
-        expect(source).toContain('limit > 0');
-        expect(source).toContain('usage-bar');
-        expect(source).toContain('usage-fill');
-        expect(source).toContain('percentage');
+    it('shows total context and percentage in the tooltip only', () => {
+        expect(source).toContain('tooltip');
+        expect(source).toContain('/ ${formatTokens(limit)} tokens');
+        expect(source).toContain('${percentage}%');
+    });
+
+    it('renders the shared ContextDonut component', () => {
+        expect(source).toContain('import ContextDonut');
+        expect(source).toContain('<ContextDonut {used} {limit} />');
+    });
+
+    it('shows the numerator (used tokens) next to the donut', () => {
+        expect(source).toContain('usage-text');
+        expect(source).toContain('{formatTokens(used)}');
     });
 
     it('formats tokens with K suffix for thousands', () => {
@@ -30,23 +39,9 @@ describe('ContextUsage rendering', () => {
         expect(source).toContain('M');
     });
 
-    it('shows green bar when usage is low', () => {
-        expect(source).toContain('color-status-green');
-    });
-
-    it('shows amber warning when usage exceeds 70%', () => {
-        expect(source).toContain('percentage > 70');
-        expect(source).toContain('color-status-amber');
-    });
-
-    it('shows orange warning when usage exceeds 80%', () => {
-        expect(source).toContain('percentage > 80');
-        expect(source).toContain('color-status-orange-dark');
-    });
-
-    it('shows red danger when usage exceeds 90%', () => {
-        expect(source).toContain('percentage >= 90');
-        expect(source).toContain('color-status-red');
+    it('no longer renders a linear usage bar', () => {
+        expect(source).not.toContain('usage-bar');
+        expect(source).not.toContain('usage-fill');
     });
 
     it('is clickable when onSummarize is provided', () => {
@@ -57,11 +52,6 @@ describe('ContextUsage rendering', () => {
     it('shows spinner while summarizing', () => {
         expect(source).toContain('isSummarizing');
         expect(source).toContain('spinner');
-        expect(source).toContain('Summarizing...');
-    });
-
-    it('shows cancel icon when summarizing', () => {
-        expect(source).toContain('cancel-icon');
     });
 
     it('calls onSummarizeCancel when clicking during summarization', () => {

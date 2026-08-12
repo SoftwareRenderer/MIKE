@@ -1849,6 +1849,32 @@ func (wm *WorktreeManager) GitRunInWorktreeOutput(taskID string, args ...string)
 	return wm.gitRunOutput(worktreePath, args...)
 }
 
+// StageIndexedFiles refreshes the index of currently staged files from the
+// working tree, so post-staging manual edits are included in the next commit
+// instead of being silently dropped. Never-staged files stay untouched.
+// Best-effort: logs failures, never blocks the commit.
+func (wm *WorktreeManager) StageIndexedFiles(taskID string) {
+	out, err := wm.GitRunInWorktreeOutput(taskID, "diff", "--staged", "--name-only", "-z", "HEAD")
+	if err != nil {
+		log.Printf("[stage] task=%s failed to list staged files: %v", taskID, err)
+		return
+	}
+	// Output is NUL-separated; the final token after the trailing NUL is empty.
+	var paths []string
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	if len(paths) == 0 {
+		return
+	}
+	args := append([]string{"add", "--"}, paths...)
+	if err := wm.GitRunInWorktree(taskID, args...); err != nil {
+		log.Printf("[stage] task=%s failed to re-stage %d file(s): %v", taskID, len(paths), err)
+	}
+}
+
 // GitRunInProject runs a git command in the project's main directory.
 func (wm *WorktreeManager) GitRunInProject(projectID string, args ...string) error {
 	project, err := wm.store.GetProject(projectID)
