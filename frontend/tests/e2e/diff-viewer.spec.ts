@@ -975,6 +975,58 @@ test.describe.serial('Diff panel real-time file updates', () => {
 
         rmSync(filePath, { force: true });
     });
+
+    test('staging an untracked file moves it to the Staged section via broadcast', async ({ page }) => {
+        const result = await ensureActiveWorktree(page);
+        if (!result) {
+            await expect(page.locator('.board')).toBeVisible();
+            return;
+        }
+        const { taskInfo, worktreeDir } = result;
+
+        const uniqueId = Date.now();
+        const testFile = `stage-broadcast-${uniqueId}.txt`;
+        writeFileSync(join(worktreeDir, testFile), 'new untracked content\n');
+
+        await navigateToTask(page, taskInfo.taskId, taskInfo.projectId);
+        await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.chat-form, .btn-start-task')).toBeVisible({ timeout: 10000 });
+
+        const diffColumn = page.locator('.column-diff');
+        if (!await diffColumn.isVisible().catch(() => false)) {
+            const changesTab = page.locator('.tab-btn:has-text("Changes")');
+            if (await changesTab.isVisible().catch(() => false)) {
+                await changesTab.click();
+            }
+        }
+
+        await expect(page.locator('.diff-content')).toBeVisible({ timeout: 10000 });
+
+        // Wait for the untracked file to show in the panel (initially Unstaged).
+        await expect(async () => {
+            const diffText = await page.locator('.diff-scroll').textContent().catch(() => '');
+            expect(diffText).toContain(testFile);
+        }).toPass({ timeout: 15000 });
+
+        const unstagedSection = page.locator('.diff-section').filter({ has: page.locator('.diff-section-header.diff-section-unstaged') });
+        await expect(async () => {
+            expect(await unstagedSection.textContent()).toContain(testFile);
+        }).toPass({ timeout: 10000 });
+
+        // Stage the file via its stage button (untracked → staged).
+        const fileSection = page.locator('.diff-file-section', { hasText: testFile }).first();
+        await fileSection.locator('.diff-stage-btn').click();
+
+        // The file must move to the Staged section without a reload — only the
+        // backend broadcast of the index change (stage/unstage) can do this for
+        // untracked files. Regression: broadcasts were dropped, leaving the file stuck.
+        const stagedSection = page.locator('.diff-section').filter({ has: page.locator('.diff-section-header.diff-section-staged') });
+        await expect(async () => {
+            expect(await stagedSection.textContent()).toContain(testFile);
+        }).toPass({ timeout: 15000 });
+
+        execSync(`rm -f ${join(worktreeDir, testFile)}`);
+    });
 });
 
 // --- Tests: done-task diff (BaseCommit..BranchTip) ---
@@ -1120,5 +1172,3 @@ test.describe.serial('Done-task diff shows committed changes', () => {
         rmSync(join(worktreePath, testFile), { force: true });
     });
 });
-
-
