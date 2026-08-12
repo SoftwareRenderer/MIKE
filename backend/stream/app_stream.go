@@ -483,9 +483,20 @@ func (asm *AppStreamManager) BroadcastBranch(projectID, branch string) {
 	})
 }
 
-// BroadcastFsEvent sends an fs_event to all clients of a project.
-func (asm *AppStreamManager) BroadcastFsEvent(projectID, op, path string) {
+// shouldSkipFsEvent reports whether an fs_event for the given path should not be
+// broadcast: internal files (.git, flight recorder) and paths ignored by git.
+func shouldSkipFsEvent(repoRoot, path string) bool {
 	if git.IsInternalFile(path) {
+		return true
+	}
+	return git.IsGitIgnored(repoRoot, path)
+}
+
+// BroadcastFsEvent sends an fs_event to all clients of a project. Events for
+// internal files (.git, flight recorder) or paths ignored by .gitignore are
+// dropped — they should not trigger explorer refreshes.
+func (asm *AppStreamManager) BroadcastFsEvent(projectID, repoRoot, op, path string) {
+	if shouldSkipFsEvent(repoRoot, path) {
 		return
 	}
 	asm.sendBoardPayload(projectID, map[string]any{

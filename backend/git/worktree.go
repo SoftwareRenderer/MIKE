@@ -113,6 +113,28 @@ func ShouldIgnoreFile(path string) bool {
 	return false
 }
 
+// IsGitIgnored reports whether relPath (relative to repoRoot) is excluded by the
+// repository's gitignore rules. Tracked files are NOT considered ignored (matching
+// git check-ignore default behavior), so events for tracked files still get
+// broadcast. Returns false when git is unavailable, repoRoot is not a git repo,
+// or the path is outside repoRoot.
+func IsGitIgnored(repoRoot, relPath string) bool {
+	if repoRoot == "" || relPath == "" {
+		return false
+	}
+	if filepath.IsAbs(relPath) {
+		rel, err := filepath.Rel(repoRoot, relPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return false
+		}
+	}
+	cmd := exec.Command("git", "check-ignore", "--quiet", "--", relPath)
+	cmd.Dir = repoRoot
+	// Exit code 0 means ignored, 1 means not ignored, 128 means fatal error.
+	// Any error (not ignored or git unavailable) → not ignored.
+	return cmd.Run() == nil
+}
+
 // IsInternalFile returns true if the path is an internal file that should not
 // appear in the diff panel or card stats (e.g., .git/*, kanban.trace).
 func IsInternalFile(path string) bool {

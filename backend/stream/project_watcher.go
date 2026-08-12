@@ -32,7 +32,7 @@ func isInternalPathInProject(absPath, projectRoot string) bool {
 	return false
 }
 
-type fsBroadcastFn func(projectID, op, path string)
+type fsBroadcastFn func(projectID, repoRoot, op, path string)
 
 // ProjectWatcher detects file create/delete events in project directories via fsnotify.
 // A single shared fsnotify.Watcher monitors all project directories.
@@ -220,7 +220,7 @@ func (pw *ProjectWatcher) handleEvent(event fsnotify.Event) {
 
 	relPath, _ := filepath.Rel(projectPath, event.Name)
 	timer := time.AfterFunc(500*time.Millisecond, func() {
-		pw.broadcast(projectID, op, relPath)
+		pw.broadcast(projectID, projectPath, op, relPath)
 	})
 	pw.debounces[projectID] = timer
 	pw.mu.Unlock()
