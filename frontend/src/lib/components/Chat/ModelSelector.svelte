@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
     import { AGENT_URL_PREFIX } from '$lib/types';
-    import { getModelName, getProviderDisplayName, providerRef } from '$lib/utils/providers';
+    import { getModelName, getProviderDisplayName, providerRef, displayModelName } from '$lib/utils/providers';
 
     interface Props {
         providers: Provider[];
@@ -376,7 +376,7 @@
                 <line x1="14" y1="5" x2="8" y2="8" stroke="currentColor" stroke-width="1.5"/>
             </svg>
             <span class="selector-label model-name" class:current={!!currentModel}>
-                {isAgentSelected && agentModelsLoading ? 'Loading...' : (currentModel || 'Select model')}
+                {isAgentSelected && agentModelsLoading ? 'Loading...' : (currentModel ? displayModelName(currentModel) : 'Select model')}
             </span>
             <svg class="chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>

@@ -14,6 +14,16 @@ export function getModelName(m: string | { name: string; reasoning_effort?: stri
 }
 
 /**
+ * Shorten a namespaced model name for compact display (e.g. the task view selector
+ * label). If a model is formatted as "orgname/model", drop the leading "orgname/"
+ */
+export function displayModelName(name: string): string {
+    if (!name) return name;
+    const slash = name.indexOf('/');
+    return slash > 0 ? name.slice(slash + 1) : name;
+}
+
+/**
  * The reference string for a provider: its stable integer ID (LLM) or name (agent).
  */
 export function providerRef(p: { id?: number; name?: string; kind?: string; url?: string }): string {

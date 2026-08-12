@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolvePair, resolveWorker, resolveUtility, getModelName, extractDomain, getProviderDisplayName } from '../providers';
+import { resolvePair, resolveWorker, resolveUtility, getModelName, displayModelName, extractDomain, getProviderDisplayName } from '../providers';
 import type { Config, Provider } from '$lib/types';
 
 function makeConfig(partial: Partial<Config>): Config {
@@ -39,6 +39,21 @@ describe('getModelName', () => {
     it('handles string and object entries', () => {
         expect(getModelName('gpt-4o')).toBe('gpt-4o');
         expect(getModelName({ name: 'claude', reasoning_effort: 'high' })).toBe('claude');
+    });
+});
+
+describe('displayModelName', () => {
+    it('strips a leading orgname/ prefix', () => {
+        expect(displayModelName('org/model')).toBe('model');
+    });
+
+    it('keeps non-namespaced names unchanged', () => {
+        expect(displayModelName('')).toBe('');
+        expect(displayModelName('llama')).toBe('llama');
+    });
+
+    it('keeps deeper nesting after the org segment', () => {
+        expect(displayModelName('org/sub/model')).toBe('sub/model');
     });
 });
 
