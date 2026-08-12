@@ -173,13 +173,6 @@ func (c *Client) readLoop() {
 			return // connection closed
 		}
 
-		// Dispatch under c.mu. cleanup(), Close(), ShellClose() and the defer
-		// below all close the pending/session channels while holding c.mu, so
-		// holding the lock across lookup+send guarantees the readLoop never
-		// sends on a closed channel (previously: "panic: send on closed
-		// channel" when a context cancel/timeout ran cleanup() between the
-		// lookup and the send). All sends here are non-blocking (select with
-		// default), so holding the lock cannot deadlock.
 		c.mu.Lock()
 
 		p, isPending := c.pending[frame.MsgID]
