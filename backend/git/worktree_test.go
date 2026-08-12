@@ -1052,6 +1052,60 @@ func TestGetTaskDiff_MixedStagedAndUnstaged(t *testing.T) {
 	}
 }
 
+func TestStageIndexedFiles_RefreshesStagedFiles(t *testing.T) {
+	repoDir, taskID, _, _, wm := setupTestRepo(t)
+
+	// Create and commit two tracked files
+	writeFile(t, repoDir, "hello.txt", "line1\nline2\n")
+	writeFile(t, repoDir, "untouched.txt", "base\n")
+	runGit(t, repoDir, "add", "hello.txt", "untouched.txt")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	worktreePath, _ := wm.WorktreePath(taskID)
+
+	// "System staged" line3; user then adds line4 (unstaged) after staging.
+	writeFile(t, worktreePath, "hello.txt", "line1\nline2\nline3\n")
+	runGit(t, worktreePath, "add", "hello.txt")
+	writeFile(t, worktreePath, "hello.txt", "line1\nline2\nline3\nline4\n")
+
+	// Unstaged-only change — must NOT be touched by the helper.
+	writeFile(t, worktreePath, "untouched.txt", "base\nedited\n")
+
+	// Sanity check: hello.txt is in MM state before the refresh.
+	status := runGitOutput(t, worktreePath, "status", "--porcelain")
+	if !strings.Contains(status, "MM hello.txt") {
+		t.Fatalf("expected hello.txt in MM state, got:\n%s", status)
+	}
+
+	wm.StageIndexedFiles(taskID)
+
+	// hello.txt: staged diff includes both line3 and line4; no unstaged diff left.
+	stagedDiff := runGitOutput(t, worktreePath, "diff", "--staged", "--", "hello.txt")
+	if !strings.Contains(stagedDiff, "+line3") || !strings.Contains(stagedDiff, "+line4") {
+		t.Fatalf("expected staged diff to include line3 and line4, got:\n%s", stagedDiff)
+	}
+	if unstaged := runGitOutput(t, worktreePath, "diff", "--", "hello.txt"); unstaged != "" {
+		t.Fatalf("expected no unstaged diff for hello.txt, got:\n%s", unstaged)
+	}
+
+	// untouched.txt still has only unstaged changes (contract preserved).
+	status = runGitOutput(t, worktreePath, "status", "--porcelain")
+	if !strings.Contains(status, " M untouched.txt") {
+		t.Fatalf("expected untouched.txt to remain unstaged-only, got:\n%s", status)
+	}
+
+	// A commit now captures the manual edit.
+	runGit(t, worktreePath, "commit", "-m", "commit after manual edit")
+	content := runGitOutput(t, worktreePath, "show", "HEAD:hello.txt")
+	if !strings.Contains(content, "line4") {
+		t.Fatalf("expected commit to include manual edit line4, got:\n%s", content)
+	}
+}
+
 func TestGetTaskDiff_StagedFileWithBaseRef(t *testing.T) {
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
