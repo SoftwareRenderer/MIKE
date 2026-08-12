@@ -303,86 +303,14 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		state.sandboxOperatingMode = setup.task.OperatingMode
 		state.agentSandboxHash = agentSandboxHash(te.agentRegistry.GetAnyAgentSandbox())
 
-		// Wire up bridge recovery — reconnects client or recreates sandbox
-		const maxBridgeRecoveryAttempts = 3
+		// Wire up bridge recovery — reconnects client or (re)creates sandbox.
 		state.recoverBridge = func() bool {
-			te.taskMu.Lock()
-			if state.bridgeRecoveryAttempts >= maxBridgeRecoveryAttempts {
-				te.taskMu.Unlock()
-				log.Printf("[bridge-recovery] task=%s max attempts (%d) reached, giving up", setup.task.ID, maxBridgeRecoveryAttempts)
-				return false
-			}
-			state.bridgeRecoveryAttempts++
-			attempt := state.bridgeRecoveryAttempts
-			te.taskMu.Unlock()
-
-			log.Printf("[bridge-recovery] task=%s attempt %d: trying client reconnect", setup.task.ID, attempt)
-			// Tier 1: try to get a fresh client from existing agent pipes.
-			// Ping subsumes the IsAlive check: it fails fast on closed/dead clients
-			// (see Client.Ping) and verifies the bridge actually responds — a client
-			// built on dead pipes can still report IsAlive until its readLoop
-			// notices, which would make the retry fail again with the same bridge
-			// error ("client closed" / "broken pipe").
-			newClient, err := te.sandboxMgr.GetClient(setup.task.ID)
-			if err == nil {
-				probeErr := newClient.Ping(setup.ctx)
-				if probeErr == nil {
-					log.Printf("[bridge-recovery] task=%s client reconnect successful", setup.task.ID)
-					te.taskMu.Lock()
-					state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(newClient)
-					state.bridgeRecoveryAttempts = 0 // reset on success
-					te.taskMu.Unlock()
-					return true
-				}
-				log.Printf("[bridge-recovery] task=%s client probe failed: %v, escalating to sandbox recreation", setup.task.ID, probeErr)
-				err = probeErr
-			}
-
-			// Tier 2: agent is dead — recreate the sandbox
-			log.Printf("[bridge-recovery] task=%s client reconnect failed (%v), recreating sandbox", setup.task.ID, err)
-			if !te.sandboxMgr.ContainerIsRunning(setup.task.ID) {
-				log.Printf("[bridge-recovery] task=%s container not running, cannot recover", setup.task.ID)
-				return false
-			}
-			if err := te.sandboxMgr.Stop(setup.task.ID); err != nil {
-				log.Printf("[bridge-recovery] task=%s failed to stop old sandbox: %v", setup.task.ID, err)
-			}
-			_, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, kanban_sandbox.SandboxOpts{
-				BaseImage:        imageToUse,
-				NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
-				MemoryLimit:      setup.sandboxOpts.MemoryLimit,
-				ForwardPorts:     setup.sandboxOpts.ForwardPorts,
-				AgentSandbox:     te.agentRegistry.GetAnyAgentSandbox(),
-				SkillsDir:        prompts.SkillsDir(),
-				SandboxMounts:    setup.sandboxOpts.SandboxMounts,
-				SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
-				Capabilities:     setup.sandboxOpts.Capabilities,
-				PlanMode:         setup.task.IsPlanMode(),
+			return te.recoverBridgeForTask(te.sandboxMgr, setup, state, imageToUse, te.agentRegistry.GetAnyAgentSandbox(), prompts.SkillsDir(), func() {
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
+					Type: types.WSTypeStatus,
+					Data: map[string]string{"state": "running", "activity": "Sandbox bridge recovered"},
+				})
 			})
-			if createErr != nil {
-				log.Printf("[bridge-recovery] task=%s failed to recreate sandbox: %v", setup.task.ID, createErr)
-				return false
-			}
-			newClient, clientErr := te.sandboxMgr.GetClient(setup.task.ID)
-			if clientErr != nil {
-				log.Printf("[bridge-recovery] task=%s failed to connect after recreation: %v", setup.task.ID, clientErr)
-				return false
-			}
-			if probeErr := newClient.Ping(setup.ctx); probeErr != nil {
-				log.Printf("[bridge-recovery] task=%s probe failed after recreation: %v", setup.task.ID, probeErr)
-				return false
-			}
-
-			log.Printf("[bridge-recovery] task=%s sandbox recreated successfully", setup.task.ID)
-			te.taskMu.Lock()
-			state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(newClient)
-			state.bridgeRecoveryAttempts = 0 // reset on success
-			te.taskMu.Unlock()
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
-				Type: types.WSTypeStatus,
-				Data: map[string]string{"state": "running", "activity": "Sandbox bridge recovered"},
-			})
-			return true
 		}
 	} else {
 		// Non-sandbox: use os.Root only for write isolation.
