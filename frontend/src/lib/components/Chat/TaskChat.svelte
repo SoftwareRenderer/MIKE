@@ -696,12 +696,12 @@
     let summarizeController: AbortController | null = null;
 
     async function handleSummarize() {
-        const confirmed = await dialogStore.showConfirm({
-            title: 'Compress Context',
-            message: 'This will create a summary of the conversation to make more efficient use of context space. You can delete the summary to restore the full context.',
+        const confirmed = await dialogStore.showCompressContextDialog({
+            used: stream.state.contextState.used,
+            limit: stream.state.contextState.limit,
+            sessionCost: stream.state.sessionCost,
             confirmText: 'Compress',
             cancelText: 'Cancel',
-            variant: 'default',
         });
         if (!confirmed) return;
         try {
