@@ -1124,6 +1124,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         onAddTask={() => { uiStore.creatingChildOf = null; uiStore.showCreateTask = true; }}
                         onCreateChildTask={(parentId: string) => { uiStore.creatingChildOf = parentId; uiStore.showCreateTask = true; }}
                         onRefreshBoard={() => refreshBoard()}
+                        onSelectTask={() => { if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat'; }}
                     />
                 {/if}
             </section>
