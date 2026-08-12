@@ -597,7 +597,7 @@ All functions are **async** (return `Promise`).
 - `loadAppSetting(key, default)` / `saveAppSetting(key, value)` — generic key-value settings
 - `saveDraftAttachments(taskId, atts)` / `loadDraftAttachments(taskId)` / `clearDraftAttachments(taskId)` — per-task image drafts
 - `setBoardCache(key, value)` / `getBoardCache<T>(key)` / `boardCacheKey(projectId)` — offline board state cache
-- `gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>, allProjectIds?: Set<string>)` — garbage-collect ALL stale entries
+- `gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>, allProjectIds?: Set<string>, projectId?: string)` — garbage-collect ALL stale entries. When `projectId` is provided, also cleans the offline message/diff caches (`messages:`/`message-full:`/`diff:` keys in the `board-cache` store) for that project
 
 **GC trigger:** Called in `Board.svelte` after the board is loaded. Components should NOT call `gc()` themselves.
 

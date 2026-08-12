@@ -107,7 +107,7 @@
             (async () => {
                 const allIds = new Set(tasks.map(t => t.id));
                 const projectPaths = projectPath ? new Set([projectPath]) : undefined;
-                await gc(allIds, projectPaths);
+                await gc(allIds, projectPaths, undefined, projectId);
             })().catch(() => {});
         }
     });

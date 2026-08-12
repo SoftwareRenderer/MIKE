@@ -5,6 +5,8 @@ import {
     queueWrite,
     resetWorktreeRaw,
 } from './queue';
+import { setBoardCache, getBoardCache, diffCacheKey } from '../storage';
+import { markCached } from './cache';
 
 // -- Git endpoints --
 
@@ -109,17 +111,44 @@ export async function commitProject(projectId: string, message: string): Promise
 
 // -- Task Git endpoints --
 
-/** Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file content. */
-export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean; checkpointIndex?: number }): Promise<{ diff: string; untracked: Array<{ path: string; diff: string; file_size?: number; truncated?: boolean; orig_added?: number; lines?: string[]; line_count?: number }>; short_stat: string; truncated_files?: string[]; original_file_stats?: Record<string, { added: number; removed: number }>; files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number }>; base_ref?: string }> {
+/** Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file content.
+ * The current worktree diff (no head/base/checkpoint options) is cached so it remains viewable offline;
+ * on failure it falls back to the cached copy. Non-current diffs are not cached. */
+export interface TaskDiff {
+    diff: string;
+    untracked: Array<{ path: string; diff: string; file_size?: number; truncated?: boolean; orig_added?: number; lines?: string[]; line_count?: number }>;
+    short_stat: string;
+    truncated_files?: string[];
+    original_file_stats?: Record<string, { added: number; removed: number }>;
+    files?: Record<string, { hash: string; type: string; added?: number; removed?: number; truncated?: boolean; origAdded?: number; origRemoved?: number; line_count?: number; file_size?: number }>;
+    base_ref?: string;
+}
+
+export async function getTaskDiff(projectId: string, taskId: string, options?: { headRef?: string; baseRef?: string; full?: boolean; checkpointIndex?: number }): Promise<TaskDiff> {
     const params = new URLSearchParams();
     if (options?.headRef) params.set('head', options.headRef);
     if (options?.baseRef) params.set('base', options.baseRef);
     if (options?.full) params.set('full', '1');
     if (options?.checkpointIndex != null) params.set('checkpointIdx', String(options.checkpointIndex));
     const url = params.toString() ? `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}` : `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`;
-    const res = await apiFetch(url);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch diff');
-    return res.json();
+    const isCurrentDiff = !options?.headRef && !options?.baseRef && options?.checkpointIndex == null;
+    try {
+        const res = await apiFetch(url);
+        if (!res.ok) throw await apiError(res, 'Failed to fetch diff');
+        const data = await res.json();
+        // Cache only the current worktree diff (fire-and-forget)
+        if (isCurrentDiff) {
+            setBoardCache(diffCacheKey(projectId, taskId), data).catch(() => {});
+        }
+        return data;
+    } catch (e) {
+        // Fall back to cached copy only for the current diff request
+        if (isCurrentDiff) {
+            const cached = await getBoardCache<TaskDiff>(diffCacheKey(projectId, taskId));
+            if (cached) return markCached(cached);
+        }
+        throw e;
+    }
 }
 
 /** Fetch commit history for a task, including the base commit and all task commits. */
