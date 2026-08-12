@@ -1058,6 +1058,98 @@ func TestCommitAndDoneCustomMessage(t *testing.T) {
 	}
 }
 
+// TestCommitAndDoneIncludesManualEditsAfterStaging verifies commit-and-done
+// includes manual edits made after staging, while unstaged-only files stay
+// out of the commit (staged/unstaged contract preserved).
+func TestCommitAndDoneIncludesManualEditsAfterStaging(t *testing.T) {
+	s := testServer(t)
+
+	// Create a project with a real git repo
+	tmpDir := t.TempDir()
+	initGitRepo(t, tmpDir)
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	proj := map[string]any{"name": "manual-edit-commit", "path": tmpDir}
+	req := testRequest("POST", "/api/projects", proj)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
+	}
+	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
+
+	// Create a task
+	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
+		"prompt": "test manual edits on commit",
+	})
+	withAuthCSRF(taskReq, cookie, csrfToken)
+	taskRR := testResponse(t, s, taskReq)
+	if taskRR.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
+	}
+	taskID := mustJSON[map[string]any](t, taskRR.Body)["id"].(string)
+
+	// Create a branch and worktree for the task
+	branchName := "task/" + taskID
+	mustRunGit(t, tmpDir, "branch", branchName)
+	wtPath := filepath.Join(os.Getenv("MIKE_WORKTREES_DIR"), projID, taskID)
+	mustRunGit(t, tmpDir, "worktree", "add", wtPath, branchName)
+
+	taskDB, _ := s.store.GetTask(projID, taskID)
+	taskDB.Branch = branchName
+	taskDB.BaseRef = "master"
+	if err := s.store.UpdateTask(taskDB); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	// Commit a base version of the file on the task branch
+	os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("line1\n"), 0o644)
+	mustRunGit(t, wtPath, "add", "feature.txt")
+	mustRunGit(t, wtPath, "commit", "-m", "base version")
+
+	// "System staged" line2; user then adds line3 (unstaged) after staging.
+	os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("line1\nline2\n"), 0o644)
+	mustRunGit(t, wtPath, "add", "feature.txt")
+	os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("line1\nline2\nline3\n"), 0o644)
+
+	// Unstaged-only file — must stay out of the commit.
+	os.WriteFile(filepath.Join(wtPath, "scratch.txt"), []byte("scratch\n"), 0o644)
+
+	// Verify the staged-then-edited state before commit.
+	status := mustRunGitOutput(t, wtPath, "status", "--porcelain")
+	if !strings.Contains(status, "MM feature.txt") {
+		t.Fatalf("expected feature.txt in MM state, got:\n%s", status)
+	}
+
+	// Move task to review (required for commit)
+	moveTask(t, s, projID, taskID, "review")
+
+	// Commit-and-done
+	commitReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/commit", map[string]any{
+		"commit_message": "commit with manual edits",
+	})
+	commitRR := testResponseAuth(t, s, commitReq)
+	if commitRR.Code != http.StatusOK {
+		t.Fatalf("commit-and-done: %d %s", commitRR.Code, commitRR.Body.String())
+	}
+	result := mustJSON[map[string]any](t, commitRR.Body)
+	if result["status"] != "done" {
+		t.Fatalf("expected status=done, got %s", result["status"])
+	}
+
+	// The task branch commit must include the manual edit (line3).
+	commitContent := mustRunGitOutput(t, tmpDir, "show", branchName+":feature.txt")
+	if !strings.Contains(commitContent, "line3") {
+		t.Fatalf("expected committed feature.txt to include manual edit line3, got:\n%s", commitContent)
+	}
+
+	// scratch.txt (only unstaged) must NOT be in the commit.
+	branchFiles := mustRunGitOutput(t, tmpDir, "ls-tree", "-r", "--name-only", branchName)
+	if strings.Contains(branchFiles, "scratch.txt") {
+		t.Fatalf("expected scratch.txt to NOT be committed, got:\n%s", branchFiles)
+	}
+}
+
 // Test: agent provider blocked when network isolation is enabled
 func TestAgentBlockedWithNetworkIsolation(t *testing.T) {
 	s := testServer(t)
