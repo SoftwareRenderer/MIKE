@@ -64,7 +64,9 @@ func makeSandboxCallbacks(client *sandbox.Client) (execFunc, execStreamFunc, rea
 		for scanner.Scan() {
 			line := scanner.Text() + "\n"
 			buf.WriteString(line)
-			outputCallback(line)
+			if outputCallback != nil {
+				outputCallback(line)
+			}
 		}
 		exitCode := <-holder.ExitCode()
 		if exitCode != 0 {
@@ -129,6 +131,18 @@ func makeRootCallbacks(root *os.Root, worktreePath string) (readFunc, writeFunc)
 // ctx is used to cancel long-running operations (e.g., bash) when the task is stopped.
 // outputCallback, if non-nil, is called with incremental output for streaming tools (e.g., bash).
 func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[string]any, worktreePath string, task *types.Task, state *executionState, outputCallback func(toolID string, text string)) (string, bool) {
+	result, ok := te.executeToolInner(ctx, name, args, worktreePath, task, state, outputCallback)
+	// A successful tool call proves the sandbox bridge is healthy (or unused),
+	// so clear the bridge-recovery failure latch.
+	if ok && state != nil && state.recoverBridge != nil {
+		te.taskMu.Lock()
+		state.bridgeRecoveryAttempts = 0
+		te.taskMu.Unlock()
+	}
+	return result, ok
+}
+
+func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args map[string]any, worktreePath string, task *types.Task, state *executionState, outputCallback func(toolID string, text string)) (string, bool) {
 	sandboxExec := state.sandboxExec
 	sandboxExecStream := state.sandboxExecStream
 	sandboxRead := state.sandboxRead
