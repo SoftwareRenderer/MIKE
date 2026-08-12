@@ -754,7 +754,7 @@
     }
     .summarization-label {
         font-size: 0.75rem;
-        color: var(--color-accent);
+        color: white;
         opacity: 0.8;
         white-space: nowrap;
     }
