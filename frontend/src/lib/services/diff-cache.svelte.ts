@@ -558,10 +558,13 @@ export class DiffCache {
             }
             this.state.files = mergedFiles;
 
-            // Update untracked: remove paths no longer in manifest, add new ones
+            // Update untracked: drop entries gone or transitioned to tracked
+            // (e.g. staged), then add new ones — otherwise a staged untracked
+            // file stays in the Unstaged section after a diff_stats broadcast.
             const mergedUntracked = { ...this.state.untracked };
             for (const path of Object.keys(mergedUntracked)) {
-                if (!manifestPaths.has(path)) {
+                const entry = result.files[path];
+                if (!entry || entry.type !== 'untracked') {
                     delete mergedUntracked[path];
                 }
             }
