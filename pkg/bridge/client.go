@@ -173,11 +173,17 @@ func (c *Client) readLoop() {
 			return // connection closed
 		}
 
-		// Check pending requests first
+		// Dispatch under c.mu. cleanup(), Close(), ShellClose() and the defer
+		// below all close the pending/session channels while holding c.mu, so
+		// holding the lock across lookup+send guarantees the readLoop never
+		// sends on a closed channel (previously: "panic: send on closed
+		// channel" when a context cancel/timeout ran cleanup() between the
+		// lookup and the send). All sends here are non-blocking (select with
+		// default), so holding the lock cannot deadlock.
 		c.mu.Lock()
+
 		p, isPending := c.pending[frame.MsgID]
 		s, isShell := c.sessions[frame.MsgID]
-		c.mu.Unlock()
 
 		if isPending {
 			switch frame.Type {
@@ -194,6 +200,7 @@ func (c *Client) readLoop() {
 				default:
 				}
 			}
+			c.mu.Unlock()
 			continue
 		}
 
@@ -201,12 +208,12 @@ func (c *Client) readLoop() {
 		if isShell && frame.Type == protocol.TypeChunk {
 			chunk, err := protocol.ParseShellChunk(frame.Payload)
 			if err != nil {
+				c.mu.Unlock()
 				continue
 			}
 			// Empty data = session closed signal
 			if len(chunk.Data) == 0 {
 				close(s.outputCh)
-				c.mu.Lock()
 				delete(c.sessions, frame.MsgID)
 				c.mu.Unlock()
 				continue
@@ -216,6 +223,7 @@ func (c *Client) readLoop() {
 			default:
 				log.Printf("[sandbox/client] shell output channel full for session %d", frame.MsgID)
 			}
+			c.mu.Unlock()
 			continue
 		}
 
@@ -226,8 +234,10 @@ func (c *Client) readLoop() {
 			default:
 				log.Printf("[sandbox/client] lsp notification channel full")
 			}
+			c.mu.Unlock()
 			continue
 		}
+		c.mu.Unlock()
 
 		log.Printf("[sandbox/client] unhandled frame MsgID=%d Type=%s", frame.MsgID, protocol.MessageTypeName(frame.Type))
 	}
@@ -263,8 +273,6 @@ func (c *Client) waitForCtx(ctx context.Context, frame *protocol.Frame, timeout 
 
 	if err := c.writeFrame(frame); err != nil {
 		c.cleanup(msgID)
-		p.closeChunk()
-		p.closeDone()
 		return nil, nil, fmt.Errorf("send request: %w", err)
 	}
 
