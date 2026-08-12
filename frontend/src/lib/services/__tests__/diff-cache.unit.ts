@@ -231,6 +231,29 @@ describe('DiffCache', () => {
         expect(getDiffFile).toHaveBeenCalledWith('proj-1', 'task-1', 'a.ts', expect.anything());
     });
 
+    it('fetchFullManifest drops untracked entries that transitioned to tracked (staging)', async () => {
+        const getTaskDiff = vi.fn(async () => ({
+            files: {
+                'new.txt': { hash: 'h2', type: 'tracked', added: 1, removed: 0, staged: true },
+            },
+        }));
+        const getDiffFile = vi.fn(async () => ({ rows: [{ lineNumber: 1, variant: 'added', text: 'hi' }] }));
+        const cache = new DiffCache(makeApis({ getTaskDiff, getDiffFile }), () => 'proj-1', () => 'task-1');
+        // new.txt is currently cached as an untracked file.
+        cache.state.files = { 'new.txt': { path: 'new.txt', rows: [{ lineNumber: 1, variant: 'added', text: 'hi' }], added: 1, removed: 0, staged: false } };
+        cache.state.untracked = { 'new.txt': { loading: false } };
+        cache.fileHashes = { 'new.txt': 'h1' };
+        cache.tracker.hash = 'old-hash';
+        cache.tracker.untrackedN = 1;
+        // Broadcast: new.txt is now tracked + staged and untracked count dropped to 0.
+        cache.processStats({ hash: 'new-hash', files: 1, additions: 1, deletions: 0, untracked_n: 0, file_hashes: { 'new.txt': 'h2' }, staged_paths: ['new.txt'] }, false);
+        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => setTimeout(r, 0));
+        // The untracked entry must be gone so the panel moves the file to Staged.
+        expect(cache.state.untracked['new.txt']).toBeUndefined();
+        expect(cache.state.files['new.txt'].staged).toBe(true);
+    });
+
     it('processStats removes files via spread for Svelte reactivity', () => {
         const cache = new DiffCache(makeApis(), () => 'proj-1', () => 'task-1');
         cache.state.files = {

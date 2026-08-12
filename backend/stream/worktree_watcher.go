@@ -257,18 +257,15 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 	} else if tid, ok := ww.pathCache[event.Name+string(filepath.Separator)]; ok {
 		taskID = tid
 	} else {
-		// Check git index dir (lives outside worktree).
-		indexPrefix := event.Name
-		if i := strings.IndexFunc(event.Name, func(r rune) bool {
-			return r == filepath.Separator
-		}); i >= 0 {
-			indexPrefix = event.Name[:i+1]
+		// Git index dir (outside worktree): events fire on the dir or files
+		// within it (e.g. <gitdir>/index), so prefix-match the gitdir.
+		for dir, tid := range ww.indexDirToTask {
+			if event.Name == dir || strings.HasPrefix(event.Name, dir+string(filepath.Separator)) {
+				taskID = tid
+				break
+			}
 		}
-		if tid, ok := ww.indexDirToTask[indexPrefix]; ok {
-			taskID = tid
-		} else if tid, ok := ww.indexDirToTask[event.Name]; ok {
-			taskID = tid
-		} else {
+		if taskID == "" {
 			// Walk up directory tree to find a cached parent.
 			dir := filepath.Dir(event.Name)
 			for {
