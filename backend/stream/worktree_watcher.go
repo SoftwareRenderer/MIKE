@@ -367,7 +367,7 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 				if colonIdx > 0 {
 					op := evt[:colonIdx]
 					path := evt[colonIdx+1:]
-					ww.fsBroadcast(info.projectID, op, path)
+					ww.fsBroadcast(info.projectID, info.path, op, path)
 				}
 				delete(ww.fsEventQueue, taskID)
 			}
