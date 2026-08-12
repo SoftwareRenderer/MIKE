@@ -1,4 +1,4 @@
-import { type Change, diffLines } from 'diff';
+import { diffLines } from 'diff';
 
 /** Per-line diff marker type. */
 export type DiffMarker =
@@ -52,7 +52,6 @@ export function mergeMarkers(
             }
         } else {
             // Context (unchanged) — maps baseline to current
-            const offset = addedCount - removedCount;
             for (let i = 0; i < lines.length; i++) {
                 baselineToCurrent.set(baselinePos + 1, currentLine);
                 baselinePos++;

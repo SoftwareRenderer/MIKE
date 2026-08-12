@@ -100,7 +100,7 @@ describe('trimEntriesForRegenerate', () => {
 });
 
 describe('buildCheckpointStateMap', () => {
-    function assistant(id: string, toolCalls?: any[], hash?: string): ChatEntry {
+    function assistant(id: string, toolCalls?: any[], _hash?: string): ChatEntry {
         const base: ChatEntry = { id, role: 'assistant', content: '', isStreaming: false, createdAt: new Date().toISOString() };
         if (toolCalls) base.toolCalls = toolCalls;
         return base;

@@ -1,4 +1,4 @@
-import type { GitCommit, GitLogResponse, TaskCommit } from '../types';
+import type { GitLogResponse, TaskCommit } from '../types';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
 import {
     getOfflineStatus,

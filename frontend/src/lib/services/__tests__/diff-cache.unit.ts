@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { DiffCache, type DiffCacheApis, type DiffApiResponse, type DiffStats } from '$lib/services/diff-cache.svelte';
+import { DiffCache, type DiffCacheApis, type DiffApiResponse } from '$lib/services/diff-cache.svelte';
 import type { DiffRow } from '$lib/types/diff';
 
 function makeApis(overrides: Partial<DiffCacheApis> = {}): DiffCacheApis {
@@ -285,7 +285,7 @@ describe('DiffCache', () => {
                     'has-content.txt': { hash: 'h-content', type: 'untracked', line_count: 3, added: 3, staged: false },
                 },
             })),
-            getDiffFile: vi.fn(async (projectId, taskId, path) => {
+            getDiffFile: vi.fn(async (_projectId, _taskId, path) => {
                 if (path === 'empty.txt') return { lines: [] };
                 return { lines: ['a', 'b', 'c'] };
             }),
@@ -335,7 +335,7 @@ describe('DiffCache', () => {
     });
 
     it('stageAll skips individual failures without breaking others', async () => {
-        const stageFn = vi.fn(async (projectId, taskId, path, stage) => {
+        const stageFn = vi.fn(async (_projectId, _taskId, path, _stage) => {
             if (path === 'b.ts') throw new Error('fail');
         });
         const apis = makeApis({ stageFile: stageFn });
@@ -352,7 +352,7 @@ describe('DiffCache', () => {
     });
 
     it('unstageAll skips individual failures without breaking others', async () => {
-        const stageFn = vi.fn(async (projectId, taskId, path, stage) => {
+        const stageFn = vi.fn(async (_projectId, _taskId, path, _stage) => {
             if (path === 'b.ts') throw new Error('fail');
         });
         const apis = makeApis({ stageFile: stageFn });

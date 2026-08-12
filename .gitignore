@@ -2,6 +2,8 @@ node_modules
 data/
 extensions/
 frontend/dist
+frontend/stats.html
+frontend/stats.json
 worktrees/*
 frontend/test-results
 test-results

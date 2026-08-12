@@ -69,7 +69,7 @@ function makeChannel(granted: string[], anchor: HTMLElement) {
     return { channel, contentWindow, messages, iframe };
 }
 
-function send(channel: ExtensionHostChannel, contentWindow: any, msg: HostRequest) {
+function send(_channel: ExtensionHostChannel, contentWindow: any, msg: HostRequest) {
     window.dispatchEvent(new MessageEvent('message', { data: msg, source: contentWindow as any, origin: 'null' }));
 }
 
@@ -110,8 +110,8 @@ describe('editor capability catalog', () => {
 });
 
 describe('editor.addFooterButton', () => {
-    let root: HTMLElement, anchor: HTMLElement, footerLeft: HTMLElement;
-    beforeEach(() => { ({ root, anchor, footerLeft } = buildEditorDom()); });
+    let anchor: HTMLElement, footerLeft: HTMLElement;
+    beforeEach(() => { ({ anchor, footerLeft } = buildEditorDom()); });
     afterEach(() => cleanupFooterButtons('ext-md'));
 
     it('adds a button to the footer right after Wrap', async () => {
@@ -206,8 +206,8 @@ describe('editor.addFooterButton', () => {
 });
 
 describe('editor.getContent and editor.setOverlay', () => {
-    let root: HTMLElement, anchor: HTMLElement, footerLeft: HTMLElement;
-    beforeEach(() => { ({ root, anchor, footerLeft } = buildEditorDom()); });
+    let root: HTMLElement, anchor: HTMLElement;
+    beforeEach(() => { ({ root, anchor } = buildEditorDom()); });
     afterEach(() => cleanupFooterButtons('ext-md'));
 
     it('editor.getContent returns the CodeMirror document text', async () => {
@@ -258,8 +258,8 @@ describe('editor.getContent and editor.setOverlay', () => {
 });
 
 describe('editor.save', () => {
-    let root: HTMLElement, anchor: HTMLElement, footerLeft: HTMLElement;
-    beforeEach(() => { ({ root, anchor, footerLeft } = buildEditorDom()); });
+    let anchor: HTMLElement;
+    beforeEach(() => { ({ anchor } = buildEditorDom()); });
     afterEach(() => cleanupFooterButtons('ext-md'));
 
     it('is a grantable call capability', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { render, waitFor } from '@testing-library/svelte';
 
 // Mock the dialogStore with a reactive toast property
 let mockToastValue: { message: string; type: 'error' | 'success' } | null = null;
