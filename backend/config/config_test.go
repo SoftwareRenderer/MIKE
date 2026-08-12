@@ -37,6 +37,26 @@ func TestGetConfig(t *testing.T) {
 	}
 }
 
+func TestGetConfigRespectsWorktreesDirEnvOverride(t *testing.T) {
+	cs := testConfigStore(t)
+
+	// DB stores a workspace_dir, but MIKE_WORKTREES_DIR overrides it at runtime.
+	dbDir := t.TempDir()
+	overrideDir := t.TempDir()
+	if err := cs.store.SetConfigValue("workspace_dir", dbDir); err != nil {
+		t.Fatalf("set workspace_dir: %v", err)
+	}
+	t.Setenv("MIKE_WORKTREES_DIR", overrideDir)
+
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.WorkspaceDir != overrideDir {
+		t.Fatalf("expected MIKE_WORKTREES_DIR override %q, got %q", overrideDir, read.WorkspaceDir)
+	}
+}
+
 func TestUpdateConfigIgnoresWorkspaceDir(t *testing.T) {
 	cs := testConfigStore(t)
 
