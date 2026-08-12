@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ExtensionHostChannel } from '../channel';
 import {
     CAP_CONFIG_GET,
@@ -42,7 +42,7 @@ function makeChannel(granted: string[], config: any = { key: 'value' }, anchor: 
     return { channel, contentWindow, messages, targets, iframe };
 }
 
-function send(channel: ExtensionHostChannel, contentWindow: any, msg: HostRequest, origin = 'null') {
+function send(_channel: ExtensionHostChannel, contentWindow: any, msg: HostRequest, origin = 'null') {
     window.dispatchEvent(new MessageEvent('message', { data: msg, source: contentWindow as any, origin }));
 }
 

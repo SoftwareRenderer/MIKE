@@ -69,8 +69,6 @@ describe('computeVirtualScrollRange', () => {
     });
 
     it('handles measured heights (simulated via getHeight)', () => {
-        // Start with estimated heights
-        const estimated = [60, 80, 40, 100, 50];
         // After measurement, item 1 is actually 120px instead of 80px
         const measured = [60, 120, 40, 100, 50];
         const result = computeVirtualScrollRange(5, (i) => measured[i], 0, 400, 3);

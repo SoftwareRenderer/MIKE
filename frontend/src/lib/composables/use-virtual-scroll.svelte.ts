@@ -135,7 +135,7 @@ export function useVirtualScroll(
     items: () => any[],
     getEstimatedHeight: (index: number) => number,
     overscan: number = 3,
-    getKey: (item: any, index: number) => string = (item, idx) => String(idx),
+    getKey: (item: any, index: number) => string = (_item, idx) => String(idx),
 ): VirtualScrollState {
     // Measured heights by key (plain object, not Map, to avoid $state mutation).
     let measuredHeights = $state<Record<string, number>>({});

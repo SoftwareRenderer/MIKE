@@ -117,26 +117,6 @@ async function loadLanguage(path: string): Promise<Language | null> {
 }
 
 /**
- * Synchronously get a cached CodeMirror Language for the given file path.
- * Returns null if the language hasn't been loaded yet (use loadLanguage() to preload).
- * Also returns null for unsupported file types (plain text fallback).
- */
-function getLanguage(path: string): Language | null {
-    const ext = path.split('.').pop()?.toLowerCase() || '';
-    const base = path.split('/').pop()?.toLowerCase() || '';
-
-    // Special basenames — no CodeMirror support
-    if (base === 'dockerfile' || base === 'makefile' || base === 'cmakelists.txt') return null;
-
-    // Go templates — handled by custom regex-based highlighter (no Lezer grammar)
-    if (ext === 'tmpl' || ext === 'gohtml') return null;
-
-    const cached = languageCache.get(ext);
-    if (cached === undefined) return null; // not loaded yet
-    return cached;
-}
-
-/**
  * Escape HTML special characters in a string.
  */
 export function escapeHtml(text: string): string {
@@ -597,7 +577,7 @@ function stripMarkdownFormatting(text: string): string {
  * Extract markdown headings (ATX format) from source text.
  * Returns headings up to depth 3 (h1, h2, h3) with inline formatting stripped.
  */
-function extractMarkdownHeadings(source: string, lineInfo: { lineAt: (pos: number) => { number: number } }): Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> {
+function extractMarkdownHeadings(source: string): Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> {
     const symbols: Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> = [];
     const lines = source.split('\n');
 
@@ -657,7 +637,7 @@ function extractMarkdownHeadings(source: string, lineInfo: { lineAt: (pos: numbe
  * Finds: component props ($props()), exported functions, $state declarations, and classes.
  * Skips template-level noise (block directives, component references, internal variables).
  */
-function extractSvelteSymbols(source: string, lineInfo: { lineAt: (pos: number) => { number: number } }): Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> {
+function extractSvelteSymbols(source: string): Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> {
     const symbols: Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> = [];
 
     // Extract script-level symbols from <script>
@@ -774,11 +754,11 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
             }
             // Markdown — extract headings as outline
             if (ext === 'md' || ext === 'mdx') {
-                return extractMarkdownHeadings(doc.toString(), { lineAt: (pos: number) => doc.lineAt(pos) });
+                return extractMarkdownHeadings(doc.toString());
             }
             // Svelte — extract components, blocks, and script declarations
             if (ext === 'svelte') {
-                return extractSvelteSymbols(doc.toString(), { lineAt: (pos: number) => doc.lineAt(pos) });
+                return extractSvelteSymbols(doc.toString());
             }
         }
 
@@ -886,7 +866,7 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
 
                 parentStack.push({ name, to: node.to });
             },
-            leave(node) {
+            leave() {
                 parentStack.pop();
             },
         });
