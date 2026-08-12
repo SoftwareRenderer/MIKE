@@ -4,7 +4,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { MultiSelect } from '$lib/composables/use-multi-select.svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
-    import { resolveWorker, getModelName, getProviderDisplayName } from '$lib/utils/providers';
+    import { resolveWorker, getModelName, getProviderDisplayName, displayModelName } from '$lib/utils/providers';
     import { getStreamingContext, getTaskDiffStatsContext } from '$lib/context';
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
@@ -402,8 +402,9 @@
         // Auto: show provider name only when 2+ providers
         const showProvider = providers.length > 1;
         const provName = showProvider && provider ? getProviderDisplayName(provider, providers) : null;
-        const text = provName ? `${provName} · ${activeModel}` : activeModel;
-        return { text, provider: provName, model: activeModel, color: getModelColor(activeModel), isAgent: false };
+        const displayModel = displayModelName(activeModel);
+        const text = provName ? `${provName} · ${displayModel}` : displayModel;
+        return { text, provider: provName, model: displayModel, color: getModelColor(activeModel), isAgent: false };
     });
 
     // Context stores (must be retrieved at top level, not inside derived/effects)

@@ -269,9 +269,28 @@ func TestBuildAssistedBy_Empty(t *testing.T) {
 
 func TestBuildAssistedBy_SingleModel(t *testing.T) {
 	result := buildAssistedBy([]string{"gpt-4o"})
-	expected := "\n\nAssisted-by: gpt-4o"
+	expected := "\n\nAssisted-by: MIKE:gpt-4o"
 	if result != expected {
 		t.Errorf("got %q, want %q", result, expected)
+	}
+}
+
+func TestBuildAssistedBy_StripsOrgPrefix(t *testing.T) {
+	result := buildAssistedBy([]string{"org/model"})
+	expected := "\n\nAssisted-by: MIKE:model"
+	if result != expected {
+		t.Errorf("buildAssistedBy(%q) = %q, want %q", "org/model", result, expected)
+	}
+
+	mixed := buildAssistedBy([]string{"org/model", "model"})
+	if !strings.Contains(mixed, "Assisted-by: MIKE:model") {
+		t.Errorf("expected org prefix stripped + MIKE prefix, got %q", mixed)
+	}
+	if !strings.Contains(mixed, "Assisted-by: MIKE:model") {
+		t.Errorf("expected non-namespaced model with MIKE prefix, got %q", mixed)
+	}
+	if strings.Contains(mixed, "org/") {
+		t.Errorf("expected no 'org/' in trailer, got %q", mixed)
 	}
 }
 
@@ -285,13 +304,13 @@ func TestBuildAssistedBy_MultipleModels(t *testing.T) {
 	if lines[0] != "" || lines[1] != "" {
 		t.Errorf("first two lines should be empty (from \n\n prefix)")
 	}
-	if lines[2] != "Assisted-by: gpt-4o" {
+	if lines[2] != "Assisted-by: MIKE:gpt-4o" {
 		t.Errorf("line 2 = %q", lines[2])
 	}
-	if lines[3] != "Assisted-by: claude-3.5" {
+	if lines[3] != "Assisted-by: MIKE:claude-3.5" {
 		t.Errorf("line 3 = %q", lines[3])
 	}
-	if lines[4] != "Assisted-by: llama-3" {
+	if lines[4] != "Assisted-by: MIKE:llama-3" {
 		t.Errorf("line 4 = %q", lines[4])
 	}
 }
@@ -300,7 +319,7 @@ func TestBuildAssistedBy_MultipleModels(t *testing.T) {
 
 func TestBuildCommitMessageWithAssistedBy_SingleModel(t *testing.T) {
 	result := buildCommitMessageWithAssistedBy("Fix bug", []string{"gpt-4o"})
-	expected := "Fix bug\n\nAssisted-by: gpt-4o"
+	expected := "Fix bug\n\nAssisted-by: MIKE:gpt-4o"
 	if result != expected {
 		t.Errorf("got %q, want %q", result, expected)
 	}
@@ -311,11 +330,11 @@ func TestBuildCommitMessageWithAssistedBy_MultipleModels(t *testing.T) {
 	if !strings.HasPrefix(result, "Add feature\n\n") {
 		t.Errorf("should start with message body, got %q", result)
 	}
-	if !strings.Contains(result, "Assisted-by: gpt-4o") {
-		t.Error("should contain gpt-4o co-author")
+	if !strings.Contains(result, "Assisted-by: MIKE:gpt-4o") {
+		t.Error("should contain MIKE:gpt-4o co-author")
 	}
-	if !strings.Contains(result, "Assisted-by: claude-3.5") {
-		t.Error("should contain claude-3.5 co-author")
+	if !strings.Contains(result, "Assisted-by: MIKE:claude-3.5") {
+		t.Error("should contain MIKE:claude-3.5 co-author")
 	}
 	// Count Assisted-by lines
 	count := strings.Count(result, "Assisted-by:")
@@ -345,7 +364,7 @@ func TestBuildCommitMessageWithAssistedBy_PreservesMessageBody(t *testing.T) {
 	if !strings.HasPrefix(result, body) {
 		t.Errorf("message body should be preserved, got %q", result)
 	}
-	if !strings.Contains(result, "Assisted-by: gpt-4o") {
+	if !strings.Contains(result, "Assisted-by: MIKE:gpt-4o") {
 		t.Error("should contain co-author")
 	}
 }

@@ -491,7 +491,7 @@ func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, taskID, turnT
 	if serverURL == "" || modelName == "" {
 		return "file changes"
 	}
-	fallback := fmt.Sprintf("%s\n\nAssisted-by: %s", task.Title, modelName)
+	fallback := fmt.Sprintf("%s\n\nAssisted-by: %s", task.Title, assistedByModel(modelName))
 
 	labelMessages := buildCommitMessages(turnText)
 
@@ -580,6 +580,22 @@ func collectUniqueModels(taskMsgs []types.TaskMessage) []string {
 	return models
 }
 
+// displayModelName shortens a namespaced model name for commit trailers:
+// "orgname/model" → "model". Non-namespaced names are returned unchanged.
+func displayModelName(name string) string {
+	if i := strings.Index(name, "/"); i > 0 {
+		return name[i+1:]
+	}
+	return name
+}
+
+// assistedByModel formats a model name for an Assisted-by trailer:
+// the org prefix is dropped and the MIKE: brand is prepended, e.g.
+// "openai/gpt-4o" → "MIKE:gpt-4o".
+func assistedByModel(name string) string {
+	return "MIKE:" + displayModelName(name)
+}
+
 // buildAssistedBy formats one or more Assisted-by trailer lines.
 // Returns an empty string if no models are provided.
 // Output: "\n\nAssisted-by: model1\nAssisted-by: model2"
@@ -593,7 +609,7 @@ func buildAssistedBy(models []string) string {
 		if i > 0 {
 			sb.WriteString("\nAssisted-by: ")
 		}
-		sb.WriteString(m)
+		sb.WriteString(assistedByModel(m))
 	}
 	return sb.String()
 }
