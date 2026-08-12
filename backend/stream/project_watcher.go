@@ -134,21 +134,7 @@ func (pw *ProjectWatcher) Close() {
 
 // StartEventLoop runs the fsnotify event loop. Call in a goroutine.
 func (pw *ProjectWatcher) StartEventLoop() {
-	log.Println("[project-watcher] event loop started")
-	for {
-		select {
-		case event, ok := <-pw.watcher.Events:
-			if !ok {
-				return
-			}
-			pw.handleEvent(event)
-		case err, ok := <-pw.watcher.Errors:
-			if !ok {
-				return
-			}
-			log.Printf("[project-watcher] error: %v", err)
-		}
-	}
+	runWatcherEventLoop(pw.watcher, "project-watcher", pw.handleEvent)
 }
 
 func (pw *ProjectWatcher) handleEvent(event fsnotify.Event) {
@@ -227,23 +213,7 @@ func (pw *ProjectWatcher) handleEvent(event fsnotify.Event) {
 }
 
 func (pw *ProjectWatcher) addRecursive(dir string, projectID string) error {
-	if err := pw.watcher.Add(dir); err != nil {
-		return err
-	}
-	pw.pathCache[dir] = projectID
-	pw.pathCache[dir+string(filepath.Separator)] = projectID
-	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() && path != dir {
-			if d.Name() == ".git" {
-				return filepath.SkipDir
-			}
-			_ = pw.watcher.Add(path)
-			pw.pathCache[path] = projectID
-			pw.pathCache[path+string(filepath.Separator)] = projectID
-		}
-		return nil
+	return addRecursiveWatcher(pw.watcher, pw.pathCache, dir, projectID, func(name string) bool {
+		return name == ".git"
 	})
 }
