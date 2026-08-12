@@ -102,21 +102,7 @@ func (bw *BranchWatcher) Close() {
 
 // StartEventLoop runs the fsnotify event loop. Call in a goroutine.
 func (bw *BranchWatcher) StartEventLoop() {
-	log.Println("[branch-watcher] event loop started")
-	for {
-		select {
-		case event, ok := <-bw.watcher.Events:
-			if !ok {
-				return
-			}
-			bw.handleEvent(event)
-		case err, ok := <-bw.watcher.Errors:
-			if !ok {
-				return
-			}
-			log.Printf("[branch-watcher] error: %v", err)
-		}
-	}
+	runWatcherEventLoop(bw.watcher, "branch-watcher", bw.handleEvent)
 }
 
 func (bw *BranchWatcher) handleEvent(event fsnotify.Event) {

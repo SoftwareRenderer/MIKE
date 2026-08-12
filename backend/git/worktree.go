@@ -1294,13 +1294,22 @@ func SplitLines(content string) []string {
 
 var hunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?(.*)@@`)
 
+// Stash message label prefixes used by kanban operations
+const (
+	stashLabelSwitch     = "mike-switch-"
+	stashLabelFork       = "mike-fork-"
+	stashLabelCheckpoint = "mike-checkpoint-"
+	stashLabelSyncMerge  = "mike-sync-merge-"
+	stashLabelAutoMerge  = "mike-auto-merge-"
+)
+
 // kanbanLabelPrefixes are the stash message prefixes used by kanban operations.
 var kanbanLabelPrefixes = []string{
-	"kanban-switch-",
-	"kanban-fork-",
-	"kanban-checkpoint-",
-	"kanban-sync-merge-",
-	"kanban-auto-merge-",
+	stashLabelSwitch,
+	stashLabelFork,
+	stashLabelCheckpoint,
+	stashLabelSyncMerge,
+	stashLabelAutoMerge,
 }
 
 // hasKanbanLabel returns true if the subject contains any kanban label prefix.
@@ -2236,19 +2245,19 @@ func stashMessageWithPrefix(prefix, taskID string) string {
 
 // StashMessageForSwitch returns a stash message for a thread switch.
 func StashMessageForSwitch(taskID string) string {
-	return stashMessageWithPrefix("kanban-switch-", taskID)
+	return stashMessageWithPrefix(stashLabelSwitch, taskID)
 }
 
 // StashMessageForFork returns a stash message for a thread fork.
 func StashMessageForFork(taskID string) string {
-	return stashMessageWithPrefix("kanban-fork-", taskID)
+	return stashMessageWithPrefix(stashLabelFork, taskID)
 }
 
 // StashMessageForCheckpoint returns a stash message for an execution checkpoint.
 // Branch name is truncated to fit within maxStashMessage characters.
 func StashMessageForCheckpoint(taskID, branch string) string {
 	prefix := "On "
-	suffix := ": kanban-checkpoint-" + taskID
+	suffix := ": " + stashLabelCheckpoint + taskID
 	if len(prefix+suffix) > maxStashMessage {
 		return (prefix + suffix)[:maxStashMessage]
 	}
@@ -2256,17 +2265,17 @@ func StashMessageForCheckpoint(taskID, branch string) string {
 	if len(branch) > branchMax {
 		branch = branch[:branchMax]
 	}
-	return fmt.Sprintf("On %s: kanban-checkpoint-%s", branch, taskID)
+	return fmt.Sprintf("On %s: %s%s", branch, stashLabelCheckpoint, taskID)
 }
 
 // StashMessageForSyncMerge returns a stash message for a sync-merge operation.
 func StashMessageForSyncMerge(taskID string) string {
-	return stashMessageWithPrefix("kanban-sync-merge-", taskID)
+	return stashMessageWithPrefix(stashLabelSyncMerge, taskID)
 }
 
 // StashMessageForAutoMerge returns a stash message for an auto-merge operation.
 func StashMessageForAutoMerge(taskID string) string {
-	return stashMessageWithPrefix("kanban-auto-merge-", taskID)
+	return stashMessageWithPrefix(stashLabelAutoMerge, taskID)
 }
 
 var fileRe = regexp.MustCompile(`^diff --git a/(.+?) b/`)

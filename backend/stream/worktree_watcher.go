@@ -231,21 +231,7 @@ func (ww *WorktreeWatcher) Close() {
 
 // StartEventLoop runs the fsnotify event loop. Call in a goroutine.
 func (ww *WorktreeWatcher) StartEventLoop() {
-	log.Println("[watcher] event loop started")
-	for {
-		select {
-		case event, ok := <-ww.watcher.Events:
-			if !ok {
-				return
-			}
-			ww.handleEvent(event)
-		case err, ok := <-ww.watcher.Errors:
-			if !ok {
-				return
-			}
-			log.Printf("[watcher] error: %v", err)
-		}
-	}
+	runWatcherEventLoop(ww.watcher, "watcher", ww.handleEvent)
 }
 
 func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
@@ -688,23 +674,8 @@ func isGitMetadataFile(name string) bool {
 }
 
 func (ww *WorktreeWatcher) addRecursive(dir string, ignoredDirs map[string]struct{}, taskID string) error {
-	if err := ww.watcher.Add(dir); err != nil {
-		return err
-	}
-	ww.pathCache[dir] = taskID
-	ww.pathCache[dir+string(filepath.Separator)] = taskID
-	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() && path != dir {
-			if _, ok := ignoredDirs[d.Name()]; ok {
-				return filepath.SkipDir
-			}
-			_ = ww.watcher.Add(path)
-			ww.pathCache[path] = taskID
-			ww.pathCache[path+string(filepath.Separator)] = taskID
-		}
-		return nil
+	return addRecursiveWatcher(ww.watcher, ww.pathCache, dir, taskID, func(name string) bool {
+		_, ok := ignoredDirs[name]
+		return ok
 	})
 }
