@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"strings"
 	"sync"
 	"testing"
@@ -350,6 +351,68 @@ func TestConcurrentWritesNoCorruption(t *testing.T) {
 	}
 
 	_ = agentReadPw.Close() // end the reader goroutine
+}
+
+// TestReadFileCancelDuringChunkFlood reproduces a "panic: send on closed
+// channel" race in the client readLoop. When a request's context is cancelled
+// (or times out) while the bridge is still streaming chunk frames, waitForCtx
+// runs cleanup(), which closes the pending request's chunk channel while
+// holding c.mu. The readLoop, however, dispatched earlier chunks after
+// releasing c.mu — the lookup of the pending request and the send to its
+// chunkCh were not atomic with cleanup()'s close, so the send could land on a
+// closed channel.
+//
+// The mock agent floods many chunks and the context is cancelled mid-flood,
+// forcing cleanup() to close chunkCh while the readLoop is still dispatching.
+// Under -race this fails on the old code with a DATA RACE; without -race the
+// flood+iteration count makes the send-on-closed-channel panic likely.
+func TestReadFileCancelDuringChunkFlood(t *testing.T) {
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	const iterations = 400
+	const chunksPerFlood = 4000
+
+	for iter := 0; iter < iterations; iter++ {
+		agentReadPr, agentReadPw := io.Pipe()   // client → agent
+		clientReadPr, clientReadPw := io.Pipe() // agent → client
+
+		client := NewClient(agentReadPw, clientReadPr)
+
+		// Mock agent: reply to each request by flooding chunks then a result.
+		go func() {
+			for {
+				frame, err := protocol.ReadFrame(agentReadPr)
+				if err != nil {
+					return
+				}
+				msgID := frame.MsgID
+				for i := 0; i < chunksPerFlood; i++ {
+					if err := protocol.WriteFrame(clientReadPw, protocol.NewChunk(msgID, []byte("x"))); err != nil {
+						return
+					}
+				}
+				if err := protocol.WriteFrame(clientReadPw, protocol.NewResult(msgID, protocol.NewUint64Result(uint64(len("x"))*chunksPerFlood))); err != nil {
+					return
+				}
+			}
+		}()
+
+		// Cancel the context shortly after the request is sent, mid-flood, so
+		// waitForCtx runs cleanup() while the readLoop is still dispatching
+		// chunks for the same request.
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			time.Sleep(time.Duration(rng.Intn(2000)) * time.Microsecond)
+			cancel()
+		}()
+
+		// Must not panic. Either result is acceptable: the request can succeed
+		// if the result wins the race, or fail with the cancellation error.
+		_, _, _ = client.ReadFile(ctx, "x")
+
+		client.Close()
+		_ = agentReadPr.Close()
+		_ = clientReadPw.Close()
+	}
 }
 
 func waitForFrame(t *testing.T, ch <-chan *protocol.Frame, label string) *protocol.Frame {
