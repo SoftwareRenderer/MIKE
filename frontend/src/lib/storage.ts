@@ -638,9 +638,4 @@ export async function saveEditorTabs(projectId: string, state: EditorTabState): 
     return dbPut(STORE_EDITOR_TABS, projectId, state);
 }
 
-/** Clear editor tab state for a project. */
-export async function clearEditorTabs(projectId: string): Promise<void> {
-    return dbDelete(STORE_EDITOR_TABS, projectId);
-}
-
 

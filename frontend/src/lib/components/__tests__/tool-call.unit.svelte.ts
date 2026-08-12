@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render } from '@testing-library/svelte';
 import ToolCall from '$lib/components/Chat/ToolCall.svelte';
 
 // Mock dependencies
@@ -32,7 +32,7 @@ vi.mock('$lib/types', () => ({
 }));
 
 vi.mock('$lib/utils/toolArgs', () => ({
-    formatToolArgs: (toolName: string, args: Record<string, unknown> | null, rawArgs?: string) => {
+    formatToolArgs: (toolName: string, args: Record<string, unknown> | null, _rawArgs?: string) => {
         if (!args) return '';
         if (toolName === 'bash') return `$ ${args.command || ''}`;
         if (toolName === 'read_file' || toolName === 'write_file') return args.path as string || '';

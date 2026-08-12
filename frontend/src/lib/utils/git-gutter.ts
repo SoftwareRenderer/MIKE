@@ -264,7 +264,7 @@ export function gitGutter() {
         },
         {
             eventHandlers: {
-                resize: function (event, view) {
+                resize: function (_event, view) {
                     this.position(view);
                     this.redraw(view);
                     return true;

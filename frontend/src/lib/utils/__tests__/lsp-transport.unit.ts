@@ -509,7 +509,6 @@ describe('LSP connection manager — message routing', () => {
     it('calls onReady on targeted channel when _ch hint is present', () => {
       let readyCalls: number[] = []; // channel IDs that received onReady
       for (let i = 0; i < channels.length; i++) {
-        const idx = i;
         channels[i].onReady = () => readyCalls.push(channels[i].id);
       }
 
@@ -525,7 +524,6 @@ describe('LSP connection manager — message routing', () => {
     it('broadcasts onReady to all channels when no _ch hint', () => {
       let readyCalls: number[] = [];
       for (let i = 0; i < channels.length; i++) {
-        const idx = i;
         channels[i].onReady = () => readyCalls.push(channels[i].id);
       }
 

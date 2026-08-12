@@ -189,24 +189,6 @@ describe('editor-tabs storage', () => {
         expect(loaded).toBeNull();
     });
 
-    it('clearEditorTabs removes stored state', async () => {
-        const { saveEditorTabs, loadEditorTabs, clearEditorTabs } = await import('$lib/storage');
-
-        await saveEditorTabs('project-456', {
-            openFiles: [{ path: '/a/b', targetLine: 0 }],
-            activeFilePath: '/a/b',
-            pinnedFiles: [],
-        });
-
-        const before = await loadEditorTabs('project-456');
-        expect(before).not.toBeNull();
-
-        await clearEditorTabs('project-456');
-
-        const after = await loadEditorTabs('project-456');
-        expect(after).toBeNull();
-    });
-
     it('overwrites previous state on save', async () => {
         const { saveEditorTabs, loadEditorTabs } = await import('$lib/storage');
 

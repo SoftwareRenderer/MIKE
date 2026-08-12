@@ -125,12 +125,6 @@ export async function enqueueAction(action: { type: ActionType; params: Record<s
     return item;
 }
 
-/** Remove a specific action from the queue. */
-async function removeAction(id: string) {
-    actionQueue = actionQueue.filter(a => a.id !== id);
-    await saveQueue();
-}
-
 /** Get set of task IDs that have pending queued actions. */
 export function getQueuedTaskIds(): Set<string> {
     const ids = new Set<string>();

@@ -387,10 +387,6 @@ class LSPConnectionManager {
   requestChannel(options: LSPTransportOptions): Promise<VirtualTransport> {
     return Promise.resolve(this.connection.requestChannel(options));
   }
-
-  releaseAll(): void {
-    this.connection.close();
-  }
 }
 
 /**
@@ -404,9 +400,4 @@ class LSPConnectionManager {
  */
 export function requestLSPChannel(options: LSPTransportOptions): Promise<VirtualTransport> {
   return LSPConnectionManager.getInstance().requestChannel(options);
-}
-
-/** Release all shared connections. For testing only. */
-export function releaseAllLSPConnections(): void {
-  LSPConnectionManager.getInstance().releaseAll();
 }

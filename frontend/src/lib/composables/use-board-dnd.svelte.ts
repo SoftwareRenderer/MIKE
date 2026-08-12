@@ -46,7 +46,6 @@ export function useBoardDnd(getAllTasks: () => Task[], getProjectId: () => strin
                 break;
             }
         }
-        const state = sectionDragState.get(sectionId) || { isOver: false, isRejected: false };
         if (rejected) {
             e.dataTransfer.dropEffect = 'none';
             sectionDragState = new Map(sectionDragState).set(sectionId, { isRejected: true, isOver: false });
