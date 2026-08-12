@@ -1,5 +1,7 @@
 import type { Task, TaskMessage } from '../types';
 import { API_BASE, apiFetch, apiError, generateId } from './helpers';
+import { setBoardCache, getBoardCache, messagesCacheKey, messageFullCacheKey } from '../storage';
+import { markCached } from './cache';
 import {
     getOfflineStatus,
     enqueueAction,
@@ -147,18 +149,40 @@ export async function sendTaskMessage(
     return sendTaskMessageRaw(projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate);
 }
 
-/** Fetch all messages for a task. */
+/** Fetch all messages for a task. Falls back to cached copy on failure.
+ * Always tries the network first — the isOffline flag tracks WebSocket state,
+ * not HTTP availability. On mobile wake (tab resume), the WebSocket may be
+ * disconnected but HTTP still works, so we must not short-circuit to cache. */
 export async function getTaskMessages(projectId: string, taskId: string): Promise<TaskMessage[]> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch messages');
-    return res.json();
+    try {
+        const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages`);
+        if (!res.ok) throw await apiError(res, 'Failed to fetch messages');
+        const data = await res.json();
+        // Cache fire-and-forget
+        setBoardCache(messagesCacheKey(projectId, taskId), data).catch(() => {});
+        return data;
+    } catch (e) {
+        const cached = await getBoardCache<TaskMessage[]>(messagesCacheKey(projectId, taskId));
+        if (cached) return markCached(cached);
+        throw e;
+    }
 }
 
-/** Fetch a single message with full content (uncompressed reasoning_content, tool_calls). */
+/** Fetch a single message with full content (uncompressed reasoning_content, tool_calls).
+ * Falls back to cached copy on failure. */
 export async function getTaskMessageFull(projectId: string, taskId: string, messageId: string): Promise<TaskMessage> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}?full=1`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch message');
-    return res.json();
+    try {
+        const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}?full=1`);
+        if (!res.ok) throw await apiError(res, 'Failed to fetch message');
+        const data = await res.json();
+        // Cache fire-and-forget
+        setBoardCache(messageFullCacheKey(projectId, taskId, messageId), data).catch(() => {});
+        return data;
+    } catch (e) {
+        const cached = await getBoardCache<TaskMessage>(messageFullCacheKey(projectId, taskId, messageId));
+        if (cached) return markCached(cached);
+        throw e;
+    }
 }
 
 /** Create a message directly (e.g., for system messages). Queued when offline. */

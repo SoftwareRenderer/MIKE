@@ -19,7 +19,9 @@
 //   collapsed-diff-files — Single key 'ids' → string[] of collapsed diff file paths
 //   app-settings         — key: setting key → any (terminal height, panel ratios, sidebar, etc.)
 //   attachments          — key: taskId → DraftAttachment[] (draft image attachments)
-//   board-cache          — key: cache type → BoardCacheEntry (projects, board, config mirror)
+//   board-cache          — key: cache type → BoardCacheEntry (projects, board, config mirror,
+//                           plus per-task offline content: messages:<pid>:<tid>,
+//                           message-full:<pid>:<tid>:<mid>, diff:<pid>:<tid>)
 //
 // Garbage collection:
 //   Call `gc(allTaskIds, allProjectPaths?)` after the board is loaded. It removes all stale
@@ -459,8 +461,9 @@ export async function saveCollapsedDiffFiles(ids: Set<string>): Promise<void> {
  * @param allTaskIds  Set of currently existing task IDs
  * @param allProjectPaths  Optional set of valid project paths; if provided, also cleans stale editor drafts
  * @param allProjectIds  Optional set of valid project IDs; if provided, also cleans stale board cache
+ * @param projectId  Optional current project ID; if provided, also cleans stale message/diff caches for that project
  */
-export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>, allProjectIds?: Set<string>): Promise<void> {
+export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>, allProjectIds?: Set<string>, projectId?: string): Promise<void> {
     // 1. Clean collapsed tasks
     await cleanCollapsedTasks(allTaskIds);
 
@@ -491,6 +494,11 @@ export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>,
     // 8. Clean editor tabs (if project IDs provided)
     if (allProjectIds) {
         await cleanEditorTabsByProject(allProjectIds);
+    }
+
+    // 9. Clean message/diff caches for the current project (if project ID provided)
+    if (projectId) {
+        await cleanTaskContentCache(allTaskIds, projectId);
     }
 }
 
@@ -588,10 +596,31 @@ async function cleanBoardCacheByProject(allProjectIds: Set<string>): Promise<voi
     }
 }
 
+/** Remove stale message/diff cache entries for a specific project.
+ * Only touches `messages:`/`message-full:`/`diff:` keys whose project part matches `projectId`,
+ * and only removes those whose task ID no longer exists in the current project's board.
+ * Other projects' caches are left untouched. */
+async function cleanTaskContentCache(allTaskIds: Set<string>, projectId: string): Promise<void> {
+    const keys = await dbGetAllKeys(STORE_BOARD_CACHE);
+    const toDelete = keys.filter(key => {
+        const parts = key.split(':');
+        if (parts[0] !== 'messages' && parts[0] !== 'message-full' && parts[0] !== 'diff') return false;
+        if (parts[1] !== projectId) return false; // only current project
+        const taskId = parts[2];
+        return !allTaskIds.has(taskId);
+    });
+    if (toDelete.length > 0) {
+        await dbDeleteKeys(STORE_BOARD_CACHE, toDelete);
+    }
+}
+
 // ─── Board cache (IndexedDB: board-cache store) ─────────────────────────────
 // Lightweight mirror of server state for offline rendering.
 // Stores projects list, per-project board state, and app config.
-// Keys: 'projects', 'board:<projectId>', 'config'
+// Also stores per-task content caches for offline viewing:
+//   'messages:<projectId>:<taskId>',
+//   'message-full:<projectId>:<taskId>:<messageId>',
+//   'diff:<projectId>:<taskId>'
 
 export interface BoardCacheEntry {
     data: unknown;
@@ -601,6 +630,21 @@ export interface BoardCacheEntry {
 /** Cache key for a project's board. */
 export function boardCacheKey(projectId: string): string {
     return `board:${projectId}`;
+}
+
+/** Cache key for a task's message list. */
+export function messagesCacheKey(projectId: string, taskId: string): string {
+    return `messages:${projectId}:${taskId}`;
+}
+
+/** Cache key for a single message's full content. */
+export function messageFullCacheKey(projectId: string, taskId: string, messageId: string): string {
+    return `message-full:${projectId}:${taskId}:${messageId}`;
+}
+
+/** Cache key for a task's current worktree diff. */
+export function diffCacheKey(projectId: string, taskId: string): string {
+    return `diff:${projectId}:${taskId}`;
 }
 
 /** Save a value to the board cache. */
