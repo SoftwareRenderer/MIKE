@@ -573,8 +573,8 @@
     }
 
     function scroll(force = false) {
-        if (!force && !atBottom) return;
         entriesReady = true;
+        if (!force && !atBottom) return;
         if (virtualList) {
             virtualList.scrollToBottom();
             requestAnimationFrame(() => virtualList?.scrollToBottom());
@@ -1354,7 +1354,7 @@
             bind:attachments={draftAttachments}
             disabled={disabled}
             isLoading={isLoading}
-            placeholder="Send a message to the agent..."
+            placeholder="Send a message..."
             providers={providers}
             selectedModel={selectedModel}
             selectedUrl={selectedUrl}
