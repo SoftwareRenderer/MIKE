@@ -25,6 +25,14 @@ export class DialogStore {
         taskId?: string;
         _resolve?: (value: string | null) => void;
     } | null>(null);
+    public compressContextDialog = $state<{
+        used?: number;
+        limit?: number;
+        sessionCost?: number;
+        confirmText?: string;
+        cancelText?: string;
+        _resolve?: (value: boolean) => void;
+    } | null>(null);
 
     /** Show a toast message that auto-dismisses after `duration` ms. */
     public showToast(message: string, type: 'error' | 'success' = 'error', duration = TOAST_DURATION_MS) {
@@ -59,6 +67,29 @@ export class DialogStore {
     /**
      * Show a commit confirmation dialog and return a Promise that resolves with the edited message or null (cancelled).
      */
+    /**
+     * Show the Compress Context dialog (includes a context donut + stats) and
+     * return a Promise that resolves to true (confirmed) or false (cancelled).
+     */
+    public showCompressContextDialog(options: {
+        used?: number;
+        limit?: number;
+        sessionCost?: number;
+        confirmText?: string;
+        cancelText?: string;
+    }): Promise<boolean> {
+        return new Promise((resolve) => {
+            this.compressContextDialog = {
+                used: options.used,
+                limit: options.limit,
+                sessionCost: options.sessionCost,
+                confirmText: options.confirmText ?? 'Compress',
+                cancelText: options.cancelText ?? 'Cancel',
+                _resolve: resolve,
+            };
+        });
+    }
+
     public showCommitDialog(options: {
         message: string;
         confirmText?: string;

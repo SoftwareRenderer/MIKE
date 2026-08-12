@@ -836,6 +836,9 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		if commitMsg == "" {
 			commitMsg = h.generateCommitMessage(r.Context(), taskID, task)
 		}
+		// Refresh staged files from the working tree so post-staging manual
+		// edits are included in the commit; unstaged files stay out.
+		h.worktreeMgr.StageIndexedFiles(taskID)
 		_ = h.worktreeMgr.GitRunInWorktree(taskID, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
 	}
 	h.executor.GetWorktreeMu(taskID).Unlock()
