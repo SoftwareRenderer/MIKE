@@ -573,8 +573,8 @@
     }
 
     function scroll(force = false) {
-        if (!force && !atBottom) return;
         entriesReady = true;
+        if (!force && !atBottom) return;
         if (virtualList) {
             virtualList.scrollToBottom();
             requestAnimationFrame(() => virtualList?.scrollToBottom());
