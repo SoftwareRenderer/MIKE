@@ -52,18 +52,6 @@ func TestConfigOverwrite(t *testing.T) {
 	}
 }
 
-func TestConfigWorkspaceDirDefault(t *testing.T) {
-	s := testStore(t)
-
-	val, err := s.GetConfigValue("workspace_dir")
-	if err != nil {
-		t.Fatalf("get workspace_dir: %v", err)
-	}
-	if val != "./.worktrees" {
-		t.Fatalf("unexpected default workspace_dir: %s", val)
-	}
-}
-
 func TestConfigProvidersJSON(t *testing.T) {
 	s := testStore(t)
 

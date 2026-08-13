@@ -155,11 +155,7 @@ func newTestConfigStore(t *testing.T) (*store.Store, *config.ConfigStore) {
 	dbPath := filepath.Join(dir, "config.db")
 	s := newTestStore(t)
 	cs := config.NewConfigStore(s, dbPath, "test")
-	// Set minimal config so terminal can start
-	err := s.SetConfigValue("workspace_dir", dir)
-	if err != nil {
-		t.Fatalf("set workspace_dir: %v", err)
-	}
+	cs.SetWorkspaceDirOverride(dir)
 	return s, cs
 }
 
