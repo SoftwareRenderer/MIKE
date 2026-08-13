@@ -376,6 +376,17 @@
             : ''
     );
 
+    // Auto-answered when the tool result differs from the question (a human-
+    // answered question keeps its result as the question).
+    let isAutoAnswered = $derived(
+        tc.toolName === 'ask_question' && !!tc.result && tc.result !== (tc.args && tc.args.question)
+    );
+    let renderedAutoAnswerHtml = $derived(
+        isAutoAnswered && tc.result
+            ? DOMPurify.sanitize(marked.parse(tc.result as string, { async: false }) as string)
+            : ''
+    );
+
     // Bash timeout (in seconds, from args or raw_args fallback)
     // Computed inline to avoid Svelte 5 $derived function-call TypeScript issues.
     let bashTimeout = $derived<number | undefined>(
@@ -518,6 +529,12 @@
             {/if}
         {:else if tc.toolName === 'ask_question' && tc.args && tc.args.question}
             <div class="tool-result tool-result-question">{@html renderedQuestionHtml}</div>
+            {#if isAutoAnswered}
+                <div class="tool-result tool-result-auto-answer">
+                    <div class="auto-answer-label">Automated answer (parent context)</div>
+                    <div class="auto-answer-body">{@html renderedAutoAnswerHtml}</div>
+                </div>
+            {/if}
         {:else if tc.toolName === 'request_review' && tc.args && tc.args.summary}
             <div class="tool-result tool-result-summary">{@html renderedSummaryHtml}</div>
         {:else if tc.result && tc.result.trim()}
@@ -679,6 +696,41 @@
     }
     .tool-result-question {
         margin: 4px 0 0;
+    }
+    .tool-result-auto-answer {
+        margin: 6px 0 0;
+        padding: 8px 12px;
+        border-left: 3px solid var(--color-accent);
+        background: var(--color-surface-1);
+        border-radius: var(--radius-sm);
+        font-size: 0.875rem;
+        line-height: 1.7;
+        color: var(--color-text-primary);
+        word-break: break-word;
+        white-space: normal;
+        min-width: 0;
+        overflow: hidden;
+    }
+    .auto-answer-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--color-accent);
+        margin-bottom: 4px;
+    }
+    .auto-answer-body :global(p) {
+        margin: 0.5rem 0;
+    }
+    .auto-answer-body :global(p:first-child) {
+        margin-top: 0;
+    }
+    .auto-answer-body :global(p:last-child) {
+        margin-bottom: 0;
+    }
+    .auto-answer-body :global(code) {
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
     }
     .tool-result-summary :global(p),
     .tool-result-question :global(p) {

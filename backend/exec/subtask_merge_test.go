@@ -883,6 +883,10 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 	if subtask2.Status != "in_progress" {
 		t.Errorf("subtask2 status should be in_progress, got %q", subtask2.Status)
 	}
+	// Auto-started from a parent via sibling continuation => Autostarted must be true
+	if !subtask2.Autostarted {
+		t.Errorf("subtask2 should be marked autostarted when started via AutoStartNextSibling")
+	}
 
 	// Verify parent is still in in_progress
 	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
@@ -892,6 +896,44 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 
 	// Cleanup
 	te.StopTask(subtask2ID)
+}
+
+// TestStartTaskUserInitiatedNotAutostarted verifies that a direct user-initiated
+// StartTask leaves the task's Autostarted flag false, even overwriting a prior true.
+func TestStartTaskUserInitiatedNotAutostarted(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+
+	taskID := "user-start-task"
+	task := &types.Task{
+		ID:              taskID,
+		ProjectID:       projectID,
+		Title:           "User Started Task",
+		Prompt:          "Task prompt",
+		Status:          "in_progress",
+		ExecutionState:  "idle",
+		CurrentThreadID: "thread-user-start",
+		LlamaServerURL:  "http://localhost:8080",
+		ModelName:       "test-model",
+		// Seed with true to prove a user-initiated start overwrites it to false.
+		Autostarted: true,
+	}
+	if err := te.store.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := te.StartTask(projectID, taskID, false); err != nil {
+		t.Fatalf("StartTask failed: %v", err)
+	}
+	defer te.StopTask(taskID)
+
+	// Verify the flag is persisted as false for a user-initiated start.
+	got, err := te.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.Autostarted {
+		t.Errorf("user-initiated StartTask should leave Autostarted=false")
+	}
 }
 
 // TestStartSubtaskWithParent_InheritsModelConfig verifies that when a subtask
@@ -940,7 +982,7 @@ func TestStartSubtaskWithParent_InheritsModelConfig(t *testing.T) {
 	}
 
 	// StartSubtaskWithParent should inherit model config from parent
-	err := te.StartSubtaskWithParent(projectID, subtaskID)
+	err := te.StartSubtaskWithParent(projectID, subtaskID, false)
 	if err != nil {
 		t.Fatalf("StartSubtaskWithParent failed: %v", err)
 	}

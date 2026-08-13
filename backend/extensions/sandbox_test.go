@@ -566,14 +566,14 @@ func TestCustomMountSnapshot(t *testing.T) {
 		t.Errorf("customMountSnapshot = %v, want [\"/a:/b:ro\"]", snap)
 	}
 
-	// Multiple mounts are sorted; mode is always forced to ro.
+	// Multiple mounts are sorted.
 	mounts2 := []types.SandboxMount{
 		{HostPath: "/z", ContainerPath: "/y", Mode: "rw"},
 		{HostPath: "/a", ContainerPath: "/b", Mode: "ro"},
 	}
 	snap2 := customMountSnapshot(mounts2)
-	if len(snap2) != 2 || snap2[0] != "/a:/b:ro" || snap2[1] != "/z:/y:ro" {
-		t.Errorf("customMountSnapshot = %v, want sorted with forced ro", snap2)
+	if len(snap2) != 2 || snap2[0] != "/a:/b:ro" || snap2[1] != "/z:/y:rw" {
+		t.Errorf("customMountSnapshot = %v, want sorted", snap2)
 	}
 }
 
