@@ -152,7 +152,7 @@ export function getQueuedDeleteTaskIds(): Set<string> {
 
 
 /** Check if an error is a transient network failure (retryable). */
-function isTransientError(e: unknown): boolean {
+export function isTransientError(e: unknown): boolean {
     return (e as any)?.name === 'TypeError' || (e as any)?.name === 'AbortError';
 }
 
@@ -230,12 +230,11 @@ async function flushQueue() {
         // Temporarily set online so raw functions execute directly
         isOffline = false;
         try {
-            const resolvedTasks = await doFlush((e) => {
-                if (isTransientError(e)) {
-                    isOffline = true;
-                    return true; // stop flushing
-                }
-                return false;
+            // doFlush only invokes the callback for transient errors — mark
+            // offline and stop flushing; the rest stays queued.
+            const resolvedTasks = await doFlush(() => {
+                isOffline = true;
+                return true; // stop flushing
             });
             notifyQueueFlushed([], resolvedTasks);
         } finally {
