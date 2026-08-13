@@ -12,8 +12,8 @@ import (
 
 	"kanban/backend/config"
 	"kanban/backend/git"
-	"kanban/backend/stream"
 	"kanban/backend/store"
+	"kanban/backend/stream"
 	"kanban/backend/types"
 )
 
@@ -35,7 +35,6 @@ func newTestTaskHandler(t *testing.T) (*TaskHandler, *store.Store, string) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	s.SetConfigValue("workspace_dir", worktreesDir)
 	s.SetConfigValue("providers", "[]")
 	s.SetConfigValue("worker_provider", "")
 	s.SetConfigValue("worker_model", "")
@@ -43,6 +42,7 @@ func newTestTaskHandler(t *testing.T) (*TaskHandler, *store.Store, string) {
 	s.SetConfigValue("utility_model", "")
 
 	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	boardMgr := stream.NewAppStreamManager(s, wm)
 	h := NewTaskHandler(s, boardMgr, cfgStore, nil, nil, wm, nil, nil)

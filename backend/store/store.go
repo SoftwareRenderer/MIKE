@@ -365,7 +365,6 @@ func (s *Store) initConfigDefaults() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defaults := map[string]string{
-		"workspace_dir":    "./.worktrees",
 		"providers":        "",
 		"worker_provider":  "",
 		"worker_model":     "",
@@ -373,26 +372,6 @@ func (s *Store) initConfigDefaults() error {
 		"utility_model":    "",
 	}
 
-	// Migrate old default worktrees path to hidden .worktrees
-	var wsDir string
-	if err := s.db.QueryRow(`SELECT value FROM config WHERE key = 'workspace_dir'`).Scan(&wsDir); err == nil {
-		if wsDir == "./worktrees" || wsDir == "worktrees" {
-			oldAbs := wsDir
-			if !filepath.IsAbs(oldAbs) {
-				if abs, err := filepath.Abs(oldAbs); err == nil {
-					oldAbs = abs
-				}
-			}
-			newAbs, _ := filepath.Abs("./.worktrees")
-			if _, err := os.Stat(oldAbs); err == nil {
-				if _, err := os.Stat(newAbs); os.IsNotExist(err) {
-					if err := os.Rename(oldAbs, newAbs); err == nil {
-						_, _ = s.db.Exec(`UPDATE config SET value = ? WHERE key = 'workspace_dir'`, "./.worktrees")
-					}
-				}
-			}
-		}
-	}
 	for k, v := range defaults {
 		_, err := s.db.Exec(`INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)`, k, v)
 		if err != nil {

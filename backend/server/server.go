@@ -91,17 +91,16 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		return nil, fmt.Errorf("get config: %w", err)
 	}
 
-	// Apply the runtime worktrees-dir override
-	if worktreesDir != "" {
-		cfgStore.SetWorkspaceDirOverride(worktreesDir)
-		cfg.WorkspaceDir = worktreesDir
+	// Set worktrees directory (CLI flag / env var, or default)
+	if worktreesDir == "" {
+		worktreesDir = config.DefaultWorkspaceDir
 	}
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
+	cfg.WorkspaceDir = worktreesDir
 
 	// Ensure the effective worktrees directory exists.
-	if cfg.WorkspaceDir != "" {
-		if err := os.MkdirAll(cfg.WorkspaceDir, 0o755); err != nil {
-			return nil, fmt.Errorf("create worktrees dir: %w", err)
-		}
+	if err := os.MkdirAll(cfg.WorkspaceDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create worktrees dir: %w", err)
 	}
 
 	s := &Server{

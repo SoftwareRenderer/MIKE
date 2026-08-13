@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -18,36 +19,23 @@ func testConfigStore(t *testing.T) *ConfigStore {
 	return NewConfigStore(db, dir+"/test.db", "test")
 }
 
-func TestGetConfig(t *testing.T) {
+func TestGetConfigDefaultWorkspaceDir(t *testing.T) {
 	cs := testConfigStore(t)
-
-	// workspace_dir is set via CLI/env, not via UpdateConfig.
-	// Use a temp dir for the test fixture.
-	wsDir := t.TempDir()
-	if err := cs.store.SetConfigValue("workspace_dir", wsDir); err != nil {
-		t.Fatalf("set workspace_dir: %v", err)
-	}
-
+	// No override set — should use the compiled-in default
 	read, err := cs.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	if read.WorkspaceDir != wsDir {
-		t.Fatalf("expected %q, got %q", wsDir, read.WorkspaceDir)
+	// Default is resolved to absolute path
+	expectedAbs, _ := filepath.Abs(DefaultWorkspaceDir)
+	if read.WorkspaceDir != expectedAbs {
+		t.Fatalf("expected default workspace dir %q, got %q", expectedAbs, read.WorkspaceDir)
 	}
 }
 
 func TestGetConfigRespectsWorkspaceDirOverride(t *testing.T) {
 	cs := testConfigStore(t)
-
-	// DB stores a relative workspace_dir, but the runtime override
-	// (--worktrees-dir flag / MIKE_WORKTREES_DIR env, captured at startup)
-	// takes precedence. It is not persisted.
-	dbDir := t.TempDir()
 	overrideDir := t.TempDir()
-	if err := cs.store.SetConfigValue("workspace_dir", dbDir); err != nil {
-		t.Fatalf("set workspace_dir: %v", err)
-	}
 	cs.SetWorkspaceDirOverride(overrideDir)
 
 	read, err := cs.GetConfig()
@@ -55,41 +43,7 @@ func TestGetConfigRespectsWorkspaceDirOverride(t *testing.T) {
 		t.Fatalf("get config: %v", err)
 	}
 	if read.WorkspaceDir != overrideDir {
-		t.Fatalf("expected workspace_dir override %q, got %q", overrideDir, read.WorkspaceDir)
-	}
-
-	// The override must not be persisted to the DB.
-	stored, err := cs.store.GetConfigValue("workspace_dir")
-	if err != nil {
-		t.Fatalf("get stored workspace_dir: %v", err)
-	}
-	if stored != dbDir {
-		t.Fatalf("override leaked to DB: expected %q, got %q", dbDir, stored)
-	}
-}
-
-func TestUpdateConfigIgnoresWorkspaceDir(t *testing.T) {
-	cs := testConfigStore(t)
-
-	// Set initial workspace_dir via store
-	originalDir := t.TempDir()
-	if err := cs.store.SetConfigValue("workspace_dir", originalDir); err != nil {
-		t.Fatalf("set workspace_dir: %v", err)
-	}
-
-	// Try to change workspace_dir via UpdateConfig — should be ignored
-	newDir := t.TempDir()
-	cfg := &types.Config{WorkspaceDir: newDir}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.WorkspaceDir != originalDir {
-		t.Fatalf("workspace_dir should not change via UpdateConfig: got %q", read.WorkspaceDir)
+		t.Fatalf("expected workspace dir %q, got %q", overrideDir, read.WorkspaceDir)
 	}
 }
 
