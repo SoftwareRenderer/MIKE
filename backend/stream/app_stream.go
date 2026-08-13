@@ -702,6 +702,12 @@ func (asm *AppStreamManager) ClearTaskBuffer(projectID, taskID string) {
 	asm.clearTaskBuffer(projectID + ":" + taskID)
 }
 
+// GetTaskBuffer returns the raw frames buffered for a task (replay payloads).
+// Read-only; used by tests to assert task event contents.
+func (asm *AppStreamManager) GetTaskBuffer(projectID, taskID string) [][]byte {
+	return asm.getTaskBuffer(projectID + ":" + taskID)
+}
+
 func (asm *AppStreamManager) getDiffBaseline(task types.Task) string {
 	if task.Branch == "" || asm.worktreeMgr == nil {
 		return task.BaseRef

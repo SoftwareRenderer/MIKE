@@ -134,6 +134,8 @@ type LSPConfig struct {
 	// ToolCallsEnabled controls whether LSP tools (references, definition,
 	// code actions, hover) are available to agent tool calls. Nil or true = enabled.
 	ToolCallsEnabled *bool `json:"tool_calls_enabled,omitempty"`
+	// Sandbox declares default sandbox options (writable mounts, envs, memory).
+	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
 }
 
 // IsEditorEnabled returns true if editor LSP features are enabled.
@@ -337,6 +339,33 @@ type SandboxConfig struct {
 	Mounts           []types.SandboxMount `json:"mounts,omitempty"`
 	Envs             []types.SandboxEnv   `json:"envs,omitempty"`
 	Capabilities     []string             `json:"capabilities,omitempty"`
+}
+
+// lspSandboxFromManifest returns the LSP capability's sandbox config, or nil.
+func lspSandboxFromManifest(m *ExtensionManifest) *SandboxConfig {
+	if m == nil || m.Capabilities == nil || m.Capabilities.LSP == nil {
+		return nil
+	}
+	return m.Capabilities.LSP.Sandbox
+}
+
+// sandboxConfigFromManifest overlays manifest-declared sandbox options onto defaults.
+func sandboxConfigFromManifest(m *SandboxConfig) SandboxConfig {
+	sc := SandboxConfig{
+		NetworkIsolation: true,
+		MemoryLimit:      DefaultExtensionMemory,
+	}
+	if m == nil {
+		return sc
+	}
+	if m.MemoryLimit > 0 {
+		sc.MemoryLimit = m.MemoryLimit
+	}
+	sc.Mounts = m.Mounts
+	sc.Envs = m.Envs
+	sc.ForwardPorts = m.ForwardPorts
+	sc.Capabilities = m.Capabilities
+	return sc
 }
 
 // RegistryIndex is the top-level registry format.

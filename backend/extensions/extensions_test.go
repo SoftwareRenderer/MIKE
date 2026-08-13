@@ -659,3 +659,78 @@ func TestPiManifestTemplateResolution(t *testing.T) {
 		t.Errorf("resolved Envs = %+v, want key HOME", sb.Envs)
 	}
 }
+
+func TestManifest_SandboxConfigUnmarshal(t *testing.T) {
+	raw := `{
+		"display_name": "Go Language Server",
+		"version": "1.0.0",
+		"capabilities": {
+			"lsp": {
+				"command": "gopls", "args": ["serve"], "language": "go",
+				"sandbox": {
+					"envs": [
+						{"key": "XDG_CACHE_HOME", "value": "/var/cache/gopls"},
+						{"key": "GOCACHE", "value": "/var/cache/gopls/go-build"}
+					],
+					"mounts": [
+						{"host_path": "/tmp/cache", "container_path": "/var/cache/gopls", "mode": "rw"}
+					],
+					"memory_limit": 512
+				}
+			}
+		}
+	}`
+	var m ExtensionManifest
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	sb := m.Capabilities.LSP.Sandbox
+	if sb == nil {
+		t.Fatal("capabilities.lsp.sandbox was not parsed")
+	}
+	if len(sb.Envs) != 2 || sb.Envs[0].Key != "XDG_CACHE_HOME" {
+		t.Errorf("unexpected envs: %+v", sb.Envs)
+	}
+	if len(sb.Mounts) != 1 || sb.Mounts[0].Mode != "rw" {
+		t.Errorf("unexpected mounts: %+v", sb.Mounts)
+	}
+	if sb.MemoryLimit != 512 {
+		t.Errorf("memory_limit = %d, want 512", sb.MemoryLimit)
+	}
+	if got := lspSandboxFromManifest(&m); got == nil {
+		t.Error("lspSandboxFromManifest returned nil")
+	}
+	if got := lspSandboxFromManifest(nil); got != nil {
+		t.Error("lspSandboxFromManifest(nil) should return nil")
+	}
+}
+
+func TestSandboxConfigFromManifest(t *testing.T) {
+	// Nil manifest config -> defaults.
+	def := sandboxConfigFromManifest(nil)
+	if !def.NetworkIsolation {
+		t.Error("default NetworkIsolation should be true")
+	}
+	if def.MemoryLimit != DefaultExtensionMemory {
+		t.Errorf("default MemoryLimit = %d, want %d", def.MemoryLimit, DefaultExtensionMemory)
+	}
+
+	// Manifest envs/mounts are carried over; defaults preserved.
+	sc := sandboxConfigFromManifest(&SandboxConfig{
+		MemoryLimit: 512,
+		Envs:        []types.SandboxEnv{{Key: "XDG_CACHE_HOME", Value: "/var/cache/gopls"}},
+		Mounts:      []types.SandboxMount{{HostPath: "/tmp/cache", ContainerPath: "/var/cache/gopls", Mode: "rw"}},
+	})
+	if !sc.NetworkIsolation {
+		t.Error("NetworkIsolation should remain true")
+	}
+	if sc.MemoryLimit != 512 {
+		t.Errorf("MemoryLimit = %d, want 512", sc.MemoryLimit)
+	}
+	if len(sc.Envs) != 1 || sc.Envs[0].Key != "XDG_CACHE_HOME" {
+		t.Errorf("envs not carried over: %+v", sc.Envs)
+	}
+	if len(sc.Mounts) != 1 || sc.Mounts[0].Mode != "rw" {
+		t.Errorf("mounts not carried over: %+v", sc.Mounts)
+	}
+}
