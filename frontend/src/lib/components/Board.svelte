@@ -8,7 +8,7 @@
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
-    import { mergeQueuedUpdate } from '$lib/utils/task-utils';
+    import { mergeQueuedUpdate, filterTopLevelTaskIds } from '$lib/utils/task-utils';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
@@ -32,7 +32,9 @@
                 cancelText: 'Cancel',
             });
             if (!confirmed) return;
-            for (const id of taskIds) {
+            // Only send DELETE for top-level tasks, server recursively deletes descendants
+            const topLevelIds = filterTopLevelTaskIds(taskIds, tasks);
+            for (const id of topLevelIds) {
                 try {
                     await deleteTask(projectId, id);
                     removeTaskFromBoard(appStore, id);
