@@ -326,8 +326,9 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	*messages = append(*messages, types.ChatMessage{Role: "user", Content: hint})
 	detector.recordHintIndex(hintIdx)
 
+	hintMsgID := uuid.New().String()
 	te.store.CreateTaskMessage(&types.TaskMessage{
-		ID: uuid.New().String(), TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "user",
+		ID: hintMsgID, TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "user",
 		Content: hint, IsLoopHint: true, CreatedAt: time.Now().UTC(),
 	})
 	// Preserve loopStreak across hint cycles so consecutive loops accumulate.
@@ -335,8 +336,9 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	streak := detector.loopStreak
 	detector.reset()
 	detector.loopStreak = streak
-	// Broadcast hint to frontend in real-time
+	// Broadcast hint with its DB message ID so the client can dedupe on history reload.
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeHint, Data: map[string]any{
+		"id":         hintMsgID,
 		"content":    hint,
 		"created_at": time.Now().UTC().Format(time.RFC3339),
 	}})

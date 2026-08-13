@@ -409,6 +409,82 @@ func TestHandleLoopDetected_IdeationModeSuppressesHints(t *testing.T) {
 	}
 }
 
+// TestHandleLoopDetected_HintBroadcastCarriesMessageID verifies the hint
+// broadcast carries the persisted message ID (frontend dedupes on history reload).
+func TestHandleLoopDetected_HintBroadcastCarriesMessageID(t *testing.T) {
+	e := newTestExecutor(t)
+	now := time.Now().UTC()
+
+	proj := &types.Project{ID: "proj-hint-id", Name: "Hint ID Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	if err := e.store.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &types.Task{
+		ID: "task-hint-id", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
+		Status: "in_progress", ExecutionState: "running",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := e.store.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	detector := newLoopDetector()
+	messages := []types.ChatMessage{{Role: "system", Content: "system prompt"}}
+
+	terminated := handleLoopDetected(e, task, proj.ID, task.ID, detector, LoopStatement, "", &messages, false)
+	if terminated {
+		t.Fatal("loop hint should not terminate on first detection")
+	}
+
+	// The hint must be persisted with IsLoopHint set.
+	hintMsgs, err := e.store.GetTaskMessages(task.ID, task.CurrentThreadID)
+	if err != nil {
+		t.Fatalf("get task messages: %v", err)
+	}
+	if len(hintMsgs) != 1 {
+		t.Fatalf("expected 1 persisted hint message, got %d", len(hintMsgs))
+	}
+	hintMsg := hintMsgs[0]
+	if !hintMsg.IsLoopHint {
+		t.Error("expected persisted hint message to have IsLoopHint=true")
+	}
+	if hintMsg.Role != "user" {
+		t.Errorf("expected hint role=user, got %q", hintMsg.Role)
+	}
+	if hintMsg.Content != buildHint(LoopStatement, "") {
+		t.Errorf("unexpected hint content: %q", hintMsg.Content)
+	}
+
+	// The broadcast frame must carry the same message ID so the frontend can
+	// dedupe the real-time entry against the DB entry on history reload.
+	frames := e.appStreamMgr.GetTaskBuffer(proj.ID, task.ID)
+	var found bool
+	for _, frame := range frames {
+		var payload struct {
+			Type   string         `json:"type"`
+			Event  string         `json:"event"`
+			TaskID string         `json:"task_id"`
+			Data   map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(frame, &payload); err != nil {
+			continue
+		}
+		if payload.Event != "hint" {
+			continue
+		}
+		found = true
+		if payload.Data["id"] != hintMsg.ID {
+			t.Errorf("hint broadcast id = %v, want %s", payload.Data["id"], hintMsg.ID)
+		}
+		if payload.Data["content"] != hintMsg.Content {
+			t.Errorf("hint broadcast content = %v, want %s", payload.Data["content"], hintMsg.Content)
+		}
+	}
+	if !found {
+		t.Fatal("no hint broadcast frame found in task buffer")
+	}
+}
+
 func TestLoopDetector_ToolLoopReturnsRepeatedArgs(t *testing.T) {
 	d := newLoopDetector()
 
