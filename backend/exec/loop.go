@@ -1340,6 +1340,9 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			te.createCheckpoint(setup.ctx, setup.projectID, setup.task.ID, setup.worktreePath, setup.task.CurrentThreadID, assistantMsgID, newMessages, lc.sandboxEnabled)
 			lc.checkpointIdx = len(lc.messages)
 
+			// Auto-summarize if context is approaching the window limit.
+			te.maybeAutoSummarize(setup, lc, activeModel)
+
 			// Continue to call LLM again with tool results — don't fall through to blocking select
 			continue
 		} else if assistantText != "" {
@@ -1391,7 +1394,28 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			// Valid text-only response: remove previously injected hints from context
 			lc.messages = lc.detector.removeHints(lc.messages)
 
-			// Check for queued user messages before sending complete.
+			// Mark the response complete and the task idle FIRST so the assistant
+			// message renders as finished (streaming cursor stops) before any
+			// auto-summarization runs. This prevents the message from looking like it
+			// is still generating while the summary is produced.
+			setup.task.Status = "review"
+			setup.task.ExecutionState = "idle"
+			te.store.UpdateTask(setup.task)
+			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+				"state": "idle", "summary": "Agent finished responding",
+				"assistant_message_id": assistantMsgID,
+				"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
+				"cache_tokens": cacheTokens,
+				"prompt_ms":    promptMs, "predicted_ms": predictedMs,
+				"model_name": activeModel, "duration": duration,
+			}})
+
+			// Auto-summarize if context is approaching the window limit. Runs right
+			// after the message completes, without waiting for the task transition.
+			te.maybeAutoSummarize(setup, lc, activeModel)
+
+			// Check for queued user messages.
 			select {
 			case um := <-setup.userMsgChan:
 				if um.ContextChanged {
@@ -1424,18 +1448,6 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			default:
 			}
 
-			setup.task.Status = "review"
-			setup.task.ExecutionState = "idle"
-			te.store.UpdateTask(setup.task)
-			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-				"state": "idle", "summary": "Agent finished responding",
-				"assistant_message_id": assistantMsgID,
-				"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
-				"cache_tokens": cacheTokens,
-				"prompt_ms":    promptMs, "predicted_ms": predictedMs,
-				"model_name": activeModel, "duration": duration,
-			}})
 			// If this is a subtask, auto-start the next sibling
 			if setup.task.ParentTaskID != "" {
 				_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID, setup.task.Status)
@@ -1471,16 +1483,11 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			lc.reasoningContent.Reset()
 			lc.finishReason = ""
 			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Reasoning-only response, requesting action"}})
-			continue
-		}
 
-		// Auto-summarize if context is approaching the window limit.
-		if lc.contextWindow != nil {
-			if shouldSummarize(lc.messages, *lc.contextWindow) {
-				lc.messages = te.applySummarization(setup.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, setup.serverURL, activeModel, nil)
-				lc.detector.reset() // context changed, clear stale text window
-				lc.detector.clearHints()
-			}
+			// Auto-summarize if context is approaching the window limit.
+			te.maybeAutoSummarize(setup, lc, activeModel)
+
+			continue
 		}
 
 		// Block for user message before next LLM call.

@@ -148,9 +148,43 @@ func extractPrevSummary(messages []types.ChatMessage) string {
 	return ""
 }
 
+// maybeAutoSummarize runs summarization if the current context usage is approaching
+// the window limit. It is invoked immediately after an assistant message is appended,
+// so it triggers right when context crosses the threshold (no waiting for the task to
+// transition to idle). applySummarization sets/clears the Summarizing flag, which shows
+// the spinner in the UI.
+func (te *TaskExecutor) maybeAutoSummarize(setup *taskExecSetup, lc *loopContext, activeModel string) {
+	if lc.contextWindow == nil {
+		return
+	}
+	if !shouldSummarize(contextTokensUsed(lc), *lc.contextWindow) {
+		return
+	}
+	lc.messages = te.applySummarization(setup.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, setup.serverURL, activeModel, nil)
+	lc.detector.reset()
+	lc.detector.clearHints()
+}
+
 // applySummarization runs summarization, appends the summary message, and broadcasts the event.
 // Summary is injected into the system prompt on the next LLM call.
 func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task, projectID, taskID string, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error) []types.ChatMessage {
+	// Signal the UI that summarization is in progress (shows the spinner) and
+	// block lazy-start for idle tasks. Idempotent with the manual path, where
+	// HandleSummarize sets this flag before sending the request. This makes the
+	// automatic path render identically to a user-triggered summarization.
+	origTask := task
+	task.Summarizing = true
+	_ = te.store.UpdateTask(task)
+	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+
+	clearFlag := func() {
+		// Clear on the caller's reference too (task may have been reloaded below).
+		origTask.Summarizing = false
+		task.Summarizing = false
+		_ = te.store.UpdateTask(task)
+		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+	}
+
 	prevSummary := extractPrevSummary(messages)
 	// Route summarization through the configured Utility provider/model.
 	// Only override the active model when a Utility pair is configured; otherwise
@@ -163,6 +197,7 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 	sumResult, err := te.summarizeContext(ctx, messages, serverURL, modelName, prevSummary)
 	if err != nil {
 		log.Printf("[summarize] task=%s summarization failed: %v", taskID, err)
+		clearFlag()
 		if resultCh != nil {
 			resultCh <- err
 		}
@@ -211,6 +246,8 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 		"model_name":       modelName,
 	}})
 	log.Printf("[summarize] task=%s summarized context (messages preserved, LLM context compressed)", taskID)
+
+	clearFlag()
 
 	if resultCh != nil {
 		resultCh <- nil
