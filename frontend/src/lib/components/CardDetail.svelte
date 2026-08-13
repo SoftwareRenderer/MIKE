@@ -520,6 +520,8 @@
                 if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
                 if (diffFullscreen) {
                     diffFullscreen = false;
+                } else if (chatFullscreen) {
+                    chatFullscreen = false;
                 } else if (checkpointDiffOpen) {
                     closeCheckpointDiff();
                 } else if (multiSelect.hasSelection) {

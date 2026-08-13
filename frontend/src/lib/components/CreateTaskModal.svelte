@@ -12,7 +12,7 @@
     import type { Config, Provider, Task } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
-    import { appStore, uiStore } from '$lib/stores';
+    import { appStore, uiStore, dialogStore } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import FileMentionDropdown from './FileMentionDropdown.svelte';
@@ -359,19 +359,42 @@
         }
     }
 
-    function handleClose() {
+    /**
+     * Gate run before the modal closes (Esc, X, Cancel). Warns that changes
+     * will be lost when the description isn't blank. Resolves true when the
+     * modal may close.
+     */
+    async function requestClose(): Promise<boolean> {
+        if (prompt.trim()) {
+            if (dialogStore.confirmation) return false;
+            const confirmed = await dialogStore.showConfirm({
+                title: 'Discard task?',
+                message: 'Your task description has not been saved. If you close now, your changes will be lost.',
+                confirmText: 'Discard',
+                cancelText: 'Keep editing',
+            });
+            if (!confirmed) return false;
+        }
+        return true;
+    }
+
+    function closeModal() {
         onClose();
+    }
+
+    async function handleCancel() {
+        if (await requestClose()) closeModal();
     }
 </script>
 
 {#snippet footer()}
-    <button type="button" class="btn-secondary" onclick={handleClose} title="Cancel">Cancel</button>
+    <button type="button" class="btn-secondary" onclick={handleCancel} title="Cancel">Cancel</button>
     <button type="button" class="btn-primary" disabled={loading || !prompt.trim() || (hasProviders && !selectedModel)} onclick={handleSubmit} title="Create the task">
         {loading ? 'Creating...' : 'Create Task'}
     </button>
 {/snippet}
 
-<BaseModal title={parentId ? 'Create Subtask' : 'Create Task'} width="480px" footer={footer} onClose={handleClose} closeOnOverlayClick={false}>
+<BaseModal title={parentId ? 'Create Subtask' : 'Create Task'} width="480px" footer={footer} onClose={closeModal} onBeforeClose={requestClose} closeOnOverlayClick={false}>
     {#if parentId}
         <div class="parent-label">Subtask of: <strong>{parentTitle || 'Parent task'}</strong></div>
     {/if}
