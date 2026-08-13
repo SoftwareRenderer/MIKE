@@ -32,6 +32,11 @@ type Skill struct {
 	Location    string // path to the SKILL.md file
 }
 
+// funcs are helper template functions.
+var funcs = template.FuncMap{
+	"inc": func(i int) int { return i + 1 },
+}
+
 // promptDir is a function variable that returns the absolute path to the prompts directory.
 // It can be overridden in tests. By default it tries the executable directory first,
 // then falls back to the current working directory.
@@ -195,13 +200,15 @@ func RenderSystemPrompt(data PromptData) (string, error) {
 		return "", os.ErrNotExist
 	}
 
-	tmpl, err := template.ParseFiles(matches...)
+	tmpl, err := template.New("prompts").Funcs(funcs).ParseFiles(matches...)
 	if err != nil {
 		return "", err
 	}
 
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	// Render by name: Execute() would render the alphabetically-first file, so
+	// a new template could hijack the system prompt.
+	if err := tmpl.ExecuteTemplate(&buf, "base.tmpl", data); err != nil {
 		return "", err
 	}
 
@@ -259,6 +266,32 @@ func RenderSummarizePrompt(data SummarizeData) (string, error) {
 	return buf.String(), nil
 }
 
+// AnswerQuestionData is the input for the automated answer prompt.
+type AnswerQuestionData struct {
+	ParentTitle  string   // parent task title
+	ParentPrompt string   // parent task description/prompt (the context to answer from)
+	SubtaskTitle string   // the subtask asking the questions
+	Questions    []string // all questions asked in this turn, in order
+}
+
+// RenderAnswerQuestionPrompt renders the automated answer system prompt.
+func RenderAnswerQuestionPrompt(data AnswerQuestionData) (string, error) {
+	dir := promptDir()
+	path := filepath.Join(dir, "answer_question.tmpl")
+
+	tmpl, err := template.New("answer_question.tmpl").Funcs(funcs).ParseFiles(path)
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+
+	return buf.String(), nil
+}
+
 // ValidateTemplates parses and dry-runs the templates to check for errors.
 // Returns the list of template file basenames and any error encountered.
 func ValidateTemplates() ([]string, error) {
@@ -273,7 +306,7 @@ func ValidateTemplates() ([]string, error) {
 		return nil, os.ErrNotExist
 	}
 
-	tmpl, err := template.ParseFiles(matches...)
+	tmpl, err := template.New("prompts").Funcs(funcs).ParseFiles(matches...)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +325,7 @@ func ValidateTemplates() ([]string, error) {
 		Summary: "Previous work: implemented authentication system.",
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "base.tmpl", data); err != nil {
 		return nil, err
 	}
 
