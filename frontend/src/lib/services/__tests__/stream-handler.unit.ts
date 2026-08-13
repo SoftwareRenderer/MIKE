@@ -327,6 +327,31 @@ describe('createStreamHandler', () => {
         expect(cb.markNotStreaming).toHaveBeenCalled();
     });
 
+    it('hint event uses the backend message id for the entry', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'hint', data: { id: 'hint-msg-1', content: 'Is the task complete?', created_at: '2026-01-01T00:00:00Z' } }, false, 'p1', 't1');
+        expect(stream.state.entries).toHaveLength(1);
+        expect(stream.state.entries[0].role).toBe('user');
+        expect(stream.state.entries[0].id).toBe('hint-msg-1');
+        expect(stream.state.entries[0].content).toBe('Is the task complete?');
+    });
+
+    it('hint event without an id falls back to genId', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'hint', data: { content: 'retry hint', created_at: '2026-01-01T00:00:00Z' } }, false, 'p1', 't1');
+        expect(stream.state.entries).toHaveLength(1);
+        expect(stream.state.entries[0].id).toMatch(/^id-/); // genId() prefix from the test callback
+        expect(stream.state.entries[0].content).toBe('retry hint');
+    });
+
+    it('hint event with an already-present id is skipped (replay dedup)', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'hint', data: { id: 'hint-msg-1', content: 'Is the task complete?', created_at: '2026-01-01T00:00:00Z' } }, false, 'p1', 't1');
+        // Replayed from the reconnect buffer — must not add a duplicate entry.
+        handleEvent({ type: 'hint', data: { id: 'hint-msg-1', content: 'Is the task complete?', created_at: '2026-01-01T00:00:00Z' } }, false, 'p1', 't1');
+        expect(stream.state.entries).toHaveLength(1);
+    });
+
     it('error event creates error entry', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'error', data: { message: 'Something failed', code: 'api_error' } }, false, 'p1', 't1');
@@ -412,6 +437,36 @@ describe('createStreamHandler', () => {
         handleEvent({ type: 'status', data: { state: 'running' } }, false, 'p1', 't1');
         // Entry with only pending tool calls should be removed
         expect(stream.state.entries.filter(e => e.toolCalls?.some(tc => tc.isPending))).toHaveLength(0);
+    });
+
+    it('status:running sets awaitingResponse so the awaiting indicator shows', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'status', data: { state: 'running' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(true);
+    });
+
+    it('status:running with retry activity also arms awaitingResponse', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'status', data: { state: 'running', activity: 'Connection interrupted (timeout), retrying... (attempt 2/3)' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(true);
+        expect(stream.state.retryCount).toBe(2);
+        expect(stream.state.retryError).toBe('timeout');
+    });
+
+    it('first token after status:running clears awaitingResponse', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'status', data: { state: 'running' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(true);
+        handleEvent({ type: 'token', data: { text: 'Hello' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(false);
+    });
+
+    it('terminal statuses after running clear awaitingResponse', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'status', data: { state: 'running' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(true);
+        handleEvent({ type: 'status', data: { state: 'idle' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(false);
     });
 
     it('tool_result resolves pending tool call via activeToolCalls lookup', () => {

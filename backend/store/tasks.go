@@ -20,11 +20,11 @@ func (s *Store) CreateTask(t *types.Task) error {
 		}
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO tasks (id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO tasks (id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.ProjectID, t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, b2i(t.HasMergeConflict),
 		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, b2i(t.AutoCommit), b2i(t.AutoMerge), b2i(t.SubtasksAutoMerge), t.OperatingMode,
-		ptrStr(t.ParentTaskID), b2i(t.TitleGenerating), b2i(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), assignedPortsJSON, t.SessionCost,
+		ptrStr(t.ParentTaskID), b2i(t.Autostarted), b2i(t.TitleGenerating), b2i(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), assignedPortsJSON, t.SessionCost,
 	)
 	return err
 }
@@ -41,7 +41,7 @@ func (s *Store) GetTaskByTaskID(taskID string) (*types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	row := s.db.QueryRow(
-		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost FROM tasks WHERE id = ?`,
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost FROM tasks WHERE id = ?`,
 		taskID,
 	)
 	var t types.Task
@@ -54,7 +54,7 @@ func (s *Store) GetTaskByTaskID(taskID string) (*types.Task, error) {
 
 func (s *Store) queryTask(projectID, taskID string) (*types.Task, error) {
 	row := s.db.QueryRow(
-		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost FROM tasks WHERE id = ? AND project_id = ?`,
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost FROM tasks WHERE id = ? AND project_id = ?`,
 		taskID, projectID,
 	)
 	var t types.Task
@@ -74,7 +74,7 @@ func (s *Store) GetTasksByProject(projectID string) ([]types.Task, error) {
 
 func (s *Store) queryTasksByProject(projectID string) ([]types.Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost FROM tasks WHERE project_id = ? ORDER BY column_order ASC`,
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost FROM tasks WHERE project_id = ? ORDER BY column_order ASC`,
 		projectID,
 	)
 	if err != nil {
@@ -104,9 +104,9 @@ func (s *Store) UpdateTask(t *types.Task) error {
 		}
 	}
 	_, err := s.db.Exec(
-		`UPDATE tasks SET title = ?, prompt = ?, status = ?, column_order = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, execution_state = ?, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, title_generating = ?, summarizing = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE tasks SET title = ?, prompt = ?, status = ?, column_order = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, execution_state = ?, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, summarizing = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ?`,
 		t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, b2i(t.HasMergeConflict),
-		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, b2i(t.AutoCommit), b2i(t.AutoMerge), b2i(t.SubtasksAutoMerge), t.OperatingMode, ptrStr(t.ParentTaskID), b2i(t.TitleGenerating), b2i(t.Summarizing), ptrStr(t.CurrentThreadID), assignedPortsJSON, t.SessionCost, now.Format(time.RFC3339), t.ID,
+		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, b2i(t.AutoCommit), b2i(t.AutoMerge), b2i(t.SubtasksAutoMerge), t.OperatingMode, ptrStr(t.ParentTaskID), b2i(t.Autostarted), b2i(t.TitleGenerating), b2i(t.Summarizing), ptrStr(t.CurrentThreadID), assignedPortsJSON, t.SessionCost, now.Format(time.RFC3339), t.ID,
 	)
 	return err
 }
@@ -243,7 +243,7 @@ func (s *Store) GetChildren(taskID string) ([]types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(
-		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost FROM tasks WHERE parent_task_id = ? ORDER BY column_order ASC`,
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost FROM tasks WHERE parent_task_id = ? ORDER BY column_order ASC`,
 		taskID,
 	)
 	if err != nil {
