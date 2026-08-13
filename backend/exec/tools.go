@@ -542,13 +542,22 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		return "Task complete", true
 	case "create_task":
 		result, err := te.handleCreateTask(args, task, state)
-		return result, err == nil
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err), false
+		}
+		return result, true
 	case "view_tasks":
 		result, err := te.handleViewTasks(task)
-		return result, err == nil
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err), false
+		}
+		return result, true
 	case "edit_task":
 		result, err := te.handleEditTask(args, task)
-		return result, err == nil
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err), false
+		}
+		return result, true
 	case "lsp_references":
 		result, err := te.handleLSPSymbolRequest(args, worktreePath, "textDocument/references", map[string]any{"includeDeclaration": true})
 		if err != nil {
