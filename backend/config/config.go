@@ -35,10 +35,16 @@ func RegistryURL() string {
 
 // ConfigStore wraps Store for config-specific operations.
 type ConfigStore struct {
-	store         *store.Store
-	dbPath        string
-	version       string
-	agentRegistry AgentProviderLister // optional — set via SetAgentRegistry
+	store                *store.Store
+	dbPath               string
+	version              string
+	agentRegistry        AgentProviderLister // optional — set via SetAgentRegistry
+	workspaceDirOverride string              // runtime override (--worktrees-dir / env), not persisted
+}
+
+// SetWorkspaceDirOverride sets a runtime override for the worktrees directory
+func (cs *ConfigStore) SetWorkspaceDirOverride(dir string) {
+	cs.workspaceDirOverride = dir
 }
 
 // SetAgentRegistry wires the agent registry so dynamically-discovered agent
@@ -168,8 +174,8 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		return nil, err
 	}
 
-	if wtDir := os.Getenv("MIKE_WORKTREES_DIR"); wtDir != "" {
-		workspaceDir = wtDir
+	if cs.workspaceDirOverride != "" {
+		workspaceDir = cs.workspaceDirOverride
 	}
 	// Resolve relative paths to absolute so the frontend can display them correctly
 	if workspaceDir != "" && !filepath.IsAbs(workspaceDir) {
