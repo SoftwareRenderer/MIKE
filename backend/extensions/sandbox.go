@@ -176,18 +176,14 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 	}
 	createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memoryLimit))
 
-	// Custom mounts
+	// Custom mounts — always read-only; extensions never get write access.
 	for _, m := range ext.SandboxConfig.Mounts {
-		mode := "ro"
-		if m.Mode == "rw" {
-			mode = "rw"
-		}
 		absHost, err := filepath.Abs(m.HostPath)
 		if err != nil {
 			continue
 		}
 		createArgs = append(createArgs,
-			"-v", fmt.Sprintf("%s:%s:rprivate,%s", absHost, m.ContainerPath, mode),
+			"-v", fmt.Sprintf("%s:%s:rprivate,ro", absHost, m.ContainerPath),
 		)
 	}
 
@@ -532,7 +528,7 @@ func customMountSnapshot(mounts []types.SandboxMount) []string {
 	}
 	snap := make([]string, len(mounts))
 	for i, m := range mounts {
-		snap[i] = m.HostPath + ":" + m.ContainerPath + ":" + m.Mode
+		snap[i] = m.HostPath + ":" + m.ContainerPath + ":ro"
 	}
 	sort.Strings(snap)
 	return snap
