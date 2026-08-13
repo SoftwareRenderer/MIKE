@@ -829,10 +829,16 @@ func (te *TaskExecutor) handleEditTask(args map[string]any, currentTask *types.T
 			if parent.Status != "backlog" {
 				return "", fmt.Errorf("parent task %s is not in backlog (status: %s). Parent must be a backlog task", parentTaskID, parent.Status)
 			}
-			target.ParentTaskID = parentTaskID
-		} else {
-			// Empty string means remove parent
+			// Only re-derive auto-merge when the parent actually changes
+			if target.ParentTaskID != parentTaskID {
+				target.ParentTaskID = parentTaskID
+				// Respect the parent's "allow subtask to auto merge" preference
+				te.applyAutoMergeOnParentChange(target, parent)
+			}
+		} else if target.ParentTaskID != "" {
+			// Empty string means remove parent — reset auto-merge to config defaults.
 			target.ParentTaskID = ""
+			te.applyAutoMergeOnParentChange(target, nil)
 		}
 	}
 
@@ -854,6 +860,17 @@ func (te *TaskExecutor) handleEditTask(args map[string]any, currentTask *types.T
 
 	result, _ := json.Marshal(map[string]string{"task_id": taskID, "title": target.Title, "status": "updated"})
 	return string(result), nil
+}
+
+// applyAutoMergeOnParentChange re-derives auto_merge/auto_commit preferences
+func (te *TaskExecutor) applyAutoMergeOnParentChange(target *types.Task, parent *types.Task) {
+	var cfg *types.Config
+	if te.configStore != nil {
+		if c, err := te.configStore.GetConfig(); err == nil {
+			cfg = c
+		}
+	}
+	types.ApplyTaskCreationDefaults(target, cfg, parent, map[string]struct{}{"subtasks_auto_merge": {}})
 }
 
 // handleLSPSymbolRequest resolves a symbol name to a position via text search,

@@ -2450,3 +2450,156 @@ func TestTaskOperatingModeRemount(t *testing.T) {
 		}
 	})
 }
+
+// createTaskDirect creates a task directly in the store with explicit
+// auto-merge fields (bypassing API defaults) for PUT reparent tests.
+func createTaskDirect(t *testing.T, s *Server, projID, taskID string, autoCommit, autoMerge, subtasksAutoMerge bool, parentTaskID string) {
+	t.Helper()
+	now := time.Now().UTC()
+	task := &types.Task{
+		ID:                taskID,
+		ProjectID:         projID,
+		Title:             "Direct Task",
+		Prompt:            "Direct prompt",
+		Status:            "backlog",
+		ExecutionState:    "idle",
+		AutoCommit:        autoCommit,
+		AutoMerge:         autoMerge,
+		SubtasksAutoMerge: subtasksAutoMerge,
+		ParentTaskID:      parentTaskID,
+		OperatingMode:     "act",
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	if err := s.store.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+}
+
+// TestTaskUpdateParentRespectsSubtasksAutoMerge verifies that nesting a task via
+// PUT re-derives auto_merge from the parent's "allow subtask to auto merge"
+// preference while preserving the task's own subtasks_auto_merge.
+func TestTaskUpdateParentRespectsSubtasksAutoMerge(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	// Parent disallows subtask auto-merge
+	createTaskDirect(t, s, projID, "parent-put-1", true, true, false, "")
+	// Independent target with auto_merge=true
+	createTaskDirect(t, s, projID, "target-put-1", true, true, true, "")
+
+	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/target-put-1", map[string]any{
+		"parent_task_id": "parent-put-1",
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	if result["parent_task_id"] != "parent-put-1" {
+		t.Errorf("expected parent_task_id=parent-put-1, got %v", result["parent_task_id"])
+	}
+	if am, ok := result["auto_merge"].(bool); !ok || am {
+		t.Errorf("expected auto_merge=false (parent subtasks_auto_merge=false), got %v", result["auto_merge"])
+	}
+	if sam, ok := result["subtasks_auto_merge"].(bool); !ok || !sam {
+		t.Errorf("expected subtasks_auto_merge=true (preserved), got %v", result["subtasks_auto_merge"])
+	}
+}
+
+// TestTaskUpdateParentExplicitAutoMergeWins verifies that an explicit auto_merge
+// sent alongside a parent change takes priority over the parent inheritance.
+func TestTaskUpdateParentExplicitAutoMergeWins(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	createTaskDirect(t, s, projID, "parent-put-2", true, true, false, "")
+	createTaskDirect(t, s, projID, "target-put-2", true, true, true, "")
+
+	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/target-put-2", map[string]any{
+		"parent_task_id": "parent-put-2",
+		"auto_merge":     true,
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	if am, ok := result["auto_merge"].(bool); !ok || !am {
+		t.Errorf("expected auto_merge=true (explicit value wins), got %v", result["auto_merge"])
+	}
+}
+
+// TestTaskUpdateUnnestResetsToConfigDefaults verifies that clearing the parent
+// resets auto_merge to the server config default while preserving the task's
+// own subtasks_auto_merge.
+func TestTaskUpdateUnnestResetsToConfigDefaults(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	// Config default: auto_merge=true
+	if err := s.store.SetConfigValue("default_auto_merge", "true"); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
+
+	createTaskDirect(t, s, projID, "parent-put-3", true, true, false, "")
+	// Subtask with auto_merge=false (inherited from parent's disallow)
+	createTaskDirect(t, s, projID, "target-put-3", true, false, true, "parent-put-3")
+
+	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/target-put-3", map[string]any{
+		"parent_task_id": "",
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	if am, ok := result["auto_merge"].(bool); !ok || !am {
+		t.Errorf("expected auto_merge=true (config default after un-nesting), got %v", result["auto_merge"])
+	}
+	if ac, ok := result["auto_commit"].(bool); !ok || !ac {
+		t.Errorf("expected auto_commit=true (prerequisite for auto_merge), got %v", result["auto_commit"])
+	}
+	if sam, ok := result["subtasks_auto_merge"].(bool); !ok || !sam {
+		t.Errorf("expected subtasks_auto_merge=true (preserved), got %v", result["subtasks_auto_merge"])
+	}
+}
+
+// TestTaskUpdateUnchangedParentKeepsAutoMerge verifies that re-sending the same
+// parent leaves an explicit auto_merge override untouched.
+func TestTaskUpdateUnchangedParentKeepsAutoMerge(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+
+	createTaskDirect(t, s, projID, "parent-put-4", true, true, false, "")
+	// Subtask with explicit auto_merge=true override
+	createTaskDirect(t, s, projID, "target-put-4", true, true, true, "parent-put-4")
+
+	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/target-put-4", map[string]any{
+		"parent_task_id": "parent-put-4",
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	if am, ok := result["auto_merge"].(bool); !ok || !am {
+		t.Errorf("expected auto_merge=true (unchanged parent must not clobber), got %v", result["auto_merge"])
+	}
+}
+
+// TestTaskUpdateParentNotFound verifies that setting a nonexistent parent via
+// PUT returns 400.
+func TestTaskUpdateParentNotFound(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	createTaskDirect(t, s, projID, "target-put-5", true, true, true, "")
+
+	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/target-put-5", map[string]any{
+		"parent_task_id": "does-not-exist",
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}

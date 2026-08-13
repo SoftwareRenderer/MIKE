@@ -281,6 +281,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		}
 		// Capture original values before partial update
 		originalSubtasksAutoMerge := task.SubtasksAutoMerge
+		originalParentTaskID := task.ParentTaskID
 		body, _ := io.ReadAll(r.Body)
 		var rawBody map[string]any
 		json.Unmarshal(body, &rawBody)
@@ -372,6 +373,31 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		}
 		if v, ok := rawBody["current_thread_id"]; ok {
 			task.CurrentThreadID = v.(string)
+		}
+		// When parent_task_id changes, re-derive auto_merge/auto_commit to respect
+		// the new parent's "allow subtask to auto merge" preference
+		if hasField(rawBody, "parent_task_id") && task.ParentTaskID != originalParentTaskID {
+			skipFields := make(map[string]struct{})
+			for _, k := range []string{"auto_commit", "auto_merge", "subtasks_auto_merge"} {
+				if hasField(rawBody, k) {
+					skipFields[k] = struct{}{}
+				}
+			}
+			var parentTask *types.Task
+			if task.ParentTaskID != "" {
+				parentTask, err = h.store.GetTask(projectID, task.ParentTaskID)
+				if err != nil {
+					httputil.JSONError(w, http.StatusBadRequest, "parent task not found")
+					return
+				}
+			}
+			var cfg *types.Config
+			if h.configStore != nil {
+				if c, err := h.configStore.GetConfig(); err == nil {
+					cfg = c
+				}
+			}
+			types.ApplyTaskCreationDefaults(task, cfg, parentTask, skipFields)
 		}
 		task.UpdatedAt = time.Now()
 		// Auto-commit is a prerequisite for auto-merge
