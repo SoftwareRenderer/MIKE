@@ -439,7 +439,7 @@ func setupExecutorWithGitForSubtask(t *testing.T) (*TaskExecutor, string, string
 	t.Cleanup(func() { s.Close() })
 
 	cfgStore := config.NewConfigStore(s, dbPath, "test")
-	_ = s.SetConfigValue("workspace_dir", worktreesDir)
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	projectID := "test-project"
 	proj := &types.Project{ID: projectID, Name: "test", Path: repoDir}
@@ -694,14 +694,14 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	// Create parent in backlog
 	parentID := "parent-sibling-test"
 	parent := &types.Task{
-		ID:                parentID,
-		ProjectID:         projectID,
-		Title:             "Parent Task",
-		Prompt:            "Parent prompt",
-		Status:            "backlog",
-		CurrentThreadID:   "thread-parent",
-		LlamaServerURL:    "http://localhost:8080",
-		ModelName:         "test-model",
+		ID:              parentID,
+		ProjectID:       projectID,
+		Title:           "Parent Task",
+		Prompt:          "Parent prompt",
+		Status:          "backlog",
+		CurrentThreadID: "thread-parent",
+		LlamaServerURL:  "http://localhost:8080",
+		ModelName:       "test-model",
 	}
 	te.store.CreateTask(parent)
 
@@ -710,16 +710,16 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	subtask2ID := "subtask2-sibling"
 	for i, id := range []string{subtask1ID, subtask2ID} {
 		subtask := &types.Task{
-			ID:                id,
-			ProjectID:         projectID,
-			Title:             "Subtask " + id,
-			Prompt:            "Subtask prompt",
-			Status:            "in_progress",
-			ExecutionState:    "idle",
-			ParentTaskID:      parentID,
-			CurrentThreadID:   "thread-subtask-" + string(rune('1'+i)),
-			LlamaServerURL:    "http://localhost:8080",
-			ModelName:         "test-model",
+			ID:              id,
+			ProjectID:       projectID,
+			Title:           "Subtask " + id,
+			Prompt:          "Subtask prompt",
+			Status:          "in_progress",
+			ExecutionState:  "idle",
+			ParentTaskID:    parentID,
+			CurrentThreadID: "thread-subtask-" + string(rune('1'+i)),
+			LlamaServerURL:  "http://localhost:8080",
+			ModelName:       "test-model",
 		}
 		te.store.CreateTask(subtask)
 	}
@@ -798,15 +798,15 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 	// Create parent in in_progress
 	parentID := "parent-inprogress-test"
 	parent := &types.Task{
-		ID:                parentID,
-		ProjectID:         projectID,
-		Title:             "Parent Task",
-		Prompt:            "Parent prompt",
-		Status:            "in_progress",
-		ExecutionState:    "idle",
-		CurrentThreadID:   "thread-parent",
-		LlamaServerURL:    "http://localhost:8080",
-		ModelName:         "test-model",
+		ID:              parentID,
+		ProjectID:       projectID,
+		Title:           "Parent Task",
+		Prompt:          "Parent prompt",
+		Status:          "in_progress",
+		ExecutionState:  "idle",
+		CurrentThreadID: "thread-parent",
+		LlamaServerURL:  "http://localhost:8080",
+		ModelName:       "test-model",
 	}
 	te.store.CreateTask(parent)
 
@@ -815,16 +815,16 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 	subtask2ID := "subtask2-inprogress"
 	for i, id := range []string{subtask1ID, subtask2ID} {
 		subtask := &types.Task{
-			ID:                id,
-			ProjectID:         projectID,
-			Title:             "Subtask " + id,
-			Prompt:            "Subtask prompt",
-			Status:            "in_progress",
-			ExecutionState:    "idle",
-			ParentTaskID:      parentID,
-			CurrentThreadID:   "thread-subtask-" + string(rune('1'+i)),
-			LlamaServerURL:    "http://localhost:8080",
-			ModelName:         "test-model",
+			ID:              id,
+			ProjectID:       projectID,
+			Title:           "Subtask " + id,
+			Prompt:          "Subtask prompt",
+			Status:          "in_progress",
+			ExecutionState:  "idle",
+			ParentTaskID:    parentID,
+			CurrentThreadID: "thread-subtask-" + string(rune('1'+i)),
+			LlamaServerURL:  "http://localhost:8080",
+			ModelName:       "test-model",
 		}
 		te.store.CreateTask(subtask)
 	}
@@ -903,29 +903,29 @@ func TestStartSubtaskWithParent_InheritsModelConfig(t *testing.T) {
 	// Create parent with model config
 	parentID := "parent-model-inherit"
 	parent := &types.Task{
-		ID:                parentID,
-		ProjectID:         projectID,
-		Title:             "Parent Task",
-		Prompt:            "Parent prompt",
-		Status:            "in_progress",
-		ExecutionState:    "idle",
-		CurrentThreadID:   "thread-parent",
-		LlamaServerURL:    "http://localhost:8080",
-		ModelName:         "test-model",
+		ID:              parentID,
+		ProjectID:       projectID,
+		Title:           "Parent Task",
+		Prompt:          "Parent prompt",
+		Status:          "in_progress",
+		ExecutionState:  "idle",
+		CurrentThreadID: "thread-parent",
+		LlamaServerURL:  "http://localhost:8080",
+		ModelName:       "test-model",
 	}
 	te.store.CreateTask(parent)
 
 	// Create subtask WITHOUT model config (simulates plan-mode created subtask)
 	subtaskID := "subtask-no-model"
 	subtask := &types.Task{
-		ID:                subtaskID,
-		ProjectID:         projectID,
-		Title:             "Subtask No Model",
-		Prompt:            "Subtask prompt",
-		Status:            "in_progress",
-		ExecutionState:    "idle",
-		ParentTaskID:      parentID,
-		CurrentThreadID:   "thread-subtask",
+		ID:              subtaskID,
+		ProjectID:       projectID,
+		Title:           "Subtask No Model",
+		Prompt:          "Subtask prompt",
+		Status:          "in_progress",
+		ExecutionState:  "idle",
+		ParentTaskID:    parentID,
+		CurrentThreadID: "thread-subtask",
 		// LlamaServerURL and ModelName are intentionally empty
 	}
 	te.store.CreateTask(subtask)
@@ -975,30 +975,30 @@ func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
 	// Create parent in backlog
 	parentID := "parent-stay-backlog"
 	parent := &types.Task{
-		ID:                parentID,
-		ProjectID:         projectID,
-		Title:             "Parent Task",
-		Prompt:            "Parent prompt",
-		Status:            "backlog",
-		CurrentThreadID:   "thread-parent",
-		LlamaServerURL:    "http://localhost:8080",
-		ModelName:         "test-model",
+		ID:              parentID,
+		ProjectID:       projectID,
+		Title:           "Parent Task",
+		Prompt:          "Parent prompt",
+		Status:          "backlog",
+		CurrentThreadID: "thread-parent",
+		LlamaServerURL:  "http://localhost:8080",
+		ModelName:       "test-model",
 	}
 	te.store.CreateTask(parent)
 
 	// Create a single subtask
 	subtaskID := "subtask-last-one"
 	subtask := &types.Task{
-		ID:                subtaskID,
-		ProjectID:         projectID,
-		Title:             "Last Subtask",
-		Prompt:            "Subtask prompt",
-		Status:            "in_progress",
-		ExecutionState:       "idle",
-		ParentTaskID:      parentID,
-		CurrentThreadID:   "thread-subtask",
-		LlamaServerURL:    "http://localhost:8080",
-		ModelName:         "test-model",
+		ID:              subtaskID,
+		ProjectID:       projectID,
+		Title:           "Last Subtask",
+		Prompt:          "Subtask prompt",
+		Status:          "in_progress",
+		ExecutionState:  "idle",
+		ParentTaskID:    parentID,
+		CurrentThreadID: "thread-subtask",
+		LlamaServerURL:  "http://localhost:8080",
+		ModelName:       "test-model",
 	}
 	te.store.CreateTask(subtask)
 
@@ -1614,8 +1614,8 @@ func TestMergeBranch_RecoverMissingBranch(t *testing.T) {
 	// Simulates the case where InitTask cleared the branch and a new
 	// random suffix was generated.
 	parentID := "parent-missing-branch"
-	oldBranch := "task/count-files-abc123"   // exists in git
-	newBranch := "task/count-files-xyz789"   // in DB but missing in git
+	oldBranch := "task/count-files-abc123" // exists in git
+	newBranch := "task/count-files-xyz789" // in DB but missing in git
 
 	// Create the old branch in git (with some work).
 	runGit(t, repoDir, "branch", oldBranch, "HEAD")

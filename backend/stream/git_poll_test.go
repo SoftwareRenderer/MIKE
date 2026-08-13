@@ -40,11 +40,11 @@ func TestBranchWatcherLifecycle(t *testing.T) {
 	defer s.Close()
 
 	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	_ = s.SetConfigValue("workspace_dir", worktreesDir)
 	if err := cfgStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)
 	}
@@ -321,11 +321,11 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 	defer s.Close()
 
 	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	_ = s.SetConfigValue("workspace_dir", worktreesDir)
 	if err := cfgStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)
 	}
@@ -409,11 +409,11 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 	defer s.Close()
 
 	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	_ = s.SetConfigValue("workspace_dir", worktreesDir)
 	if err := cfgStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)
 	}
@@ -524,11 +524,11 @@ func TestWorktreeWatcherWorkerPoolBounds(t *testing.T) {
 	defer s.Close()
 
 	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg, err := cfgStore.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	_ = s.SetConfigValue("workspace_dir", worktreesDir)
 	if err := cfgStore.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)
 	}

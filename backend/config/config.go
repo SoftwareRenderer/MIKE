@@ -22,6 +22,10 @@ type AgentProviderLister interface {
 	ToProviders() []types.Provider
 }
 
+// DefaultWorkspaceDir is the default git worktrees directory when no
+// --worktrees-dir flag or MIKE_WORKTREES_DIR env var is provided.
+const DefaultWorkspaceDir = "./.worktrees"
+
 // RegistryURL returns the extension registry index URL. It is sourced
 // exclusively from the MIKE_REGISTRY_URL environment variable (which takes
 // precedence) and otherwise falls back to the hosted online registry. It is no
@@ -39,10 +43,11 @@ type ConfigStore struct {
 	dbPath               string
 	version              string
 	agentRegistry        AgentProviderLister // optional — set via SetAgentRegistry
-	workspaceDirOverride string              // runtime override (--worktrees-dir / env), not persisted
+	workspaceDirOverride string              // set at startup via --worktrees-dir / MIKE_WORKTREES_DIR
 }
 
-// SetWorkspaceDirOverride sets a runtime override for the worktrees directory
+// SetWorkspaceDirOverride sets the worktrees directory.
+// Must be called before GetConfig().
 func (cs *ConfigStore) SetWorkspaceDirOverride(dir string) {
 	cs.workspaceDirOverride = dir
 }
@@ -169,16 +174,13 @@ func NewConfigStore(store *store.Store, dbPath, version string) *ConfigStore {
 // GetConfig retrieves the full server configuration.
 // API keys are decrypted from the DB before returning.
 func (cs *ConfigStore) GetConfig() (*types.Config, error) {
-	workspaceDir, err := cs.store.GetConfigValue("workspace_dir")
-	if err != nil {
-		return nil, err
-	}
-
-	if cs.workspaceDirOverride != "" {
-		workspaceDir = cs.workspaceDirOverride
+	// Workspace dir is set at startup via CLI flag / env var — not persisted.
+	workspaceDir := cs.workspaceDirOverride
+	if workspaceDir == "" {
+		workspaceDir = DefaultWorkspaceDir
 	}
 	// Resolve relative paths to absolute so the frontend can display them correctly
-	if workspaceDir != "" && !filepath.IsAbs(workspaceDir) {
+	if !filepath.IsAbs(workspaceDir) {
 		if abs, err := filepath.Abs(workspaceDir); err == nil {
 			workspaceDir = abs
 		}
@@ -291,7 +293,6 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	if err != nil {
 		return err
 	}
-	// workspace_dir is set at startup via CLI flag / env var — not modifiable at runtime
 	if err := cs.store.SetConfigValue("providers", string(providersJSON)); err != nil {
 		return err
 	}
@@ -427,7 +428,6 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to get current config")
 			return
 		}
-		// workspace_dir is set at startup via CLI flag / env var — not modifiable at runtime
 		if providers, ok := updates["providers"]; ok {
 			if providers != nil {
 				providersJSON, _ := json.Marshal(providers)

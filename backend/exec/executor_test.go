@@ -13,10 +13,10 @@ import (
 
 	"kanban/backend/config"
 	"kanban/backend/git"
-	pkgagent "kanban/pkg/agent"
 	"kanban/backend/store"
 	"kanban/backend/stream"
 	"kanban/backend/types"
+	pkgagent "kanban/pkg/agent"
 )
 
 // setupExecutorWithGit creates a TaskExecutor with a real git repo for testing.
@@ -51,7 +51,7 @@ func setupExecutorWithGit(t *testing.T) (*TaskExecutor, string, string, string) 
 	t.Cleanup(func() { s.Close() })
 
 	cfgStore := config.NewConfigStore(s, dbPath, "test")
-	_ = s.SetConfigValue("workspace_dir", worktreesDir)
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 
 	// Create project
 	projectID := "test-project"
@@ -93,15 +93,15 @@ func TestPrepareTaskExecution_PreservesBaseRefOnRestart(t *testing.T) {
 
 	// Create task with BaseRef already set (simulating first run completed)
 	task := &types.Task{
-		ID:            taskID,
-		ProjectID:     projectID,
-		Title:         "Test task",
-		Prompt:        "Test prompt",
-		Status:        "in_progress",
-		BaseRef:       initialSHA,
-		Branch:        branchName,
+		ID:             taskID,
+		ProjectID:      projectID,
+		Title:          "Test task",
+		Prompt:         "Test prompt",
+		Status:         "in_progress",
+		BaseRef:        initialSHA,
+		Branch:         branchName,
 		LlamaServerURL: "http://localhost:8080",
-		ModelName:     "test-model",
+		ModelName:      "test-model",
 	}
 	te.store.CreateTask(task)
 
@@ -144,14 +144,14 @@ func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
 
 	// Create task WITHOUT BaseRef (first run)
 	task := &types.Task{
-		ID:            taskID,
-		ProjectID:     projectID,
-		Title:         "Test task",
-		Prompt:        "Test prompt",
-		Status:        "in_progress",
-		Branch:        branchName,
+		ID:             taskID,
+		ProjectID:      projectID,
+		Title:          "Test task",
+		Prompt:         "Test prompt",
+		Status:         "in_progress",
+		Branch:         branchName,
 		LlamaServerURL: "http://localhost:8080",
-		ModelName:     "test-model",
+		ModelName:      "test-model",
 	}
 	te.store.CreateTask(task)
 
@@ -483,11 +483,11 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 	taskID := "test-serialize-task"
 	branchName := "task/" + taskID
 	task := &types.Task{
-		ID:      taskID,
+		ID:        taskID,
 		ProjectID: projectID,
-		Title:   "Test serialize",
-		Branch:  branchName,
-		BaseRef: "master",
+		Title:     "Test serialize",
+		Branch:    branchName,
+		BaseRef:   "master",
 	}
 	te.store.CreateTask(task)
 
@@ -598,17 +598,17 @@ func TestSlugifyBranchName_AllHyphens(t *testing.T) {
 // can never produce a slug starting with '-', preventing Git argument injection.
 func TestSlugifyBranchName_NeverStartsWithHyphen(t *testing.T) {
 	inputs := []string{
-		"-fix login",           // starts with hyphen
-		"  -fix",               // whitespace then hyphen
-		"---fix",               // multiple hyphens
-		"-123",                 // hyphen then digits
-		"---",                  // all hyphens
-		"-",                    // single hyphen
-		"-a-b-c",               // hyphen-separated
-		"Fix login",            // normal title
-		"123 fix",              // starts with digit
-		"!!!fix!!!",            // special chars
-		"",                     // empty
+		"-fix login", // starts with hyphen
+		"  -fix",     // whitespace then hyphen
+		"---fix",     // multiple hyphens
+		"-123",       // hyphen then digits
+		"---",        // all hyphens
+		"-",          // single hyphen
+		"-a-b-c",     // hyphen-separated
+		"Fix login",  // normal title
+		"123 fix",    // starts with digit
+		"!!!fix!!!",  // special chars
+		"",           // empty
 	}
 	for _, input := range inputs {
 		slug := slugifyBranchName(input)
@@ -839,4 +839,3 @@ func TestInitTask_ClearsOrphanedBranchOnWorktreeFailure(t *testing.T) {
 		t.Fatalf("branch should be cleared after worktree failure, got %q", reloaded.Branch)
 	}
 }
-
