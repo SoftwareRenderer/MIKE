@@ -351,6 +351,10 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     if (!isRetry) {
                         markStreaming();
                     }
+                    // Executor (re)started — arm the awaiting indicator until the
+                    // first token/tool_call (clearAwaiting) or a terminal status.
+                    // Covers resume paths that skip sendWithTracking/handleStartTask.
+                    s.awaitingResponse = true;
                 } else if (data.state === 'cancelled') {
                     stream.closeCurrentAssistant();
                     s.activeToolCalls = new Map();

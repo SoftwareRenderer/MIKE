@@ -645,3 +645,59 @@ func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
 		t.Errorf("expected request_review to succeed in standard mode, got: %s", result)
 	}
 }
+
+// TestExecuteTool_CreateTask_ErrorFeedback verifies that create_task errors
+// are included in the result string returned to the LLM (not silently dropped).
+func TestExecuteTool_CreateTask_ErrorFeedback(t *testing.T) {
+	te := newTestExecutor(t)
+	parent := createParentTask(t, te.store, "parent-feedback", "proj-fb", "backlog")
+
+	// Missing title — error message must be in result string
+	result, ok := te.executeTool(context.Background(), "create_task", map[string]any{
+		"prompt": "Test prompt",
+	}, "", parent, &executionState{}, nil)
+	if ok {
+		t.Error("expected create_task to fail with missing title")
+	}
+	if !strings.Contains(result, "title and prompt are required") {
+		t.Errorf("expected error message in result, got: %q", result)
+	}
+
+	// Missing prompt — error message must be in result string
+	result, ok = te.executeTool(context.Background(), "create_task", map[string]any{
+		"title": "Task",
+	}, "", parent, &executionState{}, nil)
+	if ok {
+		t.Error("expected create_task to fail with missing prompt")
+	}
+	if !strings.Contains(result, "title and prompt are required") {
+		t.Errorf("expected error message in result, got: %q", result)
+	}
+
+	// Parent not found — error message must be in result string
+	result, ok = te.executeTool(context.Background(), "create_task", map[string]any{
+		"title":          "Child Task",
+		"prompt":         "Test prompt",
+		"parent_task_id": "nonexistent-task",
+	}, "", parent, &executionState{}, nil)
+	if ok {
+		t.Error("expected create_task to fail with nonexistent parent")
+	}
+	if !strings.Contains(result, "not found") {
+		t.Errorf("expected 'not found' in error message, got: %q", result)
+	}
+
+	// Parent not in backlog — error message must be in result string
+	doneParent := createParentTask(t, te.store, "done-parent", "proj-fb-done", "done")
+	result, ok = te.executeTool(context.Background(), "create_task", map[string]any{
+		"title":          "Child Task",
+		"prompt":         "Test prompt",
+		"parent_task_id": "done-parent",
+	}, "", doneParent, &executionState{}, nil)
+	if ok {
+		t.Error("expected create_task to fail with parent not in backlog")
+	}
+	if !strings.Contains(result, "not in backlog") {
+		t.Errorf("expected 'not in backlog' in error message, got: %q", result)
+	}
+}
