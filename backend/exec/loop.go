@@ -1488,76 +1488,80 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			continue
 		}
 
-		// Block for user message before next LLM call.
-		select {
-		case <-setup.ctx.Done():
-			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
-			return
-		case req := <-setup.summarizeCh:
-			// Manual summarization request from HandleSummarize.
-			// Check if it was cancelled (user clicked ✕ or new request arrived).
-			if req.ctx.Err() != nil {
-				if req.ctx.Err() == context.Canceled {
-					log.Printf("[summarize] setup.task=%s summarization cancelled", setup.task.ID)
+		// Block for user message before next LLM call
+	idleWait:
+		for {
+			select {
+			case <-setup.ctx.Done():
+				te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+				return
+			case req := <-setup.summarizeCh:
+				// Manual summarization request from HandleSummarize.
+				// Check if it was cancelled (user clicked ✕ or new request arrived).
+				if req.ctx.Err() != nil {
+					if req.ctx.Err() == context.Canceled {
+						log.Printf("[summarize] setup.task=%s summarization cancelled", setup.task.ID)
+					}
+					req.resultCh <- req.ctx.Err()
+					continue idleWait
 				}
-				req.resultCh <- req.ctx.Err()
-				continue
-			}
-			log.Printf("[summarize] setup.task=%s manual summarization requested", setup.task.ID)
-			lc.messages = te.applySummarization(req.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, setup.serverURL, activeModel, req.resultCh)
-			lc.detector.reset() // context changed, clear stale text window
-			lc.detector.clearHints()
-			// Count messages before DB sync (includes in-memory summary).
-			preSyncCount := len(lc.messages)
-			// Re-sync from DB to pick up any messages queued during summarization.
-			lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
-			// Clear summarizing flag.
-			setup.task.Summarizing = false
-			te.store.UpdateTask(setup.task)
-			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-			// If DB has more messages than we had in-memory, new input arrived.
-			hasQueuedInput := len(lc.messages) > preSyncCount
-			if !hasQueuedInput {
-				// No new user input — go idle, don't call LLM with just the summary.
-				setup.task.Status = "review"
-				setup.task.ExecutionState = "idle"
+				log.Printf("[summarize] setup.task=%s manual summarization requested", setup.task.ID)
+				lc.messages = te.applySummarization(req.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, setup.serverURL, activeModel, req.resultCh)
+				lc.detector.reset() // context changed, clear stale text window
+				lc.detector.clearHints()
+				// Count messages before DB sync (includes in-memory summary).
+				preSyncCount := len(lc.messages)
+				// Re-sync from DB to pick up any messages queued during summarization.
+				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+				// Clear summarizing flag.
+				setup.task.Summarizing = false
 				te.store.UpdateTask(setup.task)
 				te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-				continue
-			}
-			// User message present — continue to LLM call.
-			setup.task.Status = "in_progress"
-			setup.task.ExecutionState = "running"
-			te.store.UpdateTask(setup.task)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing queued message"}})
-			continue
-		case um := <-setup.userMsgChan:
-			if um.ContextChanged {
-				log.Printf("[context-changed] setup.task=%s conversation context changed while idle, re-syncing", setup.task.ID)
+				// If DB has more messages than we had in-memory, new input arrived.
+				hasQueuedInput := len(lc.messages) > preSyncCount
+				if !hasQueuedInput {
+					// No new user input — stay idle, don't call LLM with just the summary.
+					setup.task.Status = "review"
+					setup.task.ExecutionState = "idle"
+					te.store.UpdateTask(setup.task)
+					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+					// Re-block for a user message instead of looping into a fresh LLM call.
+					continue idleWait
+				}
+				// User message present — continue to LLM call.
+				setup.task.Status = "in_progress"
+				setup.task.ExecutionState = "running"
+				te.store.UpdateTask(setup.task)
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing queued message"}})
+				break idleWait
+			case um := <-setup.userMsgChan:
+				if um.ContextChanged {
+					log.Printf("[context-changed] setup.task=%s conversation context changed while idle, re-syncing", setup.task.ID)
+					lc.detector.reset()
+					lc.detector.clearHints()
+					lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+					continue idleWait
+				}
+				log.Printf("[user-msg] setup.task=%s received message while idle, continuing (setup.regenerate=%v)", setup.task.ID, um.Regenerate)
 				lc.detector.reset()
 				lc.detector.clearHints()
-				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
-				continue
+				if um.Regenerate {
+					lc.messages = truncateForRegenerate(lc.messages)
+					lc.messages = append(lc.messages, userMessageToChatMessage(um))
+				} else {
+					// Re-sync with DB to pick up the user message
+					lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+				}
+				if um.ModelName != "" && !te.configStore.IsAgentProvider(um.ServerURL) {
+					switched := te.applyModelSwitch(lc.mc, setup.task, um.ServerURL, um.ModelName, true, false)
+					lc.client = switched.client
+					lc.providerName = switched.providerName
+				}
+				setup.task.ExecutionState = "running"
+				te.store.UpdateTask(setup.task)
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
+				break idleWait
 			}
-			log.Printf("[user-msg] setup.task=%s received message while idle, continuing (setup.regenerate=%v)", setup.task.ID, um.Regenerate)
-			lc.detector.reset()
-			lc.detector.clearHints()
-			if um.Regenerate {
-				lc.messages = truncateForRegenerate(lc.messages)
-				lc.messages = append(lc.messages, userMessageToChatMessage(um))
-			} else {
-				// Re-sync with DB to pick up the user message (already created by HandleSend)
-				// and any deleted messages. Do NOT append — syncMessagesFromDB already includes it.
-				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
-			}
-			if um.ModelName != "" && !te.configStore.IsAgentProvider(um.ServerURL) {
-				switched := te.applyModelSwitch(lc.mc, setup.task, um.ServerURL, um.ModelName, true, false)
-				lc.client = switched.client
-				lc.providerName = switched.providerName
-			}
-			setup.task.ExecutionState = "running"
-			te.store.UpdateTask(setup.task)
-			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
 		}
 	}
 }
