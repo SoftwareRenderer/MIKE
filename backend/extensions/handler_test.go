@@ -18,8 +18,7 @@ func testHandler(t *testing.T) *ExtensionHandler {
 	store := testStore(t)
 	reg := NewRegistryClient()
 	cfg := &ExtensionConfig{
-		RegistryURL:  "",
-		WorkspaceDir: "/tmp/workspace",
+		RegistryURL: "",
 	}
 	sandbox := NewExtensionSandboxManager(reg, store)
 	return NewExtensionHandler(store, sandbox, reg, cfg)

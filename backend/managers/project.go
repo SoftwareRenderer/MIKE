@@ -527,9 +527,6 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			cfg, cfgErr := h.configStore.GetConfig()
 			if cfgErr == nil {
 				worktreesDir := cfg.WorkspaceDir
-				if wtDir := os.Getenv("MIKE_WORKTREES_DIR"); wtDir != "" {
-					worktreesDir = wtDir
-				}
 				_ = os.RemoveAll(filepath.Join(worktreesDir, id))
 			}
 		}

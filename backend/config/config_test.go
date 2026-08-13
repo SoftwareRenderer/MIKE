@@ -37,23 +37,34 @@ func TestGetConfig(t *testing.T) {
 	}
 }
 
-func TestGetConfigRespectsWorktreesDirEnvOverride(t *testing.T) {
+func TestGetConfigRespectsWorkspaceDirOverride(t *testing.T) {
 	cs := testConfigStore(t)
 
-	// DB stores a workspace_dir, but MIKE_WORKTREES_DIR overrides it at runtime.
+	// DB stores a relative workspace_dir, but the runtime override
+	// (--worktrees-dir flag / MIKE_WORKTREES_DIR env, captured at startup)
+	// takes precedence. It is not persisted.
 	dbDir := t.TempDir()
 	overrideDir := t.TempDir()
 	if err := cs.store.SetConfigValue("workspace_dir", dbDir); err != nil {
 		t.Fatalf("set workspace_dir: %v", err)
 	}
-	t.Setenv("MIKE_WORKTREES_DIR", overrideDir)
+	cs.SetWorkspaceDirOverride(overrideDir)
 
 	read, err := cs.GetConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
 	if read.WorkspaceDir != overrideDir {
-		t.Fatalf("expected MIKE_WORKTREES_DIR override %q, got %q", overrideDir, read.WorkspaceDir)
+		t.Fatalf("expected workspace_dir override %q, got %q", overrideDir, read.WorkspaceDir)
+	}
+
+	// The override must not be persisted to the DB.
+	stored, err := cs.store.GetConfigValue("workspace_dir")
+	if err != nil {
+		t.Fatalf("get stored workspace_dir: %v", err)
+	}
+	if stored != dbDir {
+		t.Fatalf("override leaked to DB: expected %q, got %q", dbDir, stored)
 	}
 }
 
