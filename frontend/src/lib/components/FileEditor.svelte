@@ -30,6 +30,8 @@
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
     import { mount, unmount } from 'svelte';
+    import { dialogStore } from '$lib/stores';
+    import { reconcileExternalChange } from '$lib/utils/editor-merge';
     import { javascript } from '@codemirror/lang-javascript';
     import { python } from '@codemirror/lang-python';
     import { go } from '@codemirror/lang-go';
@@ -66,6 +68,7 @@
         onToggleFullscreen,
         mobileFullscreen,
         isMobile,
+        pendingFsEvent = null,
     }: {
         projectId: string;
         projectPath?: string;
@@ -73,6 +76,7 @@
         filePath: string;
         targetLine: number;
         active?: boolean;
+        pendingFsEvent?: { op: 'create' | 'delete'; path: string } | null;
         onFocused?: (focused: boolean) => void;
         onSymbolsUpdate?: (symbols: LSPSymbol[]) => void;
         onHasChanges?: (filePath: string, hasChanges: boolean) => void;
@@ -140,6 +144,68 @@
     $effect(() => {
         onHasChanges(filePath, hasChanges);
     });
+
+    // When an fs_event targets the currently-open file, merge the external edit
+    // into the buffer without discarding the user's unsaved edits
+    let lastHandledEvent: { op: string; path: string } | null = null;
+    $effect(() => {
+        const evt = pendingFsEvent;
+        if (!evt) return;
+        if (mode !== 'explorer' || !active || evt.path !== filePath) return;
+        if (loading || !editorReady || fileNotFound || fileTooLarge) return;
+        if (lastHandledEvent === evt) return;
+        lastHandledEvent = evt;
+        void checkExternalChange();
+    });
+
+    /**
+     * Re-read the file from disk and reconcile it against the current buffer.
+     * Non-overlapping external edits are merged in; a conflict keeps the user's
+     * buffer and surfaces a toast. Never silently discards unsaved content.
+     */
+    async function checkExternalChange() {
+        try {
+            const taskParam = taskId ? `&task=${encodeURIComponent(taskId)}` : '';
+            const res = await fetch(
+                `/api/fs/read?path=${encodeURIComponent(filePath)}&project=${encodeURIComponent(projectId)}${taskParam}`,
+            );
+            if (!res.ok) return;
+            const data = await res.json();
+            const theirs: string = data.content ?? '';
+            const result = reconcileExternalChange(savedContent, content, theirs);
+            if (result.kind === 'no-op') return;
+            if (result.kind === 'conflict') {
+                dialogStore.showToast(
+                    `"${(filePath.split('/').pop() || filePath)}" was changed externally and overlaps your unsaved edits. Your edits were kept.`,
+                    'error',
+                );
+                return;
+            }
+            // reload (no unsaved edits) or merged (user edits preserved)
+            applyDiskContent(result.content, theirs);
+        } catch {
+            // Transient read failure — keep the buffer untouched.
+        }
+    }
+
+    /** Replace the editor buffer with reconciled content and re-baseline to disk. */
+    function applyDiskContent(newContent: string, diskContent: string) {
+        if (view) {
+            view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: newContent } });
+        }
+        content = newContent;
+        savedContent = diskContent;
+        baselineContent = diskContent;
+        hasChanges = content !== savedContent;
+        lineCount = content ? content.split('\n').length : 0;
+        charCount = content.length;
+        if (mode === 'explorer') {
+            // Stale gutter markers (vs the old baseline) no longer apply.
+            if (gitGutterState) gitGutterState.baselineContent = diskContent;
+            gutterMarkers = null;
+        }
+        setEditorDraft(filePath, content).catch(() => {});
+    }
 
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let editorEl: HTMLDivElement | null = null;
