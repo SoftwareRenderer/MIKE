@@ -322,7 +322,7 @@
             {/if}
             <div class="message-row">
                 {#if queued}
-                    <span class="queued-indicator" title="Queued — will process after summarization completes">
+                    <span class="queued-indicator" title="Queued — will send when the connection is restored">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <circle cx="12" cy="12" r="10"/>
                             <polyline points="12 6 12 12 16 14"/>
