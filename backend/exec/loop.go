@@ -777,11 +777,13 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					// Notify user of retry attempt
 					retryMsg := fmt.Sprintf("Connection interrupted (%v), retrying... (attempt %d/%d)", streamErr, i+1, rateLimitRetryAttempts)
 					log.Printf("[retry] setup.task=%s %s", setup.task.ID, retryMsg)
+					retryMsgID := uuid.New().String()
 					te.store.CreateTaskMessage(&types.TaskMessage{
-						ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "system",
+						ID: retryMsgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "system",
 						Content: retryMsg, CreatedAt: time.Now().UTC(),
 					})
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeHint, Data: map[string]any{
+						"id":         retryMsgID,
 						"content":    retryMsg,
 						"created_at": time.Now().UTC().Format(time.RFC3339),
 					}})
