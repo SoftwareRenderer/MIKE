@@ -23,7 +23,7 @@ func (te *TaskExecutor) HandleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("[start] task=%s project=%s", taskID, projectID)
-	if err := te.StartTask(projectID, taskID); err != nil {
+	if err := te.StartTask(projectID, taskID, false); err != nil {
 		log.Printf("[start] task=%s error: %v", taskID, err)
 		if strings.Contains(err.Error(), "already running") {
 			httputil.JSONError(w, http.StatusConflict, err.Error())
@@ -438,7 +438,7 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	compactResult, err := runner.Compact(compactCtx)
 	compactCancel()
 	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "Compaction failed: " + err.Error())
+		httputil.JSONError(w, http.StatusInternalServerError, "Compaction failed: "+err.Error())
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "compacted", "summary": compactResult.Summary})

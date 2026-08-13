@@ -11,12 +11,12 @@ import (
 
 func TestParseSkillFrontmatter(t *testing.T) {
 	tests := []struct {
-		name          string
-		input         string
-		wantName      string
-		wantDesc      string
-		wantNoName    bool
-		wantNoDesc    bool
+		name       string
+		input      string
+		wantName   string
+		wantDesc   string
+		wantNoName bool
+		wantNoDesc bool
 	}{
 		{
 			name: "basic frontmatter",
@@ -59,8 +59,8 @@ Content.
 			wantDesc: "Full featured skill.",
 		},
 		{
-			name:       "missing name",
-			input:      `---
+			name: "missing name",
+			input: `---
 description: Has description but no name.
 ---
 `,
@@ -68,8 +68,8 @@ description: Has description but no name.
 			wantDesc:   "Has description but no name.",
 		},
 		{
-			name:       "missing description",
-			input:      `---
+			name: "missing description",
+			input: `---
 name: no-desc-skill
 ---
 `,
@@ -99,8 +99,8 @@ description:   Spaced description
 			wantDesc: "Spaced description",
 		},
 		{
-			name: "crlf line endings",
-			input: "---\r\nname: crlf-skill\r\ndescription: CRLF skill.\r\n---\r\nContent",
+			name:     "crlf line endings",
+			input:    "---\r\nname: crlf-skill\r\ndescription: CRLF skill.\r\n---\r\nContent",
 			wantName: "crlf-skill",
 			wantDesc: "CRLF skill.",
 		},
@@ -321,6 +321,65 @@ func TestRenderMergeConflictPrompt(t *testing.T) {
 	// Should instruct to ask about conflicting intent
 	if !strings.Contains(prompt, "conflicting intent") {
 		t.Error("prompt should instruct to ask about conflicting intent")
+	}
+}
+
+func TestRenderAnswerQuestionPrompt(t *testing.T) {
+	root, ok := findProjectRoot()
+	if !ok {
+		t.Skip("answer_question.tmpl not found (run from project root)")
+	}
+	origWd, _ := os.Getwd()
+	os.Chdir(root)
+	defer os.Chdir(origWd)
+
+	prompt, err := RenderAnswerQuestionPrompt(AnswerQuestionData{
+		ParentTitle:  "Build Auth",
+		ParentPrompt: "Implement login with OAuth.",
+		SubtaskTitle: "Add login endpoint",
+		Questions:    []string{"Which auth flow?", "Token expiry?"},
+	})
+	if err != nil {
+		t.Fatalf("render prompt: %v", err)
+	}
+	if !strings.Contains(prompt, "Build Auth") {
+		t.Error("prompt should include parent task title")
+	}
+	if !strings.Contains(prompt, "Implement login with OAuth.") {
+		t.Error("prompt should include parent task prompt context")
+	}
+	if !strings.Contains(prompt, "Which auth flow?") {
+		t.Error("prompt should include the first question")
+	}
+	if !strings.Contains(prompt, "Token expiry?") {
+		t.Error("prompt should include the second question")
+	}
+	if !strings.Contains(prompt, "1) answer to first question 2) answer to second") {
+		t.Error("prompt should specify the simple numbered answer format")
+	}
+}
+
+// TestRenderSystemPromptStillBase verifies that adding answer_question.tmpl does
+// not hijack the main system prompt — RenderSystemPrompt must render base.tmpl.
+func TestRenderSystemPromptStillBase(t *testing.T) {
+	root, ok := findProjectRoot()
+	if !ok {
+		t.Skip("templates not found (run from project root)")
+	}
+	origWd, _ := os.Getwd()
+	os.Chdir(root)
+	defer os.Chdir(origWd)
+
+	prompt, err := RenderSystemPrompt(PromptData{
+		WorktreePath: "/tmp",
+		CurrentDate:  "2026-01-01",
+		Tools:        []ToolInfo{{Name: "bash", Description: "run a command"}},
+	})
+	if err != nil {
+		t.Fatalf("render system prompt: %v", err)
+	}
+	if !strings.HasPrefix(prompt, "You are an expert autonomous coding assistant.") {
+		t.Errorf("system prompt should start with the base template, got: %.80q", prompt)
 	}
 }
 

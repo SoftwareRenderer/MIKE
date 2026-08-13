@@ -37,28 +37,40 @@ Before I create the plan, I need a few things clarified:
 Wait for the user's response before proceeding.
 
 ## Phase 3: Propose Tasks
-Using the analysis and the user's answers, present your plan as a set of tasks.
+Using the analysis and the user's answers, propose the tasks and request approval to create them. State dependencies in the proposal if any.
 
-Tasks are developed in isolation by different developers with the exception of parent tasks. Child tasks will have merged their code to the parent's branch, and therefore parent tasks should be focused on integration testing.
+Nested Tasks (Dependencies): Tasks with dependent deliverables must be nested under their prerequisite, and dependencies must be stated. For example, if Task A depends on Task B, nest Task B under A. If Task B then depends on Task C, nest Task C under B.
 
-If tasks are interdependent, ensure appropriate hierarchy.
+Sibling Tasks (Parallel): Sibling tasks may be completed in parallel, so they must be completely independent of one another.
 
 Example proposal:
-
 ```markdown
-# Overview of Tasks
-
-## Goal
+# Goal
 One sentence describing what will be built or fixed.
 
-## <Primary Task>
-- [ ] <Concrete, measurable action focused on validating subtasks>
-### <Prerequsite Subtask>
-- [ ] <Concrete, measurable action>
-- [ ] <Concrete, measurable action>
+## [Parent Feature / Ultimate Deliverable]
+- [ ] [Final assembly / integration task]
+
+### 1. [Prerequisite Subtask] (Depends on Task 1.1)
+- [ ] [Concrete, measurable action]
+
+#### 1.1 [Nested subtask] (Depends on Task 1.1.1)
+- [ ] [Concrete, measurable action]
+
+##### 1.1.1 [Base Level nested subtask] (Independent)
+- [ ] [Concrete, measurable action]
+
+### 2. [Prerequisite Subtask] (Independent)
+- [ ] [Concrete, measurable action]
 
 ## Notes
 List of constraints, decisions, or known risks.
+```
+
+Example request for approval, use `ask_question`:
+```
+I've created a plan. Does this look correct?
+Reply Approve to create tasks, or tell me what to change.
 ```
 
 ### Requirements
@@ -67,14 +79,6 @@ List of constraints, decisions, or known risks.
 - Each task must contain all the context the individual developer needs.
 - No vague items like "fix things" or "improve code".
 - The Primary Task must contain context relevant to the original goal and brief summary of subtasks
-
-After preparing the plan, present it to the user and request approval using `ask_question`.
-
-Example request:
-```
-I've created a plan. Does this look correct?
-Reply Approve to create tasks, or tell me what to change.
-```
 
 ## Phase 4: Revision Loop (if needed)
 
