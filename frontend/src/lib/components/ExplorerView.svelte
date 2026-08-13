@@ -783,6 +783,7 @@
                             saving={editorSaving}
                             onToggleFullscreen={toggleEditorFullscreen}
                             mobileFullscreen={editorFullscreen}
+                            pendingFsEvent={pendingFsEvent}
                         />
                     {:else}
                         <div class="file-editor-placeholder">

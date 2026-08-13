@@ -8,7 +8,7 @@
     }
 
     let { projectId, projectPath, taskId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
-        onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen }: {
+        onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen, pendingFsEvent = null }: {
         projectId: string;
         projectPath?: string;
         taskId?: string;
@@ -16,6 +16,7 @@
         activeFilePath: string;
         unsavedFiles: Set<string>;
         pinnedFiles: Set<string>;
+        pendingFsEvent?: { op: 'create' | 'delete'; path: string } | null;
         onFocused: (focused: boolean) => void;
         onSymbolsUpdate: (symbols: LSPSymbol[]) => void;
         onHasChanges: (filePath: string, hasChanges: boolean) => void;
@@ -157,6 +158,7 @@
                     onSymbolsUpdate={(symbols) => handleSymbolsUpdate(file.path, symbols)}
                     onHasChanges={(path: string, hasChanges: boolean) => handleHasChanges(path, hasChanges)}
                     onClose={() => onCloseTab(file.path)}
+                    pendingFsEvent={pendingFsEvent}
                 />
             {/each}
         {/if}
