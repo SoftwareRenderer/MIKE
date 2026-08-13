@@ -9,6 +9,7 @@
         zIndex = 1000,
         trapFocus = true,
         closeOnOverlayClick = true,
+        onBeforeClose,
         onClose,
         header,
         toolbar,
@@ -24,6 +25,7 @@
         zIndex?: number;
         trapFocus?: boolean;
         closeOnOverlayClick?: boolean;
+        onBeforeClose?: () => boolean | Promise<boolean>;
         onClose: () => void | Promise<void>;
         header?: Snippet<[ { title: string } ]>;
         toolbar?: Snippet<[]>;
@@ -53,8 +55,12 @@
         focusTrap?.destroy();
     });
 
-    function handleClose() {
+    async function handleClose() {
         if (closed) return;
+        if (onBeforeClose) {
+            const ok = await onBeforeClose();
+            if (!ok) return;
+        }
         closed = true;
         focusTrap?.destroy();
         focusTrap = null;
