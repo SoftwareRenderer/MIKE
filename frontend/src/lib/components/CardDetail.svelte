@@ -6,6 +6,7 @@
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile, initTask } from '$lib/api';
     import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
+    import { filterTopLevelTaskIds } from '$lib/utils/task-utils';
     import { clearHighlightCache } from '$lib/highlighter';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting, loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
@@ -382,7 +383,9 @@
                 cancelText: 'Cancel',
             });
             if (!confirmed) return;
-            for (const id of taskIds) {
+            // Only send DELETE for top-level tasks, the server recursively deletes descendants
+            const topLevelIds = filterTopLevelTaskIds(taskIds, allTasks);
+            for (const id of topLevelIds) {
                 try {
                     await import('$lib/api').then(({ deleteTask }) => deleteTask(task.project_id, id));
                     removeTaskFromBoard(appStore, id);
