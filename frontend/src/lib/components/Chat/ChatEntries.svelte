@@ -819,7 +819,7 @@
         animation: chat-jump-latest-in 0.2s ease-out;
     }
     .chat-jump-latest:hover {
-        background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+        background: color-mix(in srgb, var(--color-accent) 100%);
         color: var(--color-text-primary);
     }
     .chat-jump-latest-label {
