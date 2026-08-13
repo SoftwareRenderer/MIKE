@@ -44,15 +44,23 @@ type summarizeResult struct {
 	predictedMs     int64
 }
 
-// shouldSummarize checks if the assembled LLM context is approaching the window limit.
-func shouldSummarize(messages []types.ChatMessage, contextWindow int) bool {
+// shouldSummarize checks if the LLM context usage is approaching the window limit.
+func shouldSummarize(usedTokens, contextWindow int) bool {
 	if contextWindow <= 0 {
 		return false
 	}
-	// Estimate tokens in assembled context (what the LLM actually sees)
-	llmCtx := buildLLMContext(messages)
-	estimatedTokens := estimatePromptTokens(llmCtx)
-	return estimatedTokens >= contextWindow*9/10
+	return usedTokens >= contextWindow*9/10
+}
+
+// contextTokensUsed returns the real context token usage from the most recent LLM
+// call (prompt + completion tokens, matching what the model will consume next).
+// This is the same value the frontend displays as the context-usage percentage.
+// Falls back to a heuristic estimate when the LLM didn't report usage.
+func contextTokensUsed(lc *loopContext) int {
+	if lc != nil && lc.usage != nil && lc.usage.PromptTokens > 0 {
+		return lc.usage.PromptTokens + lc.usage.CompletionTokens
+	}
+	return estimatePromptTokens(buildLLMContext(lc.messages))
 }
 
 // summarizeContext produces a compact summary of the conversation history.
