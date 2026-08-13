@@ -495,7 +495,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	if req.Status == "in_progress" && task.ExecutionState != "running" {
 		// If this task is a subtask, use subtask-aware start (moves parent only, not siblings)
 		if task.ParentTaskID != "" {
-			if err := h.StartSubtaskWithParent(projectID, taskID); err != nil {
+			if err := h.StartSubtaskWithParent(projectID, taskID, false); err != nil {
 				log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
 				task.ExecutionState = "idle"
 				task.Status = originalStatus
@@ -511,7 +511,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 				selectedID := h.SelectSubtaskToStart(task, children)
 				if selectedID != "" {
 					log.Printf("[move] task=%s has subtasks, starting subtask %s via LLM selection", taskID, selectedID)
-					if err := h.StartSubtaskWithParent(projectID, selectedID); err != nil {
+					if err := h.StartSubtaskWithParent(projectID, selectedID, false); err != nil {
 						log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
 						// Keep parent in in_progress (user's explicit action); record error for visibility
 						task.ExecutionState = "idle"
@@ -519,7 +519,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			} else {
-				if err := h.executor.StartTask(projectID, taskID); err != nil {
+				if err := h.executor.StartTask(projectID, taskID, false); err != nil {
 					log.Printf("[move] task=%s auto-start failed: %v", taskID, err)
 					task.ExecutionState = "idle"
 					task.Status = originalStatus
@@ -1231,7 +1231,7 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 		selectedID := h.SelectSubtaskToStart(task, children)
 		if selectedID == "" {
 			// All subtasks are done — start the parent's own execution
-			if err := h.executor.StartTask(projectID, taskID); err != nil {
+			if err := h.executor.StartTask(projectID, taskID, false); err != nil {
 				log.Printf("[start-parent] task=%s all subtasks done, start failed: %v", taskID, err)
 				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -1243,7 +1243,7 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 			return
 		}
 		log.Printf("[start-parent] task=%s selected subtask %s to start", taskID, selectedID)
-		if err := h.StartSubtaskWithParent(projectID, selectedID); err != nil {
+		if err := h.StartSubtaskWithParent(projectID, selectedID, false); err != nil {
 			log.Printf("[start-parent] task=%s error: %v", taskID, err)
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1258,7 +1258,7 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 	}
 
 	// No subtasks — start normally
-	if err := h.executor.StartTask(projectID, taskID); err != nil {
+	if err := h.executor.StartTask(projectID, taskID, false); err != nil {
 		log.Printf("[start] task=%s error: %v", taskID, err)
 		if strings.Contains(err.Error(), "already running") {
 			httputil.JSONError(w, http.StatusConflict, err.Error())
@@ -1326,7 +1326,7 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-	if err := h.executor.StartTask(projectID, taskID); err != nil {
+	if err := h.executor.StartTask(projectID, taskID, false); err != nil {
 		log.Printf("[start-subtask] task=%s error: %v", taskID, err)
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1343,8 +1343,9 @@ func (h *TaskHandler) SelectSubtaskToStart(parent *types.Task, subtasks []types.
 }
 
 // StartSubtaskWithParent delegates to the executor.
-func (h *TaskHandler) StartSubtaskWithParent(projectID, subtaskID string) error {
-	return h.executor.StartSubtaskWithParent(projectID, subtaskID)
+// User-initiated starts pass autostarted=false.
+func (h *TaskHandler) StartSubtaskWithParent(projectID, subtaskID string, autostarted bool) error {
+	return h.executor.StartSubtaskWithParent(projectID, subtaskID, autostarted)
 }
 
 // StopTaskAndDescendants stops a task and all its running descendants.

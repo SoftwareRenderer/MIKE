@@ -632,6 +632,13 @@ class MyCache {
 
 **Directory conventions:** `$lib/services/` for plain TS classes/factories, `$lib/composables/` for reactive helpers, `$lib/utils/` for pure functions.
 
+### Automated Answer System (auto-started subtasks)
+- Each `Task` carries a persisted, backend-only `Autostarted` flag (`json:"-"`) recording whether the current execution was started autonomously from a parent (sibling continuation) rather than by a direct user action. It is set only by `AutoStartNextSibling` (`backend/exec/executor.go`); all user paths (start, start-subtask, move, retry, lazy-start) leave it false.
+- When an auto-started task calls `ask_question` (`backend/exec/loop.go`), the loop does **not** stop for a human. Instead it consolidates **all** `ask_question` calls in that turn into one LLM call via `TaskExecutor.automatedAnswers`, using the **parent's prompt context** and the parent's LLM endpoint (fallback → subtask's → Utility pair). The answers are injected as the tool results, persisted, and re-broadcast so the loop continues autonomously.
+- The answerer prompt lives in `prompts/answer_question.tmpl` (rendered by `prompts.RenderAnswerQuestionPrompt`). It returns all answers in one line in the format `1) answer 2) answer...`, split back to tool calls by index (`splitNumberedAnswers`). If auto-answering fails (no parent / LLM error / unparseable), the loop falls back to the normal stop-and-wait flow.
+- The frontend (`frontend/src/lib/components/Chat/ToolCall.svelte`) shows an "Automated answer (parent context)" block when an `ask_question` tool result differs from its question.
+- **Important:** `prompts.RenderSystemPrompt` and `ValidateTemplates` parse all `*.tmpl` and must render the root template by name — `tmpl.ExecuteTemplate(&buf, "base.tmpl", data)`. Adding a new `*.tmpl` file (e.g. `answer_question.tmpl`, which sorts before `base.tmpl`) would otherwise hijack the system prompt. New prompt templates that use custom template funcs must register them in `prompts.funcs`.
+
 ### WebSocket Protocol
 - Client sends: `{"type": "user_message", "data": {"content": "..."}}`
 - Server processes via `stream.UserMessage` → broadcasts echo as `WSTypeUserMessage` event

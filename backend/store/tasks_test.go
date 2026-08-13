@@ -28,6 +28,54 @@ func TestCreateAndGetTask(t *testing.T) {
 	}
 }
 
+func TestTaskAutostartedPersistence(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-autostart", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Default is false (not auto-started)
+	task := newTask("task-default", "proj-autostart")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	got, err := s.GetTask("proj-autostart", "task-default")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.Autostarted {
+		t.Errorf("default Autostarted should be false")
+	}
+
+	// Explicitly set true and persist via UpdateTask
+	got.Autostarted = true
+	if err := s.UpdateTask(got); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	got2, err := s.GetTaskByTaskID("task-default")
+	if err != nil {
+		t.Fatalf("get task by ID: %v", err)
+	}
+	if !got2.Autostarted {
+		t.Errorf("Autostarted should be true after update")
+	}
+
+	// Create a task with Autostarted=true directly
+	autoTask := newTask("task-auto", "proj-autostart")
+	autoTask.Autostarted = true
+	if err := s.CreateTask(autoTask); err != nil {
+		t.Fatalf("create auto task: %v", err)
+	}
+	autoGot, err := s.GetTask("proj-autostart", "task-auto")
+	if err != nil {
+		t.Fatalf("get auto task: %v", err)
+	}
+	if !autoGot.Autostarted {
+		t.Errorf("Autostarted should be true for created task")
+	}
+}
+
 func TestGetTaskNotFound(t *testing.T) {
 	s := testStore(t)
 	_, err := s.GetTask("proj-1", "task-1")

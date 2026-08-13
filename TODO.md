@@ -1,68 +1,60 @@
 # TODO
 
 ## Goal
-When a chat message send fails due to a network connection issue (fetch TypeError/AbortError), queue it in the offline action queue instead of losing it, keep it visible as an outgoing (queued) message, surface a visible non-persisted error, and let the existing ReviewBar "Resume" button appear.
+Automated answer system: when an **auto-started** task (started from a parent) calls `ask_question`, answer it automatically using the **parent's prompt context** instead of stopping and waiting for a human. The subtask then continues autonomously, and the Q&A is surfaced intuitively in the chat.
+
+## Decisions (from user)
+1. LLM endpoint: the **parent's** `LlamaServerURL`/`ModelName` (fallback → subtask's → configured Utility pair).
+2. Subtask **continues autonomously** after the answer is injected.
+3. Context: **only the parent's prompt** (plus parent title + subtask title for readability).
+4. **No limit** on auto-answered questions per run.
+5. Visibility: yes — surface the automated Q&A in the chat UI.
+
+## Key design points
+- `setup.task.Autostarted` (already persisted) gates the branch at `backend/exec/loop.go:1255`.
+- A single turn may contain **multiple `ask_question` calls**; they are **consolidated** into ONE automated-answer request so all questions are answered at once (one LLM call). Answers are aligned back to their tool calls by order.
+- Each answer is injected into the matching `toolResults[i].output` so the loop `continue`s normally with the answers as the ask_question tool results; each persisted tool_call message and a re-broadcast `WSTypeToolResult` are updated so the UI shows them live and after refresh.
+- If auto-answering fails (no parent / LLM error / unparseable consolidated response), fall back to the existing stop-and-wait behavior.
+- **Critical fix:** `RenderSystemPrompt`/`ValidateTemplates` glob all `*.tmpl` and `tmpl.Execute` renders the alphabetically-first file as root. Adding `answer_question.tmpl` (sorts before `base.tmpl`) would hijack the system prompt. Fix: render the root template explicitly via `ExecuteTemplate(&buf, "base.tmpl", data)`. (Verified: ParseFiles names each file by basename, so `"base.tmpl"` is the stable name.)
 
 ## Tasks
 
-### 1. Expose the transient-error helper
-- [x] `frontend/src/lib/api/queue.ts`: export `isTransientError` (currently module-private)
+### 1. Prompt template + renderer (`prompts/`, `backend/prompts/prompts.go`)
+- [x] Create `prompts/answer_question.tmpl`: system prompt for the automated answerer — act as the parent task, answer the subtask's question(s) using the parent's prompt context. Fields: `ParentTitle`, `ParentPrompt`, `SubtaskTitle`, `Questions` (all questions in this turn). Instructs the model to answer **each question in order in a single line**, in the simple format `1) answer to first question 2) answer to second...`.
+- [x] Fix `RenderSystemPrompt` and `ValidateTemplates` to render the root template via `tmpl.ExecuteTemplate(&buf, "base.tmpl", data)` instead of `tmpl.Execute` (prevents the new file from hijacking the system prompt).
+- [x] Add `AnswerQuestionData` struct (with `Questions []string`) and `RenderAnswerQuestionPrompt(data)` in `backend/prompts/prompts.go` (mirrors `RenderSummarizePrompt`).
 
-### 2. Queue `sendTaskMessage` on transient network failure
-- [x] `frontend/src/lib/api/tasks.ts`: in `sendTaskMessage`, wrap the raw HTTP call in try/catch; on `isTransientError` (network failure), enqueue a `sendTaskMessage` action via `queueWrite` and return the optimistic queued result (instead of throwing). Non-transient errors (server 4xx/5xx) keep throwing (existing behavior).
+### 2. Executor automated-answer helper (`backend/exec/executor.go`)
+- [x] Add `automatedAnswers(ctx, subtask *types.Task, questions []string) ([]string, error)`:
+  - Load parent via `store.GetTaskByTaskID(subtask.ParentTaskID)`; return error if no parent / not found.
+  - Render `answer_question.tmpl` with parent title+prompt, subtask title, and all `questions`.
+  - Resolve endpoint: parent's `LlamaServerURL`/`ModelName` → subtask's → `ResolveUtilityTarget(subtask)`.
+  - Call `te.ChatCompletion(ctx, serverURL, model, [system], nil)` (the questions are embedded in the rendered prompt).
+  - Split the single response on the numbered pattern (`N)` or `N.`) to extract answers aligned to `questions` by index. Return an error if the response is empty or cannot be parsed into the expected number of answers — caller falls back to stop-and-wait.
 
-### 3. TaskChat: keep the outgoing message + show non-persisted error + Resume button
-- [x] `frontend/src/lib/components/Chat/TaskChat.svelte`:
-  - [x] `sendWithTracking` returns the send result object (`{ id, role, content, queued?, actionId?, thread_id? }`) or `null` on failure (was boolean)
-  - [x] `handleSend`: on `null` keep existing permanent-failure behavior (remove message + `send_failed` error); on a queued result keep the optimistic user entry, mark it `queued: true`, and append a visible, non-persisted error entry (`code: 'send_queued'`)
-  - [x] New `handleQueuedSend(content, entryId?)` helper: marks matching entry queued + appends the non-persisted error
-  - [x] `handleRegenerate`: update the `!result` check to `result === null`; apply `handleQueuedSend` on queued results
-  - [x] `handleEditFork` / `handleEditSend`: apply `handleQueuedSend` on queued results
-  - [x] `showResumeButton` / `showRestartButton` / `handleStartTask`: use the last **non-error** entry so the appended error doesn't hide the Resume button
-  - [x] `handleDismissError`: non-persisted error codes (`send_queued`, `ws_disconnected`) are removed locally only — no `deleteTaskMessage` API call (prevents 404 / queued delete of a non-existent message)
-  - [x] `onQueueChanged` cleanup (import `getQueuedTaskIds`): when no actions remain queued for this task, drop `send_queued` error entries (message flushed successfully)
+### 3. Loop wiring (`backend/exec/loop.go`)
+- [x] Extend the local `toolResult` struct with `messageID`, `args`, `rawArgs`, `success`, `duration`; populate it at append time (using `toolCallMsgID`, parsed args, `raw_args`, `success`, `toolDuration`).
+- [x] In the `ask_question` block: if `setup.task.Autostarted`, **gather ALL ask_question calls in this turn** into a `[]string` of questions, call `te.automatedAnswers` ONCE to get all answers, then for each ask_question call set the matching `toolResults[i].output = answer`, persist it (`UpdateTaskMessageToolResult(messageID, {output: answer, success: true, duration})`), and re-broadcast `WSTypeToolResult` (same tool_id) with the answer; then **do not stop** — fall through so the loop appends the tool results and `continue`s.
+- [x] Keep the existing stop-and-wait path for non-autostarted tasks and for autostarted tasks whose auto-answer fails (log + `return`).
 
-### 4. Queued indicator copy
-- [x] `frontend/src/lib/components/Chat/ChatMessage.svelte`: update queued-indicator tooltip to "Queued — will send when the connection is restored" (was "after summarization completes")
+### 4. Frontend visibility (`frontend/src/lib/components/Chat/ToolCall.svelte`)
+- [x] For `ask_question` with an auto-answer (`tc.result` present and `!= tc.args.question`), render an "Automated answer (parent context)" block below the question (markdown), plus scoped CSS for the label/box.
 
-### 5. Unit tests
-- [x] New `frontend/src/lib/api/__tests__/send-queue.unit.ts` (mock IndexedDB + fetch, same pattern as `offline-cache.unit.ts`):
-  - [x] `sendTaskMessage` queues a `sendTaskMessage` action (in IndexedDB queue) and returns a queued result on transient failure (TypeError)
-  - [x] `sendTaskMessage` does NOT queue and rejects on non-transient failure (HTTP 500)
-  - [x] Also covers AbortError (timeout) queueing
+### 5. Tests
+- [x] `backend/prompts/prompts_test.go`: `TestRenderAnswerQuestionPrompt` (output contains parent prompt/title) and a regression test that `RenderSystemPrompt` still renders the base system prompt now that `answer_question.tmpl` exists.
+- [x] `backend/exec/`: `TestAutomatedAnswers` with an httptest mock LLM (like `mockSummarizeLLM`) — a single question returns one answer, and **multiple questions return answers aligned by index**; a no-parent case returns an error.
 
-### 6. E2E test
-- [x] New `frontend/tests/e2e/offline-send-queue.spec.ts`:
-  - [x] Setup: create task via API, move to `review` (review bar + chat form visible)
-  - [x] Block the `/send` endpoint with `page.route(...).abort('failed')`
-  - [x] Send a message via the chat UI
-  - [x] Assert: message visible as outgoing user message with `.queued-indicator`; `.error-card` visible with queued copy; ReviewBar "Resume" button visible
-  - [x] Assert IndexedDB `offline-queue` contains the `sendTaskMessage` action
-  - [x] Restore network, reload (flushes queue), assert message is persisted server-side, queue drained, error entry gone
-  - [x] Red-phase check: test fails when the queue-on-failure logic is removed
+### 6. Build & verify
+- [x] `gofmt -w` on edited Go files.
+- [x] `go build ./...` succeeds.
+- [x] `go test ./backend/... -count=1 -parallel 8` passes (excluding the two pre-existing `backend/git` failures).
+- [x] `cd frontend && npm run check` and `npm run build` succeed.
 
-### 7. Verification
-- [x] `cd frontend && npm run check` (svelte-check clean — 0 errors, 0 warnings)
-- [x] `cd frontend && npm test` (all 831 unit tests pass, incl. new file)
-- [x] `cd frontend && npm run build`
-- [x] Run new e2e spec: `npx playwright test offline-send-queue` (passes)
-- [x] Regression e2e: `offline-cache`, `chat-core`, `ui-modals` pass (ui-modals "edit task prompt and save" is a pre-existing flaky race — optimistic UI update vs fire-and-forget `updateTask` PUT; fails intermittently on baseline too, unrelated to this change)
-
-### 8. Post-review cleanup (redundancy / dead code)
-- [x] `TaskChat.svelte`: `sendWithTracking` catch no longer uses `e` → `catch {`
-- [x] `tasks.ts`: extracted shared `queueMessage()` helper — the offline branch and the transient-error catch branch were byte-identical
-- [x] `TaskChat.svelte`: extracted `appendErrorEntry(code, message)` — dedupes the `send_failed`/`send_queued` error-entry construction
-- [x] `queue.ts`: removed redundant inner `isTransientError(e)` re-check in `flushQueue`'s callback (`doFlush` only invokes it for transient errors already)
-- [x] `TaskChat.svelte` `onQueueChanged`: gated BOTH the queued-indicator clearing and the `send_queued` notice removal on `!queuedIds.has(taskId)` — previously the loop cleared all queued flags on any queue change while the notice removal was gated, so indicator and notice could disagree (multi-message / multi-task flush scenarios)
-- [x] Re-verified after cleanup: svelte-check clean, 831 unit tests pass, build succeeds, `offline-send-queue` e2e passes
-
-## Discovered Tasks
-- [x] `frontend/tests/e2e/ui-navigation.spec.ts` has a pre-existing syntax error in the committed code (`ensureTaskStarted   findProviderByRef` — missing comma in the import on line 2). It cannot be loaded by Playwright (`SyntaxError: Unexpected token`), which blocks the offline-queue e2e tests in that file (`queued actions survive flush failure and retry on reconnect`). The fix is a one-character edit (add the missing comma). NOT part of the original plan — found during regression testing. Fixed; the two offline-queue tests now pass. (The file's `board renders from cache when server is unreachable` test still fails on `page.goto` with `net::ERR_INTERNET_DISCONNECTED` — a service-worker offline-navigation issue unrelated to this change.)
+### 7. Docs
+- [x] Add a brief note in `AGENTS.md` describing the automated answer prompt (`answer_question.tmpl`) and that auto-started subtasks route `ask_question` to it.
 
 ## Notes
-- Scope is frontend-only; no backend/Go changes.
-- "Network connection issue" = `TypeError` (fetch failed) / `AbortError` (15s apiFetch timeout). Server errors (4xx/5xx) keep current behavior (message removed + `send_failed` error) — per requirement wording.
-- Error entries are client-side only (never persisted to DB): `send_queued` (new) and `ws_disconnected` (existing). Persisted errors (from stream-handler) still delete via API on dismiss.
-- "Resume" = the existing ReviewBar button (review status + last non-error entry is a user message). In-progress tasks keep their "Restart Task" affordance.
-- Reuses the existing offline-queue machinery (`offline-queue` IndexedDB store, `sendTaskMessage` action type, flush-on-reconnect/page-load).
-- Note: the environment's checkpoint mechanism reverted the four modified source files once mid-task; they were re-applied and re-verified.
+- No changes to the `Autostarted` flag or its semantics from the previous feature.
+- Answers are fed to the model as the ask_question tool results, so the model sees both each question (in the tool call args) and its answer, and continues working.
+- Multiple ask_question calls in one turn are consolidated into a single LLM call; the model returns answers in the simple `1) ... 2) ...` format, split back to tool calls by index.
+- Edge case: a root task started directly when all children are done can have `Autostarted=true` but no parent — auto-answer falls back to stop-and-wait there.
