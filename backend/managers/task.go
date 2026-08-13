@@ -537,7 +537,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 				selectedID := h.SelectSubtaskToStart(task, children)
 				if selectedID != "" {
 					log.Printf("[move] task=%s has subtasks, starting subtask %s via LLM selection", taskID, selectedID)
-					if err := h.StartSubtaskWithParent(projectID, selectedID, false); err != nil {
+					if err := h.StartSubtaskWithParent(projectID, selectedID, true); err != nil {
 						log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
 						// Keep parent in in_progress (user's explicit action); record error for visibility
 						task.ExecutionState = "idle"
@@ -1269,7 +1269,10 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 			return
 		}
 		log.Printf("[start-parent] task=%s selected subtask %s to start", taskID, selectedID)
-		if err := h.StartSubtaskWithParent(projectID, selectedID, false); err != nil {
+		// The parent's subtasks run autonomously — mark this one auto-started so its
+		// ask_question calls are auto-answered from parent context instead of stopping
+		// for a human (consistent with sibling continuations via AutoStartNextSibling).
+		if err := h.StartSubtaskWithParent(projectID, selectedID, true); err != nil {
 			log.Printf("[start-parent] task=%s error: %v", taskID, err)
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1369,7 +1372,10 @@ func (h *TaskHandler) SelectSubtaskToStart(parent *types.Task, subtasks []types.
 }
 
 // StartSubtaskWithParent delegates to the executor.
-// User-initiated starts pass autostarted=false.
+// The autostarted flag records whether the subtask runs autonomously on behalf
+// of its parent (no human present to answer ask_question): true when started via
+// HandleStartWithSubtasks or AutoStartNextSibling, false only when the user
+// explicitly starts a single subtask (HandleStartSubtask).
 func (h *TaskHandler) StartSubtaskWithParent(projectID, subtaskID string, autostarted bool) error {
 	return h.executor.StartSubtaskWithParent(projectID, subtaskID, autostarted)
 }
