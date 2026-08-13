@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -2321,57 +2326,179 @@ func TestBuildLLMContext_FiltersOnlyTaskCompleteToolCall(t *testing.T) {
 
 // --- shouldSummarize Tests ---
 
-func TestShouldSummarize_SmallContext(t *testing.T) {
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "hello"},
-		{Role: "assistant", Content: "hi"},
-	}
-	if shouldSummarize(messages, 32768) {
-		t.Error("small context should not trigger summarization")
+func TestShouldSummarize_BelowThreshold(t *testing.T) {
+	if shouldSummarize(100, 32768) {
+		t.Error("usage below 90% of window should not trigger summarization")
 	}
 }
 
-func TestShouldSummarize_LargeContext(t *testing.T) {
-	// Build a large context that exceeds 90% of a small window
-	var messages []types.ChatMessage
-	messages = append(messages, types.ChatMessage{Role: "system", Content: "system prompt"})
-	// Each message ~20 words, ~26 tokens. Window = 100 tokens, threshold = 90.
-	// Need ~4 messages to exceed threshold.
-	for i := 0; i < 10; i++ {
-		messages = append(messages, types.ChatMessage{Role: "user", Content: fmt.Sprintf("message number %d with some extra words to pad the token count higher", i)})
-		messages = append(messages, types.ChatMessage{Role: "assistant", Content: fmt.Sprintf("response number %d with some extra words to pad the token count higher", i)})
-	}
-	if !shouldSummarize(messages, 100) {
-		t.Error("large context should trigger summarization")
+func TestShouldSummarize_AboveThreshold(t *testing.T) {
+	// 92% of a 100-token window (>= 90) should trigger.
+	if !shouldSummarize(92, 100) {
+		t.Error("usage at 92% of window should trigger summarization")
 	}
 }
 
-func TestShouldSummarize_AfterExistingSummary(t *testing.T) {
-	// Existing summary + many new messages should trigger re-summarization.
-	var messages []types.ChatMessage
-	messages = append(messages, types.ChatMessage{Role: "system", Content: "system prompt"})
-	// Old messages.
-	messages = append(messages, types.ChatMessage{Role: "user", Content: "old message"})
-	messages = append(messages, types.ChatMessage{Role: "assistant", Content: "old response"})
-	messages = append(messages, types.ChatMessage{Role: "summarization", Content: "summary of earlier conversation"})
-	// Many new messages should push context over limit.
-	for i := 0; i < 10; i++ {
-		messages = append(messages, types.ChatMessage{Role: "user", Content: fmt.Sprintf("new message number %d with some extra words to pad the token count higher", i)})
-		messages = append(messages, types.ChatMessage{Role: "assistant", Content: fmt.Sprintf("new response number %d with some extra words to pad the token count higher", i)})
-	}
-	if !shouldSummarize(messages, 100) {
-		t.Error("context with existing summary + many new messages should trigger re-summarization")
+func TestShouldSummarize_AtThreshold(t *testing.T) {
+	// Exactly 90% of a 100-token window should trigger (>= 90).
+	if !shouldSummarize(90, 100) {
+		t.Error("usage at 90% of window should trigger summarization")
 	}
 }
 
 func TestShouldSummarize_ZeroWindow(t *testing.T) {
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "hello"},
-	}
-	if shouldSummarize(messages, 0) {
+	if shouldSummarize(100, 0) {
 		t.Error("zero context window should never trigger summarization")
+	}
+}
+
+func TestContextTokensUsed_RealUsagePreferred(t *testing.T) {
+	lc := &loopContext{
+		usage: &types.ChatUsage{PromptTokens: 8000, CompletionTokens: 2000},
+	}
+	if got := contextTokensUsed(lc); got != 10000 {
+		t.Errorf("contextTokensUsed should prefer real usage, got %d", got)
+	}
+}
+
+func TestContextTokensUsed_HeuristicFallback(t *testing.T) {
+	// No real usage available -> falls back to heuristic estimate of messages.
+	lc := &loopContext{
+		messages: []types.ChatMessage{
+			{Role: "system", Content: "system prompt"},
+			{Role: "user", Content: "hello"},
+		},
+	}
+	got := contextTokensUsed(lc)
+	if got <= 0 {
+		t.Errorf("contextTokensUsed fallback should estimate > 0 tokens, got %d", got)
+	}
+}
+
+// mockSummarizeLLM returns an httptest server that answers a non-streaming chat
+// completion (used by summarization) with a fixed summary.
+func mockSummarizeLLM() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"summary text"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
+	}))
+}
+
+func TestMaybeAutoSummarize_TriggersAboveThreshold(t *testing.T) {
+	// Summarization renders prompts/summarize.tmpl from the CWD — chdir to the
+	// repo root so the template is found (mirrors how the running server resolves it).
+	_, thisFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("chdir to repo root: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	te := newTestExecutor(t)
+	te.gate = NewConcurrencyGate()
+	s := te.store
+	proj := createProject(t, s, "proj-sum-trigger", "Sum Trigger")
+
+	server := mockSummarizeLLM()
+	defer server.Close()
+
+	now := time.Now().UTC()
+	task := &types.Task{
+		ID:              "sum-trigger-task",
+		ProjectID:       proj.ID,
+		Title:           "Sum task",
+		Status:          "review",
+		ExecutionState:  "idle",
+		LlamaServerURL:  server.URL,
+		ModelName:       "test-model",
+		CurrentThreadID: "thread-1",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Context usage at 92% of a 10000-token window (> 90%) should trigger.
+	cw := 10000
+	lc := &loopContext{
+		messages:      []types.ChatMessage{{Role: "user", Content: "hello"}},
+		contextWindow: &cw,
+		usage:         &types.ChatUsage{PromptTokens: 9200, CompletionTokens: 0},
+		detector:      newLoopDetector(),
+	}
+	setup := &taskExecSetup{
+		task:      task,
+		projectID: proj.ID,
+		ctx:       context.Background(),
+		serverURL: server.URL,
+		modelName: "test-model",
+	}
+
+	te.maybeAutoSummarize(setup, lc, "test-model")
+
+	var hasSummary bool
+	for _, m := range lc.messages {
+		if m.Role == "summarization" {
+			hasSummary = true
+		}
+	}
+	if !hasSummary {
+		t.Fatal("expected a summarization message to be appended when context exceeds 90%")
+	}
+	if task.Summarizing {
+		t.Fatal("Summarizing flag should be cleared on the caller's task after summarization")
+	}
+}
+
+func TestMaybeAutoSummarize_NoTriggerBelowThreshold(t *testing.T) {
+	te := newTestExecutor(t)
+	te.gate = NewConcurrencyGate()
+	s := te.store
+	proj := createProject(t, s, "proj-sum-notrigger", "Sum NoTrigger")
+
+	server := mockSummarizeLLM()
+	defer server.Close()
+
+	now := time.Now().UTC()
+	task := &types.Task{
+		ID:              "sum-notrigger-task",
+		ProjectID:       proj.ID,
+		Status:          "review",
+		ExecutionState:  "idle",
+		LlamaServerURL:  server.URL,
+		ModelName:       "test-model",
+		CurrentThreadID: "thread-1",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Context usage at 50% — well below threshold — must NOT trigger.
+	cw := 10000
+	lc := &loopContext{
+		messages:      []types.ChatMessage{{Role: "user", Content: "hello"}},
+		contextWindow: &cw,
+		usage:         &types.ChatUsage{PromptTokens: 5000, CompletionTokens: 0},
+		detector:      newLoopDetector(),
+	}
+	setup := &taskExecSetup{
+		task:      task,
+		projectID: proj.ID,
+		ctx:       context.Background(),
+		serverURL: server.URL,
+		modelName: "test-model",
+	}
+
+	te.maybeAutoSummarize(setup, lc, "test-model")
+
+	for _, m := range lc.messages {
+		if m.Role == "summarization" {
+			t.Fatal("summarization should NOT trigger below 90% threshold")
+		}
 	}
 }
 
