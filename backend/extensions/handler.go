@@ -770,10 +770,7 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		ContainerConfig: ContainerConfig{
 			Image: entry.Image,
 		},
-		SandboxConfig: SandboxConfig{
-			NetworkIsolation: true,
-			MemoryLimit:      DefaultExtensionMemory,
-		},
+		SandboxConfig: sandboxConfigFromManifest(lspSandboxFromManifest(&manifest)),
 		InstallSource: installSource,
 
 		ImageRef: entry.Image,
