@@ -18,3 +18,15 @@ export function countWithDescendants(taskId: string, status: string, childrenMap
     }
     return count;
 }
+
+/** Reduce a set of task IDs to those whose parent is NOT also in the set.
+ * Descendants are excluded because the server recursively deletes them */
+export function filterTopLevelTaskIds(taskIds: string[], tasks: Task[]): string[] {
+    const selected = new Set(taskIds);
+    const taskById = new Map(tasks.map(t => [t.id, t]));
+    return taskIds.filter(id => {
+        const task = taskById.get(id);
+        if (!task?.parent_task_id) return true;
+        return !selected.has(task.parent_task_id);
+    });
+}
