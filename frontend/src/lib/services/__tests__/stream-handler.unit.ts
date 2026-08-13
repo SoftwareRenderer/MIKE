@@ -439,6 +439,36 @@ describe('createStreamHandler', () => {
         expect(stream.state.entries.filter(e => e.toolCalls?.some(tc => tc.isPending))).toHaveLength(0);
     });
 
+    it('status:running sets awaitingResponse so the awaiting indicator shows', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'status', data: { state: 'running' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(true);
+    });
+
+    it('status:running with retry activity also arms awaitingResponse', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'status', data: { state: 'running', activity: 'Connection interrupted (timeout), retrying... (attempt 2/3)' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(true);
+        expect(stream.state.retryCount).toBe(2);
+        expect(stream.state.retryError).toBe('timeout');
+    });
+
+    it('first token after status:running clears awaitingResponse', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'status', data: { state: 'running' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(true);
+        handleEvent({ type: 'token', data: { text: 'Hello' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(false);
+    });
+
+    it('terminal statuses after running clear awaitingResponse', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'status', data: { state: 'running' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(true);
+        handleEvent({ type: 'status', data: { state: 'idle' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(false);
+    });
+
     it('tool_result resolves pending tool call via activeToolCalls lookup', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
