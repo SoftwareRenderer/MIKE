@@ -318,6 +318,33 @@ describe('createStreamHandler', () => {
         expect(tc.success).toBe(true);
     });
 
+    it('regression: ask_question auto-answer re-broadcast updates resolved tool call', () => {
+        // Flow for an auto-started subtask: the question tool_result arrives first,
+        // then the backend re-broadcasts the auto-answer (from parent context) for the
+        // same tool_id. The re-broadcast must overwrite the result in place even though
+        // the tool call is no longer pending and no longer in activeToolCalls.
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({
+            type: 'tool_call',
+            data: { tool_id: 'qa1', tool_name: 'ask_question', args: { question: 'What is your favorite bird?' } },
+        }, false, 'p1', 't1');
+        // Original result echoes the question back.
+        handleEvent({
+            type: 'tool_result',
+            data: { tool_id: 'qa1', success: true, output: 'What is your favorite bird?', duration: 50 },
+        }, false, 'p1', 't1');
+        // Auto-answer re-broadcast with the parent-context answer.
+        handleEvent({
+            type: 'tool_result',
+            data: { tool_id: 'qa1', success: true, output: 'A peregrine falcon.', duration: 50, message_id: 'msg-qa-1' },
+        }, false, 'p1', 't1');
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.result).toBe('A peregrine falcon.');
+        expect(tc.isPending).toBe(false);
+        expect(tc.messageId).toBe('msg-qa-1');
+    });
+
     it('complete event closes assistant and sets stats', () => {
         const { cb, stream, handleEvent } = setup();
         handleEvent({ type: 'token', data: { text: 'Hi' } }, false, 'p1', 't1');
