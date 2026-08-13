@@ -259,7 +259,7 @@ test.describe('Scroll to Current Task in Side Panel', () => {
     expect(isVisible).toBe(true);
   });
 
-  test('should keep current task section always expanded', async ({ page }) => {
+  test('should toggle section collapse in board overview', async ({ page }) => {
     const projectId = await getProjectId(page);
     const taskId1 = await createTaskViaApi(page, projectId, `scroll-task-a-${Date.now()}`);
     await createTaskViaApi(page, projectId, `scroll-task-b-${Date.now()}`);
@@ -269,9 +269,14 @@ test.describe('Scroll to Current Task in Side Panel', () => {
 
     const backlogHeader = page.locator('.section-header').nth(0);
     await expect(backlogHeader).toHaveAttribute('aria-expanded', 'true');
-    await expect(backlogHeader).toHaveAttribute('title', 'Backlog (current task)');
+    await expect(backlogHeader).toHaveAttribute('title', 'Collapse Backlog');
 
-    // Clicking should NOT collapse (protected)
+    // Clicking collapses the section
+    await backlogHeader.click();
+    await expect(backlogHeader).toHaveAttribute('aria-expanded', 'false');
+    await expect(backlogHeader).toHaveAttribute('title', 'Expand Backlog');
+
+    // Clicking again expands it
     await backlogHeader.click();
     await expect(backlogHeader).toHaveAttribute('aria-expanded', 'true');
 
@@ -364,8 +369,8 @@ test.describe('Clear Done Tasks', () => {
     await expect(page.locator('[role="dialog"]')).toBeVisible();
     expect(await page.locator('[role="dialog"] .confirm-message').textContent()).toContain('Permanently delete');
 
-    // Click Cancel (btn-secondary) to dismiss without deleting
-    await page.click('[role="dialog"] .btn-secondary');
+    // Click Cancel to dismiss without deleting
+    await page.click('[role="dialog"] .btn-cancel');
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
 
     // Verify our specific task is still in done (not deleted)
@@ -662,7 +667,7 @@ test.describe('Multi-Select', () => {
     await expect(dialog).toContainText(card1Title!);
     await expect(dialog).toContainText(card2Title!);
 
-    const cancelBtn = page.locator('.modal-footer .btn-secondary');
+    const cancelBtn = page.locator('.modal-footer .btn-cancel');
     await cancelBtn.click();
     await expect(dialog).not.toBeVisible();
 
@@ -704,7 +709,7 @@ test.describe('Multi-Select', () => {
     await expect(dialog).toContainText(card1Title!);
     await expect(dialog).toContainText(card2Title!);
 
-    const cancelBtn = page.locator('.modal-footer .btn-secondary');
+    const cancelBtn = page.locator('.modal-footer .btn-cancel');
     await cancelBtn.click();
     await expect(dialog).not.toBeVisible();
 
