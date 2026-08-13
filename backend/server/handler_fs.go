@@ -556,11 +556,7 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		searchRoot = filepath.Clean(searchRoot)
 		cfg, cfgErr := s.configStore.GetConfig()
 		if cfgErr == nil && cfg.WorkspaceDir != "" {
-			wtDir := cfg.WorkspaceDir
-			if wtOverride := os.Getenv("MIKE_WORKTREES_DIR"); wtOverride != "" {
-				wtDir = wtOverride
-			}
-			cleanWT := filepath.Clean(wtDir)
+			cleanWT := filepath.Clean(cfg.WorkspaceDir)
 			if !strings.HasPrefix(searchRoot, cleanWT+string(os.PathSeparator)) && searchRoot != cleanWT {
 				JSONError(w, http.StatusForbidden, "worktree path outside allowed workspace")
 				return
@@ -1100,7 +1096,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		} else {
 			output, execErr = s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, cmd, opts)
 		}
-			if execErr != nil {
+		if execErr != nil {
 			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", execErr))
 			return
 		}

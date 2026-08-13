@@ -722,7 +722,6 @@ func TestHandleProjectStageFile_PathStartingWithDash(t *testing.T) {
 // git worktree rather than the project repo.
 func TestHandleStageFile_PathStartingWithDash(t *testing.T) {
 	worktreesDir := t.TempDir()
-	t.Setenv("MIKE_WORKTREES_DIR", worktreesDir)
 
 	repoPath := initGitRepoTemp(t)
 	s := gitTestStore(t)
@@ -741,6 +740,7 @@ func TestHandleStageFile_PathStartingWithDash(t *testing.T) {
 	}
 
 	cfgStore := config.NewConfigStore(s, filepath.Join(t.TempDir(), "test.db"), "test")
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	wm := git.NewWorktreeManager(s, cfgStore)
 	h := &GitHandler{store: s, worktreeMgr: wm}
 

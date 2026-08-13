@@ -82,7 +82,7 @@ The server requires an encryption key to secure sensitive data (like API keys) i
 |------|---------|---------|-------------|
 | `--port` | `MIKE_PORT` | `3000` | Server listen port |
 | `--data-dir` | `MIKE_DATA_DIR` | `./data` | Data directory for DB, TLS certs, trace files |
-| `--worktrees-dir` | `MIKE_WORKTREES_DIR` | `./worktrees` | Directory for git worktrees |
+| `--worktrees-dir` | `MIKE_WORKTREES_DIR` | DB `workspace_dir` (default `./.worktrees`) | Runtime override for the git worktrees dir (not persisted) |
 | `--no-tls` | `MIKE_TLS=0` | *(disabled)* | Disable TLS (plain HTTP) |
 | `--tls-cert` | `MIKE_TLS_CERT` | *(auto-generated)* | Path to TLS certificate file |
 | `--tls-key` | `MIKE_TLS_KEY` | *(auto-generated)* | Path to TLS private key file |
@@ -289,7 +289,7 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 - **Worker routing**: the frontend defaults chat/task model selection to the configured Worker pair (`resolveWorker` in `$lib/utils/providers.ts`).
 - **Utility routing**: utility-type requests (title generation, summarization, commit messages, checkpoint labels) route through the configured Utility provider/model via `utilityTarget()` in `backend/exec/executor.go`, falling back to the task's own URL/model if unset.
 - Test fixtures use `http://neptune:8010/v1` as example endpoint
-- Workspace: `<project-root>/worktrees` (absolute path)
+- Workspace: `<project-root>/.worktrees` (stored relative; resolved to absolute at runtime). The `--worktrees-dir` flag / `MIKE_WORKTREES_DIR` env override it at runtime without persisting, so the directory can be relocated.
 
 ## Architecture
 

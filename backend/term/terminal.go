@@ -468,9 +468,6 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 		return
 	}
 	worktreesDir := cfg.WorkspaceDir
-	if wtDir := os.Getenv("MIKE_WORKTREES_DIR"); wtDir != "" {
-		worktreesDir = wtDir
-	}
 	worktreePath := filepath.Join(worktreesDir, projectID, taskID)
 
 	tm.handleTerminalWSWithSetup(w, r, taskID, taskID, worktreePath, projectID)

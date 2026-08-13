@@ -2,12 +2,12 @@ package server
 
 import (
 	"context"
+	stdtls "crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
-	stdtls "crypto/tls"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,8 +91,17 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		return nil, fmt.Errorf("get config: %w", err)
 	}
 
-	if wtDir := os.Getenv("MIKE_WORKTREES_DIR"); wtDir != "" {
-		cfg.WorkspaceDir = wtDir
+	// Apply the runtime worktrees-dir override
+	if worktreesDir != "" {
+		cfgStore.SetWorkspaceDirOverride(worktreesDir)
+		cfg.WorkspaceDir = worktreesDir
+	}
+
+	// Ensure the effective worktrees directory exists.
+	if cfg.WorkspaceDir != "" {
+		if err := os.MkdirAll(cfg.WorkspaceDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create worktrees dir: %w", err)
+		}
 	}
 
 	s := &Server{
@@ -171,8 +180,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	// Bootstrap built-in extensions
 	// (Removed built-in bootstrapping to decouple extensions from core)
 	s.extHandler = extensions.NewExtensionHandler(s.extStore, s.extSandboxMgr, extRegistry, &extensions.ExtensionConfig{
-		RegistryURL:  cfg.RegistryURL,
-		WorkspaceDir: cfg.WorkspaceDir,
+		RegistryURL: cfg.RegistryURL,
 	})
 
 	// LSP handler for language server WebSocket bridging

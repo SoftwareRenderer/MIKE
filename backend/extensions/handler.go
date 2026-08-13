@@ -66,8 +66,7 @@ type ExtensionHandler struct {
 
 // ExtensionConfig holds configuration for the extension handler.
 type ExtensionConfig struct {
-	RegistryURL  string
-	WorkspaceDir string
+	RegistryURL string
 	// ExtensionsDir is the directory served as /extensions/ where materialized
 	// extension files are written. Defaults to "extensions".
 	ExtensionsDir string
@@ -1372,12 +1371,12 @@ type ExtensionResponse struct {
 
 // ExtensionUpdate describes an available update.
 type ExtensionUpdate struct {
-	ID               string   `json:"id"`
-	Name             string   `json:"name"`
-	CurrentVersion   string   `json:"current_version"`
-	AvailableVersion string   `json:"available_version"`
-	CurrentCommit    string   `json:"current_commit,omitempty"`
-	AvailableCommit  string   `json:"available_commit,omitempty"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	CurrentVersion   string `json:"current_version"`
+	AvailableVersion string `json:"available_version"`
+	CurrentCommit    string `json:"current_commit,omitempty"`
+	AvailableCommit  string `json:"available_commit,omitempty"`
 	// NewPermissions lists the UI permissions the update would newly grant
 	// (present in the registry version but not the installed one).
 	NewPermissions []string `json:"new_permissions,omitempty"`

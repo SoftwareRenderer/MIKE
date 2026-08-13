@@ -185,7 +185,6 @@ func (wm *WorktreeManager) GetProjectStashMu(projectID string) *sync.Mutex {
 
 // WorktreePath returns the filesystem path for a task's worktree.
 // Path format: worktreesDir/projectID/taskID
-// Respects MIKE_WORKTREES_DIR env var override (same as CreateWorktree).
 func (wm *WorktreeManager) WorktreePath(taskID string) (string, error) {
 	task, err := wm.store.GetTaskByTaskID(taskID)
 	if err != nil {
@@ -196,9 +195,6 @@ func (wm *WorktreeManager) WorktreePath(taskID string) (string, error) {
 		return "", err
 	}
 	worktreesDir := cfg.WorkspaceDir
-	if wtDir := os.Getenv("MIKE_WORKTREES_DIR"); wtDir != "" {
-		worktreesDir = wtDir
-	}
 	return filepath.Join(worktreesDir, task.ProjectID, taskID), nil
 }
 
@@ -222,9 +218,6 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	}
 
 	worktreesDir := cfg.WorkspaceDir
-	if wtDir := os.Getenv("MIKE_WORKTREES_DIR"); wtDir != "" {
-		worktreesDir = wtDir
-	}
 	if !filepath.IsAbs(worktreesDir) {
 		abs, err := filepath.Abs(worktreesDir)
 		if err == nil {
@@ -366,9 +359,6 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	}
 
 	worktreesDir := cfg.WorkspaceDir
-	if wtDir := os.Getenv("MIKE_WORKTREES_DIR"); wtDir != "" {
-		worktreesDir = wtDir
-	}
 	if !filepath.IsAbs(worktreesDir) {
 		if abs, err := filepath.Abs(worktreesDir); err == nil {
 			worktreesDir = abs

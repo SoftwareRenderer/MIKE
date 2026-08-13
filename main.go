@@ -34,7 +34,7 @@ func main() {
 	// CLI flags
 	port := flag.Int("port", 0, "Server listen port (default: $MIKE_PORT or 3000)")
 	dataDir := flag.String("data-dir", "", "Data directory for DB, TLS certs, trace files (default: $MIKE_DATA_DIR or ./data)")
-	worktreesDir := flag.String("worktrees-dir", "", "Directory for git worktrees (default: $MIKE_WORKTREES_DIR or ./worktrees)")
+	worktreesDir := flag.String("worktrees-dir", "", "Runtime override for the git worktrees dir (default: $MIKE_WORKTREES_DIR or ./.worktrees)")
 	noTLS := flag.Bool("no-tls", false, "Disable TLS (plain HTTP); overrides $MIKE_TLS")
 	tlsCert := flag.String("tls-cert", "", "Path to TLS certificate file (default: auto-generated self-signed)")
 	tlsKey := flag.String("tls-key", "", "Path to TLS private key file")
@@ -61,13 +61,9 @@ func main() {
 		effectiveDataDir = "./data"
 	}
 
-	// Worktrees directory
-	effectiveWorktreesDir := *worktreesDir
-	if effectiveWorktreesDir == "" {
-		effectiveWorktreesDir = os.Getenv("MIKE_WORKTREES_DIR")
-	}
-	if effectiveWorktreesDir == "" {
-		effectiveWorktreesDir = "./worktrees"
+	worktreesOverride := *worktreesDir
+	if worktreesOverride == "" {
+		worktreesOverride = os.Getenv("MIKE_WORKTREES_DIR")
 	}
 
 	// Database path (derived from data-dir)
@@ -79,10 +75,7 @@ func main() {
 		frontendDist = "./frontend/dist"
 	}
 
-	// Ensure directories exist
-	if err := os.MkdirAll(effectiveWorktreesDir, 0o755); err != nil {
-		log.Fatalf("Failed to create worktrees directory: %v", err)
-	}
+	// Ensure data directory exists
 	if err := os.MkdirAll(effectiveDataDir, 0o755); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
@@ -154,7 +147,7 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", effectivePort)
 
-	srv, err := server.NewServer(dbPath, effectiveWorktreesDir, addr, frontendDist, tlsCfg)
+	srv, err := server.NewServer(dbPath, worktreesOverride, addr, frontendDist, tlsCfg)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
