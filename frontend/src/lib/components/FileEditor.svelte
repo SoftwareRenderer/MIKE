@@ -26,6 +26,7 @@
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax, lightTheme, lightSyntax, isLightTheme } from '$lib/utils/codemirror-theme';
     import { stickyScroll, updateHeadersEffect, sectionHeadersField, type SectionHeader } from '$lib/utils/sticky-scroll';
+    import { keepViewportParsed } from '$lib/utils/keep-viewport-parsed';
     import { requestLSPSymbols, flattenSymbols, type LSPSymbol } from '$lib/utils/lsp-symbols';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
@@ -277,6 +278,7 @@
         const extensions = [
             // Explicit setup (replaces basicSetup, excludes searchKeymap)
             stickyScroll(),
+            keepViewportParsed(),
             sectionHeadersField,
             gitGutterExt.extension,
             highlightActiveLineGutter(),
