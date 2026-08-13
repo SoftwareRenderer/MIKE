@@ -20,6 +20,7 @@ export function createFocusTrap(container: HTMLElement, onClose?: () => void) {
 
     function handleKeydown(e: KeyboardEvent) {
         if (e.key === 'Escape') {
+            e.stopPropagation();
             onClose?.();
             return;
         }
