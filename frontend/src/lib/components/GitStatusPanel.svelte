@@ -446,8 +446,9 @@
     let sortedStagedFiles = $derived(sortFiles(stagedDiffFiles));
     let sortedUnstagedFiles = $derived(sortFiles(unstagedDiffFiles));
 
-    async function loadData(): Promise<boolean> {
-        loading = true;
+    async function loadData(silent = false): Promise<boolean> {
+        // Silent reloads (triggered by stage/unstage) update the panel in place
+        if (!silent) loading = true;
         // Preload the diff viewer chunk while fetching data
         loadDiffViewer();
         try {
@@ -519,7 +520,7 @@
             console.error('Failed to load git status:', e);
             return false;
         } finally {
-            loading = false;
+            if (!silent) loading = false;
         }
     }
 
@@ -617,37 +618,49 @@
         }
     }
 
+    // Serialize stage/unstage operations
+    let stageQueue: Promise<void> = Promise.resolve();
+    function enqueueStage(task: () => Promise<void>): void {
+        stageQueue = stageQueue.then(task).catch(() => {});
+    }
+
     /** Stage or unstage a single file. */
-    async function handleStageFile(path: string, stage: boolean) {
-        try {
-            await stageProjectFile(projectId, path, stage);
-            const hasChanges = await loadData();
-            await updateCompareMode(hasChanges);
-        } catch (e) {
-            console.error('Failed to stage/unstage file:', e);
-        }
+    function handleStageFile(path: string, stage: boolean) {
+        enqueueStage(async () => {
+            try {
+                await stageProjectFile(projectId, path, stage);
+                const hasChanges = await loadData(true);
+                await updateCompareMode(hasChanges);
+            } catch (e) {
+                console.error('Failed to stage/unstage file:', e);
+            }
+        });
     }
 
     /** Stage all unstaged files. */
-    async function handleStageAll() {
-        try {
-            await Promise.all(unstagedEntries.map(e => stageProjectFile(projectId, e.path, true)));
-            const hasChanges = await loadData();
-            await updateCompareMode(hasChanges);
-        } catch (e) {
-            console.error('Failed to stage all:', e);
-        }
+    function handleStageAll() {
+        enqueueStage(async () => {
+            try {
+                await Promise.all(unstagedEntries.map(e => stageProjectFile(projectId, e.path, true)));
+                const hasChanges = await loadData(true);
+                await updateCompareMode(hasChanges);
+            } catch (e) {
+                console.error('Failed to stage all:', e);
+            }
+        });
     }
 
     /** Unstage all staged files. */
-    async function handleUnstageAll() {
-        try {
-            await Promise.all(stagedEntries.map(e => stageProjectFile(projectId, e.path, false)));
-            const hasChanges = await loadData();
-            await updateCompareMode(hasChanges);
-        } catch (e) {
-            console.error('Failed to unstage all:', e);
-        }
+    function handleUnstageAll() {
+        enqueueStage(async () => {
+            try {
+                await Promise.all(stagedEntries.map(e => stageProjectFile(projectId, e.path, false)));
+                const hasChanges = await loadData(true);
+                await updateCompareMode(hasChanges);
+            } catch (e) {
+                console.error('Failed to unstage all:', e);
+            }
+        });
     }
 
     /** Open the commit dialog, with HEAD staleness check first. */
