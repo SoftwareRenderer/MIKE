@@ -937,6 +937,11 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		type toolResult struct {
 			toolCallID string
 			output     string
+			messageID  string         // persisted tool_call message ID
+			args       map[string]any // parsed tool args
+			rawArgs    string         // raw tool args JSON
+			success    bool
+			duration   int64
 		}
 		var toolResults []toolResult
 		var turnFailures []turnResult
@@ -1061,7 +1066,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tc.ID, tc.Function.Name, result, success, toolDuration, args, tc.Function.Arguments, extractPathFromArgs(tc.Function.Arguments), isSandboxed, streamed, toolCallMsgID)})
-				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result})
+				toolResults = append(toolResults, toolResult{toolCallID: tc.ID, output: result, messageID: toolCallMsgID, args: args, rawArgs: tc.Function.Arguments, success: success, duration: toolDuration})
 
 				// Update tool_call message with result after execution completes.
 				resultJSON, _ := json.Marshal(map[string]any{
@@ -1254,25 +1259,64 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				te.broadcastDiffIfGitCmd(setup.projectID, setup.task.ID, setup.task)
 			}
 
-			// Check if ask_question was called — stop executor, wait for user to restart
-			for i, tc := range lc.pendingToolCalls {
-				if tc.Function.Name == "ask_question" {
-					question := toolResults[i].output
-					setup.task.ExecutionState = "idle"
-					setup.task.Status = "review"
-					te.store.UpdateTask(setup.task)
-					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-						"state":    "idle",
-						"question": question,
-						"summary":  "Agent has a question",
-					}})
-					log.Printf("[ask_question] setup.task=%s stopping executor, awaiting user answer", setup.task.ID)
-					// Remove from setup.task registry so next user message triggers handleLazyStart
-					te.taskMu.Lock()
-					delete(te.tasks, setup.task.ID)
-					te.taskMu.Unlock()
-					return
+			// ask_question: auto-started tasks answer all questions in this turn via
+			// parent context and continue; otherwise stop and wait for the user.
+			autoAnswered := false
+			if setup.task.Autostarted {
+				var questionIdxs []int
+				var questions []string
+				for i, tc := range lc.pendingToolCalls {
+					if tc.Function.Name == "ask_question" {
+						questionIdxs = append(questionIdxs, i)
+						questions = append(questions, toolResults[i].output)
+					}
+				}
+				if len(questionIdxs) > 0 {
+					answers, aerr := te.automatedAnswers(setup.ctx, setup.task, questions)
+					if aerr != nil || len(answers) != len(questionIdxs) {
+						if aerr != nil {
+							log.Printf("[ask_question] setup.task=%s auto-answer failed: %v, falling back to user", setup.task.ID, aerr)
+						} else {
+							log.Printf("[ask_question] setup.task=%s auto-answer count mismatch (%d answers, %d questions), falling back to user", setup.task.ID, len(answers), len(questionIdxs))
+						}
+					} else {
+						for k, idx := range questionIdxs {
+							tr := toolResults[idx]
+							tr.output = answers[k]
+							toolResults[idx] = tr
+							// Persist the answer as this tool call's result.
+							resultJSON, _ := json.Marshal(map[string]any{"output": tr.output, "success": tr.success, "duration": tr.duration})
+							_ = te.store.UpdateTaskMessageToolResult(tr.messageID, string(resultJSON))
+							// Re-broadcast so the UI shows the answer in place.
+							te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tr.toolCallID, "ask_question", tr.output, tr.success, tr.duration, tr.args, tr.rawArgs, "", false, false, tr.messageID)})
+						}
+						autoAnswered = true
+						log.Printf("[ask_question] setup.task=%s auto-answered %d question(s) from parent context", setup.task.ID, len(answers))
+					}
+				}
+			}
+
+			// Not auto-answered: stop and wait for the user to restart.
+			if !autoAnswered {
+				for i, tc := range lc.pendingToolCalls {
+					if tc.Function.Name == "ask_question" {
+						question := toolResults[i].output
+						setup.task.ExecutionState = "idle"
+						setup.task.Status = "review"
+						te.store.UpdateTask(setup.task)
+						te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+							"state":    "idle",
+							"question": question,
+							"summary":  "Agent has a question",
+						}})
+						log.Printf("[ask_question] setup.task=%s stopping executor, awaiting user answer", setup.task.ID)
+						// Remove from setup.task registry so next user message triggers handleLazyStart
+						te.taskMu.Lock()
+						delete(te.tasks, setup.task.ID)
+						te.taskMu.Unlock()
+						return
+					}
 				}
 			}
 

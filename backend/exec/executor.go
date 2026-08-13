@@ -232,6 +232,85 @@ func (te *TaskExecutor) ResolveUtilityTarget(task *types.Task) (serverURL, model
 	return serverURL, model
 }
 
+// automatedAnswers answers all questions asked by an auto-started subtask in one
+// LLM call using the parent's prompt context. Returns one answer per question.
+// Errors when the subtask has no parent or the response can't be parsed.
+func (te *TaskExecutor) automatedAnswers(ctx context.Context, subtask *types.Task, questions []string) ([]string, error) {
+	if subtask.ParentTaskID == "" {
+		return nil, errors.New("task has no parent; cannot auto-answer")
+	}
+	parent, err := te.store.GetTaskByTaskID(subtask.ParentTaskID)
+	if err != nil {
+		return nil, fmt.Errorf("get parent task: %w", err)
+	}
+	if len(questions) == 0 {
+		return nil, errors.New("no questions to answer")
+	}
+
+	promptText, err := prompts.RenderAnswerQuestionPrompt(prompts.AnswerQuestionData{
+		ParentTitle:  parent.Title,
+		ParentPrompt: parent.Prompt,
+		SubtaskTitle: subtask.Title,
+		Questions:    questions,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render answer prompt: %w", err)
+	}
+
+	// Resolve the endpoint: prefer the parent's config, then the subtask's, then the Utility pair.
+	serverURL, model := parent.LlamaServerURL, parent.ModelName
+	if serverURL == "" || model == "" {
+		serverURL, model = subtask.LlamaServerURL, subtask.ModelName
+	}
+	if serverURL == "" || model == "" {
+		serverURL, model = te.ResolveUtilityTarget(subtask)
+	}
+
+	messages := []types.ChatMessage{{Role: "system", Content: promptText}}
+	_, answer, err := te.ChatCompletion(ctx, serverURL, model, messages, nil)
+	if err != nil {
+		return nil, fmt.Errorf("automated answer completion: %w", err)
+	}
+	return splitNumberedAnswers(answer, len(questions))
+}
+
+// numberedMarker matches a numbered list marker such as "1)" or "1.".
+var numberedMarker = regexp.MustCompile(`\d+\s*[\)\.]`)
+
+// splitNumberedAnswers parses "1) a 2) b..." into n answers aligned by index.
+// Errors when the response is empty or yields fewer than n segments.
+func splitNumberedAnswers(response string, n int) ([]string, error) {
+	if n == 0 {
+		return nil, errors.New("no questions to answer")
+	}
+	text := strings.TrimSpace(response)
+	if text == "" {
+		return nil, errors.New("empty automated answer")
+	}
+	locs := numberedMarker.FindAllStringIndex(text, -1)
+	if len(locs) == 0 {
+		if n == 1 {
+			return []string{text}, nil
+		}
+		return nil, fmt.Errorf("unparseable automated answer: no numbered markers (expected %d answers)", n)
+	}
+	segments := make([]string, 0, n)
+	for i, loc := range locs {
+		start := loc[1]
+		end := len(text)
+		if i+1 < len(locs) {
+			end = locs[i+1][0]
+		}
+		if seg := strings.TrimSpace(text[start:end]); seg != "" {
+			segments = append(segments, seg)
+		}
+	}
+	if len(segments) < n {
+		return nil, fmt.Errorf("automated answer has %d segment(s), expected %d", len(segments), n)
+	}
+	return segments[:n], nil
+}
+
 // ChatCompletion sends a non-streaming chat request through the concurrency gate.
 func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, opts *ChatCompletionOpts) (*types.ChatUsage, string, error) {
 	reasoningEffort := "off"
@@ -408,7 +487,8 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 // The parent stays in its current column (e.g., backlog) while subtasks run.
 // Siblings are NOT moved — that is handled by HandleMove when a parent task
 // (not an individual subtask) is moved.
-func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) error {
+// autostarted records whether this start came from autonomous sibling continuation.
+func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string, autostarted bool) error {
 	subtask, err := te.store.GetTaskByTaskID(subtaskID)
 	if err != nil {
 		return fmt.Errorf("get subtask: %w", err)
@@ -465,7 +545,7 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string) erro
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, subtask)
 
 	// Start the subtask executor
-	return te.StartTask(projectID, subtaskID)
+	return te.StartTask(projectID, subtaskID, autostarted)
 }
 
 // EnsureParentBranch creates the parent task's git branch if it doesn't exist yet.
@@ -613,7 +693,7 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 		// needs to explicitly start or move it.
 		if parent.Status == "in_progress" {
 			log.Printf("[auto-start] task=%s all children done, starting parent %s", finishedTaskID, parent.ID)
-			if err := te.StartTask(projectID, parent.ID); err != nil {
+			if err := te.StartTask(projectID, parent.ID, true); err != nil {
 				log.Printf("[auto-start] task=%s failed to start parent %s: %v", finishedTaskID, parent.ID, err)
 			} else {
 				started, _ := te.store.GetTaskByTaskID(parent.ID)
@@ -648,7 +728,7 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 	}
 
 	log.Printf("[auto-start] task=%s finished, starting next sibling %s (parent=%s)", finishedTaskID, selectedID, parentTaskID)
-	return te.StartSubtaskWithParent(projectID, selectedID)
+	return te.StartSubtaskWithParent(projectID, selectedID, true)
 }
 
 // InitTask creates the worktree and branch for a task without starting LLM execution.
@@ -1063,13 +1143,25 @@ func (te *TaskExecutor) getAgentRunner(ctx context.Context, projectID, taskID st
 	return runner, nil
 }
 
-// StartTask begins AI execution for a task.
-func (te *TaskExecutor) StartTask(projectID, taskID string) error {
+// StartTask begins AI execution for a task. autostarted records whether this
+// execution was started autonomously from a parent (sibling continuation) rather
+// than by a direct user action.
+func (te *TaskExecutor) StartTask(projectID, taskID string, autostarted bool) error {
 	execSetup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
 	if err != nil {
 		return err
 	}
 	task := execSetup.task
+
+	// Persist how this execution was started (backend-only provenance flag).
+	task.Autostarted = autostarted
+	if err := te.store.UpdateTask(task); err != nil {
+		execSetup.cancel()
+		te.taskMu.Lock()
+		delete(te.tasks, taskID)
+		te.taskMu.Unlock()
+		return fmt.Errorf("persist autostarted flag: %w", err)
+	}
 
 	existingMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
 	if len(existingMsgs) == 0 {
@@ -1259,7 +1351,7 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 	}
 	task.ExecutionState = "idle"
 	te.store.UpdateTask(task)
-	return te.StartTask(projectID, taskID)
+	return te.StartTask(projectID, taskID, false)
 }
 
 // handleLazyStart is called when a user message arrives for a task with no active executor.
