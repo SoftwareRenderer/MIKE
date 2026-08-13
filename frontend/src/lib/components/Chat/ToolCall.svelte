@@ -731,6 +731,17 @@
     .auto-answer-body :global(code) {
         font-family: var(--font-mono);
         font-size: 0.8125rem;
+        overflow-wrap: break-word;
+        word-break: break-word;
+    }
+    .auto-answer-body :global(pre) {
+        background: var(--color-surface-0);
+        padding: 8px;
+        border-radius: var(--radius-sm);
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-wrap: break-word;
     }
     .tool-result-summary :global(p),
     .tool-result-question :global(p) {
@@ -781,11 +792,16 @@
         padding: 8px;
         border-radius: var(--radius-sm);
         overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-wrap: break-word;
     }
     .tool-result-summary :global(code),
     .tool-result-question :global(code) {
         font-family: var(--font-mono);
         font-size: 0.8125rem;
+        overflow-wrap: break-word;
+        word-break: break-word;
     }
     .tool-result-summary :global(:not(pre) > code),
     .tool-result-question :global(:not(pre) > code) {
