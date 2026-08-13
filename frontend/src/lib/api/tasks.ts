@@ -6,6 +6,7 @@ import {
     getOfflineStatus,
     enqueueAction,
     queueWrite,
+    isTransientError,
     createTaskRaw,
     updateTaskRaw,
     deleteTaskRaw,
@@ -131,7 +132,7 @@ export async function resumeTask(projectId: string, taskId: string): Promise<Tas
 
 // -- Message endpoints --
 
-/** Send a user message via HTTP POST. Triggers executor and returns the created message. Supports image attachments. Queued when offline. */
+/** Send a user message via HTTP POST. Triggers executor and returns the created message. Supports image attachments. Queued when offline or on network failure. */
 export async function sendTaskMessage(
     projectId: string,
     taskId: string,
@@ -141,12 +142,25 @@ export async function sendTaskMessage(
     attachments?: Array<{ mimeType: string; data: string }>,
     reasoningEffort?: string,
     regenerate = false
-): Promise<{ id: string; role: string; content: string; thread_id?: string }> {
-    if (getOfflineStatus()) {
+): Promise<{ id: string; role: string; content: string; thread_id?: string; queued?: boolean; actionId?: string }> {
+    // Queue the message when offline or on network failure so it isn't lost.
+    const queueMessage = () => {
         const id = generateId();
-        return await queueWrite('sendTaskMessage', { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate }, { id, role: 'user', content });
+        return queueWrite('sendTaskMessage', { projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate }, { id, role: 'user', content });
+    };
+    if (getOfflineStatus()) {
+        return await queueMessage();
     }
-    return sendTaskMessageRaw(projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate);
+    try {
+        return await sendTaskMessageRaw(projectId, taskId, content, modelName, serverUrl, attachments, reasoningEffort, regenerate);
+    } catch (e) {
+        // Network failure (fetch TypeError / timeout AbortError) — queue the message
+        // so it isn't lost. Non-transient errors (server 4xx/5xx) still propagate.
+        if (isTransientError(e)) {
+            return await queueMessage();
+        }
+        throw e;
+    }
 }
 
 /** Fetch all messages for a task. Falls back to cached copy on failure.

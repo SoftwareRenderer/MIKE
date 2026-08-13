@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getTask } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getQueuedTaskIds, getTask } from '$lib/api';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getCommitQueueContext, getTaskEventContext } from '$lib/context';
     import { StreamState } from '$lib/services/stream-state.svelte';
@@ -164,6 +164,11 @@
     // Show "Start Task" button when task is in backlog (not yet started).
     let showStartButton = $derived(taskStatus === 'backlog' && !isLoading);
 
+    // Last entry ignoring client-side error notices (connection lost / queued).
+    // Error entries are appended after the message they relate to, so the
+    // Resume/Restart conditions must look past them.
+    let lastNonErrorEntry = $derived([...entries].reverse().find(e => e.role !== 'error'));
+
     // Show "Restart Task" button when task is in_progress, stalled (no active LLM, not queued),
     // has at least one assistant response (was actually started before),
     // and the last message is from the user (agent hasn't responded yet).
@@ -173,20 +178,23 @@
         !isLoading &&
         !isSummarizing &&
         queuePosition === 0 &&
-        entries.length > 0 &&
-        entries[entries.length - 1].role === 'user' &&
+        lastNonErrorEntry !== undefined &&
+        lastNonErrorEntry.role === 'user' &&
         entries.some(e => e.role === 'assistant')
     );
 
     // Show "Resume" button in review bar when the last message is from the user
     // (agent hasn't responded yet — user sent a follow-up before moving to review).
+    // Also shows when a follow-up message was queued due to a network failure:
+    // the outgoing message stays the last entry, so "Resume" is the recovery
+    // action once the connection is restored.
     // Hidden during summarization so the ChatForm (with spinner) stays visible.
     let showResumeButton = $derived(
         taskStatus === 'review' &&
         !isLoading &&
         !isSummarizing &&
-        entries.length > 0 &&
-        entries[entries.length - 1].role === 'user'
+        lastNonErrorEntry !== undefined &&
+        lastNonErrorEntry.role === 'user'
     );
 
     // Set of user message IDs with no assistant response after them.
@@ -310,19 +318,48 @@
         updateTaskInBoard(appStore, taskId, merged);
     }
 
-    /** Send a message via the API with tracking state. Returns false on failure. */
-    async function sendWithTracking(msg: string, attachments?: Array<{ mimeType: string; data: string }>, regenerate = false, entryId?: string): Promise<boolean> {
+    /** Result of a send: the created/optimistic message, or null on failure. */
+    type SendResult = { id: string; role: string; content: string; thread_id?: string; queued?: boolean; actionId?: string };
+
+    /** Send a message via the API with tracking state. Returns the message result, or null on failure. */
+    async function sendWithTracking(msg: string, attachments?: Array<{ mimeType: string; data: string }>, regenerate = false, entryId?: string): Promise<SendResult | null> {
         lastSentMessage = msg;
         lastSentEntryId = entryId ?? null;
         stream.state.awaitingResponse = true;
         try {
-            await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined, regenerate);
-            return true;
-        } catch (e) {
-            const errorMsg = e instanceof Error ? e.message : 'Failed to send message';
+            return await sendTaskMessage(projectId, taskId, msg, selectedModel, selectedUrl, attachments, selectedReasoningEffort || undefined, regenerate);
+        } catch {
             stream.state.awaitingResponse = false;
-            return false;
+            return null;
         }
+    }
+
+    /** Error codes that are client-side only — never persisted to the DB. */
+    const LOCAL_ERROR_CODES = new Set(['send_queued', 'ws_disconnected']);
+
+    /** Append a client-side error entry (visible but never persisted to the DB). */
+    function appendErrorEntry(code: string, message: string) {
+        stream.state.entries = [...stream.state.entries, {
+            id: genId(),
+            role: 'error',
+            content: message,
+            isStreaming: false,
+            error: { code, message },
+            createdAt: new Date().toISOString(),
+        }];
+    }
+
+    /**
+     * A send was queued due to a network failure. Mark the optimistic entry as
+     * queued and append a visible error notice. The notice lives only in the UI
+     * (never persisted to the DB) and is cleared when the queue flushes.
+     */
+    function handleQueuedSend(content: string, entryId?: string) {
+        const entry = entryId
+            ? stream.state.entries.find(e => e.id === entryId)
+            : [...stream.state.entries].reverse().find(e => e.role === 'user' && e.content === content);
+        if (entry) entry.queued = true;
+        appendErrorEntry('send_queued', 'Connection lost — message queued and will be sent when the connection is restored');
     }
 
     function markStreaming() {
@@ -629,11 +666,17 @@
             stream.state.awaitingResponse = false;
         }
         // Send with model info for lazy-start
-        if (!await sendWithTracking(msg, attachments, false, entryId)) {
-            const errorMsg = lastSentMessage ? 'Failed to send message' : 'Failed to send message';
+        const result = await sendWithTracking(msg, attachments, false, entryId);
+        if (result === null) {
+            // Permanent failure (e.g. server error) — remove the optimistic message and show an error.
             stream.state.entries = stream.state.entries.filter(e => !(e.role === 'user' && e.content === msg));
-            stream.state.entries = [...stream.state.entries, { id: genId(), role: 'error', content: errorMsg, isStreaming: false, error: { code: 'send_failed', message: errorMsg }, createdAt: new Date().toISOString() }];
+            appendErrorEntry('send_failed', 'Failed to send message');
             return;
+        }
+        if (result.queued) {
+            // Network failure — the message was queued (not lost). Keep it as an
+            // outgoing message and surface a visible, non-persisted notice.
+            handleQueuedSend(msg, entryId);
         }
         scroll();
         chatFormComp?.focus();
@@ -762,10 +805,16 @@
         // Trim local entries: keep everything up to and including the last user message
         stream.state.entries = trimEntriesForRegenerate(stream.state.entries, idx);
         isRegenerating = true;
-        if (!await sendWithTracking(lastUser.content, undefined, true)) {
+        const result = await sendWithTracking(lastUser.content, undefined, true);
+        if (result === null) {
             dialogStore.showToast('Failed to regenerate');
             isRegenerating = false;
             return;
+        }
+        if (result.queued) {
+            // Network failure — regeneration is queued; keep the last user message
+            // visible as outgoing and surface a non-persisted notice.
+            handleQueuedSend(lastUser.content);
         }
         scroll();
     }
@@ -784,7 +833,8 @@
             }
         }
         // If the last message is already from the LLM, just update status without re-triggering
-        const lastEntry = entries[entries.length - 1];
+        // (use the last non-error entry — client-side error notices don't count).
+        const lastEntry = lastNonErrorEntry;
         if (lastEntry && lastEntry.role === 'assistant') {
             try {
                 const updated = await moveTask(projectId, taskId, 'in_progress');
@@ -980,7 +1030,8 @@
             await loadHistory(true);
             updateThreadUrl(forked.id);
             onThreadSwitch?.();
-            await sendWithTracking(newContent, attachments);
+            const result = await sendWithTracking(newContent, attachments);
+            if (result?.queued) handleQueuedSend(newContent);
         } catch (e) {
             dialogStore.showToast(String(e));
         }
@@ -1018,7 +1069,8 @@
         }
         const newMsg = await createTaskMessage(projectId, taskId, 'user', newContent);
         stream.state.entries = [...stream.state.entries, { id: newMsg.id, role: 'user', content: newContent, attachments, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
-        await sendWithTracking(newContent, attachments);
+        const result = await sendWithTracking(newContent, attachments);
+        if (result?.queued) handleQueuedSend(newContent);
         scroll();
     }
 
@@ -1035,6 +1087,13 @@
 
     /** Dismiss a single error message without affecting other messages. */
     async function handleDismissError(messageId: string) {
+        const entry = entries.find(e => e.id === messageId);
+        // Client-side only errors (queued / connection-lost) are not in the DB —
+        // remove them locally instead of attempting a delete that would 404.
+        if (entry?.error?.code && LOCAL_ERROR_CODES.has(entry.error.code)) {
+            stream.state.entries = entries.filter(e => e.id !== messageId);
+            return;
+        }
         try {
             await deleteTaskMessage(projectId, taskId, messageId);
             stream.state.entries = entries.filter(e => e.id !== messageId);
@@ -1258,12 +1317,14 @@
     let unsubQueue: (() => void) | null = null;
     onMount(() => {
         unsubQueue = onQueueChanged(() => {
-            // When queue changes, check if any queued messages have been flushed
-            // Clear queued flag for messages that are no longer in the queue
-            for (const entry of entries) {
-                if (entry.queued) {
-                    entry.queued = false;
-                }
+            const queuedIds = getQueuedTaskIds();
+            // Only when nothing is queued for this task anymore was the queued
+            // message actually flushed — clear its queued indicator and drop the
+            // client-side notice (the notice is local-only, never persisted).
+            if (!queuedIds.has(taskId)) {
+                stream.state.entries = stream.state.entries
+                    .map(e => e.queued ? { ...e, queued: false } : e)
+                    .filter(e => !(e.role === 'error' && e.error?.code === 'send_queued'));
             }
         });
     });
