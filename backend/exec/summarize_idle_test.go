@@ -30,7 +30,10 @@ func mockSummarizeIdleLLM(streamCalls, summarizeCalls *atomic.Int32, firstChat c
 			return
 		}
 		var body struct {
-			Stream bool `json:"stream"`
+			Stream   bool `json:"stream"`
+			Messages []struct {
+				Role string `json:"role"`
+			} `json:"messages"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body.Stream {
@@ -54,6 +57,20 @@ func mockSummarizeIdleLLM(streamCalls, summarizeCalls *atomic.Int32, firstChat c
 			return
 		}
 		// Non-streaming: context summarization (summarizeContext).
+		// Strict chat templates (e.g. Qwen3.8 on llama.cpp) reject system-only
+		// requests, so mirror that: the call must carry a user message.
+		hasUser := false
+		for _, m := range body.Messages {
+			if m.Role == "user" {
+				hasUser = true
+				break
+			}
+		}
+		if !hasUser {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":{"message":"No user query found in messages."}}`))
+			return
+		}
 		summarizeCalls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"summary text"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
