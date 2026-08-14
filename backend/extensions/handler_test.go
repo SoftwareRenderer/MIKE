@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1716,3 +1717,62 @@ func TestHandleDelete_CleansStorage(t *testing.T) {
 		t.Fatalf("expected global storage cleaned, got %d", len(entries))
 	}
 }
+
+func makeProxyExt(t *testing.T, h *ExtensionHandler, domains []string) {
+	t.Helper()
+	ext := makeTestExt("proxy-ext", "proxy", ExtensionTypeUI)
+	ext.Manifest.Capabilities = &Capabilities{
+		Proxy: &ProxyConfig{AllowedDomains: domains},
+	}
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("Create proxy ext: %v", err)
+	}
+}
+
+func TestHandleProxy_RejectsNonHTTPScheme(t *testing.T) {
+	h := testHandler(t)
+	makeProxyExt(t, h, []string{"example.com"})
+
+	body := `{"url":"gopher://example.com:8080/x","method":"GET"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/proxy-ext/proxy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.HandleProxy(w, req, "proxy-ext")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (non-http scheme rejected)", w.Code)
+	}
+}
+
+func TestHandleProxy_DoesNotFollowRedirects(t *testing.T) {
+	// The "internal" server must never be reached via a redirect from an
+	// allowed domain (SSRF via redirect).
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("INTERNAL-SECRET"))
+	}))
+	defer internal.Close()
+
+	// Allowed domain that 302-redirects to the internal server.
+	allowed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, internal.URL, http.StatusFound)
+	}))
+	defer allowed.Close()
+
+	u, _ := url.Parse(allowed.URL)
+	h := testHandler(t)
+	makeProxyExt(t, h, []string{u.Hostname()})
+
+	body := `{"url":"` + allowed.URL + `/probe","method":"GET"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/proxy-ext/proxy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.HandleProxy(w, req, "proxy-ext")
+
+	// The proxy should return the redirect response itself, not follow it.
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d (redirect must not be followed)", w.Code, http.StatusFound)
+	}
+	if strings.Contains(w.Body.String(), "INTERNAL-SECRET") {
+		t.Fatal("proxy followed a redirect to a non-allowed host (SSRF via redirect)")
+	}
+}
+
+

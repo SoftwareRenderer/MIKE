@@ -108,7 +108,11 @@ type LSPHandler struct {
 	clients  map[*websocket.Conn]*ClientSession
 	// Per workspace+language state
 	workspaces map[string]*workspaceState
-	nextID     atomic.Uint64
+	// validateWorkspace, if set, restricts which workspace paths a client may
+	// subscribe a language server to. It must return true for the workspace to
+	// be accepted. Nil means no restriction (default, used in tests).
+	validateWorkspace func(workspace string) bool
+	nextID            atomic.Uint64
 	// nextBackendID generates unique backend request IDs for remapping
 	nextBackendID atomic.Int64
 	// serverRouterDone signals the server message router to stop
@@ -132,6 +136,16 @@ func NewLSPHandler(reg lspRegistry, mgr lspManager) *LSPHandler {
 	return h
 }
 
+// SetWorkspaceValidator sets an optional callback that restricts which
+// workspace paths a client may subscribe a language server to. The callback
+// must return true for the workspace to be accepted. If never set, any
+// workspace is allowed (used by tests).
+func (h *LSPHandler) SetWorkspaceValidator(fn func(workspace string) bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.validateWorkspace = fn
+}
+
 // Close stops the handler's background goroutines.
 func (h *LSPHandler) Close() {
 	close(h.serverRouterDone)
@@ -141,8 +155,10 @@ func (h *LSPHandler) Close() {
 // HandleLSP is the HTTP handler for the LSP WebSocket endpoint at /api/lsp.
 func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
-		CompressionMode:    websocket.CompressionContextTakeover,
+		// Origin verification is enabled by default: the browser must connect
+		// from the same host (or an explicitly listed pattern). This prevents
+		// cross-site WebSocket hijacking.
+		CompressionMode: websocket.CompressionContextTakeover,
 	})
 	if err != nil {
 		log.Printf("[lsp] accept error: %v", err)
@@ -381,6 +397,13 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 	if sub.Params.Workspace == "" {
 		log.Printf("[lsp] client %d: subscribe missing workspace", session.clientID)
 		session.conn.Close(websocket.StatusProtocolError, "missing workspace")
+		return
+	}
+
+	// Restrict the workspace to allowed paths when a validator is configured.
+	if h.validateWorkspace != nil && !h.validateWorkspace(sub.Params.Workspace) {
+		log.Printf("[lsp] client %d: workspace %q not allowed", session.clientID, sub.Params.Workspace)
+		session.conn.Close(websocket.StatusProtocolError, "workspace not allowed")
 		return
 	}
 

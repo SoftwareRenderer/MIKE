@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"kanban/pkg/sandboxruntime"
 )
@@ -24,7 +25,13 @@ type RegistryClient struct {
 // NewRegistryClient creates a new RegistryClient.
 func NewRegistryClient() *RegistryClient {
 	return &RegistryClient{
-		httpClient: &http.Client{},
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+			// Do not follow redirects
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 

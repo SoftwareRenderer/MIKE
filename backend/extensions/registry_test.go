@@ -22,7 +22,7 @@ func TestFetchIndex(t *testing.T) {
 			DisplayName: "Go Language Server",
 			Description: "Go language server",
 			Author:      "Go Team",
-			Image: "ghcr.io/kanban/gopls:1.0.0",
+			Image:       "ghcr.io/kanban/gopls:1.0.0",
 		},
 		{
 			Name:        "typescript",
@@ -31,7 +31,7 @@ func TestFetchIndex(t *testing.T) {
 			DisplayName: "TypeScript Language Server",
 			Description: "TypeScript language server",
 			Author:      "Microsoft",
-			Image: "ghcr.io/kanban/typescript:2.0.0",
+			Image:       "ghcr.io/kanban/typescript:2.0.0",
 		},
 	}
 
@@ -530,5 +530,28 @@ func TestResolveURL(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("ResolveURL(%q, %q) = %q, want %q", tt.base, tt.target, got, tt.want)
 		}
+	}
+}
+
+func TestRegistryClient_DoesNotFollowRedirects(t *testing.T) {
+	// The registry client must not follow a redirect from the registry URL to
+	// an arbitrary internal host (SSRF via redirect).
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"name":"internal"}]`))
+	}))
+	defer internal.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, internal.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	rc := NewRegistryClient()
+	_, err := rc.FetchIndex(redirector.URL)
+	if err == nil {
+		t.Fatal("expected error fetching a redirecting registry URL, got nil")
+	}
+	if strings.Contains(err.Error(), "internal") {
+		t.Fatalf("registry client followed a redirect: %v", err)
 	}
 }

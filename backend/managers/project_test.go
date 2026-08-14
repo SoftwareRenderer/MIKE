@@ -321,8 +321,8 @@ func TestApplyPricingPowerOnlyNoElectricity(t *testing.T) {
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			ID:               1,
-			Name:             "prov-x",
+			ID:                1,
+			Name:              "prov-x",
 			DisplayName:       "Provider X",
 			URL:               "http://localhost:8080/v1",
 			InputPrice:        3.0,
@@ -409,8 +409,8 @@ func TestApplyPricingMultipleProviders(t *testing.T) {
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			ID:               1,
-			Name:             "prov-x",
+			ID:                1,
+			Name:              "prov-x",
 			DisplayName:       "Provider X",
 			URL:               "http://localhost:8080/v1",
 			InputPrice:        3.0,
@@ -485,11 +485,11 @@ func TestApplyPricingModelPricingOverride(t *testing.T) {
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			ID:               1,
-			Name:             "prov-x",
-			DisplayName:      "Provider X",
-			URL:              "http://localhost:8080/v1",
-			InputPrice:       3.0, // provider defaults — must be overridden
+			ID:                1,
+			Name:              "prov-x",
+			DisplayName:       "Provider X",
+			URL:               "http://localhost:8080/v1",
+			InputPrice:        3.0, // provider defaults — must be overridden
 			OutputPrice:       5.0,
 			CacheReadPrice:    1.0,
 			PowerConsumptionW: 500.0,
@@ -580,8 +580,8 @@ func TestApplyPricingModelPartialFallback(t *testing.T) {
 	cfg, _ := h.configStore.GetConfig()
 	cfg.Providers = []types.Provider{
 		{
-			ID:               1,
-			Name:             "prov-x",
+			ID:                1,
+			Name:              "prov-x",
 			DisplayName:       "Provider X",
 			URL:               "http://localhost:8080/v1",
 			InputPrice:        3.0,
@@ -675,4 +675,32 @@ func TestApplyPricingJSONSerialization(t *testing.T) {
 	expectedKwh := 500.0 * 5000.0 / 3_600_000_000
 	expectedTotalCost := 0.0053 + expectedKwh*0.12
 	floatApprox(t, m.Cost, expectedTotalCost, 0.0001)
+}
+
+func TestValidateGitCloneURL(t *testing.T) {
+	valid := []string{
+		"https://github.com/user/repo.git",
+		"http://example.com/repo",
+		"ssh://git@example.com:22/repo.git",
+		"git://example.com/repo.git",
+		"git@example.com:user/repo.git", // scp-like SSH form
+		"/tmp/local-repo",               // bare path → local clone is a supported feature
+		"file:///tmp/local-repo",        // file scheme → local clone is a supported feature
+	}
+	for _, u := range valid {
+		if err := validateGitCloneURL(u); err != nil {
+			t.Errorf("validateGitCloneURL(%q) = %v, want nil", u, err)
+		}
+	}
+
+	invalid := []string{
+		"",                  // empty
+		"-o evil",           // leading dash → git option injection
+		"--config=http://x", // leading dash
+	}
+	for _, u := range invalid {
+		if err := validateGitCloneURL(u); err == nil {
+			t.Errorf("validateGitCloneURL(%q) = nil, want error", u)
+		}
+	}
 }

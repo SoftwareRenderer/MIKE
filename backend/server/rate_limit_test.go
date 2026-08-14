@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -176,4 +177,78 @@ func testResponseRateLimited(t *testing.T, s *Server, req *http.Request) *httpte
 	handler := s.CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))
 	handler.ServeHTTP(rr, req)
 	return rr
+}
+
+func setTrustProxy(t *testing.T, enabled bool) {
+	t.Helper()
+	old := os.Getenv("MIKE_TRUST_PROXY")
+	if enabled {
+		os.Setenv("MIKE_TRUST_PROXY", "1")
+	} else {
+		os.Unsetenv("MIKE_TRUST_PROXY")
+	}
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("MIKE_TRUST_PROXY", old)
+		} else {
+			os.Unsetenv("MIKE_TRUST_PROXY")
+		}
+	})
+}
+
+func TestClientIP_IgnoresXFFByDefault(t *testing.T) {
+	// By default the client-supplied X-Forwarded-For header must NOT be trusted,
+	// otherwise an attacker can spoof it to bypass IP-based rate limiting.
+	setTrustProxy(t, false)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req.RemoteAddr = "203.0.113.9:54321"
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+	if got := clientIP(req); got != "203.0.113.9" {
+		t.Fatalf("clientIP with spoofed XFF (proxy disabled): got %q, want %q", got, "203.0.113.9")
+	}
+}
+
+func TestClientIP_TrustsXFFWhenProxyEnabled(t *testing.T) {
+	setTrustProxy(t, true)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req.RemoteAddr = "10.0.0.1:54321"
+	req.Header.Set("X-Forwarded-For", "198.51.100.7, 10.0.0.1")
+	if got := clientIP(req); got != "198.51.100.7" {
+		t.Fatalf("clientIP with XFF (proxy enabled): got %q, want %q", got, "198.51.100.7")
+	}
+}
+
+func TestClientIP_FallsBackToRemoteAddr(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req.RemoteAddr = "192.0.2.55:4444"
+	if got := clientIP(req); got != "192.0.2.55" {
+		t.Fatalf("clientIP no XFF: got %q, want %q", got, "192.0.2.55")
+	}
+}
+
+func TestRateLimitMiddleware_XFFCannotBypassByDefault(t *testing.T) {
+	// A client rotating X-Forwarded-For must not be able to bypass the limit
+	// when proxy trust is disabled.
+	setTrustProxy(t, false)
+	limiter := NewRateLimiter(2, time.Minute)
+	handler := RateLimitMiddleware(limiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	limited := false
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+		req.RemoteAddr = "203.0.113.9:54321"
+		// Rotate the spoofed header each attempt.
+		req.Header.Set("X-Forwarded-For", "1.2.3."+strconv.Itoa(i))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Error("expected XFF spoofing to be blocked by default (should hit rate limit)")
+	}
 }

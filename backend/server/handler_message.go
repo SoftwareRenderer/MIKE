@@ -88,6 +88,18 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusBadRequest, "role and content required")
 			return
 		}
+		// Only user-initiated roles may be created over HTTP
+		switch msg.Role {
+		case "user", "error":
+		default:
+			JSONError(w, http.StatusBadRequest, "invalid role: "+msg.Role)
+			return
+		}
+		const maxMessageContentBytes = 1 << 20 // 1MB
+		if len(msg.Content) > maxMessageContentBytes {
+			JSONError(w, http.StatusRequestEntityTooLarge, "message too large (max 1MB)")
+			return
+		}
 		msg.TaskID = taskID
 		msg.ID = uuid.New().String()
 		msg.CreatedAt = time.Now().UTC()

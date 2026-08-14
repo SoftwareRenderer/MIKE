@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"kanban/backend/tls"
 	"kanban/backend/types"
 )
 
@@ -1246,10 +1247,10 @@ func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {
 	cookie, csrfToken := loginTestCSRF(t, s)
 	netIso := true
 	proj := map[string]any{
-		"name":                       "sandbox-test-proj",
-		"path":                       dir,
-		"sandbox_enabled":            true,
-		"sandbox_network_isolation":  netIso,
+		"name":                      "sandbox-test-proj",
+		"path":                      dir,
+		"sandbox_enabled":           true,
+		"sandbox_network_isolation": netIso,
 	}
 	req := testRequest("POST", "/api/projects", proj)
 	withAuthCSRF(req, cookie, csrfToken)
@@ -1300,10 +1301,10 @@ func TestSandboxDisableAllowedWithDangerZone(t *testing.T) {
 	cookie, csrfToken := loginTestCSRF(t, s)
 	netIso := true
 	proj := map[string]any{
-		"name":                       "sandbox-test-proj-2",
-		"path":                       dir,
-		"sandbox_enabled":            true,
-		"sandbox_network_isolation":  netIso,
+		"name":                      "sandbox-test-proj-2",
+		"path":                      dir,
+		"sandbox_enabled":           true,
+		"sandbox_network_isolation": netIso,
 	}
 	req := testRequest("POST", "/api/projects", proj)
 	withAuthCSRF(req, cookie, csrfToken)
@@ -1372,10 +1373,10 @@ func TestSandboxCreateDisabledBlockedWithoutDangerZone(t *testing.T) {
 	// Creating with sandbox enabled should always work
 	netIso := true
 	proj = map[string]any{
-		"name":                       "sandbox-test-proj-4",
-		"path":                       dir,
-		"sandbox_enabled":            true,
-		"sandbox_network_isolation":  netIso,
+		"name":                      "sandbox-test-proj-4",
+		"path":                      dir,
+		"sandbox_enabled":           true,
+		"sandbox_network_isolation": netIso,
 	}
 	req = testRequest("POST", "/api/projects", proj)
 	withAuthCSRF(req, cookie, csrfToken)
@@ -1398,4 +1399,50 @@ func execOutput(t *testing.T, cmd string, args ...string) string {
 
 func join(parts ...string) string {
 	return filepath.Join(parts...)
+}
+
+func TestRedirectHTTPSMiddleware_IgnoresXForwardedProtoByDefault(t *testing.T) {
+	s := &Server{tlsConfig: &tls.Config{CertFile: "cert", KeyFile: "key"}}
+	setTrustProxy(t, false)
+	var passed bool
+	h := s.RedirectHTTPSMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		passed = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Attacker spoofs X-Forwarded-Proto to claim HTTPS; with proxy trust off it
+	// must still be redirected to HTTPS, not passed through.
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if passed {
+		t.Fatal("request with spoofed X-Forwarded-Proto was passed through; expected HTTPS redirect")
+	}
+	if rr.Code != http.StatusMovedPermanently {
+		t.Fatalf("expected 301 redirect, got %d", rr.Code)
+	}
+}
+
+func TestRedirectHTTPSMiddleware_TrustsXForwardedProtoWhenProxyEnabled(t *testing.T) {
+	s := &Server{tlsConfig: &tls.Config{CertFile: "cert", KeyFile: "key"}}
+	setTrustProxy(t, true)
+	var passed bool
+	h := s.RedirectHTTPSMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		passed = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if !passed {
+		t.Fatal("request with X-Forwarded-Proto=https (proxy enabled) should pass through")
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
 }

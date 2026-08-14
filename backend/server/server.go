@@ -186,6 +186,32 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	// Use extension-based registry and manager for dynamic LSP discovery
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)
 	s.lspHandler = lsp.NewLSPHandler(extLSPRegistry, s.extLSPMgr)
+	// Restrict LSP workspaces to project paths and task worktrees so a client
+	// cannot spawn a language server with cwd at an arbitrary host directory.
+	s.lspHandler.SetWorkspaceValidator(func(workspace string) bool {
+		cfg, err := s.configStore.GetConfig()
+		if err != nil {
+			return false
+		}
+		ws := filepath.Clean(workspace)
+		// Task worktrees and projects located under the workspace dir.
+		wsDir := filepath.Clean(cfg.WorkspaceDir)
+		if ws == wsDir || strings.HasPrefix(ws, wsDir+string(os.PathSeparator)) {
+			return true
+		}
+		// Projects may live anywhere on the host; allow their roots and descendants.
+		projects, err := s.store.ListProjects()
+		if err != nil {
+			return false
+		}
+		for _, p := range projects {
+			root := filepath.Clean(p.Path)
+			if ws == root || strings.HasPrefix(ws, root+string(os.PathSeparator)) {
+				return true
+			}
+		}
+		return false
+	})
 	// Wire extension change callback → reload agent registry + broadcast to all clients
 	s.extHandler.SetOnExtensionChanged(func() {
 		agentRegistry.Reload()
@@ -300,7 +326,12 @@ func (s *Server) RedirectHTTPSMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		isHTTPS := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+		// Only trust X-Forwarded-Proto when explicitly behind a trusted proxy.
+		// Otherwise an attacker can set it to "https" to bypass the redirect.
+		isHTTPS := r.TLS != nil
+		if !isHTTPS && trustProxy() && r.Header.Get("X-Forwarded-Proto") == "https" {
+			isHTTPS = true
+		}
 		if !isHTTPS {
 			target := fmt.Sprintf("https://%s%s", r.Host, r.URL.RequestURI())
 			http.Redirect(w, r, target, http.StatusMovedPermanently)

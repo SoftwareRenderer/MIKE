@@ -59,16 +59,15 @@ export async function listLocalExtensions(): Promise<RegistryEntry[]> {
 }
 
 /** Fetch the registry index. */
-export async function getRegistryIndex(url?: string): Promise<RegistryEntry[]> {
-    const params = url ? `?url=${encodeURIComponent(url)}` : '';
-    const res = await apiFetch(`${API_BASE}/extensions/registry${params}`);
+export async function getRegistryIndex(): Promise<RegistryEntry[]> {
+    const res = await apiFetch(`${API_BASE}/extensions/registry`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch registry');
     return res.json();
 }
 
 /** Stream SSE progress + final result; the install survives a client disconnect. */
-export function installExtension(name: string, registryUrl?: string): AsyncIterable<BuildProgressEvent> {
-    return streamOperation('/extensions/install', { name, registry_url: registryUrl });
+export function installExtension(name: string): AsyncIterable<BuildProgressEvent> {
+    return streamOperation('/extensions/install', { name });
 }
 
 /** Install a local (unpublished) extension from the local extensions directory. */
@@ -77,9 +76,8 @@ export function installLocalExtension(author: string, name: string): AsyncIterab
 }
 
 /** Check for available updates. */
-export async function checkUpdates(url?: string): Promise<ExtensionUpdate[]> {
-    const params = url ? `?url=${encodeURIComponent(url)}` : '';
-    const res = await apiFetch(`${API_BASE}/extensions/check-updates${params}`);
+export async function checkUpdates(): Promise<ExtensionUpdate[]> {
+    const res = await apiFetch(`${API_BASE}/extensions/check-updates`);
     if (!res.ok) throw await apiError(res, 'Failed to check for updates');
     return res.json();
 }

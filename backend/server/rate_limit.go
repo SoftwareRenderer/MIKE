@@ -98,16 +98,26 @@ func (rl *RateLimiter) Stop() {
 	close(rl.stopCh)
 }
 
+// trustProxy reports whether the server is behind a trusted reverse proxy and
+// should honor forwarding headers (X-Forwarded-For, X-Forwarded-Proto).
+func trustProxy() bool {
+	return os.Getenv("MIKE_TRUST_PROXY") == "1"
+}
+
 // clientIP extracts the client IP from a request, considering
 // X-Forwarded-For headers if present (for reverse proxy setups).
 func clientIP(r *http.Request) string {
-	// Check X-Forwarded-For (set by reverse proxies)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For can contain multiple IPs; the first is the original client
-		if idx := indexByte(xff, ','); idx >= 0 {
-			return xff[:idx]
+	// Only trust X-Forwarded-For when explicitly behind a trusted proxy.
+	// Otherwise an attacker can spoof the header to bypass IP-based
+	// rate limiting (e.g. the login brute-force limit).
+	if trustProxy() {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// X-Forwarded-For can contain multiple IPs; the first is the original client
+			if idx := indexByte(xff, ','); idx >= 0 {
+				return xff[:idx]
+			}
+			return xff
 		}
-		return xff
 	}
 	// Fall back to the direct remote address
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

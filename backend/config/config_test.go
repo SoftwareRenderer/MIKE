@@ -332,3 +332,39 @@ func TestMigrateProviderIDs(t *testing.T) {
 		t.Errorf("task_messages provider_name not remapped: got %q want %q", stored, id)
 	}
 }
+
+func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1, APIKey: ptr("super-secret-key")},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	readCfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	// Sanity check: the stored key decrypts to the plaintext.
+	if len(readCfg.Providers) != 1 || readCfg.Providers[0].APIKey == nil || *readCfg.Providers[0].APIKey != "super-secret-key" {
+		t.Fatalf("expected decrypted key in GetConfig, got %+v", readCfg.Providers)
+	}
+
+	// The HTTP response must mask the key, never return it in plaintext.
+	resp := cs.buildConfigResponse(readCfg)
+	if len(resp.Providers) != 1 || resp.Providers[0].APIKey == nil {
+		t.Fatalf("expected 1 provider with an APIKey field, got %+v", resp.Providers)
+	}
+	if got := *resp.Providers[0].APIKey; got != maskedAPIKey {
+		t.Fatalf("API key not masked in response: got %q, want %q", got, maskedAPIKey)
+	}
+	if got := *resp.Providers[0].APIKey; got == "super-secret-key" {
+		t.Fatal("plaintext API key leaked in config response")
+	}
+}
+
+func ptr(s string) *string { return &s }
