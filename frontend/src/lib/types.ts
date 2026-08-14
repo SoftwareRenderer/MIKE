@@ -202,6 +202,7 @@ export interface Config {
     default_subtasks_auto_merge?: boolean;
     default_operating_mode?: string; // "act", "plan", or "explore"
     default_max_failed_turns?: number;
+    default_auto_summarize_threshold?: number; // percent of context window, 1-100
     encryption_enabled?: boolean;
     registry_url?: string;
 }
