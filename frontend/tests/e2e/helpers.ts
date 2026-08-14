@@ -25,23 +25,18 @@ async function getOrigin(page: Page): Promise<string> {
 }
 
 /**
- * Get CSRF token from page context. Tries window.__csrfToken first,
- * then falls back to fetching /api/auth/session.
+ * Get CSRF token from page context via the authenticated session endpoint
  */
 async function getCsrfToken(page: Page): Promise<string> {
-  let token = await page.evaluate(() => (window as any).__csrfToken || '');
-  if (!token) {
-    token = await page.evaluate(async () => {
-      try {
-        const res = await fetch('/api/auth/session');
-        const data = await res.json();
-        return data.csrf_token || '';
-      } catch {
-        return '';
-      }
-    });
-  }
-  return token;
+  return await page.evaluate(async () => {
+    try {
+      const res = await fetch('/api/auth/session');
+      const data = await res.json();
+      return data.csrf_token || '';
+    } catch {
+      return '';
+    }
+  });
 }
 
 /**
