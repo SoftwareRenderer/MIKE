@@ -73,19 +73,20 @@ type TaskThread struct {
 
 // Config represents global server configuration.
 type Config struct {
-	WorkspaceDir             string     `json:"workspace_dir"`
-	DatabasePath             string     `json:"database_path"`
-	RegistryURL              string     `json:"registry_url"`
-	Providers                []Provider `json:"providers"`
-	WorkerProvider           string     `json:"worker_provider"`
-	WorkerModel              string     `json:"worker_model"`
-	UtilityProvider          string     `json:"utility_provider"`
-	UtilityModel             string     `json:"utility_model"`
-	DefaultAutoCommit        *bool      `json:"default_auto_commit"`
-	DefaultAutoMerge         *bool      `json:"default_auto_merge"`
-	DefaultSubtasksAutoMerge *bool      `json:"default_subtasks_auto_merge"`
-	DefaultOperatingMode     *string    `json:"default_operating_mode"`
-	DefaultMaxFailedTurns    *int       `json:"default_max_failed_turns,omitempty"`
+	WorkspaceDir                  string     `json:"workspace_dir"`
+	DatabasePath                  string     `json:"database_path"`
+	RegistryURL                   string     `json:"registry_url"`
+	Providers                     []Provider `json:"providers"`
+	WorkerProvider                string     `json:"worker_provider"`
+	WorkerModel                   string     `json:"worker_model"`
+	UtilityProvider               string     `json:"utility_provider"`
+	UtilityModel                  string     `json:"utility_model"`
+	DefaultAutoCommit             *bool      `json:"default_auto_commit"`
+	DefaultAutoMerge              *bool      `json:"default_auto_merge"`
+	DefaultSubtasksAutoMerge      *bool      `json:"default_subtasks_auto_merge"`
+	DefaultOperatingMode          *string    `json:"default_operating_mode"`
+	DefaultMaxFailedTurns         *int       `json:"default_max_failed_turns,omitempty"`
+	DefaultAutoSummarizeThreshold *int       `json:"default_auto_summarize_threshold,omitempty"`
 }
 
 // ModelConfig represents a model with its per-model settings.

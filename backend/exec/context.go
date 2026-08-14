@@ -44,12 +44,21 @@ type summarizeResult struct {
 	predictedMs     int64
 }
 
+// defaultSummarizeThreshold is the auto-summarization threshold (percent of the
+// context window) used when no explicit config value is set.
+const defaultSummarizeThreshold = 90
+
 // shouldSummarize checks if the LLM context usage is approaching the window limit.
-func shouldSummarize(usedTokens, contextWindow int) bool {
+// thresholdPct is the percent of the context window at which auto-summarization
+// triggers (1-100).
+func shouldSummarize(usedTokens, contextWindow, thresholdPct int) bool {
 	if contextWindow <= 0 {
 		return false
 	}
-	return usedTokens >= contextWindow*9/10
+	if thresholdPct <= 0 || thresholdPct > 100 {
+		thresholdPct = defaultSummarizeThreshold
+	}
+	return usedTokens >= contextWindow*thresholdPct/100
 }
 
 // contextTokensUsed returns the real context token usage from the most recent LLM

@@ -2327,28 +2327,49 @@ func TestBuildLLMContext_FiltersOnlyTaskCompleteToolCall(t *testing.T) {
 // --- shouldSummarize Tests ---
 
 func TestShouldSummarize_BelowThreshold(t *testing.T) {
-	if shouldSummarize(100, 32768) {
+	if shouldSummarize(100, 32768, 90) {
 		t.Error("usage below 90% of window should not trigger summarization")
 	}
 }
 
 func TestShouldSummarize_AboveThreshold(t *testing.T) {
 	// 92% of a 100-token window (>= 90) should trigger.
-	if !shouldSummarize(92, 100) {
+	if !shouldSummarize(92, 100, 90) {
 		t.Error("usage at 92% of window should trigger summarization")
 	}
 }
 
 func TestShouldSummarize_AtThreshold(t *testing.T) {
 	// Exactly 90% of a 100-token window should trigger (>= 90).
-	if !shouldSummarize(90, 100) {
+	if !shouldSummarize(90, 100, 90) {
 		t.Error("usage at 90% of window should trigger summarization")
 	}
 }
 
 func TestShouldSummarize_ZeroWindow(t *testing.T) {
-	if shouldSummarize(100, 0) {
+	if shouldSummarize(100, 0, 90) {
 		t.Error("zero context window should never trigger summarization")
+	}
+}
+
+func TestShouldSummarize_CustomThreshold(t *testing.T) {
+	// With a 50% threshold, 60% of the window should trigger.
+	if !shouldSummarize(60, 100, 50) {
+		t.Error("usage at 60% of window with 50% threshold should trigger summarization")
+	}
+	// But below the custom threshold it should not trigger.
+	if shouldSummarize(40, 100, 50) {
+		t.Error("usage at 40% of window with 50% threshold should not trigger summarization")
+	}
+}
+
+func TestShouldSummarize_InvalidThresholdFallsBackToDefault(t *testing.T) {
+	// Invalid thresholds fall back to the 90% default.
+	if !shouldSummarize(90, 100, 0) {
+		t.Error("usage at 90% of window with invalid threshold should trigger summarization")
+	}
+	if !shouldSummarize(90, 100, 150) {
+		t.Error("usage at 90% of window with out-of-range threshold should trigger summarization")
 	}
 }
 
