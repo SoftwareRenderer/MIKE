@@ -33,7 +33,7 @@ test.describe('File Browser Actions', () => {
 
     // Open the file browser (uses BaseModal with role="dialog")
     await page.click('.add-project-btn');
-    await expect(page.locator('[role="dialog"]:has-text("Select Project Directory")')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]:has-text("Add Project")')).toBeVisible({ timeout: 5000 });
 
     // Navigate to the non-git directory
     const pathInput = page.locator('.path-input');
@@ -65,7 +65,7 @@ test.describe('File Browser Actions', () => {
     }).toPass({ timeout: 15000 });
 
     // Browser should close automatically after init (auto-select)
-    await expect(page.locator('[role="dialog"]:has-text("Select Project Directory")')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]:has-text("Add Project")')).not.toBeVisible({ timeout: 5000 });
 
     // New project should be added
     await expect(page.locator('.project-item')).toHaveCount(initialCount + 1, { timeout: 5000 });
@@ -76,7 +76,7 @@ test.describe('File Browser Actions', () => {
 
   test('should show error when creating a folder that already exists', async ({ page }) => {
     await page.click('.add-project-btn');
-    await expect(page.locator('[role="dialog"]:has-text("Select Project Directory")')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]:has-text("Add Project")')).toBeVisible({ timeout: 5000 });
 
     const pathInput = page.locator('.path-input');
     await pathInput.fill(TEST_NEW_FOLDER_PARENT);
@@ -115,7 +115,7 @@ test.describe('File Browser Actions', () => {
 
     // Open the file browser (uses BaseModal with role="dialog")
     await page.click('.add-project-btn');
-    await expect(page.locator('[role="dialog"]:has-text("Select Project Directory")')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]:has-text("Add Project")')).toBeVisible({ timeout: 5000 });
 
     // Uncheck "Use Sandbox"
     const sandboxCheckbox = page.locator('.sandbox-toggle input[type="checkbox"]');
@@ -140,7 +140,7 @@ test.describe('File Browser Actions', () => {
     await page.click('.btn-primary:has-text("Select")');
 
     // Browser should close
-    await expect(page.locator('[role="dialog"]:has-text("Select Project Directory")')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"]:has-text("Add Project")')).not.toBeVisible({ timeout: 5000 });
 
     // New project should be added
     await expect(page.locator('.project-item')).toHaveCount(initialCount + 1, { timeout: 5000 });
