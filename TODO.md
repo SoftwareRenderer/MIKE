@@ -43,3 +43,52 @@ Add a per-provider `max_requests_per_second` setting (0 = unlimited) and enforce
 - `HandleConfig` PUT merges the `providers` array wholesale, so the new plain field flows through GET/PUT automatically; only clamping is needed.
 - TDD: tests written first, red confirmed, then implementation.
 - Keep comments concise (project convention).
+
+---
+
+# TODO — frontend: per-provider "Max requests/sec" (Settings → Providers)
+
+## Goal
+Add a per-provider "Max requests/sec" option (integer input, min 0, `0` = unlimited, LLM providers only) to Settings → Providers, persisted via `max_requests_per_second` through `PUT/GET /api/config`.
+
+## Tasks
+
+### 1. E2E test first (red phase)
+- [x] Add `test.describe.serial('Provider max requests per second')` to `frontend/tests/e2e/settings-provider.spec.ts` with three tests:
+  - API round-trip: `apiPutConfig` a provider with `max_requests_per_second: 5` (+ url, models, concurrency), `waitForConfig`, `apiGetConfig` → assert `=== 5`
+  - UI show & persist: seed config with value 5, open Settings, expand the LLM provider card, assert "Max requests/sec" input visible with value 5, set to 3, Save, re-open, expand, assert 3; also assert `apiGetConfig` saved value is 3
+  - New provider default: click "+ Add Provider", assert the new (expanded) LLM card shows Max requests/sec input with value 0, then cancel without saving
+- [x] Run `npx playwright test settings-provider` (clean stale state first) — confirmed red: UI test fails on missing "Max requests/sec" label (5.9s), serial halts; API round-trip test already green (backend landed). Baseline run (block excluded) shows identical pre-existing failures (1, 4, 7, 8) → unrelated to this change.
+
+### 2. Frontend implementation (green phase)
+- [x] `frontend/src/lib/types.ts`: add `max_requests_per_second: number;` to `Provider` interface after `concurrency` (with `0 = unlimited` comment)
+- [x] `frontend/src/lib/components/ConfigModal.svelte`:
+  - `ProviderDraft` interface: add `max_requests_per_second: number;`
+  - `buildProviders`: map `max_requests_per_second: p.max_requests_per_second || 0`
+  - Both new-provider default drafts (`addProvider`, `addAgent`): set `max_requests_per_second: 0`
+  - Save mapping: `max_requests_per_second: Math.max(0, Math.floor(p.max_requests_per_second || 0))`
+- [x] `frontend/src/lib/components/ConfigModal/ProviderCard.svelte`:
+  - Local `ProviderDraft`: add `max_requests_per_second: number;`
+  - LLM branch `.provider-options`: second `.option-row` — "Max requests/sec" label + help tooltip + `<input id={max-rps-${index}} type="number" min="0" step="1" bind:value={provider.max_requests_per_second} class="option-input" onchange={() => onDirty?.()}>`
+  - CSS: spacing between option rows (`.provider-options .option-row + .option-row { margin-top: 8px; }`)
+- [x] Fix `frontend/src/lib/utils/__tests__/providers.unit.ts` fixtures for the new required field (svelte-check: 0 errors)
+
+### 3. Verification
+- [x] `cd frontend && npm run check` — zero TypeScript errors
+- [x] `cd frontend && npm test` — vitest suite green (74 files, 893 tests)
+- [x] `cd frontend && npx playwright test settings-provider` — new block fully green (3/3: round-trip, UI persist, default-0); pre-existing failures (Model switcher, Settings Model Delete, Reasoning persist, Primary Providers display) proven identical with/without this change — see Discovered Tasks
+- [x] Mark all TODO items done and request review
+
+## Discovered Tasks (not started — need approval)
+- [ ] (discovered) Pre-existing settings-provider e2e failures in this environment, unrelated to this feature:
+  - `Settings Model Delete`, `Reasoning effort › persist`, `Primary Providers` (×3): test fixtures seed name-based `worker_provider`/`utility_provider` refs (e.g. 'primary-a'), but the current UI keys LLM providers by stable integer ID (commit 9ed9a70c, which postdates the spec's last update). Consequence: primary-provider selects show "Select provider" and Save is blocked by "Please select a Worker provider and model." Fix = reseed with ID-based refs (two-step PUT, same pattern as the new block).
+  - `Model switcher in task view`: LLM/executor-dependent; times out waiting for the task to go idle in this sandbox (gVisor/podman sandboxing is broken here: "failed to list stale containers: exit status 125").
+  - Environment notes: Playwright browsers were missing (installed chromium); `frontend/dist` was not built (built); harness quirk: `globalTeardown` reuses global-setup's default export, re-running full setup after every run.
+
+## Notes
+- Backend field already exists (commit `5d028851`): plain int, always serialized, `UpdateConfig` clamps negatives to 0. Do NOT stub/modify the backend.
+- `settings-provider.spec.ts` runs in the Playwright **isolated** project (port 3001, serialized, `workers: 1`) per `playwright.config.ts` — not the main chromium project. Page-based API helpers work identically there.
+- LLM provider references in the UI are stable integer IDs (`String(p.id)`). For the UI test's save path to pass modal validation, seed the config in two steps: PUT provider (server assigns ID) → GET to read the ID → PUT again with `worker_provider`/`utility_provider` set to `String(id)`.
+- The new "+ Add Provider" draft has `expanded: true` by default and `concurrency: 1`, `max_requests_per_second: 0`.
+- Cancel path after dirtying the form triggers the "Discard changes?" confirm dialog — click "Discard".
+- Clean stale state before e2e runs: `lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null; rm -f /tmp/kanban-test-setup.lock; rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-worktrees`
