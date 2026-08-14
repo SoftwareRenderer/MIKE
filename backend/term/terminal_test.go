@@ -452,3 +452,57 @@ func TestTaskTerminalDoesNotStopContainerOnExit(t *testing.T) {
 		t.Error("expected Stop to NOT be called for task-level terminal session")
 	}
 }
+
+func TestHandleTerminal_RejectsUnknownOrTraversalTask(t *testing.T) {
+	s, cs := newTestConfigStore(t)
+	mock := newMockSandbox(t)
+	tm := NewTerminalManager(s, cs, mock, nil)
+
+	// A non-existent task (including path-traversal strings) must return 404
+	// before any shell/websocket is created, so a traversal taskID cannot be
+	// used to open a shell with a cwd outside the workspace.
+	for _, taskID := range []string{"../../../../etc", "no-such-task", "../other"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/p1/tasks/"+taskID+"/terminal", nil)
+		req.SetPathValue("projectID", "p1")
+		req.SetPathValue("taskID", taskID)
+		w := httptest.NewRecorder()
+		tm.HandleTerminal(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("taskID %q: status = %d, want 404", taskID, w.Code)
+		}
+	}
+}
+
+func TestHandleTerminal_RejectsTaskFromAnotherProject(t *testing.T) {
+	s, cs := newTestConfigStore(t)
+	mock := newMockSandbox(t)
+	tm := NewTerminalManager(s, cs, mock, nil)
+
+	// A task that exists but belongs to a different project must be rejected.
+	projID := "project-a"
+	if err := s.CreateProject(&types.Project{ID: projID, Name: "A", Path: t.TempDir(), SandboxEnabled: true}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := "real-task"
+	now := time.Now().UTC()
+	if err := s.CreateTask(&types.Task{
+		ID:             taskID,
+		ProjectID:      projID,
+		Status:         "backlog",
+		ExecutionState: "idle",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Request the task under a different project ID.
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/other/tasks/"+taskID+"/terminal", nil)
+	req.SetPathValue("projectID", "other")
+	req.SetPathValue("taskID", taskID)
+	w := httptest.NewRecorder()
+	tm.HandleTerminal(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-project task: status = %d, want 404", w.Code)
+	}
+}

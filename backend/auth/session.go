@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -52,7 +53,7 @@ func NewSessionManager(s *store.Store) (*SessionManager, error) {
 // Login validates the password and creates a new session.
 // Returns the session id, session token, and CSRF token on success.
 func (m *SessionManager) Login(password string) (id, token, csrfToken string, err error) {
-	if password != m.password {
+	if subtle.ConstantTimeCompare([]byte(password), []byte(m.password)) != 1 {
 		return "", "", "", ErrInvalidPassword
 	}
 

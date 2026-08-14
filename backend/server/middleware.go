@@ -140,7 +140,7 @@ func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 		defer func() {
 			if err := recover(); err != nil {
 				log.Printf("[PANIC] %s %s: %v\n%s", r.Method, r.URL.Path, err, debug.Stack())
-				JSONError(w, http.StatusInternalServerError, fmt.Sprintf("internal server error: %v", err))
+				JSONError(w, http.StatusInternalServerError, "internal server error")
 			}
 		}()
 		next.ServeHTTP(w, r)

@@ -295,3 +295,21 @@ func TestCSRFMiddlewarePublicEndpointExempt(t *testing.T) {
 		t.Fatalf("login without CSRF: status = %d; want 200", rr.Code)
 	}
 }
+
+func TestPanicRecovery_DoesNotLeakPanicValue(t *testing.T) {
+	panicValue := "SENSITIVE-INTERNAL-DETAIL"
+	h := PanicRecoveryMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic(panicValue)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rr.Code)
+	}
+	if strings.Contains(rr.Body.String(), panicValue) {
+		t.Fatalf("panic value leaked to client: %q", rr.Body.String())
+	}
+}

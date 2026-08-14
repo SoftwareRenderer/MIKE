@@ -1029,3 +1029,86 @@ func mustMarshal(t *testing.T, v any) []byte {
 	}
 	return data
 }
+
+func TestSubscriptionRejectsDisallowedWorkspace(t *testing.T) {
+	mgr := newMockProcessManager()
+	reg := newTestRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	handler.SetWorkspaceValidator(func(ws string) bool { return ws != "/etc" })
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+
+	// Connect and subscribe to a disallowed workspace.
+	client := connectClient(t, url)
+	client.channelID = 1
+	client.workspace = "/etc"
+	client.language = "go"
+	client.send(t, map[string]any{
+		"_ch":    1,
+		"method": "workspace/subscribe",
+		"params": map[string]any{"workspace": "/etc", "file": "main.go"},
+	})
+
+	// The handler should close the connection without spawning a language server.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, _, err := client.conn.Read(ctx); err == nil {
+		t.Fatal("expected connection to be closed for a disallowed workspace")
+	}
+	if got := mgr.ProcessCount(); got != 0 {
+		t.Fatalf("expected no LSP process spawned, got %d", got)
+	}
+}
+
+func TestSubscriptionAllowsAllowedWorkspace(t *testing.T) {
+	mgr := newMockProcessManager()
+	reg := newTestRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	handler.SetWorkspaceValidator(func(ws string) bool { return ws == "/tmp/test-project" })
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+	subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
+	if got := mgr.ProcessCount(); got != 1 {
+		t.Fatalf("expected 1 LSP process, got %d", got)
+	}
+}
+
+func TestWebSocketOrigin_RejectsCrossOrigin(t *testing.T) {
+	mgr := newMockProcessManager()
+	reg := newTestRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+
+	// A cross-origin handshake must be rejected (Origin != Host).
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _, err := websocket.Dial(ctx, url+"/api/lsp", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{"https://evil.example.com"}},
+	})
+	if err == nil {
+		t.Fatal("expected cross-origin WebSocket handshake to be rejected")
+	}
+}
+
+func TestWebSocketOrigin_AcceptsSameOrigin(t *testing.T) {
+	mgr := newMockProcessManager()
+	reg := newTestRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, url+"/api/lsp", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{url}},
+	})
+	if err != nil {
+		t.Fatalf("expected same-origin WebSocket handshake to succeed: %v", err)
+	}
+	defer conn.CloseNow()
+}

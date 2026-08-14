@@ -130,16 +130,6 @@ describe('extensions API', () => {
         expect(calls[0][0]).toContain('/api/extensions/registry');
     });
 
-    it('getRegistryIndex with custom URL', async () => {
-        mockSuccess([]);
-
-        const { getRegistryIndex } = await import('$lib/api/extensions');
-        await getRegistryIndex('https://custom.registry/index.json');
-
-        const calls = apiCalls(mockFetch.mock.calls);
-        expect(calls[0][0]).toContain('url=https%3A%2F%2Fcustom.registry%2Findex.json');
-    });
-
     it('installExtension streams SSE progress then final result', async () => {
         const result = { id: 'gopls-1', name: 'gopls', type: 'lsp', enabled: true, install_source: 'registry' };
         const chunks = [

@@ -468,7 +468,18 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 		return
 	}
 	worktreesDir := cfg.WorkspaceDir
-	worktreePath := filepath.Join(worktreesDir, projectID, taskID)
+
+	// Resolve the worktree path from the task record
+	task, err := tm.store.GetTask(projectID, taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if task.ProjectID != projectID {
+		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	worktreePath := filepath.Join(worktreesDir, task.ProjectID, taskID)
 
 	tm.handleTerminalWSWithSetup(w, r, taskID, taskID, worktreePath, projectID)
 }

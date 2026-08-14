@@ -89,11 +89,11 @@ export class ExtensionManager {
     }
 
     /** Load registry index. */
-    async loadRegistry(url?: string) {
+    async loadRegistry() {
         this.state.loadingRegistry = true;
         this.state.error = '';
         try {
-            this.state.registry = await getRegistryIndex(url);
+            this.state.registry = await getRegistryIndex();
         } catch (e: any) {
             this.state.error = e.message || 'Failed to load registry';
         } finally {
@@ -140,11 +140,11 @@ export class ExtensionManager {
     }
 
     /** Check for available updates. */
-    async checkUpdates(url?: string) {
+    async checkUpdates() {
         this.state.loadingUpdates = true;
         this.state.error = '';
         try {
-            this.state.updates = await checkUpdates(url);
+            this.state.updates = await checkUpdates();
         } catch (e: any) {
             this.state.error = e.message || 'Failed to check for updates';
         } finally {

@@ -554,10 +554,7 @@ func (h *ExtensionHandler) HandleRegistryIndex(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	url := r.URL.Query().Get("url")
-	if url == "" {
-		url = h.config.RegistryURL
-	}
+	url := h.config.RegistryURL
 	if url == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "registry URL not configured")
 		return
@@ -591,10 +588,7 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	url := req.RegistryURL
-	if url == "" {
-		url = h.config.RegistryURL
-	}
+	url := h.config.RegistryURL
 	if url == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "registry URL not configured")
 		return
@@ -884,10 +878,7 @@ func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	url := r.URL.Query().Get("url")
-	if url == "" {
-		url = h.config.RegistryURL
-	}
+	url := h.config.RegistryURL
 	if url == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "registry URL not configured")
 		return
@@ -1173,10 +1164,14 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 		req.Method = http.MethodGet
 	}
 
-	// Validate domain against allowed_domains
+	// Validate
 	u, err := parseURL(req.URL)
 	if err != nil {
 		httputil.JSONError(w, http.StatusBadRequest, "invalid url: "+err.Error())
+		return
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		httputil.JSONError(w, http.StatusBadRequest, "only http/https URLs are allowed")
 		return
 	}
 	allowed := false
@@ -1216,8 +1211,15 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 	// Log the proxy request
 	log.Printf("[proxy] extension=%s method=%s url=%s status=pending", ext.Name, req.Method, req.URL)
 
-	// Execute proxy request
-	client := &http.Client{Timeout: 30 * time.Second}
+	// Execute proxy request. Redirects are NOT followed: the allowlist only
+	// validates the original URL's hostname, so following a redirect could
+	// otherwise reach an arbitrary internal host (SSRF via redirect).
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		httputil.JSONError(w, http.StatusBadGateway, "proxy request failed: "+err.Error())
@@ -1338,9 +1340,8 @@ type UpdateExtensionRequest struct {
 
 // InstallExtensionRequest is the request body for installing from registry.
 type InstallExtensionRequest struct {
-	Name        string `json:"name"`
-	Author      string `json:"author,omitempty"`
-	RegistryURL string `json:"registry_url,omitempty"`
+	Name   string `json:"name"`
+	Author string `json:"author,omitempty"`
 }
 
 // ExtensionResponse is the API response for an extension.

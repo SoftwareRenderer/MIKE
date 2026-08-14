@@ -75,6 +75,7 @@ The server requires an encryption key to secure sensitive data (like API keys) i
 | `MIKE_ENCRYPTION_KEY` | A non-blank string used to derive the AES-256-GCM encryption key. |
 | `MIKE_LOGIN_PASSWORD` | The master password used for server authentication and session creation. |
 | `MIKE_REGISTRY_URL` | The extension registry index URL. Sourced exclusively from this env var (not DB-backed), falling back to the hosted online registry `https://getmike.dev/extensions/registry.json`. Bare filesystem paths (no `http(s)://` or `file://` scheme) are treated as local files, resolved against the working directory. |
+| `MIKE_TRUST_PROXY` | Set to `1` only when the server is deployed behind a trusted reverse proxy that strips client-supplied forwarding headers. When set, the server honors `X-Forwarded-For` (for IP-based rate limiting) and `X-Forwarded-Proto` (for the HTTPS redirect). Default (unset): these headers are **ignored** so an attacker cannot spoof them to bypass login rate limiting or the HTTPS redirect. |
 
 ### CLI Flags
 
