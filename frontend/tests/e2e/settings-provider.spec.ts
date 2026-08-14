@@ -538,3 +538,132 @@ test.describe.serial('Primary Providers', () => {
         expect(utilityProvider.url).toBe('http://localhost:9998/v1');
     });
 });
+
+// ─── Provider max requests per second Tests ──────────────────────────────────
+
+test.describe.serial('Provider max requests per second', () => {
+    // Unique per-run identifiers to avoid interference between runs
+    const ts = Date.now();
+    const seedUrl = `http://rps-seed-${ts}/v1`;
+    const seedModel = 'rps-model-a';
+
+    /**
+     * Seed the isolated server with a single LLM provider carrying the given
+     * max_requests_per_second. The server assigns a stable integer ID on the
+     * first PUT, so references are set in a second PUT keyed by that ID (the
+     * Settings modal resolves worker/utility selections by provider ID).
+     */
+    async function seedProviderConfig(page, maxRps: number) {
+        await apiPutConfig(page, {
+            providers: [
+                {
+                    url: seedUrl,
+                    models: [{ name: seedModel }],
+                    concurrency: 2,
+                    max_requests_per_second: maxRps,
+                },
+            ],
+        });
+        const config = await apiGetConfig(page);
+        const id = String(config?.providers?.find((p: any) => p.url === seedUrl)?.id ?? '');
+        expect(id).not.toBe('');
+        await apiPutConfig(page, {
+            worker_provider: id,
+            worker_model: seedModel,
+            utility_provider: id,
+            utility_model: seedModel,
+        });
+        await waitForConfig(page, c =>
+            c.providers && c.worker_provider === id &&
+            c.providers.find((p: any) => p.url === seedUrl)?.max_requests_per_second === maxRps
+        );
+    }
+
+    test.beforeEach(async ({ page }) => {
+        await page.keyboard.press('Escape').catch(() => {});
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 2000 }).catch(() => {});
+
+        await seedProviderConfig(page, 5);
+        await page.goto('/');
+        await page.waitForSelector('.card', { timeout: 10000 });
+    });
+
+    test('should round-trip max_requests_per_second through config API', async ({ page }) => {
+        // beforeEach seeded max_requests_per_second: 5; the server must persist and
+        // serialize it verbatim (plain int, no omitempty).
+        const config = await apiGetConfig(page);
+        const provider = config.providers.find((p: any) => p.url === seedUrl);
+        expect(provider).toBeDefined();
+        expect(provider.max_requests_per_second).toBe(5);
+    });
+
+    test('should show and persist Max requests/sec in the provider card UI', async ({ page }) => {
+        // Open Settings (seeded provider shows max_requests_per_second: 5)
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+
+        // Expand the (single) provider card
+        const card = page.locator('.provider-card').first();
+        if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
+            await card.locator('.provider-card-header').click();
+        }
+        await expect(card.locator('.provider-details')).toBeVisible({ timeout: 5000 });
+
+        // The LLM branch shows a Max requests/sec input seeded with 5
+        const maxRpsInput = page.getByLabel('Max requests/sec');
+        await expect(maxRpsInput).toBeVisible({ timeout: 5000 });
+        await expect(maxRpsInput).toHaveValue('5');
+
+        // Change to 3 and save
+        await maxRpsInput.fill('3');
+        await page.getByRole('button', { name: 'Save' }).click();
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
+
+        // Persisted value verified via API
+        const config = await apiGetConfig(page);
+        const provider = config.providers.find((p: any) => p.url === seedUrl);
+        expect(provider).toBeDefined();
+        expect(provider.max_requests_per_second).toBe(3);
+
+        // Re-open Settings — the card shows the saved value
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
+            await card.locator('.provider-card-header').click();
+        }
+        await expect(card.locator('.provider-details')).toBeVisible({ timeout: 5000 });
+        await expect(page.getByLabel('Max requests/sec')).toHaveValue('3');
+
+        // Close without further changes
+        await page.click('button:has-text("Cancel")');
+        const discardBtn = page.getByRole('button', { name: 'Discard' });
+        if (await discardBtn.isVisible().catch(() => false)) {
+            await discardBtn.click();
+        }
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+    });
+
+    test('should default to 0 for a newly added provider', async ({ page }) => {
+        // Open Settings
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+
+        // Add a fresh LLM provider — the new card is expanded by default
+        await page.getByRole('button', { name: '+ Add Provider' }).click();
+        const newCard = page.locator('.provider-card').last();
+        await expect(newCard.locator('.provider-details')).toBeVisible({ timeout: 5000 });
+
+        // The new card's Max requests/sec input defaults to 0
+        const inputs = newCard.getByLabel('Max requests/sec');
+        await expect(inputs).toHaveCount(1, { timeout: 5000 });
+        await expect(inputs).toHaveValue('0');
+
+        // Discard the unsaved provider
+        await page.click('button:has-text("Cancel")');
+        const discardBtn = page.getByRole('button', { name: 'Discard' });
+        if (await discardBtn.isVisible().catch(() => false)) {
+            await discardBtn.click();
+        }
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+    });
+});
