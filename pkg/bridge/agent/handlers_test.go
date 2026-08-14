@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,6 +163,85 @@ func TestEditParams_Marshal(t *testing.T) {
 	}
 }
 
+// runEditRequest drives handleEdit over a net.Pipe connection and returns the
+// response frame the agent writes back.
+func runEditRequest(t *testing.T, path string, edits []protocol.Edit) (*protocol.Frame, error) {
+	t.Helper()
+	h := newHandler()
+	h.closed.Store(false) // caller marks the connection ready (see newHandler)
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	params, err := json.Marshal(protocol.EditParams{Path: path, Edits: edits})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &protocol.Request{MsgID: 7, Method: protocol.MethodEdit, Params: params}
+
+	go h.dispatch(serverConn, req)
+
+	// Read the response frame from the client side of the pipe. dispatch writes
+	// a result frame on success and an error frame on failure.
+	frame, readErr := protocol.ReadFrame(clientConn)
+	return frame, readErr
+}
+
+func TestHandleEdit_AppliesEdits(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.txt")
+	content := "alpha\nbeta\ngamma\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	frame, err := runEditRequest(t, path, []protocol.Edit{
+		{OldText: "alpha", NewText: "ALPHA"},
+		{OldText: "gamma", NewText: "GAMMA"},
+	})
+	if err != nil {
+		t.Fatalf("handleEdit: %v", err)
+	}
+	if frame.Type == protocol.TypeError {
+		t.Fatalf("unexpected error frame: %s", frame.ErrorMsg())
+	}
+	if frame.Type != protocol.TypeResult {
+		t.Fatalf("frame type = %d, want TypeResult", frame.Type)
+	}
+	// Result payload is the number of bytes written.
+	if n, err := protocol.Uint64Result(frame.Payload); err != nil || n != uint64(len("ALPHA\nbeta\nGAMMA\n")) {
+		t.Errorf("bytes written = %d (err %v), want %d", n, err, len("ALPHA\nbeta\nGAMMA\n"))
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read edited file: %v", err)
+	}
+	if want := "ALPHA\nbeta\nGAMMA\n"; string(data) != want {
+		t.Errorf("got %q, want %q", string(data), want)
+	}
+}
+
+func TestHandleEdit_NotFoundError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(path, []byte("hello world"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	frame, err := runEditRequest(t, path, []protocol.Edit{{OldText: "nope", NewText: "x"}})
+	if err != nil {
+		t.Fatalf("handleEdit: %v", err)
+	}
+	if frame.Type != protocol.TypeError {
+		t.Fatalf("frame type = %d, want TypeError", frame.Type)
+	}
+	msg := frame.ErrorMsg()
+	if !strings.Contains(msg, "not found in file") || !strings.Contains(msg, "Got 1 lines in file") {
+		t.Errorf("unexpected error message: %q", msg)
+	}
+}
+
 // TestBashCancel kills a long-running bash process via bash_cancel.
 func TestBashCancel(t *testing.T) {
 	// Create pipes: test → agent (requests), agent → test (responses)
@@ -248,11 +328,11 @@ type testPipeConn struct {
 	writer io.WriteCloser
 }
 
-func (c *testPipeConn) Read(b []byte) (int, error)        { return c.reader.Read(b) }
-func (c *testPipeConn) Write(b []byte) (int, error)       { return c.writer.Write(b) }
-func (c *testPipeConn) Close() error                      { return c.writer.Close() }
-func (c *testPipeConn) LocalAddr() net.Addr               { return nil }
-func (c *testPipeConn) RemoteAddr() net.Addr              { return nil }
+func (c *testPipeConn) Read(b []byte) (int, error)         { return c.reader.Read(b) }
+func (c *testPipeConn) Write(b []byte) (int, error)        { return c.writer.Write(b) }
+func (c *testPipeConn) Close() error                       { return c.writer.Close() }
+func (c *testPipeConn) LocalAddr() net.Addr                { return nil }
+func (c *testPipeConn) RemoteAddr() net.Addr               { return nil }
 func (c *testPipeConn) SetDeadline(t time.Time) error      { return nil }
 func (c *testPipeConn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *testPipeConn) SetWriteDeadline(t time.Time) error { return nil }
