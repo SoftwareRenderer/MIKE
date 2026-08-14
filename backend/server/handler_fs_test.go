@@ -1,7 +1,10 @@
 package server
 
 import (
+	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -136,6 +139,26 @@ func TestGitAuthorFlagCmd_ShellSafety(t *testing.T) {
 			}
 			cleanCanary()
 		})
+	}
+}
+
+// TestFSMkdirNoProject verifies mkdir without a "project" param (project-picker
+// FileBrowser) creates the dir on the host fs instead of panicking on nil project.
+func TestFSMkdirNoProject(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+
+	parent := t.TempDir()
+	target := filepath.Join(parent, "new-folder")
+
+	req := testRequest(http.MethodPost, "/api/fs/mkdir", map[string]string{"path": target})
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := authenticatedRequest(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		t.Fatalf("expected directory %s to exist, err=%v", target, err)
 	}
 }
 
