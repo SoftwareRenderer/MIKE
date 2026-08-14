@@ -123,6 +123,7 @@ type Provider struct {
 	APIKey                *string       `json:"api_key,omitempty"` // nil=preserve, ""=clear, value=set; encrypted in DB, masked in API responses
 	Models                []ModelConfig `json:"models"`
 	Concurrency           int           `json:"concurrency"`
+	MaxRequestsPerSecond  int           `json:"max_requests_per_second"`     // 0 = unlimited; max new LLM request starts per second
 	AgentConfigDir        string        `json:"agent_config_dir,omitempty"`  // optional host path override for the agent config dir; empty means use extension default
 	AgentDescription      string        `json:"agent_description,omitempty"` // agent description text (from manifest); empty for LLM providers
 	AgentSetupInfo        string        `json:"agent_setup_info,omitempty"`  // agent setup instructions (from manifest); empty for LLM providers

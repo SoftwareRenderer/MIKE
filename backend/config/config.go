@@ -276,10 +276,13 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	// Assign stable IDs to providers that don't have one yet (new providers).
 	assignProviderIDs(c.Providers)
-	// Enforce minimum concurrency of 1 and encrypt API keys for all providers
+	// Enforce minimum concurrency of 1, non-negative rate limit, and encrypt API keys
 	for i := range c.Providers {
 		if c.Providers[i].Concurrency < 1 {
 			c.Providers[i].Concurrency = 1
+		}
+		if c.Providers[i].MaxRequestsPerSecond < 0 {
+			c.Providers[i].MaxRequestsPerSecond = 0
 		}
 		if c.Providers[i].APIKey != nil && *c.Providers[i].APIKey != "" {
 			encrypted, err := crypto.Encrypt(*c.Providers[i].APIKey)

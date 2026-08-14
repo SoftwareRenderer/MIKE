@@ -1,8 +1,12 @@
 package config
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"kanban/backend/store"
@@ -364,6 +368,120 @@ func TestBuildConfigResponseMasksAPIKeys(t *testing.T) {
 	}
 	if got := *resp.Providers[0].APIKey; got == "super-secret-key" {
 		t.Fatal("plaintext API key leaked in config response")
+	}
+}
+
+func TestUpdateConfig_MaxRequestsPerSecond(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			{ID: 1, URL: "http://neptune:8010/v1", Concurrency: 1, MaxRequestsPerSecond: 4},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if len(read.Providers) != 1 || read.Providers[0].MaxRequestsPerSecond != 4 {
+		t.Fatalf("expected MaxRequestsPerSecond=4 persisted, got %+v", read.Providers)
+	}
+}
+
+func TestHandleConfig_MaxRequestsPerSecondRoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cs.HandleConfig(w, r)
+	}))
+	defer srv.Close()
+
+	// PUT: send providers with max_requests_per_second
+	putBody := `{"providers":[{"id":1,"url":"http://neptune:8010/v1","concurrency":2,"max_requests_per_second":4,"models":[]}]}`
+	req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/config", strings.NewReader(putBody))
+	if err != nil {
+		t.Fatalf("build PUT request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("put config: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT /api/config status = %d, want 200", resp.StatusCode)
+	}
+
+	// GET: the value must round-trip via the JSON field
+	getResp, err := http.Get(srv.URL + "/api/config")
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	defer getResp.Body.Close()
+	var got struct {
+		Providers []struct {
+			URL                  string `json:"url"`
+			MaxRequestsPerSecond int    `json:"max_requests_per_second"`
+		} `json:"providers"`
+	}
+	if err := json.NewDecoder(getResp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode get config: %v", err)
+	}
+	if len(got.Providers) != 1 || got.Providers[0].MaxRequestsPerSecond != 4 {
+		t.Fatalf("expected max_requests_per_second=4 in GET response, got %+v", got.Providers)
+	}
+}
+
+func TestUpdateConfig_ClampsNegativeMaxRequestsPerSecond(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			{ID: 1, URL: "http://neptune:8010/v1", Concurrency: 1, MaxRequestsPerSecond: -5},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if len(read.Providers) != 1 || read.Providers[0].MaxRequestsPerSecond != 0 {
+		t.Fatalf("expected negative MaxRequestsPerSecond clamped to 0, got %+v", read.Providers)
+	}
+}
+
+func TestGetProviderMaxRequestsPerSecond(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			{ID: 1, URL: "http://neptune:8010/v1", Concurrency: 1, MaxRequestsPerSecond: 4},
+			{ID: 2, URL: "http://other:9000/v1", Concurrency: 1}, // unset → 0
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	// Exact URL
+	if got := cs.GetProviderMaxRequestsPerSecond("http://neptune:8010/v1"); got != 4 {
+		t.Fatalf("expected 4 for matching URL, got %d", got)
+	}
+	// Trailing-slash tolerant (like GetProviderConcurrency)
+	if got := cs.GetProviderMaxRequestsPerSecond("http://neptune:8010/v1/"); got != 4 {
+		t.Fatalf("expected 4 for trailing-slash URL, got %d", got)
+	}
+	// Unset on a known provider → 0
+	if got := cs.GetProviderMaxRequestsPerSecond("http://other:9000/v1"); got != 0 {
+		t.Fatalf("expected 0 for provider without the value set, got %d", got)
+	}
+	// Unknown URL → 0
+	if got := cs.GetProviderMaxRequestsPerSecond("http://unknown/v1"); got != 0 {
+		t.Fatalf("expected 0 for unknown URL, got %d", got)
 	}
 }
 

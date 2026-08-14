@@ -461,6 +461,26 @@ func (cs *ConfigStore) GetProviderConcurrency(serverURL string) int {
 	return 1
 }
 
+// GetProviderMaxRequestsPerSecond returns the max new-request-start rate (requests/second)
+// for the provider matching the given server URL. Returns 0 (unlimited) if the provider
+// is not found or the value is unset/invalid.
+func (cs *ConfigStore) GetProviderMaxRequestsPerSecond(serverURL string) int {
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return 0
+	}
+	serverURL = strings.TrimRight(serverURL, "/")
+	for _, provider := range cfg.Providers {
+		if strings.TrimRight(provider.URL, "/") == serverURL {
+			if provider.MaxRequestsPerSecond < 1 {
+				return 0
+			}
+			return provider.MaxRequestsPerSecond
+		}
+	}
+	return 0
+}
+
 // IsAgentProvider returns true if the provider matching the given server URL is an agent (non-LLM kind).
 // Also returns true for agent:// URLs (agent extensions).
 // Returns false if no matching provider is found.
