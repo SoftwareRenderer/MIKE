@@ -7,6 +7,56 @@ import {
 } from '@codemirror/view';
 import { mergeMarkers } from './diff-gutter';
 
+/** Layout info for a document line, in content coordinates
+ * (`block.top` is relative to the top of the document). */
+export interface ScrollbarLineLayout {
+    top: number;
+    height: number;
+    contentHeight: number;
+}
+
+/** Compute the (y, h) rect of a marker band on the scrollbar annotation canvas.
+ *
+ * Positions derive from `layout` (the line's measured block + the document
+ * content height) so wrapped lines and folded regions map to their real
+ * scrollbar position. Falls back to a plain line-count fraction when no layout
+ * is available (1 doc line = 1 visual row).
+ *
+ * @param ln - 1-based document line number
+ * @param totalLines - total document line count
+ * @param canvasHeight - annotation canvas height (px)
+ * @param layout - measured line block + content height (optional)
+ * @param boundary - place the band at the line's bottom edge instead of its
+ *   center. Used for 'removed' marks: the deleted content sits in the gap
+ *   below the anchor line.
+ */
+export function scrollbarMarkerRect(
+    ln: number,
+    totalLines: number,
+    canvasHeight: number,
+    layout?: ScrollbarLineLayout,
+    boundary = false,
+): { y: number; h: number } {
+    const lineHeight = layout
+        ? (layout.height / layout.contentHeight) * canvasHeight
+        : (1 / totalLines) * canvasHeight;
+    const frac = layout
+        ? boundary
+            ? (layout.top + layout.height) / layout.contentHeight
+            : (layout.top + layout.height / 2) / layout.contentHeight
+        : boundary
+          ? ln / totalLines
+          : (ln - 0.5) / totalLines;
+    // Clamp into the canvas so a boundary mark on the last line stays visible.
+    const y = Math.min(Math.max(0, frac * canvasHeight), Math.max(0, canvasHeight - 1));
+    return { y, h: Math.max(1, lineHeight - 0.5) };
+}
+
+/** Whether a vertical scrollbar is present (content overflows the viewport). */
+export function hasVerticalScrollbar(scrollHeight: number, clientHeight: number): boolean {
+    return scrollHeight > clientHeight;
+}
+
 interface IndicatorDef {
     color: string;
     shape: 'stripe' | 'triangle';
@@ -225,21 +275,57 @@ export function gitGutter() {
             redraw(view: EditorView) {
                 const ctx = this.canvas.getContext('2d');
                 if (!ctx) return;
+                const scroller = view.scrollDOM;
+                // No vertical scrollbar — nothing to annotate. Hide the overlay so
+                // the colored bands never paint over the code area.
+                if (!hasVerticalScrollbar(scroller.scrollHeight, scroller.clientHeight)) {
+                    this.container.style.display = 'none';
+                    this.canvas.width = 12;
+                    this.canvas.height = 1; // resetting height clears the canvas
+                    return;
+                }
+                this.container.style.display = '';
+
                 const totalLines = view.state.doc.lines;
                 if (totalLines === 0) return;
                 ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // When a horizontal scrollbar is present it occupies the bottom
+                // strip of the scroller — keep marks out of that region.
+                const usableHeight =
+                    scroller.scrollWidth > scroller.clientWidth
+                        ? Math.max(0, Math.min(this.canvas.height, scroller.clientHeight))
+                        : this.canvas.height;
+                if (usableHeight <= 0) return;
+
+                const contentHeight = view.contentHeight || totalLines * view.defaultLineHeight;
                 const colorMap: Record<string, string> = {
                     added: 'rgba(63,185,80,0.6)',
                     modified: 'rgba(88,166,255,0.6)',
                     removed: 'rgba(248,81,73,0.6)',
                 };
                 for (const [ln, types] of state.map) {
+                    if (ln < 1 || ln > totalLines) continue;
+                    let layout: ScrollbarLineLayout | null = null;
+                    try {
+                        const line = view.state.doc.line(ln);
+                        const block = view.lineBlockAt(line.from);
+                        if (block && contentHeight > 0) {
+                            layout = { top: block.top, height: block.height, contentHeight };
+                        }
+                    } catch {
+                        layout = null;
+                    }
                     for (const t of types) {
-                        const fraction = (ln - 0.5) / totalLines;
-                        const y = fraction * this.canvas.height;
-                        const lineHeight = (1 / totalLines) * this.canvas.height;
+                        const { y, h } = scrollbarMarkerRect(
+                            ln,
+                            totalLines,
+                            usableHeight,
+                            layout ?? undefined,
+                            t === 'removed',
+                        );
                         ctx.fillStyle = colorMap[t] || colorMap.added;
-                        ctx.fillRect(0, Math.max(0, y), 10, Math.max(1, lineHeight - 0.5));
+                        ctx.fillRect(0, y, 10, h);
                     }
                 }
             }
