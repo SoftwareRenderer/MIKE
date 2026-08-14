@@ -27,6 +27,7 @@
     import { darkTheme, darkSyntax, lightTheme, lightSyntax, isLightTheme } from '$lib/utils/codemirror-theme';
     import { stickyScroll, updateHeadersEffect, sectionHeadersField, type SectionHeader } from '$lib/utils/sticky-scroll';
     import { keepViewportParsed } from '$lib/utils/keep-viewport-parsed';
+    import { closeHoverOnScroll } from '$lib/utils/close-hover-on-scroll';
     import { requestLSPSymbols, flattenSymbols, type LSPSymbol } from '$lib/utils/lsp-symbols';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
@@ -345,6 +346,7 @@
             // Explicit setup (replaces basicSetup, excludes searchKeymap)
             stickyScroll(),
             keepViewportParsed(),
+            closeHoverOnScroll(),
             sectionHeadersField,
             gitGutterExt.extension,
             highlightActiveLineGutter(),

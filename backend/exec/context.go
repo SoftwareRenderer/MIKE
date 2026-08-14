@@ -787,12 +787,12 @@ func collectToolIDs(msgs []*types.ChatMessage) map[string]bool {
 	return ids
 }
 
-// ExtractCommitContext extracts the first user message and the last relevant assistant
-// message from a conversation.
+// ExtractCommitContext extracts the first user message, ALL assistant messages that
+// contain a request_review tool call, and the last relevant assistant message from a
+// conversation, along with their tool results.
 func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
 	var firstUser *types.ChatMessage
-	var lastAssistant *types.ChatMessage
-	var lastRequestReview *types.ChatMessage
+	var requestReviews []*types.ChatMessage // all request_review assistant messages, chronological
 
 	for i := range messages {
 		m := &messages[i]
@@ -803,26 +803,22 @@ func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
 			firstUser = m
 		}
 		if m.Role == "assistant" {
-			lastAssistant = m
 			if hasRequestReview(m) {
-				lastRequestReview = m
+				requestReviews = append(requestReviews, m)
 			}
 		}
 	}
 
-	// Decide which assistant messages to include.
-	// Always include if it's the request_review message, or if there is no request_review.
-	// Otherwise only include if it has state-changing tool calls (edits are relevant).
-	includeLastAssistant := lastAssistant != nil &&
-		(lastAssistant == lastRequestReview || lastRequestReview == nil || hasStateChangingTool(lastAssistant))
-
-	// Collect assistant messages to include.
+	// Collect assistant messages to include (deduped, chronological).
+	// requestReviews is already chronological and every entry precedes lastAssistant,
+	// so appending lastAssistant last preserves order.
 	var assistants []*types.ChatMessage
-	if includeLastAssistant {
-		assistants = append(assistants, lastAssistant)
-	}
-	if lastRequestReview != nil && lastRequestReview != lastAssistant {
-		assistants = append(assistants, lastRequestReview)
+	seen := make(map[*types.ChatMessage]bool)
+	for _, m := range requestReviews {
+		if !seen[m] {
+			seen[m] = true
+			assistants = append(assistants, m)
+		}
 	}
 
 	toolIDSet := collectToolIDs(assistants)
@@ -831,12 +827,8 @@ func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
 	if firstUser != nil {
 		result = append(result, *firstUser)
 	}
-	// Add assistant messages: request_review first (chronological), then last.
-	if lastRequestReview != nil && lastRequestReview != lastAssistant {
-		result = append(result, *lastRequestReview)
-	}
-	if includeLastAssistant {
-		result = append(result, *lastAssistant)
+	for _, m := range assistants {
+		result = append(result, *m)
 	}
 	// Include tool result messages for the included assistants' tool calls.
 	for i := range messages {
@@ -910,8 +902,13 @@ func FormatConversationTurns(messages []types.ChatMessage) string {
 					action := formatToolAction(tc.Function.Name, tc.Function.Arguments)
 					status := formatToolStatus(tc.ID, toolResults)
 					result := formatToolResult(tc.Function.Name, tc.ID, status, toolResults)
-					sb.WriteString(fmt.Sprintf("\nAssistant: (I used the %s tool to %s %s)",
-						tc.Function.Name, action, result))
+					if tc.Function.Name == "request_review" {
+						sb.WriteString(fmt.Sprintf("\nAssistant: %s", action))
+					} else {
+						sb.WriteString(fmt.Sprintf("\nAssistant: (I used the %s tool to %s %s)",
+							tc.Function.Name, action, result))
+					}
+
 				}
 			}
 			sb.WriteString("\n\n")
