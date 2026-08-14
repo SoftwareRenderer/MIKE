@@ -14,8 +14,6 @@ let csrfToken: string = '';
 /** Set the CSRF token (called after login or session check). */
 export function setCsrfToken(token: string): void {
     csrfToken = token;
-    // Expose on window for UI extensions that can't import $lib/api
-    if (typeof window !== 'undefined') (window as any).__csrfToken = token;
 }
 
 /** Clear the CSRF token (called on logout). */
@@ -25,9 +23,8 @@ export function clearCsrfToken(): void {
 
 /** Lazily fetch CSRF token from session endpoint (for E2E test auth). */
 export async function ensureCsrfToken(): Promise<string> {
-    // Check module-level token first, then window.__csrfToken (set by E2E tests)
+    // Use the in-memory token if set, else fetch from the session endpoint
     if (csrfToken) return csrfToken;
-    if (typeof window !== 'undefined' && (window as any).__csrfToken) return (window as any).__csrfToken;
     // Auto-fetch from session endpoint (public, no CSRF needed)
     try {
         const controller = new AbortController();
