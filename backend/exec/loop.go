@@ -602,6 +602,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		// Acquire concurrency gate slot before LLM call.
 		_, activeModel := lc.mc.get()
 		concurrency := te.configStore.GetProviderConcurrency(setup.serverURL)
+		maxRPS := te.configStore.GetProviderMaxRequestsPerSecond(setup.serverURL)
 
 		// Queue status polling — runs while waiting for a gate slot.
 		queueDone := make(chan struct{})
@@ -626,7 +627,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			}
 		}()
 
-		_, entry, err := te.gate.Acquire(setup.ctx, setup.serverURL, concurrency)
+		_, entry, err := te.gate.Acquire(setup.ctx, setup.serverURL, concurrency, maxRPS)
 		if err != nil {
 			close(queueDone) // cleanup polling goroutine
 			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
