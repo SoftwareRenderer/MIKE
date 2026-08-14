@@ -234,6 +234,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	defaultSubtasksAutoMergeRaw, _ := cs.store.GetConfigValue("default_subtasks_auto_merge")
 	defaultOperatingModeRaw, _ := cs.store.GetConfigValue("default_operating_mode")
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
+	defaultAutoSummarizeThresholdRaw, _ := cs.store.GetConfigValue("default_auto_summarize_threshold")
 
 	cfg := &types.Config{
 		WorkspaceDir:    workspaceDir,
@@ -263,6 +264,9 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseIntPtr(defaultMaxFailedTurnsRaw); err == nil && v != nil {
 		cfg.DefaultMaxFailedTurns = v
+	}
+	if v, err := parseIntPtr(defaultAutoSummarizeThresholdRaw); err == nil && v != nil {
+		cfg.DefaultAutoSummarizeThreshold = v
 	}
 	return cfg, nil
 }
@@ -333,26 +337,32 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
+	if c.DefaultAutoSummarizeThreshold != nil {
+		if err := cs.store.SetConfigValue("default_auto_summarize_threshold", fmt.Sprintf("%d", *c.DefaultAutoSummarizeThreshold)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 // configResponse wraps Config with additional metadata for API responses.
 type configResponse struct {
-	WorkspaceDir             string           `json:"workspace_dir"`
-	DatabasePath             string           `json:"database_path"`
-	RegistryURL              string           `json:"registry_url"`
-	Version                  string           `json:"version"`
-	Providers                []types.Provider `json:"providers"`
-	WorkerProvider           string           `json:"worker_provider"`
-	WorkerModel              string           `json:"worker_model"`
-	UtilityProvider          string           `json:"utility_provider"`
-	UtilityModel             string           `json:"utility_model"`
-	DefaultAutoCommit        *bool            `json:"default_auto_commit"`
-	DefaultAutoMerge         *bool            `json:"default_auto_merge"`
-	DefaultSubtasksAutoMerge *bool            `json:"default_subtasks_auto_merge"`
-	DefaultOperatingMode     *string          `json:"default_operating_mode"`
-	DefaultMaxFailedTurns    *int             `json:"default_max_failed_turns,omitempty"`
-	EncryptionEnabled        bool             `json:"encryption_enabled"`
+	WorkspaceDir                  string           `json:"workspace_dir"`
+	DatabasePath                  string           `json:"database_path"`
+	RegistryURL                   string           `json:"registry_url"`
+	Version                       string           `json:"version"`
+	Providers                     []types.Provider `json:"providers"`
+	WorkerProvider                string           `json:"worker_provider"`
+	WorkerModel                   string           `json:"worker_model"`
+	UtilityProvider               string           `json:"utility_provider"`
+	UtilityModel                  string           `json:"utility_model"`
+	DefaultAutoCommit             *bool            `json:"default_auto_commit"`
+	DefaultAutoMerge              *bool            `json:"default_auto_merge"`
+	DefaultSubtasksAutoMerge      *bool            `json:"default_subtasks_auto_merge"`
+	DefaultOperatingMode          *string          `json:"default_operating_mode"`
+	DefaultMaxFailedTurns         *int             `json:"default_max_failed_turns,omitempty"`
+	DefaultAutoSummarizeThreshold *int             `json:"default_auto_summarize_threshold,omitempty"`
+	EncryptionEnabled             bool             `json:"encryption_enabled"`
 }
 
 // maskAPIKeys replaces non-empty API keys with a masked placeholder.
@@ -387,21 +397,22 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 	}
 	maskAPIKeys(providers)
 	return configResponse{
-		WorkspaceDir:             cfg.WorkspaceDir,
-		DatabasePath:             cfg.DatabasePath,
-		RegistryURL:              cfg.RegistryURL,
-		Version:                  cs.version,
-		Providers:                providers,
-		WorkerProvider:           cfg.WorkerProvider,
-		WorkerModel:              cfg.WorkerModel,
-		UtilityProvider:          cfg.UtilityProvider,
-		UtilityModel:             cfg.UtilityModel,
-		DefaultAutoCommit:        cfg.DefaultAutoCommit,
-		DefaultAutoMerge:         cfg.DefaultAutoMerge,
-		DefaultSubtasksAutoMerge: cfg.DefaultSubtasksAutoMerge,
-		DefaultOperatingMode:     cfg.DefaultOperatingMode,
-		DefaultMaxFailedTurns:    cfg.DefaultMaxFailedTurns,
-		EncryptionEnabled:        crypto.IsEnabled(),
+		WorkspaceDir:                  cfg.WorkspaceDir,
+		DatabasePath:                  cfg.DatabasePath,
+		RegistryURL:                   cfg.RegistryURL,
+		Version:                       cs.version,
+		Providers:                     providers,
+		WorkerProvider:                cfg.WorkerProvider,
+		WorkerModel:                   cfg.WorkerModel,
+		UtilityProvider:               cfg.UtilityProvider,
+		UtilityModel:                  cfg.UtilityModel,
+		DefaultAutoCommit:             cfg.DefaultAutoCommit,
+		DefaultAutoMerge:              cfg.DefaultAutoMerge,
+		DefaultSubtasksAutoMerge:      cfg.DefaultSubtasksAutoMerge,
+		DefaultOperatingMode:          cfg.DefaultOperatingMode,
+		DefaultMaxFailedTurns:         cfg.DefaultMaxFailedTurns,
+		DefaultAutoSummarizeThreshold: cfg.DefaultAutoSummarizeThreshold,
+		EncryptionEnabled:             crypto.IsEnabled(),
 	}
 }
 
@@ -489,6 +500,18 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 				current.DefaultMaxFailedTurns = &v
 			}
 		}
+		if dast, ok := updates["default_auto_summarize_threshold"]; ok {
+			if f, ok := dast.(float64); ok {
+				v := int(f)
+				if v < 1 {
+					v = 1
+				}
+				if v > 100 {
+					v = 100
+				}
+				current.DefaultAutoSummarizeThreshold = &v
+			}
+		}
 		if err := cs.UpdateConfig(current); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to update config")
 			return
@@ -522,6 +545,21 @@ func parseIntPtr(s string) (*int, error) {
 		return nil, err
 	}
 	return &v, nil
+}
+
+// AutoSummarizeThreshold returns the configured auto-summarization threshold as a
+// percent of the context window (1-100). Falls back to the default of 90 when unset
+// or invalid.
+func (cs *ConfigStore) AutoSummarizeThreshold() int {
+	raw, err := cs.store.GetConfigValue("default_auto_summarize_threshold")
+	if err != nil {
+		return 90
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 1 || v > 100 {
+		return 90
+	}
+	return v
 }
 
 // GetProviderAPIKey looks up and returns the decrypted API key for a provider by URL.
