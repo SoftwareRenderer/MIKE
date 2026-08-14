@@ -94,6 +94,15 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 		branch = "HEAD"
 	}
 
+	path := r.URL.Query().Get("path")
+	if path != "" {
+		// Basic sanitization: must be relative, no parent traversal
+		if filepath.IsAbs(path) || strings.Contains(path, "..") || strings.HasPrefix(path, "~") {
+			httputil.JSONError(w, http.StatusBadRequest, "invalid path")
+			return
+		}
+	}
+
 	full := r.URL.Query().Get("full") == "1"
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
@@ -108,6 +117,9 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 			args = append(args, "-n", strconv.Itoa(limit+1))
 		}
 		args = append(args, "--format=%H|%h|%s|%aN|%aI|%P%n---BODY---%n%b%n---END---", branch)
+		if path != "" {
+			args = append(args, "--", path)
+		}
 		c := exec.Command("git", args...)
 		out, err := c.CombinedOutput()
 		if err != nil {
@@ -195,6 +207,9 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "-n", strconv.Itoa(limit))
 	}
 	args = append(args, branch)
+	if path != "" {
+		args = append(args, "--", path)
+	}
 	c := exec.Command("git", args...)
 	out, err := c.CombinedOutput()
 	if err != nil {
