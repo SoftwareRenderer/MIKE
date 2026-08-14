@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,32 +50,23 @@ func unstageNewBinaryFiles(wm *git.WorktreeManager, taskID string) {
 	unstagePaths(wm, taskID, paths)
 }
 
-// Rate-limit backoff bounds for LLM streaming retries.
+// Retry bounds for LLM streaming.
 const (
 	rateLimitRetryAttempts = 3
-	rateLimitMaxBackoff    = 60 * time.Second
 )
 
-// backoffFor returns the duration to wait before the next LLM retry attempt.
-// For a 429 rate-limit error it honors the upstream Retry-After header (capped
-// at rateLimitMaxBackoff) when present; otherwise it backs off exponentially.
-// All other transient errors use a fixed linear schedule (2s, 4s, 6s).
+// backoffFor returns the duration to wait before the next LLM retry attempt
 func backoffFor(attempt int, err error) time.Duration {
 	var le *llama.LlamaError
-	if errors.As(err, &le) && le.IsRateLimit() {
-		if le.RetryAfter > 0 {
-			if le.RetryAfter > rateLimitMaxBackoff {
-				return rateLimitMaxBackoff
-			}
-			return le.RetryAfter
-		}
-		d := time.Duration(1<<attempt) * 2 * time.Second // 2s, 4s, 8s
-		if d > rateLimitMaxBackoff {
-			return rateLimitMaxBackoff
-		}
-		return d
+	if errors.As(err, &le) && le.IsRateLimit() && le.RetryAfter > 0 {
+		return le.RetryAfter + time.Second + jitter()
 	}
-	return time.Duration(attempt+1) * 2 * time.Second
+	return time.Duration(1<<attempt) * 2 * time.Second // 2s, 4s, 8s, ...
+}
+
+// jitter returns a random duration between 250ms and 500ms (inclusive)
+func jitter() time.Duration {
+	return 250*time.Millisecond + time.Duration(rand.Int64N(251))*time.Millisecond
 }
 
 // streamFlusher batches streaming events to reduce WebSocket write overhead.
@@ -762,9 +754,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		go func() {
 			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb)
 
-			// Retry on transient errors (skip if cancelled by user message).
-			// Rate-limit errors (429) wait for the upstream Retry-After or back off
-			// exponentially; other transient errors use a fixed linear schedule.
+			// Retry on transient errors (skip if cancelled by user message)
 			if streamErr != nil && callCtx.Err() == nil {
 				for i := range rateLimitRetryAttempts {
 					select {
