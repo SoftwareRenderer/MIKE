@@ -12,11 +12,12 @@ import { markCached } from './cache';
 
 /** Fetch git log with full commit details (hash, parents, date, branches). Optional branch filter.
  * Returns commits array plus current_branch, origin_tip, and has_more metadata. */
-export async function getGitLogFull(projectId: string, options?: { branch?: string; limit?: number; offset?: number }): Promise<GitLogResponse> {
+export async function getGitLogFull(projectId: string, options?: { branch?: string; limit?: number; offset?: number; path?: string }): Promise<GitLogResponse> {
     const params = new URLSearchParams({ full: '1' });
     if (options?.branch) params.set('branch', options.branch);
     if (options?.limit != null) params.set('limit', String(options.limit));
     if (options?.offset != null) params.set('offset', String(options.offset));
+    if (options?.path) params.set('path', options.path);
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/log?${params}`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch git log');
     return res.json();

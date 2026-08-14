@@ -236,11 +236,11 @@
     let hasMoreCommits = $state(false);
     let loadingMoreCommits = $state(false);
 
-    async function loadCommits(branch?: string) {
+    async function loadCommits(branch?: string, path?: string) {
         loadingCommits = true;
         commitOffset = 0;
         try {
-            const resp: GitLogResponse = await getGitLogFull(projectId, { branch, limit: COMMIT_BATCH_SIZE, offset: 0 });
+            const resp: GitLogResponse = await getGitLogFull(projectId, { branch, path, limit: COMMIT_BATCH_SIZE, offset: 0 });
             commits = resp.commits;
             commitOffset = resp.commits.length;
             originTip = resp.origin_tip || '';
@@ -255,11 +255,38 @@
         }
     }
 
+    // Reload history when focused file or branch changes
+    $effect(() => {
+        const branch = selectedBranch;
+        let relPath: string | undefined;
+        if (activeFilePath) {
+            if (activeFilePath.startsWith(projectPath)) {
+                relPath = activeFilePath.slice(projectPath.length);
+            } else if (sandboxEnabled && mountPath && activeFilePath.startsWith(mountPath)) {
+                relPath = activeFilePath.slice(mountPath.length);
+            }
+            // Strip leading slash
+            if (relPath && relPath.startsWith('/')) relPath = relPath.slice(1);
+        }
+        if (branch) {
+            loadCommits(branch, relPath);
+        }
+    });
+
     async function loadMoreCommits() {
         if (loadingMoreCommits || !hasMoreCommits) return;
         loadingMoreCommits = true;
         try {
-            const resp: GitLogResponse = await getGitLogFull(projectId, { limit: COMMIT_BATCH_SIZE, offset: commitOffset });
+            let relPath: string | undefined;
+            if (activeFilePath) {
+                if (activeFilePath.startsWith(projectPath)) {
+                    relPath = activeFilePath.slice(projectPath.length);
+                } else if (sandboxEnabled && mountPath && activeFilePath.startsWith(mountPath)) {
+                    relPath = activeFilePath.slice(mountPath.length);
+                }
+                if (relPath && relPath.startsWith('/')) relPath = relPath.slice(1);
+            }
+            const resp: GitLogResponse = await getGitLogFull(projectId, { branch: selectedBranch, path: relPath, limit: COMMIT_BATCH_SIZE, offset: commitOffset });
             commits = [...commits, ...resp.commits];
             commitOffset += resp.commits.length;
             hasMoreCommits = resp.has_more || false;
@@ -289,7 +316,7 @@
         try {
             await checkoutBranch(projectId, branch);
             selectedBranch = branch;
-            await loadCommits(branch);
+            // Commits will reload via $effect watching selectedBranch
         } catch (e) {
             console.error('Failed to checkout branch:', e);
         } finally {
