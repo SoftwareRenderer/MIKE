@@ -33,6 +33,29 @@ func TestGetConfigDefaultWorkspaceDir(t *testing.T) {
 	}
 }
 
+func TestAutoSummarizeThreshold_Default(t *testing.T) {
+	cs := testConfigStore(t)
+	if got := cs.AutoSummarizeThreshold(); got != 90 {
+		t.Fatalf("expected default threshold 90, got %d", got)
+	}
+}
+
+func TestAutoSummarizeThreshold_Roundtrip(t *testing.T) {
+	cs := testConfigStore(t)
+	v := 60
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.DefaultAutoSummarizeThreshold = &v
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	if got := cs.AutoSummarizeThreshold(); got != 60 {
+		t.Fatalf("expected threshold 60 after update, got %d", got)
+	}
+}
+
 func TestGetConfigRespectsWorkspaceDirOverride(t *testing.T) {
 	cs := testConfigStore(t)
 	overrideDir := t.TempDir()
