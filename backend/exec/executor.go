@@ -196,7 +196,8 @@ func (te *TaskExecutor) WorktreeMgr() *git.WorktreeManager {
 // the function is not run and the gate error is returned.
 func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn func() error) error {
 	concurrency := te.configStore.GetProviderConcurrency(serverURL)
-	if _, _, err := te.gate.Acquire(ctx, serverURL, concurrency); err != nil {
+	maxRPS := te.configStore.GetProviderMaxRequestsPerSecond(serverURL)
+	if _, _, err := te.gate.Acquire(ctx, serverURL, concurrency, maxRPS); err != nil {
 		return err
 	}
 	defer te.gate.Release(serverURL)
