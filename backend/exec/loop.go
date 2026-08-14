@@ -299,7 +299,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			te.failTask(setup.task, setup.projectID, err.Error(), "sandbox_setup_failed")
 			return
 		}
-		state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(agentClient)
+		state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(agentClient)
 		state.sandboxOperatingMode = setup.task.OperatingMode
 		state.agentSandboxHash = agentSandboxHash(te.agentRegistry.GetAnyAgentSandbox())
 
@@ -482,7 +482,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						return
 					}
 					te.taskMu.Lock()
-					state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(newAgentClient)
+					state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(newAgentClient)
 					state.sandboxOperatingMode = newOperatingMode
 					te.taskMu.Unlock()
 					// Update setup.task reference with latest mode
@@ -558,7 +558,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					return
 				}
 				te.taskMu.Lock()
-				state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite = makeSandboxCallbacks(newAgentClient)
+				state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(newAgentClient)
 				state.agentSandboxHash = newHash
 				te.taskMu.Unlock()
 				if len(assignedPorts) > 0 {

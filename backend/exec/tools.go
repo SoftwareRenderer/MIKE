@@ -20,6 +20,7 @@ import (
 	"kanban/backend/git"
 	"kanban/backend/types"
 	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge/protocol"
 
 	"github.com/google/uuid"
 )
@@ -37,9 +38,13 @@ type readFunc func(ctx context.Context, path string) ([]byte, error)
 // writeFunc writes a file. Provided by the sandbox in container mode.
 type writeFunc func(ctx context.Context, path, content string) error
 
-// makeSandboxCallbacks creates exec/read/write callbacks that route through
+// editFunc applies text replacements to a file atomically in the sandbox.
+// Provided by the sandbox in container mode; nil means fall back to read+edit+write.
+type editFunc func(ctx context.Context, path string, edits []protocol.Edit) error
+
+// makeSandboxCallbacks creates exec/read/write/edit callbacks that route through
 // the sandbox agent client inside a container.
-func makeSandboxCallbacks(client *sandbox.Client) (execFunc, execStreamFunc, readFunc, writeFunc) {
+func makeSandboxCallbacks(client *sandbox.Client) (execFunc, execStreamFunc, readFunc, writeFunc, editFunc) {
 	execCb := func(ctx context.Context, command string, timeout int64) (string, error) {
 		holder, err := client.Bash(ctx, command, timeout)
 		if err != nil {
@@ -88,7 +93,14 @@ func makeSandboxCallbacks(client *sandbox.Client) (execFunc, execStreamFunc, rea
 		}
 		return nil
 	}
-	return execCb, execStreamCb, readCb, writeCb
+	editCb := func(ctx context.Context, path string, edits []protocol.Edit) error {
+		_, err := client.EditFile(ctx, path, edits)
+		if err != nil {
+			return fmt.Errorf("edit: %w", err)
+		}
+		return nil
+	}
+	return execCb, execStreamCb, readCb, writeCb, editCb
 }
 
 // makeRootCallbacks creates read/write callbacks that use os.Root for folder isolation.
@@ -147,6 +159,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 	sandboxExecStream := state.sandboxExecStream
 	sandboxRead := state.sandboxRead
 	sandboxWrite := state.sandboxWrite
+	sandboxEdit := state.sandboxEdit
 
 	// recoverBridge detects bridge errors and attempts automatic recovery.
 	// Returns true if recovery succeeded and callbacks were refreshed.
@@ -318,6 +331,33 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			return "Error: no edits provided", false
 		}
 
+		// In sandbox mode, delegate the read-modify-write to the sandbox agent via
+		// MethodEdit. This keeps the file content inside the container and applies the
+		// replacements atomically under a per-file lock. sandboxEdit is nil in
+		// non-sandbox mode, falling back to read+edit+write below.
+		if sandboxEdit != nil {
+			editsProto := make([]protocol.Edit, len(edits))
+			for i, e := range edits {
+				editsProto[i] = protocol.Edit{OldText: e.OldText, NewText: e.NewText}
+			}
+			apply := func() error {
+				if state.sandboxEdit == nil {
+					return errors.New("sandbox edit callback unavailable")
+				}
+				return state.sandboxEdit(ctx, path, editsProto)
+			}
+			if err := apply(); err != nil {
+				if recoverBridge(err.Error()) {
+					if err := apply(); err != nil {
+						return fmt.Sprintf("Error: %v", err), false
+					}
+				} else {
+					return fmt.Sprintf("Error: %v", err), false
+				}
+			}
+			return fmt.Sprintf("Edited %s (%d edit(s) applied)", path, len(edits)), true
+		}
+
 		// Read current file content
 		data, err := read(ctx, path)
 		if err != nil {
@@ -373,12 +413,19 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			}
 		}
 
-		// Apply edits in reverse order to preserve positions
-		result := fileContent
-		for i := len(positions) - 1; i >= 0; i-- {
-			p := positions[i]
-			result = result[:p.start] + p.newText + result[p.end:]
+		// Apply edits in a single forward pass (positions are sorted by start and
+		// overlap-free). Building once with a strings.Builder is O(file size), whereas
+		// rebuilding a full string per edit would be O(edits × file size).
+		var b strings.Builder
+		b.Grow(len(fileContent) + 64)
+		prev := 0
+		for _, p := range positions {
+			b.WriteString(fileContent[prev:p.start])
+			b.WriteString(p.newText)
+			prev = p.end
 		}
+		b.WriteString(fileContent[prev:])
+		result := b.String()
 
 		// Write the result
 		if err := write(ctx, path, result); err != nil {
