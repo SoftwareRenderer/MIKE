@@ -76,6 +76,10 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	// If git_url is provided, clone the repo into <path>/<repo-name> first,
 	// then proceed with normal project creation from the cloned directory.
 	if req.GitUrl != "" {
+		if err := validateGitCloneURL(req.GitUrl); err != nil {
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		repoName, err := repoNameFromGitURL(req.GitUrl)
 		if err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, err.Error())
@@ -539,6 +543,25 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// validateGitCloneURL validates a git clone source URL before it is passed to
+// `git clone`. It rejects empty values and values starting with '-', which
+// would otherwise be parsed by git as flags (argument injection, e.g.
+// "--config", "--reference") instead of a repository.
+//
+// Local-repo cloning (a bare filesystem path or file:// URL) is intentionally
+// allowed: it is a supported workflow for creating a project from an existing
+// local repository.
+func validateGitCloneURL(gitURL string) error {
+	s := strings.TrimSpace(gitURL)
+	if s == "" {
+		return fmt.Errorf("git_url is required")
+	}
+	if strings.HasPrefix(s, "-") {
+		return fmt.Errorf("git_url must not start with a dash")
+	}
+	return nil
 }
 
 // repoNameFromGitURL extracts the repository name from a git URL.

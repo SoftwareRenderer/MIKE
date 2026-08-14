@@ -730,8 +730,7 @@ func (asm *AppStreamManager) getDiffBaseline(task types.Task) string {
 // HandleStream is the HTTP handler for the /api/stream WebSocket endpoint.
 func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
-		CompressionMode:    websocket.CompressionContextTakeover,
+		CompressionMode: websocket.CompressionContextTakeover,
 	})
 	if err != nil {
 		log.Printf("[app stream] accept error: %v", err)

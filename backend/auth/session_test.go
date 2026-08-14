@@ -181,3 +181,17 @@ func TestMultipleSessions(t *testing.T) {
 		t.Errorf("token2 should still be valid: %v", err)
 	}
 }
+
+func TestLoginNearMissPassword(t *testing.T) {
+	// A same-length password differing in a single byte must be rejected
+	// (exercises the constant-time comparison path where lengths match).
+	m := testManager(t)
+	if _, _, _, err := m.Login("test-password"); err != nil {
+		t.Fatalf("valid password login: %v", err)
+	}
+	if _, _, _, err := m.Login("test-passwordX"); err == nil {
+		t.Fatal("near-miss password accepted; expected ErrInvalidPassword")
+	} else if err != ErrInvalidPassword {
+		t.Fatalf("expected ErrInvalidPassword, got %v", err)
+	}
+}

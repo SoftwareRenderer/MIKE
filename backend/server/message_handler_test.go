@@ -9,8 +9,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"kanban/backend/types"
 )
+
+// seedMessage writes a message directly to the store. It is used to seed
+// internal-role (assistant/tool_call) fixture messages that the user-facing
+// POST endpoint must reject for security reasons.
+func seedMessage(t *testing.T, s *Server, projID, taskID string, msg *types.TaskMessage) *types.TaskMessage {
+	t.Helper()
+	if msg.TaskID == "" {
+		msg.TaskID = taskID
+	}
+	if msg.ThreadID == "" {
+		if task, _ := s.store.GetTask(projID, taskID); task != nil {
+			msg.ThreadID = task.CurrentThreadID
+		}
+	}
+	if msg.ID == "" {
+		msg.ID = uuid.New().String()
+	}
+	if msg.CreatedAt.IsZero() {
+		msg.CreatedAt = time.Now().UTC()
+	}
+	if err := s.store.CreateTaskMessage(msg); err != nil {
+		t.Fatalf("seed message: %v", err)
+	}
+	return msg
+}
 
 func TestMessageCreate(t *testing.T) {
 	s := testServer(t)
@@ -297,19 +324,18 @@ func TestMessageListWriteFileContentSuppressed(t *testing.T) {
 			"content": "package main\n\nfunc main() {}\n",
 		},
 		"raw_args": `{"path":"src/main.go","content":"package main\n\nfunc main() {}\n"}`,
-		"sandbox":    false,
+		"sandbox":  false,
 	})
 
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":       "tool_call",
-		"content":    "file written",
-		"tool_calls": string(toolCallsJSON),
-		"tool_result": `{"output":"","success":true,"duration":10}`,
+	seedMessage(t, s, projID, taskID, &types.TaskMessage{
+		Role:       "tool_call",
+		Content:    "file written",
+		ToolCalls:  string(toolCallsJSON),
+		ToolResult: `{"output":"","success":true,"duration":10}`,
 	})
-	testResponseAuth(t, s, req)
 
 	// GET without full=1 — content should be suppressed
-	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -365,19 +391,18 @@ func TestMessageListWriteFileContentFull(t *testing.T) {
 			"content": "package main\n\nfunc main() {}\n",
 		},
 		"raw_args": `{"path":"src/main.go","content":"package main\n\nfunc main() {}\n"}`,
-		"sandbox":    false,
+		"sandbox":  false,
 	})
 
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":       "tool_call",
-		"content":    "file written",
-		"tool_calls": string(toolCallsJSON),
-		"tool_result": `{"output":"","success":true,"duration":10}`,
+	seedMessage(t, s, projID, taskID, &types.TaskMessage{
+		Role:       "tool_call",
+		Content:    "file written",
+		ToolCalls:  string(toolCallsJSON),
+		ToolResult: `{"output":"","success":true,"duration":10}`,
 	})
-	testResponseAuth(t, s, req)
 
 	// GET with full=1 — content should be preserved
-	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages?full=1", nil)
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages?full=1", nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -426,19 +451,18 @@ func TestMessageListNonWriteFileNotSuppressed(t *testing.T) {
 			"command": "ls -la",
 		},
 		"raw_args": `{"command":"ls -la"}`,
-		"sandbox":    false,
+		"sandbox":  false,
 	})
 
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":       "tool_call",
-		"content":    "executed",
-		"tool_calls": string(toolCallsJSON),
-		"tool_result": `{"output":"total 100","success":true,"duration":5}`,
+	seedMessage(t, s, projID, taskID, &types.TaskMessage{
+		Role:       "tool_call",
+		Content:    "executed",
+		ToolCalls:  string(toolCallsJSON),
+		ToolResult: `{"output":"total 100","success":true,"duration":5}`,
 	})
-	testResponseAuth(t, s, req)
 
 	// GET without full=1 — non-write_file tool should NOT be suppressed
-	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -484,15 +508,14 @@ func TestMessageListReasoningContentSuppressed(t *testing.T) {
 
 	// Create an assistant message with long reasoning + regular content (would be auto-hidden)
 	longReasoning := strings.Repeat("x", 300)
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":              "assistant",
-		"content":           "Here is the answer.",
-		"reasoning_content": longReasoning,
+	seedMessage(t, s, projID, taskID, &types.TaskMessage{
+		Role:             "assistant",
+		Content:          "Here is the answer.",
+		ReasoningContent: longReasoning,
 	})
-	testResponseAuth(t, s, req)
 
 	// GET without full=1 — reasoning should be suppressed
-	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -569,15 +592,14 @@ func TestMessageListReasoningContentFull(t *testing.T) {
 
 	// Create an assistant message with long reasoning + regular content
 	longReasoning := strings.Repeat("y", 500)
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":              "assistant",
-		"content":           "The answer is 42.",
-		"reasoning_content": longReasoning,
+	seedMessage(t, s, projID, taskID, &types.TaskMessage{
+		Role:             "assistant",
+		Content:          "The answer is 42.",
+		ReasoningContent: longReasoning,
 	})
-	testResponseAuth(t, s, req)
 
 	// GET with full=1 — reasoning should be preserved
-	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages?full=1", nil)
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages?full=1", nil)
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -656,21 +678,15 @@ func TestMessageGetByIDFull(t *testing.T) {
 
 	// Create an assistant message with long reasoning + content (would be suppressed in list)
 	longReasoning := strings.Repeat("a", 500)
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":              "assistant",
-		"content":           "The answer is 42.",
-		"reasoning_content": longReasoning,
+	msg := seedMessage(t, s, projID, taskID, &types.TaskMessage{
+		Role:             "assistant",
+		Content:          "The answer is 42.",
+		ReasoningContent: longReasoning,
 	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
-	}
-	msg := mustJSON[map[string]any](t, rr.Body)
-	msgID := msg["id"].(string)
 
 	// GET single message with full=1 — reasoning should be preserved
-	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msgID+"?full=1", nil)
-	rr = testResponseAuth(t, s, req)
+	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msg.ID+"?full=1", nil)
+	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -1321,6 +1337,7 @@ func TestDeleteFirstRequestRollsBackToBase(t *testing.T) {
 //  1. "Create hello.cs" -> hello.cs WITHOUT counter (checkpoint A, survives)
 //  2. "count to 5"      -> hello.cs WITH counter    (checkpoint B, deleted)
 //  3. delete the "count to 5" message
+//
 // Expected: worktree rolls back to checkpoint A -> hello.cs WITHOUT counter
 // (NOT the base commit, which would remove the file entirely).
 func TestDeleteCounterRequestRollsBackToPriorCheckpoint(t *testing.T) {
@@ -1411,4 +1428,39 @@ func TestDeleteCounterRequestRollsBackToPriorCheckpoint(t *testing.T) {
 
 	// Expected: roll back to checkpoint A -> hello.cs WITHOUT counter.
 	verifyWorktreeContent(t, worktreePath, "hello.cs", noCounter, "after delete rollback to prior checkpoint")
+}
+
+func TestMessageCreateRejectsInvalidRole(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	// Internal roles must not be injectable over HTTP (prompt injection into
+	// the LLM conversation context).
+	for _, role := range []string{"system", "assistant", "tool_call", "tool"} {
+		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
+			"role":    role,
+			"content": "injected",
+		})
+		rr := testResponseAuth(t, s, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("role %q: expected 400, got %d", role, rr.Code)
+		}
+	}
+}
+
+func TestMessageCreateRejectsOversizedContent(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Test task")
+
+	big := strings.Repeat("a", (1<<20)+1)
+	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
+		"role":    "user",
+		"content": big,
+	})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for oversized content, got %d", rr.Code)
+	}
 }
