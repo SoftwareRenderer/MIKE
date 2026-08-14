@@ -210,10 +210,8 @@ type ChatCompletionOpts struct {
 	Thinking        *llama.ThinkingParams // Thinking sets reasoning params directly, overriding ReasoningEffort.
 }
 
-// utilityTarget resolves the configured Utility provider/model pair. It returns
-// the resolved URL/model and whether the configured Utility pair was actually
-// used (ok=true). When utility is unset or unresolvable it falls back to the
-// task's own values and returns ok=false.
+// utilityTarget resolves the configured Utility provider/model pair, falling
+// back to the task's own values when unset. ok = Utility pair used.
 func (te *TaskExecutor) utilityTarget(task *types.Task) (serverURL, model string, ok bool) {
 	providerName, utilModel := te.configStore.GetUtility()
 	if providerName != "" {
@@ -224,18 +222,15 @@ func (te *TaskExecutor) utilityTarget(task *types.Task) (serverURL, model string
 	return task.LlamaServerURL, task.ModelName, false
 }
 
-// ResolveUtilityTarget returns the URL/model to use for utility-type LLM calls
-// (title generation, commit messages, checkpoint labels, summarization). It
-// routes through the configured Utility provider/model, falling back to the
-// task's own URL/model when Utility is unset or unresolvable.
+// ResolveUtilityTarget returns the URL/model for utility-type LLM calls,
+// routing through the Utility provider/model with task fallback.
 func (te *TaskExecutor) ResolveUtilityTarget(task *types.Task) (serverURL, model string) {
 	serverURL, model, _ = te.utilityTarget(task)
 	return serverURL, model
 }
 
-// automatedAnswers answers all questions asked by an auto-started subtask in one
-// LLM call using the parent's prompt context. Returns one answer per question.
-// Errors when the subtask has no parent or the response can't be parsed.
+// automatedAnswers answers an auto-started subtask's questions in one LLM call
+// using the parent's prompt context. Returns one answer per question.
 func (te *TaskExecutor) automatedAnswers(ctx context.Context, subtask *types.Task, questions []string) ([]string, error) {
 	if subtask.ParentTaskID == "" {
 		return nil, errors.New("task has no parent; cannot auto-answer")
@@ -275,11 +270,23 @@ func (te *TaskExecutor) automatedAnswers(ctx context.Context, subtask *types.Tas
 	return splitNumberedAnswers(answer, len(questions))
 }
 
-// numberedMarker matches a numbered list marker such as "1)" or "1.".
-var numberedMarker = regexp.MustCompile(`\d+\s*[\)\.]`)
+// numberedMarker matches "N)" markers (single-line format, after whitespace)
+// and "N." markers at line starts. Group 1 = paren number, group 2 = dot number.
+var numberedMarker = regexp.MustCompile(`(?:^|\s)(\d+)\)|(?:^|\n)(\d+)\.`)
+
+// leadingMarker matches a numbered marker at the very start of a response.
+var leadingMarker = regexp.MustCompile(`^(\d+)\s*[\)\.]`)
+
+// markerFollowedByDigit reports whether the char after a marker is a digit,
+// i.e. the "marker" is really a decimal/version ("1.21", "2.5").
+func markerFollowedByDigit(text string, end int) bool {
+	return end < len(text) && text[end] >= '0' && text[end] <= '9'
+}
 
 // splitNumberedAnswers parses "1) a 2) b..." into n answers aligned by index.
-// Errors when the response is empty or yields fewer than n segments.
+// Only markers whose number matches the expected position (1..n) are accepted,
+// so decimals/versions in answers don't split them and out-of-order numbering
+// errors instead of silently misaligning.
 func splitNumberedAnswers(response string, n int) ([]string, error) {
 	if n == 0 {
 		return nil, errors.New("no questions to answer")
@@ -288,21 +295,58 @@ func splitNumberedAnswers(response string, n int) ([]string, error) {
 	if text == "" {
 		return nil, errors.New("empty automated answer")
 	}
-	locs := numberedMarker.FindAllStringIndex(text, -1)
-	if len(locs) == 0 {
-		if n == 1 {
-			return []string{text}, nil
+	// Single question: only a leading marker delimits the answer; body numbers
+	// ("Use Go 1.21") are content.
+	if n == 1 {
+		if m := leadingMarker.FindStringSubmatchIndex(text); m != nil && !markerFollowedByDigit(text, m[1]) {
+			return []string{strings.TrimSpace(text[m[1]:])}, nil
 		}
+		return []string{text}, nil
+	}
+	locs := numberedMarker.FindAllStringSubmatchIndex(text, -1)
+	// bounds[i] = content start after marker i, and marker i's match start
+	// (the boundary where the previous segment ends).
+	bounds := make([][2]int, 0, n)
+	expected := 1
+	for _, loc := range locs {
+		if markerFollowedByDigit(text, loc[1]) {
+			continue // decimal/version, not a marker
+		}
+		numStr := ""
+		if loc[2] >= 0 {
+			numStr = text[loc[2]:loc[3]]
+		} else {
+			numStr = text[loc[4]:loc[5]]
+		}
+		num, err := strconv.Atoi(numStr)
+		if err != nil {
+			continue
+		}
+		if num == expected {
+			bounds = append(bounds, [2]int{loc[1], loc[0]})
+			expected++
+			if expected > n {
+				break
+			}
+		} else if num > expected {
+			// Out-of-order or missing answer — refuse to guess.
+			return nil, fmt.Errorf("automated answer has out-of-order numbering (marker %d, expected %d)", num, expected)
+		}
+		// num < expected: duplicate/spurious marker — ignore.
+	}
+	if len(bounds) == 0 {
 		return nil, fmt.Errorf("unparseable automated answer: no numbered markers (expected %d answers)", n)
 	}
+	if len(bounds) < n {
+		return nil, fmt.Errorf("automated answer has %d segment(s), expected %d", len(bounds), n)
+	}
 	segments := make([]string, 0, n)
-	for i, loc := range locs {
-		start := loc[1]
+	for i, b := range bounds {
 		end := len(text)
-		if i+1 < len(locs) {
-			end = locs[i+1][0]
+		if i+1 < len(bounds) {
+			end = bounds[i+1][1]
 		}
-		if seg := strings.TrimSpace(text[start:end]); seg != "" {
+		if seg := strings.TrimSpace(text[b[0]:end]); seg != "" {
 			segments = append(segments, seg)
 		}
 	}
