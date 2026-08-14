@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kanban/backend/config"
+	"kanban/backend/exec"
 	"kanban/backend/git"
 	"kanban/backend/store"
 	"kanban/backend/stream"
@@ -410,5 +413,158 @@ func TestEnrichTaskWorktree(t *testing.T) {
 
 	if !task.WorktreeExists {
 		t.Error("task should have worktree_exists=true")
+	}
+}
+
+// --- Auto-answer provenance (autostarted) ---
+//
+// Starting a parent task runs its subtasks autonomously (no human present to
+// answer ask_question). The selected subtask must therefore be marked
+// autostarted=true, so the auto-answer system answers its questions from parent
+// context instead of stopping to wait for a user.
+
+// gitRun executes a git command in dir.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := osexec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+}
+
+// newTaskHandlerWithExecutor builds a TaskHandler wired to a real executor,
+// backed by a temp git repo (needed for subtask worktree/branch setup).
+func newTaskHandlerWithExecutor(t *testing.T) (*TaskHandler, *store.Store, string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	worktreesDir := filepath.Join(tmpDir, "worktrees")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRun(t, repoDir, "init")
+	gitRun(t, repoDir, "config", "user.email", "test@test.com")
+	gitRun(t, repoDir, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repoDir, "add", "README.md")
+	gitRun(t, repoDir, "commit", "-m", "Initial")
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	s, err := store.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	s.SetConfigValue("providers", "[]")
+	s.SetConfigValue("worker_provider", "")
+	s.SetConfigValue("worker_model", "")
+	s.SetConfigValue("utility_provider", "")
+	s.SetConfigValue("utility_model", "")
+
+	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
+
+	projID := "proj-auto-start"
+	proj := &types.Project{ID: projID, Name: "auto-start", Path: repoDir}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	worktreeMgr := git.NewWorktreeManager(s, cfgStore)
+	boardMgr := stream.NewAppStreamManager(s, worktreeMgr)
+
+	executor := exec.NewTaskExecutor(s, cfgStore, boardMgr, worktreeMgr, nil, nil, nil, nil)
+	h := NewTaskHandler(s, boardMgr, cfgStore, nil, executor, worktreeMgr, nil, nil)
+	return h, s, projID
+}
+
+// createParentWithSubtask creates an in_progress parent with one subtask whose
+// thread already ends in an assistant message. This lets StartTask persist the
+// autostarted flag and return early without invoking the LLM.
+func createParentWithSubtask(t *testing.T, s *store.Store, projectID string) (string, string) {
+	t.Helper()
+	now := time.Now().UTC()
+
+	parent := &types.Task{
+		ID:              "parent-auto-start",
+		ProjectID:       projectID,
+		Title:           "Parent Auto Start",
+		Prompt:          "Parent prompt",
+		Status:          "backlog",
+		ExecutionState:  "idle",
+		LlamaServerURL:  "http://localhost:8080",
+		ModelName:       "test-model",
+		OperatingMode:   "act",
+		CurrentThreadID: "thread-parent",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := s.CreateTask(parent); err != nil {
+		t.Fatal(err)
+	}
+
+	child := &types.Task{
+		ID:              "child-auto-start",
+		ProjectID:       projectID,
+		Title:           "Child Auto Start",
+		Prompt:          "Child prompt",
+		Status:          "backlog",
+		ExecutionState:  "idle",
+		ParentTaskID:    parent.ID,
+		LlamaServerURL:  "http://localhost:8080",
+		ModelName:       "test-model",
+		OperatingMode:   "act",
+		CurrentThreadID: "thread-child",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := s.CreateTask(child); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed the child thread so StartTask returns early (no LLM) after persisting
+	// the autostarted flag: a user prompt message followed by an assistant reply.
+	for _, m := range []*types.TaskMessage{
+		{ID: "u1", TaskID: child.ID, ThreadID: child.CurrentThreadID, Role: "user", Content: child.Prompt, CreatedAt: now},
+		{ID: "a1", TaskID: child.ID, ThreadID: child.CurrentThreadID, Role: "assistant", Content: "Done.", CreatedAt: now},
+	} {
+		if err := s.CreateTaskMessage(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	return parent.ID, child.ID
+}
+
+// TestHandleStartWithSubtasks_MarksSubtaskAutostarted verifies that starting a
+// parent task with subtasks marks the selected subtask autostarted=true, so its
+// ask_question calls are auto-answered from parent context.
+func TestHandleStartWithSubtasks_MarksSubtaskAutostarted(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	parentID, childID := createParentWithSubtask(t, s, projID)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStartWithSubtasks)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projID+"/tasks/"+parentID+"/start", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HandleStartWithSubtasks status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	child, err := s.GetTaskByTaskID(childID)
+	if err != nil {
+		t.Fatalf("get child: %v", err)
+	}
+	if !child.Autostarted {
+		t.Errorf("child task should be marked autostarted=true when started via its parent (got %v)", child.Autostarted)
 	}
 }

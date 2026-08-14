@@ -181,10 +181,12 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         if (data.message_id) tc.messageId = data.message_id;
                     }
                 } else {
-                    // Tool call loaded from DB after page refresh — not in activeToolCalls.
-                    // Search entries directly for a pending tool call with matching tool_id.
+                    // Tool call loaded from DB after page refresh (not in activeToolCalls), or
+                    // an already-resolved call being re-broadcast (e.g. ask_question auto-answer
+                    // replaces the original question result). Match by tool_id regardless of
+                    // pending state so the latest result is applied in place.
                     for (const entry of s.entries) {
-                        const tc = entry.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id && t.isPending);
+                        const tc = entry.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id);
                         if (tc) {
                             // Same logic: preserve streamed output when available
                             if (data.streamed && tc.result) {

@@ -157,7 +157,8 @@ func (te *TaskExecutor) maybeAutoSummarize(setup *taskExecSetup, lc *loopContext
 	if lc.contextWindow == nil {
 		return
 	}
-	if !shouldSummarize(contextTokensUsed(lc), *lc.contextWindow) {
+	threshold := te.configStore.AutoSummarizeThreshold()
+	if !shouldSummarize(contextTokensUsed(lc), *lc.contextWindow, threshold) {
 		return
 	}
 	lc.messages = te.applySummarization(setup.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, setup.serverURL, activeModel, nil)
