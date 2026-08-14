@@ -15,9 +15,29 @@ import (
 )
 
 // mockAnswerLLM returns an httptest server that answers a non-streaming chat
-// completion with a fixed consolidated numbered answer string.
+// completion with a fixed consolidated numbered answer string. Like the real
+// servers behind strict chat templates (e.g. Qwen3.8 on llama.cpp), it rejects
+// requests that carry no user message with a 500.
 func mockAnswerLLM(answer string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct {
+				Role string `json:"role"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		hasUser := false
+		for _, m := range req.Messages {
+			if m.Role == "user" {
+				hasUser = true
+				break
+			}
+		}
+		if !hasUser {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":{"message":"No user query found in messages."}}`))
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		resp := map[string]any{
 			"choices": []any{map[string]any{"message": map[string]any{"content": answer}}},

@@ -243,7 +243,7 @@ func (te *TaskExecutor) automatedAnswers(ctx context.Context, subtask *types.Tas
 		return nil, errors.New("no questions to answer")
 	}
 
-	promptText, err := prompts.RenderAnswerQuestionPrompt(prompts.AnswerQuestionData{
+	systemPrompt, userPrompt, err := prompts.RenderAnswerQuestionPrompt(prompts.AnswerQuestionData{
 		ParentTitle:  parent.Title,
 		ParentPrompt: parent.Prompt,
 		SubtaskTitle: subtask.Title,
@@ -262,7 +262,10 @@ func (te *TaskExecutor) automatedAnswers(ctx context.Context, subtask *types.Tas
 		serverURL, model = te.ResolveUtilityTarget(subtask)
 	}
 
-	messages := []types.ChatMessage{{Role: "system", Content: promptText}}
+	messages := []types.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
 	_, answer, err := te.ChatCompletion(ctx, serverURL, model, messages, nil)
 	if err != nil {
 		return nil, fmt.Errorf("automated answer completion: %w", err)
