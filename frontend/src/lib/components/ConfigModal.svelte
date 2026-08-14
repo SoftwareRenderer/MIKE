@@ -44,6 +44,7 @@
     let defaultSubtasksAutoMerge = $state(true);
     let defaultOperatingMode = $state('act');
     let defaultMaxFailedTurns = $state(3);
+    let defaultAutoSummarizeThreshold = $state(90);
     let loading = $state(false);
     let error = $state('');
 
@@ -175,6 +176,7 @@
         defaultSubtasksAutoMerge = config?.default_subtasks_auto_merge ?? true;
         defaultOperatingMode = config?.default_operating_mode ?? 'act';
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
+        defaultAutoSummarizeThreshold = config?.default_auto_summarize_threshold ?? 90;
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
         hasChanges = false;
@@ -576,6 +578,7 @@
                 default_subtasks_auto_merge: defaultSubtasksAutoMerge,
                 default_operating_mode: defaultOperatingMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
+                default_auto_summarize_threshold: defaultAutoSummarizeThreshold,
             } as Config);
             appStore.config = cfg;
             onSaved();
@@ -822,6 +825,7 @@
                 bind:defaultAutoMerge
                 bind:defaultSubtasksAutoMerge
                 bind:defaultMaxFailedTurns
+                bind:defaultAutoSummarizeThreshold
                 originBranch={appStore.selectedProject?.origin_branch || 'main'}
                 onDirty={markDirty}
             />

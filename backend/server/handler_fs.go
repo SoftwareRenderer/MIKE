@@ -1059,7 +1059,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		worktreePath = wtPath
-	} else {
+	} else if project != nil {
 		worktreePath = project.Path
 	}
 

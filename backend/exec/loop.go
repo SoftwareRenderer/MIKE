@@ -966,6 +966,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			// can't detect diff state changes from git commit/checkout/merge
 			// (branch pointer moves without working tree file changes).
 			hadGitCmd := false
+			hadRequestReview := false // request_review detected in this turn
 
 			for _, tc := range lc.pendingToolCalls {
 				if tc.ID == "" || tc.Function.Name == "" {
@@ -1089,169 +1090,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				}
 
 				if tc.Function.Name == "request_review" {
-					if setup.task.AutoCommit {
-						if setup.task.HasMergeConflict {
-							_, setup.task = te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
-							if setup.task.HasMergeConflict {
-								// Still conflicted — inject resolution prompt and continue
-								conflictedFiles := GetConflictedFiles(setup.worktreePath)
-								prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
-									TaskBranch:      setup.task.Branch,
-									TargetBranch:    te.ResolveMergeTarget(setup.projectID, setup.task),
-									TaskTitle:       setup.task.Title,
-									TaskDescription: setup.task.Prompt,
-									ConflictedFiles: conflictedFiles,
-								})
-								if pErr != nil {
-									log.Printf("[merge] setup.task=%s failed to render merge conflict prompt: %v", setup.task.ID, pErr)
-								}
-								lc.detector.reset()
-								lc.detector.clearHints()
-								lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: prompt})
-								te.store.CreateTaskMessage(&types.TaskMessage{
-									ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
-									Role: "system", Content: "Merge conflict detected — resolving with tools",
-									CreatedAt: time.Now().UTC(),
-								})
-								te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Resolving merge conflicts"}})
-								lc.pendingToolCalls = nil
-								lc.assistantContent.Reset()
-								lc.reasoningContent.Reset()
-								lc.finishReason = ""
-								continue
-							}
-							if !setup.task.AutoMerge {
-								// Merge was skipped (auto_merge=false) — don't mark done
-								setup.task.ExecutionState = "idle"
-								setup.task.Status = "review"
-							} else {
-								setup.task.ExecutionState = "completed"
-								setup.task.Status = "done"
-							}
-							if te.sandboxMgr != nil {
-								_ = te.sandboxMgr.Stop(setup.task.ID)
-							}
-							te.store.UpdateTask(setup.task)
-							te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-								"state":                setup.task.ExecutionState,
-								"assistant_message_id": assistantMsgID,
-								"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
-								"cache_tokens": cacheTokens,
-								"prompt_ms":    promptMs, "predicted_ms": predictedMs,
-								"model_name": activeModel, "duration": time.Since(lc.callStartTime).Milliseconds(),
-							}})
-							te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-							if setup.task.ParentTaskID != "" {
-								_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID, setup.task.Status)
-							}
-							return
-						}
-
-						// No merge conflict — normal auto-commit path
-						commitMsg := te.GenerateCommitMessageForTask(setup.ctx, setup.task.ID, setup.task)
-						mergeErr := te.CommitAndMerge(setup.projectID, setup.task.ID, setup.worktreePath, commitMsg, setup.task.AutoMerge)
-						setup.task, _ = te.store.GetTaskByTaskID(setup.task.ID)
-						if setup.task.HasMergeConflict {
-							// Merge conflict on first attempt — inject resolution prompt
-							conflictedFiles := GetResolvedConflictedFiles(setup.worktreePath)
-							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
-								TaskBranch:      setup.task.Branch,
-								TargetBranch:    te.ResolveMergeTarget(setup.projectID, setup.task),
-								TaskTitle:       setup.task.Title,
-								TaskDescription: setup.task.Prompt,
-								ConflictedFiles: conflictedFiles,
-							})
-							if pErr != nil {
-								log.Printf("[merge] setup.task=%s failed to render merge conflict prompt: %v", setup.task.ID, pErr)
-							}
-							lc.detector.reset()
-							lc.detector.clearHints()
-							lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: prompt})
-							te.store.CreateTaskMessage(&types.TaskMessage{
-								ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
-								Role: "system", Content: "Merge conflict detected — resolving with tools",
-								CreatedAt: time.Now().UTC(),
-							})
-							te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Resolving merge conflicts"}})
-							lc.pendingToolCalls = nil
-							lc.assistantContent.Reset()
-							lc.reasoningContent.Reset()
-							lc.finishReason = ""
-							continue
-						}
-						if mergeErr != nil {
-							// Merge failed (non-conflict) — don't mark done
-							log.Printf("[merge] task=%s merge failed, moving to review: %v", setup.task.ID, mergeErr)
-							setup.task.ExecutionState = "idle"
-							setup.task.Status = "review"
-							setup.task.Output = "Merge failed: " + mergeErr.Error()
-							if te.sandboxMgr != nil {
-								_ = te.sandboxMgr.Stop(setup.task.ID)
-							}
-						} else if !setup.task.AutoMerge {
-							// Merge was skipped (auto_merge=false) — don't mark done
-							setup.task.ExecutionState = "idle"
-							setup.task.Status = "review"
-							if te.sandboxMgr != nil {
-								_ = te.sandboxMgr.Stop(setup.task.ID)
-							}
-						} else {
-							setup.task.ExecutionState = "completed"
-							setup.task.Status = "done"
-							if te.sandboxMgr != nil {
-								_ = te.sandboxMgr.Stop(setup.task.ID)
-							}
-						}
-					} else if setup.task.HasMergeConflict {
-						// Task has a merge conflict (e.g., from HandleCommitAndDone).
-						// LLM resolved conflicts by editing files — commit resolution,
-						// finish the sync merge, then attempt the final merge.
-						_, setup.task = te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
-						if setup.task.HasMergeConflict {
-							// Still conflicted after LLM called request_review — fail.
-							log.Printf("[merge] setup.task=%s merge still conflicted after request_review", setup.task.ID)
-							setup.task.ExecutionState = "failed"
-							setup.task.Status = "review"
-							if te.sandboxMgr != nil {
-								_ = te.sandboxMgr.Stop(setup.task.ID)
-							}
-						} else if !setup.task.AutoMerge {
-							// Merge was skipped (auto_merge=false) — don't mark done
-							setup.task.ExecutionState = "idle"
-							setup.task.Status = "review"
-							if te.sandboxMgr != nil {
-								_ = te.sandboxMgr.Stop(setup.task.ID)
-							}
-						} else {
-							setup.task.ExecutionState = "completed"
-							setup.task.Status = "done"
-							if te.sandboxMgr != nil {
-								_ = te.sandboxMgr.Stop(setup.task.ID)
-							}
-						}
-					} else {
-						setup.task.ExecutionState = "idle"
-						setup.task.Status = "review"
-					}
-					te.store.UpdateTask(setup.task)
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-						"state":                setup.task.ExecutionState,
-						"assistant_message_id": assistantMsgID,
-						"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
-						"cache_tokens": cacheTokens,
-						"prompt_ms":    promptMs, "predicted_ms": predictedMs,
-						"model_name": activeModel, "duration": time.Since(lc.callStartTime).Milliseconds(),
-					}})
-					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-					// Post-tool git check: broadcast diff if a git command changed the state
-					if hadGitCmd {
-						te.broadcastDiffIfGitCmd(setup.projectID, setup.task.ID, setup.task)
-					}
-					// If this is a subtask, auto-start the next sibling
-					if setup.task.ParentTaskID != "" {
-						_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID, setup.task.Status)
-					}
-					return
+					hadRequestReview = true
 				}
 			}
 			// Post-tool git check: broadcast diff if a git command changed the state
@@ -1296,8 +1135,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				}
 			}
 
-			// Not auto-answered: stop and wait for the user to restart.
-			if !autoAnswered {
+			// Not auto-answered and no request_review: stop and wait for the user to restart.
+			if !hadRequestReview && !autoAnswered {
 				for i, tc := range lc.pendingToolCalls {
 					if tc.Function.Name == "ask_question" {
 						question := toolResults[i].output
@@ -1318,6 +1157,164 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						return
 					}
 				}
+			}
+
+			// request_review: handle task completion (commit/merge)
+			// This runs AFTER auto-answer so that ask_question in the same turn
+			// is answered before the task completes.
+			if hadRequestReview {
+				if setup.task.AutoCommit {
+					if setup.task.HasMergeConflict {
+						_, setup.task = te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
+						if setup.task.HasMergeConflict {
+							// Still conflicted — inject resolution prompt and continue
+							conflictedFiles := GetConflictedFiles(setup.worktreePath)
+							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+								TaskBranch:      setup.task.Branch,
+								TargetBranch:    te.ResolveMergeTarget(setup.projectID, setup.task),
+								TaskTitle:       setup.task.Title,
+								TaskDescription: setup.task.Prompt,
+								ConflictedFiles: conflictedFiles,
+							})
+							if pErr != nil {
+								log.Printf("[merge] setup.task=%s failed to render merge conflict prompt: %v", setup.task.ID, pErr)
+							}
+							lc.detector.reset()
+							lc.detector.clearHints()
+							lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: prompt})
+							te.store.CreateTaskMessage(&types.TaskMessage{
+								ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
+								Role: "system", Content: "Merge conflict detected — resolving with tools",
+								CreatedAt: time.Now().UTC(),
+							})
+							te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Resolving merge conflicts"}})
+							lc.pendingToolCalls = nil
+							lc.assistantContent.Reset()
+							lc.reasoningContent.Reset()
+							lc.finishReason = ""
+							continue
+						}
+						if !setup.task.AutoMerge {
+							setup.task.ExecutionState = "idle"
+							setup.task.Status = "review"
+						} else {
+							setup.task.ExecutionState = "completed"
+							setup.task.Status = "done"
+						}
+						if te.sandboxMgr != nil {
+							_ = te.sandboxMgr.Stop(setup.task.ID)
+						}
+						te.store.UpdateTask(setup.task)
+						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+							"state":                setup.task.ExecutionState,
+							"assistant_message_id": assistantMsgID,
+							"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
+							"cache_tokens": cacheTokens,
+							"prompt_ms":    promptMs, "predicted_ms": predictedMs,
+							"model_name": activeModel, "duration": time.Since(lc.callStartTime).Milliseconds(),
+						}})
+						te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+						if setup.task.ParentTaskID != "" {
+							_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID, setup.task.Status)
+						}
+						return
+					}
+
+					// No merge conflict — normal auto-commit path
+					commitMsg := te.GenerateCommitMessageForTask(setup.ctx, setup.task.ID, setup.task)
+					mergeErr := te.CommitAndMerge(setup.projectID, setup.task.ID, setup.worktreePath, commitMsg, setup.task.AutoMerge)
+					setup.task, _ = te.store.GetTaskByTaskID(setup.task.ID)
+					if setup.task.HasMergeConflict {
+						conflictedFiles := GetResolvedConflictedFiles(setup.worktreePath)
+						prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+							TaskBranch:      setup.task.Branch,
+							TargetBranch:    te.ResolveMergeTarget(setup.projectID, setup.task),
+							TaskTitle:       setup.task.Title,
+							TaskDescription: setup.task.Prompt,
+							ConflictedFiles: conflictedFiles,
+						})
+						if pErr != nil {
+							log.Printf("[merge] setup.task=%s failed to render merge conflict prompt: %v", setup.task.ID, pErr)
+						}
+						lc.detector.reset()
+						lc.detector.clearHints()
+						lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: prompt})
+						te.store.CreateTaskMessage(&types.TaskMessage{
+							ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
+							Role: "system", Content: "Merge conflict detected — resolving with tools",
+							CreatedAt: time.Now().UTC(),
+						})
+						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Resolving merge conflicts"}})
+						lc.pendingToolCalls = nil
+						lc.assistantContent.Reset()
+						lc.reasoningContent.Reset()
+						lc.finishReason = ""
+						continue
+					}
+					if mergeErr != nil {
+						log.Printf("[merge] task=%s merge failed, moving to review: %v", setup.task.ID, mergeErr)
+						setup.task.ExecutionState = "idle"
+						setup.task.Status = "review"
+						setup.task.Output = "Merge failed: " + mergeErr.Error()
+						if te.sandboxMgr != nil {
+							_ = te.sandboxMgr.Stop(setup.task.ID)
+						}
+					} else if !setup.task.AutoMerge {
+						setup.task.ExecutionState = "idle"
+						setup.task.Status = "review"
+						if te.sandboxMgr != nil {
+							_ = te.sandboxMgr.Stop(setup.task.ID)
+						}
+					} else {
+						setup.task.ExecutionState = "completed"
+						setup.task.Status = "done"
+						if te.sandboxMgr != nil {
+							_ = te.sandboxMgr.Stop(setup.task.ID)
+						}
+					}
+				} else if setup.task.HasMergeConflict {
+					_, setup.task = te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
+					if setup.task.HasMergeConflict {
+						log.Printf("[merge] setup.task=%s merge still conflicted after request_review", setup.task.ID)
+						setup.task.ExecutionState = "failed"
+						setup.task.Status = "review"
+						if te.sandboxMgr != nil {
+							_ = te.sandboxMgr.Stop(setup.task.ID)
+						}
+					} else if !setup.task.AutoMerge {
+						setup.task.ExecutionState = "idle"
+						setup.task.Status = "review"
+						if te.sandboxMgr != nil {
+							_ = te.sandboxMgr.Stop(setup.task.ID)
+						}
+					} else {
+						setup.task.ExecutionState = "completed"
+						setup.task.Status = "done"
+						if te.sandboxMgr != nil {
+							_ = te.sandboxMgr.Stop(setup.task.ID)
+						}
+					}
+				} else {
+					setup.task.ExecutionState = "idle"
+					setup.task.Status = "review"
+				}
+				te.store.UpdateTask(setup.task)
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+					"state":                setup.task.ExecutionState,
+					"assistant_message_id": assistantMsgID,
+					"prompt_tokens":        promptTokens, "predicted_tokens": predictedTokens,
+					"cache_tokens": cacheTokens,
+					"prompt_ms":    promptMs, "predicted_ms": predictedMs,
+					"model_name": activeModel, "duration": time.Since(lc.callStartTime).Milliseconds(),
+				}})
+				te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+				if hadGitCmd {
+					te.broadcastDiffIfGitCmd(setup.projectID, setup.task.ID, setup.task)
+				}
+				if setup.task.ParentTaskID != "" {
+					_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID, setup.task.Status)
+				}
+				return
 			}
 
 			// Check consecutive identical tool call failures (turn-level).

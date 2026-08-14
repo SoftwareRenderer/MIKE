@@ -8,6 +8,7 @@
         defaultAutoMerge = $bindable(true),
         defaultSubtasksAutoMerge = $bindable(true),
         defaultMaxFailedTurns = $bindable(3),
+        defaultAutoSummarizeThreshold = $bindable(90),
         originBranch,
         onDirty,
     }: {
@@ -15,6 +16,7 @@
         defaultAutoMerge?: boolean;
         defaultSubtasksAutoMerge?: boolean;
         defaultMaxFailedTurns?: number;
+        defaultAutoSummarizeThreshold?: number;
         originBranch: string;
         onDirty?: () => void;
     } = $props();
@@ -48,6 +50,17 @@
             <span id="toggle-mergechildren-desc" class="toggle-desc">Subtasks created under a task will auto-merge into it</span>
         </div>
         <ToggleSwitch bind:checked={defaultSubtasksAutoMerge} ariaLabel="Allow subtasks to auto-merge" ariaDescribedby="toggle-mergechildren-desc" onChange={() => onDirty?.()} />
+    </div>
+
+    <div class="toggle-field">
+        <div class="toggle-label-group">
+            <label class="toggle-label" for="default-summarize-threshold">Auto-summarize threshold</label>
+            <span class="toggle-desc">Summarize context when it reaches this % of the model's context window</span>
+        </div>
+        <div class="percent-input-wrap">
+            <input id="default-summarize-threshold" type="number" bind:value={defaultAutoSummarizeThreshold} min="1" max="100" class="option-input" onchange={() => onDirty?.()} />
+            <span class="percent-suffix">%</span>
+        </div>
     </div>
 
     <div class="toggle-field">
@@ -120,5 +133,14 @@
         background: var(--color-surface-2);
         color: var(--color-text-primary);
         font-size: 0.8125rem;
+    }
+    .percent-input-wrap {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .percent-suffix {
+        font-size: 0.8125rem;
+        color: var(--color-text-tertiary);
     }
 </style>
