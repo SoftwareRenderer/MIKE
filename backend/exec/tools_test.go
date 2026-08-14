@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"kanban/backend/types"
+	"kanban/pkg/bridge/protocol"
 )
 
 // --- isSandboxableTool Tests ---
@@ -410,6 +412,221 @@ func TestExecuteTool_EditFile_MultipleEdits(t *testing.T) {
 	want := "ALPHA\nbeta\nGAMMA\ndelta"
 	if string(data) != want {
 		t.Errorf("got %q, want %q", string(data), want)
+	}
+}
+
+// --- edit_file sandbox delegation (MethodEdit) tests ---
+
+// sandboxEditRecorder is a test edit callback that records the edits/path it
+// receives and optionally fails the first call with a bridge error. When it
+// runs without error it applies the edits to the file on disk, mirroring the
+// sandbox agent's behavior.
+type sandboxEditRecorder struct {
+	mu     sync.Mutex
+	path   string
+	calls  []protocol.Edit
+	failN  int // fail the Nth call (1-based); 0 = never fail
+	callsN int
+}
+
+func (r *sandboxEditRecorder) callback(dir string) editFunc {
+	return func(_ context.Context, path string, edits []protocol.Edit) error {
+		r.mu.Lock()
+		r.callsN++
+		r.path = path
+		r.calls = append(r.calls, edits...)
+		fail := r.failN > 0 && r.callsN == r.failN
+		r.mu.Unlock()
+		if fail {
+			return fmt.Errorf("broken pipe")
+		}
+		data, err := os.ReadFile(filepath.Join(dir, path))
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		for i, e := range edits {
+			idx := strings.Index(content, e.OldText)
+			if idx == -1 {
+				return fmt.Errorf("edits[%d].oldText not found in file", i)
+			}
+			content = content[:idx] + e.NewText + content[idx+len(e.OldText):]
+		}
+		return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
+	}
+}
+
+func TestExecuteTool_EditFile_SandboxDelegation(t *testing.T) {
+	dir := t.TempDir()
+	content := "alpha\nbeta\ngamma\ndelta"
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	rec := &sandboxEditRecorder{}
+	state := &executionState{
+		projectName:  "test",
+		sandboxRead:  nil, // must NOT be used when sandboxEdit is present
+		sandboxWrite: nil, // must NOT be used when sandboxEdit is present
+		sandboxEdit:  rec.callback(dir),
+	}
+
+	te := &TaskExecutor{}
+	editsJSON, _ := json.Marshal([]map[string]any{
+		{"oldText": "alpha", "newText": "ALPHA"},
+		{"oldText": "gamma", "newText": "GAMMA"},
+	})
+	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
+		"path":  "test.txt",
+		"edits": json.RawMessage(editsJSON),
+	}, dir, &types.Task{}, state, nil)
+	if !ok {
+		t.Fatalf("expected success, got failure: %s", result)
+	}
+
+	// The edits must be forwarded to the sandbox agent as protocol.Edit.
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.path != "test.txt" {
+		t.Errorf("sandboxEdit got path %q, want %q", rec.path, "test.txt")
+	}
+	if len(rec.calls) != 2 {
+		t.Fatalf("sandboxEdit got %d edits, want 2", len(rec.calls))
+	}
+	if rec.calls[0] != (protocol.Edit{OldText: "alpha", NewText: "ALPHA"}) ||
+		rec.calls[1] != (protocol.Edit{OldText: "gamma", NewText: "GAMMA"}) {
+		t.Errorf("sandboxEdit got edits %+v", rec.calls)
+	}
+
+	// Success message reflects the number of edits.
+	if !strings.Contains(result, "Edited test.txt (2 edit(s) applied)") {
+		t.Errorf("unexpected result: %q", result)
+	}
+
+	// The file must reflect the applied edits.
+	data, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if want := "ALPHA\nbeta\nGAMMA\ndelta"; string(data) != want {
+		t.Errorf("got %q, want %q", string(data), want)
+	}
+}
+
+func TestExecuteTool_EditFile_SandboxDelegation_Error(t *testing.T) {
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("hello world"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	editErr := func(_ context.Context, path string, edits []protocol.Edit) error {
+		return fmt.Errorf("edits[0].oldText not found in file. Ensure it matches exactly (whitespace, indentation). Got 1 lines in file.")
+	}
+	state := &executionState{
+		projectName: "test",
+		sandboxEdit: editErr,
+	}
+
+	te := &TaskExecutor{}
+	editsJSON, _ := json.Marshal([]map[string]any{{"oldText": "nope", "newText": "x"}})
+	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
+		"path":  "test.txt",
+		"edits": json.RawMessage(editsJSON),
+	}, dir, &types.Task{}, state, nil)
+	if ok {
+		t.Fatalf("expected failure, got success: %s", result)
+	}
+	if !strings.Contains(result, "not found in file") {
+		t.Errorf("expected sandbox edit error, got %q", result)
+	}
+}
+
+func TestExecuteTool_EditFile_SandboxDelegation_Recovery(t *testing.T) {
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("line one\nline two\nline three"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	working := &sandboxEditRecorder{}
+	failing := &sandboxEditRecorder{failN: 1}
+	recoveryCalled := false
+	state := &executionState{
+		projectName: "test",
+		sandboxEdit: failing.callback(dir),
+	}
+	state.recoverBridge = func() bool {
+		recoveryCalled = true
+		// Refresh to a working callback, like a reconnected sandbox client.
+		state.sandboxEdit = working.callback(dir)
+		return true
+	}
+
+	edits, _ := json.Marshal([]map[string]any{{"oldText": "line two", "newText": "modified two"}})
+	te := &TaskExecutor{}
+	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
+		"path":  "test.txt",
+		"edits": json.RawMessage(edits),
+	}, dir, &types.Task{}, state, nil)
+	if !ok {
+		t.Fatalf("expected success after recovery, got failure: %s", result)
+	}
+	if !recoveryCalled {
+		t.Fatal("expected recoverBridge to be called")
+	}
+	if !strings.Contains(result, "Edited") {
+		t.Errorf("unexpected result: %q", result)
+	}
+	data, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("read edited file: %v", err)
+	}
+	if !strings.Contains(string(data), "modified two") {
+		t.Errorf("file content = %q, want to contain %q", string(data), "modified two")
+	}
+}
+
+// BenchmarkExecuteTool_EditFile measures the cost of applying many edits to a
+// large file. The apply path is O(file size) regardless of edit count; a
+// regression to the old quadratic (per-edit full-string rebuild) shows up as a
+// dramatic per-op time increase here.
+func BenchmarkExecuteTool_EditFile(b *testing.B) {
+	const nEdits = 2000
+	var content strings.Builder
+	for i := 0; i < nEdits; i++ {
+		content.WriteString(fmt.Sprintf("some code line %d with content to pad the file\n", i))
+		content.WriteString(fmt.Sprintf("MARKER_%04d\n", i))
+	}
+	fileContent := content.String()
+	// Fixed-width markers ensure no marker is a substring of another, so each
+	// oldText is unique and the edit succeeds.
+	edits := make([]map[string]any, nEdits)
+	for j := 0; j < nEdits; j++ {
+		edits[j] = map[string]any{
+			"oldText": fmt.Sprintf("MARKER_%04d", j),
+			"newText": fmt.Sprintf("REPLACED_%04d", j),
+		}
+	}
+	editsJSON, _ := json.Marshal(edits)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		dir := b.TempDir()
+		path := filepath.Join(dir, "test.txt")
+		if err := os.WriteFile(path, []byte(fileContent), 0644); err != nil {
+			b.Fatal(err)
+		}
+		te := &TaskExecutor{}
+		result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
+			"path":  "test.txt",
+			"edits": json.RawMessage(editsJSON),
+		}, dir, &types.Task{}, &executionState{}, nil)
+		if !ok {
+			b.Fatalf("edit_file failed: %s", result)
+		}
 	}
 }
 
@@ -913,8 +1130,8 @@ func TestExecuteTool_ReadFile_NoRecoveryOnNonBridgeError(t *testing.T) {
 	recoveryCalled := false
 	state := &executionState{
 		sandboxRead: func(_ context.Context, path string) ([]byte, error) {
-		return nil, fmt.Errorf("file not found")
-	},
+			return nil, fmt.Errorf("file not found")
+		},
 		recoverBridge: func() bool {
 			recoveryCalled = true
 			return true
@@ -1216,8 +1433,8 @@ func TestExecuteTool_RecoveryReturnsNil(t *testing.T) {
 
 	state := &executionState{
 		sandboxRead: func(_ context.Context, path string) ([]byte, error) {
-		return nil, fmt.Errorf("broken pipe")
-	},
+			return nil, fmt.Errorf("broken pipe")
+		},
 		recoverBridge: func() bool {
 			return false // recovery failed
 		},

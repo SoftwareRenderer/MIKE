@@ -98,6 +98,7 @@ type executionState struct {
 	sandboxExecStream execStreamFunc
 	sandboxRead       readFunc
 	sandboxWrite      writeFunc
+	sandboxEdit       editFunc
 	// Sandbox operating mode (ro vs rw) at container creation time.
 	sandboxOperatingMode string
 	// Agent sandbox config hash at container creation time.

@@ -51,7 +51,8 @@ func handleEdit(h *handler, conn net.Conn, req *protocol.Request) error {
 		}
 		idx := strings.Index(content, e.OldText)
 		if idx == -1 {
-			return fmt.Errorf("edits[%d].oldText not found in file", i)
+			// Show context around where it might be expected.
+			return fmt.Errorf("edits[%d].oldText not found in file. Ensure it matches exactly (whitespace, indentation). Got %d lines in file.", i, len(strings.Split(content, "\n")))
 		}
 		// Check for duplicate matches
 		secondIdx := strings.Index(content[idx+1:], e.OldText)
@@ -73,12 +74,17 @@ func handleEdit(h *handler, conn net.Conn, req *protocol.Request) error {
 		}
 	}
 
-	// Apply edits in reverse order to preserve positions
-	result := content
-	for i := len(positions) - 1; i >= 0; i-- {
-		p := positions[i]
-		result = result[:p.start] + p.newText + result[p.end:]
+	// Apply edits in a single forward pass
+	var b strings.Builder
+	b.Grow(len(content) + 64)
+	prev := 0
+	for _, p := range positions {
+		b.WriteString(content[prev:p.start])
+		b.WriteString(p.newText)
+		prev = p.end
 	}
+	b.WriteString(content[prev:])
+	result := b.String()
 
 	// Write atomically (temp file + rename)
 	dir := filepath.Dir(p.Path)
