@@ -196,6 +196,17 @@ import { slide } from 'svelte/transition';
     let showFullMessage = $state(false);
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let subjectBtnEl: HTMLButtonElement | null = null;
+    let copiedHash = $state(false);
+
+    async function handleCopyHash() {
+        try {
+            await navigator.clipboard.writeText(commit.hash);
+            copiedHash = true;
+            setTimeout(() => { copiedHash = false; }, 1500);
+        } catch (e) {
+            console.error('Failed to copy hash:', e);
+        }
+    }
     let hasBody = $derived.by(() => commit.body && commit.body.length > 0);
     let fullMessage = $derived.by(() => {
         const parts = [commit.subject];
@@ -311,7 +322,16 @@ import { slide } from 'svelte/transition';
                 {:else}
                     <span class="diff-commit-subject" title={commit.subject}>{commit.subject}</span>
                 {/if}
-                <span class="diff-commit-hash" title={commit.hash}>{commit.short}</span>
+                <span class="diff-commit-hash-wrapper">
+                    <span class="diff-commit-hash" title={commit.hash}>{commit.short}</span>
+                    <button class="diff-hash-copy-btn" class:copied={copiedHash} onclick={handleCopyHash} aria-label="Copy commit hash" title="Copy full hash">
+                        <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                        </svg>
+                        <span class="check">✓</span>
+                    </button>
+                </span>
                 {#if commit.date}
                     <span class="diff-commit-date" title={formatDateTime(commit.date)}>{formatDate(commit.date)}</span>
                 {/if}
@@ -592,11 +612,56 @@ import { slide } from 'svelte/transition';
         max-height: 200px;
         overflow-y: auto;
     }
+    .diff-commit-hash-wrapper {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
     .diff-commit-hash {
         font-size: 0.75rem;
         font-family: var(--font-mono, monospace);
         color: var(--color-text-tertiary);
         flex-shrink: 0;
+    }
+    .diff-hash-copy-btn {
+        background: none;
+        border: none;
+        color: var(--color-text-tertiary);
+        cursor: pointer;
+        padding: 0;
+        border-radius: var(--radius-sm);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+        position: relative;
+        transition: color 0.15s ease;
+    }
+    .diff-hash-copy-btn:hover {
+        color: var(--color-text-primary);
+    }
+    .diff-hash-copy-btn .icon {
+        opacity: 1;
+        transition: opacity 0.2s ease;
+    }
+    .diff-hash-copy-btn.copied .icon {
+        opacity: 0;
+    }
+    .diff-hash-copy-btn .check {
+        position: absolute;
+        opacity: 0;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1;
+        transition: opacity 0.2s ease;
+        pointer-events: none;
+        color: var(--color-status-green);
+    }
+    .diff-hash-copy-btn.copied .check {
+        opacity: 1;
     }
     .diff-commit-date {
         font-size: 0.75rem;
