@@ -459,8 +459,8 @@ func TestExtractCommitContext_LastAssistantNoRequestReviewNoneAtAll(t *testing.T
 	}
 }
 
-func TestExtractCommitContext_MultipleRequestReviewsUsesLast(t *testing.T) {
-	// Multiple request_review calls — should include tool results from the LAST one
+func TestExtractCommitContext_MultipleRequestReviewsUsesAll(t *testing.T) {
+	// Multiple request_review calls — should include ALL of them
 	messages := []types.ChatMessage{
 		{Role: "user", Content: "Build feature"},
 		// First request_review (intermediate)
@@ -482,22 +482,28 @@ func TestExtractCommitContext_MultipleRequestReviewsUsesLast(t *testing.T) {
 
 	result := ExtractCommitContext(messages)
 
-	// Should include: first user + last assistant + tool results from LAST request_review
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(result))
+	// Should include: first user + ALL request_review assistants + all their tool results
+	if len(result) != 5 {
+		t.Fatalf("expected 5 messages, got %d", len(result))
 	}
-	// The tool result should be from the LAST request_review, not the first
-	if result[2].Role != "tool" {
-		t.Errorf("third role = %q, want tool", result[2].Role)
+	if result[0].Role != "user" || result[0].Content != "Build feature" {
+		t.Errorf("first = %q, want user 'Build feature'", result[0].Content)
 	}
-	if result[2].Content != "Task complete" {
-		t.Errorf("tool result = %q, want %q (should be from last request_review)", result[2].Content, "Task complete")
+	if result[1].Role != "assistant" || result[1].Content != "Phase 1 done" {
+		t.Errorf("second = %q, want first request_review assistant", result[1].Content)
 	}
-	// Should NOT include the first request_review's tool result
+	if result[2].Role != "assistant" || result[2].Content != "All done. Final summary." {
+		t.Errorf("third = %q, want final request_review assistant", result[2].Content)
+	}
+	// Both tool results present, in chronological order
+	var toolContents []string
 	for _, m := range result {
-		if m.Content == "Task complete phase 1" {
-			t.Error("should not include tool result from first request_review")
+		if m.Role == "tool" {
+			toolContents = append(toolContents, m.Content)
 		}
+	}
+	if len(toolContents) != 2 || toolContents[0] != "Task complete phase 1" || toolContents[1] != "Task complete" {
+		t.Errorf("tool results = %v, want [Task complete phase 1, Task complete]", toolContents)
 	}
 }
 
