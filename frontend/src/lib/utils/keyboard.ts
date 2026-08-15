@@ -134,3 +134,11 @@ export function matchesCreateTaskSubmitKey(config: Config | null | undefined, e:
 export function shortcutHintsHidden(config: Config | null | undefined): boolean {
     return config?.keyboard_shortcuts?.hide_hints === true;
 }
+
+/** True when the element receives text input (shortcuts/arrow nav shouldn't fire). */
+export function isEditableTarget(el: EventTarget | null): boolean {
+    if (!(el instanceof HTMLElement)) return false;
+    if (el.isContentEditable) return true;
+    const tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
