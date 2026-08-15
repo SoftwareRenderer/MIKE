@@ -21,6 +21,7 @@
     import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
     import { resolveWorker, getModelName } from '$lib/utils/providers';
     import { applyExploreModeRule } from '$lib/utils/explore-mode';
+    import { matchesCreateTaskSubmitKey, effectiveCreateTaskSubmitKey, formatShortcut, shortcutHintsHidden } from '$lib/utils/keyboard';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
 
@@ -238,6 +239,28 @@
         return provider ? isAgentProvider(provider) : false;
     });
 
+    // Shared guard for the Create button and the submit shortcut (Settings → Preferences).
+    const canSubmit = $derived(!loading && prompt.trim() !== '' && (!hasProviders || !!selectedModel));
+    // Shortcut label for the Create button (tooltip + keycap); empty when disabled.
+    const submitHintLabel = $derived.by(() => {
+        const key = effectiveCreateTaskSubmitKey(appStore.config);
+        return key ? formatShortcut(key) : '';
+    });
+    const hintsHidden = $derived(shortcutHintsHidden(appStore.config));
+
+    // The submit shortcut fires from anywhere in the dialog (description included).
+    $effect(() => {
+        const handleKeydown = (e: KeyboardEvent) => {
+            if (e.repeat || !canSubmit || dialogStore.confirmation) return;
+            if (matchesCreateTaskSubmitKey(appStore.config, e)) {
+                e.preventDefault();
+                handleSubmit();
+            }
+        };
+        window.addEventListener('keydown', handleKeydown);
+        return () => window.removeEventListener('keydown', handleKeydown);
+    });
+
     // Config is now reactive via appStore
     let cfg: Config | null = $state(null);
     $effect(() => { cfg = appStore.config; });
@@ -403,8 +426,8 @@
 
 {#snippet footer()}
     <button type="button" class="btn-secondary" onclick={handleCancel} title="Cancel">Cancel</button>
-    <button type="button" class="btn-primary" disabled={loading || !prompt.trim() || (hasProviders && !selectedModel)} onclick={handleSubmit} title="Create the task">
-        {loading ? 'Creating...' : 'Create Task'}
+    <button type="button" class="btn-primary" disabled={!canSubmit} onclick={handleSubmit} title={`Create the task${submitHintLabel ? ` (${submitHintLabel})` : ''}`}>
+        {loading ? 'Creating...' : 'Create Task'}{#if submitHintLabel && !hintsHidden}<kbd class="key-hint">{submitHintLabel}</kbd>{/if}
     </button>
 {/snippet}
 

@@ -11,6 +11,7 @@
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import TaskDefaults from './ConfigModal/TaskDefaults.svelte';
+    import PreferencesTab from './ConfigModal/PreferencesTab.svelte';
     import ProviderCard from './ConfigModal/ProviderCard.svelte';
     import ExtensionsTab from './ConfigModal/ExtensionsTab.svelte';
     import pwaIcon from '$lib/assets/icons/pwa-icon.svg?raw';
@@ -45,6 +46,11 @@
     let defaultOperatingMode = $state('act');
     let defaultMaxFailedTurns = $state(3);
     let defaultAutoSummarizeThreshold = $state(90);
+    // Keyboard shortcut bindings (undefined = default, "" = disabled).
+    // The Save payload always sends BOTH bindings (absent = reset to default).
+    let keyboardCreateTask = $state<string | undefined>(undefined);
+    let keyboardCreateTaskSubmit = $state<string | undefined>(undefined);
+    let keyboardHideHints = $state(false);
     let loading = $state(false);
     let error = $state('');
 
@@ -179,6 +185,9 @@
         defaultOperatingMode = config?.default_operating_mode ?? 'act';
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
         defaultAutoSummarizeThreshold = config?.default_auto_summarize_threshold ?? 90;
+        keyboardCreateTask = config?.keyboard_shortcuts?.create_task;
+        keyboardCreateTaskSubmit = config?.keyboard_shortcuts?.create_task_submit;
+        keyboardHideHints = config?.keyboard_shortcuts?.hide_hints === true;
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
         hasChanges = false;
@@ -584,6 +593,7 @@
                 default_operating_mode: defaultOperatingMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
                 default_auto_summarize_threshold: defaultAutoSummarizeThreshold,
+                keyboard_shortcuts: { create_task: keyboardCreateTask, create_task_submit: keyboardCreateTaskSubmit, hide_hints: keyboardHideHints },
             } as Config);
             appStore.config = cfg;
             onSaved();
@@ -649,6 +659,7 @@
         <div class="header-tabs">
             <button type="button" class="tab-btn" class:active={activeTab === 'providers'} onclick={() => activeTab = 'providers'}>Providers</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'task-defaults'} onclick={() => activeTab = 'task-defaults'}>Task Defaults</button>
+            <button type="button" class="tab-btn" class:active={activeTab === 'preferences'} onclick={() => activeTab = 'preferences'}>Preferences</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'extensions'} onclick={() => activeTab = 'extensions'}>Extensions</button>
             <button type="button" class="tab-btn" class:active={activeTab === 'about'} onclick={() => activeTab = 'about'}>About</button>
         </div>
@@ -834,6 +845,11 @@
                 originBranch={appStore.selectedProject?.origin_branch || 'main'}
                 onDirty={markDirty}
             />
+        {/if}
+
+        <!-- Preferences Tab -->
+        {#if activeTab === 'preferences'}
+            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:hideHints={keyboardHideHints} onDirty={markDirty} />
         {/if}
 
         <!-- Extensions Tab -->

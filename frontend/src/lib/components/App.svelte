@@ -8,6 +8,7 @@ import { createStreamingContext, createTaskDiffContext, createCommitQueueContext
 import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
 import { getBoardCache, boardCacheKey } from '$lib/storage';
 import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
+import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
 import kanbanIcon from '$lib/assets/icons/kanban.svg';
     import type { Project, Task, Config, StreamEvent } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
@@ -187,6 +188,33 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     let currentBranch = $state('');
     let urlFileId = $state(new URLSearchParams(location.search).get('file') || '');
     let mobileMenuOpen = $state(false);
+
+    // Keyboard shortcuts (Settings → Preferences): active only on the visible board with no modal open.
+    function boardShortcutsEnabled(): boolean {
+        return (
+            !!currentProject &&
+            !(uiStore.showCardDetail && appStore.selectedTask) &&
+            !showExplorerViewVal &&
+            !showTaskExplorerVal &&
+            !uiStore.showCreateTask &&
+            !uiStore.showConfig &&
+            !uiStore.showTerminal &&
+            !uiStore.showStats &&
+            !uiStore.showSandboxConfig &&
+            !appStore.showEditTask &&
+            !dialogStore.confirmation &&
+            !dialogStore.commitDialog &&
+            !dialogStore.compressContextDialog
+        );
+    }
+    useKeyboardShortcuts({
+        isEnabled: boardShortcutsEnabled,
+        onCreateTask: () => {
+            uiStore.creatingChildOf = null;
+            uiStore.showCreateTask = true;
+        },
+    });
+
     let isAuthenticated = $state(false);
     let isLoadingAuth = $state(true);
     let servingFromCache = $state(false);
