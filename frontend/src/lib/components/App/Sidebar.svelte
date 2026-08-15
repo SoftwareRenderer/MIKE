@@ -4,6 +4,7 @@
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
+    import { boardEdgeCard } from '$lib/composables/use-board-arrow-nav';
     // UI extension injection point — re-render when extensions change
     $effect(() => {
         const _v = uiInjector.getPointVersion(INJECTION_POINTS.PROJECT_SIDEBAR);
@@ -42,6 +43,31 @@
         onAddProject: () => void;
     } = $props();
 
+    /** Arrows on project items: Up/Down select prev/next (click + wrap); Right/Left jump to the first board/done card. */
+    function handleProjectItemKeydown(e: KeyboardEvent, idx: number) {
+        if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        const current = e.currentTarget;
+        if (!(current instanceof Element)) return;
+        const nav = current.closest('nav.project-list');
+        const items = Array.from(nav?.querySelectorAll<HTMLButtonElement>('button.project-item') ?? []);
+        if (!items.length || idx >= items.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+            const card = boardEdgeCard(e.key === 'ArrowRight' ? 'first' : 'last');
+            if (card) {
+                card.focus();
+                card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            }
+            return;
+        }
+        const dir = e.key === 'ArrowUp' ? -1 : 1;
+        const next = items[(idx + dir + items.length) % items.length];
+        next.click();
+        next.focus();
+    }
+
     // Sort projects alphabetically (case-insensitive) for display — without mutating the source array
     const sortedProjects = $derived(
         [...projects].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
@@ -61,11 +87,12 @@
         </button>
     </div>
     <nav class="project-list" aria-label="Projects">
-        {#each sortedProjects as p (p.id)}
+        {#each sortedProjects as p, i (p.id)}
             <div class="project-item-wrapper" class:active={currentProject?.id === p.id} class:has-review={projectCounts[p.id]?.review > 0}>
                 <div class="project-item-content">
                     <button
                         class="project-item"
+                        onkeydown={(e) => handleProjectItemKeydown(e, i)}
                         onclick={() => onSelectProject(p)}
                         title={projectCounts[p.id]?.review > 0 ? `${p.name} - ${projectCounts[p.id].review} task${projectCounts[p.id].review === 1 ? '' : 's'} available for review` : `Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}`}
                     >
@@ -270,6 +297,11 @@
     }
     .project-item:hover {
         background: var(--color-surface-2);
+    }
+    /* Focused-project ring: must stay an INSET box-shadow — ancestor overflow:hidden
+       (collapse transition) clips any outline drawn outside the button box. */
+    .project-item:focus {
+        box-shadow: inset 0 0 0 2px var(--color-accent);
     }
     .sandbox-badge {
         flex-shrink: 0;

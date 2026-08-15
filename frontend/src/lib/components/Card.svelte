@@ -987,6 +987,7 @@
         to { transform: rotate(360deg); }
     }
     .card:hover:not(:has(.card:hover)) > .card-title > .card-title-text,
+    .card:focus-within:not(:has(.card:focus-within)) > .card-title > .card-title-text,
     .card.selected > .card-title > .card-title-text {
         /* --idle-px covers the Idle badge being wider than a 26px icon slot */
         padding-right: calc(var(--actions) * 28px + var(--idle-px, 0px) + 6px);
@@ -1003,6 +1004,7 @@
         transition: opacity 0.15s ease;
     }
     .card:hover:not(:has(.card:hover)) > .card-title > .card-actions,
+    .card:focus-within:not(:has(.card:focus-within)) > .card-title > .card-actions,
     .card.selected > .card-title > .card-actions {
         opacity: 1;
         pointer-events: auto;
