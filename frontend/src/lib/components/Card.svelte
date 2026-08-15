@@ -864,7 +864,6 @@
         user-select: none;
         -webkit-user-select: none;
         -webkit-user-drag: element;
-        will-change: transform;
         contain: layout style paint;
     }
     /* Diagonal fade overlay for tasks with queued offline actions */

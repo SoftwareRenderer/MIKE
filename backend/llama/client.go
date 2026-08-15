@@ -163,10 +163,24 @@ func setThinkingParams(reqBody map[string]any, t *ThinkingParams) {
 	reqBody["reasoning_budget_message"] = msg
 }
 
+// hasUserMessage reports whether the message list contains at least one user
+// message. Some chat templates raise an error for system-only requests.
+func hasUserMessage(messages []types.ChatMessage) bool {
+	for _, m := range messages {
+		if m.Role == "user" {
+			return true
+		}
+	}
+	return false
+}
+
 // ChatStream sends a chat completion request with streaming.
 func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessage, tools []types.ChatTool, cb types.StreamCallback, onProgress types.PromptProgressCallback) (*types.ChatUsage, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("llama server URL not configured")
+	}
+	if !hasUserMessage(messages) {
+		return nil, fmt.Errorf("no user message in chat request; chat templates require at least one")
 	}
 
 	url := c.baseURL + "/chat/completions"
@@ -331,6 +345,9 @@ type ChatCompletionOptions struct {
 func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatMessage, opts *ChatCompletionOptions) (*types.ChatUsage, string, error) {
 	if c.baseURL == "" {
 		return nil, "", fmt.Errorf("llama server URL not configured")
+	}
+	if !hasUserMessage(messages) {
+		return nil, "", fmt.Errorf("no user message in chat request; chat templates require at least one")
 	}
 
 	var maxTokens int

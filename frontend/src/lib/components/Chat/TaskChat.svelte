@@ -30,10 +30,6 @@
     let connecting = $state(true);
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let scrollEl: HTMLElement | null = null;
-    // VirtualList ref for scrollToBottom
-    let virtualList: {
-        scrollToBottom: () => void;
-    } | null = $state(null);
     // Hide entries until scrolled to bottom (avoids flash)
     let entriesReady = $state(false);
     // True while the initial conversation history is being fetched
@@ -612,13 +608,13 @@
     function scroll(force = false) {
         entriesReady = true;
         if (!force && !atBottom) return;
-        if (virtualList) {
-            virtualList.scrollToBottom();
-            requestAnimationFrame(() => virtualList?.scrollToBottom());
-            return;
-        }
         if (!scrollEl) return;
         scrollEl.scrollTop = scrollEl.scrollHeight;
+        // Streaming entries keep growing after this frame; pin once more on the
+        // next frame so the viewport stays on the latest content.
+        requestAnimationFrame(() => {
+            if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+        });
     }
 
     // Scroll handler — updates atBottom synchronously so a user scroll-up is
@@ -1367,9 +1363,7 @@
         {onViewChanges}
         {onToggleFullscreen}
         {isChatFullscreen}
-        {scrollEl}
         onScrollElChange={(el) => scrollEl = el}
-        onVirtualListChange={(comp) => virtualList = comp}
         {entriesReady}
         {historyLoading}
     />
