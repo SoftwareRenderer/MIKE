@@ -78,16 +78,18 @@ func (te *TaskExecutor) summarizeContext(ctx context.Context, messages []types.C
 	oldLen := len(messages)
 
 	chatHistory := formatChatHistory(messages, previousSummary != "")
-	summarizePrompt, err := prompts.RenderSummarizePrompt(prompts.SummarizeData{
+	systemPrompt, userPrompt, err := prompts.RenderSummarizePrompt(prompts.SummarizeData{
 		ChatHistory:     chatHistory,
 		PreviousSummary: previousSummary,
 	})
 	if err != nil {
 		return summarizeResult{}, fmt.Errorf("load summarize prompt: %w", err)
 	}
-	// Chat history is embedded in the system prompt.
+	// Conversation data (previous summary + chat history) goes in the user
+	// message; some chat templates reject system-only requests.
 	summarizeMessages := []types.ChatMessage{
-		{Role: "system", Content: summarizePrompt},
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
 	}
 
 	// Non-streaming, with reasoning enabled.

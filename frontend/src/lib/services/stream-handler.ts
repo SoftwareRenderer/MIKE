@@ -156,58 +156,35 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const newActive = new Map(s.activeToolCalls);
                 newActive.delete(data.tool_id);
                 s.activeToolCalls = newActive;
+                // Locate via active-call ref, or — for DB-loaded/auto-answered
+                // re-broadcasts — by scanning entries for tool_id.
+                let tc: ToolCallInfo | undefined;
                 if (ref) {
-                    // Access tc through current s.entries proxy so mutations trigger reactivity.
+                    // Mutate via the entries proxy so changes are reactive.
                     const entry = s.entries.find(e => e.id === ref.entryId);
-                    const tc = entry?.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id);
-                    if (tc) {
-                        // When streamed=true and output was already accumulated via tool_output,
-                        // keep the full streamed content instead of overwriting with the preview.
-                        if (data.streamed && tc.result) {
-                            // keep tc.result as-is (full streamed content)
-                        } else {
-                            tc.result = data.output;
-                        }
-                        tc.success = data.success;
-                        tc.duration = data.duration;
-                        tc.isPending = false;
-                        if (data.args) tc.args = data.args;
-                        if (data.raw_args) tc.raw_args = data.raw_args;
-                        if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
-                        if (data.path !== undefined) tc.path = data.path;
-                        if (data.result_truncated !== undefined) tc.resultTruncated = data.result_truncated;
-                        if (data.original_lines !== undefined) tc.originalLines = data.original_lines;
-                        if (data.original_bytes !== undefined) tc.originalBytes = data.original_bytes;
-                        if (data.message_id) tc.messageId = data.message_id;
-                    }
+                    tc = entry?.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id);
                 } else {
-                    // Tool call loaded from DB after page refresh (not in activeToolCalls), or
-                    // an already-resolved call being re-broadcast (e.g. ask_question auto-answer
-                    // replaces the original question result). Match by tool_id regardless of
-                    // pending state so the latest result is applied in place.
                     for (const entry of s.entries) {
-                        const tc = entry.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id);
-                        if (tc) {
-                            // Same logic: preserve streamed output when available
-                            if (data.streamed && tc.result) {
-                                // keep tc.result as-is
-                            } else {
-                                tc.result = data.output;
-                            }
-                            tc.success = data.success;
-                            tc.duration = data.duration;
-                            tc.isPending = false;
-                            if (data.args) tc.args = data.args;
-                            if (data.raw_args) tc.raw_args = data.raw_args;
-                            if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
-                            if (data.path !== undefined) tc.path = data.path;
-                            if (data.result_truncated !== undefined) tc.resultTruncated = data.result_truncated;
-                            if (data.original_lines !== undefined) tc.originalLines = data.original_lines;
-                            if (data.original_bytes !== undefined) tc.originalBytes = data.original_bytes;
-                            if (data.message_id) tc.messageId = data.message_id;
-                            break;
-                        }
+                        tc = entry.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id);
+                        if (tc) break;
                     }
+                }
+                if (tc) {
+                    // Keep full streamed content over the preview when present.
+                    if (!(data.streamed && tc.result)) {
+                        tc.result = data.output;
+                    }
+                    tc.success = data.success;
+                    tc.duration = data.duration;
+                    tc.isPending = false;
+                    if (data.args) tc.args = data.args;
+                    if (data.raw_args) tc.raw_args = data.raw_args;
+                    if (data.sandbox !== undefined) tc.sandbox = data.sandbox;
+                    if (data.path !== undefined) tc.path = data.path;
+                    if (data.result_truncated !== undefined) tc.resultTruncated = data.result_truncated;
+                    if (data.original_lines !== undefined) tc.originalLines = data.original_lines;
+                    if (data.original_bytes !== undefined) tc.originalBytes = data.original_bytes;
+                    if (data.message_id) tc.messageId = data.message_id;
                 }
                 if (s.activeToolCalls.size === 0) {
                     stream.closeCurrentAssistant();

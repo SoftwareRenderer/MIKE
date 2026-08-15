@@ -490,6 +490,123 @@ func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
 	}
 }
 
+// seedCreateTaskHistory persists a create_task tool_call message (and its
+// result) for a task, simulating a create_task that ran in an earlier
+// execution. The referenced child task is created in the store so the plan
+// summary count can find it.
+func seedCreateTaskHistory(t *testing.T, s *store.Store, planTaskID, threadID, callID, childID, title string, success bool) {
+	t.Helper()
+	now := time.Now().UTC()
+	child := &types.Task{
+		ID:             childID,
+		ProjectID:      "proj-1",
+		Title:          title,
+		Prompt:         "Seeded child prompt",
+		Status:         "backlog",
+		ExecutionState: "idle",
+		ParentTaskID:   planTaskID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if err := s.CreateTask(child); err != nil {
+		t.Fatalf("create seeded child: %v", err)
+	}
+	output, _ := json.Marshal(map[string]string{"task_id": childID, "title": title})
+	result, _ := json.Marshal(map[string]any{
+		"output":   string(output),
+		"success":  success,
+		"duration": 1,
+	})
+	tc, _ := json.Marshal(map[string]any{
+		"tool_id":           callID,
+		"tool_name":         "create_task",
+		"tool_display_name": "Create Task",
+		"args":              map[string]any{"title": title, "prompt": "Seeded child prompt"},
+		"raw_args":          fmt.Sprintf(`{"title":%q,"prompt":"Seeded child prompt"}`, title),
+		"sandbox":           false,
+	})
+	msg := &types.TaskMessage{
+		ID:         "seeded-" + callID,
+		TaskID:     planTaskID,
+		ThreadID:   threadID,
+		Role:       "tool_call",
+		ToolCalls:  string(tc),
+		ToolResult: string(result),
+		CreatedAt:  now,
+	}
+	if err := s.CreateTaskMessage(msg); err != nil {
+		t.Fatalf("seed tool_call message: %v", err)
+	}
+}
+
+func TestTaskComplete_PlanMode_CountsHistoryCreateTask(t *testing.T) {
+	te := newTestExecutor(t)
+	plan := createParentTask(t, te.store, "plan-task-h1", "proj-1", "backlog")
+
+	// Simulate a previous execution: a Main thread with a successful
+	// create_task tool call, and the child task on the board.
+	thread := &types.TaskThread{ID: "thread-h1", TaskID: plan.ID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}
+	if err := te.store.CreateThread(thread); err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	seedCreateTaskHistory(t, te.store, plan.ID, "thread-h1", "call-h1", "child-h1", "Seeded Child", true)
+
+	// Fresh execution state — nothing created in this execution.
+	state := &executionState{}
+	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{"summary": "Plan complete"}, "", plan, state, nil)
+	if !ok {
+		t.Errorf("expected request_review to succeed using history, got: %s", result)
+	}
+}
+
+func TestTaskComplete_PlanMode_HistoryFailedCreateTaskDoesNotCount(t *testing.T) {
+	te := newTestExecutor(t)
+	plan := createParentTask(t, te.store, "plan-task-h2", "proj-1", "backlog")
+	thread := &types.TaskThread{ID: "thread-h2", TaskID: plan.ID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}
+	if err := te.store.CreateThread(thread); err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	seedCreateTaskHistory(t, te.store, plan.ID, "thread-h2", "call-h2", "child-h2", "Seeded Child", false)
+
+	state := &executionState{}
+	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{"summary": "Plan complete"}, "", plan, state, nil)
+	if ok {
+		t.Error("expected request_review to fail: a failed create_task in history should not count")
+	}
+	if !strings.Contains(result, "Cannot complete planning without creating") {
+		t.Errorf("unexpected error message: %s", result)
+	}
+}
+
+func TestPlanCreatedTaskIDs_MergesHistoryAndState(t *testing.T) {
+	te := newTestExecutor(t)
+	plan := createParentTask(t, te.store, "plan-task-h4", "proj-1", "backlog")
+	thread := &types.TaskThread{ID: "thread-h4", TaskID: plan.ID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}
+	if err := te.store.CreateThread(thread); err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	seedCreateTaskHistory(t, te.store, plan.ID, "thread-h4", "call-h4a", "child-a", "Child A", true)
+	seedCreateTaskHistory(t, te.store, plan.ID, "thread-h4", "call-h4b", "child-b", "Child B", true)
+	// Non-create_task tool call in history — must be ignored.
+	nonCreate, _ := json.Marshal(map[string]any{
+		"tool_id": "call-h4c", "tool_name": "write_file", "tool_display_name": "Write",
+		"args": map[string]any{"path": "x.go"}, "raw_args": `{"path":"x.go"}`, "sandbox": false,
+	})
+	res, _ := json.Marshal(map[string]any{"output": "ok", "success": true, "duration": 1})
+	if err := te.store.CreateTaskMessage(&types.TaskMessage{
+		ID: "seeded-call-h4c", TaskID: plan.ID, ThreadID: "thread-h4", Role: "tool_call",
+		ToolCalls: string(nonCreate), ToolResult: string(res), CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed non-create message: %v", err)
+	}
+	state := &executionState{createdIDs: []string{"child-a", "child-b"}}
+
+	ids := te.planCreatedTaskIDs(plan, state)
+	if len(ids) != 2 || ids[0] != "child-a" || ids[1] != "child-b" {
+		t.Errorf("expected [child-a child-b] (deduped), got %v", ids)
+	}
+}
+
 // newTestExecutorWithConfig creates a TaskExecutor with config defaults set.
 func newTestExecutorWithConfig(t *testing.T, autoMerge, subtasksAutoMerge bool) *TaskExecutor {
 	t.Helper()

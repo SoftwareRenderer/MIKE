@@ -57,9 +57,9 @@ describe('ChatEntries — Jump to latest button', () => {
 
     it('pins the viewport to the bottom when new entries arrive while at the bottom', () => {
         // When the user is at the bottom, the effect must keep up with new content
-        // by scrolling the virtual list to the bottom (immediate + next frame).
-        expect(source).toContain('virtualListComp?.scrollToBottom()');
-        expect(source).toMatch(/requestAnimationFrame\s*\(\s*\(\s*\)\s*=>\s*virtualListComp\?\.scrollToBottom\(\)/);
+        // by scrolling the chat container to the bottom (immediate + next frame).
+        expect(source).toContain('scrollToBottom()');
+        expect(source).toMatch(/requestAnimationFrame\s*\(\s*\(\s*\)\s*=>\s*scrollToBottom\(\)/);
     });
 
     it('renders a jump-to-latest button with class chat-jump-latest', () => {
@@ -83,10 +83,10 @@ describe('ChatEntries — Jump to latest button', () => {
         expect(source).toMatch(/<svg[^>]*>.*-chevron.*<\/svg>|<svg[^>]*>.*arrow.*<\/svg>|<svg[^>]*>.*polyline.*<\/svg>|<svg[^>]*>.*path.*<\/svg>/is);
     });
 
-    it('the button click handler calls scrollToBottom on the virtual list', () => {
+    it('the button click handler calls scrollToBottom on the chat container', () => {
         expect(source).toMatch(/handleJumpLatest|jumpLatest|scrollToBottom/);
-        // Should call virtualListComp?.scrollToBottom()
-        expect(source).toContain('virtualListComp?.scrollToBottom()');
+        // Should call scrollToBottom() on the real DOM container
+        expect(source).toContain('scrollToBottom()');
     });
 
     it('the click handler uses requestAnimationFrame for a second scrollToBottom call', () => {
