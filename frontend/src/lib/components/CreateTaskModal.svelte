@@ -20,6 +20,7 @@
     import ModeSelect from './ModeSelect.svelte';
     import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
     import { resolveWorker, getModelName } from '$lib/utils/providers';
+    import { applyExploreModeRule } from '$lib/utils/explore-mode';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
 
@@ -29,6 +30,8 @@
     let autoCommit = $state(false);
 
     let operatingMode = $state('act'); // "act", "plan", or "explore"
+    let modeChangedByUser = $state(false);
+    let autoExploreBase = $state<string | null>(null);
     let autoMerge = $state(false);
     let subtasksAutoMerge = $state(true);
     let loading = $state(false);
@@ -99,6 +102,14 @@
     let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
     let promptTextarea: HTMLTextAreaElement | null = $state(null);
     const MENTION_DEBOUNCE_MS = 150;
+
+    function handlePromptInput() {
+        if (!isAgentSelected) {
+            const next = applyExploreModeRule(prompt, { mode: operatingMode, modeChangedByUser, autoExploreBase });
+            operatingMode = next.mode;
+            autoExploreBase = next.autoExploreBase;
+        }
+    }
 
     function handleMentionInput() {
         if (!promptTextarea) return;
@@ -417,7 +428,7 @@
                 {/each}
             </div>
         {/if}
-        <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={handleMentionInput} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
+        <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={() => { handlePromptInput(); handleMentionInput(); }} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
         <!-- Anchor for sandboxed UI extensions (e.g. GitHub issue importer) -->
         <div bind:this={extAnchor} class="ext-anchor"></div>
     </label>
@@ -443,7 +454,7 @@
                     <span class="config-desc">{MODE_DESCRIPTIONS[operatingMode] || ''}</span>
                 </div>
             </div>
-            <ModeSelect value={operatingMode} onChange={(m: string) => operatingMode = m} />
+            <ModeSelect value={operatingMode} onChange={(m: string) => { modeChangedByUser = true; operatingMode = m; }} />
         </div>
         {/if}
     </div>

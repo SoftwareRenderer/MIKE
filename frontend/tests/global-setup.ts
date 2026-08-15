@@ -305,8 +305,10 @@ async function killKanbanServer(): Promise<void> {
     let killed = false;
     try {
         const pids = execSync('lsof -ti:3000 2>/dev/null || true').toString().trim();
-        if (pids) {
-            execSync(`kill ${pids} 2>/dev/null || true`);
+        // Skip this process — killing it would SIGTERM the Playwright runner.
+        const toKill = pids ? pids.split('\n').map(p => p.trim()).filter(p => p && p !== String(process.pid)) : [];
+        if (toKill.length > 0) {
+            execSync(`kill ${toKill.join(' ')} 2>/dev/null || true`);
             console.log('[global-setup] Killed existing server on port 3000');
             killed = true;
         }
@@ -345,6 +347,7 @@ function waitForServer(port: number, timeout = 5000): Promise<void> {
         const start = Date.now();
         const tryConnect = () => {
             const req = http.get(`http://localhost:${port}/`, () => {
+                req.destroy(); // release the port socket
                 resolve();
             });
             req.on('error', () => {
