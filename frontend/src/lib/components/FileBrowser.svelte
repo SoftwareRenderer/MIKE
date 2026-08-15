@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import BaseModal from './BaseModal.svelte';
     import { ensureCsrfToken } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
@@ -35,6 +35,8 @@
     let initGitLoading = $state(false);
     let showNewFolder = $state(false);
     let newFolderName = $state('');
+    let newFolderInput: HTMLInputElement | null = $state(null);
+    let cloneUrlInput: HTMLInputElement | null = $state(null);
     let mkdirLoading = $state(false);
 
     // Clone tab state
@@ -109,11 +111,15 @@
         }
     }
 
-    function toggleNewFolder() {
+    async function toggleNewFolder() {
         if (!showNewFolder) {
             newFolderName = '';
         }
         showNewFolder = !showNewFolder;
+        if (showNewFolder) {
+            await tick(); // wait for the row to render
+            newFolderInput?.focus();
+        }
     }
 
     async function handleCreateFolder() {
@@ -162,9 +168,13 @@
         }
     }
 
-    function switchTab(tab: 'browse' | 'clone') {
+    async function switchTab(tab: 'browse' | 'clone') {
         cloneError = '';
         activeTab = tab;
+        if (tab === 'clone') {
+            await tick();
+            cloneUrlInput?.focus();
+        }
     }
 
     // Load user's home directory on mount
@@ -228,14 +238,13 @@
                 </div>
                 {#if showNewFolder}
                     <div class="new-folder-row">
-                        <!-- svelte-ignore a11y_autofocus -->
                         <input
                             type="text"
                             class="folder-name-input"
+                            bind:this={newFolderInput}
                             bind:value={newFolderName}
                             placeholder="Folder name"
                             onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') showNewFolder = false; }}
-                            autofocus
                             aria-label="New folder name"
                         />
                         <button class="btn-mini" onclick={handleCreateFolder} disabled={mkdirLoading || !newFolderName.trim()} title="Create">{mkdirLoading ? '...' : 'Create'}</button>
@@ -288,15 +297,14 @@
             {:else}
                 <div class="clone-form">
                     <label class="clone-label" for="clone-url">Git repository URL</label>
-                    <!-- svelte-ignore a11y_autofocus -->
                     <input
                         id="clone-url"
                         type="text"
                         class="clone-url-input"
+                        bind:this={cloneUrlInput}
                         bind:value={cloneUrl}
                         placeholder="https://github.com/org/repo.git"
                         onkeydown={(e) => { if (e.key === 'Enter' && !cloneLoading) handleClone(); }}
-                        autofocus
                         aria-label="Git repository URL"
                     />
                     <div class="clone-help">Supports HTTPS and SSH URLs (e.g. <code>git@github.com:org/repo.git</code>).</div>

@@ -269,6 +269,9 @@
     });
 
     onMount(async () => {
+        // Queue after BaseModal's focus-trap microtask (queued from its onMount, which
+        // runs before ours) so the textarea wins initial focus over the close button.
+        queueMicrotask(() => promptTextarea?.focus());
         // Fetch parent task title and defaults if creating a subtask
         if (parentId && projectId) {
             try {
@@ -428,7 +431,7 @@
                 {/each}
             </div>
         {/if}
-        <textarea bind:this={promptTextarea} id="task-description" autofocus bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={() => { handlePromptInput(); handleMentionInput(); }} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
+        <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={() => { handlePromptInput(); handleMentionInput(); }} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
         <!-- Anchor for sandboxed UI extensions (e.g. GitHub issue importer) -->
         <div bind:this={extAnchor} class="ext-anchor"></div>
     </label>
