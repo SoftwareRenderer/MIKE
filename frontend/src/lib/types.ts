@@ -236,6 +236,7 @@ export interface Provider {
     api_key?: string;          // masked ("••••••••••") when read from config, full value when sent
     models: ProviderModel[];
     concurrency: number;
+    max_requests_per_second: number; // 0 = unlimited; max new LLM request starts per second
     agent_config_dir?: string; // optional host path override for agent config dir; empty means use extension default
     input_price?: number;      // USD per 1M input (non-cached) tokens
     output_price?: number;     // USD per 1M output tokens
