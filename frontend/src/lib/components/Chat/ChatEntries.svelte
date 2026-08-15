@@ -4,7 +4,6 @@
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
     import QueueIndicator from './QueueIndicator.svelte';
-    import VirtualList from '$lib/components/VirtualList.svelte';
     import { formatToolArgs } from '$lib/utils/toolArgs';
     import { SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
 
@@ -40,9 +39,7 @@
         onViewChanges,
         onToggleFullscreen,
         isChatFullscreen,
-        scrollEl,
         onScrollElChange,
-        onVirtualListChange,
         entriesReady,
         historyLoading = false,
     }: {
@@ -77,9 +74,7 @@
         onViewChanges?: (commitHash: string) => void;
         onToggleFullscreen?: () => void;
         isChatFullscreen?: boolean;
-        scrollEl: HTMLElement | null;
         onScrollElChange?: (el: HTMLElement | null) => void;
-        onVirtualListChange?: (comp: { scrollToBottom: () => void } | null) => void;
         entriesReady?: boolean;
         historyLoading?: boolean;
     } = $props();
@@ -91,7 +86,7 @@
     // Estimate rendered height from message data.
     // Text: ~20px per line (explicit \n or wrapped ~70 chars).
     // Tool calls: header + args + result, estimated from data.
-    function getEstimatedHeight(entry: ChatEntry, _index: number): number {
+    function getEstimatedHeight(entry: ChatEntry): number {
         const padding = 24;
         if (entry.role === 'error') return padding + estimateTextHeight(entry.content, 50);
         if (entry.role === 'summarization') return padding + estimateTextHeight(entry.content, 70);
@@ -176,31 +171,33 @@
         return h;
     }
 
-    // Virtual list scroll element — received from VirtualList via callback
-    let chatScrollEl: HTMLElement | null = null;
-
-    // VirtualList component instance for accessing scrollToItem
-    let virtualListComp: {
-        scrollToItem: (index: number, behavior?: ScrollBehavior) => void;
-        scrollToBottom: () => void;
-        vs: {
-            getItemOffset: (index: number) => number;
-            totalHeight: number;
-        } | null;
-    } | null = $state(null);
+    // Scroll element — the real (non-virtualized) chat message container.
+    // Reactive so the parent is notified whenever the mounted container changes.
+    let chatScrollEl: HTMLElement | null = $state(null);
 
     // Track whether the user is scrolled to the bottom of the chat
     let atBottom = $state(true);
 
-    // Expose VirtualList ref to parent
+    // Scroll the chat container to the bottom (real DOM; the browser clamps).
+    function scrollToBottom() {
+        if (!chatScrollEl) return;
+        chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
+    }
+
+    // Scroll a specific entry index into view.
+    function scrollToItem(index: number, behavior: ScrollBehavior = 'auto') {
+        if (!chatScrollEl) return;
+        const el = chatScrollEl.querySelectorAll('.chat-entry')[index];
+        el?.scrollIntoView({ behavior, block: 'start' });
+    }
+
+    // Notify the parent of the (real-DOM) scroll element.
     $effect(() => {
-        if (onVirtualListChange) {
-            onVirtualListChange(virtualListComp);
-        }
+        onScrollElChange?.(chatScrollEl);
     });
 
-    // Edit diff expand/collapse overrides — lives here (above VirtualList)
-    // so state survives item unmount/remount during scroll.
+    // Edit diff expand/collapse overrides — lives here so the state survives
+    // entry re-renders (and off-screen content-visibility skips).
     // Keyed by toolId; undefined = use default (auto-expand for trivial diffs).
     let editDiffOverrides = $state<Record<string, boolean>>({});
 
@@ -247,16 +244,9 @@
         resolvedReasoningOverrides = { ...resolvedReasoningOverrides, [messageId]: content };
     }
 
-    function handleScrollElChange(el: HTMLElement | null) {
-        chatScrollEl = el;
-        if (onScrollElChange) {
-            onScrollElChange(el);
-        }
-    }
-
     // Compute sticky header from entry data based on scroll position.
-    // This replaces the DOM-based query approach with a data-driven one
-    // that works correctly with virtual scrolling.
+    // Data-driven (estimated heights, no DOM queries) so it stays cheap on
+    // every scroll event.
     let computedStickyMessage = $state('');
     let computedShowHeader = $state(false);
 
@@ -275,7 +265,7 @@
         let firstUserBottom = -1;
         for (let i = 0; i < entries.length; i++) {
             const entry = entries[i];
-            const h = getEstimatedHeight(entry, i);
+            const h = getEstimatedHeight(entry);
             if (entry.role === 'user') {
                 if (firstUserBottom < 0) firstUserBottom = offset + h;
                 if (offset <= scrollTop) {
@@ -290,21 +280,18 @@
 
     /** Scroll to the user message shown in the sticky header. */
     function handleStickyClickInternal() {
-        if (!computedStickyMessage || !virtualListComp) return;
+        if (!computedStickyMessage || !chatScrollEl) return;
         // Find the last user entry matching the sticky message content
         for (let i = entries.length - 1; i >= 0; i--) {
             const entry = entries[i];
             if (entry.role === 'user' && entry.content.split('\n')[0] === computedStickyMessage) {
-                virtualListComp.scrollToItem(i, 'smooth');
+                scrollToItem(i, 'smooth');
                 return;
             }
         }
     }
 
     /** Combined scroll handler: calls parent onScroll + computes sticky header + atBottom. */
-    function getEntryKey(_entry: ChatEntry, index: number): string {
-        return String(index);
-    }
     function handleCombinedScroll() {
         onScroll?.();
         computeStickyFromScroll();
@@ -323,20 +310,18 @@
         entries.length;
         computeStickyFromScroll();
         if (atBottom) {
-            // VirtualList always exposes scrollToBottom, but unit tests may stub
-            // the component — only pin the viewport when the method is available.
-            if (typeof virtualListComp?.scrollToBottom === 'function') {
-                virtualListComp.scrollToBottom();
-                requestAnimationFrame(() => virtualListComp?.scrollToBottom());
-            }
+            // Pin the viewport to the bottom as new content arrives (immediate +
+            // next frame, so growing streaming entries stay in view).
+            scrollToBottom();
+            requestAnimationFrame(() => scrollToBottom());
             atBottom = true;
         }
     });
 
     /** Scroll to the latest message and hide the jump button. */
     function handleJumpLatest() {
-        virtualListComp?.scrollToBottom();
-        requestAnimationFrame(() => virtualListComp?.scrollToBottom());
+        scrollToBottom();
+        requestAnimationFrame(() => scrollToBottom());
         atBottom = true;
     }
 </script>
@@ -358,7 +343,7 @@
     {/if}
 
     {#if entries.length === 0}
-        <div class="chat-messages" bind:this={scrollEl} role="region" aria-label="Chat messages" tabindex="-1">
+        <div class="chat-messages" bind:this={chatScrollEl} role="region" aria-label="Chat messages" tabindex="-1">
             {#if historyLoading}
                 <div class="chat-loading">
                     <span class="spinner"></span>
@@ -375,17 +360,10 @@
             {/if}
         </div>
     {:else}
-        <VirtualList
-            items={entries}
-            itemHeight={getEstimatedHeight}
-            getKey={getEntryKey}
-            overscan={5}
-            onScrollElChange={handleScrollElChange}
-            onscroll={handleCombinedScroll}
-            bind:this={virtualListComp}
-        >
-            {#snippet children({ item: entry, index: entryIdx })}
+        <div class="chat-messages" bind:this={chatScrollEl} role="region" aria-label="Chat messages" tabindex="-1" onscroll={handleCombinedScroll}>
+            {#each entries as entry, entryIdx (entry.id)}
                 {@const meta = entryMetas[entryIdx] as EntryMeta}
+                <div class="chat-entry">
                 {#if entry.role === 'user'}
                     {#if meta.cpThread || meta.cpState}
                         <div>
@@ -516,8 +494,9 @@
                         <ChatMessage role={entry.role} severity={entry.severity} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} formatToolArgs={formatToolArgs} onDelete={entry.role === 'system' ? () => onDismissError(entry.id) : () => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
                     </div>
                 {/if}
-            {/snippet}
-        </VirtualList>
+                </div>
+            {/each}
+        </div>
 
         {#if !atBottom && entries.length > 0}
             <button
@@ -559,6 +538,14 @@
         overflow-y: auto;
         padding: 8px 12px;
         min-height: 0;
+    }
+    /* Render every entry in the DOM (no JS virtualizer) but let the browser skip
+       paint/layout for entries far off-screen. `auto` remembers each entry's last
+       rendered size so scroll height stays stable; 64px is the fallback estimate.
+       This keeps long conversations smooth without a height cache. */
+    .chat-entry {
+        content-visibility: auto;
+        contain-intrinsic-size: auto 64px;
     }
     .chat-sticky-header {
         position: absolute;

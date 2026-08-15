@@ -11,9 +11,6 @@ vi.mock('$lib/components/Chat/CheckpointDivider.svelte', () => ({
 vi.mock('$lib/components/Chat/QueueIndicator.svelte', () => ({
     default: () => '<div class="mock-queue-indicator"></div>',
 }));
-vi.mock('$lib/components/VirtualList.svelte', () => ({
-    default: () => '<div class="mock-virtual-list"></div>',
-}));
 vi.mock('$lib/utils/toolArgs', () => ({
     formatToolArgs: vi.fn(() => ''),
 }));
@@ -50,7 +47,6 @@ const baseProps = {
     onMsgEdit: vi.fn(),
     onRegenerate: vi.fn(),
     onNavigateTask: vi.fn(),
-    scrollEl: null,
 };
 
 describe('ChatEntries — history loading indicator', () => {
