@@ -281,3 +281,114 @@ test.describe.serial('ModeSelect component', () => {
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
   });
 });
+
+test.describe.serial('Question mark auto-switches operating mode to Explore', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.card', { timeout: 10000 });
+  });
+
+  test('should switch to Explore when the description contains a ?', async ({ page }) => {
+    // Open the Create Task modal
+    await page.locator('.add-task-btn').first().click();
+    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
+
+    // Default mode is Act in the test environment
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Act');
+
+    // Type a description containing a question mark
+    await page.locator('#task-description').fill('Why is the login broken?');
+
+    // The mode should auto-switch to Explore
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Explore');
+
+    // The explore icon should be active
+    await expect(page.locator('.mode-btn .mode-icon.explore')).toBeVisible();
+
+    // Close modal (prompt is non-empty → confirm discard)
+    await page.locator('.modal .btn-secondary').click();
+    await expect(page.getByRole('button', { name: 'Discard' })).toBeVisible({ timeout: 5000 });
+    await page.getByRole('button', { name: 'Discard' }).click();
+    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('should revert to the previous mode when the ? is removed', async ({ page }) => {
+    // Open the Create Task modal
+    await page.locator('.add-task-btn').first().click();
+    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
+
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Act');
+
+    // Add a ? — mode switches to Explore
+    await page.locator('#task-description').fill('Why is the login broken?');
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Explore');
+
+    // Remove the ? — mode should revert to Act
+    await page.locator('#task-description').fill('Why is the login broken');
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Act');
+
+    // Type ? again and remove it again — still reverts
+    await page.locator('#task-description').fill('Why is the login broken?');
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Explore');
+    await page.locator('#task-description').fill('no question mark here');
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Act');
+
+    // Close modal (prompt is non-empty → confirm discard)
+    await page.locator('.modal .btn-secondary').click();
+    await expect(page.getByRole('button', { name: 'Discard' })).toBeVisible({ timeout: 5000 });
+    await page.getByRole('button', { name: 'Discard' }).click();
+    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('should not override a manually selected mode', async ({ page }) => {
+    // Open the Create Task modal
+    await page.locator('.add-task-btn').first().click();
+    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
+
+    // Manually select Plan mode
+    await page.locator('.mode-btn').click();
+    await expect(page.locator('.mode-dropdown')).toBeVisible({ timeout: 5000 });
+    await page.locator('.mode-option.plan').click();
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Plan');
+
+    // Add a ? — mode should STAY Plan (user changed it)
+    await page.locator('#task-description').fill('Why is the login broken?');
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Plan');
+
+    // Remove the ? — mode should STAY Plan (no revert)
+    await page.locator('#task-description').fill('Why is the login broken');
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Plan');
+
+    // Close modal (prompt is non-empty → confirm discard)
+    await page.locator('.modal .btn-secondary').click();
+    await expect(page.getByRole('button', { name: 'Discard' })).toBeVisible({ timeout: 5000 });
+    await page.getByRole('button', { name: 'Discard' }).click();
+    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('should create the task in Explore mode when the description contains a ?', async ({ page }) => {
+    const projectId = await getProjectId(page);
+    const uniquePrompt = `explore-qs-${Date.now()}`;
+
+    // Open the Create Task modal
+    await page.locator('.add-task-btn').first().click();
+    await expect(page.locator('.modal')).toBeVisible({ timeout: 5000 });
+
+    await page.locator('#task-description').fill(`${uniquePrompt}? What is going on?`);
+    await expect(page.locator('.mode-btn .mode-label')).toHaveText('Explore');
+
+    // Submit
+    await page.locator('.modal .btn-primary').click();
+    await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+
+    // Verify the created task persisted with operating_mode=explore
+    const task = await page.evaluate(async ({ pid, prompt }) => {
+      const res = await fetch(`/api/projects/${pid}/board`);
+      const board = await res.json();
+      return board.tasks.find((t: any) => t.prompt?.includes(prompt)) || null;
+    }, { pid: projectId, prompt: uniquePrompt });
+
+    expect(task).not.toBeNull();
+    expect(task.operating_mode).toBe('explore');
+  });
+});
