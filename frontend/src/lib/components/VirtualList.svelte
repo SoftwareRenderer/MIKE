@@ -1,24 +1,18 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
-    import { useVirtualScroll } from '$lib/composables/use-virtual-scroll.svelte';
 
     /**
-     * Generic virtual scroll list component.
+     * Fixed-height virtual scroll list component.
      *
-     * Renders only visible items plus an overscan buffer, using absolute
-     * positioning within a scrollable container. Items are automatically
-     * measured via ResizeObserver on their wrapper elements.
+     * Renders only visible rows plus a buffer, using absolute positioning
+     * within a scrollable container. Lists below `minThreshold` items render
+     * fully (no windowing). All rows must have the same height — use
+     * `content-visibility: auto` (see ChatEntries.svelte) instead for
+     * variable-height content.
      *
-     * Full API (for variable-height items):
-     *   <VirtualList {items} itemHeight={getEstimatedHeight} getKey={(i) => i.id}
-     *     onScrollElChange={(el) => scrollEl = el} overscan={5}>
-     *     {#snippet children({ item, index, offset })}
-     *       <div>{item.content}</div>
-     *     {/snippet}
-     *   </VirtualList>
-     *
-     * Fixed-height mode:
-     *   <VirtualList {items} itemHeight={28} minThreshold={50}>
+     * Usage:
+     *   <VirtualList {items} itemHeight={28} minThreshold={50}
+     *     onScrollElChange={(el) => scrollEl = el}>
      *     {#snippet children({ item, index })}
      *       <div>{item.name}</div>
      *     {/snippet}
@@ -28,9 +22,7 @@
         items,
         itemHeight = 28,
         minThreshold = 50,
-        overscan = 3,
         buffer = 5,
-        getKey,
         onScrollElChange,
         role,
         'aria-label': ariaLabel,
@@ -41,24 +33,18 @@
         ontouchstart,
     }: {
         items: any[];
-        itemHeight?: number | ((item: any, index: number) => number);
+        itemHeight?: number;
         minThreshold?: number;
-        overscan?: number;
         buffer?: number;
-        getKey?: (item: any, index: number) => string;
         onScrollElChange?: (el: HTMLElement | null) => void;
         role?: string;
         'aria-label'?: string;
         scrollTop?: number;
-        children: Snippet<[{ item: any; index: number; offset?: number; measure?: (el: HTMLElement | null) => void }]>;
+        children: Snippet<[{ item: any; index: number }]>;
         onscroll?: () => void;
         onwheel?: () => void;
         ontouchstart?: () => void;
     } = $props();
-
-    // Determine if we're using fixed-height or variable-height mode
-    let isFixedHeight = $derived(!getKey && typeof itemHeight === 'number');
-    let effectiveOverscan = $derived(isFixedHeight ? buffer : overscan);
 
     // Scroll container ref
     // svelte-ignore non_reactive_update
@@ -87,7 +73,7 @@
         }
     }
 
-    // Fixed-height: track internal scroll position and container height
+    // Track internal scroll position and container height
     let internalScrollTop = $state(0);
     let containerHeight = $state(0);
     let scrollTop = $derived(scrollTopProp ?? internalScrollTop);
@@ -99,13 +85,11 @@
         }
     });
 
-    // ── Fixed-height mode (minThreshold) ──
-
     let virtualized = $derived(items.length >= minThreshold);
-    let totalHeight = $derived(items.length * (typeof itemHeight === 'number' ? itemHeight : 28));
-    let startIndex = $derived(Math.max(0, Math.floor(scrollTop / (typeof itemHeight === 'number' ? itemHeight : 28)) - effectiveOverscan));
-    let endIndex = $derived(Math.min(items.length, Math.ceil((scrollTop + containerHeight) / (typeof itemHeight === 'number' ? itemHeight : 28)) + effectiveOverscan));
-    let visibleOffset = $derived(startIndex * (typeof itemHeight === 'number' ? itemHeight : 28));
+    let totalHeight = $derived(items.length * itemHeight);
+    let startIndex = $derived(Math.max(0, Math.floor(scrollTop / itemHeight) - buffer));
+    let endIndex = $derived(Math.min(items.length, Math.ceil((scrollTop + containerHeight) / itemHeight) + buffer));
+    let visibleOffset = $derived(startIndex * itemHeight);
 
     function handleScroll() {
         if (scrollEl) internalScrollTop = scrollEl.scrollTop;
@@ -115,31 +99,8 @@
         if (scrollEl) containerHeight = scrollEl.clientHeight;
     }
 
-    // ── Variable-height mode (useVirtualScroll) ──
-
-    // Virtual scroll controller (only used in variable-height mode)
-    // svelte-ignore non_reactive_update — vs is set once and its internal $state drives reactivity
-    let vs: ReturnType<typeof useVirtualScroll> | null = null;
-
-    // svelte-ignore state_referenced_locally — useVirtualScroll creates $state that is read by $derived consumers below
-    if (!isFixedHeight) {
-        vs = useVirtualScroll(
-            () => scrollEl,
-            () => items,
-            (index) => {
-                if (index < 0 || index >= items.length) return 60;
-                return typeof itemHeight === 'function'
-                    ? itemHeight(items[index], index)
-                    : itemHeight;
-            },
-            effectiveOverscan,
-            getKey,
-        );
-    }
-
-    // Initialize container height for fixed-height mode
     $effect(() => {
-        if (scrollEl && isFixedHeight) {
+        if (scrollEl) {
             containerHeight = scrollEl.clientHeight;
             scrollEl.addEventListener('scroll', handleScroll, { passive: true });
             window.addEventListener('resize', handleResize, { passive: true });
@@ -150,116 +111,11 @@
         }
     });
 
-    // Variable-height: visible items with offsets
-    let newVisibleItems = $derived.by(() => {
-        if (!vs || isFixedHeight) return [];
-        const result: Array<{ item: any; index: number; offset: number }> = [];
-        const end = Math.min(vs.endIdx, items.length);
-        for (let i = vs.startIdx; i < end; i++) {
-            result.push({
-                item: items[i],
-                index: i,
-                offset: vs.getItemOffset(i),
-            });
-        }
-        return result;
-    });
-
-    // Variable-height: ResizeObserver for measuring items
-    let itemObserver: ResizeObserver | null = null;
-    let observedIndices = new Set<number>();
-
-    $effect(() => {
-        if (!scrollEl || isFixedHeight || !vs) return;
-
-        // ResizeObserver: measures item heights when they render/change.
-        itemObserver = new ResizeObserver((entries) => {
-            for (const entry of entries) {
-                const target = entry.target as HTMLElement;
-                const index = parseInt(target.getAttribute('data-virtual-index') ?? '', 10);
-                if (isNaN(index)) continue;
-                const h = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
-                if (h > 0) {
-                    vs?.measureItem(index, Math.ceil(h));
-                }
-            }
-        });
-
-        // Observe initially rendered items.
-        const itemEls = scrollEl.querySelectorAll<HTMLElement>('.virtual-item[data-virtual-index]');
-        // Prune stale indices — removed virtual items leave dead entries behind.
-        // This bounds observedIndices to only indices whose elements are still in the DOM.
-        const aliveIndices = new Set<number>();
-        for (const el of itemEls) {
-            const index = parseInt(el.getAttribute('data-virtual-index') ?? '', 10);
-            if (isNaN(index)) continue;
-            aliveIndices.add(index);
-        }
-        for (const index of observedIndices) {
-            if (!aliveIndices.has(index)) {
-                observedIndices.delete(index);
-            }
-        }
-        for (const el of itemEls) {
-            const index = parseInt(el.getAttribute('data-virtual-index') ?? '', 10);
-            if (isNaN(index) || observedIndices.has(index)) continue;
-            observedIndices.add(index);
-            itemObserver.observe(el);
-        }
-
-        // MutationObserver picks up new items from scroll (no reactive cycle).
-        const spacer = scrollEl.querySelector('.virtual-spacer');
-        let mo: MutationObserver | null = null;
-        if (spacer) {
-            mo = new MutationObserver((mutations) => {
-                for (const mutation of mutations) {
-                    // Handle removed nodes first — clean up observed indices
-                    for (const node of mutation.removedNodes) {
-                        if (node.nodeType !== 1) continue;
-                        const el = node as HTMLElement;
-                        const removedItems = el.classList?.contains('virtual-item')
-                            ? [el]
-                            : Array.from(el.querySelectorAll<HTMLElement>('.virtual-item[data-virtual-index]'));
-                        for (const item of removedItems) {
-                            const index = parseInt(item.getAttribute('data-virtual-index') ?? '', 10);
-                            if (!isNaN(index)) observedIndices.delete(index);
-                        }
-                    }
-                    // Handle added nodes — observe new items
-                    for (const node of mutation.addedNodes) {
-                        if (node.nodeType !== 1) continue;
-                        const el = node as HTMLElement;
-                        // Direct virtual-item or parent of one
-                        const items = el.classList?.contains('virtual-item')
-                            ? [el]
-                            : Array.from(el.querySelectorAll<HTMLElement>('.virtual-item[data-virtual-index]'));
-                        for (const item of items) {
-                            const index = parseInt(item.getAttribute('data-virtual-index') ?? '', 10);
-                            if (isNaN(index) || observedIndices.has(index)) continue;
-                            observedIndices.add(index);
-                            itemObserver?.observe(item);
-                        }
-                    }
-                }
-            });
-            mo.observe(spacer, { childList: true });
-        }
-
-        return () => {
-            itemObserver?.disconnect();
-            itemObserver = null;
-            mo?.disconnect();
-            mo = null;
-            observedIndices.clear();
-        };
-    });
-
     /** Scroll to the bottom of the list. */
     function scrollToBottom() {
         if (scrollEl) {
             // Buffer past estimated height; browser clamps to actual max.
-            const h = isFixedHeight ? totalHeight : (vs?.totalHeight ?? 0);
-            scrollEl.scrollTop = h + 10000;
+            scrollEl.scrollTop = totalHeight + 10000;
         }
     }
 
@@ -273,73 +129,24 @@
     /** Check if the scroll container is near the bottom. */
     function isNearBottom(threshold = 32): boolean {
         if (!scrollEl) return true;
-        const h = isFixedHeight ? totalHeight : (vs?.totalHeight ?? 0);
-        const gap = h - scrollEl.scrollTop - scrollEl.clientHeight;
+        const gap = totalHeight - scrollEl.scrollTop - scrollEl.clientHeight;
         return gap < threshold;
     }
 
     /** Scroll to a specific item index. */
     function scrollToItem(index: number, behavior: ScrollBehavior = 'auto') {
         if (index < 0 || index >= items.length) return;
-        if (isFixedHeight) {
-            const h = typeof itemHeight === 'number' ? itemHeight : 28;
-            scrollToOffset(index * h, behavior);
-        } else if (vs) {
-            scrollToOffset(vs.getItemOffset(index), behavior);
-        }
+        scrollToOffset(index * itemHeight, behavior);
     }
 
     // Expose methods and state for parent access
     export { scrollEl as scrollElement, scrollToBottom, scrollToOffset, isNearBottom, scrollToItem };
-    export { vs };
 </script>
 
-{#if isFixedHeight}
-    {#if virtualized}
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div
-            class="virtual-scroll"
-            bind:this={scrollEl}
-            role={role}
-            aria-label={ariaLabel}
-            tabindex="0"
-            onscroll={onscroll}
-            onwheel={onwheel}
-            ontouchstart={ontouchstart}
-            onkeydown={handleKeydown}
-        >
-            <div class="virtual-spacer" style="height: {totalHeight}px">
-                <div class="virtual-content" style="transform: translateY({visibleOffset}px)">
-                    {#each items as item, idx}
-                        {#if idx >= startIndex && idx < endIndex}
-                            {@render children({ item, index: idx })}
-                        {/if}
-                    {/each}
-                </div>
-            </div>
-        </div>
-    {:else}
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <div
-            class="virtual-scroll"
-            bind:this={scrollEl}
-            role={role}
-            aria-label={ariaLabel}
-            tabindex="0"
-            onscroll={onscroll}
-            onwheel={onwheel}
-            ontouchstart={ontouchstart}
-            onkeydown={handleKeydown}
-        >
-            {#each items as item, index}
-                {@render children({ item, index })}
-            {/each}
-        </div>
-    {/if}
-{:else}
+{#if virtualized}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
-        class="virtual-list"
+        class="virtual-scroll"
         bind:this={scrollEl}
         role={role}
         aria-label={ariaLabel}
@@ -349,23 +156,37 @@
         ontouchstart={ontouchstart}
         onkeydown={handleKeydown}
     >
-        <div class="virtual-spacer" style="height: {vs?.totalHeight ?? 0}px; position: relative;">
-            {#each newVisibleItems as { item, index, offset }}
-                <div
-                    class="virtual-item"
-                    style="position: absolute; top: {offset}px; left: 0; right: 0;"
-                    data-virtual-index={index}
-                >
-                    {@render children({ item, index, offset })}
-                </div>
-            {/each}
+        <div class="virtual-spacer" style="height: {totalHeight}px">
+            <div class="virtual-content" style="transform: translateY({visibleOffset}px)">
+                {#each items as item, idx}
+                    {#if idx >= startIndex && idx < endIndex}
+                        {@render children({ item, index: idx })}
+                    {/if}
+                {/each}
+            </div>
         </div>
+    </div>
+{:else}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div
+        class="virtual-scroll"
+        bind:this={scrollEl}
+        role={role}
+        aria-label={ariaLabel}
+        tabindex="0"
+        onscroll={onscroll}
+        onwheel={onwheel}
+        ontouchstart={ontouchstart}
+        onkeydown={handleKeydown}
+    >
+        {#each items as item, index}
+            {@render children({ item, index })}
+        {/each}
     </div>
 {/if}
 
 <style>
-    .virtual-scroll,
-    .virtual-list {
+    .virtual-scroll {
         display: flex;
         flex-direction: column;
         flex: 1;
@@ -374,8 +195,7 @@
         overflow-x: hidden;
         outline: none;
     }
-    .virtual-scroll:focus-visible,
-    .virtual-list:focus-visible {
+    .virtual-scroll:focus-visible {
         box-shadow: inset 0 0 0 1px var(--color-accent);
     }
 
@@ -389,9 +209,5 @@
         top: 0;
         left: 0;
         right: 0;
-    }
-    .virtual-item {
-        padding: 0 12px;
-        will-change: transform;
     }
 </style>
