@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
     import { setCsrfToken } from '$lib/api';
     import BaseModal from './BaseModal.svelte';
 
@@ -36,8 +37,9 @@
         }
     }
 
-    $effect(() => {
-        setTimeout(() => passwordInput?.focus(), 50);
+    onMount(() => {
+        // Queue after BaseModal's focus-trap microtask so the password field wins initial focus
+        queueMicrotask(() => passwordInput?.focus());
     });
 </script>
 
@@ -52,7 +54,6 @@
         <div class="login-error" role="alert">{error}</div>
     {/if}
 
-    <!-- svelte-ignore a11y_autofocus — intentional focus on login form -->
     <input
         id="login-password"
         bind:this={passwordInput}
@@ -60,7 +61,6 @@
         bind:value={password}
         placeholder="Password"
         autocomplete="current-password"
-        autofocus
         aria-label="Password"
         onkeydown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
     />

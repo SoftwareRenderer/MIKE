@@ -50,11 +50,9 @@ export function createFocusTrap(container: HTMLElement, onClose?: () => void) {
     document.addEventListener('keydown', handleKeydown);
 
     return {
-        /** Focus the first focusable element in the container; an element marked `autofocus` takes precedence */
+        /** Focus the first focusable element; callers needing a specific initial focus should focus it programmatically */
         focusFirst() {
-            const focusable = getFocusableElements();
-            const auto = focusable.find(el => el.hasAttribute('autofocus'));
-            (auto ?? focusable[0])?.focus();
+            getFocusableElements()[0]?.focus();
         },
         /** Remove event listeners */
         destroy() {
