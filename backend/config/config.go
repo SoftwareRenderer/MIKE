@@ -235,6 +235,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	defaultOperatingModeRaw, _ := cs.store.GetConfigValue("default_operating_mode")
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
 	defaultAutoSummarizeThresholdRaw, _ := cs.store.GetConfigValue("default_auto_summarize_threshold")
+	keyboardShortcutsRaw, _ := cs.store.GetConfigValue("keyboard_shortcuts")
 
 	cfg := &types.Config{
 		WorkspaceDir:    workspaceDir,
@@ -268,7 +269,23 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	if v, err := parseIntPtr(defaultAutoSummarizeThresholdRaw); err == nil && v != nil {
 		cfg.DefaultAutoSummarizeThreshold = v
 	}
+	if keyboardShortcutsRaw != "" {
+		ks := &types.KeyboardShortcuts{}
+		if err := json.Unmarshal([]byte(keyboardShortcutsRaw), ks); err == nil {
+			cfg.KeyboardShortcuts = ks
+		}
+	}
+	cfg.KeyboardShortcuts = normalizeKeyboardShortcuts(cfg.KeyboardShortcuts)
 	return cfg, nil
+}
+
+// normalizeKeyboardShortcuts returns nil when no binding is set, so the
+// field is omitted from API responses.
+func normalizeKeyboardShortcuts(ks *types.KeyboardShortcuts) *types.KeyboardShortcuts {
+	if ks == nil || (ks.CreateTask == nil && ks.CreateTaskSubmit == nil && ks.HideHints == nil) {
+		return nil
+	}
+	return ks
 }
 
 // UpdateConfig persists the full server configuration and updates the in-memory override if set.
@@ -345,27 +362,37 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
+	if c.KeyboardShortcuts != nil {
+		ksJSON, err := json.Marshal(c.KeyboardShortcuts)
+		if err != nil {
+			return err
+		}
+		if err := cs.store.SetConfigValue("keyboard_shortcuts", string(ksJSON)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 // configResponse wraps Config with additional metadata for API responses.
 type configResponse struct {
-	WorkspaceDir                  string           `json:"workspace_dir"`
-	DatabasePath                  string           `json:"database_path"`
-	RegistryURL                   string           `json:"registry_url"`
-	Version                       string           `json:"version"`
-	Providers                     []types.Provider `json:"providers"`
-	WorkerProvider                string           `json:"worker_provider"`
-	WorkerModel                   string           `json:"worker_model"`
-	UtilityProvider               string           `json:"utility_provider"`
-	UtilityModel                  string           `json:"utility_model"`
-	DefaultAutoCommit             *bool            `json:"default_auto_commit"`
-	DefaultAutoMerge              *bool            `json:"default_auto_merge"`
-	DefaultSubtasksAutoMerge      *bool            `json:"default_subtasks_auto_merge"`
-	DefaultOperatingMode          *string          `json:"default_operating_mode"`
-	DefaultMaxFailedTurns         *int             `json:"default_max_failed_turns,omitempty"`
-	DefaultAutoSummarizeThreshold *int             `json:"default_auto_summarize_threshold,omitempty"`
-	EncryptionEnabled             bool             `json:"encryption_enabled"`
+	WorkspaceDir                  string                   `json:"workspace_dir"`
+	DatabasePath                  string                   `json:"database_path"`
+	RegistryURL                   string                   `json:"registry_url"`
+	Version                       string                   `json:"version"`
+	Providers                     []types.Provider         `json:"providers"`
+	WorkerProvider                string                   `json:"worker_provider"`
+	WorkerModel                   string                   `json:"worker_model"`
+	UtilityProvider               string                   `json:"utility_provider"`
+	UtilityModel                  string                   `json:"utility_model"`
+	DefaultAutoCommit             *bool                    `json:"default_auto_commit"`
+	DefaultAutoMerge              *bool                    `json:"default_auto_merge"`
+	DefaultSubtasksAutoMerge      *bool                    `json:"default_subtasks_auto_merge"`
+	DefaultOperatingMode          *string                  `json:"default_operating_mode"`
+	DefaultMaxFailedTurns         *int                     `json:"default_max_failed_turns,omitempty"`
+	DefaultAutoSummarizeThreshold *int                     `json:"default_auto_summarize_threshold,omitempty"`
+	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
+	EncryptionEnabled             bool                     `json:"encryption_enabled"`
 }
 
 // maskAPIKeys replaces non-empty API keys with a masked placeholder.
@@ -415,6 +442,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		DefaultOperatingMode:          cfg.DefaultOperatingMode,
 		DefaultMaxFailedTurns:         cfg.DefaultMaxFailedTurns,
 		DefaultAutoSummarizeThreshold: cfg.DefaultAutoSummarizeThreshold,
+		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
 		EncryptionEnabled:             crypto.IsEnabled(),
 	}
 }
@@ -513,6 +541,14 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 					v = 100
 				}
 				current.DefaultAutoSummarizeThreshold = &v
+			}
+		}
+		if ksRaw, ok := updates["keyboard_shortcuts"]; ok {
+			if ksJSON, err := json.Marshal(ksRaw); err == nil {
+				ks := &types.KeyboardShortcuts{}
+				if err := json.Unmarshal(ksJSON, ks); err == nil {
+					current.KeyboardShortcuts = ks
+				}
 			}
 		}
 		if err := cs.UpdateConfig(current); err != nil {

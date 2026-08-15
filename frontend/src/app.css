@@ -8,6 +8,28 @@ input[type="number"] {
     -moz-appearance: textfield;
 }
 
+/* Keycap hint shown on text buttons that have a keyboard shortcut */
+.key-hint {
+    font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
+    font-size: 0.6875rem;
+    line-height: 1.5;
+    padding: 0 6px;
+    margin-left: 8px;
+    border: 1px solid var(--color-border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--color-surface-2);
+    color: var(--color-text-tertiary);
+    white-space: nowrap;
+}
+
+/* No keycaps on mobile (matches the 768px isMobile breakpoint) */
+@media (max-width: 768px) {
+    .key-hint {
+        display: none;
+    }
+}
+
 :root {
     /* Surface palette */
     --color-surface-0: #141414;

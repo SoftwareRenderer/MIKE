@@ -73,20 +73,34 @@ type TaskThread struct {
 
 // Config represents global server configuration.
 type Config struct {
-	WorkspaceDir                  string     `json:"workspace_dir"`
-	DatabasePath                  string     `json:"database_path"`
-	RegistryURL                   string     `json:"registry_url"`
-	Providers                     []Provider `json:"providers"`
-	WorkerProvider                string     `json:"worker_provider"`
-	WorkerModel                   string     `json:"worker_model"`
-	UtilityProvider               string     `json:"utility_provider"`
-	UtilityModel                  string     `json:"utility_model"`
-	DefaultAutoCommit             *bool      `json:"default_auto_commit"`
-	DefaultAutoMerge              *bool      `json:"default_auto_merge"`
-	DefaultSubtasksAutoMerge      *bool      `json:"default_subtasks_auto_merge"`
-	DefaultOperatingMode          *string    `json:"default_operating_mode"`
-	DefaultMaxFailedTurns         *int       `json:"default_max_failed_turns,omitempty"`
-	DefaultAutoSummarizeThreshold *int       `json:"default_auto_summarize_threshold,omitempty"`
+	WorkspaceDir                  string             `json:"workspace_dir"`
+	DatabasePath                  string             `json:"database_path"`
+	RegistryURL                   string             `json:"registry_url"`
+	Providers                     []Provider         `json:"providers"`
+	WorkerProvider                string             `json:"worker_provider"`
+	WorkerModel                   string             `json:"worker_model"`
+	UtilityProvider               string             `json:"utility_provider"`
+	UtilityModel                  string             `json:"utility_model"`
+	DefaultAutoCommit             *bool              `json:"default_auto_commit"`
+	DefaultAutoMerge              *bool              `json:"default_auto_merge"`
+	DefaultSubtasksAutoMerge      *bool              `json:"default_subtasks_auto_merge"`
+	DefaultOperatingMode          *string            `json:"default_operating_mode"`
+	DefaultMaxFailedTurns         *int               `json:"default_max_failed_turns,omitempty"`
+	DefaultAutoSummarizeThreshold *int               `json:"default_auto_summarize_threshold,omitempty"`
+	KeyboardShortcuts             *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
+}
+
+// KeyboardShortcuts holds user-customizable keyboard shortcut bindings.
+// A nil binding means "use the default"; "" means disabled. Values are
+// normalized: modifiers in fixed order (control, meta, shift, alt) joined
+// with "+" then the key (e.g. "c", "shift+k").
+type KeyboardShortcuts struct {
+	// CreateTask opens the create-task dialog on the project board.
+	CreateTask *string `json:"create_task,omitempty"`
+	// CreateTaskSubmit creates the task inside the create-task dialog.
+	CreateTaskSubmit *string `json:"create_task_submit,omitempty"`
+	// HideHints hides the keycap hints on shortcut buttons (tooltips stay).
+	HideHints *bool `json:"hide_hints,omitempty"`
 }
 
 // ModelConfig represents a model with its per-model settings.

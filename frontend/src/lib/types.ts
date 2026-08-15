@@ -205,6 +205,19 @@ export interface Config {
     default_auto_summarize_threshold?: number; // percent of context window, 1-100
     encryption_enabled?: boolean;
     registry_url?: string;
+    keyboard_shortcuts?: KeyboardShortcuts;
+}
+
+/**
+ * Keyboard shortcut bindings (server-side). Normalized form: modifiers in
+ * fixed order (control, meta, shift, alt) joined with "+" then the key.
+ * undefined = default, "" = disabled, non-empty = custom.
+ */
+export interface KeyboardShortcuts {
+    create_task?: string;
+    create_task_submit?: string;
+    /** Hide the keycap hints on shortcut buttons (tooltips stay). */
+    hide_hints?: boolean;
 }
 
 export interface ProviderModel {
