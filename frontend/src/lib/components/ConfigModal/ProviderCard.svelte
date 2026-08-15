@@ -27,6 +27,7 @@
         agent_config_dir?: string;
         models: ModelEntry[];
         concurrency: number;
+        max_requests_per_second: number; // 0 = unlimited; max new LLM request starts per second
         input_price: number;
         output_price: number;
         cache_read_price: number;
@@ -209,6 +210,18 @@
                             </span>
                         </div>
                         <input id={`concurrency-${index}`} type="number" bind:value={provider.concurrency} min="1" max="20" class="option-input" onchange={() => onDirty?.()} />
+                    </div>
+                    <div class="option-row">
+                        <div class="option-label-group">
+                            <label class="option-label" for={`max-rps-${index}`}>Max requests/sec</label>
+                            <span class="help-icon" title="Maximum new requests started per second to this provider. 0 = unlimited.">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
+                                </svg>
+                            </span>
+                        </div>
+                        <input id={`max-rps-${index}`} type="number" min="0" step="1" bind:value={provider.max_requests_per_second} class="option-input" onchange={() => onDirty?.()} />
                     </div>
                 </div>
 
@@ -452,6 +465,9 @@
         display: flex;
         align-items: center;
         gap: 10px;
+    }
+    .provider-options .option-row + .option-row {
+        margin-top: 8px;
     }
     .option-label-group {
         display: flex;
