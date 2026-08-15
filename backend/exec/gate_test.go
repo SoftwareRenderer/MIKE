@@ -658,3 +658,49 @@ func TestAcquire_RateLimit_FIFO(t *testing.T) {
 		t.Fatalf("expected FIFO serve order [0 1], got %v", order)
 	}
 }
+
+// TestAcquire_RateLimit_ReleaseServeSpacing verifies a waiter served by
+// Release advances the rate window when it starts, spacing the next waiter
+// by a full interval.
+func TestAcquire_RateLimit_ReleaseServeSpacing(t *testing.T) {
+	g := NewConcurrencyGate()
+	defer g.Close()
+	ctx := context.Background()
+
+	// concurrency=1, maxRPS=10 (100ms interval). A holds the only slot.
+	if _, _, err := g.Acquire(ctx, "http://p", 1, 10); err != nil {
+		t.Fatalf("acquire A: %v", err)
+	}
+	// B queues (slot full); Release — not B's own timer — grants it.
+	bStart := make(chan time.Time, 1)
+	go func() {
+		if _, _, err := g.Acquire(ctx, "http://p", 1, 10); err != nil {
+			t.Errorf("acquire B: %v", err)
+			return
+		}
+		bStart <- time.Now()
+	}()
+	time.Sleep(30 * time.Millisecond)
+	// C queues behind B.
+	cStart := make(chan time.Time, 1)
+	go func() {
+		if _, _, err := g.Acquire(ctx, "http://p", 1, 10); err != nil {
+			t.Errorf("acquire C: %v", err)
+			return
+		}
+		cStart <- time.Now()
+	}()
+	time.Sleep(100 * time.Millisecond) // A's window (100ms) has now opened
+
+	// Release A's slot: window open, so Release serves B directly.
+	g.Release("http://p")
+
+	b := <-bStart
+	// B releases its slot so C can proceed (concurrency=1).
+	g.Release("http://p") // B
+	c := <-cStart
+	if gap := c.Sub(b); gap < 80*time.Millisecond {
+		t.Fatalf("B->C start gap is %v, want >= 80ms (a waiter served by Release must advance the rate window)", gap)
+	}
+	g.Release("http://p") // C
+}
