@@ -1,6 +1,8 @@
 <script lang="ts">
     import type { Task } from '$lib/types';
     import type { MultiSelect } from '$lib/composables/use-multi-select.svelte';
+    import { appStore } from '$lib/stores';
+    import { effectiveCreateTaskKey, formatShortcut, shortcutHintsHidden } from '$lib/utils/keyboard';
     import Card from './Card.svelte';
     import { fade } from 'svelte/transition';
     import { countWithDescendants } from '$lib/utils/task-utils';
@@ -25,6 +27,13 @@
         onRefreshBoard?: () => void;
         multiSelect?: MultiSelect | null;
     } = $props();
+
+    // Create Task shortcut hint (empty = disabled).
+    const createTaskShortcutLabel = $derived.by(() => {
+        const key = effectiveCreateTaskKey(appStore.config);
+        return key ? formatShortcut(key) : '';
+    });
+    const hintsHidden = $derived(shortcutHintsHidden(appStore.config));
 
     let isOver = $state(false);
     let isDropRejected = $state(false);
@@ -107,7 +116,7 @@
     </div>
     <div class="card-list" bind:this={cardListEl} onscroll={handleScroll}>
         {#if onAddTask}
-            <button class="add-task-btn" onclick={onAddTask} title="Create a new task">+ Create Task</button>
+            <button class="add-task-btn" onclick={onAddTask} title={createTaskShortcutLabel ? `Create a new task (${createTaskShortcutLabel})` : 'Create a new task'}>+ Create Task{#if createTaskShortcutLabel && !hintsHidden}<kbd class="key-hint">{createTaskShortcutLabel}</kbd>{/if}</button>
         {/if}
         {#each tasks as task (task.id)}
             <div class="task-wrapper" transition:fade={{ duration: 200 }}>
@@ -247,9 +256,17 @@
         color: var(--color-text-secondary);
         cursor: pointer;
         transition: background 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
     .add-task-btn:hover {
         background: var(--color-accent-dark);
         color: white;
+    }
+    .add-task-btn:hover .key-hint {
+        color: rgba(255, 255, 255, 0.85);
+        border-color: rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.1);
     }
 </style>

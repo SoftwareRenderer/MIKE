@@ -303,6 +303,22 @@ For tool calls, use `delta.tool_calls` instead of `delta.content`:
 - All real-time communication uses WebSocket through the Go server.
 - Model/provider changes are sent via WebSocket `user_message` with optional `model_name`/`llama_server_url` fields.
 
+### Keyboard Shortcuts (Settings → Preferences)
+Settings has a **Preferences** tab (Providers, Task Defaults, **Preferences**, Extensions, About) holding user-customizable keyboard shortcuts. Bindings persist **server-side** (`keyboard_shortcuts` key in the `config` table, JSON) so they sync across devices, and save through the shared Settings Save/Cancel flow.
+
+- **Bindings**: `create_task` (opens the create-task dialog on the board, default `C`) and `create_task_submit` (creates the task inside the dialog, default platform-aware: `Ctrl+Enter` / `Cmd+Enter` via `isMac()`). `hide_hints` (bool, absent = show) hides the keycap hints on shortcut buttons — tooltips keep the shortcut text (`shortcutHintsHidden()`).
+- **Data format**: normalized string — modifiers in the fixed order `control`, `meta`, `shift`, `alt` joined with `+` to the key: `c`, `shift+k`, `control+k`. Absent binding = use default; `""` = disabled; non-empty = custom. An all-nil struct is normalized to nil (field omitted from API responses).
+- **Replace semantics**: `PUT /api/config` replaces the whole `keyboard_shortcuts` object — the Settings UI always sends **all** bindings (absent = reset to default). This is what makes "Reset to default" work without a clear token (see `TestHandleConfig_KeyboardShortcutsReplaceSemantics`).
+- **Submit matching** (`matchesCreateTaskSubmitKey`): while the binding is unset, **both** `Ctrl+Enter` and `Cmd+Enter` trigger; an explicit binding matches exactly; `""` never matches.
+- **Defaults**: `frontend/src/lib/utils/keyboard.ts` → `DEFAULT_SHORTCUTS`, `defaultCreateTaskSubmitKey()`
+- **Capture rules** (`normalizeKey`): rejects modifier-only presses, Escape (cancels capture), named keys without a modifier, and browser-reserved combos (`Control+W/Q/N/T`).
+- **Activation**: board shortcuts via `use-keyboard-shortcuts.svelte.ts` (wired in `App.svelte`) — fire only while the project board is visible (no task detail/explorer view, no modal or dialog open) and focus is not in an editable element. The submit shortcut is handled inside `CreateTaskModal.svelte` (mount-scoped window keydown) — fires from **any** focus in the dialog (description included), gated by the same `canSubmit` derived as the Create button.
+- **Button hints**: text buttons with a configurable shortcut show a `<kbd class="key-hint">` keycap (shared style in `app.css`) and include the shortcut in their `title` tooltip (e.g. `Create a new task (C)`, `Create the task (Ctrl+Enter)`); both derive from `appStore.config` (no extra round-trip). Hidden/omitted when the shortcut is disabled or the user enabled "Hide shortcut hints"; keycaps are always hidden below the 768px mobile breakpoint (media query in `app.css`).
+- **Adding a new shortcut**:
+  1. Backend: add a `*string` field to `types.KeyboardShortcuts` (`backend/types/domain.go`) and extend `normalizeKeyboardShortcuts` (`backend/config/config.go`) so an all-nil struct stays nil.
+  2. Frontend: `KeyboardShortcuts` in `$lib/types.ts`, a default (in `DEFAULT_SHORTCUTS` or a dedicated function for platform-aware defaults), a row in `ConfigModal/PreferencesTab.svelte`, the field in the `handleSave` payload of `ConfigModal.svelte` (always send all bindings — see Replace semantics), and the dispatch (board shortcut: `use-keyboard-shortcuts.svelte.ts`; dialog action: the owning component).
+- **Tests**: `backend/config/config_test.go` (round-trips, replace semantics), `utils/__tests__/keyboard.unit.ts`, `__tests__/preferences-tab.unit.svelte.ts`, e2e `preferences-keyboard.spec.ts` + `create-task-submit-shortcut.spec.ts` (the former runs in the `isolated` Playwright project — it mutates server config via the UI Save flow; the latter exercises default bindings only).
+
 ### Extensions System
 The Extensions system replaces hardcoded LSP configurations with user-defined and downloadable extensions.
 

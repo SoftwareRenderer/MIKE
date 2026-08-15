@@ -1,0 +1,275 @@
+import { test, expect, type Page } from '@playwright/test';
+import { apiPutConfig, apiGetConfig, waitForConfig } from './helpers';
+
+// Keyboard shortcut preferences (Settings → Preferences). The create-task
+// shortcut defaults to "C"; can be rebound, reset, or cleared. Bindings
+// persist server-side (keyboard_shortcuts in /api/config).
+//
+// Runs in the `isolated` project: mutates server config via the UI Save flow.
+
+const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';
+const PREFERENCES_TAB = 'button.tab-btn:has-text("Preferences")';
+// Rows in the Preferences tab (two shortcuts share class/aria names).
+const CREATE_ROW = '.shortcut-row[data-shortcut="create_task"]';
+const SUBMIT_ROW = '.shortcut-row[data-shortcut="create_task_submit"]';
+const KEY_CHIP = `${CREATE_ROW} button.key-chip`;
+const SUBMIT_CHIP = `${SUBMIT_ROW} button.key-chip`;
+const RESET_BTN = `${CREATE_ROW} button[aria-label="Reset to default"]`;
+const CLEAR_BTN = `${CREATE_ROW} button[aria-label="Clear shortcut"]`;
+const SAVE_BTN = 'button.btn-primary[title="Save settings"]';
+const BOARD_BTN = '.add-task-btn';
+const CREATE_MODAL = '#task-description';
+
+/**
+ * Self-consistent, saveable provider config (the Settings Save flow validates
+ * that worker/utility references resolve). Does not touch keyboard_shortcuts.
+ */
+async function ensureSaveableConfig(page: Page) {
+    const cfg = await apiGetConfig(page);
+    const maxId = Math.max(0, ...((cfg?.providers || []) as Array<{ id?: number }>).map(p => p.id || 0));
+    const id = maxId + 1;
+    await apiPutConfig(page, {
+        providers: [{
+            id,
+            name: 'keyboard-pref-mock',
+            url: 'http://localhost:9999/v1',
+            models: [{ name: 'mock-model', reasoning_effort: 'off' }],
+            concurrency: 1,
+        }],
+        worker_provider: String(id),
+        worker_model: 'mock-model',
+        utility_provider: String(id),
+        utility_model: 'mock-model',
+    });
+    await waitForConfig(page, c => c.worker_provider === String(id) && c.utility_provider === String(id));
+}
+
+/** Reset the create-task binding to its default via the API. */
+async function resetShortcuts(page: Page) {
+    await apiPutConfig(page, { keyboard_shortcuts: {} });
+}
+
+test.describe.serial('Keyboard shortcut preferences', () => {
+    test.beforeEach(async ({ page }) => {
+        await ensureSaveableConfig(page);
+        await page.goto('/');
+        await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
+    });
+
+    test('default: button shows a C keycap and pressing C opens the create-task modal', async ({ page }) => {
+        await resetShortcuts(page);
+        await page.reload();
+        await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
+
+        await expect(page.locator(BOARD_BTN)).toContainText('+ Create Task');
+        await expect(page.locator(BOARD_BTN).locator('.key-hint')).toHaveText('C');
+        await expect(page.locator(BOARD_BTN)).toHaveAttribute('title', 'Create a new task (C)');
+
+        await page.keyboard.press('c');
+        await expect(page.locator(CREATE_MODAL)).toBeVisible({ timeout: 5000 });
+
+        await page.keyboard.press('Escape');
+        await expect(page.locator(CREATE_MODAL)).not.toBeVisible({ timeout: 5000 });
+    });
+
+    test('rebinding to Shift+K via the Preferences tab', async ({ page }) => {
+        await resetShortcuts(page);
+        await page.reload();
+        await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
+
+        // Open Settings → Preferences and capture a new key
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await expect(page.locator(KEY_CHIP)).toHaveText('C');
+
+        await page.locator(KEY_CHIP).click();
+        await expect(page.locator(KEY_CHIP)).toHaveText('Press a key...');
+        await page.keyboard.press('Shift+K');
+        await expect(page.locator(KEY_CHIP)).toHaveText('Shift+K');
+
+        // Save and verify the button hint updates
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+        await expect(page.locator(BOARD_BTN).locator('.key-hint')).toHaveText('Shift+K');
+        await expect(page.locator(BOARD_BTN)).toHaveAttribute('title', 'Create a new task (Shift+K)');
+
+        // The old key no longer triggers; the new one does
+        await page.keyboard.press('c');
+        await page.waitForTimeout(300);
+        await expect(page.locator(CREATE_MODAL)).not.toBeVisible();
+
+        await page.keyboard.press('Shift+K');
+        await expect(page.locator(CREATE_MODAL)).toBeVisible({ timeout: 5000 });
+        await page.keyboard.press('Escape');
+        await expect(page.locator(CREATE_MODAL)).not.toBeVisible({ timeout: 5000 });
+    });
+
+    test('reset restores the default binding', async ({ page }) => {
+        // Carries over from the rebind test: binding is Shift+K
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await expect(page.locator(KEY_CHIP)).toHaveText('Shift+K');
+
+        await page.locator(RESET_BTN).click();
+        await expect(page.locator(KEY_CHIP)).toHaveText('C');
+
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+        await expect(page.locator(BOARD_BTN).locator('.key-hint')).toHaveText('C');
+
+        await page.keyboard.press('c');
+        await expect(page.locator(CREATE_MODAL)).toBeVisible({ timeout: 5000 });
+        await page.keyboard.press('Escape');
+        await expect(page.locator(CREATE_MODAL)).not.toBeVisible({ timeout: 5000 });
+    });
+
+    test('clearing disables the shortcut and hides the key hint', async ({ page }) => {
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await expect(page.locator(KEY_CHIP)).toHaveText('C');
+
+        await page.locator(CLEAR_BTN).click();
+        await expect(page.locator(KEY_CHIP)).toHaveText('None');
+        // Reset is available to restore the default from the disabled state
+        await expect(page.locator(RESET_BTN)).toBeVisible();
+
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+
+        // No key hint or tooltip shortcut; pressing the key does nothing
+        await expect(page.locator(BOARD_BTN).locator('.key-hint')).not.toBeAttached();
+        await expect(page.locator(BOARD_BTN)).toHaveAttribute('title', 'Create a new task');
+        await page.keyboard.press('c');
+        await page.waitForTimeout(300);
+        await expect(page.locator(CREATE_MODAL)).not.toBeVisible();
+
+        // Restore the default for other suites
+        await resetShortcuts(page);
+    });
+
+    test('bindings persist server-side in /api/config', async ({ page }) => {
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await page.locator(KEY_CHIP).click();
+        await page.keyboard.press('Control+K');
+        await expect(page.locator(KEY_CHIP)).toHaveText('Ctrl+K');
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+
+        // Server-side persistence check
+        await waitForConfig(page, c =>
+            c.keyboard_shortcuts && c.keyboard_shortcuts.create_task === 'control+k'
+        );
+        const config = await apiGetConfig(page);
+        expect(config.keyboard_shortcuts.create_task).toBe('control+k');
+
+        // The bound combo triggers the modal
+        await page.keyboard.press('Control+K');
+        await expect(page.locator(CREATE_MODAL)).toBeVisible({ timeout: 5000 });
+        await page.keyboard.press('Escape');
+        await expect(page.locator(CREATE_MODAL)).not.toBeVisible({ timeout: 5000 });
+
+        // Restore the default for other suites
+        await resetShortcuts(page);
+    });
+
+    test('rebinding submit to Shift+Enter makes it the only trigger', async ({ page }) => {
+        await resetShortcuts(page);
+        await page.reload();
+        await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
+
+        // Linux test env: the submit row shows the Ctrl+Enter default
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await expect(page.locator(SUBMIT_CHIP)).toHaveText('Ctrl+Enter');
+
+        await page.locator(SUBMIT_CHIP).click();
+        await expect(page.locator(SUBMIT_CHIP)).toHaveText('Press a key...');
+        await page.keyboard.press('Shift+Enter');
+        await expect(page.locator(SUBMIT_CHIP)).toHaveText('Shift+Enter');
+
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+        await waitForConfig(page, c => c.keyboard_shortcuts?.create_task_submit === 'shift+enter');
+
+        // Open the dialog: Shift+Enter submits, the old default does not
+        await page.locator(BOARD_BTN).first().click();
+        await expect(page.locator(CREATE_MODAL)).toBeVisible({ timeout: 5000 });
+        const prompt = `submit-rebind-${Date.now()}`;
+        await page.fill(CREATE_MODAL, prompt);
+
+        await page.keyboard.press('Control+Enter');
+        await expect(page.locator(CREATE_MODAL)).toBeVisible();
+
+        await page.keyboard.press('Shift+Enter');
+        await expect(page.locator(CREATE_MODAL)).not.toBeVisible({ timeout: 5000 });
+        await expect(page.locator('.card', { hasText: prompt }).first()).toBeVisible({ timeout: 10000 });
+
+        // Restore the default for other suites
+        await resetShortcuts(page);
+    });
+
+    test('hiding hints removes keycaps but keeps the tooltips', async ({ page }) => {
+        await resetShortcuts(page);
+        await page.reload();
+        await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
+        // Board button: keycap visible, tooltip shows the shortcut
+        await expect(page.locator(BOARD_BTN).locator('.key-hint')).toHaveText('C');
+        await expect(page.locator(BOARD_BTN)).toHaveAttribute('title', 'Create a new task (C)');
+
+        // Enable "Hide shortcut hints"
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await page.locator('button[aria-label="Hide shortcut hints"]').click();
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+
+        // Board: keycap gone, tooltip keeps the shortcut
+        await expect(page.locator(BOARD_BTN).locator('.key-hint')).not.toBeAttached();
+        await expect(page.locator(BOARD_BTN)).toHaveAttribute('title', 'Create a new task (C)');
+
+        // Dialog: keycap gone, tooltip keeps the shortcut
+        await page.keyboard.press('c');
+        await expect(page.locator(CREATE_MODAL)).toBeVisible({ timeout: 5000 });
+        const createBtn = page.locator('.btn-primary', { hasText: 'Create Task' });
+        await expect(createBtn.locator('kbd.key-hint')).not.toBeAttached();
+        await expect(createBtn).toHaveAttribute('title', 'Create the task (Ctrl+Enter)');
+        await page.keyboard.press('Escape');
+        await expect(page.locator(CREATE_MODAL)).not.toBeVisible({ timeout: 5000 });
+
+        // Toggle off -> keycaps return
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await page.locator('button[aria-label="Hide shortcut hints"]').click();
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+        await expect(page.locator(BOARD_BTN).locator('.key-hint')).toHaveText('C');
+
+        // Restore defaults for other suites (clears bindings + hide_hints)
+        await resetShortcuts(page);
+    });
+
+    test('shortcut is suppressed while a modal is open', async ({ page }) => {
+        await resetShortcuts(page);
+        await page.reload();
+        await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
+        await expect(page.locator(BOARD_BTN).locator('.key-hint')).toHaveText('C');
+
+        // With Settings open, "c" must not open the create-task modal
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await page.keyboard.press('c');
+        await page.waitForTimeout(300);
+        await expect(page.locator(CREATE_MODAL)).not.toBeVisible();
+
+        // Close settings via Cancel (no changes)
+        await page.locator('button[title="Cancel and discard changes"]').click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+
+        // Back on the board, "c" works again
+        await page.keyboard.press('c');
+        await expect(page.locator(CREATE_MODAL)).toBeVisible({ timeout: 5000 });
+        await page.keyboard.press('Escape');
+        await expect(page.locator(CREATE_MODAL)).not.toBeVisible({ timeout: 5000 });
+    });
+});

@@ -86,7 +86,7 @@ test.describe('Delete Task with Confirmation', () => {
 
     await page.click('.icon-btn[aria-label="Delete task"]');
     await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
-    await page.click('[role="dialog"] .btn-secondary');
+    await page.click('[role="dialog"] .btn-cancel');
     await expect(page.locator('.task-detail-page')).toBeVisible();
   });
 });
