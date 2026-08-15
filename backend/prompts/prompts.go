@@ -248,22 +248,29 @@ type SummarizeData struct {
 	PreviousSummary string // summary from a prior summarization, empty if first
 }
 
-// RenderSummarizePrompt renders the context summarization system prompt from a template file.
-func RenderSummarizePrompt(data SummarizeData) (string, error) {
+// RenderSummarizePrompt renders the context summarization prompt pair: the
+// system prompt (summarization instructions) and the user message (previous
+// summary + chat history).
+func RenderSummarizePrompt(data SummarizeData) (string, string, error) {
 	dir := promptDir()
-	path := filepath.Join(dir, "summarize.tmpl")
-
-	tmpl, err := template.ParseFiles(path)
+	systemTmpl, err := template.ParseFiles(filepath.Join(dir, "summarize.tmpl"))
 	if err != nil {
-		return "", err
+		return "", "", err
+	}
+	userTmpl, err := template.ParseFiles(filepath.Join(dir, "summarize_user.tmpl"))
+	if err != nil {
+		return "", "", err
 	}
 
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", err
+	var systemBuf, userBuf bytes.Buffer
+	if err := systemTmpl.Execute(&systemBuf, data); err != nil {
+		return "", "", err
+	}
+	if err := userTmpl.Execute(&userBuf, data); err != nil {
+		return "", "", err
 	}
 
-	return buf.String(), nil
+	return systemBuf.String(), userBuf.String(), nil
 }
 
 // AnswerQuestionData is the input for the automated answer prompt.
@@ -274,22 +281,30 @@ type AnswerQuestionData struct {
 	Questions    []string // all questions asked in this turn, in order
 }
 
-// RenderAnswerQuestionPrompt renders the automated answer system prompt.
-func RenderAnswerQuestionPrompt(data AnswerQuestionData) (string, error) {
+// RenderAnswerQuestionPrompt renders the automated answer prompt pair: the
+// system prompt (parent context + answer format) and the user message (the
+// numbered questions). The questions live in the user message because some
+// chat templates reject system-only requests.
+func RenderAnswerQuestionPrompt(data AnswerQuestionData) (string, string, error) {
 	dir := promptDir()
-	path := filepath.Join(dir, "answer_question.tmpl")
-
-	tmpl, err := template.New("answer_question.tmpl").Funcs(funcs).ParseFiles(path)
+	systemTmpl, err := template.New("answer_question.tmpl").Funcs(funcs).ParseFiles(filepath.Join(dir, "answer_question.tmpl"))
 	if err != nil {
-		return "", err
+		return "", "", err
+	}
+	userTmpl, err := template.New("answer_question_user.tmpl").Funcs(funcs).ParseFiles(filepath.Join(dir, "answer_question_user.tmpl"))
+	if err != nil {
+		return "", "", err
 	}
 
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", err
+	var systemBuf, userBuf bytes.Buffer
+	if err := systemTmpl.Execute(&systemBuf, data); err != nil {
+		return "", "", err
+	}
+	if err := userTmpl.Execute(&userBuf, data); err != nil {
+		return "", "", err
 	}
 
-	return buf.String(), nil
+	return systemBuf.String(), userBuf.String(), nil
 }
 
 // ValidateTemplates parses and dry-runs the templates to check for errors.
