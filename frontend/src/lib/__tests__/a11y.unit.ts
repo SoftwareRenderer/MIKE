@@ -53,6 +53,33 @@ describe('createFocusTrap', () => {
         trap.destroy();
     });
 
+    it('focusFirst prefers a later autofocus element over earlier focusables', () => {
+        container.innerHTML = `
+            <button id="first">First</button>
+            <textarea id="auto" autofocus></textarea>
+        `;
+        const first = document.getElementById('first') as HTMLButtonElement;
+        const auto = document.getElementById('auto') as HTMLTextAreaElement;
+        // jsdom reports offsetParent as null; fake visibility like the Tab test.
+        Object.defineProperty(first, 'offsetParent', { value: {} });
+        Object.defineProperty(auto, 'offsetParent', { value: {} });
+        const trap = createFocusTrap(container);
+        trap.focusFirst();
+        expect(document.activeElement).toBe(auto);
+        trap.destroy();
+    });
+
+    it('focusFirst falls back to the first focusable element when nothing is marked autofocus', () => {
+        const first = document.getElementById('first') as HTMLButtonElement;
+        const second = document.getElementById('second') as HTMLButtonElement;
+        Object.defineProperty(first, 'offsetParent', { value: {} });
+        Object.defineProperty(second, 'offsetParent', { value: {} });
+        const trap = createFocusTrap(container);
+        trap.focusFirst();
+        expect(document.activeElement).toBe(first);
+        trap.destroy();
+    });
+
     it('wraps Tab focus within the container', () => {
         const trap = createFocusTrap(container);
         const first = document.getElementById('first') as HTMLButtonElement;
