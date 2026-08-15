@@ -185,6 +185,8 @@ E2E tests run against **two dedicated test servers** with isolated databases, fu
 
 Both servers share a mock LLM on port 9999. Test data dirs, worktrees (`/tmp/kanban-test-worktrees/`), and servers are fully torn down and rebuilt each run.
 
+The test servers are spawned via `go run .` inheriting your shell environment, so `MIKE_ENCRYPTION_KEY` must be exported before running e2e tests — without it the server refuses to start and global-setup fails with `Server on port 3000 did not start within 15000ms`.
+
 **Important**: Your development server is **killed** during test runs. Restart it manually after:
 ```bash
 ./kanban &

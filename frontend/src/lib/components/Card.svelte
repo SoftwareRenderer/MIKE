@@ -150,11 +150,23 @@
         return isActive(task.execution_state);
     });
 
-    // Number of action icons in the title bar (for dynamic padding)
+    // Element rendered in the last (third) action slot
+    let thirdAction = $derived.by(() => {
+        if (isPausable) return 'pause';
+        if (isResumable) return 'resume';
+        if (isIdle) return 'idle';
+        if (columnId === 'done' && !(multiSelect?.isSelected(task.id) ?? false)) return 'delete';
+        if (isDoneSubtask && !(multiSelect?.isSelected(task.id) ?? false)) return 'delete';
+        if (inline && task.parent_task_id) return null; // no move button for inline subtasks
+        if (task.status === 'in_progress') return null; // no move button for in_progress tasks
+        return 'move';
+    });
+
+    // Number of action elements in the title bar (for dynamic padding)
     let actionCount = $derived(
-        (!inline || !task.parent_task_id || hasChildren || showSubtaskBorder ? 1 : 0) // + subtask
+        (!inline || !task.parent_task_id || hasChildren || showSubtaskBorder ? 1 : 0) // create subtask
         + (!isDoneSubtask ? 1 : 0) // edit
-        + (inline && task.parent_task_id ? 0 : 1) // move/pause/resume/idle (move hidden for inline subtasks)
+        + (thirdAction ? 1 : 0) // pause/resume/idle/delete/move
     );
 
     const statuses = ['backlog', 'in_progress', 'review', 'done'] as const;
@@ -665,7 +677,7 @@
     aria-label={`Open task: ${task.title || '(untitled)'}, Status: ${task.status === 'backlog' ? 'Backlog' : task.status === 'in_progress' ? 'In Progress' : task.status === 'review' ? 'Review' : 'Done'}`}
     aria-keyshortcuts="Alt+ArrowLeft, Alt+ArrowRight"
     aria-current={isSelected ? 'page' : undefined}
-    style={`--actions: ${actionCount}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
+    style={`--actions: ${actionCount}; --idle-px: ${thirdAction === 'idle' ? '10px' : '0px'}; --column-color: ${columnColor || ""}; --status-color: ${statusColor}${parentSelected && inline && task.parent_task_id ? `; border-left: 3px solid ${statusColor}` : ""}`}
 >
     <div class="card-title">
             {#if task.title_generating}
@@ -714,7 +726,7 @@
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
                     </button>
                     {/if}
-                    {#if isPausable}
+                    {#if thirdAction === 'pause'}
                         <button
                             type="button"
                             class="action-icon"
@@ -724,7 +736,7 @@
                         >
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><rect x="2.5" y="1.5" width="1.5" height="7" fill="currentColor"/><rect x="6" y="1.5" width="1.5" height="7" fill="currentColor"/></svg>
                         </button>
-                    {:else if isResumable}
+                    {:else if thirdAction === 'resume'}
                         <button
                             type="button"
                             class="action-icon"
@@ -734,9 +746,9 @@
                         >
                             <svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
                         </button>
-                    {:else if isIdle}
+                    {:else if thirdAction === 'idle'}
                         <span class="action-idle" aria-label="Idle" title="Idle">Idle</span>
-                    {:else if columnId === 'done' && !(multiSelect?.isSelected(task.id) ?? false)}
+                    {:else if thirdAction === 'delete'}
                         <button
                             type="button"
                             class="action-icon action-delete"
@@ -749,24 +761,7 @@
                                 <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                         </button>
-                    {:else if isDoneSubtask && !(multiSelect?.isSelected(task.id) ?? false)}
-                        <button
-                            type="button"
-                            class="action-icon action-delete"
-                            onclick={handleDelete}
-                            aria-label="Delete task"
-                            title="Delete task"
-                        >
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                                <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </button>
-                    {:else if inline && task.parent_task_id}
-                        <!-- no move button for inline subtasks -->
-                    {:else if task.status === 'in_progress'}
-                        <!-- no move button for in_progress tasks -->
-                    {:else}
+                    {:else if thirdAction === 'move'}
                         <button
                             type="button"
                             class="action-icon action-move"
@@ -993,7 +988,8 @@
     }
     .card:hover:not(:has(.card:hover)) > .card-title > .card-title-text,
     .card.selected > .card-title > .card-title-text {
-        padding-right: calc(var(--actions) * 28px + 6px);
+        /* --idle-px covers the Idle badge being wider than a 26px icon slot */
+        padding-right: calc(var(--actions) * 28px + var(--idle-px, 0px) + 6px);
     }
     .card-actions {
         position: absolute;
@@ -1048,6 +1044,8 @@
         color: var(--color-text-tertiary);
         padding: 0 4px;
         pointer-events: none;
+        /* Fixed slot width so the title padding calc stays deterministic */
+        width: 36px;
     }
     .action-overflow.is-open {
         background: var(--color-surface-4);
@@ -1126,6 +1124,11 @@
         }
         .card.is-subtask > .card-title > .card-title-text {
             padding-right: 58px;
+        }
+        /* Subtasks render the overflow menu (+ Idle badge in the in-progress
+           column); account for the badge in the fixed padding. */
+        .card.is-subtask:has(.action-idle) > .card-title > .card-title-text {
+            padding-right: 106px;
         }
         .action-icon {
             width: 44px;
