@@ -333,7 +333,7 @@ func TestRenderAnswerQuestionPrompt(t *testing.T) {
 	os.Chdir(root)
 	defer os.Chdir(origWd)
 
-	prompt, err := RenderAnswerQuestionPrompt(AnswerQuestionData{
+	systemPrompt, userPrompt, err := RenderAnswerQuestionPrompt(AnswerQuestionData{
 		ParentTitle:  "Build Auth",
 		ParentPrompt: "Implement login with OAuth.",
 		SubtaskTitle: "Add login endpoint",
@@ -342,20 +342,89 @@ func TestRenderAnswerQuestionPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render prompt: %v", err)
 	}
-	if !strings.Contains(prompt, "Build Auth") {
-		t.Error("prompt should include parent task title")
+	// System prompt keeps the parent context and the answer format rules...
+	if !strings.Contains(systemPrompt, "Build Auth") {
+		t.Error("system prompt should include parent task title")
 	}
-	if !strings.Contains(prompt, "Implement login with OAuth.") {
-		t.Error("prompt should include parent task prompt context")
+	if !strings.Contains(systemPrompt, "Implement login with OAuth.") {
+		t.Error("system prompt should include parent task prompt context")
 	}
-	if !strings.Contains(prompt, "Which auth flow?") {
-		t.Error("prompt should include the first question")
+	if !strings.Contains(systemPrompt, "1) answer to first question 2) answer to second") {
+		t.Error("system prompt should specify the simple numbered answer format")
 	}
-	if !strings.Contains(prompt, "Token expiry?") {
-		t.Error("prompt should include the second question")
+	// ...but must not carry the questions — they belong in the user message
+	// because some chat templates reject system-only requests.
+	if strings.Contains(systemPrompt, "Which auth flow?") || strings.Contains(systemPrompt, "Token expiry?") {
+		t.Error("system prompt must not contain the questions")
 	}
-	if !strings.Contains(prompt, "1) answer to first question 2) answer to second") {
-		t.Error("prompt should specify the simple numbered answer format")
+	// The user message carries the numbered questions.
+	if !strings.Contains(userPrompt, "Which auth flow?") {
+		t.Error("user prompt should include the first question")
+	}
+	if !strings.Contains(userPrompt, "Token expiry?") {
+		t.Error("user prompt should include the second question")
+	}
+}
+
+func TestRenderSummarizePrompt(t *testing.T) {
+	root, ok := findProjectRoot()
+	if !ok {
+		t.Skip("summarize.tmpl not found (run from project root)")
+	}
+	origWd, _ := os.Getwd()
+	os.Chdir(root)
+	defer os.Chdir(origWd)
+
+	data := SummarizeData{
+		ChatHistory:     "user: fix the bug\nassistant: fixed it",
+		PreviousSummary: "## Goal\nEarlier goal",
+	}
+
+	// With a previous summary.
+	systemPrompt, userPrompt, err := RenderSummarizePrompt(data)
+	if err != nil {
+		t.Fatalf("render prompt: %v", err)
+	}
+	// System prompt keeps the summarization instructions...
+	if !strings.Contains(systemPrompt, "EXACT format") {
+		t.Error("system prompt should contain the format instructions")
+	}
+	if !strings.Contains(systemPrompt, "## Goal") {
+		t.Error("system prompt should contain the summary format sections")
+	}
+	// ...but must not carry the conversation data — that belongs in the
+	// user message because some chat templates reject system-only requests.
+	if strings.Contains(systemPrompt, "fix the bug") {
+		t.Error("system prompt must not contain the chat history")
+	}
+	if strings.Contains(systemPrompt, "Earlier goal") {
+		t.Error("system prompt must not contain the previous summary")
+	}
+	// The user message carries the chat history and the previous summary.
+	if !strings.Contains(userPrompt, "fix the bug") || !strings.Contains(userPrompt, "fixed it") {
+		t.Error("user prompt should contain the chat history")
+	}
+	if !strings.Contains(userPrompt, "<chat_history>") {
+		t.Error("user prompt should wrap the chat history in <chat_history>")
+	}
+	if !strings.Contains(userPrompt, "Earlier goal") {
+		t.Error("user prompt should contain the previous summary")
+	}
+	if !strings.Contains(userPrompt, "# Previous Summary") {
+		t.Error("user prompt should label the previous summary section")
+	}
+
+	// Without a previous summary: no summary section in the user message.
+	data.PreviousSummary = ""
+	systemPrompt, userPrompt, err = RenderSummarizePrompt(data)
+	if err != nil {
+		t.Fatalf("render prompt (no previous summary): %v", err)
+	}
+	if !strings.Contains(userPrompt, "fix the bug") {
+		t.Error("user prompt should still contain the chat history")
+	}
+	if strings.Contains(userPrompt, "# Previous Summary") {
+		t.Error("user prompt must omit the previous summary section when empty")
 	}
 }
 

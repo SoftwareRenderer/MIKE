@@ -89,6 +89,7 @@
         agent_config_dir?: string;
         models: ModelEntry[];
         concurrency: number;
+        max_requests_per_second: number; // 0 = unlimited; max new LLM request starts per second
         // Pricing (USD per 1M tokens)
         input_price: number;
         output_price: number;
@@ -131,6 +132,7 @@
                 kind: isAgent ? 'agent' : (p.kind || 'llm'),
                 api_key: p.api_key || '',
                 concurrency: p.concurrency || 1,
+                max_requests_per_second: p.max_requests_per_second || 0,
                 input_price: p.input_price || 0,
                 output_price: p.output_price || 0,
                 cache_read_price: p.cache_read_price || 0,
@@ -236,6 +238,7 @@
             api_key: '',
             models: [],
             concurrency: 1,
+            max_requests_per_second: 0,
             input_price: 0,
             output_price: 0,
             cache_read_price: 0,
@@ -305,6 +308,7 @@
             api_key: '',
             models: [],
             concurrency: 1,
+            max_requests_per_second: 0,
             input_price: 0,
             output_price: 0,
             cache_read_price: 0,
@@ -548,6 +552,7 @@
                             power_consumption_w: m.power_consumption_w ?? undefined,
                         })),
                         concurrency: Math.max(1, p.concurrency || 1),
+                        max_requests_per_second: Math.max(0, Math.floor(p.max_requests_per_second || 0)),
                         agent_config_dir: p.agent_config_dir || '',
                         input_price: p.input_price,
                         output_price: p.output_price,

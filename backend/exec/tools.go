@@ -549,12 +549,9 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		}
 		return question, true
 	case "request_review":
-		// In plan mode, require at least one task created during planning before allowing completion
+		// In plan mode, require at least one task created via create_task
 		if task.IsPlanMode() {
-			if state == nil {
-				return "Error: Cannot complete planning without creating tasks. Use create_task() to add at least one task first.", false
-			}
-			createdIDs := state.createdIDs
+			createdIDs := te.planCreatedTaskIDs(task, state)
 			if len(createdIDs) == 0 {
 				return "Error: Cannot complete planning without creating tasks. Use create_task() to add at least one task first.", false
 			}
@@ -802,6 +799,56 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 	// Return JSON with task_id so the LLM can reference it for nested subtasks
 	result, _ := json.Marshal(map[string]string{"task_id": newTaskID, "title": title})
 	return string(result), nil
+}
+
+// planCreatedTaskIDs returns the IDs successful create_task calls in task
+func (te *TaskExecutor) planCreatedTaskIDs(task *types.Task, state *executionState) []string {
+	seen := make(map[string]bool)
+	var ids []string
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if state != nil {
+		for _, id := range state.createdIDs {
+			add(id)
+		}
+	}
+	// threadID "" returns all messages for the task (all threads + legacy).
+	msgs, err := te.store.GetTaskMessages(task.ID, "")
+	if err != nil {
+		log.Printf("[plan] task=%s history scan failed: %v", task.ID, err)
+		return ids
+	}
+	for i := range msgs {
+		m := &msgs[i]
+		if m.Role != "tool_call" || m.ToolCalls == "" || m.ToolResult == "" {
+			continue
+		}
+		var tc struct {
+			ToolName string `json:"tool_name"`
+		}
+		if err := json.Unmarshal([]byte(m.ToolCalls), &tc); err != nil || tc.ToolName != "create_task" {
+			continue
+		}
+		var res struct {
+			Output  string `json:"output"`
+			Success bool   `json:"success"`
+		}
+		if err := json.Unmarshal([]byte(m.ToolResult), &res); err != nil || !res.Success {
+			continue
+		}
+		var out struct {
+			TaskID string `json:"task_id"`
+		}
+		if err := json.Unmarshal([]byte(res.Output), &out); err != nil {
+			continue
+		}
+		add(out.TaskID)
+	}
+	return ids
 }
 
 // handleViewTasks returns all backlog tasks for the current project.
