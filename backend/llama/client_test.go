@@ -39,7 +39,7 @@ func TestChatStream_ReadIdleTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := c.ChatStream(ctx, nil, nil, func(choice types.ChatChoice) {}, nil)
+	_, err := c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {}, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -74,7 +74,7 @@ func TestChatStream_TimedOutRace(t *testing.T) {
 
 	for range 20 {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_, _ = c.ChatStream(ctx, nil, nil, func(choice types.ChatChoice) {}, nil)
+		_, _ = c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {}, nil)
 		cancel()
 	}
 
@@ -158,7 +158,7 @@ func TestChatStream_ProductionTimedOutRace(t *testing.T) {
 
 	for range 200 {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_, _ = c.ChatStream(ctx, nil, nil, func(choice types.ChatChoice) {}, nil)
+		_, _ = c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {}, nil)
 		cancel()
 	}
 
@@ -295,7 +295,7 @@ func TestChatStream_WallClockTimingFallback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	usage, err := c.ChatStream(ctx, nil, nil, func(choice types.ChatChoice) {}, nil)
+	usage, err := c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {}, nil)
 	if err != nil {
 		t.Fatalf("ChatStream error: %v", err)
 	}
@@ -359,7 +359,7 @@ func TestChatStream_TimingsFromProvider(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	usage, err := c.ChatStream(ctx, nil, nil, func(choice types.ChatChoice) {}, nil)
+	usage, err := c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {}, nil)
 	if err != nil {
 		t.Fatalf("ChatStream error: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestChatCompletion_WallClockTimingFallback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	usage, content, err := c.ChatCompletion(ctx, nil, nil)
+	usage, content, err := c.ChatCompletion(ctx, testMessages(), nil)
 	if err != nil {
 		t.Fatalf("ChatCompletion error: %v", err)
 	}
@@ -503,7 +503,7 @@ func TestChatStream_ReturnsLlamaError(t *testing.T) {
 	defer server.Close()
 
 	c := NewLlamaClient(server.URL, "test-model", "off", "")
-	_, err := c.ChatStream(context.Background(), nil, nil, func(types.ChatChoice) {}, nil)
+	_, err := c.ChatStream(context.Background(), testMessages(), nil, func(types.ChatChoice) {}, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -519,5 +519,75 @@ func TestChatStream_ReturnsLlamaError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "llama error 429") {
 		t.Errorf("Error() = %q, want to contain llama error 429", err.Error())
+	}
+}
+
+// --- User message guard tests ---
+
+// testMessages returns a minimal message list that satisfies the user message guard.
+func testMessages() []types.ChatMessage {
+	return []types.ChatMessage{{Role: "user", Content: "hi"}}
+}
+
+// hitCountingServer counts requests so guard tests can assert the server is never hit.
+func hitCountingServer(hits *atomic.Int32) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+}
+
+func TestChatCompletion_NoUserMessage(t *testing.T) {
+	var hits atomic.Int32
+	server := hitCountingServer(&hits)
+	defer server.Close()
+
+	c := NewLlamaClient(server.URL, "test-model", "off", "")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// System-only messages must be rejected before any request is sent.
+	_, _, err := c.ChatCompletion(ctx, []types.ChatMessage{{Role: "system", Content: "hi"}}, nil)
+	if err == nil {
+		t.Fatal("expected error for system-only messages, got nil")
+	}
+	if !strings.Contains(err.Error(), "no user message") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Empty/nil messages must also be rejected.
+	if _, _, err := c.ChatCompletion(ctx, nil, nil); err == nil {
+		t.Fatal("expected error for empty messages, got nil")
+	}
+
+	if got := hits.Load(); got != 0 {
+		t.Errorf("server hit %d times, want 0", got)
+	}
+}
+
+func TestChatStream_NoUserMessage(t *testing.T) {
+	var hits atomic.Int32
+	server := hitCountingServer(&hits)
+	defer server.Close()
+
+	c := NewLlamaClient(server.URL, "test-model", "off", "")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := c.ChatStream(ctx, []types.ChatMessage{{Role: "system", Content: "hi"}}, nil, func(types.ChatChoice) {}, nil)
+	if err == nil {
+		t.Fatal("expected error for system-only messages, got nil")
+	}
+	if !strings.Contains(err.Error(), "no user message") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, err := c.ChatStream(ctx, nil, nil, func(types.ChatChoice) {}, nil); err == nil {
+		t.Fatal("expected error for empty messages, got nil")
+	}
+
+	if got := hits.Load(); got != 0 {
+		t.Errorf("server hit %d times, want 0", got)
 	}
 }

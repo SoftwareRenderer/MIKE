@@ -15,9 +15,29 @@ import (
 )
 
 // mockAnswerLLM returns an httptest server that answers a non-streaming chat
-// completion with a fixed consolidated numbered answer string.
+// completion with a fixed consolidated numbered answer string. Like the real
+// servers behind strict chat templates (e.g. Qwen3.8 on llama.cpp), it rejects
+// requests that carry no user message with a 500.
 func mockAnswerLLM(answer string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct {
+				Role string `json:"role"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		hasUser := false
+		for _, m := range req.Messages {
+			if m.Role == "user" {
+				hasUser = true
+				break
+			}
+		}
+		if !hasUser {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":{"message":"No user query found in messages."}}`))
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		resp := map[string]any{
 			"choices": []any{map[string]any{"message": map[string]any{"content": answer}}},
@@ -127,6 +147,54 @@ func TestAutomatedAnswers_NoParent(t *testing.T) {
 	}
 }
 
+// mkToolCall builds a ChatToolCall (Function is an anonymous struct, so it
+// can't be set in a literal).
+func mkToolCall(id, name, args string) types.ChatToolCall {
+	tc := types.ChatToolCall{ID: id}
+	tc.Function.Name = name
+	tc.Function.Arguments = args
+	return tc
+}
+
+func TestAskQuestionResults_AlignmentWithIncompleteCalls(t *testing.T) {
+	pending := []types.ChatToolCall{
+		mkToolCall("c0", "read_file", `{"path":"a"}`),
+		{ID: ""}, // incomplete — skipped, no result
+		mkToolCall("c1", "ask_question", `{"question":"q1"}`),
+		mkToolCall("c2", "bash", `{"command":"ls"}`),
+		mkToolCall("c3", "ask_question", `{"question":"q2"}`),
+	}
+	results := []toolResult{
+		{toolCallID: "c0", output: "a-content"},
+		{toolCallID: "c1", output: "q1"},
+		{toolCallID: "c2", output: "ls-out"},
+		{toolCallID: "c3", output: "q2"},
+	}
+	got := askQuestionResults(pending, results)
+	want := map[int]int{2: 1, 4: 3}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("askQuestionResults: got %#v, want %#v", got, want)
+	}
+}
+
+func TestAskQuestionResults_AllComplete(t *testing.T) {
+	pending := []types.ChatToolCall{
+		mkToolCall("c0", "ask_question", ""),
+		mkToolCall("c1", "bash", ""),
+		mkToolCall("c2", "ask_question", ""),
+	}
+	results := []toolResult{
+		{toolCallID: "c0", output: "q0"},
+		{toolCallID: "c1", output: "out"},
+		{toolCallID: "c2", output: "q2"},
+	}
+	got := askQuestionResults(pending, results)
+	want := map[int]int{0: 0, 2: 2}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("askQuestionResults: got %#v, want %#v", got, want)
+	}
+}
+
 func TestSplitNumberedAnswers(t *testing.T) {
 	tests := []struct {
 		response string
@@ -136,9 +204,21 @@ func TestSplitNumberedAnswers(t *testing.T) {
 	}{
 		{"1) Use OAuth. 2) 30 minutes", 2, []string{"Use OAuth.", "30 minutes"}, false},
 		{"1. Use OAuth.", 1, []string{"Use OAuth."}, false},
+		{"1. Use OAuth.\n2. 30 minutes", 2, []string{"Use OAuth.", "30 minutes"}, false},
 		{"Just an answer", 1, []string{"Just an answer"}, false},
 		{"", 1, nil, true},
 		{"1) Only one", 2, nil, true},
+		// Decimals/versions/dates in answers must not split them.
+		{"1) Use Go 1.21. 2) Use Python 3.10.", 2, []string{"Use Go 1.21.", "Use Python 3.10."}, false},
+		{"1) It costs 3.5 dollars. 2) Done", 2, []string{"It costs 3.5 dollars.", "Done"}, false},
+		{"1) At 2.5 hours. 2) OK", 2, []string{"At 2.5 hours.", "OK"}, false},
+		{"1) Upgrade to v2.0. 2) Then reboot", 2, []string{"Upgrade to v2.0.", "Then reboot"}, false},
+		{"1) Ship by 12.5.2024. 2) Done", 2, []string{"Ship by 12.5.2024.", "Done"}, false},
+		{"1) See section 2. 2) Done", 2, []string{"See section 2.", "Done"}, false},
+		{"Use Go 1.21", 1, []string{"Use Go 1.21"}, false},
+		// Out-of-order or duplicated numbering must error, not silently misalign.
+		{"1) first 3) third 2) second", 2, nil, true},
+		{"1) a 1) b", 2, nil, true},
 	}
 	for _, tc := range tests {
 		got, err := splitNumberedAnswers(tc.response, tc.n)
