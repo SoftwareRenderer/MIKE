@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -49,32 +51,23 @@ func unstageNewBinaryFiles(wm *git.WorktreeManager, taskID string) {
 	unstagePaths(wm, taskID, paths)
 }
 
-// Rate-limit backoff bounds for LLM streaming retries.
+// Retry bounds for LLM streaming.
 const (
 	rateLimitRetryAttempts = 3
-	rateLimitMaxBackoff    = 60 * time.Second
 )
 
-// backoffFor returns the duration to wait before the next LLM retry attempt.
-// For a 429 rate-limit error it honors the upstream Retry-After header (capped
-// at rateLimitMaxBackoff) when present; otherwise it backs off exponentially.
-// All other transient errors use a fixed linear schedule (2s, 4s, 6s).
+// backoffFor returns the duration to wait before the next LLM retry attempt
 func backoffFor(attempt int, err error) time.Duration {
 	var le *llama.LlamaError
-	if errors.As(err, &le) && le.IsRateLimit() {
-		if le.RetryAfter > 0 {
-			if le.RetryAfter > rateLimitMaxBackoff {
-				return rateLimitMaxBackoff
-			}
-			return le.RetryAfter
-		}
-		d := time.Duration(1<<attempt) * 2 * time.Second // 2s, 4s, 8s
-		if d > rateLimitMaxBackoff {
-			return rateLimitMaxBackoff
-		}
-		return d
+	if errors.As(err, &le) && le.IsRateLimit() && le.RetryAfter > 0 {
+		return le.RetryAfter + time.Second + jitter()
 	}
-	return time.Duration(attempt+1) * 2 * time.Second
+	return time.Duration(1<<attempt) * 2 * time.Second // 2s, 4s, 8s, ...
+}
+
+// jitter returns a random duration between 250ms and 500ms (inclusive)
+func jitter() time.Duration {
+	return 250*time.Millisecond + time.Duration(rand.Int64N(251))*time.Millisecond
 }
 
 // streamFlusher batches streaming events to reduce WebSocket write overhead.
@@ -237,6 +230,36 @@ type loopContext struct {
 	usage            *types.ChatUsage
 	sessionCost      float64 // accumulated API cost (USD) of completed calls for this task run
 	checkpointIdx    int     // messages index of last checkpoint
+}
+
+// toolResult holds one executed tool call's outcome. Incomplete calls (empty
+// ID/name) are skipped during execution, so toolResults is NOT index-aligned
+// with lc.pendingToolCalls.
+type toolResult struct {
+	toolCallID string
+	output     string
+	messageID  string         // persisted tool_call message ID
+	args       map[string]any // parsed tool args
+	rawArgs    string         // raw tool args JSON
+	success    bool
+	duration   int64
+}
+
+// askQuestionResults maps pendingToolCalls indexes of complete ask_question
+// calls to their toolResults index (incomplete calls have no result).
+func askQuestionResults(pending []types.ChatToolCall, results []toolResult) map[int]int {
+	m := make(map[int]int)
+	ri := 0
+	for i, tc := range pending {
+		if tc.ID == "" || tc.Function.Name == "" {
+			continue // incomplete call — skipped during execution, no result
+		}
+		if tc.Function.Name == "ask_question" {
+			m[i] = ri
+		}
+		ri++
+	}
+	return m
 }
 
 func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
@@ -762,9 +785,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		go func() {
 			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb)
 
-			// Retry on transient errors (skip if cancelled by user message).
-			// Rate-limit errors (429) wait for the upstream Retry-After or back off
-			// exponentially; other transient errors use a fixed linear schedule.
+			// Retry on transient errors (skip if cancelled by user message)
 			if streamErr != nil && callCtx.Err() == nil {
 				for i := range rateLimitRetryAttempts {
 					select {
@@ -934,15 +955,6 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 		assistantText := lc.assistantContent.String()
 
-		type toolResult struct {
-			toolCallID string
-			output     string
-			messageID  string         // persisted tool_call message ID
-			args       map[string]any // parsed tool args
-			rawArgs    string         // raw tool args JSON
-			success    bool
-			duration   int64
-		}
 		var toolResults []toolResult
 		var turnFailures []turnResult
 
@@ -1098,19 +1110,22 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				te.broadcastDiffIfGitCmd(setup.projectID, setup.task.ID, setup.task)
 			}
 
-			// ask_question: auto-started tasks answer all questions in this turn via
-			// parent context and continue; otherwise stop and wait for the user.
+			// ask_question: auto-started tasks auto-answer from parent context and
+			// continue; otherwise stop and wait for the user.
+			askResults := askQuestionResults(lc.pendingToolCalls, toolResults)
 			autoAnswered := false
-			if setup.task.Autostarted {
-				var questionIdxs []int
-				var questions []string
-				for i, tc := range lc.pendingToolCalls {
-					if tc.Function.Name == "ask_question" {
-						questionIdxs = append(questionIdxs, i)
-						questions = append(questions, toolResults[i].output)
-					}
+			if len(askResults) > 0 {
+				// Collect question indexes in call order (map iteration is unordered).
+				questionIdxs := make([]int, 0, len(askResults))
+				for i := range askResults {
+					questionIdxs = append(questionIdxs, i)
 				}
-				if len(questionIdxs) > 0 {
+				slices.Sort(questionIdxs)
+				if setup.task.Autostarted {
+					questions := make([]string, 0, len(questionIdxs))
+					for _, i := range questionIdxs {
+						questions = append(questions, toolResults[askResults[i]].output)
+					}
 					answers, aerr := te.automatedAnswers(setup.ctx, setup.task, questions)
 					if aerr != nil || len(answers) != len(questionIdxs) {
 						if aerr != nil {
@@ -1120,9 +1135,10 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						}
 					} else {
 						for k, idx := range questionIdxs {
-							tr := toolResults[idx]
+							ri := askResults[idx]
+							tr := toolResults[ri]
 							tr.output = answers[k]
-							toolResults[idx] = tr
+							toolResults[ri] = tr
 							// Persist the answer as this tool call's result.
 							resultJSON, _ := json.Marshal(map[string]any{"output": tr.output, "success": tr.success, "duration": tr.duration})
 							_ = te.store.UpdateTaskMessageToolResult(tr.messageID, string(resultJSON))
@@ -1133,29 +1149,25 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						log.Printf("[ask_question] setup.task=%s auto-answered %d question(s) from parent context", setup.task.ID, len(answers))
 					}
 				}
-			}
 
-			// Not auto-answered and no request_review: stop and wait for the user to restart.
-			if !hadRequestReview && !autoAnswered {
-				for i, tc := range lc.pendingToolCalls {
-					if tc.Function.Name == "ask_question" {
-						question := toolResults[i].output
-						setup.task.ExecutionState = "idle"
-						setup.task.Status = "review"
-						te.store.UpdateTask(setup.task)
-						te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-							"state":    "idle",
-							"question": question,
-							"summary":  "Agent has a question",
-						}})
-						log.Printf("[ask_question] setup.task=%s stopping executor, awaiting user answer", setup.task.ID)
-						// Remove from setup.task registry so next user message triggers handleLazyStart
-						te.taskMu.Lock()
-						delete(te.tasks, setup.task.ID)
-						te.taskMu.Unlock()
-						return
-					}
+				// Not auto-answered and no request_review: stop and wait for the user.
+				if !hadRequestReview && !autoAnswered {
+					tr := toolResults[askResults[questionIdxs[0]]]
+					setup.task.ExecutionState = "idle"
+					setup.task.Status = "review"
+					te.store.UpdateTask(setup.task)
+					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+						"state":    "idle",
+						"question": tr.output,
+						"summary":  "Agent has a question",
+					}})
+					log.Printf("[ask_question] setup.task=%s stopping executor, awaiting user answer", setup.task.ID)
+					// Remove from setup.task registry so next user message triggers handleLazyStart
+					te.taskMu.Lock()
+					delete(te.tasks, setup.task.ID)
+					te.taskMu.Unlock()
+					return
 				}
 			}
 

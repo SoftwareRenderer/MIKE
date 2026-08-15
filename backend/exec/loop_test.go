@@ -3403,22 +3403,30 @@ func TestBuildContextReplay_WithSummarization(t *testing.T) {
 
 // --- Backoff Policy Tests ---
 
-func TestBackoffFor_RateLimitedWithRetryAfter(t *testing.T) {
-	// Retry-After is honored verbatim.
-	err := &llama.LlamaError{StatusCode: 429, RetryAfter: 20 * time.Second}
-	for attempt := 0; attempt < 3; attempt++ {
-		if got := backoffFor(attempt, err); got != 20*time.Second {
-			t.Errorf("attempt %d: backoff = %v, want 20s", attempt, got)
-		}
+// assertBackoffWithin fails the test if got is outside [min, max].
+func assertBackoffWithin(t *testing.T, name string, got, min, max time.Duration) {
+	t.Helper()
+	if got < min || got > max {
+		t.Errorf("%s: backoff = %v, want within [%v, %v]", name, got, min, max)
 	}
 }
 
-func TestBackoffFor_RateLimitedRetryAfterCapped(t *testing.T) {
-	// A huge Retry-After is capped at rateLimitMaxBackoff.
-	err := &llama.LlamaError{StatusCode: 429, RetryAfter: 10 * time.Hour}
-	if got := backoffFor(0, err); got != rateLimitMaxBackoff {
-		t.Errorf("backoff = %v, want %v", got, rateLimitMaxBackoff)
+func TestBackoffFor_RateLimitedWithRetryAfter(t *testing.T) {
+	// Retry-After is honored: delay + 1s + 250-500ms jitter, on every attempt.
+	err := &llama.LlamaError{StatusCode: 429, RetryAfter: 20 * time.Second}
+	min := 20*time.Second + time.Second + 250*time.Millisecond
+	max := 20*time.Second + time.Second + 500*time.Millisecond
+	for attempt := 0; attempt < 3; attempt++ {
+		assertBackoffWithin(t, fmt.Sprintf("attempt %d", attempt), backoffFor(attempt, err), min, max)
 	}
+}
+
+func TestBackoffFor_RateLimitedRetryAfterUncapped(t *testing.T) {
+	// A huge Retry-After is honored uncapped: 10h + 1s + 250-500ms jitter.
+	err := &llama.LlamaError{StatusCode: 429, RetryAfter: 10 * time.Hour}
+	min := 10*time.Hour + time.Second + 250*time.Millisecond
+	max := 10*time.Hour + time.Second + 500*time.Millisecond
+	assertBackoffWithin(t, "attempt 0", backoffFor(0, err), min, max)
 }
 
 func TestBackoffFor_RateLimitedExponential(t *testing.T) {
@@ -3432,20 +3440,10 @@ func TestBackoffFor_RateLimitedExponential(t *testing.T) {
 	}
 }
 
-func TestBackoffFor_RateLimitedExponentialCapped(t *testing.T) {
-	// High attempt counts cap at rateLimitMaxBackoff.
-	err := &llama.LlamaError{StatusCode: 429}
-	for attempt := 6; attempt < 10; attempt++ {
-		if got := backoffFor(attempt, err); got != rateLimitMaxBackoff {
-			t.Errorf("attempt %d: backoff = %v, want %v", attempt, got, rateLimitMaxBackoff)
-		}
-	}
-}
-
-func TestBackoffFor_GenericLinear(t *testing.T) {
-	// Non-rate-limit errors keep the linear 2s, 4s, 6s schedule.
+func TestBackoffFor_GenericExponential(t *testing.T) {
+	// Non-rate-limit errors use the same exponential 2s, 4s, 8s schedule.
 	err := errors.New("connection reset")
-	wants := []time.Duration{2 * time.Second, 4 * time.Second, 6 * time.Second}
+	wants := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 	for attempt, want := range wants {
 		if got := backoffFor(attempt, err); got != want {
 			t.Errorf("attempt %d: backoff = %v, want %v", attempt, got, want)
@@ -3454,7 +3452,7 @@ func TestBackoffFor_GenericLinear(t *testing.T) {
 }
 
 func TestBackoffFor_GenericLlamaErrorNotRateLimited(t *testing.T) {
-	// A LlamaError with a non-429 code falls back to the linear schedule.
+	// A LlamaError with a non-429 code uses the exponential schedule (Retry-After ignored).
 	err := &llama.LlamaError{StatusCode: 500, RetryAfter: 30 * time.Second}
 	if got := backoffFor(0, err); got != 2*time.Second {
 		t.Errorf("backoff = %v, want 2s", got)
