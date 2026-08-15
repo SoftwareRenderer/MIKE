@@ -1211,6 +1211,9 @@
             // 5. Allow live events — buffer replay is done, DB state is loaded.
             suppressEvents = false;
 
+            // 6. Initial focus
+            if (!destroyed) chatFormComp?.focus();
+
             // Override model selection with task-specific values if set
             try {
                 const task = await (await import('$lib/api')).getTask(projectId, taskId);
