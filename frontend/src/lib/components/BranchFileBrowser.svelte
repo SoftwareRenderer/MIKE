@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import { ensureCsrfToken, getGitStatus } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
@@ -20,8 +20,25 @@
     // New file creation
     let showNewFile = $state(false);
     let newFileName = $state('');
+    let newFileInput: HTMLInputElement | null = $state(null);
     let creating = $state(false);
     let createError = $state('');
+
+    async function toggleNewFile() {
+        showNewFile = true;
+        newFileName = '';
+        createError = '';
+        await tick(); // wait for the row to render
+        newFileInput?.focus();
+    }
+
+    async function toggleNewFolder() {
+        showNewFolder = true;
+        newFolderName = '';
+        createFolderError = '';
+        await tick(); // wait for the row to render
+        newFolderInput?.focus();
+    }
 
     async function handleCreateFile() {
         const name = newFileName.trim();
@@ -57,6 +74,7 @@
     // New folder creation
     let showNewFolder = $state(false);
     let newFolderName = $state('');
+    let newFolderInput: HTMLInputElement | null = $state(null);
     let creatingFolder = $state(false);
     let createFolderError = $state('');
 
@@ -362,13 +380,13 @@
                         <line x1="21" y1="21" x2="16.65" y2="16.65"/>
                     </svg>
                 </button>
-                <button class="new-file-btn" onclick={() => { showNewFile = true; newFileName = ''; createError = ''; }} title="New file" aria-label="Create new file">
+                <button class="new-file-btn" onclick={toggleNewFile} title="New file" aria-label="Create new file">
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
                         <line x1="8" y1="3" x2="8" y2="13"/>
                         <line x1="3" y1="8" x2="13" y2="8"/>
                     </svg>
                 </button>
-                <button class="new-file-btn" onclick={() => { showNewFolder = true; newFolderName = ''; createFolderError = ''; }} title="New folder" aria-label="Create new folder">
+                <button class="new-file-btn" onclick={toggleNewFolder} title="New folder" aria-label="Create new folder">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
                         <line x1="12" y1="10" x2="12" y2="16"/>
@@ -378,32 +396,30 @@
             </div>
         {:else if showNewFile}
             <div class="new-file-input-row">
-                <!-- svelte-ignore a11y_autofocus — intentional focus for new file input -->
                 <input
                     type="text"
                     class="new-file-input"
+                    bind:this={newFileInput}
                     placeholder="filename"
                     value={newFileName}
                     oninput={(e) => newFileName = (e.target as HTMLInputElement).value}
                     onkeydown={(e) => { if (e.key === 'Enter') handleCreateFile(); if (e.key === 'Escape') { showNewFile = false; newFileName = ''; } }}
                     onblur={() => { showNewFile = false; newFileName = ''; }}
                     aria-label="New file name"
-                    autofocus
                 />
             </div>
         {:else}
             <div class="new-file-input-row">
-                <!-- svelte-ignore a11y_autofocus — intentional focus for new folder input -->
                 <input
                     type="text"
                     class="new-file-input"
+                    bind:this={newFolderInput}
                     placeholder="folder name"
                     value={newFolderName}
                     oninput={(e) => newFolderName = (e.target as HTMLInputElement).value}
                     onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') { showNewFolder = false; newFolderName = ''; } }}
                     onblur={() => { showNewFolder = false; newFolderName = ''; }}
                     aria-label="New folder name"
-                    autofocus
                 />
             </div>
         {/if}

@@ -53,7 +53,7 @@ describe('createFocusTrap', () => {
         trap.destroy();
     });
 
-    it('focusFirst prefers a later autofocus element over earlier focusables', () => {
+    it('focusFirst does not special-case the autofocus attribute (focus must be set programmatically)', () => {
         container.innerHTML = `
             <button id="first">First</button>
             <textarea id="auto" autofocus></textarea>
@@ -65,7 +65,8 @@ describe('createFocusTrap', () => {
         Object.defineProperty(auto, 'offsetParent', { value: {} });
         const trap = createFocusTrap(container);
         trap.focusFirst();
-        expect(document.activeElement).toBe(auto);
+        // The `autofocus` attribute is ignored — the first focusable wins.
+        expect(document.activeElement).toBe(first);
         trap.destroy();
     });
 
