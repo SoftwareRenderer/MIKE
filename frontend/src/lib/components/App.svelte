@@ -9,6 +9,7 @@ import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
 import { getBoardCache, boardCacheKey } from '$lib/storage';
 import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
 import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
+import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
 import kanbanIcon from '$lib/assets/icons/kanban.svg';
     import type { Project, Task, Config, StreamEvent } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
@@ -214,6 +215,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             uiStore.showCreateTask = true;
         },
     });
+    // Arrow-key navigation between board cards (same gate as the shortcuts above).
+    useBoardArrowNav({ isEnabled: boardShortcutsEnabled });
 
     let isAuthenticated = $state(false);
     let isLoadingAuth = $state(true);

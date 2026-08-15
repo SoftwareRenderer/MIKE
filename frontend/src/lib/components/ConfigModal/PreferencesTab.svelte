@@ -84,7 +84,7 @@
         <h3 class="section-label">Keyboard Shortcuts</h3>
     </div>
 
-    <div class="shortcut-row" data-pref="hide_hints">
+    <div class="shortcut-row">
         <div class="shortcut-info">
             <span class="shortcut-name">Hide shortcut hints</span>
             <span id="hide-hints-desc" class="shortcut-desc">Hide the keycaps shown on buttons</span>

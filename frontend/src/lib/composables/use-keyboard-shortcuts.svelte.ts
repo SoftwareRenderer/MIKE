@@ -3,20 +3,13 @@
  * when ctx.isEnabled() is true and focus is not in an editable element.
  */
 import { appStore } from '$lib/stores';
-import { effectiveCreateTaskKey, matchShortcut } from '$lib/utils/keyboard';
+import { effectiveCreateTaskKey, isEditableTarget, matchShortcut } from '$lib/utils/keyboard';
 
 interface KeyboardShortcutsContext {
     /** True only when shortcuts should be active (board visible, no modals). */
     isEnabled: () => boolean;
     /** Action for the create-task shortcut. */
     onCreateTask: () => void;
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-    if (!(target instanceof HTMLElement)) return false;
-    if (target.isContentEditable) return true;
-    const tag = target.tagName;
-    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 }
 
 /** Wire up the keyboard shortcuts. Call from a component's setup. */
