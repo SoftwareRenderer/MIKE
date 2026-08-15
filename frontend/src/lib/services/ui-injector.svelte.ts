@@ -261,9 +261,19 @@ export class UIInjector {
         };
         if (anchor) {
             const ac = this.channels.get(anchor);
-            if (ac) teardownOne(ac);
+            if (ac) {
+                teardownOne(ac);
+                // Drop the anchor entry once it has no channels left, so the
+                // (dead) anchor element is no longer pinned in the map and can
+                // be garbage-collected.
+                if (ac.size === 0) this.channels.delete(anchor);
+            }
         } else {
-            for (const ac of this.channels.values()) teardownOne(ac);
+            // Iterate over a snapshot — we delete empty inner maps below.
+            for (const [el, ac] of [...this.channels]) {
+                teardownOne(ac);
+                if (ac.size === 0) this.channels.delete(el);
+            }
         }
     }
 

@@ -7,10 +7,7 @@ Description:
 {{ .ParentPrompt }}
 </description>
 
-Provide concise, decisive answers for the following questions:
-
-{{range $i, $q := .Questions}}{{$i | inc}}. {{$q}}
-{{end}}
+The user's message contains the questions to answer. Provide concise, decisive answers for them.
 
 Answer each question in the exact order given, in a single line, using this simple format:
 
