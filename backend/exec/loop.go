@@ -1394,8 +1394,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			te.createCheckpoint(setup.ctx, setup.projectID, setup.task.ID, setup.worktreePath, setup.task.CurrentThreadID, assistantMsgID, newMessages, lc.sandboxEnabled)
 			lc.checkpointIdx = len(lc.messages)
 
-			// Auto-summarize if context is approaching the window limit.
-			te.maybeAutoSummarize(setup, lc, activeModel)
+			// Auto-summarize if context is approaching the limit
+			te.maybeAutoSummarize(setup, lc, activeModel, true)
 
 			// Continue to call LLM again with tool results — don't fall through to blocking select
 			continue
@@ -1467,7 +1467,9 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 			// Auto-summarize if context is approaching the window limit. Runs right
 			// after the message completes, without waiting for the task transition.
-			te.maybeAutoSummarize(setup, lc, activeModel)
+			// The task goes idle here (context is NOT fed back to the LLM), so no
+			// "Proceed" is injected — a queued real user message supersedes it.
+			te.maybeAutoSummarize(setup, lc, activeModel, false)
 
 			// Check for queued user messages.
 			select {
@@ -1538,8 +1540,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			lc.finishReason = ""
 			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Reasoning-only response, requesting action"}})
 
-			// Auto-summarize if context is approaching the window limit.
-			te.maybeAutoSummarize(setup, lc, activeModel)
+			// Auto-summarize if context is approaching the window limit
+			te.maybeAutoSummarize(setup, lc, activeModel, true)
 
 			continue
 		}
