@@ -9,6 +9,10 @@ import type { Config } from '$lib/types';
 /** Default keyboard shortcut bindings. */
 export const DEFAULT_SHORTCUTS: Record<string, string> = {
     create_task: 'c',
+    // Ctrl+backtick — classic terminal shortcut (VS Code, iTerm); not reserved
+    // by browsers on any platform (Cmd+backtick is macOS window-cycling, so
+    // the default always uses control, not meta).
+    'open_terminal': 'control+`',
 };
 
 const MODIFIERS = ['control', 'meta', 'shift', 'alt'] as const;
@@ -100,6 +104,11 @@ export function matchShortcut(key: string, e: KeyboardEvent): boolean {
 /** Resolve the effective create-task shortcut: the default when unset, `""` when disabled. */
 export function effectiveCreateTaskKey(config: Config | null | undefined): string {
     return config?.keyboard_shortcuts?.create_task ?? DEFAULT_SHORTCUTS.create_task;
+}
+
+/** Resolve the effective open-terminal shortcut: the default when unset, `""` when disabled. */
+export function effectiveOpenTerminalKey(config: Config | null | undefined): string {
+    return config?.keyboard_shortcuts?.open_terminal ?? DEFAULT_SHORTCUTS.open_terminal;
 }
 
 /** True on Apple platforms (used to pick the platform-appropriate submit key). */

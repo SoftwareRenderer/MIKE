@@ -494,8 +494,9 @@ test.describe.parallel('Terminal', () => {
       // 4. Wait for the task detail page to load
       await expect(page.locator('.task-detail-page')).toBeVisible();
 
-      // 5. Find the terminal button in the task header (title="Open terminal")
-      const terminalButton = page.locator('button[title="Open terminal"]');
+      // 5. Find the terminal button in the task header (aria-label is stable;
+      //    the title now includes the keyboard shortcut)
+      const terminalButton = page.locator('button[aria-label="Open terminal"]');
       await expect(terminalButton).toBeVisible();
 
       // 6. Verify terminal is not visible before clicking
