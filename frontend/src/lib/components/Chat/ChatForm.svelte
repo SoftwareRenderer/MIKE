@@ -209,6 +209,12 @@
             handleStop();
             return;
         }
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            textareaEl?.blur();
+            return;
+        }
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             if (canSend) {

@@ -62,6 +62,22 @@ export function resolveArrowTarget(opts: {
     return null;
 }
 
+// keyboard nav
+export function resolveOverviewArrowTarget(opts: {
+    cards: HTMLElement[];
+    activeElement: Element | null;
+    key: 'ArrowDown' | 'ArrowUp';
+}): HTMLElement | null {
+    const { cards, activeElement, key } = opts;
+    if (!cards.length) return null;
+    const idx = activeElement instanceof Element
+        ? cards.findIndex((c) => c === activeElement || c.contains(activeElement))
+        : -1;
+    if (idx === -1) return cards[0];
+    const dir = key === 'ArrowDown' ? 1 : -1;
+    return cards[(idx + dir + cards.length) % cards.length];
+}
+
 /** Build the column refs from the live DOM (projects pseudo-column first). */
 function collectNavColumns(): BoardColumnRef[] {
     const cols: BoardColumnRef[] = [];
