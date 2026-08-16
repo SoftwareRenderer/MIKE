@@ -20,10 +20,7 @@ export interface BoardColumnRef {
 export type ArrowKey = 'ArrowDown' | 'ArrowUp' | 'ArrowLeft' | 'ArrowRight';
 
 /**
- * Pure navigation step (unit-tested): Down/Up move within the focused column
- * (wrapping; neutral anchors to the first non-empty board column, never the
- * projects list); Left/Right jump to the first card of the next non-empty
- * column, cycling through the ring. Returns null when there is no target.
+ * Arroy Key navigation
  */
 export function resolveArrowTarget(opts: {
     columns: BoardColumnRef[];
@@ -40,19 +37,23 @@ export function resolveArrowTarget(opts: {
         if (colIdx >= 0) cardIdx = columns[colIdx].cards.findIndex((c) => c.contains(activeElement));
     }
 
+    // Neutral anchor (focus outside the ring, e.g. on <body>): first card of
+    // the first non-empty board column (backlog first), never the projects list.
+    function neutralAnchor(): HTMLElement | null {
+        for (const col of columns) if (!col.isProjects && col.cards.length) return col.cards[0];
+        return null;
+    }
+
     if (key === 'ArrowDown' || key === 'ArrowUp') {
         const dir = key === 'ArrowDown' ? 1 : -1;
-        if (colIdx === -1) {
-            for (const col of columns) if (!col.isProjects && col.cards.length) return col.cards[0];
-            return null;
-        }
+        if (colIdx === -1) return neutralAnchor();
         const cards = columns[colIdx].cards;
         if (!cards.length) return null;
         if (cardIdx === -1) return dir > 0 ? cards[0] : cards[cards.length - 1];
         return cards[(cardIdx + dir + cards.length) % cards.length];
     }
 
-    if (colIdx === -1) return null;
+    if (colIdx === -1) return neutralAnchor();
     const dir = key === 'ArrowRight' ? 1 : -1;
     // steps 1..n-1: every other column exactly once, cyclic through projects
     for (let step = 1; step < columns.length; step++) {

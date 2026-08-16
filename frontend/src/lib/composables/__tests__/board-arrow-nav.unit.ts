@@ -85,20 +85,24 @@ describe('resolveArrowTarget — neutral (no card focused)', () => {
         expect(idOf(resolveArrowTarget({ columns: cols, activeElement: null, key: 'ArrowUp' }))).toBe('t1');
     });
 
-    it('Left/Right are no-ops', () => {
-        const cols = setupBoard(1, 1, 1, 1);
-        expect(resolveArrowTarget({ columns: cols, activeElement: null, key: 'ArrowLeft' })).toBeNull();
-        expect(resolveArrowTarget({ columns: cols, activeElement: null, key: 'ArrowRight' })).toBeNull();
+    it('Left/Right anchor to the first backlog card, never the projects list', () => {
+        const cols = setupBoard(2, 1, 0, 1, 2);
+        expect(idOf(resolveArrowTarget({ columns: cols, activeElement: null, key: 'ArrowLeft' }))).toBe('t1');
+        expect(idOf(resolveArrowTarget({ columns: cols, activeElement: null, key: 'ArrowRight' }))).toBe('t1');
     });
 
     it('falls back to the first non-empty board column when backlog is empty', () => {
         const cols = setupBoard(0, 1, 0, 1);
-        expect(idOf(resolveArrowTarget({ columns: cols, activeElement: null, key: 'ArrowDown' }))).toBe('t1');
+        for (const key of ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'] as const) {
+            expect(idOf(resolveArrowTarget({ columns: cols, activeElement: null, key }))).toBe('t1');
+        }
     });
 
     it('returns null when every board column is empty (projects have items)', () => {
         const cols = setupBoard(0, 0, 0, 0, 1);
-        expect(resolveArrowTarget({ columns: cols, activeElement: null, key: 'ArrowDown' })).toBeNull();
+        for (const key of ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'] as const) {
+            expect(resolveArrowTarget({ columns: cols, activeElement: null, key })).toBeNull();
+        }
     });
 });
 
