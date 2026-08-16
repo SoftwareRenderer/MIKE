@@ -255,6 +255,12 @@ func TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage(t *testing.T)
 	if summarizeCalls.Load() == 0 {
 		t.Fatal("expected the summarization endpoint to be called")
 	}
+	// Manual summarization must NOT inject a "Proceed" user message.
+	for _, m := range msgs {
+		if m.Role == "user" && m.Content == "Proceed" {
+			t.Fatal("manual summarization must not inject a 'Proceed' user message")
+		}
+	}
 }
 
 // TestExecuteTask_ManualSummarize_StartsWithQueuedMessage verifies the intended

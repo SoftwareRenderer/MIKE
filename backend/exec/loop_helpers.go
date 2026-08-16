@@ -153,7 +153,10 @@ func extractPrevSummary(messages []types.ChatMessage) string {
 // so it triggers right when context crosses the threshold (no waiting for the task to
 // transition to idle). applySummarization sets/clears the Summarizing flag, which shows
 // the spinner in the UI.
-func (te *TaskExecutor) maybeAutoSummarize(setup *taskExecSetup, lc *loopContext, activeModel string) {
+//
+// When injectProceed is true and summarization succeeds, a persisted "Proceed" user
+// message is appended to the context to the next LLM call
+func (te *TaskExecutor) maybeAutoSummarize(setup *taskExecSetup, lc *loopContext, activeModel string, injectProceed bool) {
 	if lc.contextWindow == nil {
 		return
 	}
@@ -161,18 +164,33 @@ func (te *TaskExecutor) maybeAutoSummarize(setup *taskExecSetup, lc *loopContext
 	if !shouldSummarize(contextTokensUsed(lc), *lc.contextWindow, threshold) {
 		return
 	}
+	before := len(lc.messages)
 	lc.messages = te.applySummarization(setup.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, setup.serverURL, activeModel, nil)
+	if injectProceed && len(lc.messages) > before {
+		te.injectProceedMessage(setup, lc)
+	}
 	lc.detector.reset()
 	lc.detector.clearHints()
+}
+
+// injectProceedMessage persists and broadcasts a "Proceed" user message
+func (te *TaskExecutor) injectProceedMessage(setup *taskExecSetup, lc *loopContext) {
+	msgID := uuid.New().String()
+	_ = te.store.CreateTaskMessage(&types.TaskMessage{
+		ID: msgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
+		Role: "user", Content: "Proceed", CreatedAt: time.Now().UTC(),
+	})
+	lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: "Proceed"})
+	te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
+		Type: types.WSTypeUserMessage,
+		Data: map[string]any{"id": msgID, "role": "user", "content": "Proceed"},
+	})
 }
 
 // applySummarization runs summarization, appends the summary message, and broadcasts the event.
 // Summary is injected into the system prompt on the next LLM call.
 func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task, projectID, taskID string, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error) []types.ChatMessage {
-	// Signal the UI that summarization is in progress (shows the spinner) and
-	// block lazy-start for idle tasks. Idempotent with the manual path, where
-	// HandleSummarize sets this flag before sending the request. This makes the
-	// automatic path render identically to a user-triggered summarization.
+	// Signal the UI that summarization is in progress
 	origTask := task
 	task.Summarizing = true
 	_ = te.store.UpdateTask(task)
@@ -187,9 +205,7 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 	}
 
 	prevSummary := extractPrevSummary(messages)
-	// Route summarization through the configured Utility provider/model.
-	// Only override the active model when a Utility pair is configured; otherwise
-	// keep the task's active model/URL passed in by the caller.
+	// Route summarization through the configured Utility provider/model
 	utilURL, utilModel, ok := te.utilityTarget(task)
 	if ok {
 		serverURL = utilURL
