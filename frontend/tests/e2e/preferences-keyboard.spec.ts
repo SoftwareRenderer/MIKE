@@ -12,8 +12,12 @@ const PREFERENCES_TAB = 'button.tab-btn:has-text("Preferences")';
 // Rows in the Preferences tab (two shortcuts share class/aria names).
 const CREATE_ROW = '.shortcut-row[data-shortcut="create_task"]';
 const SUBMIT_ROW = '.shortcut-row[data-shortcut="create_task_submit"]';
+const TERMINAL_ROW = '.shortcut-row[data-shortcut="open_terminal"]';
 const KEY_CHIP = `${CREATE_ROW} button.key-chip`;
 const SUBMIT_CHIP = `${SUBMIT_ROW} button.key-chip`;
+const TERMINAL_CHIP = `${TERMINAL_ROW} button.key-chip`;
+const TERMINAL_RESET = `${TERMINAL_ROW} button[aria-label="Reset to default"]`;
+const TERMINAL_CLEAR = `${TERMINAL_ROW} button[aria-label="Clear shortcut"]`;
 const RESET_BTN = `${CREATE_ROW} button[aria-label="Reset to default"]`;
 const CLEAR_BTN = `${CREATE_ROW} button[aria-label="Clear shortcut"]`;
 const SAVE_BTN = 'button.btn-primary[title="Save settings"]';
@@ -271,5 +275,82 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator(CREATE_MODAL)).toBeVisible({ timeout: 5000 });
         await page.keyboard.press('Escape');
         await expect(page.locator(CREATE_MODAL)).not.toBeVisible({ timeout: 5000 });
+    });
+
+    test('open_terminal defaults to Ctrl+` and opens the terminal panel', async ({ page }) => {
+        await resetShortcuts(page);
+        await page.reload();
+        await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
+
+        // Terminal button tooltip shows the shortcut
+        await expect(page.locator('button[aria-label="Open terminal"]')).toHaveAttribute('title', 'Open terminal (Ctrl+`)');
+
+        // Preferences row shows the default
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await expect(page.locator(TERMINAL_CHIP)).toHaveText('Ctrl+`');
+
+        // Close settings via Cancel (no changes)
+        await page.locator('button[title="Cancel and discard changes"]').click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+
+        // Pressing the default opens the terminal panel
+        await page.keyboard.press('Control+`');
+        await expect(page.locator('.terminal-panel')).toBeVisible({ timeout: 10000 });
+        await page.locator('.terminal-panel .close-btn').click();
+        await expect(page.locator('.terminal-panel')).not.toBeVisible({ timeout: 5000 });
+    });
+
+    test('rebinding open_terminal persists and the new combo opens the terminal', async ({ page }) => {
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await expect(page.locator(TERMINAL_CHIP)).toHaveText('Ctrl+`');
+
+        await page.locator(TERMINAL_CHIP).click();
+        await expect(page.locator(TERMINAL_CHIP)).toHaveText('Press a key...');
+        await page.keyboard.press('Alt+Shift+T');
+        await expect(page.locator(TERMINAL_CHIP)).toHaveText('Shift+Alt+T');
+
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+        await waitForConfig(page, c => c.keyboard_shortcuts?.open_terminal === 'shift+alt+t');
+
+        // The old default no longer opens the terminal; the new binding does
+        await page.keyboard.press('Control+`');
+        await page.waitForTimeout(300);
+        await expect(page.locator('.terminal-panel')).not.toBeVisible();
+
+        await page.keyboard.press('Alt+Shift+T');
+        await expect(page.locator('.terminal-panel')).toBeVisible({ timeout: 10000 });
+        await page.locator('.terminal-panel .close-btn').click();
+        await expect(page.locator('.terminal-panel')).not.toBeVisible({ timeout: 5000 });
+    });
+
+    test('reset and clear work for open_terminal', async ({ page }) => {
+        // Carries over from the rebind test: binding is Shift+Alt+T
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+
+        await page.locator(TERMINAL_RESET).click();
+        await expect(page.locator(TERMINAL_CHIP)).toHaveText('Ctrl+`');
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+        await waitForConfig(page, c => c.keyboard_shortcuts?.open_terminal === undefined);
+
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await page.locator(TERMINAL_CLEAR).click();
+        await expect(page.locator(TERMINAL_CHIP)).toHaveText('None');
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+        await waitForConfig(page, c => c.keyboard_shortcuts?.open_terminal === '');
+
+        // Disabled: the default combo does nothing
+        await page.keyboard.press('Control+`');
+        await page.waitForTimeout(300);
+        await expect(page.locator('.terminal-panel')).not.toBeVisible();
+
+        // Restore the default for other suites
+        await resetShortcuts(page);
     });
 });

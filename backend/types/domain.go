@@ -99,6 +99,8 @@ type KeyboardShortcuts struct {
 	CreateTask *string `json:"create_task,omitempty"`
 	// CreateTaskSubmit creates the task inside the create-task dialog.
 	CreateTaskSubmit *string `json:"create_task_submit,omitempty"`
+	// OpenTerminal opens the terminal panel on pages with a terminal button.
+	OpenTerminal *string `json:"open_terminal,omitempty"`
 	// HideHints hides the keycap hints on shortcut buttons (tooltips stay).
 	HideHints *bool `json:"hide_hints,omitempty"`
 }

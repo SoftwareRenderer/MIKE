@@ -6,6 +6,7 @@ import {
     parseShortcut,
     matchShortcut,
     effectiveCreateTaskKey,
+    effectiveOpenTerminalKey,
     isMac,
     defaultCreateTaskSubmitKey,
     effectiveCreateTaskSubmitKey,
@@ -75,6 +76,10 @@ describe('normalizeKey', () => {
         expect(normalizeKey(keyEvent({ key: 't', ctrlKey: true }))).toBeNull();
     });
 
+    it('accepts the default terminal combo (control+backtick)', () => {
+        expect(normalizeKey(keyEvent({ key: '`', ctrlKey: true }))).toBe('control+`');
+    });
+
     it('rejects dead/unknown keys', () => {
         expect(normalizeKey(keyEvent({ key: 'Dead' }))).toBeNull();
         expect(normalizeKey(keyEvent({ key: 'Unidentified' }))).toBeNull();
@@ -98,6 +103,10 @@ describe('formatShortcut', () => {
     it('formats special keys with readable names', () => {
         expect(formatShortcut('shift+ ')).toBe('Shift+Space');
         expect(formatShortcut('control+f5')).toBe('Ctrl+F5');
+    });
+
+    it('formats the default terminal combo', () => {
+        expect(formatShortcut('control+`')).toBe('Ctrl+`');
     });
 });
 
@@ -154,6 +163,23 @@ describe('effectiveCreateTaskKey', () => {
 
     it('returns empty string when explicitly disabled', () => {
         expect(effectiveCreateTaskKey({ keyboard_shortcuts: { create_task: '' } } as Config)).toBe('');
+    });
+});
+
+describe('effectiveOpenTerminalKey', () => {
+    it('defaults to control+backtick when unset', () => {
+        expect(effectiveOpenTerminalKey(null)).toBe('control+`');
+        expect(effectiveOpenTerminalKey(undefined)).toBe('control+`');
+        expect(effectiveOpenTerminalKey({} as Config)).toBe('control+`');
+        expect(effectiveOpenTerminalKey({ keyboard_shortcuts: {} } as Config)).toBe('control+`');
+    });
+
+    it('returns the stored custom binding', () => {
+        expect(effectiveOpenTerminalKey({ keyboard_shortcuts: { open_terminal: 'alt+shift+t' } } as Config)).toBe('alt+shift+t');
+    });
+
+    it('returns empty string when disabled', () => {
+        expect(effectiveOpenTerminalKey({ keyboard_shortcuts: { open_terminal: '' } } as Config)).toBe('');
     });
 });
 

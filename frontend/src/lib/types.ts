@@ -216,6 +216,8 @@ export interface Config {
 export interface KeyboardShortcuts {
     create_task?: string;
     create_task_submit?: string;
+    /** Opens the terminal panel on pages with a terminal button. */
+    open_terminal?: string;
     /** Hide the keycap hints on shortcut buttons (tooltips stay). */
     hide_hints?: boolean;
 }

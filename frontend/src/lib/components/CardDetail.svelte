@@ -4,7 +4,7 @@
     import type { DiffFile, DiffRow } from '$lib/types/diff';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
-    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile, initTask } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile } from '$lib/api';
     import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { filterTopLevelTaskIds } from '$lib/utils/task-utils';
     import { clearHighlightCache } from '$lib/highlighter';
@@ -140,18 +140,8 @@
     })));
     // Terminal - worktree exists when task is initialized (branch created via init or start)
     let worktreeExists = $derived(task.worktree_exists || !!task.branch);
-    // Open terminal, initializing the task worktree first if needed.
-    async function handleOpenTerminal() {
-        if (!worktreeExists) {
-            try {
-                await initTask(task.project_id, task.id);
-            } catch (e) {
-                console.error('[terminal] Failed to initialize task:', e);
-                return;
-            }
-        }
-        onOpenTerminal?.();
-    }
+    // Note: opening the terminal (button and shortcut) initializes the task
+    // worktree first if needed — that logic lives in App.svelte's openTerminal().
 
     // Commit history for diff comparison
     let commits: TaskCommit[] = $state([]);
@@ -735,7 +725,7 @@
             {badge}
             {task}
             {onClose}
-            onOpenTerminal={handleOpenTerminal}
+            onOpenTerminal={() => onOpenTerminal?.()}
             onOpenExplorer={onOpenExplorer || (() => {})}
             onDelete={handleDelete}
         />
