@@ -12,6 +12,8 @@
     import { loadAppSetting, saveAppSetting, loadCollapsedSections, saveCollapsedSections } from '$lib/storage';
     import { useBoardDnd } from '$lib/composables/use-board-dnd.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
+    import { resolveOverviewArrowTarget } from '$lib/composables/use-board-arrow-nav';
+    import { isEditableTarget } from '$lib/utils/keyboard';
     import { DiffCache } from '$lib/services/diff-cache.svelte';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
@@ -522,6 +524,27 @@
                 } else {
                     onClose();
                 }
+                return;
+            }
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                // Board overview arrow navigation
+                if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+                const active = document.activeElement;
+                if (active instanceof HTMLElement && (active.closest('.column-chat') || isEditableTarget(active))) return;
+                if (
+                    uiStore.showCreateTask || uiStore.showConfig || uiStore.showTerminal ||
+                    uiStore.showStats || uiStore.showSandboxConfig ||
+                    appStore.showEditTask ||
+                    dialogStore.confirmation || dialogStore.commitDialog || dialogStore.compressContextDialog
+                ) return;
+                if (isMobileCtx.isMobile && activeTab !== 'context') return;
+                if (!detailEl) return;
+                const cards = Array.from(detailEl.querySelectorAll<HTMLElement>('.task-list .task-wrapper > .card'));
+                const target = resolveOverviewArrowTarget({ cards, activeElement: active, key: e.key });
+                if (!target) return;
+                e.preventDefault();
+                target.focus();
+                target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
             }
         }
         window.addEventListener('keydown', handleKey);

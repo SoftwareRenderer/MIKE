@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { resolveArrowTarget, type BoardColumnRef } from '../use-board-arrow-nav';
+import { resolveArrowTarget, resolveOverviewArrowTarget, type BoardColumnRef } from '../use-board-arrow-nav';
 
 // Fixture: project list pseudo-column (left of backlog) + 4 board columns.
 // Ring: [Projects] [Backlog] [In Progress] [Review] [Done] (cyclic).
@@ -192,5 +192,96 @@ describe('resolveArrowTarget — focus inside a column but not on a card', () =>
         (cols[2].el.querySelector('.card-list') as HTMLElement).before(header);
         expect(idOf(resolveArrowTarget({ columns: cols, activeElement: header, key: 'ArrowDown' }))).toBe('t3');
         expect(idOf(resolveArrowTarget({ columns: cols, activeElement: header, key: 'ArrowUp' }))).toBe('t4');
+    });
+});
+
+// ── resolveOverviewArrowTarget — task-view board overview (single vertical list) ──
+
+let ovIds: string[] = [];
+
+/** Build a `.task-list` of overview cards across section groups; returns the card list. */
+function setupOverview(perSection: number[]): HTMLElement[] {
+    document.body.innerHTML = '';
+    ovIds = [];
+    const list = document.createElement('div');
+    list.className = 'task-list';
+    perSection.forEach((count, s) => {
+        const group = document.createElement('div');
+        group.className = 'section-group';
+        const body = document.createElement('div');
+        body.className = 'section-body';
+        for (let i = 0; i < count; i++) {
+            const id = `ov${ovIds.length + 1}`;
+            ovIds.push(id);
+            const wrapper = document.createElement('div');
+            wrapper.className = 'task-wrapper';
+            const c = document.createElement('div');
+            c.className = 'card';
+            c.dataset.id = id;
+            c.tabIndex = 0;
+            wrapper.appendChild(c);
+            body.appendChild(wrapper);
+        }
+        group.appendChild(body);
+        list.appendChild(group);
+    });
+    document.body.appendChild(list);
+    // Query from an ancestor (as CardDetail does from detailEl), not from
+    // .task-list itself — the selector needs .task-list as a descendant.
+    return Array.from(document.querySelectorAll<HTMLElement>('.task-list .task-wrapper > .card'));
+}
+
+const ovCard = (id: string) => document.querySelector<HTMLElement>(`.card[data-id="${id}"]`)!;
+
+describe('resolveOverviewArrowTarget', () => {
+    it('moves to next/prev card', () => {
+        const cards = setupOverview([2, 2]); // ov1 ov2 | ov3 ov4
+        expect(ovCard('ov2')).toBe(resolveOverviewArrowTarget({ cards, activeElement: ovCard('ov1'), key: 'ArrowDown' }));
+        expect(ovCard('ov2')).toBe(resolveOverviewArrowTarget({ cards, activeElement: ovCard('ov3'), key: 'ArrowUp' }));
+    });
+
+    it('moves across section boundaries in DOM order', () => {
+        const cards = setupOverview([2, 2]);
+        expect(ovCard('ov3')).toBe(resolveOverviewArrowTarget({ cards, activeElement: ovCard('ov2'), key: 'ArrowDown' }));
+        expect(ovCard('ov2')).toBe(resolveOverviewArrowTarget({ cards, activeElement: ovCard('ov3'), key: 'ArrowUp' }));
+    });
+
+    it('wraps last -> first and first -> last', () => {
+        const cards = setupOverview([2, 2]);
+        expect(ovCard('ov1')).toBe(resolveOverviewArrowTarget({ cards, activeElement: ovCard('ov4'), key: 'ArrowDown' }));
+        expect(ovCard('ov4')).toBe(resolveOverviewArrowTarget({ cards, activeElement: ovCard('ov1'), key: 'ArrowUp' }));
+    });
+
+    it('stays put in a single-card list', () => {
+        const cards = setupOverview([1]);
+        expect(ovCard('ov1')).toBe(resolveOverviewArrowTarget({ cards, activeElement: ovCard('ov1'), key: 'ArrowDown' }));
+        expect(ovCard('ov1')).toBe(resolveOverviewArrowTarget({ cards, activeElement: ovCard('ov1'), key: 'ArrowUp' }));
+    });
+
+    it('anchors to the first card when nothing is focused', () => {
+        const cards = setupOverview([1, 2]);
+        expect(ovCard('ov1')).toBe(resolveOverviewArrowTarget({ cards, activeElement: null, key: 'ArrowDown' }));
+        expect(ovCard('ov1')).toBe(resolveOverviewArrowTarget({ cards, activeElement: null, key: 'ArrowUp' }));
+    });
+
+    it('anchors to the first card when focus is on a non-card element', () => {
+        const cards = setupOverview([2]);
+        const header = document.createElement('button');
+        header.className = 'section-header';
+        document.body.appendChild(header);
+        expect(ovCard('ov1')).toBe(resolveOverviewArrowTarget({ cards, activeElement: header, key: 'ArrowDown' }));
+        expect(ovCard('ov1')).toBe(resolveOverviewArrowTarget({ cards, activeElement: header, key: 'ArrowUp' }));
+    });
+
+    it('matches focus inside a card element (e.g. a card child button)', () => {
+        const cards = setupOverview([2]); // ov1, ov2
+        const inner = document.createElement('button');
+        ovCard('ov2').appendChild(inner);
+        expect(ovCard('ov1')).toBe(resolveOverviewArrowTarget({ cards, activeElement: inner, key: 'ArrowUp' }));
+    });
+
+    it('returns null for an empty list', () => {
+        const cards = setupOverview([]);
+        expect(resolveOverviewArrowTarget({ cards, activeElement: null, key: 'ArrowDown' })).toBeNull();
     });
 });
