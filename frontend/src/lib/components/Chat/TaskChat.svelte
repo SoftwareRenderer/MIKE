@@ -15,6 +15,7 @@
     });
     import { DRAFT_SAVE_DEBOUNCE_MS, SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
+    import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
     import { resolveWorker, getModelName } from '$lib/utils/providers';
     import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
@@ -857,6 +858,25 @@
         }
         isStarting = false;
     }
+
+    // Start Task shortcut
+    $effect(() => {
+        function handleKeydown(e: KeyboardEvent) {
+            if (e.defaultPrevented || e.repeat) return;
+            if (!showStartButton || disabled) return;
+            if (uiStore.showCreateTask || uiStore.showConfig || uiStore.showTerminal ||
+                uiStore.showStats || uiStore.showSandboxConfig ||
+                appStore.showEditTask || dialogStore.confirmation ||
+                dialogStore.commitDialog || dialogStore.compressContextDialog) return;
+            const key = effectiveStartTaskKey(appStore.config);
+            if (key && matchShortcut(key, e)) {
+                e.preventDefault();
+                void handleStartTask();
+            }
+        }
+        window.addEventListener('keydown', handleKeydown);
+        return () => window.removeEventListener('keydown', handleKeydown);
+    });
 
     async function handleStop() {
         stopping = true;

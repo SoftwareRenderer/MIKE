@@ -218,6 +218,8 @@ export interface KeyboardShortcuts {
     create_task_submit?: string;
     /** Opens the terminal panel on pages with a terminal button. */
     open_terminal?: string;
+    /** Starts the task in the task view while the Start Task button is shown. */
+    start_task?: string;
     /** Hide the keycap hints on shortcut buttons (tooltips stay). */
     hide_hints?: boolean;
 }

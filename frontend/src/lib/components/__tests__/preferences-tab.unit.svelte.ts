@@ -15,10 +15,10 @@ function mockUserAgent(ua: string) {
 }
 
 /** Render the tab with per-row scoped queries (rows share class/aria names). */
-function renderTab(props: { createTaskKey?: string; createTaskSubmitKey?: string; openTerminalKey?: string } = {}) {
+function renderTab(props: { createTaskKey?: string; createTaskSubmitKey?: string; openTerminalKey?: string; startTaskKey?: string } = {}) {
     const onDirty = vi.fn();
     const utils = render(PreferencesTab, {
-        props: { createTaskKey: undefined, createTaskSubmitKey: undefined, openTerminalKey: undefined, onDirty, ...props },
+        props: { createTaskKey: undefined, createTaskSubmitKey: undefined, openTerminalKey: undefined, startTaskKey: undefined, onDirty, ...props },
     });
     const row = (id: string) => within(utils.container.querySelector(`[data-shortcut="${id}"]`)!);
     return {
@@ -27,6 +27,7 @@ function renderTab(props: { createTaskKey?: string; createTaskSubmitKey?: string
         create: row('create_task'),
         submit: row('create_task_submit'),
         terminal: row('open_terminal'),
+        start: row('start_task'),
     };
 }
 
@@ -254,5 +255,70 @@ describe('PreferencesTab submit row', () => {
         await fireEvent.click(submit.getByRole('button', { name: 'Clear shortcut' }));
         expect(submit.getByRole('button', { name: /create task \(submit\) shortcut/i }).textContent).toBe('None');
         expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('PreferencesTab start-task row', () => {
+    it('shows the platform default: Ctrl+Enter on non-Mac', () => {
+        mockUserAgent(WIN_UA);
+        const { start } = renderTab();
+        expect(start.getByRole('button', { name: /start task shortcut/i }).textContent).toBe('Ctrl+Enter');
+    });
+
+    it('shows the platform default: Cmd+Enter on Mac', () => {
+        mockUserAgent(MAC_UA);
+        const { start } = renderTab();
+        expect(start.getByRole('button', { name: /start task shortcut/i }).textContent).toBe('Cmd+Enter');
+    });
+
+    it('shows a custom binding formatted, with Reset and Clear controls', () => {
+        mockUserAgent(WIN_UA);
+        const { start } = renderTab({ startTaskKey: 'shift+enter' });
+        const chip = start.getByRole('button', { name: /start task shortcut/i });
+        expect(chip.textContent).toBe('Shift+Enter');
+        expect(start.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
+        expect(start.getByRole('button', { name: 'Clear shortcut' })).toBeTruthy();
+    });
+
+    it('shows "None" and no Clear control when the shortcut is disabled', () => {
+        mockUserAgent(WIN_UA);
+        const { start } = renderTab({ startTaskKey: '' });
+        expect(start.getByRole('button', { name: /start task shortcut/i }).textContent).toBe('None');
+        expect(start.queryByRole('button', { name: 'Clear shortcut' })).toBeNull();
+        expect(start.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
+    });
+
+    it('captures a combo and assigns it to the start-task binding only', async () => {
+        mockUserAgent(WIN_UA);
+        const { start, submit, onDirty } = renderTab();
+        const chip = start.getByRole('button', { name: /start task shortcut/i });
+        await fireEvent.click(chip);
+        await fireEvent.keyDown(window, { key: 'Enter', shiftKey: true });
+        expect(chip.textContent).toBe('Shift+Enter');
+        // The other rows are untouched.
+        expect(submit.getByRole('button', { name: /create task \(submit\) shortcut/i }).textContent).toBe('Ctrl+Enter');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+
+    it('resets to the platform default', async () => {
+        mockUserAgent(WIN_UA);
+        const { start, onDirty } = renderTab({ startTaskKey: 'shift+enter' });
+        await fireEvent.click(start.getByRole('button', { name: 'Reset to default' }));
+        expect(start.getByRole('button', { name: /start task shortcut/i }).textContent).toBe('Ctrl+Enter');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears the shortcut (disables it)', async () => {
+        mockUserAgent(WIN_UA);
+        const { start, onDirty } = renderTab();
+        await fireEvent.click(start.getByRole('button', { name: 'Clear shortcut' }));
+        expect(start.getByRole('button', { name: /start task shortcut/i }).textContent).toBe('None');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+
+    it('describes its purpose for the task view', () => {
+        mockUserAgent(WIN_UA);
+        const { start } = renderTab();
+        expect(start.getAllByText(/task view/i).length).toBeGreaterThan(0);
     });
 });

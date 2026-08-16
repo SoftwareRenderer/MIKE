@@ -573,6 +573,15 @@
         flex-direction: column;
         gap: 16px;
     }
+    .btn-primary {
+        display: inline-flex;
+        align-items: center;
+    }
+    .btn-primary .key-hint {
+        color: rgba(255, 255, 255, 0.85);
+        border-color: rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.1);
+    }
     label {
         display: flex;
         flex-direction: column;

@@ -11,6 +11,8 @@ import {
     defaultCreateTaskSubmitKey,
     effectiveCreateTaskSubmitKey,
     matchesCreateTaskSubmitKey,
+    defaultStartTaskKey,
+    effectiveStartTaskKey,
     shortcutHintsHidden,
 } from '$lib/utils/keyboard';
 import type { Config } from '$lib/types';
@@ -255,6 +257,35 @@ describe('matchesCreateTaskSubmitKey', () => {
         const cfg = { keyboard_shortcuts: { create_task_submit: '' } } as Config;
         expect(matchesCreateTaskSubmitKey(cfg, keyEvent({ key: 'Enter', ctrlKey: true }))).toBe(false);
         expect(matchesCreateTaskSubmitKey(cfg, keyEvent({ key: 'Enter', metaKey: true }))).toBe(false);
+    });
+});
+
+describe('defaultStartTaskKey', () => {
+    it('is Cmd+Enter on Mac, Ctrl+Enter elsewhere', () => {
+        mockUserAgent(MAC_UA);
+        expect(defaultStartTaskKey()).toBe('meta+enter');
+        mockUserAgent(WIN_UA);
+        expect(defaultStartTaskKey()).toBe('control+enter');
+    });
+});
+
+describe('effectiveStartTaskKey', () => {
+    it('falls back to the platform default when unset', () => {
+        mockUserAgent(MAC_UA);
+        expect(effectiveStartTaskKey(null)).toBe('meta+enter');
+        expect(effectiveStartTaskKey(undefined)).toBe('meta+enter');
+        expect(effectiveStartTaskKey({} as Config)).toBe('meta+enter');
+        expect(effectiveStartTaskKey({ keyboard_shortcuts: {} } as Config)).toBe('meta+enter');
+        mockUserAgent(WIN_UA);
+        expect(effectiveStartTaskKey({} as Config)).toBe('control+enter');
+    });
+
+    it('returns the custom binding when set', () => {
+        expect(effectiveStartTaskKey({ keyboard_shortcuts: { start_task: 'shift+enter' } } as Config)).toBe('shift+enter');
+    });
+
+    it('returns empty string when explicitly disabled', () => {
+        expect(effectiveStartTaskKey({ keyboard_shortcuts: { start_task: '' } } as Config)).toBe('');
     });
 });
 
