@@ -51,6 +51,7 @@
     let keyboardCreateTask = $state<string | undefined>(undefined);
     let keyboardCreateTaskSubmit = $state<string | undefined>(undefined);
     let keyboardOpenTerminal = $state<string | undefined>(undefined);
+    let keyboardStartTask = $state<string | undefined>(undefined);
     let keyboardHideHints = $state(false);
     let loading = $state(false);
     let error = $state('');
@@ -189,6 +190,7 @@
         keyboardCreateTask = config?.keyboard_shortcuts?.create_task;
         keyboardCreateTaskSubmit = config?.keyboard_shortcuts?.create_task_submit;
         keyboardOpenTerminal = config?.keyboard_shortcuts?.open_terminal;
+        keyboardStartTask = config?.keyboard_shortcuts?.start_task;
         keyboardHideHints = config?.keyboard_shortcuts?.hide_hints === true;
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
@@ -595,7 +597,7 @@
                 default_operating_mode: defaultOperatingMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
                 default_auto_summarize_threshold: defaultAutoSummarizeThreshold,
-                keyboard_shortcuts: { create_task: keyboardCreateTask, create_task_submit: keyboardCreateTaskSubmit, open_terminal: keyboardOpenTerminal, hide_hints: keyboardHideHints },
+                keyboard_shortcuts: { create_task: keyboardCreateTask, create_task_submit: keyboardCreateTaskSubmit, open_terminal: keyboardOpenTerminal, start_task: keyboardStartTask, hide_hints: keyboardHideHints },
             } as Config);
             appStore.config = cfg;
             onSaved();
@@ -851,7 +853,7 @@
 
         <!-- Preferences Tab -->
         {#if activeTab === 'preferences'}
-            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:hideHints={keyboardHideHints} onDirty={markDirty} />
+            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:startTaskKey={keyboardStartTask} bind:hideHints={keyboardHideHints} onDirty={markDirty} />
         {/if}
 
         <!-- Extensions Tab -->

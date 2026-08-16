@@ -111,6 +111,16 @@ export function effectiveOpenTerminalKey(config: Config | null | undefined): str
     return config?.keyboard_shortcuts?.open_terminal ?? DEFAULT_SHORTCUTS.open_terminal;
 }
 
+/** Platform default for the start-task binding: Cmd+Enter on Mac, Ctrl+Enter elsewhere. */
+export function defaultStartTaskKey(): string {
+    return isMac() ? 'meta+enter' : 'control+enter';
+}
+
+/** Resolve the effective start-task binding: the stored value if set, else the platform default. */
+export function effectiveStartTaskKey(config: Config | null | undefined): string {
+    return config?.keyboard_shortcuts?.start_task ?? defaultStartTaskKey();
+}
+
 /** True on Apple platforms (used to pick the platform-appropriate submit key). */
 export function isMac(): boolean {
     if (typeof navigator === 'undefined') return false;

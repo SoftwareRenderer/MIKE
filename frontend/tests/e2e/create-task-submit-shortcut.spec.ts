@@ -103,4 +103,33 @@ test.describe.serial('Create Task submit shortcut (default bindings)', () => {
     await page.keyboard.press('Escape');
     await expect(page.locator('#task-description')).not.toBeVisible({ timeout: 5000 });
   });
+
+  test('Create button keycap is vertically centered on the primary background', async ({ page }) => {
+    await page.locator('.add-task-btn').first().click();
+    await expect(page.locator('#task-description')).toBeVisible({ timeout: 5000 });
+
+    const createBtn = page.locator('.btn-primary', { hasText: 'Create Task' });
+    const kbd = createBtn.locator('kbd.key-hint');
+    await expect(kbd).toBeVisible();
+
+    // The keycap center must coincide with the button content-area center.
+    // (Baseline-aligned inline kbd with the 2px bottom border drifts ~1.4px
+    // low — the same buttons elsewhere use flex + align-items: center.)
+    const [btnBox, kbdBox] = await Promise.all([createBtn.boundingBox(), kbd.boundingBox()]);
+    const pad = await createBtn.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { top: parseFloat(cs.paddingTop), bottom: parseFloat(cs.paddingBottom) };
+    });
+    const contentCenter = btnBox.y + pad.top + (btnBox.height - pad.top - pad.bottom) / 2;
+    const kbdCenter = kbdBox.y + kbdBox.height / 2;
+    expect(Math.abs(kbdCenter - contentCenter)).toBeLessThan(1);
+
+    // The keycap uses the translucent-white palette on the primary
+    // background (same pattern as .btn-start-task), not neutral colors.
+    const bg = await kbd.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(bg).toBe('rgba(255, 255, 255, 0.1)');
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#task-description')).not.toBeVisible({ timeout: 5000 });
+  });
 });

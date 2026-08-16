@@ -1,6 +1,15 @@
 <script lang="ts">
     import type { Provider } from '$lib/types';
+    import { appStore } from '$lib/stores';
+    import { effectiveStartTaskKey, formatShortcut, shortcutHintsHidden } from '$lib/utils/keyboard';
     import ModelSelector from './ModelSelector.svelte';
+
+    // Start Task shortcut hint (empty = disabled).
+    const startShortcutLabel = $derived.by(() => {
+        const key = effectiveStartTaskKey(appStore.config);
+        return key ? formatShortcut(key) : '';
+    });
+    const hintsHidden = $derived(shortcutHintsHidden(appStore.config));
 
     let {
         providers,
@@ -65,14 +74,14 @@
         </button>
         {/if}
     </div>
-    <button class="btn-start-task" onclick={onStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title="Start the AI task">
+    <button class="btn-start-task" onclick={onStartTask} disabled={isStarting || disabled || (providers.length > 0 && !selectedModel)} title={startShortcutLabel ? `Start the AI task (${startShortcutLabel})` : 'Start the AI task'}>
         {#if isStarting}
             <span class="spinner-inline"></span> Starting...
         {:else}
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M4 2l10 6-10 6V2z" fill="currentColor"/>
             </svg>
-            Start Task
+            Start Task{#if startShortcutLabel && !hintsHidden}<kbd class="key-hint">{startShortcutLabel}</kbd>{/if}
         {/if}
     </button>
 </div>
@@ -142,6 +151,11 @@
     .btn-start-task:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+    }
+    .btn-start-task .key-hint {
+        color: rgba(255, 255, 255, 0.85);
+        border-color: rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.1);
     }
     .spinner-inline {
         display: inline-block;
