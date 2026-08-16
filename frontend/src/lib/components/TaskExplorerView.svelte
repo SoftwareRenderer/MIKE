@@ -14,7 +14,15 @@
     import ResizeHandle from './ResizeHandle.svelte';
     import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles, loadEditorTabs, saveEditorTabs, clearEditorDraft, clearEditorHistory } from '$lib/storage';
     import type { LSPSymbol } from '$lib/utils/lsp-symbols';
-    import { dialogStore } from '$lib/stores';
+    import { appStore, dialogStore } from '$lib/stores';
+    import { effectiveOpenTerminalKey, formatShortcut } from '$lib/utils/keyboard';
+
+    // Terminal button tooltip — always shows the effective shortcut (tooltips
+    // keep the shortcut text even when keycap hints are hidden).
+    const terminalButtonTitle = $derived.by(() => {
+        const key = effectiveOpenTerminalKey(appStore.config);
+        return key ? `Open terminal (${formatShortcut(key)})` : 'Open terminal';
+    });
 
     let { projectId, projectName, taskId, taskPath, taskBranch, taskStatus, currentBranch, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
         projectId: string;
@@ -511,7 +519,7 @@
             {selectedBranch}
         </span>
         <div class="explorer-header-spacer"></div>
-        <button class="icon-btn terminal-btn" onclick={onOpenTerminal} aria-label="Open terminal" title="Open terminal">
+        <button class="icon-btn terminal-btn" onclick={onOpenTerminal} aria-label="Open terminal" title={terminalButtonTitle}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                 <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>

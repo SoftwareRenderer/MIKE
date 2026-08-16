@@ -4,7 +4,7 @@
     import { get } from 'svelte/store';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
 import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
-    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
 import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
 import { getBoardCache, boardCacheKey } from '$lib/storage';
 import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -42,6 +42,25 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
             TerminalPanelComponent = mod.default;
             terminalLoading = false;
         });
+    }
+
+    /**
+     * Open the project terminal (terminal button and open-terminal shortcut).
+     * When the task detail is open, initialize that task's worktree first if
+     * it does not exist yet.
+     */
+    async function openTerminal(): Promise<void> {
+        loadTerminalPanel();
+        const task = appStore.selectedTask;
+        if (uiStore.showCardDetail && task && !task.worktree_exists && !task.branch) {
+            try {
+                await initTask(task.project_id, task.id);
+            } catch (e) {
+                console.error('[terminal] Failed to initialize task:', e);
+                return;
+            }
+        }
+        uiStore.showTerminal = true;
     }
 
     function getProjectAbbr(name: string): string {
@@ -190,13 +209,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     let urlFileId = $state(new URLSearchParams(location.search).get('file') || '');
     let mobileMenuOpen = $state(false);
 
-    // Keyboard shortcuts (Settings → Preferences): active only on the visible board with no modal open.
-    function boardShortcutsEnabled(): boolean {
+    // No modal/overlay is open (shared gate for the keyboard shortcuts below).
+    function noModalOpen(): boolean {
         return (
-            !!currentProject &&
-            !(uiStore.showCardDetail && appStore.selectedTask) &&
-            !showExplorerViewVal &&
-            !showTaskExplorerVal &&
             !uiStore.showCreateTask &&
             !uiStore.showConfig &&
             !uiStore.showTerminal &&
@@ -208,12 +223,29 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             !dialogStore.compressContextDialog
         );
     }
+    // Keyboard shortcuts (Settings → Preferences): the create-task shortcut is
+    // active only on the visible board; the open-terminal shortcut is active
+    // on every page with a terminal button (board, task detail, explorers).
+    function boardShortcutsEnabled(): boolean {
+        return (
+            !!currentProject &&
+            !(uiStore.showCardDetail && appStore.selectedTask) &&
+            !showExplorerViewVal &&
+            !showTaskExplorerVal &&
+            noModalOpen()
+        );
+    }
+    function terminalShortcutEnabled(): boolean {
+        return !!currentProject && noModalOpen();
+    }
     useKeyboardShortcuts({
         isEnabled: boardShortcutsEnabled,
         onCreateTask: () => {
             uiStore.creatingChildOf = null;
             uiStore.showCreateTask = true;
         },
+        isTerminalEnabled: terminalShortcutEnabled,
+        onOpenTerminal: () => { void openTerminal(); },
     });
     // Arrow-key navigation between board cards (same gate as the shortcuts above).
     useBoardArrowNav({ isEnabled: boardShortcutsEnabled });
@@ -1101,7 +1133,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 onOpenMenu={() => mobileMenuOpen = true}
                 onOpenSandboxConfig={() => currentProject && openSandboxConfig(currentProject)}
                 onOpenExplorerView={() => { showExplorerViewVal = true; updateUrl({ project: currentProject?.id, view: 'explorer' }, false, true); }}
-                onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }}
+                onOpenTerminal={openTerminal}
                 onShowStats={() => uiStore.showStats = true}
                 onShowConfig={() => uiStore.showConfig = true}
             />
@@ -1115,7 +1147,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         initialFile={urlFileId || ''}
                         sandboxEnabled={currentProject.sandbox_enabled ?? false}
                         fsEventQueue={fsEventQueue}
-                        onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }}
+                        onOpenTerminal={openTerminal}
                         onUpdateFile={handleExplorerFileChange}
                         onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
@@ -1130,7 +1162,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         currentBranch={currentBranch}
                         sandboxEnabled={currentProject.sandbox_enabled ?? false}
                         fsEventQueue={fsEventQueue}
-                        onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }}
+                        onOpenTerminal={openTerminal}
                         onUpdateFile={(path: string | null) => { if (path) updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer', file: path }, false, true); }}
                         onClose={() => { showTaskExplorerVal = false; updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
@@ -1145,7 +1177,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         updateUrl({ project: currentProject?.id, task: t.id }, true, true);
                         if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
                         appStore.selectedTask = t;
-                    }} onRefreshBoard={() => refreshBoard()} onOpenTerminal={() => { loadTerminalPanel(); uiStore.showTerminal = true; }} onOpenExplorer={() => { showTaskExplorerVal = true; updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer' }, false, true); }} />
+                    }} onRefreshBoard={() => refreshBoard()} onOpenTerminal={openTerminal} onOpenExplorer={() => { showTaskExplorerVal = true; updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer' }, false, true); }} />
                 {:else}
                     <Board
                         {tasks}

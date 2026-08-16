@@ -8,6 +8,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { createFocusTrap } from '$lib/a11y';
+    import { effectiveOpenTerminalKey, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
     import ResizeHandle from './ResizeHandle.svelte';
     import '@xterm/xterm/css/xterm.css';
 
@@ -106,6 +107,29 @@
         const handler = (e: PointerEvent) => e.preventDefault();
         kbContainer.addEventListener('pointerdown', handler, { capture: true });
         return () => { if (kbContainer) kbContainer.removeEventListener('pointerdown', handler, { capture: true }); };
+    });
+
+    // Close button tooltip — the shortcut toggles the panel, so it also closes.
+    const closeButtonTitle = $derived.by(() => {
+        const key = effectiveOpenTerminalKey(appStore.config);
+        return key ? `Close terminal (${formatShortcut(key)})` : 'Close terminal';
+    });
+
+    // Open/close terminal shortcut: while the panel is open, pressing the
+    // binding closes it (the global handler in App.svelte opens it). Capture
+    // phase so it wins over xterm's own keydown, which would send Ctrl+` as
+    // a space to the shell.
+    $effect(() => {
+        const handleKeydown = (e: KeyboardEvent) => {
+            if (e.defaultPrevented || e.repeat) return;
+            const key = effectiveOpenTerminalKey(appStore.config);
+            if (!key || !matchShortcut(key, e)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            close();
+        };
+        document.addEventListener('keydown', handleKeydown, true);
+        return () => document.removeEventListener('keydown', handleKeydown, true);
     });
 
     /** Load saved height from IndexedDB. */
@@ -811,7 +835,7 @@
                 {/if}
             </button>
             {/if}
-            <button class="close-btn" onclick={close} aria-label="Close terminal" title="Close terminal">✕</button>
+            <button class="close-btn" onclick={close} aria-label="Close terminal" title={closeButtonTitle}>✕</button>
         </div>
     </div>
     <div class="terminal-container" bind:this={container}></div>

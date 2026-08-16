@@ -4,6 +4,8 @@
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { toHomeRelative } from '$lib/utils/path';
+    import { appStore } from '$lib/stores';
+    import { effectiveOpenTerminalKey, formatShortcut } from '$lib/utils/keyboard';
 
     let {
         currentProject,
@@ -32,6 +34,13 @@
     } = $props();
 
     let isMainBranch = $derived(currentBranch === 'main' || currentBranch === 'master');
+
+    // Terminal button tooltip — always shows the effective shortcut (tooltips
+    // keep the shortcut text even when keycap hints are hidden).
+    const terminalButtonTitle = $derived.by(() => {
+        const key = effectiveOpenTerminalKey(appStore.config);
+        return key ? `Open terminal (${formatShortcut(key)})` : 'Open terminal';
+    });
 </script>
 
 <header class="top-bar">
@@ -78,7 +87,7 @@
         </button>
     </span>
     <div class="actions">
-        <button class="icon-btn" onclick={onOpenTerminal} aria-label="Open terminal" title="Open terminal">
+        <button class="icon-btn" onclick={onOpenTerminal} aria-label="Open terminal" title={terminalButtonTitle}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                 <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>

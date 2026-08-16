@@ -5,11 +5,13 @@
     let {
         createTaskKey = $bindable<string | undefined>(),
         createTaskSubmitKey = $bindable<string | undefined>(),
+        openTerminalKey = $bindable<string | undefined>(),
         hideHints = $bindable(false),
         onDirty,
     }: {
         createTaskKey?: string | undefined;
         createTaskSubmitKey?: string | undefined;
+        openTerminalKey?: string | undefined;
         hideHints?: boolean;
         onDirty?: () => void;
     } = $props();
@@ -30,6 +32,13 @@
             value: createTaskSubmitKey,
             def: defaultCreateTaskSubmitKey(),
         },
+        {
+            id: 'open_terminal' as const,
+            name: 'Open Terminal',
+            desc: 'Opens the terminal panel on pages with a terminal button',
+            value: openTerminalKey,
+            def: DEFAULT_SHORTCUTS.open_terminal,
+        },
     ]);
 
     let capturingId = $state<string | null>(null);
@@ -38,7 +47,8 @@
 
     function assign(id: string, value: string | undefined) {
         if (id === 'create_task') createTaskKey = value;
-        else createTaskSubmitKey = value;
+        else if (id === 'create_task_submit') createTaskSubmitKey = value;
+        else if (id === 'open_terminal') openTerminalKey = value;
         onDirty?.();
     }
 

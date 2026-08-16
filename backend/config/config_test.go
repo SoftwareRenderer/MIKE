@@ -576,6 +576,47 @@ func TestKeyboardShortcutsSubmit_DisabledRoundTrip(t *testing.T) {
 	}
 }
 
+func TestKeyboardShortcutsOpenTerminal_CustomRoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{OpenTerminal: ptr("alt+shift+t")}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.OpenTerminal == nil || *read.KeyboardShortcuts.OpenTerminal != "alt+shift+t" {
+		t.Fatalf("expected open_terminal=\"alt+shift+t\", got %+v", read.KeyboardShortcuts)
+	}
+	if read.KeyboardShortcuts.CreateTask != nil || read.KeyboardShortcuts.CreateTaskSubmit != nil {
+		t.Fatalf("expected other bindings to stay nil, got %+v", read.KeyboardShortcuts)
+	}
+}
+
+func TestKeyboardShortcutsOpenTerminal_DisabledRoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{OpenTerminal: ptr("")}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.OpenTerminal == nil || *read.KeyboardShortcuts.OpenTerminal != "" {
+		t.Fatalf("expected disabled (empty string) open_terminal, got %+v", read.KeyboardShortcuts)
+	}
+}
+
 func TestKeyboardShortcutsHideHints_RoundTrip(t *testing.T) {
 	cs := testConfigStore(t)
 	cfg, err := cs.GetConfig()
@@ -819,8 +860,8 @@ func TestHandleConfig_KeyboardShortcutsReplaceSemantics(t *testing.T) {
 	defer srv.Close()
 
 	for _, body := range []string{
-		`{"keyboard_shortcuts":{"create_task":"shift+k","create_task_submit":"shift+enter"}}`,
-		`{"keyboard_shortcuts":{"create_task":"c"}}`, // no create_task_submit -> reset to default
+		`{"keyboard_shortcuts":{"create_task":"shift+k","create_task_submit":"shift+enter","open_terminal":"alt+shift+t"}}`,
+		`{"keyboard_shortcuts":{"create_task":"c"}}`, // no create_task_submit/open_terminal -> reset to default
 	} {
 		req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/config", strings.NewReader(body))
 		if err != nil {
@@ -846,6 +887,9 @@ func TestHandleConfig_KeyboardShortcutsReplaceSemantics(t *testing.T) {
 	}
 	if read.KeyboardShortcuts.CreateTaskSubmit != nil {
 		t.Fatalf("expected create_task_submit reset to default (nil), got %+v", read.KeyboardShortcuts.CreateTaskSubmit)
+	}
+	if read.KeyboardShortcuts.OpenTerminal != nil {
+		t.Fatalf("expected open_terminal reset to default (nil), got %+v", read.KeyboardShortcuts.OpenTerminal)
 	}
 }
 
