@@ -1,17 +1,19 @@
 <script lang="ts">
-    import { DEFAULT_SHORTCUTS, normalizeKey, formatShortcut, defaultCreateTaskSubmitKey } from '$lib/utils/keyboard';
+    import { DEFAULT_SHORTCUTS, normalizeKey, formatShortcut, defaultCreateTaskSubmitKey, defaultStartTaskKey } from '$lib/utils/keyboard';
     import ToggleSwitch from '../ToggleSwitch.svelte';
 
     let {
         createTaskKey = $bindable<string | undefined>(),
         createTaskSubmitKey = $bindable<string | undefined>(),
         openTerminalKey = $bindable<string | undefined>(),
+        startTaskKey = $bindable<string | undefined>(),
         hideHints = $bindable(false),
         onDirty,
     }: {
         createTaskKey?: string | undefined;
         createTaskSubmitKey?: string | undefined;
         openTerminalKey?: string | undefined;
+        startTaskKey?: string | undefined;
         hideHints?: boolean;
         onDirty?: () => void;
     } = $props();
@@ -39,6 +41,13 @@
             value: openTerminalKey,
             def: DEFAULT_SHORTCUTS.open_terminal,
         },
+        {
+            id: 'start_task' as const,
+            name: 'Start Task',
+            desc: 'Starts the task in the task view while the Start Task button is shown',
+            value: startTaskKey,
+            def: defaultStartTaskKey(),
+        },
     ]);
 
     let capturingId = $state<string | null>(null);
@@ -49,6 +58,7 @@
         if (id === 'create_task') createTaskKey = value;
         else if (id === 'create_task_submit') createTaskSubmitKey = value;
         else if (id === 'open_terminal') openTerminalKey = value;
+        else if (id === 'start_task') startTaskKey = value;
         onDirty?.();
     }
 

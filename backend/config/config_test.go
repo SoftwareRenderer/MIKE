@@ -617,6 +617,47 @@ func TestKeyboardShortcutsOpenTerminal_DisabledRoundTrip(t *testing.T) {
 	}
 }
 
+func TestKeyboardShortcutsStartTask_CustomRoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{StartTask: ptr("shift+enter")}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.StartTask == nil || *read.KeyboardShortcuts.StartTask != "shift+enter" {
+		t.Fatalf("expected start_task=\"shift+enter\", got %+v", read.KeyboardShortcuts)
+	}
+	if read.KeyboardShortcuts.CreateTask != nil || read.KeyboardShortcuts.CreateTaskSubmit != nil || read.KeyboardShortcuts.OpenTerminal != nil {
+		t.Fatalf("expected other bindings to stay nil, got %+v", read.KeyboardShortcuts)
+	}
+}
+
+func TestKeyboardShortcutsStartTask_DisabledRoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{StartTask: ptr("")}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.StartTask == nil || *read.KeyboardShortcuts.StartTask != "" {
+		t.Fatalf("expected disabled (empty string) start_task, got %+v", read.KeyboardShortcuts)
+	}
+}
+
 func TestKeyboardShortcutsHideHints_RoundTrip(t *testing.T) {
 	cs := testConfigStore(t)
 	cfg, err := cs.GetConfig()

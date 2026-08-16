@@ -101,6 +101,8 @@ type KeyboardShortcuts struct {
 	CreateTaskSubmit *string `json:"create_task_submit,omitempty"`
 	// OpenTerminal opens the terminal panel on pages with a terminal button.
 	OpenTerminal *string `json:"open_terminal,omitempty"`
+	// StartTask starts the task in the task view while the Start Task button is shown.
+	StartTask *string `json:"start_task,omitempty"`
 	// HideHints hides the keycap hints on shortcut buttons (tooltips stay).
 	HideHints *bool `json:"hide_hints,omitempty"`
 }

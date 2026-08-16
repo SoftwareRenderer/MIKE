@@ -282,7 +282,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 // normalizeKeyboardShortcuts returns nil when no binding is set, so the
 // field is omitted from API responses.
 func normalizeKeyboardShortcuts(ks *types.KeyboardShortcuts) *types.KeyboardShortcuts {
-	if ks == nil || (ks.CreateTask == nil && ks.CreateTaskSubmit == nil && ks.OpenTerminal == nil && ks.HideHints == nil) {
+	if ks == nil || (ks.CreateTask == nil && ks.CreateTaskSubmit == nil && ks.OpenTerminal == nil && ks.StartTask == nil && ks.HideHints == nil) {
 		return nil
 	}
 	return ks
