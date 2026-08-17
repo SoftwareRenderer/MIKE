@@ -376,6 +376,15 @@ describe('createStreamHandler', () => {
         expect(stream.state.entries[0].content).toBe('Is the task complete?');
     });
 
+    it('hint event with role system creates a system entry (not a user bubble)', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'hint', data: { id: 'retry-msg-1', role: 'system', content: 'Connection interrupted (EOF), retrying... (attempt 1/3)', created_at: '2026-01-01T00:00:00Z' } }, false, 'p1', 't1');
+        expect(stream.state.entries).toHaveLength(1);
+        expect(stream.state.entries[0].role).toBe('system');
+        expect(stream.state.entries[0].id).toBe('retry-msg-1');
+        expect(stream.state.entries[0].content).toContain('Connection interrupted');
+    });
+
     it('hint event without an id falls back to genId', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'hint', data: { content: 'retry hint', created_at: '2026-01-01T00:00:00Z' } }, false, 'p1', 't1');

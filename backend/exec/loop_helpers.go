@@ -353,9 +353,11 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	streak := detector.loopStreak
 	detector.reset()
 	detector.loopStreak = streak
-	// Broadcast hint with its DB message ID so the client can dedupe on history reload.
+	// Broadcast hint with its DB message ID so the client can dedupe on history
+	// reload. Loop hints are user-role messages; send the role explicitly.
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeHint, Data: map[string]any{
 		"id":         hintMsgID,
+		"role":       "user",
 		"content":    hint,
 		"created_at": time.Now().UTC().Format(time.RFC3339),
 	}})
