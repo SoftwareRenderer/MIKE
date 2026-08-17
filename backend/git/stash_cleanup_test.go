@@ -117,7 +117,7 @@ func TestDropStashEntriesForTask_ByHash(t *testing.T) {
 	repoDir, projID, taskID, _, _, wm := setupStashTest(t)
 
 	// Create some kanban-labeled stashes for this task
-	for i, label := range []string{"kanban-switch", "kanban-fork", "kanban-checkpoint"} {
+	for i, label := range []string{"mike-switch", "mike-fork", "mike-checkpoint"} {
 		msg := fmt.Sprintf("%s-%s", label, taskID)
 		createStash(t, repoDir, fmt.Sprintf("change for %s\n", label), msg)
 		_ = i
@@ -149,9 +149,9 @@ func TestDropStashEntriesForTask_ByHash(t *testing.T) {
 	// Verify the remaining entries are the unrelated ones
 	subjects := stashSubjects(t, repoDir)
 	for _, s := range subjects {
-		if strings.Contains(s, "kanban-switch-"+taskID) ||
-			strings.Contains(s, "kanban-fork-"+taskID) ||
-			strings.Contains(s, "kanban-checkpoint-"+taskID) {
+		if strings.Contains(s, "mike-switch-"+taskID) ||
+			strings.Contains(s, "mike-fork-"+taskID) ||
+			strings.Contains(s, "mike-checkpoint-"+taskID) {
 			t.Errorf("kanban stash entry should have been dropped, found: %s", s)
 		}
 	}
@@ -178,7 +178,7 @@ func TestDropStashEntriesForTask_NoFalsePositives(t *testing.T) {
 
 	// Create kanban stashes for BOTH tasks
 	for _, tid := range []string{taskID, otherTaskID} {
-		msg := fmt.Sprintf("kanban-switch-%s", tid)
+		msg := fmt.Sprintf("mike-switch-%s", tid)
 		createStash(t, repoDir, fmt.Sprintf("change for %s\n", tid), msg)
 	}
 
@@ -216,9 +216,9 @@ func TestDropStashEntriesForTask_InterleavedStashes(t *testing.T) {
 	// Create an interleaved pattern: unrelated, kanban, unrelated, kanban, unrelated
 	stashMessages := []string{
 		"manual stash 0",
-		fmt.Sprintf("kanban-switch-%s", taskID),
+		fmt.Sprintf("mike-switch-%s", taskID),
 		"manual stash 1",
-		fmt.Sprintf("kanban-fork-%s", taskID),
+		fmt.Sprintf("mike-fork-%s", taskID),
 		"manual stash 2",
 	}
 
@@ -244,7 +244,7 @@ func TestDropStashEntriesForTask_InterleavedStashes(t *testing.T) {
 	// Verify only manual stashes remain
 	subjects := stashSubjects(t, repoDir)
 	for _, s := range subjects {
-		if strings.Contains(s, "kanban-") {
+		if strings.Contains(s, "mike-") {
 			t.Errorf("kanban stash should have been dropped, found: %s", s)
 		}
 	}
@@ -262,7 +262,7 @@ func TestDropStashEntriesForBranch_ByHash(t *testing.T) {
 	runGit(t, repoDir, "branch", branchName)
 	runGit(t, repoDir, "checkout", branchName)
 	for i := 0; i < 3; i++ {
-		createStash(t, repoDir, fmt.Sprintf("change %d\n", i), fmt.Sprintf("kanban-switch-%s entry %d", taskID, i))
+		createStash(t, repoDir, fmt.Sprintf("change %d\n", i), fmt.Sprintf("mike-switch-%s entry %d", taskID, i))
 	}
 
 	// Switch to master and create stashes there (different branch in subject)
@@ -367,11 +367,11 @@ func TestDropStashEntriesForTask_AllKanbanLabels(t *testing.T) {
 	repoDir, projID, taskID, _, _, wm := setupStashTest(t)
 
 	labels := []string{
-		"kanban-switch",
-		"kanban-fork",
-		"kanban-checkpoint",
-		"kanban-sync-merge",
-		"kanban-auto-merge",
+		"mike-switch",
+		"mike-fork",
+		"mike-checkpoint",
+		"mike-sync-merge",
+		"mike-auto-merge",
 	}
 
 	for _, label := range labels {

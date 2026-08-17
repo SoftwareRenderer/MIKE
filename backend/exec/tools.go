@@ -614,14 +614,22 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
-	case "lsp_code_actions":
-		result, err := te.handleLSPSymbolRequest(args, worktreePath, "textDocument/codeAction", nil)
+	case "lsp_hover":
+		result, err := te.handleLSPHover(args, worktreePath)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
-	case "lsp_hover":
-		result, err := te.handleLSPHover(args, worktreePath)
+	case "lsp_rename":
+		read := sandboxRead
+		if read == nil {
+			read = makeRead()
+		}
+		write := sandboxWrite
+		if write == nil {
+			write = makeWrite()
+		}
+		result, err := te.handleLSPRename(ctx, args, worktreePath, read, write)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
@@ -1033,6 +1041,122 @@ func (te *TaskExecutor) handleLSPHover(args map[string]any, worktreePath string)
 	return te.handleLSPSymbolRequest(args, worktreePath, "textDocument/hover", nil)
 }
 
+// handleLSPRename renames a symbol across files using the language server's
+// textDocument/rename. It validates renamability with prepareRename first,
+// then applies the returned WorkspaceEdit to every target file (all must be
+// inside the workspace). Writes go through the same sandbox-aware read/write
+// callbacks as write_file, so the rename lands as one checkpoint's worth of
+// changes in the task diff.
+func (te *TaskExecutor) handleLSPRename(ctx context.Context, args map[string]any, worktreePath string, read readFunc, write writeFunc) (string, error) {
+	if te.lspMgr == nil {
+		return "", fmt.Errorf("LSP manager not available")
+	}
+	path, _ := args["path"].(string)
+	symbol, _ := args["symbol"].(string)
+	newName, _ := args["new_name"].(string)
+	if path == "" || symbol == "" || newName == "" {
+		return "", fmt.Errorf("path, symbol, and new_name are required")
+	}
+	if !te.lspMgr.IsToolCallsEnabledForFile(path) {
+		return "", fmt.Errorf("LSP tool calls are disabled for this file type")
+	}
+
+	absPath := filepath.Join(worktreePath, path)
+	absWorkspace, err := filepath.Abs(worktreePath)
+	if err != nil {
+		absWorkspace = worktreePath
+	}
+
+	// Resolve the symbol position by text search (same as the other LSP tools).
+	content, err := read(ctx, path)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+	position := findSymbolInText(string(content), symbol)
+	if position == nil {
+		return fmt.Sprintf("Symbol %q not found in %s. Use read_file to inspect the file.", symbol, path), nil
+	}
+
+	uri := "file://" + absPath
+	baseParams := map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     position,
+	}
+
+	// prepareRename: a null result means the symbol cannot be renamed.
+	prepareResp, err := te.lspMgr.LSPRequest(absWorkspace, path, "textDocument/prepareRename", baseParams)
+	if err != nil {
+		return "", err
+	}
+	var preEnvelope struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(prepareResp, &preEnvelope); err != nil {
+		return "", fmt.Errorf("unmarshal prepareRename response: %w", err)
+	}
+	if len(preEnvelope.Result) == 0 || string(preEnvelope.Result) == "null" {
+		return fmt.Sprintf("Symbol %q in %s is not renamable by the language server.", symbol, path), nil
+	}
+
+	// rename
+	renameParams := map[string]any{
+		"textDocument": baseParams["textDocument"],
+		"position":     baseParams["position"],
+		"newName":      newName,
+	}
+	renameResp, err := te.lspMgr.LSPRequest(absWorkspace, path, "textDocument/rename", renameParams)
+	if err != nil {
+		return "", err
+	}
+	edits, err := parseWorkspaceEdit(renameResp)
+	if err != nil {
+		return "", err
+	}
+	if edits == nil {
+		return fmt.Sprintf("Rename of %q produced no edits (symbol may not be renamable).", symbol), nil
+	}
+
+	// Validate all targets are inside the workspace.
+	uris := make([]string, 0, len(edits))
+	for uri := range edits {
+		uris = append(uris, uri)
+	}
+	relPaths, err := workspaceEditTargets(absWorkspace, uris)
+	if err != nil {
+		return "", err
+	}
+
+	// Apply file by file (deterministic order). Any failure aborts; files
+	// already written are part of the same checkpoint, so the diff shows the
+	// partial state and the agent can recover.
+	sort.Strings(uris)
+	var fileSummary []string
+	for _, uri := range uris {
+		rel := relPaths[uri]
+		data, err := read(ctx, rel)
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", rel, err)
+		}
+		newContent, err := applyTextEdits(string(data), edits[uri])
+		if err != nil {
+			return "", fmt.Errorf("apply edits to %s: %w", rel, err)
+		}
+		if err := write(ctx, rel, newContent); err != nil {
+			return "", fmt.Errorf("write %s: %w", rel, err)
+		}
+		fileSummary = append(fileSummary, fmt.Sprintf("%s (%d edit%s)", rel, len(edits[uri]), plural(len(edits[uri]))))
+	}
+
+	return fmt.Sprintf("Renamed %q to %q in %d file(s): %s", symbol, newName, len(uris), strings.Join(fileSummary, ", ")), nil
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
 // findSymbolInText searches file content for an identifier and returns its LSP position
 // (0-indexed line, 0-indexed character). Uses word boundary matching to avoid partial matches.
 func findSymbolInText(content, symbol string) map[string]any {
@@ -1069,7 +1193,6 @@ func isIdentChar(c byte) bool {
 
 // formatLSPResponse formats a raw LSP JSON response into a human-readable string.
 func formatLSPResponse(response json.RawMessage, method string, worktreePath string) string {
-	// Check for LSP error
 	var envelope struct {
 		Error *struct {
 			Code    int    `json:"code"`
@@ -1077,18 +1200,16 @@ func formatLSPResponse(response json.RawMessage, method string, worktreePath str
 		} `json:"error"`
 		Result json.RawMessage `json:"result"`
 	}
-	if err := json.Unmarshal(response, &envelope); err == nil && envelope.Error != nil {
-		return fmt.Sprintf("LSP error %d: %s", envelope.Error.Code, envelope.Error.Message)
-	}
-
-	// For success, unmarshal the result
-	var result any
 	if err := json.Unmarshal(response, &envelope); err != nil {
 		return string(response)
+	}
+	if envelope.Error != nil {
+		return fmt.Sprintf("LSP error %d: %s", envelope.Error.Code, envelope.Error.Message)
 	}
 	if envelope.Result == nil || string(envelope.Result) == "null" {
 		return "(no result)"
 	}
+	var result any
 	if err := json.Unmarshal(envelope.Result, &result); err != nil {
 		return string(envelope.Result)
 	}
@@ -1098,8 +1219,6 @@ func formatLSPResponse(response json.RawMessage, method string, worktreePath str
 		return formatLocationArray(result, worktreePath, "references")
 	case "textDocument/definition":
 		return formatDefinitionResult(result, worktreePath)
-	case "textDocument/codeAction":
-		return formatCodeActions(result)
 	case "textDocument/hover":
 		return formatHoverResult(result)
 	default:
@@ -1190,35 +1309,6 @@ func formatDefinitionResult(result any, worktreePath string) string {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return string(data)
 	}
-}
-
-// formatCodeActions formats code actions result.
-func formatCodeActions(result any) string {
-	actions, ok := result.([]any)
-	if !ok {
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return string(data)
-	}
-	if len(actions) == 0 {
-		return "No code actions available at this position"
-	}
-
-	var buf strings.Builder
-	fmt.Fprintf(&buf, "Found %d code action(s):\n", len(actions))
-	for i, actAny := range actions {
-		act, ok := actAny.(map[string]any)
-		if !ok {
-			continue
-		}
-		title, _ := act["title"].(string)
-		kind, _ := act["kind"].(string)
-		fmt.Fprintf(&buf, "  %d. %s", i+1, title)
-		if kind != "" {
-			fmt.Fprintf(&buf, " [%s]", kind)
-		}
-		fmt.Fprintln(&buf)
-	}
-	return buf.String()
 }
 
 // formatHoverResult formats hover information result.

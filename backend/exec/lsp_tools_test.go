@@ -65,7 +65,6 @@ func TestLSPTools_NoLSPManager(t *testing.T) {
 	}{
 		{"lsp_references", map[string]any{"path": "main.go", "symbol": "main"}},
 		{"lsp_definition", map[string]any{"path": "main.go", "symbol": "main"}},
-		{"lsp_code_actions", map[string]any{"path": "main.go", "symbol": "main"}},
 		{"lsp_hover", map[string]any{"path": "main.go", "symbol": "main"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -195,26 +194,6 @@ func TestFormatLSPResponse_DefinitionSingle(t *testing.T) {
 	}
 }
 
-func TestFormatLSPResponse_CodeActions(t *testing.T) {
-	resp := formatLSPResponse([]byte(`{
-		"result": [
-			{"title": "Add missing import", "kind": "quickfix"},
-			{"title": "Organize imports", "kind": "source.organizeImports"}
-		]
-	}`), "textDocument/codeAction", "/tmp/proj")
-
-	if resp != "Found 2 code action(s):\n  1. Add missing import [quickfix]\n  2. Organize imports [source.organizeImports]\n" {
-		t.Errorf("got %q", resp)
-	}
-}
-
-func TestFormatLSPResponse_CodeActionsEmpty(t *testing.T) {
-	resp := formatLSPResponse([]byte(`{"result":[]}`), "textDocument/codeAction", "/tmp/proj")
-	if resp != "No code actions available at this position" {
-		t.Errorf("got %q", resp)
-	}
-}
-
 func TestFormatLSPResponse_Hover(t *testing.T) {
 	resp := formatLSPResponse([]byte(`{"result":{"contents":{"kind":"markdown","value":"func Foo() string\nReturns a foo."}}}`), "textDocument/hover", "/tmp/proj")
 
@@ -225,7 +204,7 @@ func TestFormatLSPResponse_Hover(t *testing.T) {
 }
 
 func TestIsReadOnlyCall_LSPTools(t *testing.T) {
-	for _, toolName := range []string{"lsp_references", "lsp_definition", "lsp_code_actions", "lsp_hover"} {
+	for _, toolName := range []string{"lsp_references", "lsp_definition", "lsp_hover"} {
 		if !isReadOnlyCall(toolName, `{"path":"main.go"}`) {
 			t.Errorf("isReadOnlyCall(%q) = false, want true", toolName)
 		}

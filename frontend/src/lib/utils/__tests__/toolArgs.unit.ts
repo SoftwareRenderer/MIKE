@@ -158,12 +158,28 @@ describe('formatToolArgs - lsp_definition', () => {
     });
 });
 
-describe('formatToolArgs - lsp_code_actions', () => {
-    it('shows symbol and path', () => {
-        expect(formatToolArgs('lsp_code_actions', { path: 'main.go', symbol: 'foo' })).toBe('code actions for foo in main.go');
+describe('formatToolArgs - removed lsp_code_actions tool', () => {
+    it('falls back to the generic JSON summary', () => {
+        expect(formatToolArgs('lsp_code_actions', { path: 'main.go', symbol: 'foo' })).toBe(
+            JSON.stringify({ path: 'main.go', symbol: 'foo' }, null, 2)
+        );
+    });
+});
+
+describe('formatToolArgs - lsp_rename', () => {
+    it('shows old and new symbol with path', () => {
+        expect(formatToolArgs('lsp_rename', { path: 'main.go', symbol: 'foo', new_name: 'bar' })).toBe('rename foo to bar in main.go');
+    });
+
+    it('shows fallback when no new_name', () => {
+        expect(formatToolArgs('lsp_rename', { path: 'main.go', symbol: 'foo' })).toBe('rename foo in main.go');
     });
 
     it('shows fallback when no symbol', () => {
-        expect(formatToolArgs('lsp_code_actions', { path: 'main.go' })).toBe('(code actions in main.go)');
+        expect(formatToolArgs('lsp_rename', { path: 'main.go' })).toBe('(rename in main.go)');
+    });
+
+    it('shows fallback for empty args', () => {
+        expect(formatToolArgs('lsp_rename', {})).toBe('(rename in file)');
     });
 });

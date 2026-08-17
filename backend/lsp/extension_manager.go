@@ -56,6 +56,12 @@ type sandboxClient struct {
 	initialized bool
 	// openedFiles tracks file URIs that have been sent via didOpen.
 	openedFiles map[string]bool
+	// openedFileContents tracks the last content sent to the server per URI,
+	// so on-disk changes (agent edits between LSP calls) can be re-synced via
+	// didChange. Servers like tsserver do not watch the filesystem.
+	openedFileContents map[string]string
+	// openedFileVersions tracks the last LSP document version sent per URI.
+	openedFileVersions map[string]int
 }
 
 // translateURIs recursively translates file URIs in the provided data.
@@ -596,12 +602,14 @@ func (m *ExtensionLSPManager) LSPRequest(workspacePath, filePath, method string,
 			}
 		}()
 		sc = &sandboxClient{
-			bridgeClient:  bridgeClient,
-			workspace:     workspacePath,
-			language:      language,
-			extensionID:   ext.ID,
-			projectMounts: projectMounts,
-			openedFiles:   make(map[string]bool),
+			bridgeClient:       bridgeClient,
+			workspace:          workspacePath,
+			language:           language,
+			extensionID:        ext.ID,
+			projectMounts:      projectMounts,
+			openedFiles:        make(map[string]bool),
+			openedFileContents: make(map[string]string),
+			openedFileVersions: make(map[string]int),
 		}
 		m.mu.Lock()
 		m.clients[workspaceKey] = sc
@@ -618,16 +626,15 @@ func (m *ExtensionLSPManager) LSPRequest(workspacePath, filePath, method string,
 		sc.initialized = true
 	}
 
-	// Extract the file URI from params to ensure the file is opened
+	// Extract the file URI from params and ensure the server's copy is in sync
+	// with the on-disk content (didOpen once, then didChange when the file
+	// changes on disk — servers like tsserver do not watch the filesystem).
 	if paramsMap, ok := params.(map[string]any); ok {
 		if td, ok := paramsMap["textDocument"].(map[string]any); ok {
 			if uri, ok := td["uri"].(string); ok {
-				if !sc.openedFiles[uri] {
-					if err := m.lspDidOpen(ctx, sc, uri, workspacePath, filePath, language); err != nil {
-						log.Printf("[lsp] didOpen failed for %s: %v", filePath, err)
-						// Continue anyway — the server may still have the file
-					}
-					sc.openedFiles[uri] = true
+				if err := m.ensureDocSync(ctx, sc, uri, workspacePath, filePath, language); err != nil {
+					log.Printf("[lsp] doc sync failed for %s: %v", filePath, err)
+					// Continue anyway — the server may still have the file
 				}
 			}
 		}
@@ -727,15 +734,58 @@ func (m *ExtensionLSPManager) lspInitialize(ctx context.Context, sc *sandboxClie
 	return nil
 }
 
-// lspDidOpen sends a textDocument/didOpen notification to the LSP server.
-func (m *ExtensionLSPManager) lspDidOpen(ctx context.Context, sc *sandboxClient, uri, workspacePath, filePath, language string) error {
-	// Read file content from the host workspace
+// docSyncAction describes what ensureDocSync must send to keep the server's
+// document copy in sync with the on-disk file.
+type docSyncAction struct {
+	kind    string // "" (no sync), "open" (didOpen), or "change" (didChange)
+	version int    // LSP document version to send (for open/change)
+}
+
+// decideDocSync is the pure sync decision: given the last content sent to the
+// server and the current on-disk content, determine whether to didOpen (file
+// never sent), didChange (on-disk content diverged), or do nothing.
+func decideDocSync(opened bool, lastSent, onDisk string, lastVersion int) docSyncAction {
+	if !opened {
+		return docSyncAction{kind: "open", version: 1}
+	}
+	if lastSent != onDisk {
+		return docSyncAction{kind: "change", version: lastVersion + 1}
+	}
+	return docSyncAction{}
+}
+
+// ensureDocSync sends didOpen (first time) or didChange (on-disk content
+// changed since the last sync) so the language server never operates on stale
+// content. Servers like tsserver do not watch the filesystem, so without this
+// a file edited on disk between LSP calls would yield stale results.
+func (m *ExtensionLSPManager) ensureDocSync(ctx context.Context, sc *sandboxClient, uri, workspacePath, filePath, language string) error {
 	absPath := filepath.Join(workspacePath, filePath)
 	content, err := os.ReadFile(absPath)
 	if err != nil {
-		return fmt.Errorf("read file for didOpen: %w", err)
+		return fmt.Errorf("read file for doc sync: %w", err)
 	}
 
+	action := decideDocSync(sc.openedFiles[uri], sc.openedFileContents[uri], string(content), sc.openedFileVersions[uri])
+	switch action.kind {
+	case "open":
+		if err := m.lspDidOpen(ctx, sc, uri, language, string(content), action.version); err != nil {
+			return err
+		}
+	case "change":
+		if err := m.lspDidChange(ctx, sc, uri, language, string(content), action.version); err != nil {
+			return err
+		}
+	default:
+		return nil
+	}
+	sc.openedFiles[uri] = true
+	sc.openedFileContents[uri] = string(content)
+	sc.openedFileVersions[uri] = action.version
+	return nil
+}
+
+// lspDidOpen sends a textDocument/didOpen notification to the LSP server.
+func (m *ExtensionLSPManager) lspDidOpen(ctx context.Context, sc *sandboxClient, uri, language, content string, version int) error {
 	notify := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "textDocument/didOpen",
@@ -743,14 +793,36 @@ func (m *ExtensionLSPManager) lspDidOpen(ctx context.Context, sc *sandboxClient,
 			"textDocument": map[string]any{
 				"uri":        uri,
 				"languageId": language,
-				"version":    1,
-				"text":       string(content),
+				"version":    version,
+				"text":       content,
 			},
 		},
 	}
+	return m.lspNotify(ctx, sc, notify)
+}
+
+// lspDidChange sends a textDocument/didChange notification with a full-text
+// sync (no range) to the LSP server.
+func (m *ExtensionLSPManager) lspDidChange(ctx context.Context, sc *sandboxClient, uri, language, content string, version int) error {
+	notify := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "textDocument/didChange",
+		"params": map[string]any{
+			"textDocument": map[string]any{
+				"uri":     uri,
+				"version": version,
+			},
+			"contentChanges": []map[string]any{{"text": content}},
+		},
+	}
+	return m.lspNotify(ctx, sc, notify)
+}
+
+// lspNotify marshals a JSON-RPC notification, translates its URIs to
+// container paths, and sends it to the LSP server via the bridge.
+func (m *ExtensionLSPManager) lspNotify(ctx context.Context, sc *sandboxClient, notify map[string]any) error {
 	notifyBytes, _ := json.Marshal(notify)
 	translated := translateURIsToContainer(notifyBytes, sc.workspace, sc.projectMounts)
-
 	return sc.bridgeClient.LSPNotify(ctx, translated)
 }
 
