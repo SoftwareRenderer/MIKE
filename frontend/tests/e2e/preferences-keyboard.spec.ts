@@ -13,16 +13,21 @@ const PREFERENCES_TAB = 'button.tab-btn:has-text("Preferences")';
 const CREATE_ROW = '.shortcut-row[data-shortcut="create_task"]';
 const SUBMIT_ROW = '.shortcut-row[data-shortcut="create_task_submit"]';
 const TERMINAL_ROW = '.shortcut-row[data-shortcut="open_terminal"]';
+const FULLSCREEN_ROW = '.shortcut-row[data-shortcut="toggle_fullscreen"]';
 const KEY_CHIP = `${CREATE_ROW} button.key-chip`;
 const SUBMIT_CHIP = `${SUBMIT_ROW} button.key-chip`;
 const TERMINAL_CHIP = `${TERMINAL_ROW} button.key-chip`;
+const FULLSCREEN_CHIP = `${FULLSCREEN_ROW} button.key-chip`;
 const TERMINAL_RESET = `${TERMINAL_ROW} button[aria-label="Reset to default"]`;
 const TERMINAL_CLEAR = `${TERMINAL_ROW} button[aria-label="Clear shortcut"]`;
+const FULLSCREEN_RESET = `${FULLSCREEN_ROW} button[aria-label="Reset to default"]`;
 const RESET_BTN = `${CREATE_ROW} button[aria-label="Reset to default"]`;
 const CLEAR_BTN = `${CREATE_ROW} button[aria-label="Clear shortcut"]`;
 const SAVE_BTN = 'button.btn-primary[title="Save settings"]';
 const BOARD_BTN = '.add-task-btn';
 const CREATE_MODAL = '#task-description';
+const TERMINAL_PANEL = '.terminal-panel';
+const TERMINAL_CLOSE = '.terminal-panel .close-btn';
 
 /**
  * Self-consistent, saveable provider config (the Settings Save flow validates
@@ -349,6 +354,87 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await page.keyboard.press('Control+`');
         await page.waitForTimeout(300);
         await expect(page.locator('.terminal-panel')).not.toBeVisible();
+
+        // Restore the default for other suites
+        await resetShortcuts(page);
+    });
+
+    test('toggle_fullscreen defaults to Ctrl+Up and the default binding toggles the focused area', async ({ page }) => {
+        await resetShortcuts(page);
+        await page.reload();
+        await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
+
+        // The Preferences row shows the default
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await expect(page.locator(FULLSCREEN_CHIP)).toHaveText('Ctrl+Up');
+
+        // Close settings via Cancel (no changes)
+        await page.locator('button[title="Cancel and discard changes"]').click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+
+        // The default combo toggles the terminal fullscreen (panel has focus)
+        await page.keyboard.press('Control+`');
+        await expect(page.locator(TERMINAL_PANEL)).toBeVisible({ timeout: 10000 });
+        await page.keyboard.press('Control+ArrowUp');
+        await expect(page.locator(TERMINAL_PANEL)).toHaveClass(/fullscreen/);
+        await page.keyboard.press('Control+ArrowUp');
+        await expect(page.locator(TERMINAL_PANEL)).not.toHaveClass(/fullscreen/);
+        await page.locator(TERMINAL_CLOSE).click();
+        await expect(page.locator(TERMINAL_PANEL)).not.toBeVisible({ timeout: 5000 });
+    });
+
+    test('rebinding toggle_fullscreen changes the trigger and reset restores the default', async ({ page }) => {
+        // Carries over from the previous test: binding is the default
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await expect(page.locator(FULLSCREEN_CHIP)).toHaveText('Ctrl+Up');
+
+        await page.locator(FULLSCREEN_CHIP).click();
+        await expect(page.locator(FULLSCREEN_CHIP)).toHaveText('Press a key...');
+        await page.keyboard.press('Shift+Alt+F');
+        await expect(page.locator(FULLSCREEN_CHIP)).toHaveText('Shift+Alt+F');
+
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+        await waitForConfig(page, c => c.keyboard_shortcuts?.toggle_fullscreen === 'shift+alt+f');
+
+        // The old default no longer toggles; the new binding does
+        await page.keyboard.press('Control+`');
+        await expect(page.locator(TERMINAL_PANEL)).toBeVisible({ timeout: 10000 });
+        await page.keyboard.press('Control+ArrowUp');
+        await page.waitForTimeout(300);
+        await expect(page.locator(TERMINAL_PANEL)).not.toHaveClass(/fullscreen/);
+
+        await page.keyboard.press('Shift+Alt+F');
+        await expect(page.locator(TERMINAL_PANEL)).toHaveClass(/fullscreen/);
+
+        // Exit fullscreen first — the fullscreen panel covers the top bar.
+        await page.keyboard.press('Shift+Alt+F');
+        await expect(page.locator(TERMINAL_PANEL)).not.toHaveClass(/fullscreen/);
+
+        // Close the terminal — its backdrop overlay blocks the Settings button.
+        await page.locator(TERMINAL_CLOSE).click();
+        await expect(page.locator(TERMINAL_PANEL)).not.toBeVisible({ timeout: 5000 });
+
+        // Reset restores the default
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await page.locator(FULLSCREEN_RESET).click();
+        await expect(page.locator(FULLSCREEN_CHIP)).toHaveText('Ctrl+Up');
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+        await waitForConfig(page, c => c.keyboard_shortcuts?.toggle_fullscreen === undefined);
+
+        // Reopen the terminal: Ctrl+Up works again
+        await page.keyboard.press('Control+`');
+        await expect(page.locator(TERMINAL_PANEL)).toBeVisible({ timeout: 10000 });
+        await page.keyboard.press('Control+ArrowUp');
+        await expect(page.locator(TERMINAL_PANEL)).toHaveClass(/fullscreen/);
+
+        await page.keyboard.press('Control+ArrowUp');
+        await page.locator(TERMINAL_CLOSE).click();
+        await expect(page.locator(TERMINAL_PANEL)).not.toBeVisible({ timeout: 5000 });
 
         // Restore the default for other suites
         await resetShortcuts(page);

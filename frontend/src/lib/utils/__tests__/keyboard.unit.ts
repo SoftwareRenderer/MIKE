@@ -13,6 +13,8 @@ import {
     matchesCreateTaskSubmitKey,
     defaultStartTaskKey,
     effectiveStartTaskKey,
+    effectiveToggleFullscreenKey,
+    fullscreenToggleTitle,
     shortcutHintsHidden,
 } from '$lib/utils/keyboard';
 import type { Config } from '$lib/types';
@@ -286,6 +288,41 @@ describe('effectiveStartTaskKey', () => {
 
     it('returns empty string when explicitly disabled', () => {
         expect(effectiveStartTaskKey({ keyboard_shortcuts: { start_task: '' } } as Config)).toBe('');
+    });
+});
+
+describe('effectiveToggleFullscreenKey', () => {
+    it('defaults to Ctrl+Up when unset (any platform)', () => {
+        mockUserAgent(MAC_UA);
+        expect(effectiveToggleFullscreenKey(null)).toBe('control+arrowup');
+        expect(effectiveToggleFullscreenKey(undefined)).toBe('control+arrowup');
+        expect(effectiveToggleFullscreenKey({} as Config)).toBe('control+arrowup');
+        expect(effectiveToggleFullscreenKey({ keyboard_shortcuts: {} } as Config)).toBe('control+arrowup');
+        mockUserAgent(WIN_UA);
+        expect(effectiveToggleFullscreenKey({} as Config)).toBe('control+arrowup');
+    });
+
+    it('returns the custom binding when set', () => {
+        expect(effectiveToggleFullscreenKey({ keyboard_shortcuts: { toggle_fullscreen: 'shift+alt+f' } } as Config)).toBe('shift+alt+f');
+    });
+
+    it('returns empty string when explicitly disabled', () => {
+        expect(effectiveToggleFullscreenKey({ keyboard_shortcuts: { toggle_fullscreen: '' } } as Config)).toBe('');
+    });
+});
+
+describe('fullscreenToggleTitle', () => {
+    it('shows the default binding', () => {
+        expect(fullscreenToggleTitle(null)).toBe('Toggle fullscreen (Ctrl+Up)');
+        expect(fullscreenToggleTitle({} as Config)).toBe('Toggle fullscreen (Ctrl+Up)');
+    });
+
+    it('shows a custom binding formatted', () => {
+        expect(fullscreenToggleTitle({ keyboard_shortcuts: { toggle_fullscreen: 'shift+alt+f' } } as Config)).toBe('Toggle fullscreen (Shift+Alt+F)');
+    });
+
+    it('shows plain text when disabled', () => {
+        expect(fullscreenToggleTitle({ keyboard_shortcuts: { toggle_fullscreen: '' } } as Config)).toBe('Toggle fullscreen');
     });
 });
 

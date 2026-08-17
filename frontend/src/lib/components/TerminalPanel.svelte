@@ -8,7 +8,7 @@
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
     import { createFocusTrap } from '$lib/a11y';
-    import { effectiveOpenTerminalKey, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
+    import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, fullscreenToggleTitle, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
     import ResizeHandle from './ResizeHandle.svelte';
     import '@xterm/xterm/css/xterm.css';
 
@@ -115,6 +115,8 @@
         return key ? `Close terminal (${formatShortcut(key)})` : 'Close terminal';
     });
 
+    const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
+
     // Open/close terminal shortcut: while the panel is open, pressing the
     // binding closes it (the global handler in App.svelte opens it). Capture
     // phase so it wins over xterm's own keydown, which would send Ctrl+` as
@@ -127,6 +129,24 @@
             e.preventDefault();
             e.stopPropagation();
             close();
+        };
+        document.addEventListener('keydown', handleKeydown, true);
+        return () => document.removeEventListener('keydown', handleKeydown, true);
+    });
+
+    // Toggle-fullscreen shortcut (default Ctrl+Up): fires only while focus is
+    // inside the panel; capture phase so it wins over xterm's own keydown.
+    // Focus elsewhere (e.g. chat above the panel) is handled by that area.
+    $effect(() => {
+        const handleKeydown = (e: KeyboardEvent) => {
+            if (e.defaultPrevented || e.repeat) return;
+            const key = effectiveToggleFullscreenKey(appStore.config);
+            if (!key || !matchShortcut(key, e)) return;
+            const active = document.activeElement;
+            if (!(panelEl && active instanceof HTMLElement && panelEl.contains(active))) return;
+            e.preventDefault();
+            e.stopPropagation();
+            toggleFullscreen();
         };
         document.addEventListener('keydown', handleKeydown, true);
         return () => document.removeEventListener('keydown', handleKeydown, true);
@@ -827,7 +847,7 @@
         </div>
         <div class="header-actions">
             {#if !isMobileCtx.isMobile}
-            <button type="button" class="icon-btn terminal-fullscreen-toggle" onclick={toggleFullscreen} title="Toggle fullscreen">
+            <button type="button" class="icon-btn terminal-fullscreen-toggle" onclick={toggleFullscreen} title={fullscreenTitle}>
                 {#if fullscreen}
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 {:else}

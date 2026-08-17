@@ -729,6 +729,47 @@ func TestKeyboardShortcutsStartTask_DisabledRoundTrip(t *testing.T) {
 	}
 }
 
+func TestKeyboardShortcutsToggleFullscreen_CustomRoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{ToggleFullscreen: ptr("shift+alt+f")}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.ToggleFullscreen == nil || *read.KeyboardShortcuts.ToggleFullscreen != "shift+alt+f" {
+		t.Fatalf("expected toggle_fullscreen=\"shift+alt+f\", got %+v", read.KeyboardShortcuts)
+	}
+	if read.KeyboardShortcuts.CreateTask != nil || read.KeyboardShortcuts.CreateTaskSubmit != nil || read.KeyboardShortcuts.OpenTerminal != nil || read.KeyboardShortcuts.StartTask != nil {
+		t.Fatalf("expected other bindings to stay nil, got %+v", read.KeyboardShortcuts)
+	}
+}
+
+func TestKeyboardShortcutsToggleFullscreen_DisabledRoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{ToggleFullscreen: ptr("")}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.ToggleFullscreen == nil || *read.KeyboardShortcuts.ToggleFullscreen != "" {
+		t.Fatalf("expected disabled (empty string) toggle_fullscreen, got %+v", read.KeyboardShortcuts)
+	}
+}
+
 func TestKeyboardShortcutsHideHints_RoundTrip(t *testing.T) {
 	cs := testConfigStore(t)
 	cfg, err := cs.GetConfig()
