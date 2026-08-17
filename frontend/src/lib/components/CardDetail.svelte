@@ -13,7 +13,7 @@
     import { useBoardDnd } from '$lib/composables/use-board-dnd.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
     import { resolveOverviewArrowTarget } from '$lib/composables/use-board-arrow-nav';
-    import { resolveDetailColumn, resolveDiffFileTarget, type DetailColumnId } from '$lib/composables/use-task-detail-column-nav';
+    import { canSwitchDetailColumn, resolveDetailColumn, resolveDiffFileTarget, type DetailColumnId } from '$lib/composables/use-task-detail-column-nav';
     import { effectiveToggleFullscreenKey, isEditableTarget, matchShortcut } from '$lib/utils/keyboard';
     import { DiffCache } from '$lib/services/diff-cache.svelte';
     import TaskChat from './Chat/TaskChat.svelte';
@@ -606,20 +606,26 @@
             }
             if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
                 // Cyclic column focus switching: Board -> Chat -> Diff -> Board.
-                if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-                if (e.defaultPrevented) return;
-                if (isMobileCtx.isMobile) return;
+                // Plain arrows keep native text-cursor movement in editable
+                // focus (incl. the chat input); Ctrl+arrows switch columns
+                // from any focus — the keyboard way out of the chat input.
                 const active = document.activeElement;
-                const chatCol: HTMLElement | null = detailEl ? detailEl.querySelector('.column-chat') : null;
-                // Editable focus keeps native text-cursor movement — except the
-                // chat input: horizontal arrows switch columns so the cycle
-                // always works; vertical arrows still edit text.
-                const inChatInput = active instanceof HTMLElement && active.tagName === 'TEXTAREA' && !!chatCol?.contains(active);
-                if (active instanceof HTMLElement && isEditableTarget(active) && !inChatInput) return;
-                if (isBlocked()) return;
-                if (editingFile || diffFullscreen || chatFullscreen) return;
+                if (!canSwitchDetailColumn({
+                    ctrlKey: e.ctrlKey,
+                    altKey: e.altKey,
+                    metaKey: e.metaKey,
+                    shiftKey: e.shiftKey,
+                    defaultPrevented: e.defaultPrevented,
+                    isMobile: isMobileCtx.isMobile,
+                    blocked: isBlocked(),
+                    editingFile: !!editingFile,
+                    diffFullscreen,
+                    chatFullscreen,
+                    isEditable: active instanceof HTMLElement && isEditableTarget(active),
+                })) return;
                 if (!detailEl) return;
                 const boardCol = detailEl.querySelector<HTMLElement>('.column-context');
+                const chatCol: HTMLElement | null = detailEl.querySelector('.column-chat');
                 const diffCol = detailEl.querySelector<HTMLElement>('.column-diff');
                 const current: DetailColumnId | null = active instanceof HTMLElement
                     ? (boardCol?.contains(active) ? 'board' : chatCol?.contains(active) ? 'chat' : diffCol?.contains(active) ? 'diff' : null)
