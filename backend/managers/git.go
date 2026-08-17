@@ -572,8 +572,22 @@ func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"branch": req.Branch})
 }
 
+// gitErrorSummary returns a trimmed, length-capped summary
+func gitErrorSummary(out []byte) string {
+	s := strings.TrimSpace(string(out))
+	const maxLen = 300
+	if len(s) > maxLen {
+		s = s[:maxLen] + "..."
+	}
+	return s
+}
+
 // HandlePull pulls from remote.
 func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
@@ -587,9 +601,11 @@ func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request) {
 		defer mu.Unlock()
 	}
 	c := exec.Command("git", "-C", project.Path, "pull")
+	// Never block on an interactive credential prompt.
+	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := c.CombinedOutput(); err != nil {
 		log.Printf("git pull failed: %v: %s", err, out)
-		httputil.JSONError(w, http.StatusInternalServerError, "git pull failed")
+		httputil.JSONError(w, http.StatusInternalServerError, "git pull failed: "+gitErrorSummary(out))
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "pulled"})
@@ -597,6 +613,10 @@ func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request) {
 
 // HandlePush pushes to remote.
 func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
@@ -610,9 +630,11 @@ func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
 		defer mu.Unlock()
 	}
 	c := exec.Command("git", "-C", project.Path, "push")
+	// Never block on an interactive credential prompt.
+	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := c.CombinedOutput(); err != nil {
 		log.Printf("git push failed: %v: %s", err, out)
-		httputil.JSONError(w, http.StatusInternalServerError, "git push failed")
+		httputil.JSONError(w, http.StatusInternalServerError, "git push failed: "+gitErrorSummary(out))
 		return
 	}
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "pushed"})

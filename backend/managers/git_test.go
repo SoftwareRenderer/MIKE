@@ -993,6 +993,186 @@ func TestHandleTaskCheckout_ValidBranch(t *testing.T) {
 	}
 }
 
+// --- HandlePull / HandlePush tests ---
+
+// addBareRemote creates a bare repo, registers it as "origin" in projPath,
+// and pushes the current branch with upstream tracking. Returns the bare path.
+func addBareRemote(t *testing.T, projPath string) string {
+	t.Helper()
+	bare := t.TempDir()
+	mustRun(t, "", "git", "init", "--bare", bare)
+	mustRun(t, projPath, "git", "remote", "add", "origin", bare)
+	mustRun(t, projPath, "git", "push", "-u", "origin", "HEAD")
+	return bare
+}
+
+// decodeGitError parses a JSON error response body and returns the message.
+func decodeGitError(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body struct{ Error string }
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error response: %v: %s", err, rec.Body.String())
+	}
+	return body.Error
+}
+
+// newPullPushMux wires the pull/push routes exactly like the server does.
+func newPullPushMux(h *GitHandler) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/git/pull", h.HandlePull)
+	mux.HandleFunc("POST /api/projects/{projectID}/git/push", h.HandlePush)
+	return mux
+}
+
+func TestHandlePull_RequiresPOST(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "pull-method-proj", Name: "pull-method-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := newPullPushMux(h)
+
+	// GET is not allowed for the pull route.
+	req := httptest.NewRequest("GET", "/api/projects/pull-method-proj/git/pull", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 for GET pull, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// GET is not allowed for the push route.
+	req = httptest.NewRequest("GET", "/api/projects/pull-method-proj/git/push", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 for GET push, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlePush_Success(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	addBareRemote(t, projPath)
+	proj := &types.Project{ID: "push-success-proj", Name: "push-success-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a new local commit to push.
+	createFile(t, projPath, "pushed-file.txt", "pushed\n")
+	mustRun(t, projPath, "git", "add", "pushed-file.txt")
+	mustRun(t, projPath, "git", "commit", "-m", "commit to push")
+	localHead, err := exec.Command("git", "-C", projPath, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+
+	mux := newPullPushMux(h)
+	req := httptest.NewRequest("POST", "/api/projects/push-success-proj/git/push", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for push, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// The bare remote must now contain the local commit.
+	bare, err := exec.Command("git", "-C", projPath, "remote", "get-url", "origin").Output()
+	if err != nil {
+		t.Fatalf("remote get-url: %v", err)
+	}
+	remoteHead, err := exec.Command("git", "-C", strings.TrimSpace(string(bare)), "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-parse remote HEAD: %v", err)
+	}
+	if strings.TrimSpace(string(remoteHead)) != strings.TrimSpace(string(localHead)) {
+		t.Fatalf("remote HEAD %q != local HEAD %q", remoteHead, localHead)
+	}
+}
+
+func TestHandlePull_Success(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	bare := addBareRemote(t, projPath)
+	proj := &types.Project{ID: "pull-success-proj", Name: "pull-success-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	// Advance the remote via a second clone so the local repo is behind.
+	clone := t.TempDir()
+	mustRun(t, "", "git", "clone", bare, clone)
+	createFile(t, clone, "remote-file.txt", "from remote\n")
+	mustRun(t, clone, "git", "add", "remote-file.txt")
+	mustRun(t, clone, "git", "commit", "-m", "remote commit")
+	mustRun(t, clone, "git", "push")
+
+	mux := newPullPushMux(h)
+	req := httptest.NewRequest("POST", "/api/projects/pull-success-proj/git/pull", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for pull, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// The pulled commit must now be in the local repo.
+	if _, err := os.Stat(filepath.Join(projPath, "remote-file.txt")); err != nil {
+		t.Fatalf("expected remote-file.txt after pull: %v", err)
+	}
+}
+
+func TestHandlePull_NotAGitRepo_ErrorIncludesGitOutput(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	// A plain directory (not a git repo) gives a deterministic git error
+	// whose wording is stable across git versions.
+	projPath := t.TempDir()
+	proj := &types.Project{ID: "pull-err-proj", Name: "pull-err-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := newPullPushMux(h)
+	req := httptest.NewRequest("POST", "/api/projects/pull-err-proj/git/pull", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for pull on non-git dir, got %d: %s", rec.Code, rec.Body.String())
+	}
+	msg := decodeGitError(t, rec)
+	if !strings.Contains(msg, "not a git repository") {
+		t.Fatalf("error message should include git output, got %q", msg)
+	}
+}
+
+func TestHandlePush_NotAGitRepo_ErrorIncludesGitOutput(t *testing.T) {
+	h, s, _, _ := newTestGitHandler(t)
+	projPath := t.TempDir()
+	proj := &types.Project{ID: "push-err-proj", Name: "push-err-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := newPullPushMux(h)
+	req := httptest.NewRequest("POST", "/api/projects/push-err-proj/git/push", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for push on non-git dir, got %d: %s", rec.Code, rec.Body.String())
+	}
+	msg := decodeGitError(t, rec)
+	if !strings.Contains(msg, "not a git repository") {
+		t.Fatalf("error message should include git output, got %q", msg)
+	}
+}
+
 // --- HandleProjectStageFile_DashFPathNotForceAdd ---
 // TestHandleProjectStageFile_DashFPathNotForceAdd verifies that a path of
 // exactly "-f" is treated as a filename (via '--'), not as the --force flag.

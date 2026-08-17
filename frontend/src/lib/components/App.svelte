@@ -106,6 +106,10 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
         const view = params.view !== undefined ? params.view : current.get('view');
         const file = params.file !== undefined ? params.file : current.get('file');
         const thread = clearThread ? null : current.get('thread');
+        // Keep the Review Changes panel state in sync
+        if (params.view !== undefined) {
+            urlChangesOpen = params.view === 'review' || params.view === 'task-review';
+        }
         // Build query in canonical order: project, task, view, file, thread
         // Use manual encoding to keep / unencoded in file paths
         const parts: string[] = [];
@@ -200,6 +204,31 @@ import kanbanIcon from '$lib/assets/icons/kanban.svg';
     let showFileBrowserVal = $state(false);
     let showExplorerViewVal = $state(false);
     let showTaskExplorerVal = $state(false);
+    // Review Changes panel state (URL: view=review / view=task-review)
+    let urlChangesOpen = $state(initialChangesOpen());
+
+    /** True when the initial URL opened the Review Changes panel. */
+    function initialChangesOpen(): boolean {
+        const v = new URLSearchParams(location.search).get('view');
+        return v === 'review' || v === 'task-review';
+    }
+
+    /** Restore explorer + changes-panel state from the URL's view param. */
+    function applyUrlView(viewParam: string | null) {
+        if (viewParam === 'explorer' || viewParam === 'review') {
+            showExplorerViewVal = true;
+            showTaskExplorerVal = false;
+            urlChangesOpen = viewParam === 'review';
+        } else if (viewParam === 'task-explorer' || viewParam === 'task-review') {
+            showExplorerViewVal = false;
+            showTaskExplorerVal = true;
+            urlChangesOpen = viewParam === 'task-review';
+        } else {
+            showExplorerViewVal = false;
+            showTaskExplorerVal = false;
+            urlChangesOpen = false;
+        }
+    }
     let cardDetailActiveTab = $state<'context' | 'chat' | 'diff' | 'checkpoint'>('chat');
 let scrollToColumn = $state<string | null>(null); // column to scroll to on mobile after task delete
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
@@ -335,18 +364,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             appStore.selectedTask = null;
             uiStore.showCardDetail = false;
         }
-        // Restore explorer view from URL
-        const viewParam = params.get('view');
-        if (viewParam === 'explorer') {
-            showExplorerViewVal = true;
-            showTaskExplorerVal = false;
-        } else if (viewParam === 'task-explorer') {
-            showExplorerViewVal = false;
-            showTaskExplorerVal = true;
-        } else {
-            showExplorerViewVal = false;
-            showTaskExplorerVal = false;
-        }
+        // Restore explorer view (and Review Changes panel) from URL
+        applyUrlView(params.get('view'));
         // Notify child components (e.g., TaskChat) that the URL changed
         window.dispatchEvent(new CustomEvent('urlchanged'));
     }
@@ -385,9 +404,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onBranch: (branch) => {
                 currentBranch = branch;
                 if (branch && !showExplorerViewVal) {
-                    const params = new URLSearchParams(location.search);
-                    if (params.get('view') === 'explorer') {
-                        showExplorerViewVal = true;
+                    const view = new URLSearchParams(location.search).get('view');
+                    if (view === 'explorer' || view === 'review') {
+                        applyUrlView(view);
                     }
                 }
             },
@@ -461,15 +480,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             },
         });
         setAppStreamRef(appStream);
-        const urlParams = new URLSearchParams(location.search);
-        const viewParam = urlParams.get('view');
-        if (viewParam === 'explorer') {
-            showExplorerViewVal = true;
-            showTaskExplorerVal = false;
-        } else if (viewParam === 'task-explorer') {
-            showExplorerViewVal = false;
-            showTaskExplorerVal = true;
-        }
+        applyUrlView(new URLSearchParams(location.search).get('view'));
         await loadAppData();
         extensionManager.loadExtensions().catch(() => {});
     }
@@ -748,15 +759,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         appStore.selectedTask = task;
         // Restore view state from URL
         const viewParam = params.get('view');
-        if (viewParam === 'task-explorer') {
-            showTaskExplorerVal = true;
-            showExplorerViewVal = false;
-            uiStore.showCardDetail = false;
-        } else if (viewParam === 'explorer') {
-            showExplorerViewVal = true;
-            showTaskExplorerVal = false;
+        if (viewParam === 'explorer' || viewParam === 'review' || viewParam === 'task-explorer' || viewParam === 'task-review') {
+            applyUrlView(viewParam);
             uiStore.showCardDetail = false;
         } else {
+            applyUrlView(null);
             uiStore.showCardDetail = true;
         }
     }
@@ -856,7 +863,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Update URL with project param
         // Preserve task param from URL — restoreTaskFromUrl needs it after board loads
         const urlTaskId = new URLSearchParams(location.search).get('task');
-        const viewParam = wasExplorerViewOpen ? 'explorer' : (wasTaskExplorerOpen ? 'task-explorer' : null);
+        const viewParam = wasExplorerViewOpen ? (urlChangesOpen ? 'review' : 'explorer')
+            : (wasTaskExplorerOpen ? (urlChangesOpen ? 'task-review' : 'task-explorer') : null);
         updateUrl({ project: p.id, task: appStore.selectedTask?.id || urlTaskId, view: viewParam, file: urlFileId || null }, false, true);
         if (wasProjectSwitch && wasExplorerViewOpen) {
             queueMicrotask(() => { showExplorerViewVal = true; });
@@ -963,7 +971,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     function handleExplorerFileChange(path: string | null) {
         const isFileOpen = path != null && (path.startsWith(currentProject?.path || '') || path.startsWith('/home/sandbox/'));
         if (isFileOpen) {
-            updateUrl({ project: currentProject?.id, view: 'explorer', file: path });
+            updateUrl({ project: currentProject?.id, view: urlChangesOpen ? 'review' : 'explorer', file: path });
             // Auto-collapse sidebar on tablet to give editor more space
             if (isTablet() && !collapsed) {
                 collapsed = true;
@@ -971,7 +979,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 sidebarAutoCollapsed = true;
             }
         } else {
-            updateUrl({ project: currentProject?.id, view: 'explorer', file: null });
+            updateUrl({ project: currentProject?.id, view: urlChangesOpen ? 'review' : 'explorer', file: null });
             // Restore sidebar when file is closed
             if (sidebarAutoCollapsed) {
                 collapsed = false;
@@ -1149,6 +1157,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={openTerminal}
                         onUpdateFile={handleExplorerFileChange}
+                        changesOpen={urlChangesOpen}
+                        onChangesOpen={(open: boolean) => updateUrl({ project: currentProject?.id, view: open ? 'review' : 'explorer' }, false, open)}
                         onClose={() => { restoreExplorerSidebar(); showExplorerViewVal = false; updateUrl({ project: currentProject?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if showTaskExplorerVal && currentProject && appStore.selectedTask}
@@ -1163,7 +1173,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         sandboxEnabled={currentProject.sandbox_enabled ?? false}
                         fsEventQueue={fsEventQueue}
                         onOpenTerminal={openTerminal}
-                        onUpdateFile={(path: string | null) => { if (path) updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer', file: path }, false, true); }}
+                        onUpdateFile={(path: string | null) => { if (path) updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: urlChangesOpen ? 'task-review' : 'task-explorer', file: path }, false, true); }}
+                        changesOpen={urlChangesOpen}
+                        onChangesOpen={(open: boolean) => updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: open ? 'task-review' : 'task-explorer' }, false, open)}
                         onClose={() => { showTaskExplorerVal = false; updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if uiStore.showCardDetail && appStore.selectedTask}
