@@ -445,6 +445,10 @@
         padding: 8px 12px;
         min-height: 0;
     }
+    /* Inset focus ring — the global ring's 2px offset is clipped. */
+    .chat-messages:focus-visible {
+        outline-offset: -2px;
+    }
     /* Render every entry in the DOM (no JS virtualizer) but let the browser skip
        paint/layout for entries far off-screen. `auto` remembers each entry's last
        rendered size so scroll height stays stable; 64px is the fallback estimate.
