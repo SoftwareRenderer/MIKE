@@ -334,6 +334,17 @@ Arrow keys move **real DOM focus** (highlight = the global `:focus-visible` ring
 - **Project list** (`App/Sidebar.svelte`, per-button `onkeydown`): Up/Down = click (select) prev/next project, wrapping; Right = first backlog card; Left = first done card. Enter/Space = native button click. `stopPropagation` keeps the card handler from also firing. A focused project gets a blue ring via an explicit `.project-item:focus` rule using an **inset box-shadow** (not an outline — the wrapper/content ancestors have `overflow:hidden` for the collapse transition and clip anything drawn outside the button box; `:focus` instead of `:focus-visible` because the handler's `click()+focus()` defeats the heuristic).
 - **Tests**: `composables/__tests__/board-arrow-nav.unit.ts` (pure `resolveArrowTarget`: 5-column ring, wrap/skip/anchor rules), e2e `board-arrow-nav.spec.ts` (chromium project; creates a second project at `/tmp/kanban-test-repo-2` via the API; asserts the accent focus ring on the focused project).
 
+### Task View Column Navigation
+In the Task View (`CardDetail.svelte`) the three columns — `[Board overview][Chat][Diff]` — are focusable. Arrow keys move **real DOM focus** (global `:focus-visible` ring is the highlight). All handlers live in `CardDetail.svelte`'s window `keydown` listener, using pure resolvers from `composables/use-task-detail-column-nav.ts` (same pattern as the board arrow nav).
+
+- **Left/Right** (cyclic, wraps at both ends): switch the focused column Board → Chat → Diff → Board. Landing targets: Board → currently focused overview card, else first card, else the `.column-context` container; Chat → the chat input (ChatForm textarea), fallback `.chat-messages`; Diff → first `button.diff-file-header`, fallback the `.column-diff` container. Gated: desktop only, no modifier keys, no modal/overlay open, not `editingFile`/fullscreen. **Exception:** the chat input is an editable element but still switches columns on Left/Right (so the cycle always works); vertical arrows in the input remain native text editing.
+- **Up/Down** dispatch on the focused column:
+  - **Board** (or neutral focus outside all columns) → next/prev overview card via `resolveOverviewArrowTarget` (existing behavior, wraps).
+  - **Chat** (non-editable focus, e.g. the `.chat-messages` region) → page-scroll the messages by ±`clientHeight` (smooth). Focus in the chat input keeps native text-cursor behavior.
+  - **Diff** → next/prev diff file header via `resolveDiffFileTarget` (wraps both ends; focus inside a file section anchors to that section).
+- **Column containers** `.column-context` and `.column-diff` are `tabindex="-1"` (fallback focus targets); an inset `:focus-visible` offset (`-2px`) is set on them and on `.chat-messages` because the global ring's `2px` offset is clipped by the parent.
+- **Tests**: `composables/__tests__/task-detail-column-nav.unit.ts` (pure `resolveDetailColumn` + `resolveDiffFileTarget`), e2e `task-view-column-nav.spec.ts` (chromium project; serial; fixture = in-progress task with a worktree holding two files, verified via `waitForStableHeaders()` so the 2s worktree watcher can't re-render the file list mid-test).
+
 ### Extensions System
 The Extensions system replaces hardcoded LSP configurations with user-defined and downloadable extensions.
 
