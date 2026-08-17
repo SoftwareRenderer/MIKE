@@ -38,8 +38,8 @@ test.describe.serial('Chat Jump to Latest', () => {
     }
 
     // Verify we have scrollable content
-    const virtualList = page.locator('.virtual-list').first();
-    const scrollable = await virtualList.evaluate((el) => {
+    const chatList = page.locator('.chat-messages').first();
+    const scrollable = await chatList.evaluate((el) => {
       return el.scrollHeight > el.clientHeight + 100;
     });
     expect(scrollable).toBe(true);
@@ -49,7 +49,7 @@ test.describe.serial('Chat Jump to Latest', () => {
     await expect(jumpBtn).not.toBeVisible();
 
     // Scroll up by setting scrollTop directly and dispatching scroll event
-    await virtualList.evaluate((el) => {
+    await chatList.evaluate((el) => {
       // Scroll to the top
       el.scrollTop = 0;
       // Dispatch scroll event to trigger Svelte handler
@@ -74,7 +74,7 @@ test.describe.serial('Chat Jump to Latest', () => {
     await expect(jumpBtn).not.toBeVisible({ timeout: 3000 });
 
     // Verify the chat is scrolled near the bottom
-    const isNearBottom = await virtualList.evaluate((el) => {
+    const isNearBottom = await chatList.evaluate((el) => {
       const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
       return gap < 100; // generous threshold for test
     });

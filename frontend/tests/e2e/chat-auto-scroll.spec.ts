@@ -89,7 +89,7 @@ test.describe.serial('Chat Auto-Scroll', () => {
     const taskId = await setupChat(page, 'chat-scroll-pin');
     if (!taskId) return; // graceful: executor unavailable
 
-    const virtualList = page.locator('.virtual-list').first();
+    const chatList = page.locator('.chat-messages').first();
     const jumpBtn = page.locator('.chat-jump-latest');
 
     // Build enough content to make the chat scrollable.
@@ -97,12 +97,12 @@ test.describe.serial('Chat Auto-Scroll', () => {
 
     // Verify the chat is scrollable and auto-scrolled to the bottom — the
     // jump-to-latest button must NOT be visible.
-    const scrollable = await virtualList.evaluate((el) => {
+    const scrollable = await chatList.evaluate((el) => {
       return el.scrollHeight > el.clientHeight + 100;
     });
     expect(scrollable).toBe(true);
     await expect(jumpBtn).not.toBeVisible();
-    const nearBottom = await virtualList.evaluate((el) => {
+    const nearBottom = await chatList.evaluate((el) => {
       const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
       return gap < 100;
     });
@@ -115,7 +115,7 @@ test.describe.serial('Chat Auto-Scroll', () => {
       body: { content: `stop-test slow stream ${Date.now()}` },
     });
     await expect(async () => {
-      const gap = await virtualList.evaluate((el) => {
+      const gap = await chatList.evaluate((el) => {
         return el.scrollHeight - el.scrollTop - el.clientHeight;
       });
       expect(gap).toBeLessThan(200);
@@ -132,18 +132,18 @@ test.describe.serial('Chat Auto-Scroll', () => {
     const taskId = await setupChat(page, 'chat-scroll-read');
     if (!taskId) return; // graceful: executor unavailable
 
-    const virtualList = page.locator('.virtual-list').first();
+    const chatList = page.locator('.chat-messages').first();
     const jumpBtn = page.locator('.chat-jump-latest');
 
     // Build enough content to make the chat scrollable.
     if (!await sendBurst(page, taskId, 'read test', 5)) return;
-    const scrollable = await virtualList.evaluate((el) => {
+    const scrollable = await chatList.evaluate((el) => {
       return el.scrollHeight > el.clientHeight + 100;
     });
     expect(scrollable).toBe(true);
 
     // Scroll up to read older messages.
-    await virtualList.evaluate((el) => {
+    await chatList.evaluate((el) => {
       el.scrollTop = 0;
       el.dispatchEvent(new Event('scroll', { bubbles: true }));
     });
@@ -161,7 +161,7 @@ test.describe.serial('Chat Auto-Scroll', () => {
     // Let the stream emit content (slow fixture is ~1.6s of 100ms chunks).
     await page.waitForTimeout(2000);
 
-    const stillScrolledUp = await virtualList.evaluate((el) => el.scrollTop < 100);
+    const stillScrolledUp = await chatList.evaluate((el) => el.scrollTop < 100);
     expect(stillScrolledUp).toBe(true);
     // The jump button must remain visible so the user can return to latest.
     await expect(jumpBtn).toBeVisible({ timeout: 5000 });
@@ -170,7 +170,7 @@ test.describe.serial('Chat Auto-Scroll', () => {
     if (!await settleResponses(page)) return;
     await jumpBtn.click();
     await page.waitForTimeout(300);
-    const nearBottom = await virtualList.evaluate((el) => {
+    const nearBottom = await chatList.evaluate((el) => {
       const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
       return gap < 100;
     });
