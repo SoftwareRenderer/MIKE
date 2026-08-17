@@ -363,13 +363,14 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'hint': {
-                const data = event.data as { id?: string; content: string; created_at: string };
+                const data = event.data as { id?: string; role?: string; content: string; created_at: string };
                 if (data.content) {
                     // Dedupe replayed hint events (reconnect buffer replay).
                     if (data.id && s.entries.some(e => e.id === data.id)) break;
                     stream.closeCurrentAssistant();
                     // Use the backend message id so loadHistory() dedupes against the DB entry.
-                    s.entries = [...s.entries, { id: data.id || genId(), role: 'user', content: data.content, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];
+                    // Role from the backend; legacy frames without a role default to "user".
+                    s.entries = [...s.entries, { id: data.id || genId(), role: data.role || 'user', content: data.content, isStreaming: false, createdAt: data.created_at || new Date().toISOString() }];
                 }
                 break;
             }

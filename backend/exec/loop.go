@@ -65,6 +65,24 @@ func backoffFor(attempt int, err error) time.Duration {
 	return time.Duration(1<<attempt) * 2 * time.Second // 2s, 4s, 8s, ...
 }
 
+// sendRetryHint persists the "Connection interrupted" retry notification and
+// broadcasts it with role "system" so the frontend renders a system card.
+func (te *TaskExecutor) sendRetryHint(projectID, taskID string, task *types.Task, streamErr error, attempt int) {
+	retryMsg := fmt.Sprintf("Connection interrupted (%v), retrying... (attempt %d/%d)", streamErr, attempt, rateLimitRetryAttempts)
+	log.Printf("[retry] setup.task=%s %s", taskID, retryMsg)
+	retryMsgID := uuid.New().String()
+	te.store.CreateTaskMessage(&types.TaskMessage{
+		ID: retryMsgID, TaskID: taskID, ThreadID: task.CurrentThreadID, Role: "system",
+		Content: retryMsg, CreatedAt: time.Now().UTC(),
+	})
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeHint, Data: map[string]any{
+		"id":         retryMsgID,
+		"role":       "system",
+		"content":    retryMsg,
+		"created_at": time.Now().UTC().Format(time.RFC3339),
+	}})
+}
+
 // jitter returns a random duration between 250ms and 500ms (inclusive)
 func jitter() time.Duration {
 	return 250*time.Millisecond + time.Duration(rand.Int64N(251))*time.Millisecond
@@ -797,18 +815,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					case <-time.After(backoffFor(i, streamErr)):
 					}
 					// Notify user of retry attempt
-					retryMsg := fmt.Sprintf("Connection interrupted (%v), retrying... (attempt %d/%d)", streamErr, i+1, rateLimitRetryAttempts)
-					log.Printf("[retry] setup.task=%s %s", setup.task.ID, retryMsg)
-					retryMsgID := uuid.New().String()
-					te.store.CreateTaskMessage(&types.TaskMessage{
-						ID: retryMsgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "system",
-						Content: retryMsg, CreatedAt: time.Now().UTC(),
-					})
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeHint, Data: map[string]any{
-						"id":         retryMsgID,
-						"content":    retryMsg,
-						"created_at": time.Now().UTC().Format(time.RFC3339),
-					}})
+					te.sendRetryHint(setup.projectID, setup.task.ID, setup.task, streamErr, i+1)
 					// Flush any remaining buffered events before retry.
 					flusher.flush()
 					// Reset builders so retry doesn't concatenate partial content.

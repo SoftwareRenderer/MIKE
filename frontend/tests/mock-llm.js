@@ -48,6 +48,8 @@ const toolCallSummarize = loadFixture('tool_call_summarize');
 const textResponseReasoning = loadFixture('text_response_reasoning');
 
 let requestCount = 0;
+// Prompts already failed once (fail-once e2e).
+const failOncePrompts = new Set();
 let loopToolCount = 0;  // per-scenario counter for tool loop test
 let loopTextCount = 0;  // per-scenario counter for text loop test
 let loopPhraseCount = 0;  // per-scenario counter for phrase loop test
@@ -306,6 +308,21 @@ const server = http.createServer((req, res) => {
                 const msgs = parsed.messages || [];
                 const lastUser = msgs.filter(m => m.role === 'user').pop();
                 console.error(`[mock-llm] request #${requestCount}: routing to ${fixtureName} (delay=${chunkDelay}ms) stream=${parsed.stream} last_user="${(lastUser?.content || '').slice(0, 80)}..."`);
+
+                // Fail-once (connection-retry e2e): first streaming request for a
+                // "fail-once-test" prompt → 500; retries succeed. Never fails
+                // non-streaming requests (title generation).
+                if (parsed.stream !== false && /fail-once-test/i.test(lastUser?.content || '')) {
+                    const key = lastUser.content;
+                    if (!failOncePrompts.has(key)) {
+                        failOncePrompts.add(key);
+                        console.error(`[mock-llm] fail-once: failing first attempt for "${key.slice(0, 40)}..."`);
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Simulated transient LLM failure' }));
+                        return;
+                    }
+                    console.error(`[mock-llm] fail-once: serving success on retry for "${key.slice(0, 40)}..."`);
+                }
 
                 // Check for initial delay: header override or keyword-based routing
                 let initialDelay = parseInt(req.headers['x-initial-delay'] || '50', 10);
