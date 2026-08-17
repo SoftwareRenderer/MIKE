@@ -1,0 +1,61 @@
+[
+  {
+    "choices": [
+      {
+        "delta": {
+          "tool_calls": [
+            {
+              "id": "call_rename1",
+              "function": {
+                "name": "lsp_rename",
+                "arguments": "{\"path\":\"main.go\",\"symbol\":\"gre"
+              },
+              "type": "function"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "etGreeting\",\"new_name\":\"greet\"}"
+              }
+            }
+          ]
+        },
+        "finish_reason": "tool_calls"
+      }
+    ]
+  },
+  {
+    "choices": [
+      {
+        "delta": {},
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 55,
+      "completion_tokens": 15,
+      "total_tokens": 70,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "timings": {
+      "prompt_ms": 400,
+      "predicted_ms": 250,
+      "prompt_per_token_ms": 0,
+      "predicted_per_token_ms": 0,
+      "prompt_per_second": 0,
+      "predicted_per_second": 0
+    }
+  }
+]

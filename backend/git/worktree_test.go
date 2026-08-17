@@ -2047,13 +2047,13 @@ func TestDropStashEntriesForTask_RemovesMatchingStashes(t *testing.T) {
 
 	// Verify all three stashes exist
 	listOut := runGitOutput(t, repoDir, "stash", "list", "--format=%s")
-	if !strings.Contains(listOut, "kanban-switch-"+taskID) {
+	if !strings.Contains(listOut, "mike-switch-"+taskID) {
 		t.Errorf("expected switch stash for task %s, got:\n%s", taskID, listOut)
 	}
-	if !strings.Contains(listOut, "kanban-fork-"+taskID) {
+	if !strings.Contains(listOut, "mike-fork-"+taskID) {
 		t.Errorf("expected fork stash for task %s, got:\n%s", taskID, listOut)
 	}
-	if !strings.Contains(listOut, "kanban-switch-"+otherTaskID) {
+	if !strings.Contains(listOut, "mike-switch-"+otherTaskID) {
 		t.Errorf("expected switch stash for other task, got:\n%s", listOut)
 	}
 
@@ -2146,13 +2146,13 @@ func TestDropStashEntriesForTask_RemovesSyncMergeAndAutoMergeStashes(t *testing.
 
 	// Verify all three stashes exist
 	listOut := runGitOutput(t, repoDir, "stash", "list", "--format=%s")
-	if !strings.Contains(listOut, "kanban-sync-merge-"+taskID) {
+	if !strings.Contains(listOut, "mike-sync-merge-"+taskID) {
 		t.Errorf("expected sync-merge stash for task %s, got:\n%s", taskID, listOut)
 	}
-	if !strings.Contains(listOut, "kanban-auto-merge-"+taskID) {
+	if !strings.Contains(listOut, "mike-auto-merge-"+taskID) {
 		t.Errorf("expected auto-merge stash for task %s, got:\n%s", taskID, listOut)
 	}
-	if !strings.Contains(listOut, "kanban-sync-merge-"+otherTaskID) {
+	if !strings.Contains(listOut, "mike-sync-merge-"+otherTaskID) {
 		t.Errorf("expected sync-merge stash for other task, got:\n%s", listOut)
 	}
 
@@ -2164,13 +2164,13 @@ func TestDropStashEntriesForTask_RemovesSyncMergeAndAutoMergeStashes(t *testing.
 
 	// Verify our task's stashes are gone but the other task's stash remains
 	listOut = runGitOutput(t, repoDir, "stash", "list", "--format=%s")
-	if strings.Contains(listOut, "kanban-sync-merge-"+taskID) {
+	if strings.Contains(listOut, "mike-sync-merge-"+taskID) {
 		t.Errorf("sync-merge stash for task %s should be gone, got:\n%s", taskID, listOut)
 	}
-	if strings.Contains(listOut, "kanban-auto-merge-"+taskID) {
+	if strings.Contains(listOut, "mike-auto-merge-"+taskID) {
 		t.Errorf("auto-merge stash for task %s should be gone, got:\n%s", taskID, listOut)
 	}
-	if !strings.Contains(listOut, "kanban-sync-merge-"+otherTaskID) {
+	if !strings.Contains(listOut, "mike-sync-merge-"+otherTaskID) {
 		t.Error("sync-merge stash for other task should remain")
 	}
 
@@ -2201,13 +2201,13 @@ func TestGarbageCollect_DropsStaleSyncMergeAndAutoMergeStashes(t *testing.T) {
 
 	// Verify all stashes exist
 	listOut := runGitOutput(t, repoDir, "stash", "list", "--format=%s")
-	if !strings.Contains(listOut, "kanban-sync-merge-"+staleTaskID) {
+	if !strings.Contains(listOut, "mike-sync-merge-"+staleTaskID) {
 		t.Errorf("expected stale sync-merge stash, got:\n%s", listOut)
 	}
-	if !strings.Contains(listOut, "kanban-auto-merge-"+staleTaskID) {
+	if !strings.Contains(listOut, "mike-auto-merge-"+staleTaskID) {
 		t.Errorf("expected stale auto-merge stash, got:\n%s", listOut)
 	}
-	if !strings.Contains(listOut, "kanban-sync-merge-"+taskID) {
+	if !strings.Contains(listOut, "mike-sync-merge-"+taskID) {
 		t.Errorf("expected active sync-merge stash, got:\n%s", listOut)
 	}
 
@@ -2222,7 +2222,7 @@ func TestGarbageCollect_DropsStaleSyncMergeAndAutoMergeStashes(t *testing.T) {
 	if strings.Contains(listOut, staleTaskID) {
 		t.Errorf("stale stashes for %s should be gone, got:\n%s", staleTaskID, listOut)
 	}
-	if !strings.Contains(listOut, "kanban-sync-merge-"+taskID) {
+	if !strings.Contains(listOut, "mike-sync-merge-"+taskID) {
 		t.Errorf("active sync-merge stash for %s should remain, got:\n%s", taskID, listOut)
 	}
 
@@ -2235,28 +2235,28 @@ func TestStashMessageHelpers_GenerateCorrectFormats(t *testing.T) {
 	taskID := "test-task-id"
 
 	switchMsg := StashMessageForSwitch(taskID)
-	if switchMsg != "kanban-switch-"+taskID {
-		t.Errorf("StashMessageForSwitch = %q, want %q", switchMsg, "kanban-switch-"+taskID)
+	if switchMsg != "mike-switch-"+taskID {
+		t.Errorf("StashMessageForSwitch = %q, want %q", switchMsg, "mike-switch-"+taskID)
 	}
 
 	forkMsg := StashMessageForFork(taskID)
-	if forkMsg != "kanban-fork-"+taskID {
-		t.Errorf("StashMessageForFork = %q, want %q", forkMsg, "kanban-fork-"+taskID)
+	if forkMsg != "mike-fork-"+taskID {
+		t.Errorf("StashMessageForFork = %q, want %q", forkMsg, "mike-fork-"+taskID)
 	}
 
 	checkpointMsg := StashMessageForCheckpoint(taskID, "task/fix-bug")
-	if checkpointMsg != "On task/fix-bug: kanban-checkpoint-"+taskID {
-		t.Errorf("StashMessageForCheckpoint = %q, want %q", checkpointMsg, "On task/fix-bug: kanban-checkpoint-"+taskID)
+	if checkpointMsg != "On task/fix-bug: mike-checkpoint-"+taskID {
+		t.Errorf("StashMessageForCheckpoint = %q, want %q", checkpointMsg, "On task/fix-bug: mike-checkpoint-"+taskID)
 	}
 
 	syncMsg := StashMessageForSyncMerge(taskID)
-	if syncMsg != "kanban-sync-merge-"+taskID {
-		t.Errorf("StashMessageForSyncMerge = %q, want %q", syncMsg, "kanban-sync-merge-"+taskID)
+	if syncMsg != "mike-sync-merge-"+taskID {
+		t.Errorf("StashMessageForSyncMerge = %q, want %q", syncMsg, "mike-sync-merge-"+taskID)
 	}
 
 	autoMsg := StashMessageForAutoMerge(taskID)
-	if autoMsg != "kanban-auto-merge-"+taskID {
-		t.Errorf("StashMessageForAutoMerge = %q, want %q", autoMsg, "kanban-auto-merge-"+taskID)
+	if autoMsg != "mike-auto-merge-"+taskID {
+		t.Errorf("StashMessageForAutoMerge = %q, want %q", autoMsg, "mike-auto-merge-"+taskID)
 	}
 }
 

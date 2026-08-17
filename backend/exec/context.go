@@ -250,19 +250,22 @@ func formatToolAction(name, arguments string) string {
 			}
 			return "find definition in `" + path + "`"
 		}
-	case "lsp_code_actions":
-		if path, ok := args["path"].(string); ok && path != "" {
-			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
-				return "get code actions for `" + sym + "` in `" + path + "`"
-			}
-			return "get code actions in `" + path + "`"
-		}
 	case "lsp_hover":
 		if path, ok := args["path"].(string); ok && path != "" {
 			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
 				return "hover over `" + sym + "` in `" + path + "`"
 			}
 			return "get hover info in `" + path + "`"
+		}
+	case "lsp_rename":
+		if path, ok := args["path"].(string); ok && path != "" {
+			if sym, ok2 := args["symbol"].(string); ok2 && sym != "" {
+				if nn, ok3 := args["new_name"].(string); ok3 && nn != "" {
+					return "rename `" + sym + "` to `" + nn + "` in `" + path + "`"
+				}
+				return "rename `" + sym + "` in `" + path + "`"
+			}
+			return "rename a symbol in `" + path + "`"
 		}
 	}
 	return "perform an action"
@@ -363,7 +366,7 @@ func isSandboxableTool(name string) bool {
 // These are always sandboxed regardless of the project's sandbox setting.
 func isLSPTool(name string) bool {
 	switch name {
-	case "lsp_references", "lsp_definition", "lsp_code_actions", "lsp_hover":
+	case "lsp_references", "lsp_definition", "lsp_hover", "lsp_rename":
 		return true
 	default:
 		return false

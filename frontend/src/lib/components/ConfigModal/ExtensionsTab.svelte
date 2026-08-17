@@ -886,7 +886,7 @@
                     </div>
                     <div class="config-field">
                         <span class="field-label">Tool Calls</span>
-                        <p class="field-desc">Enable LSP tool support: references, definition, code actions, and hover.</p>
+                        <p class="field-desc">Enable LSP tool support: references, definition, rename, and hover.</p>
                         <ToggleSwitch
                             checked={editLspSettings.tool_calls_enabled}
                             onChange={() => editLspSettings.tool_calls_enabled = !editLspSettings.tool_calls_enabled}

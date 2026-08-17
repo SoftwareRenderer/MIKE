@@ -38,6 +38,29 @@ func TestIsSandboxableTool(t *testing.T) {
 	}
 }
 
+func TestIsLSPTool(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"lsp_references", true},
+		{"lsp_definition", true},
+		{"lsp_hover", true},
+		{"lsp_rename", true},
+		{"read_file", false},
+		{"write_file", false},
+		{"unknown_tool", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		got := isLSPTool(tt.name)
+		if got != tt.want {
+			t.Errorf("isLSPTool(%q) = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 // --- executeTool with sandbox callbacks ---
 
 func TestExecuteTool_ReadFile_Sandboxed(t *testing.T) {

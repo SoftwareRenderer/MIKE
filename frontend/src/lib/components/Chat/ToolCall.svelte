@@ -251,13 +251,13 @@
         resultExpanded = true;
     }
 
-    // LSP tools (hover, references, definition, code actions) use a magnifying glass icon
-    const LSP_TOOLS = new Set(['lsp_hover', 'lsp_references', 'lsp_definition', 'lsp_code_actions']);
+    // LSP tools (hover, references, definition) use a magnifying glass icon
+    const LSP_TOOLS = new Set(['lsp_hover', 'lsp_references', 'lsp_definition']);
 
     // Icon selection
     let iconInfo = $derived(
         tc.toolName === 'read_file' ? { src: fileTextIcon } :
-        tc.toolName === 'write_file' || tc.toolName === 'edit_file' ? { src: editIcon } :
+        tc.toolName === 'write_file' || tc.toolName === 'edit_file' || tc.toolName === 'lsp_rename' ? { src: editIcon } :
         tc.toolName === 'request_review' ? { src: checkCircleIcon } :
         tc.toolName === 'ask_question' ? { src: questionIcon } :
         LSP_TOOLS.has(tc.toolName) ? { src: searchIcon } :

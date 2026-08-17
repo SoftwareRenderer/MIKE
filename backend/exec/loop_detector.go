@@ -291,9 +291,9 @@ func isReadOnlyCall(toolName, rawArgs string) bool {
 	switch toolName {
 	case "read_file":
 		return true
-	case "lsp_references", "lsp_definition", "lsp_code_actions", "lsp_hover":
+	case "lsp_references", "lsp_definition", "lsp_hover":
 		return true
-	case "write_file", "edit_file":
+	case "write_file", "edit_file", "lsp_rename":
 		return false
 	case "ask_question", "request_review":
 		return false

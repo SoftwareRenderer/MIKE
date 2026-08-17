@@ -132,7 +132,7 @@ type LSPConfig struct {
 	// go-to-definition) are available in the editor. Nil or true = enabled.
 	EditorEnabled *bool `json:"editor_enabled,omitempty"`
 	// ToolCallsEnabled controls whether LSP tools (references, definition,
-	// code actions, hover) are available to agent tool calls. Nil or true = enabled.
+	// rename, hover) are available to agent tool calls. Nil or true = enabled.
 	ToolCallsEnabled *bool `json:"tool_calls_enabled,omitempty"`
 	// Sandbox declares default sandbox options (writable mounts, envs, memory).
 	Sandbox *SandboxConfig `json:"sandbox,omitempty"`

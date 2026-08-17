@@ -36,8 +36,7 @@ test.describe.serial('Chat fullscreen Escape behavior', () => {
     // Scroll the chat to the bottom so the sticky header (with the fullscreen
     // toggle button) appears.
     await page
-      .locator('.chat-messages-wrapper .virtual-scroll, .chat-messages-wrapper .virtual-list')
-      .first()
+      .locator('.chat-messages-wrapper .chat-messages')
       .evaluate((el) => { el.scrollTop = el.scrollHeight; });
     await expect(page.locator('.chat-sticky-fullscreen')).toBeVisible({ timeout: 5000 });
 
