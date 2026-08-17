@@ -235,6 +235,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	defaultOperatingModeRaw, _ := cs.store.GetConfigValue("default_operating_mode")
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
 	defaultAutoSummarizeThresholdRaw, _ := cs.store.GetConfigValue("default_auto_summarize_threshold")
+	hideModelBadgeRaw, _ := cs.store.GetConfigValue("hide_model_badge")
 	keyboardShortcutsRaw, _ := cs.store.GetConfigValue("keyboard_shortcuts")
 
 	cfg := &types.Config{
@@ -274,6 +275,9 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		if err := json.Unmarshal([]byte(keyboardShortcutsRaw), ks); err == nil {
 			cfg.KeyboardShortcuts = ks
 		}
+	}
+	if v, err := parseBoolPtr(hideModelBadgeRaw); err == nil && v != nil {
+		cfg.HideModelBadge = v
 	}
 	cfg.KeyboardShortcuts = normalizeKeyboardShortcuts(cfg.KeyboardShortcuts)
 	return cfg, nil
@@ -362,6 +366,11 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
+	if c.HideModelBadge != nil {
+		if err := cs.store.SetConfigValue("hide_model_badge", fmt.Sprintf("%t", *c.HideModelBadge)); err != nil {
+			return err
+		}
+	}
 	if c.KeyboardShortcuts != nil {
 		ksJSON, err := json.Marshal(c.KeyboardShortcuts)
 		if err != nil {
@@ -391,6 +400,7 @@ type configResponse struct {
 	DefaultOperatingMode          *string                  `json:"default_operating_mode"`
 	DefaultMaxFailedTurns         *int                     `json:"default_max_failed_turns,omitempty"`
 	DefaultAutoSummarizeThreshold *int                     `json:"default_auto_summarize_threshold,omitempty"`
+	HideModelBadge                *bool                    `json:"hide_model_badge,omitempty"`
 	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 	EncryptionEnabled             bool                     `json:"encryption_enabled"`
 }
@@ -442,6 +452,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		DefaultOperatingMode:          cfg.DefaultOperatingMode,
 		DefaultMaxFailedTurns:         cfg.DefaultMaxFailedTurns,
 		DefaultAutoSummarizeThreshold: cfg.DefaultAutoSummarizeThreshold,
+		HideModelBadge:                cfg.HideModelBadge,
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
 		EncryptionEnabled:             crypto.IsEnabled(),
 	}
@@ -541,6 +552,11 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 					v = 100
 				}
 				current.DefaultAutoSummarizeThreshold = &v
+			}
+		}
+		if hmb, ok := updates["hide_model_badge"]; ok {
+			if v, ok := hmb.(bool); ok {
+				current.HideModelBadge = &v
 			}
 		}
 		if ksRaw, ok := updates["keyboard_shortcuts"]; ok {

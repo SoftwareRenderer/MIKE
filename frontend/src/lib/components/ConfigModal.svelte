@@ -53,6 +53,7 @@
     let keyboardOpenTerminal = $state<string | undefined>(undefined);
     let keyboardStartTask = $state<string | undefined>(undefined);
     let keyboardHideHints = $state(false);
+    let hideModelBadge = $state(false);
     let loading = $state(false);
     let error = $state('');
 
@@ -192,6 +193,7 @@
         keyboardOpenTerminal = config?.keyboard_shortcuts?.open_terminal;
         keyboardStartTask = config?.keyboard_shortcuts?.start_task;
         keyboardHideHints = config?.keyboard_shortcuts?.hide_hints === true;
+        hideModelBadge = config?.hide_model_badge === true;
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
         hasChanges = false;
@@ -597,6 +599,7 @@
                 default_operating_mode: defaultOperatingMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
                 default_auto_summarize_threshold: defaultAutoSummarizeThreshold,
+                hide_model_badge: hideModelBadge,
                 keyboard_shortcuts: { create_task: keyboardCreateTask, create_task_submit: keyboardCreateTaskSubmit, open_terminal: keyboardOpenTerminal, start_task: keyboardStartTask, hide_hints: keyboardHideHints },
             } as Config);
             appStore.config = cfg;
@@ -853,7 +856,7 @@
 
         <!-- Preferences Tab -->
         {#if activeTab === 'preferences'}
-            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:startTaskKey={keyboardStartTask} bind:hideHints={keyboardHideHints} onDirty={markDirty} />
+            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:startTaskKey={keyboardStartTask} bind:hideHints={keyboardHideHints} bind:hideModelBadge={hideModelBadge} onDirty={markDirty} />
         {/if}
 
         <!-- Extensions Tab -->
