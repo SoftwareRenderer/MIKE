@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { Thread, ChatEntry } from '$lib/types';
     import type { EntryMeta } from '$lib/utils/chat-entries';
+    import { computeStickyHeader, type StickyUserMessage } from '$lib/utils/chat-sticky-header';
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
     import QueueIndicator from './QueueIndicator.svelte';
@@ -83,94 +84,6 @@
         return /^[a-z0-9]{8}$/.test(id);
     }
 
-    // Estimate rendered height from message data.
-    // Text: ~20px per line (explicit \n or wrapped ~70 chars).
-    // Tool calls: header + args + result, estimated from data.
-    function getEstimatedHeight(entry: ChatEntry): number {
-        const padding = 24;
-        if (entry.role === 'error') return padding + estimateTextHeight(entry.content, 50);
-        if (entry.role === 'summarization') return padding + estimateTextHeight(entry.content, 70);
-        if (entry.role === 'merge_resolution') return padding + estimateTextHeight(entry.content, 60);
-        if (entry.buildLog) {
-            // Header (~32px) + scrollable log box (max 180px, ~16px per line).
-            const header = 32;
-            const lineCount = Math.min(entry.buildLog.lines.length, 200);
-            const logHeight = Math.min(180, Math.max(18, lineCount * 16) + 6);
-            return padding + header + logHeight + 12;
-        }
-        if (entry.role === 'user') {
-            let h = padding + estimateTextHeight(entry.content, 60);
-            if (entry.attachments?.length) h += entry.attachments.length * 80;
-            return h;
-        }
-        // assistant
-        let h = padding + 50; // padding + actions/stats base
-        h += estimateTextHeight(entry.content, 40);
-        if (entry.reasoningContent) h += estimateTextHeight(entry.reasoningContent, 60);
-        else if (entry.hasReasoning) h += 80;
-        for (const tc of entry.toolCalls || []) {
-            h += 60; // header + args
-            if (tc.toolName === 'edit_file') {
-                // edit_file has a diff toggle + optional expanded diff
-                h += estimateEditDiffHeight(tc);
-            } else if (tc.result) {
-                h += estimateTextHeight(tc.result, 50);
-            } else if (tc.isPending) {
-                h += 30;
-            }
-        }
-        if (entry.isStreaming) h += 20;
-        if (entry.stats) h += 30;
-        return h;
-    }
-
-    function estimateTextHeight(text: string, base: number): number {
-        if (!text) return base;
-        const lines = text.split('\n').length;
-        const chars = text.length;
-        const wrappedLines = Math.ceil(chars / 70);
-        const totalLines = Math.max(lines, wrappedLines);
-        return base + totalLines * 20;
-    }
-
-    /** Estimate height of an edit_file tool call's diff toggle + expanded diff. */
-    function estimateEditDiffHeight(tc: NonNullable<ChatEntry['toolCalls']>[number]): number {
-        const edits = tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined;
-        if (!edits) return 30; // just the toggle button
-
-        let totalDiffLines = 0;
-        let changes = 0;
-        for (const edit of edits) {
-            const oldLines = (edit.oldText || '').split('\n');
-            const newLines = (edit.newText || '').split('\n');
-            const pairCount = Math.min(oldLines.length, newLines.length);
-            for (let p = 0; p < pairCount; p++) {
-                if (oldLines[p] === newLines[p]) {
-                    totalDiffLines += 1; // identical — 1 context line
-                } else {
-                    totalDiffLines += 2; // different — removed + added
-                    changes += 2;
-                }
-            }
-            // Unpaired lines
-            const unpairedOld = oldLines.length - pairCount;
-            const unpairedNew = newLines.length - pairCount;
-            totalDiffLines += unpairedOld + unpairedNew;
-            changes += unpairedOld + unpairedNew;
-        }
-
-        // Toggle button (always visible)
-        let h = 30;
-
-        // Auto-expanded for trivial changes (≤2), otherwise collapsed
-        if (changes <= 2) {
-            h += totalDiffLines * 20; // ~20px per diff line
-            h += edits.length * 5; // separator between edit blocks
-        }
-
-        return h;
-    }
-
     // Scroll element — the real (non-virtualized) chat message container.
     // Reactive so the parent is notified whenever the mounted container changes.
     let chatScrollEl: HTMLElement | null = $state(null);
@@ -244,51 +157,44 @@
         resolvedReasoningOverrides = { ...resolvedReasoningOverrides, [messageId]: content };
     }
 
-    // Compute sticky header from entry data based on scroll position.
-    // Data-driven (estimated heights, no DOM queries) so it stays cheap on
-    // every scroll event.
+    // Compute the sticky chat header
     let computedStickyMessage = $state('');
     let computedShowHeader = $state(false);
+    let stickyEntryIdx = $state(-1);
 
     function computeStickyFromScroll() {
-        if (!chatScrollEl || entries.length === 0) {
+        const el = chatScrollEl;
+        if (!el || entries.length === 0) {
             computedStickyMessage = '';
+            stickyEntryIdx = -1;
             computedShowHeader = false;
             return;
         }
-        const scrollTop = chatScrollEl.scrollTop;
-        // Walk through entries computing cumulative offsets to find
-        // the latest user message whose top has scrolled above the viewport.
-        // Only show the sticky header once the first user message is out of view.
-        let offset = 0;
-        let latestFirstLine = '';
-        let firstUserBottom = -1;
-        for (let i = 0; i < entries.length; i++) {
-            const entry = entries[i];
-            const h = getEstimatedHeight(entry);
-            if (entry.role === 'user') {
-                if (firstUserBottom < 0) firstUserBottom = offset + h;
-                if (offset <= scrollTop) {
-                    latestFirstLine = entry.content.split('\n')[0];
-                }
-            }
-            offset += h;
+        const containerTop = el.getBoundingClientRect().top;
+        const scrollTop = el.scrollTop;
+        const userMessages: StickyUserMessage[] = [];
+        for (const node of Array.from(el.querySelectorAll<HTMLElement>('.sticky-user-message'))) {
+            const entryIdx = Number(node.dataset.entryIdx);
+            if (!Number.isInteger(entryIdx)) continue;
+            const rect = node.getBoundingClientRect();
+            // Convert viewport-space rects to content space.
+            userMessages.push({
+                entryIdx,
+                firstLine: node.dataset.userMsgFirstLine ?? '',
+                top: rect.top - containerTop + scrollTop,
+                bottom: rect.bottom - containerTop + scrollTop,
+            });
         }
-        computedStickyMessage = latestFirstLine;
-        computedShowHeader = !!latestFirstLine && firstUserBottom >= 0 && scrollTop >= firstUserBottom;
+        const sticky = computeStickyHeader(userMessages, scrollTop);
+        computedStickyMessage = sticky.firstLine;
+        stickyEntryIdx = sticky.entryIdx;
+        computedShowHeader = sticky.show;
     }
 
-    /** Scroll to the user message shown in the sticky header. */
+    /** Scroll to the exact user message shown in the sticky header. */
     function handleStickyClickInternal() {
-        if (!computedStickyMessage || !chatScrollEl) return;
-        // Find the last user entry matching the sticky message content
-        for (let i = entries.length - 1; i >= 0; i--) {
-            const entry = entries[i];
-            if (entry.role === 'user' && entry.content.split('\n')[0] === computedStickyMessage) {
-                scrollToItem(i, 'smooth');
-                return;
-            }
-        }
+        if (stickyEntryIdx < 0 || !chatScrollEl) return;
+        scrollToItem(stickyEntryIdx, 'smooth');
     }
 
     /** Combined scroll handler: calls parent onScroll + computes sticky header + atBottom. */
@@ -453,7 +359,7 @@
                         </div>
                     </div>
                 {:else if entry.role === 'user'}
-                    <div class="sticky-user-message" data-user-msg-first-line={entry.content.split('\n')[0]}>
+                    <div class="sticky-user-message" data-entry-idx={entryIdx} data-user-msg-first-line={entry.content.split('\n')[0]}>
                         <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={entryIdx === 0} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
                     </div>
                 {:else if entry.buildLog}

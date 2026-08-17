@@ -2457,7 +2457,7 @@ func TestMaybeAutoSummarize_TriggersAboveThreshold(t *testing.T) {
 		modelName: "test-model",
 	}
 
-	te.maybeAutoSummarize(setup, lc, "test-model")
+	te.maybeAutoSummarize(setup, lc, "test-model", false)
 
 	var hasSummary bool
 	for _, m := range lc.messages {
@@ -2468,6 +2468,114 @@ func TestMaybeAutoSummarize_TriggersAboveThreshold(t *testing.T) {
 	if !hasSummary {
 		t.Fatal("expected a summarization message to be appended when context exceeds 90%")
 	}
+	if task.Summarizing {
+		t.Fatal("Summarizing flag should be cleared on the caller's task after summarization")
+	}
+	// injectProceed=false must NOT append or persist a "Proceed" user message.
+	for _, m := range lc.messages {
+		if m.Role == "user" && m.Content == "Proceed" {
+			t.Fatal("injectProceed=false must not append a 'Proceed' user message")
+		}
+	}
+	msgs, _ := s.GetTaskMessages(task.ID, "thread-1")
+	for _, m := range msgs {
+		if m.Role == "user" && m.Content == "Proceed" {
+			t.Fatal("injectProceed=false must not persist a 'Proceed' user message")
+		}
+	}
+}
+
+// TestMaybeAutoSummarize_InjectProceedWhenFeedingBack verifies that when auto-
+// summarization succeeds with injectProceed=true (the loop is about to feed the
+// compressed context back to the LLM), a "Proceed" user message is appended to
+// the in-memory context AND persisted in the store (visible in the chat UI).
+func TestMaybeAutoSummarize_InjectProceedWhenFeedingBack(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	oldwd, _ := os.Getwd()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("chdir to repo root: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	te := newTestExecutor(t)
+	te.gate = NewConcurrencyGate()
+	s := te.store
+	proj := createProject(t, s, "proj-sum-proceed", "Sum Proceed")
+
+	server := mockSummarizeLLM()
+	defer server.Close()
+
+	now := time.Now().UTC()
+	task := &types.Task{
+		ID:              "sum-proceed-task",
+		ProjectID:       proj.ID,
+		Title:           "Sum task",
+		Status:          "review",
+		ExecutionState:  "idle",
+		LlamaServerURL:  server.URL,
+		ModelName:       "test-model",
+		CurrentThreadID: "thread-1",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Context usage at 92% of a 10000-token window (> 90%) should trigger.
+	cw := 10000
+	lc := &loopContext{
+		messages:      []types.ChatMessage{{Role: "user", Content: "hello"}},
+		contextWindow: &cw,
+		usage:         &types.ChatUsage{PromptTokens: 9200, CompletionTokens: 0},
+		detector:      newLoopDetector(),
+	}
+	setup := &taskExecSetup{
+		task:      task,
+		projectID: proj.ID,
+		ctx:       context.Background(),
+		serverURL: server.URL,
+		modelName: "test-model",
+	}
+
+	te.maybeAutoSummarize(setup, lc, "test-model", true)
+
+	// A summarization message must be appended first.
+	summaryIdx := -1
+	for i, m := range lc.messages {
+		if m.Role == "summarization" {
+			summaryIdx = i
+		}
+	}
+	if summaryIdx < 0 {
+		t.Fatal("expected a summarization message to be appended when context exceeds 90%")
+	}
+
+	// ...followed immediately by the injected user "Proceed" message.
+	if summaryIdx != len(lc.messages)-2 {
+		t.Fatalf("expected 'Proceed' immediately after the summary, got %d messages with summary at index %d", len(lc.messages), summaryIdx)
+	}
+	last := lc.messages[len(lc.messages)-1]
+	if last.Role != "user" || last.Content != "Proceed" {
+		t.Fatalf("expected injected user 'Proceed' message after summary, got role=%q content=%q", last.Role, last.Content)
+	}
+
+	// The "Proceed" message must be persisted in the store (visible in chat UI).
+	msgs, err := s.GetTaskMessages(task.ID, "thread-1")
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	var persistedProceed bool
+	for _, m := range msgs {
+		if m.Role == "user" && m.Content == "Proceed" {
+			persistedProceed = true
+		}
+	}
+	if !persistedProceed {
+		t.Fatal("expected a persisted user 'Proceed' message in the store")
+	}
+
 	if task.Summarizing {
 		t.Fatal("Summarizing flag should be cleared on the caller's task after summarization")
 	}
@@ -2514,7 +2622,7 @@ func TestMaybeAutoSummarize_NoTriggerBelowThreshold(t *testing.T) {
 		modelName: "test-model",
 	}
 
-	te.maybeAutoSummarize(setup, lc, "test-model")
+	te.maybeAutoSummarize(setup, lc, "test-model", false)
 
 	for _, m := range lc.messages {
 		if m.Role == "summarization" {
