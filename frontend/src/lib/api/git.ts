@@ -110,6 +110,28 @@ export async function commitProject(projectId: string, message: string): Promise
     return res.json();
 }
 
+/** Pull from the remote in the project repo. */
+export async function pullProject(projectId: string): Promise<{ status: string }> {
+    const csrfToken = await ensureCsrfToken();
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/pull`, {
+        method: 'POST',
+        headers: { ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to pull');
+    return res.json();
+}
+
+/** Push to the remote in the project repo. */
+export async function pushProject(projectId: string): Promise<{ status: string }> {
+    const csrfToken = await ensureCsrfToken();
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git/push`, {
+        method: 'POST',
+        headers: { ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to push');
+    return res.json();
+}
+
 // -- Task Git endpoints --
 
 /** Fetch the unified diff for a task's worktree. Supports optional head/base refs and full file content.

@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId } from './helpers';
 
 test.describe('Task View Explorer Link', () => {
   test.describe.configure({ mode: 'serial' });
@@ -11,14 +10,19 @@ test.describe('Task View Explorer Link', () => {
   });
 
   test('should open explorer with worktree path when clicking project path in task header', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    if (!projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
+    // Select the global-setup project by exact name. Clicking `.first()` is
+    // unreliable in parallel runs: other specs create extra projects (which
+    // can sort earlier in the sidebar) and share the same server session, so
+    // the selection can be mid-switch and the board can re-render under the
+    // click. The global-setup project always has tasks, so this is also the
+    // only board where the "first card" below is guaranteed to exist.
+    const projectBtn = page.locator('button.project-item').filter({
+      has: page.locator('span.project-name', { hasText: /^test-project$/ }),
+    });
+    if ((await projectBtn.count()) === 0) {
+      return; // no test project — nothing to test
     }
-
-    // Open project and click on first card to open task detail
-    await page.locator('.project-item').first().click();
+    await projectBtn.click();
     await page.waitForSelector('.card', { timeout: 10000 });
 
     // If no cards exist, skip (nothing to test)
@@ -37,8 +41,11 @@ test.describe('Task View Explorer Link', () => {
     await page.locator('.card').first().click();
     await page.waitForSelector('.task-detail-page', { timeout: 10000 });
 
-    // Verify the explorer button is visible and clickable
-    const explorerBtn = page.locator('.explorer-btn');
+    // Verify the explorer button is visible and clickable.
+    // The task detail header has its own "Open explorer" button (a plain
+    // icon-btn — the .explorer-btn class only exists on the board's TopBar,
+    // which is not rendered on the task detail page).
+    const explorerBtn = page.locator('.task-detail-page').getByRole('button', { name: 'Open explorer' });
     await expect(explorerBtn).toBeVisible();
 
     // Click the explorer button
