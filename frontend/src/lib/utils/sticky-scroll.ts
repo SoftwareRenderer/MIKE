@@ -22,41 +22,15 @@ export const sectionHeadersField = StateField.define<SectionHeader[]>({
 });
 
 /**
- * Compute the pixel line height from CSS computed styles.
+ * Find the section header that should be sticky at the current scroll position
  */
-function getLineHeightPx(scroller: HTMLElement): number {
-    const style = getComputedStyle(scroller);
-    const rawLineHeight = style.lineHeight;
-    const rawFontSize = style.fontSize;
-
-    if (rawLineHeight.endsWith('px')) {
-        const px = parseFloat(rawLineHeight);
-        if (!isNaN(px) && px > 0) return px;
-    }
-
-    const multiplier = parseFloat(rawLineHeight);
-    if (!isNaN(multiplier) && multiplier > 0) {
-        const fontSize = parseFloat(rawFontSize);
-        if (!isNaN(fontSize) && fontSize > 0) return multiplier * fontSize;
-    }
-
-    const fontSize = parseFloat(rawFontSize);
-    return !isNaN(fontSize) && fontSize > 0 ? fontSize * 1.5 : 21;
-}
-
-/**
- * Find the section header that should be sticky at the current scroll position.
- */
-function findStickyHeader(
+export function findStickyHeader(
     view: EditorView,
     headers: SectionHeader[],
 ): SectionHeader | undefined {
-    const scroller = view.dom.querySelector('.cm-scroller') as HTMLElement | null;
-    if (!scroller || headers.length === 0) return undefined;
+    if (headers.length === 0) return undefined;
 
-    const scrollTop = scroller.scrollTop;
-    const lineHeight = getLineHeightPx(scroller);
-    const topLine = Math.floor(scrollTop / lineHeight) + 1;
+    const topLine = view.state.doc.lineAt(view.viewport.from).number;
 
     let result: SectionHeader | undefined;
     for (const header of headers) {
@@ -87,10 +61,27 @@ function getScrollbarWidth(editor: HTMLElement): number {
 }
 
 /**
- * Get the highlighted HTML for a declaration line by cloning from the
- * editor's DOM. Falls back to plain text if the line is not in viewport.
+ * Walk up from a DOM node to the CodeMirror line element
  */
-function getHeaderLineHtml(view: EditorView, header: SectionHeader): string {
+export function findLineElement(start: Node | null): Element | null {
+    let el: Node | null = start;
+    let depth = 0;
+    while (el && depth < 30) {
+        if (el.nodeType === 1 && (el as Element).classList.contains('cm-line')) {
+            return el as Element;
+        }
+        el = el.parentNode;
+        depth++;
+    }
+    return null;
+}
+
+/**
+ * Get the highlighted HTML for a declaration line by cloning from the
+ * editor's DOM. Falls back to plain text if the line is not in viewport
+ * (or no line element is reachable from the anchor node).
+ */
+export function getHeaderLineHtml(view: EditorView, header: SectionHeader): string {
     const line = view.state.doc.line(header.line);
     const plain = line.text.trim();
     // Preserve leading indentation
@@ -99,28 +90,16 @@ function getHeaderLineHtml(view: EditorView, header: SectionHeader): string {
     // Try to find the line's DOM in the visible viewport
     const lineStart = line.from;
     const dom = view.domAtPos(lineStart);
-    if (dom && dom.node) {
-        let el: Node | null = dom.node;
-        let depth = 0;
-        while (el && depth < 30) {
-            if (el.nodeType === 1) {
-                const cls = (el as Element).className;
-                if (typeof cls === 'string' && cls.includes('cm-line')) {
-                    // Clone the highlighted line content (has inline styles from defaultHighlightStyle)
-                    const clone = (el as Element).cloneNode(true) as Element;
-                    clone.removeAttribute('cm-line');
-                    clone.removeAttribute('class');
-                    clone.removeAttribute('style');
-                    clone.removeAttribute('spellcheck');
-                    const inner = clone.innerHTML;
-                    if (inner && inner.length > plain.length) {
-                        return inner;
-                    }
-                    break;
-                }
-            }
-            el = el.parentNode;
-            depth++;
+    const lineEl = findLineElement(dom?.node ?? null);
+    if (lineEl) {
+        // Clone the highlighted line content (has inline styles from defaultHighlightStyle)
+        const clone = lineEl.cloneNode(true) as Element;
+        clone.removeAttribute('class');
+        clone.removeAttribute('style');
+        clone.removeAttribute('spellcheck');
+        const inner = clone.innerHTML;
+        if (inner && inner.length > plain.length) {
+            return inner;
         }
     }
 
