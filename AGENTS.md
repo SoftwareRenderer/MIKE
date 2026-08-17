@@ -122,6 +122,7 @@ CLI flags take priority over environment variables.
 - **Graceful failures** — Tests should pass even if LLM is slow/unavailable
 - **Test the UX** — Verify UI elements, not just API responses
 - **Mock LLM is default** — tests use pre-recorded fixtures, never the real LLM endpoint
+- **Heavy fixtures get a dedicated repo** — specs that create large files or mutate the working tree (e.g. a 900KB Go fixture for `editor-wrap-highlight`) must NOT write into the shared `/tmp/kanban-test-repo` (other specs' `git add -A && git commit` races with them). Instead, init a dedicated repo (e.g. `/tmp/kanban-test-repo-<name>`), create its project in `beforeAll` (use `browser.newContext({ storageState })` — `page` is not available in `beforeAll`) and delete both in `afterAll`, and wrap the describe in `.serial` (`fullyParallel: true` would split the file's tests across workers and race `beforeAll`); see `editor-wrap-highlight.spec.ts`
 - **Wait for selectors** for async operations; Do not use arbitrary timeouts or fixed delays
 - **Config-modifying tests** (model switch, settings, reasoning effort, mode select) run in the `isolated` project on port 3001
 
