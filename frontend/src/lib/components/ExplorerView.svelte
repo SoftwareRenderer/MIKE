@@ -26,7 +26,7 @@
         return key ? `Open terminal (${formatShortcut(key)})` : 'Open terminal';
     });
 
-    let { projectId, projectPath, currentBranch, initialFile, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
+    let { projectId, projectPath, currentBranch, initialFile, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile, changesOpen, onChangesOpen }: {
         projectId: string;
         projectPath: string;
         currentBranch: string;
@@ -36,6 +36,8 @@
         fsEventQueue: Array<{ op: 'create' | 'delete'; path: string }>;
         onOpenTerminal: () => void;
         onUpdateFile: (path: string | null) => void;
+        changesOpen: boolean;
+        onChangesOpen: (open: boolean) => void;
     } = $props();
 
     let commits = $state<GitCommit[]>([]);
@@ -54,12 +56,12 @@
     let diffLoading = $state(false);
     const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f826635b6';
 
-    // Review Changes panel state
-    let showChanges = $state(false);
+    // Review Changes panel state (owned by App via the URL: view=review)
+    let showChanges = $derived(changesOpen);
 
     function handleEditFromChanges(path: string, line?: number) {
         handleFileSelected(path, line);
-        showChanges = false;
+        onChangesOpen(false);
     }
 
     // Find in files panel state
@@ -499,7 +501,7 @@
             if (showFind) {
                 showFind = false;
             } else if (showChanges) {
-                showChanges = false;
+                onChangesOpen(false);
             } else if (diffCommit) {
                 closeCommitDiff();
             } else if (!editorFocused) {
@@ -597,7 +599,7 @@
 <div class="explorer-view" class:fullscreen={editorFullscreen && activeFilePath} role="dialog" aria-label="Explorer view">
     <!-- Header bar (replaces top-bar when explorer is open) -->
     <div class="explorer-header">
-        <button class="close-btn" onclick={() => { if (showChanges) { showChanges = false; } else { editorFullscreen = false; closeCommitDiff(); onClose(); } }} aria-label="Close branch view" title="Close (Escape)">
+        <button class="close-btn" onclick={() => { if (showChanges) { onChangesOpen(false); } else { editorFullscreen = false; closeCommitDiff(); onClose(); } }} aria-label="Close branch view" title="Close (Escape)">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
@@ -672,7 +674,7 @@
             </div>
         {/if}
         <div class="explorer-header-spacer"></div>
-        <button class="icon-btn git-status-btn" class:active={showChanges} onclick={() => showChanges = !showChanges} aria-label="Review Changes" title="Review Changes">
+        <button class="icon-btn git-status-btn" class:active={showChanges} onclick={() => onChangesOpen(!showChanges)} aria-label="Review Changes" title="Review Changes">
             <Icon src={commitPushIcon} color="currentColor" width={14} height={14} />
         </button>
         <button class="icon-btn terminal-btn" onclick={onOpenTerminal} aria-label="Open terminal" title={terminalButtonTitle}>
@@ -721,10 +723,14 @@
             <GitStatusPanel
                 projectId={projectId}
                 projectPath={projectPath}
-                onClose={() => showChanges = false}
+                onClose={() => onChangesOpen(false)}
                 isMobile={isMobileCtx.isMobile}
                 onEditFile={handleEditFromChanges}
                 onCommitted={() => {
+                    loadCommits();
+                    loadBranches();
+                }}
+                onUpdated={() => {
                     loadCommits();
                     loadBranches();
                 }}

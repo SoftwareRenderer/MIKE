@@ -24,7 +24,7 @@
         return key ? `Open terminal (${formatShortcut(key)})` : 'Open terminal';
     });
 
-    let { projectId, projectName, taskId, taskPath, taskBranch, taskStatus, currentBranch, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile }: {
+    let { projectId, projectName, taskId, taskPath, taskBranch, taskStatus, currentBranch, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile, changesOpen, onChangesOpen }: {
         projectId: string;
         projectName: string;
         taskId: string;
@@ -37,6 +37,8 @@
         fsEventQueue: Array<{ op: 'create' | 'delete'; path: string }>;
         onOpenTerminal: () => void;
         onUpdateFile: (path: string | null) => void;
+        changesOpen: boolean;
+        onChangesOpen: (open: boolean) => void;
     } = $props();
 
     let commits = $state<GitCommit[]>([]);
@@ -63,12 +65,12 @@
     const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f826635b6';
 
     // Review Changes panel state
-    let showChanges = $state(false);
+    let showChanges = $derived(changesOpen);
 
     /** Open a file from Review Changes in the usual file editor. */
     function handleEditFromChanges(path: string, line?: number) {
         handleFileSelected(path, line);
-        showChanges = false;
+        onChangesOpen(false);
     }
 
     // Find in files panel state
@@ -406,7 +408,7 @@
             if (showFind) {
                 showFind = false;
             } else if (showChanges) {
-                showChanges = false;
+                onChangesOpen(false);
             } else if (diffCommit) {
                 closeCommitDiff();
             } else if (!editorFocused) {
@@ -510,7 +512,7 @@
 <div class="explorer-view" class:fullscreen={editorFullscreen && activeFilePath} role="dialog" aria-label="Task explorer view">
     <!-- Header bar -->
     <div class="explorer-header">
-        <button class="close-btn" onclick={() => { if (showChanges) { showChanges = false; } else { editorFullscreen = false; closeCommitDiff(); onClose(); } }} aria-label="Close task explorer" title="Close (Escape)">
+        <button class="close-btn" onclick={() => { if (showChanges) { onChangesOpen(false); } else { editorFullscreen = false; closeCommitDiff(); onClose(); } }} aria-label="Close task explorer" title="Close (Escape)">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
@@ -578,7 +580,7 @@
             <GitStatusPanel
                 projectId={projectId}
                 projectPath={taskPath}
-                onClose={() => showChanges = false}
+                onClose={() => onChangesOpen(false)}
                 isMobile={isMobileCtx.isMobile}
                 onEditFile={handleEditFromChanges}
             />

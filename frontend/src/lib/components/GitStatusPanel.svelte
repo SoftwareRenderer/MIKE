@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { DiffFile } from '$lib/types/diff';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
-    import { getGitStatus, getProjectDiff, getProjectDiffFile, stageProjectFile, commitProject, getGitLogFull, getCommitDiff } from '$lib/api/git';
+    import { getGitStatus, getProjectDiff, getProjectDiffFile, stageProjectFile, commitProject, pullProject, pushProject, getGitLogFull, getCommitDiff } from '$lib/api/git';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
     import { loadAppSetting, saveAppSetting } from '$lib/storage';
@@ -19,12 +19,13 @@
     }
     import ResizeHandle from './ResizeHandle.svelte';
 
-    let { projectId, projectPath, onClose, isMobile, onCommitted, onEditFile }: {
+    let { projectId, projectPath, onClose, isMobile, onCommitted, onUpdated, onEditFile }: {
         projectId: string;
         projectPath: string;
         onClose: () => void;
         isMobile: boolean;
         onCommitted?: () => void;
+        onUpdated?: () => void;
         onEditFile?: (path: string, line?: number) => void;
     } = $props();
 
@@ -547,12 +548,6 @@
         toInputValue = commits.find(c => c.hash === toCommit)?.short || toCommit.substring(0, 7);
     }
 
-    /** Refresh button handler — reloads data and updates compare mode. */
-    async function handleRefresh() {
-        const hasChanges = await loadData();
-        await updateCompareMode(hasChanges);
-    }
-
     /** Load the full content of an untracked file on-demand for the DiffViewer. */
     async function loadUntrackedFile(path: string) {
         const entry = unstagedUntracked.find(e => e.path === path);
@@ -661,6 +656,44 @@
                 console.error('Failed to unstage all:', e);
             }
         });
+    }
+
+    // Pull/Push in-flight state (guards against re-entry and shows spinners)
+    let pulling = $state(false);
+    let pushing = $state(false);
+
+    /** Pull from the remote, then refresh the panel in place. */
+    async function handlePull() {
+        if (pulling || pushing) return;
+        pulling = true;
+        try {
+            await pullProject(projectId);
+            dialogStore.showToast('Pulled from remote', 'success');
+            const hasChanges = await loadData(true);
+            await updateCompareMode(hasChanges);
+            onUpdated?.();
+        } catch (e: any) {
+            dialogStore.showToast(e.message || 'Pull failed', 'error');
+        } finally {
+            pulling = false;
+        }
+    }
+
+    /** Push to the remote, then refresh the panel in place. */
+    async function handlePush() {
+        if (pulling || pushing) return;
+        pushing = true;
+        try {
+            await pushProject(projectId);
+            dialogStore.showToast('Pushed to remote', 'success');
+            const hasChanges = await loadData(true);
+            await updateCompareMode(hasChanges);
+            onUpdated?.();
+        } catch (e: any) {
+            dialogStore.showToast(e.message || 'Push failed', 'error');
+        } finally {
+            pushing = false;
+        }
     }
 
     /** Open the commit dialog, with HEAD staleness check first. */
@@ -898,20 +931,38 @@
             {#if compareLoading}Loading commit diff{:else if compareError}Diff error: {compareError}{:else if compareDiff.length > 0}Showing diff with {compareDiff.length} file{compareDiff.length !== 1 ? 's' : ''}{/if}
         </div>
 
-        {#if stagedEntries.length > 0}
-            <button class="panel-commit-btn" onclick={openCommitDialog} title="Commit staged changes" aria-label="Commit staged changes">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                    <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/>
-                    <path d="M5.5 8l2 2 3.5-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? 'Pulling…' : 'Pull from remote'} aria-label="Pull from remote">
+            {#if pulling}
+                <span class="mini-spinner" aria-hidden="true"></span>
+            {:else}
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M8 3v7M5 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                 </svg>
-                <span>Commit</span>
-            </button>
-        {/if}
-        <button class="panel-icon-btn" onclick={handleRefresh} title="Refresh" aria-label="Refresh">
+            {/if}
+        </button>
+        <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? 'Pushing…' : 'Push to remote'} aria-label="Push to remote">
+            {#if pushing}
+                <span class="mini-spinner" aria-hidden="true"></span>
+            {:else}
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M8 10V3M5 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+            {/if}
+        </button>
+        <button
+            class="panel-commit-btn"
+            disabled={stagedEntries.length === 0}
+            onclick={openCommitDialog}
+            title={stagedEntries.length > 0 ? 'Commit staged changes' : 'Nothing staged to commit'}
+            aria-label={stagedEntries.length > 0 ? 'Commit staged changes' : 'Nothing staged to commit'}
+        >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                <path d="M2 8a6 6 0 0 1 10.47-4M14 8a6 6 0 0 1-10.47 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                <path d="M12 1v3h-3M4 15v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/>
+                <path d="M5.5 8l2 2 3.5-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
+            <span>Commit</span>
         </button>
     </div>
 
@@ -1296,12 +1347,18 @@
         color: var(--color-text-secondary);
         cursor: pointer;
         border-radius: 4px;
-        margin-left: auto;
         flex-shrink: 0;
     }
     .panel-icon-btn:hover {
         background: var(--color-surface-3);
         color: var(--color-text-primary);
+    }
+    .panel-icon-btn:disabled,
+    .panel-icon-btn:disabled:hover {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background: transparent;
+        color: var(--color-text-secondary);
     }
 
     /* Commit button in header */
@@ -1321,6 +1378,21 @@
     }
     .panel-commit-btn:hover {
         opacity: 0.9;
+    }
+    .panel-commit-btn:disabled,
+    .panel-commit-btn:disabled:hover {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+
+    /* Busy indicator for Pull/Push */
+    .mini-spinner {
+        width: 12px;
+        height: 12px;
+        border: 2px solid currentColor;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
     }
 
     /* Loading / Empty */
