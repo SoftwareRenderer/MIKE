@@ -298,6 +298,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 } else if (data.state === 'starting_container') {
                     s.entries = [...s.entries, { id: genId(), role: 'system', content: 'Starting sandbox container...', isStreaming: false, createdAt: new Date().toISOString() }];
                 } else if (data.state === 'running') {
+                    const wasInFlight = s.currentAssistantId !== null || s.activeToolCalls.size > 0;
                     // The sandbox container started — any build/pull box is complete.
                     const buildEntry = s.entries.find(e => e.buildLog && !e.buildLog.done);
                     if (buildEntry && buildEntry.buildLog) buildEntry.buildLog.done = true;
@@ -330,10 +331,10 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     if (!isRetry) {
                         markStreaming();
                     }
-                    // Executor (re)started — arm the awaiting indicator until the
-                    // first token/tool_call (clearAwaiting) or a terminal status.
-                    // Covers resume paths that skip sendWithTracking/handleStartTask.
-                    s.awaitingResponse = true;
+                    // Executor (re)started
+                    if (isRetry || !wasInFlight) {
+                        s.awaitingResponse = true;
+                    }
                 } else if (data.state === 'cancelled') {
                     stream.closeCurrentAssistant();
                     s.activeToolCalls = new Map();
