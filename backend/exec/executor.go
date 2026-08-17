@@ -38,7 +38,7 @@ type TaskExecutor struct {
 	worktreeMgr   *git.WorktreeManager
 	sandboxMgr    *sandboxmgr.SandboxManager
 	agentRegistry *agent.AgentRegistry
-	lspMgr        *lsp.ExtensionLSPManager
+	lspMgr        lspManager
 	commitQueue   *CommitQueue
 	gate          *ConcurrencyGate
 	taskMu        sync.Mutex
@@ -162,6 +162,11 @@ func (mc *modelConfig) set(serverURL, modelName string) {
 
 // NewTaskExecutor creates a new TaskExecutor.
 func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStreamMgr *stream.AppStreamManager, worktreeMgr *git.WorktreeManager, sandboxMgr *sandboxmgr.SandboxManager, agentRegistry *agent.AgentRegistry, lspMgr *lsp.ExtensionLSPManager, commitQueue *CommitQueue) *TaskExecutor {
+	// Normalize nil concrete to a nil interface so te.lspMgr == nil guards hold.
+	var lspMgrI lspManager
+	if lspMgr != nil {
+		lspMgrI = lspMgr
+	}
 	te := &TaskExecutor{
 		store:         store,
 		configStore:   configStore,
@@ -169,7 +174,7 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 		worktreeMgr:   worktreeMgr,
 		sandboxMgr:    sandboxMgr,
 		agentRegistry: agentRegistry,
-		lspMgr:        lspMgr,
+		lspMgr:        lspMgrI,
 		commitQueue:   commitQueue,
 		gate:          NewConcurrencyGate(),
 		tasks:         make(map[string]*executionState),
