@@ -347,6 +347,7 @@ test.describe.serial('Reasoning effort setting', () => {
                 const select = selects[0];
                 return Array.from(select.options).map(o => o.value);
             });
+            expect(options[0]).toBe('default'); // default is the first option
             expect(options).toContain('off');
             expect(options).toContain('low');
             expect(options).toContain('medium');
@@ -355,7 +356,7 @@ test.describe.serial('Reasoning effort setting', () => {
         }
     });
 
-    test('should default to Medium for new models', async ({ page }) => {
+    test('should default to Default for new models', async ({ page }) => {
         // Open settings
         await page.click('.icon-btn[aria-label="Settings"]');
         await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
@@ -380,11 +381,11 @@ test.describe.serial('Reasoning effort setting', () => {
             await modelInputs.last().fill(`test-model-${Date.now()}`);
         }
 
-        // Check that the reasoning effort select for the new row defaults to 'medium'
+        // Check that the reasoning effort select for the new row defaults to 'default'
         const allSelects = page.locator('.reasoning-effort-select');
         const lastSelect = allSelects.last();
         const defaultValue = await lastSelect.inputValue();
-        expect(defaultValue).toBe('medium');
+        expect(defaultValue).toBe('default');
 
         // Cancel — model edits mark the form dirty; dismiss the discard dialog.
         await page.click('button:has-text("Cancel")');
@@ -433,11 +434,27 @@ test.describe.serial('Reasoning effort setting', () => {
             const savedValue = await savedSelect.inputValue();
             expect(savedValue).toBe('high');
 
-            // Change back to medium and save to restore
-            await savedSelect.selectOption({ value: 'medium' });
+            // Change to 'default' and save to verify it also round-trips
+            await savedSelect.selectOption({ value: 'default' });
             await page.click('button:has-text("Save")');
             // Wait for modal to close (replaces waitForTimeout(500))
             await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
+
+            // Reopen settings and verify 'default' persisted
+            await page.click('.icon-btn[aria-label="Settings"]');
+            await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+            await providerHeader.click();
+            await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
+            const finalValue = await page.locator('.reasoning-effort-select').first().inputValue();
+            expect(finalValue).toBe('default');
+
+            // Close settings
+            await page.click('button:has-text("Cancel")');
+            const discardBtn = page.getByRole('button', { name: 'Discard' });
+            if (await discardBtn.isVisible().catch(() => false)) {
+                await discardBtn.click();
+            }
+            await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
         }
     });
 });

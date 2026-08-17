@@ -35,18 +35,25 @@
         null
     );
 
+    /** Resolve { name, effort } for a model entry (string or object). */
+    function resolveModelInfo(m: string | { name: string; reasoning_effort?: string }): { name: string; effort: string } {
+        return {
+            name: typeof m === 'string' ? m : m.name,
+            effort: (typeof m === 'object' && m.reasoning_effort) ? m.reasoning_effort : 'default',
+        };
+    }
+
     let availableModels = $derived(
         (() => {
             if (!selectedProvider?.models.length) return [];
             // Build unique model+effort pairs
             const pairs = new Map<string, { name: string; effort: string }>();
             for (const m of selectedProvider.models) {
-                const name = typeof m === 'string' ? m : m.name;
-                const effort = (typeof m === 'object' && m.reasoning_effort) ? m.reasoning_effort : 'medium';
-                if (!name.trim()) continue;
-                const key = `${name}|${effort}`;
+                const info = resolveModelInfo(m);
+                if (!info.name.trim()) continue;
+                const key = `${info.name}|${info.effort}`;
                 if (!pairs.has(key)) {
-                    pairs.set(key, { name, effort });
+                    pairs.set(key, info);
                 }
             }
             return Array.from(pairs.values())
@@ -178,13 +185,9 @@
     function selectProvider(provider: Provider) {
         selectedProviderUrl = provider.url;
         providerDropdownOpen = false;
-        const getModelInfo = (m: string | { name: string; reasoning_effort?: string }) => ({
-            name: typeof m === 'string' ? m : m.name,
-            effort: (typeof m === 'object' && m.reasoning_effort) ? m.reasoning_effort : 'medium',
-        });
         let modelToSelect: { name: string; effort: string } | null = null;
         if (provider.models.length > 0) {
-            modelToSelect = getModelInfo(provider.models[0]);
+            modelToSelect = resolveModelInfo(provider.models[0]);
         }
         if (modelToSelect) {
             onSelect(providerRef(provider), modelToSelect.name, provider.url, modelToSelect.effort);
@@ -442,10 +445,10 @@
             <div class="empty">No models available</div>
         {:else}
             {#each availableModels as m}
-                {@const isActive = m.name === currentModel && m.effort === (currentReasoningEffort || 'medium')}
+                {@const isActive = m.name === currentModel && m.effort === (currentReasoningEffort || 'default')}
                 <button type="button" class="model-option" class:active={isActive} onclick={() => selectModel(m.name, m.effort)} role="option" aria-selected={isActive}>
                     <span class="option-name">{m.name}</span>
-                    {#if m.effort && m.effort !== 'medium'}
+                    {#if m.effort && m.effort !== 'default'}
                         <span class="effort-badge">{m.effort}</span>
                     {/if}
                     {#if isActive}

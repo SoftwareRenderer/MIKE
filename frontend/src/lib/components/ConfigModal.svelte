@@ -76,7 +76,7 @@
     interface ModelEntry {
         name: string;
         readonly: boolean; // true = fetched from API, not editable
-        reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
+        reasoning_effort?: 'default' | 'off' | 'low' | 'medium' | 'high' | 'max';
         context_window?: number | null; // nil if not reported by LLM; editable in UI
         // Per-model overrides; null = inherit provider default
         input_price?: number | null;
@@ -156,12 +156,12 @@
                 models: isAgent ? [] : (p.models || []).map(m => {
                     // Handle both old format (string) and new format ({name, reasoning_effort, ...})
                     if (typeof m === 'string') {
-                        return { name: m, readonly: false, reasoning_effort: 'medium' as const, context_window: null, input_price: null, output_price: null, cache_read_price: null, cache_write_price: null, power_consumption_w: null };
+                        return { name: m, readonly: false, reasoning_effort: 'default' as const, context_window: null, input_price: null, output_price: null, cache_read_price: null, cache_write_price: null, power_consumption_w: null };
                     }
                     return {
                         name: m.name,
                         readonly: false,
-                        reasoning_effort: m.reasoning_effort || 'medium',
+                        reasoning_effort: m.reasoning_effort || 'default',
                         context_window: m.context_window ?? null,
                         input_price: m.input_price ?? null,
                         output_price: m.output_price ?? null,
@@ -436,7 +436,7 @@
                     return {
                         name: m.name,
                         readonly: true,
-                        reasoning_effort: prior?.reasoning_effort || 'medium',
+                        reasoning_effort: prior?.reasoning_effort || 'default',
                         context_window: m.context_window ?? prior?.context_window ?? null,
                         input_price: prior?.input_price ?? null,
                         output_price: prior?.output_price ?? null,
@@ -507,7 +507,7 @@
     });
 
     function addModelToProvider(idx: number) {
-        providers[idx].models.push({ name: '', readonly: false, reasoning_effort: 'medium', context_window: null, input_price: null, output_price: null, cache_read_price: null, cache_write_price: null, power_consumption_w: null });
+        providers[idx].models.push({ name: '', readonly: false, reasoning_effort: 'default', context_window: null, input_price: null, output_price: null, cache_read_price: null, cache_write_price: null, power_consumption_w: null });
         providers[idx].models.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     }
 
@@ -555,7 +555,7 @@
                         url: p.url.trim(),
                         models: p.models.filter(m => m.name.trim()).map(m => ({
                             name: m.name.trim(),
-                            reasoning_effort: m.reasoning_effort || 'medium',
+                            reasoning_effort: m.reasoning_effort || 'default',
                             // undefined = omitted (inherit provider default)
                             context_window: m.context_window ?? undefined,
                             input_price: m.input_price ?? undefined,
