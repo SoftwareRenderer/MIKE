@@ -75,6 +75,33 @@ func TestModelConfigJSONRoundTrip(t *testing.T) {
 	}
 }
 
+// TestProviderUnmarshalNormalizesReasoningEffort: empty effort and legacy string
+// model lists normalize to "default".
+func TestProviderUnmarshalNormalizesReasoningEffort(t *testing.T) {
+	var p Provider
+	data := `{"name":"p","url":"http://x/v1","concurrency":1,"models":[{"name":"a"},{"name":"b","reasoning_effort":""},{"name":"c","reasoning_effort":"default"}]}`
+	if err := json.Unmarshal([]byte(data), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, m := range p.Models {
+		if m.ReasoningEffort != "default" {
+			t.Errorf("model %s: expected default effort \"default\", got %q", m.Name, m.ReasoningEffort)
+		}
+	}
+
+	// Legacy format: plain model-name strings normalize to the default level.
+	var legacy Provider
+	legacyData := `{"name":"p","url":"http://x/v1","concurrency":1,"models":["m1","m2"]}`
+	if err := json.Unmarshal([]byte(legacyData), &legacy); err != nil {
+		t.Fatalf("unmarshal legacy: %v", err)
+	}
+	for _, m := range legacy.Models {
+		if m.ReasoningEffort != "default" {
+			t.Errorf("legacy model %s: expected default effort \"default\", got %q", m.Name, m.ReasoningEffort)
+		}
+	}
+}
+
 // TestModelConfigNilFieldsOmitted verifies that unset (nil) override fields are
 // omitted from JSON so they round-trip as "inherit provider default".
 func TestModelConfigNilFieldsOmitted(t *testing.T) {

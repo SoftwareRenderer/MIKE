@@ -9,7 +9,7 @@
     interface ModelEntry {
         name: string;
         readonly: boolean;
-        reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
+        reasoning_effort?: 'default' | 'off' | 'low' | 'medium' | 'high' | 'max';
         context_window?: number | null;
         input_price?: number | null;
         output_price?: number | null;

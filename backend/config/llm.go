@@ -301,7 +301,7 @@ func (cs *ConfigStore) HandleFetchModels(w http.ResponseWriter, r *http.Request)
 }
 
 // GetModelReasoningEffort looks up the reasoning effort for a model by name across all providers.
-// Returns types.DefaultReasoningEffort if the model is not found.
+// Returns types.DefaultReasoningEffort if the model is not found or has no explicit effort.
 func (cs *ConfigStore) GetModelReasoningEffort(modelName string) string {
 	cfg, err := cs.GetConfig()
 	if err != nil {

@@ -4,7 +4,7 @@
     interface ModelEntry {
         name: string;
         readonly: boolean;
-        reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
+        reasoning_effort?: 'default' | 'off' | 'low' | 'medium' | 'high' | 'max';
         context_window?: number | null;
         // Per-model pricing/power overrides — null = inherit provider default
         input_price?: number | null;
@@ -93,8 +93,8 @@
                     </div>
                     <select
                         class="reasoning-effort-select"
-                        value={model.reasoning_effort || 'medium'}
-                        oninput={(e) => { model.reasoning_effort = (e.target as HTMLSelectElement).value as 'off' | 'low' | 'medium' | 'high' | 'max'; onDirty?.(); }}
+                        value={model.reasoning_effort || 'default'}
+                        oninput={(e) => { model.reasoning_effort = (e.target as HTMLSelectElement).value as 'default' | 'off' | 'low' | 'medium' | 'high' | 'max'; onDirty?.(); }}
                         aria-label="Reasoning effort for {model.name || 'this model'}"
                         title="Reasoning effort (thinking budget)"
                     >

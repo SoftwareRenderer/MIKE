@@ -61,13 +61,30 @@ func parseRetryAfter(v string) time.Duration {
 	return 0
 }
 
-// Reasoning effort to token budget mapping.
+// reasoningEffortTokens: thinking budget per level ("off"/"default" send none).
 var reasoningEffortTokens = map[string]int{
-	"off":    -1,
 	"low":    512,
 	"medium": 2048,
 	"high":   8192,
 	"max":    -1, // unlimited
+}
+
+// applyReasoningParams sets request fields for an effort level: "off" disables
+// thinking, "default" sends nothing, budget levels send budget + control + effort.
+func applyReasoningParams(reqBody map[string]any, effort string) {
+	switch effort {
+	case "off":
+		reqBody["thinking_budget_tokens"] = 0
+		reqBody["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
+	case "default":
+		// Server decides.
+	default:
+		if budget, ok := reasoningEffortTokens[effort]; ok {
+			reqBody["thinking_budget_tokens"] = budget
+			reqBody["reasoning_control"] = true
+			reqBody["reasoning_effort"] = effort
+		}
+	}
 }
 
 // LlamaClient handles communication with llama.cpp OpenAI-compatible API.
@@ -147,22 +164,6 @@ func toAPIMessages(messages []types.ChatMessage) []map[string]any {
 	return result
 }
 
-// defaultBudgetMessage is sent to the model when the reasoning budget is exhausted.
-const defaultBudgetMessage = "... I'm over thinking. Answering now."
-
-// setThinkingParams adds reasoning/thinking parameters to the request body.
-func setThinkingParams(reqBody map[string]any, t *ThinkingParams) {
-	reqBody["thinking_budget_tokens"] = t.BudgetTokens
-	if t.BudgetTokens > 0 {
-		reqBody["reasoning_control"] = true
-	}
-	msg := t.BudgetMessage
-	if msg == "" {
-		msg = defaultBudgetMessage
-	}
-	reqBody["reasoning_budget_message"] = msg
-}
-
 // hasUserMessage reports whether the message list contains at least one user
 // message. Some chat templates raise an error for system-only requests.
 func hasUserMessage(messages []types.ChatMessage) bool {
@@ -197,16 +198,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	} else {
 		reqBody["tool_choice"] = "none"
 	}
-	if c.reasoningEffort != "off" {
-		if budget, ok := reasoningEffortTokens[c.reasoningEffort]; ok {
-			reqBody["thinking_budget_tokens"] = budget
-			reqBody["reasoning_control"] = true
-		}
-	} else {
-		// Explicitly disable reasoning (server may enable it by default)
-		reqBody["thinking_budget_tokens"] = 0
-		reqBody["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
-	}
+	applyReasoningParams(reqBody, c.reasoningEffort)
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -327,16 +319,9 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	return usage, scanner.Err()
 }
 
-// ThinkingParams holds reasoning/thinking parameters for the LLM API.
-type ThinkingParams struct {
-	BudgetTokens  int
-	BudgetMessage string
-}
-
 // ChatCompletionOptions holds optional parameters for ChatCompletion.
 type ChatCompletionOptions struct {
-	MaxTokens *int            // MaxTokens caps the response. nil = server default.
-	Thinking  *ThinkingParams // Thinking overrides reasoning params. nil = client's reasoningEffort.
+	MaxTokens *int // MaxTokens caps the response. nil = server default.
 }
 
 // ChatCompletion sends a non-streaming chat completion request and returns the usage data and full text response.
@@ -351,12 +336,8 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 	}
 
 	var maxTokens int
-	var thinking *ThinkingParams
-	if opts != nil {
-		if opts.MaxTokens != nil {
-			maxTokens = *opts.MaxTokens
-		}
-		thinking = opts.Thinking
+	if opts != nil && opts.MaxTokens != nil {
+		maxTokens = *opts.MaxTokens
 	}
 
 	url := c.baseURL + "/chat/completions"
@@ -370,18 +351,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 	if maxTokens > 0 {
 		reqBody["max_tokens"] = maxTokens
 	}
-	if thinking != nil {
-		setThinkingParams(reqBody, thinking)
-	} else if c.reasoningEffort != "off" {
-		if budget, ok := reasoningEffortTokens[c.reasoningEffort]; ok {
-			reqBody["thinking_budget_tokens"] = budget
-			reqBody["reasoning_control"] = true
-		}
-	} else {
-		// Explicitly disable reasoning (server may enable it by default)
-		reqBody["thinking_budget_tokens"] = 0
-		reqBody["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
-	}
+	applyReasoningParams(reqBody, c.reasoningEffort)
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {

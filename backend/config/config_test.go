@@ -934,5 +934,36 @@ func TestHandleConfig_KeyboardShortcutsReplaceSemantics(t *testing.T) {
 	}
 }
 
+// TestGetModelReasoningEffort: explicit values pass through; empty or unknown
+// models fall back to "default".
+func TestGetModelReasoningEffort(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			{
+				Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1,
+				Models: []types.ModelConfig{
+					{Name: "known", ReasoningEffort: "high"},
+					{Name: "empty", ReasoningEffort: ""},
+				},
+			},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	if got := cs.GetModelReasoningEffort("known"); got != "high" {
+		t.Errorf("known model: got %q, want high", got)
+	}
+	if got := cs.GetModelReasoningEffort("empty"); got != "default" {
+		t.Errorf("empty-effort model: got %q, want default", got)
+	}
+	if got := cs.GetModelReasoningEffort("unknown-model"); got != "default" {
+		t.Errorf("unknown model: got %q, want default", got)
+	}
+}
+
 func ptr(s string) *string { return &s }
 func ptrBool(b bool) *bool { return &b }

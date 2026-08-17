@@ -3,6 +3,7 @@ package llama
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -527,6 +528,133 @@ func TestChatStream_ReturnsLlamaError(t *testing.T) {
 // testMessages returns a minimal message list that satisfies the user message guard.
 func testMessages() []types.ChatMessage {
 	return []types.ChatMessage{{Role: "user", Content: "hi"}}
+}
+
+// reasoningParamsCase: expected reasoning request fields for one effort level.
+type reasoningParamsCase struct {
+	effort       string
+	budgetTokens float64
+	budgetSent   bool
+	controlSent  bool
+	effortSent   string // "" = key absent
+	enableThink  bool
+}
+
+var reasoningParamCases = []reasoningParamsCase{
+	{effort: "default", budgetSent: false, controlSent: false, effortSent: "", enableThink: false},
+	{effort: "off", budgetSent: true, budgetTokens: 0, controlSent: false, effortSent: "", enableThink: true},
+	{effort: "low", budgetSent: true, budgetTokens: 512, controlSent: true, effortSent: "low"},
+	{effort: "medium", budgetSent: true, budgetTokens: 2048, controlSent: true, effortSent: "medium"},
+	{effort: "high", budgetSent: true, budgetTokens: 8192, controlSent: true, effortSent: "high"},
+	{effort: "max", budgetSent: true, budgetTokens: -1, controlSent: true, effortSent: "max"},
+}
+
+func assertReasoningParams(t *testing.T, captured map[string]any, tc reasoningParamsCase) {
+	t.Helper()
+
+	if budget, ok := captured["thinking_budget_tokens"]; !ok {
+		if tc.budgetSent {
+			t.Errorf("effort=%s: thinking_budget_tokens missing, want %v", tc.effort, tc.budgetTokens)
+		}
+	} else {
+		if !tc.budgetSent {
+			t.Errorf("effort=%s: thinking_budget_tokens = %v, want absent", tc.effort, budget)
+		} else if got, isNum := budget.(float64); !isNum || got != tc.budgetTokens {
+			t.Errorf("effort=%s: thinking_budget_tokens = %v, want %v", tc.effort, budget, tc.budgetTokens)
+		}
+	}
+
+	if control, ok := captured["reasoning_control"]; !ok {
+		if tc.controlSent {
+			t.Errorf("effort=%s: reasoning_control missing, want true", tc.effort)
+		}
+	} else if !tc.controlSent || control != true {
+		t.Errorf("effort=%s: reasoning_control = %v, want %v", tc.effort, control, tc.controlSent)
+	}
+
+	if effort, ok := captured["reasoning_effort"]; !ok {
+		if tc.effortSent != "" {
+			t.Errorf("effort=%s: reasoning_effort missing, want %q", tc.effort, tc.effortSent)
+		}
+	} else if tc.effortSent == "" || effort != tc.effortSent {
+		t.Errorf("effort=%s: reasoning_effort = %v, want %q", tc.effort, effort, tc.effortSent)
+	}
+
+	if tc.enableThink {
+		kwargs, ok := captured["chat_template_kwargs"].(map[string]any)
+		if !ok {
+			t.Errorf("effort=%s: chat_template_kwargs missing", tc.effort)
+		} else if kwargs["enable_thinking"] != false {
+			t.Errorf("effort=%s: enable_thinking = %v, want false", tc.effort, kwargs["enable_thinking"])
+		}
+	} else if _, ok := captured["chat_template_kwargs"]; ok {
+		t.Errorf("effort=%s: chat_template_kwargs present, want absent", tc.effort)
+	}
+}
+
+// TestChatStream_ReasoningParams: reasoning request fields per effort level (streaming).
+func TestChatStream_ReasoningParams(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]\n\n"))
+		flusher.Flush()
+		w.Write([]byte("data: [DONE]\n\n"))
+		flusher.Flush()
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	for _, tc := range reasoningParamCases {
+		t.Run(tc.effort, func(t *testing.T) {
+			captured = nil
+			c := NewLlamaClient(server.URL, "test-model", tc.effort, "")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := c.ChatStream(ctx, testMessages(), nil, func(choice types.ChatChoice) {}, nil); err != nil {
+				t.Fatalf("ChatStream error: %v", err)
+			}
+			if captured == nil {
+				t.Fatal("no request captured")
+			}
+			assertReasoningParams(t, captured, tc)
+		})
+	}
+}
+
+// TestChatCompletion_ReasoningParams: same, on the non-streaming path.
+func TestChatCompletion_ReasoningParams(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	for _, tc := range reasoningParamCases {
+		t.Run(tc.effort, func(t *testing.T) {
+			captured = nil
+			c := NewLlamaClient(server.URL, "test-model", tc.effort, "")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, _, err := c.ChatCompletion(ctx, testMessages(), nil); err != nil {
+				t.Fatalf("ChatCompletion error: %v", err)
+			}
+			if captured == nil {
+				t.Fatal("no request captured")
+			}
+			assertReasoningParams(t, captured, tc)
+		})
+	}
 }
 
 // hitCountingServer counts requests so guard tests can assert the server is never hit.
