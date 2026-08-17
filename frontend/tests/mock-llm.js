@@ -44,6 +44,7 @@ const toolCallCreateTask = loadFixture('tool_call_create_task');
 const toolCallEditFile = loadFixture('tool_call_edit_file');
 const toolCallRename = loadFixture('tool_call_rename');
 const toolCallRenameTs = loadFixture('tool_call_rename_ts');
+const toolCallSummarize = loadFixture('tool_call_summarize');
 const textResponseReasoning = loadFixture('text_response_reasoning');
 
 let requestCount = 0;
@@ -180,6 +181,19 @@ function selectResponse(parsed) {
         }
         loopPhraseCount++;
         return { chunks: phraseRepeat, chunkDelay: 1 };
+    }
+
+    // Auto-summarize + "Proceed" test: a tool-call turn whose reported usage
+    // exceeds 90% of the model context window (mock-model: 8192), forcing the
+    // executor to auto-summarize mid-turn and inject a "Proceed" user message.
+    if (hasTools && /summarize-now/i.test(lastUserMsg)) {
+        return { chunks: toolCallSummarize, chunkDelay: 1 };
+    }
+    // After auto-summarization the executor feeds the compressed context back to
+    // the LLM with the injected "Proceed" user message — answer with plain text
+    // so the turn completes (the tool result was compressed into the summary).
+    if (/^proceed$/i.test(lastUserMsg.trim())) {
+        return { chunks: textResponse, chunkDelay: 1 };
     }
 
     // If there are tool results in the conversation, the LLM should respond
