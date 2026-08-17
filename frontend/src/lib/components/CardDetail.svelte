@@ -13,6 +13,7 @@
     import { useBoardDnd } from '$lib/composables/use-board-dnd.svelte';
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
     import { resolveOverviewArrowTarget } from '$lib/composables/use-board-arrow-nav';
+    import { resolveDetailColumn, resolveDiffFileTarget, type DetailColumnId } from '$lib/composables/use-task-detail-column-nav';
     import { isEditableTarget } from '$lib/utils/keyboard';
     import { DiffCache } from '$lib/services/diff-cache.svelte';
     import TaskChat from './Chat/TaskChat.svelte';
@@ -508,6 +509,16 @@
 
         loadDiff();
 
+        /** True while any modal/overlay would swallow task-view shortcuts. */
+        function isBlocked(): boolean {
+            return !!(
+                uiStore.showCreateTask || uiStore.showConfig || uiStore.showTerminal ||
+                uiStore.showStats || uiStore.showSandboxConfig ||
+                appStore.showEditTask ||
+                dialogStore.confirmation || dialogStore.commitDialog || dialogStore.compressContextDialog
+            );
+        }
+
         function handleKey(e: KeyboardEvent) {
             if (e.key === 'Escape') {
                 // Don't close when user is typing in an input/textarea
@@ -527,20 +538,77 @@
                 return;
             }
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                // Board overview arrow navigation
+                // Column-aware navigation: Board -> overview cards, Chat ->
+                // page-scroll the messages, Diff -> diff file headers. Focus
+                // outside all columns anchors to the board overview.
                 if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
                 const active = document.activeElement;
-                if (active instanceof HTMLElement && (active.closest('.column-chat') || isEditableTarget(active))) return;
-                if (
-                    uiStore.showCreateTask || uiStore.showConfig || uiStore.showTerminal ||
-                    uiStore.showStats || uiStore.showSandboxConfig ||
-                    appStore.showEditTask ||
-                    dialogStore.confirmation || dialogStore.commitDialog || dialogStore.compressContextDialog
-                ) return;
+                if (active instanceof HTMLElement && isEditableTarget(active)) return;
+                if (isBlocked()) return;
                 if (isMobileCtx.isMobile && activeTab !== 'context') return;
                 if (!detailEl) return;
+                const chatCol = detailEl.querySelector<HTMLElement>('.column-chat');
+                if (active instanceof HTMLElement && chatCol?.contains(active)) {
+                    const scroller = chatCol.querySelector<HTMLElement>('.chat-messages');
+                    if (!scroller) return;
+                    e.preventDefault();
+                    scroller.scrollBy({ top: e.key === 'ArrowDown' ? scroller.clientHeight : -scroller.clientHeight, behavior: 'smooth' });
+                    return;
+                }
+                const diffCol = detailEl.querySelector<HTMLElement>('.column-diff');
+                if (!editingFile && active instanceof HTMLElement && diffCol?.contains(active)) {
+                    const sections = Array.from(diffCol.querySelectorAll<HTMLElement>('.diff-file-section'));
+                    const headers = sections
+                        .map(s => s.querySelector<HTMLElement>('button.diff-file-header'))
+                        .filter((h): h is HTMLElement => !!h);
+                    const target = resolveDiffFileTarget({ sections, headers, activeElement: active, key: e.key });
+                    if (!target) return;
+                    e.preventDefault();
+                    target.focus();
+                    target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                    return;
+                }
                 const cards = Array.from(detailEl.querySelectorAll<HTMLElement>('.task-list .task-wrapper > .card'));
                 const target = resolveOverviewArrowTarget({ cards, activeElement: active, key: e.key });
+                if (!target) return;
+                e.preventDefault();
+                target.focus();
+                target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            }
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                // Cyclic column focus switching: Board -> Chat -> Diff -> Board.
+                if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+                if (e.defaultPrevented) return;
+                if (isMobileCtx.isMobile) return;
+                const active = document.activeElement;
+                const chatCol: HTMLElement | null = detailEl ? detailEl.querySelector('.column-chat') : null;
+                // Editable focus keeps native text-cursor movement — except the
+                // chat input: horizontal arrows switch columns so the cycle
+                // always works; vertical arrows still edit text.
+                const inChatInput = active instanceof HTMLElement && active.tagName === 'TEXTAREA' && !!chatCol?.contains(active);
+                if (active instanceof HTMLElement && isEditableTarget(active) && !inChatInput) return;
+                if (isBlocked()) return;
+                if (editingFile || diffFullscreen || chatFullscreen) return;
+                if (!detailEl) return;
+                const boardCol = detailEl.querySelector<HTMLElement>('.column-context');
+                const diffCol = detailEl.querySelector<HTMLElement>('.column-diff');
+                const current: DetailColumnId | null = active instanceof HTMLElement
+                    ? (boardCol?.contains(active) ? 'board' : chatCol?.contains(active) ? 'chat' : diffCol?.contains(active) ? 'diff' : null)
+                    : null;
+                const next = resolveDetailColumn(['board', 'chat', 'diff'], current, e.key);
+                if (!next) return;
+                let target: HTMLElement | null = null;
+                if (next === 'board') {
+                    // Current card, else first overview card, else the column container.
+                    target =
+                        (active instanceof HTMLElement && boardCol?.contains(active) ? (active.closest('.task-list .task-wrapper > .card') as HTMLElement | null) : null) ||
+                        detailEl.querySelector<HTMLElement>('.task-list .task-wrapper > .card') ||
+                        boardCol;
+                } else if (next === 'chat') {
+                    target = chatCol?.querySelector<HTMLElement>('textarea') || chatCol?.querySelector<HTMLElement>('.chat-messages') || chatCol;
+                } else {
+                    target = diffCol?.querySelector<HTMLElement>('button.diff-file-header') || diffCol;
+                }
                 if (!target) return;
                 e.preventDefault();
                 target.focus();
@@ -759,7 +827,7 @@
         <!-- 3-Column Layout -->
         <div bind:this={columnsRef} class="columns"  role="region" aria-label="Task detail panels">
             <!-- Column 1: Board Overview -->
-            <div class="column column-context" class:hidden={isMobileCtx.isMobile && activeTab !== 'context'} style:width={boardWidth}>
+            <div class="column column-context" tabindex="-1" class:hidden={isMobileCtx.isMobile && activeTab !== 'context'} style:width={boardWidth}>
                 <BoardOverview
                     sections={overviewSections}
                     {allTasks}
@@ -843,7 +911,7 @@
             {/if}
 
             <!-- Column 3: Working Changes (Diff) with Checkpoint overlay -->
-            <div class="column column-diff" class:hidden={isMobileCtx.isMobile && activeTab !== 'diff' && activeTab !== 'checkpoint'} style:width={diffWidth}>
+            <div class="column column-diff" tabindex="-1" class:hidden={isMobileCtx.isMobile && activeTab !== 'diff' && activeTab !== 'checkpoint'} style:width={diffWidth}>
                 <div class="diff-content">
                     {#if editingFile}
                         <!-- Inline file editor (lazy-loaded) -->
@@ -974,6 +1042,12 @@
     }
     .column.hidden {
         display: none;
+    }
+
+    /* Inset focus ring — the global ring's 2px offset is clipped by .columns. */
+    .column-context:focus-visible,
+    .column-diff:focus-visible {
+        outline-offset: -2px;
     }
 
     /* Mobile tab bar — hidden on desktop, shown on mobile via media query */
