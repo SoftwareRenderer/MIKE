@@ -485,6 +485,77 @@ func TestHandleLoopDetected_HintBroadcastCarriesMessageID(t *testing.T) {
 	}
 }
 
+// TestSendRetryHint_SystemRole: retry notification persists as a system message
+// and the hint broadcast carries role "system".
+func TestSendRetryHint_SystemRole(t *testing.T) {
+	e := newTestExecutor(t)
+	now := time.Now().UTC()
+
+	proj := &types.Project{ID: "proj-retry-hint", Name: "Retry Hint Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
+	if err := e.store.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &types.Task{
+		ID: "task-retry-hint", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
+		Status: "in_progress", ExecutionState: "running",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := e.store.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	e.sendRetryHint(proj.ID, task.ID, task, errors.New("EOF"), 1)
+
+	// The retry message must be persisted with role=system.
+	msgs, err := e.store.GetTaskMessages(task.ID, task.CurrentThreadID)
+	if err != nil {
+		t.Fatalf("get task messages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 persisted retry message, got %d", len(msgs))
+	}
+	if msgs[0].Role != "system" {
+		t.Errorf("expected persisted retry role=system, got %q", msgs[0].Role)
+	}
+	if !strings.Contains(msgs[0].Content, "Connection interrupted") {
+		t.Errorf("unexpected retry content: %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "attempt 1/3") {
+		t.Errorf("expected attempt 1/3 in content, got %q", msgs[0].Content)
+	}
+
+	// The broadcast frame must carry the same message ID plus role "system".
+	frames := e.appStreamMgr.GetTaskBuffer(proj.ID, task.ID)
+	var found bool
+	for _, frame := range frames {
+		var payload struct {
+			Type   string         `json:"type"`
+			Event  string         `json:"event"`
+			TaskID string         `json:"task_id"`
+			Data   map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(frame, &payload); err != nil {
+			continue
+		}
+		if payload.Event != "hint" {
+			continue
+		}
+		found = true
+		if payload.Data["id"] != msgs[0].ID {
+			t.Errorf("hint broadcast id = %v, want %s", payload.Data["id"], msgs[0].ID)
+		}
+		if payload.Data["role"] != "system" {
+			t.Errorf("hint broadcast role = %v, want \"system\"", payload.Data["role"])
+		}
+		if payload.Data["content"] != msgs[0].Content {
+			t.Errorf("hint broadcast content = %v, want %s", payload.Data["content"], msgs[0].Content)
+		}
+	}
+	if !found {
+		t.Fatal("no hint broadcast frame found in task buffer")
+	}
+}
+
 func TestLoopDetector_ToolLoopReturnsRepeatedArgs(t *testing.T) {
 	d := newLoopDetector()
 
