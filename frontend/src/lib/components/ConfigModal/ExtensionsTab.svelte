@@ -346,6 +346,7 @@
 
     // Check for updates
     async function handleCheckUpdates() {
+        activeView = 'installed';
         loadingUpdates = true;
         error = '';
         try {

@@ -63,6 +63,31 @@ test.describe('Extensions Tab', () => {
     await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
   });
 
+  test('should switch to Installed tab when Check for Updates is clicked in Browse view', async ({ page }) => {
+    // Open settings modal
+    await page.click('.icon-btn[aria-label="Settings"]');
+    await page.waitForSelector('.modal, [role="dialog"]', { timeout: 5000 });
+
+    // Click Extensions tab
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    // Switch to Browse view
+    await page.click('.view-tab:has-text("Browse")');
+    await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
+
+    // Click Check for Updates from the Browse tab
+    await page.click('button:has-text("Check for Updates")');
+
+    // The view must switch to Installed so the check results are visible
+    await expect(page.locator('.installed-view')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.view-tab:has-text("Installed")')).toHaveClass(/active/);
+    await expect(page.locator('.browse-view')).toHaveCount(0);
+
+    // The check must complete (button label returns from "Checking..." to "Check for Updates")
+    await expect(page.locator('button:has-text("Check for Updates")')).toBeVisible({ timeout: 15000 });
+  });
+
   test('should show unpublished extensions at the top of Browse Registry', async ({ page }) => {
     // Open settings modal
     await page.click('.icon-btn[aria-label="Settings"]');
