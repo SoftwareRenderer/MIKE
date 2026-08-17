@@ -658,6 +658,7 @@
         const isOfflineNow = getOfflineStatus();
         const isQueuedForSummarize = isSummarizing;
         stream.state.entries = [...stream.state.entries, { id: entryId, role: 'user', content: msg, attachments: attachments || undefined, threadId: activeThreadId, isStreaming: false, createdAt: new Date().toISOString(), queued: isOfflineNow || isQueuedForSummarize }];
+        scroll(true);
         // If queued for summarization, don't show awaiting spinner — executor hasn't started yet.
         // The executor will be started after summarization completes and process this message.
         if (isQueuedForSummarize) {
@@ -676,7 +677,7 @@
             // outgoing message and surface a visible, non-persisted notice.
             handleQueuedSend(msg, entryId);
         }
-        scroll();
+        scroll(true);
         chatFormComp?.focus();
     }
 
@@ -814,7 +815,8 @@
             // visible as outgoing and surface a non-persisted notice.
             handleQueuedSend(lastUser.content);
         }
-        scroll();
+        // Regenerate is a user-initiated action — jump to the latest message.
+        scroll(true);
     }
 
     async function handleStartTask() {
@@ -1088,7 +1090,8 @@
         stream.state.entries = [...stream.state.entries, { id: newMsg.id, role: 'user', content: newContent, attachments, threadId: activeThreadId, isStreaming: false, createdAt: newMsg.created_at || new Date().toISOString() }];
         const result = await sendWithTracking(newContent, attachments);
         if (result?.queued) handleQueuedSend(newContent);
-        scroll();
+        // Edit-and-send is a user-initiated send — jump to the latest message.
+        scroll(true);
     }
 
     function connect(skipSync = false) {
