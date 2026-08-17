@@ -61,6 +61,40 @@ describe('PreferencesTab hide-hints toggle', () => {
     });
 });
 
+describe('PreferencesTab hide-model-badge toggle', () => {
+    const TOGGLE = 'button[aria-label="Hide model badge"]';
+
+    function renderModelBadgeTab(props: { hideModelBadge?: boolean } = {}) {
+        const onDirty = vi.fn();
+        const utils = render(PreferencesTab, {
+            props: { createTaskKey: undefined, createTaskSubmitKey: undefined, hideModelBadge: false, onDirty, ...props },
+        });
+        return { ...utils, onDirty, toggle: () => utils.container.querySelector(TOGGLE) as HTMLButtonElement };
+    }
+
+    it('renders the toggle in its own UI section, off by default', () => {
+        const { getByText, toggle } = renderModelBadgeTab();
+        expect(toggle()).toBeTruthy();
+        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+        // The toggle lives in a dedicated UI section, not under Keyboard Shortcuts.
+        const section = toggle()!.closest('.section');
+        expect(section?.querySelector('.section-label')?.textContent).toBe('UI');
+        expect(getByText('Hide model badge')).toBeTruthy();
+    });
+
+    it('reflects a stored preference', () => {
+        const { toggle } = renderModelBadgeTab({ hideModelBadge: true });
+        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('toggles and reports dirty', async () => {
+        const { toggle, onDirty } = renderModelBadgeTab();
+        await fireEvent.click(toggle()!);
+        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('PreferencesTab create-task row', () => {
     it('shows the default key "C" when no binding is stored', () => {
         const { create } = renderTab();
