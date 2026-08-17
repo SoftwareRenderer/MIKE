@@ -226,7 +226,7 @@ export interface KeyboardShortcuts {
 
 export interface ProviderModel {
     name: string;
-    reasoning_effort?: 'off' | 'low' | 'medium' | 'high' | 'max';
+    reasoning_effort?: 'default' | 'off' | 'low' | 'medium' | 'high' | 'max';
     context_window?: number; // nil if not reported by LLM
     input_price?: number;
     output_price?: number;
@@ -236,12 +236,13 @@ export interface ProviderModel {
 }
 
 /** Reasoning effort options for the settings UI. */
-export const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string; tokens: string }> = [
-    { value: 'off', label: 'Off', tokens: 'Disabled' },
-    { value: 'low', label: 'Low', tokens: '512 tokens' },
-    { value: 'medium', label: 'Medium', tokens: '2,048 tokens' },
-    { value: 'high', label: 'High', tokens: '8,192 tokens' },
-    { value: 'max', label: 'Max', tokens: 'Unlimited' },
+export const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string }> = [
+    { value: 'default', label: 'Default' },
+    { value: 'off', label: 'Off' },
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'max', label: 'Max' },
 ];
 
 export interface Provider {

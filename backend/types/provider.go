@@ -5,8 +5,8 @@ import (
 	"fmt"
 )
 
-// DefaultReasoningEffort is the default reasoning effort for models without an explicit setting.
-const DefaultReasoningEffort = "medium"
+// DefaultReasoningEffort applies to models without an explicit setting: server decides.
+const DefaultReasoningEffort = "default"
 
 // UnmarshalJSON implements backward-compatible JSON unmarshaling for Provider.
 // Accepts both the new format (models as []ModelConfig) and the old format (models as []string).

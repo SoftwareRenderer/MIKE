@@ -206,9 +206,8 @@ func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn fu
 
 // ChatCompletionOpts holds optional parameters for ChatCompletion.
 type ChatCompletionOpts struct {
-	MaxTokens       *int                  // MaxTokens caps the response. nil = server default (no cap).
-	ReasoningEffort string                // ReasoningEffort overrides the default ("off"). "" = provider default.
-	Thinking        *llama.ThinkingParams // Thinking sets reasoning params directly, overriding ReasoningEffort.
+	MaxTokens       *int   // MaxTokens caps the response. nil = server default (no cap).
+	ReasoningEffort string // effort override; "" = "off" (no provider lookup)
 }
 
 // utilityTarget resolves the configured Utility provider/model pair, falling
@@ -370,7 +369,6 @@ func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName
 		}
 		llamaOpts = &llama.ChatCompletionOptions{
 			MaxTokens: opts.MaxTokens,
-			Thinking:  opts.Thinking,
 		}
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
