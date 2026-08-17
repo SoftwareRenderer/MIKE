@@ -7,6 +7,7 @@
         createTaskSubmitKey = $bindable<string | undefined>(),
         openTerminalKey = $bindable<string | undefined>(),
         startTaskKey = $bindable<string | undefined>(),
+        toggleFullscreenKey = $bindable<string | undefined>(),
         hideHints = $bindable(false),
         hideModelBadge = $bindable(false),
         onDirty,
@@ -15,6 +16,7 @@
         createTaskSubmitKey?: string | undefined;
         openTerminalKey?: string | undefined;
         startTaskKey?: string | undefined;
+        toggleFullscreenKey?: string | undefined;
         hideHints?: boolean;
         hideModelBadge?: boolean;
         onDirty?: () => void;
@@ -50,6 +52,13 @@
             value: startTaskKey,
             def: defaultStartTaskKey(),
         },
+        {
+            id: 'toggle_fullscreen' as const,
+            name: 'Toggle Fullscreen',
+            desc: 'Maximizes or minimizes the focused area (chat, diff, editor, terminal)',
+            value: toggleFullscreenKey,
+            def: DEFAULT_SHORTCUTS.toggle_fullscreen,
+        },
     ]);
 
     let capturingId = $state<string | null>(null);
@@ -61,6 +70,7 @@
         else if (id === 'create_task_submit') createTaskSubmitKey = value;
         else if (id === 'open_terminal') openTerminalKey = value;
         else if (id === 'start_task') startTaskKey = value;
+        else if (id === 'toggle_fullscreen') toggleFullscreenKey = value;
         onDirty?.();
     }
 

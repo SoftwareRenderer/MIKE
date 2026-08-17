@@ -13,6 +13,8 @@ export const DEFAULT_SHORTCUTS: Record<string, string> = {
     // by browsers on any platform (Cmd+backtick is macOS window-cycling, so
     // the default always uses control, not meta).
     'open_terminal': 'control+`',
+    // Ctrl+Up — maximize/minimize the focused area (chat, diff, editor, terminal).
+    'toggle_fullscreen': 'control+arrowup',
 };
 
 const MODIFIERS = ['control', 'meta', 'shift', 'alt'] as const;
@@ -119,6 +121,17 @@ export function defaultStartTaskKey(): string {
 /** Resolve the effective start-task binding: the stored value if set, else the platform default. */
 export function effectiveStartTaskKey(config: Config | null | undefined): string {
     return config?.keyboard_shortcuts?.start_task ?? defaultStartTaskKey();
+}
+
+/** Resolve the effective toggle-fullscreen binding: the default when unset, `""` when disabled. */
+export function effectiveToggleFullscreenKey(config: Config | null | undefined): string {
+    return config?.keyboard_shortcuts?.toggle_fullscreen ?? DEFAULT_SHORTCUTS.toggle_fullscreen;
+}
+
+/** Tooltip for the fullscreen-toggle buttons: the binding, or plain text when disabled. */
+export function fullscreenToggleTitle(config: Config | null | undefined): string {
+    const key = effectiveToggleFullscreenKey(config);
+    return key ? `Toggle fullscreen (${formatShortcut(key)})` : 'Toggle fullscreen';
 }
 
 /** True on Apple platforms (used to pick the platform-appropriate submit key). */

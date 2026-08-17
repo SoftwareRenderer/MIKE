@@ -1,6 +1,8 @@
 <script lang="ts">
     import type { TaskCommit } from '$lib/types';
     import { formatRelativeTime } from '$lib/utils/format-time';
+    import { appStore } from '$lib/stores';
+    import { fullscreenToggleTitle } from '$lib/utils/keyboard';
     import DiffSelect from '../DiffSelect.svelte';
 
     let { commits, baseCommit, diffFrom, diffTo, onFromChange, onToChange, onToggleFullscreen, isFullscreen, isDone, branchTip, branchName }: {
@@ -16,6 +18,8 @@
         branchTip?: string;
         branchName?: string;
     } = $props();
+
+    const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
 
     function getCommitSubject(commit: TaskCommit): string {
         return commit.subject.split('\n')[0].trim();
@@ -81,7 +85,7 @@
     <DiffSelect options={fromOptions} value={diffFrom} onChange={onFromChange} ariaLabel="From" />
     <span class="diff-arrow">→</span>
     <DiffSelect options={toOptions} value={diffTo} onChange={onToChange} ariaLabel="To" />
-    <button type="button" class="diff-fullscreen-btn" onclick={onToggleFullscreen} title="Toggle fullscreen">
+    <button type="button" class="diff-fullscreen-btn" onclick={onToggleFullscreen} title={fullscreenTitle}>
         {#if isFullscreen}
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         {:else}

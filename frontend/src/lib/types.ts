@@ -221,6 +221,8 @@ export interface KeyboardShortcuts {
     open_terminal?: string;
     /** Starts the task in the task view while the Start Task button is shown. */
     start_task?: string;
+    /** Maximizes or minimizes the focused area (chat, diff, editor, terminal). */
+    toggle_fullscreen?: string;
     /** Hide the keycap hints on shortcut buttons (tooltips stay). */
     hide_hints?: boolean;
 }

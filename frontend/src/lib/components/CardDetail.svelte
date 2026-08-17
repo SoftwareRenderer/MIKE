@@ -14,7 +14,7 @@
     import { useSubtaskHierarchy } from '$lib/composables/use-subtask-hierarchy.svelte';
     import { resolveOverviewArrowTarget } from '$lib/composables/use-board-arrow-nav';
     import { resolveDetailColumn, resolveDiffFileTarget, type DetailColumnId } from '$lib/composables/use-task-detail-column-nav';
-    import { isEditableTarget } from '$lib/utils/keyboard';
+    import { effectiveToggleFullscreenKey, isEditableTarget, matchShortcut } from '$lib/utils/keyboard';
     import { DiffCache } from '$lib/services/diff-cache.svelte';
     import TaskChat from './Chat/TaskChat.svelte';
     import ResizeHandle from './ResizeHandle.svelte';
@@ -536,6 +536,35 @@
                     onClose();
                 }
                 return;
+            }
+            // Toggle maximize/minimize (default Ctrl+Up) for the focused column:
+            // chat -> chat fullscreen; diff -> editor while a file is being
+            // edited, else diff. No maximize button in the checkpoint overlay
+            // or no-branch/worktree state -> no-op.
+            if (e.key === 'ArrowUp' && !e.repeat && !e.defaultPrevented) {
+                const key = effectiveToggleFullscreenKey(appStore.config);
+                if (key && matchShortcut(key, e)) {
+                    const active = document.activeElement;
+                    if (active instanceof HTMLElement && detailEl) {
+                        const chatCol = detailEl.querySelector<HTMLElement>('.column-chat');
+                        if (chatCol?.contains(active)) {
+                            e.preventDefault();
+                            toggleChatFullscreen();
+                            return;
+                        }
+                        const diffCol = detailEl.querySelector<HTMLElement>('.column-diff');
+                        if (diffCol?.contains(active)) {
+                            if (editingFile) {
+                                e.preventDefault();
+                                toggleEditorFullscreen();
+                            } else if (!checkpointDiffOpen && (worktreeExists || task.branch)) {
+                                e.preventDefault();
+                                toggleDiffFullscreen();
+                            }
+                        }
+                    }
+                    return;
+                }
             }
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                 // Column-aware navigation: Board -> overview cards, Chat ->

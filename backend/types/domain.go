@@ -105,6 +105,9 @@ type KeyboardShortcuts struct {
 	OpenTerminal *string `json:"open_terminal,omitempty"`
 	// StartTask starts the task in the task view while the Start Task button is shown.
 	StartTask *string `json:"start_task,omitempty"`
+	// ToggleFullscreen maximizes or minimizes the focused area (chat, diff,
+	// file editor, terminal panel) in the task view / explorer views.
+	ToggleFullscreen *string `json:"toggle_fullscreen,omitempty"`
 	// HideHints hides the keycap hints on shortcut buttons (tooltips stay).
 	HideHints *bool `json:"hide_hints,omitempty"`
 }
