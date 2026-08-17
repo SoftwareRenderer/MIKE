@@ -93,10 +93,12 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
             const path = args.path as string;
             return sym ? `definition of ${sym} in ${path || 'file'}` : `(definition in ${path || 'file'})`;
         }
-        case 'lsp_code_actions': {
+        case 'lsp_rename': {
             const sym = args.symbol as string;
+            const newName = (args as Record<string, unknown>).new_name as string;
             const path = args.path as string;
-            return sym ? `code actions for ${sym} in ${path || 'file'}` : `(code actions in ${path || 'file'})`;
+            if (sym && newName) return `rename ${sym} to ${newName} in ${path || 'file'}`;
+            return sym ? `rename ${sym} in ${path || 'file'}` : `(rename in ${path || 'file'})`;
         }
         default:
             return JSON.stringify(args, null, 2);

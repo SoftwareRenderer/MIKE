@@ -42,6 +42,8 @@ const textLoop = loadFixture('text_loop');
 const phraseRepeat = loadFixture('phrase_repeat');
 const toolCallCreateTask = loadFixture('tool_call_create_task');
 const toolCallEditFile = loadFixture('tool_call_edit_file');
+const toolCallRename = loadFixture('tool_call_rename');
+const toolCallRenameTs = loadFixture('tool_call_rename_ts');
 const textResponseReasoning = loadFixture('text_response_reasoning');
 
 let requestCount = 0;
@@ -205,6 +207,14 @@ function selectResponse(parsed) {
         return { chunks: toolCallStreaming, chunkDelay: 1 };
     }
 
+    // LSP rename tool calls: TS variant first (its keyword contains the Go keyword)
+    if (hasTools && /rename-test-ts/i.test(lastUserMsg)) {
+        return { chunks: toolCallRenameTs, chunkDelay: 1 };
+    }
+    if (hasTools && /rename-test/i.test(lastUserMsg)) {
+        return { chunks: toolCallRename, chunkDelay: 1 };
+    }
+
     // Edit file tool call: tools provided and message mentions "edit"
     if (hasTools && /\bedit\b/i.test(lastUserMsg)) {
         return { chunks: toolCallEditFile, chunkDelay: 1 };
@@ -269,6 +279,7 @@ const server = http.createServer((req, res) => {
                 const fixtureName = chunks === toolCallFail ? 'tool_call_fail' :
                                     chunks === toolCallStreaming ? 'tool_call_streaming' :
                                     chunks === toolCallEditFile ? 'tool_call_edit_file' :
+                                    chunks === toolCallRename ? 'tool_call_rename' :
                                     chunks === toolCallWithText ? 'tool_call_with_text' :
                                     chunks === toolCallLoop ? 'tool_call_loop' :
                                     chunks === toolCallTaskComplete ? 'tool_call_request_review' :

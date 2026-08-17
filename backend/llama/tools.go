@@ -13,19 +13,19 @@ type CreateTaskArgs struct {
 
 // toolDisplayNames maps tool names to their UI display names.
 var toolDisplayNames = map[string]string{
-	"read_file":        "Read",
-	"write_file":       "Write",
-	"edit_file":        "Edit",
-	"bash":             "Execute",
-	"ask_question":     "Question",
-	"request_review":   "Done",
-	"create_task":      "Create Task",
-	"view_tasks":       "View Tasks",
-	"edit_task":        "Edit Task",
-	"lsp_references":   "LSP References",
-	"lsp_definition":   "LSP Definition",
-	"lsp_code_actions": "LSP Code Actions",
-	"lsp_hover":        "LSP Hover",
+	"read_file":      "Read",
+	"write_file":     "Write",
+	"edit_file":      "Edit",
+	"bash":           "Execute",
+	"ask_question":   "Question",
+	"request_review": "Done",
+	"create_task":    "Create Task",
+	"view_tasks":     "View Tasks",
+	"edit_task":      "Edit Task",
+	"lsp_references": "LSP References",
+	"lsp_definition": "LSP Definition",
+	"lsp_hover":      "LSP Hover",
+	"lsp_rename":     "LSP Rename",
 }
 
 // GetToolDisplayName returns the display name for a tool, or the raw name if unknown.
@@ -286,6 +286,12 @@ type lspSymbolProps struct {
 	Symbol paramSchema `json:"symbol"`
 }
 
+type lspRenameProps struct {
+	Path    paramSchema `json:"path"`
+	Symbol  paramSchema `json:"symbol"`
+	NewName paramSchema `json:"new_name"`
+}
+
 var toolLSPReferences = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
@@ -320,23 +326,6 @@ var toolLSPDefinition = types.ChatTool{
 	},
 }
 
-var toolLSPCodeActions = types.ChatTool{
-	Type: "function",
-	Function: &types.ToolDef{
-		Name:        "lsp_code_actions",
-		DisplayName: "LSP Code Actions",
-		Description: "Get available code actions (quick fixes, refactoring options) at a symbol in a file. Returns an array of actions with title, kind, and optional edit details. Use this to see what fixes the language server suggests for errors or to access refactoring options like 'Extract variable' or 'Organize imports'.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": lspSymbolProps{
-				Path:   paramSchema{Type: "string", Description: "Relative path to the file"},
-				Symbol: paramSchema{Type: "string", Description: "Name of the symbol to get code actions for"},
-			},
-			"required": []string{"path", "symbol"},
-		},
-	},
-}
-
 var toolLSPHover = types.ChatTool{
 	Type: "function",
 	Function: &types.ToolDef{
@@ -354,14 +343,32 @@ var toolLSPHover = types.ChatTool{
 	},
 }
 
+var toolLSPRename = types.ChatTool{
+	Type: "function",
+	Function: &types.ToolDef{
+		Name:        "lsp_rename",
+		DisplayName: "LSP Rename",
+		Description: "Rename a symbol across all files using the language server's rename capability. Applies the language server's multi-file edit (e.g. a Go or TypeScript function, variable, or type rename everywhere it is used). Validates renamability first; refuses edits outside the workspace. Prefer this over manual multi-file edit_file calls for symbol renames.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": lspRenameProps{
+				Path:    paramSchema{Type: "string", Description: "Relative path to a file containing the symbol"},
+				Symbol:  paramSchema{Type: "string", Description: "Name of the symbol to rename"},
+				NewName: paramSchema{Type: "string", Description: "New name for the symbol"},
+			},
+			"required": []string{"path", "symbol", "new_name"},
+		},
+	},
+}
+
 // GetLSPToolDefinitions returns the LSP-aware tool definitions.
 // These tools are only available when an LSP extension is installed.
 func GetLSPToolDefinitions() []types.ChatTool {
 	return []types.ChatTool{
 		toolLSPReferences,
 		toolLSPDefinition,
-		toolLSPCodeActions,
 		toolLSPHover,
+		toolLSPRename,
 	}
 }
 
