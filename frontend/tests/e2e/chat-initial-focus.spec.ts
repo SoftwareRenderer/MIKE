@@ -51,6 +51,21 @@ test.describe('Chat input initial focus', () => {
     await expect(page.locator('.chat-form textarea')).toHaveCount(0);
   });
 
+  test('does not auto-focus the chat input on mobile', async ({ page }) => {
+    // Mobile (viewport <= 768px): selecting a task must not pop the virtual
+    // keyboard, so the chat input is left unfocused.
+    await page.setViewportSize({ width: 390, height: 844 });
+    const taskId = await createTaskWithStatus(page, 'review', 'mobile');
+    await navigateToTask(page, taskId, projectId);
+    const chatTextarea = page.locator('.chat-form textarea');
+    await expect(chatTextarea).toBeVisible({ timeout: 10000 });
+    // Settle so a (buggy) late focus attempt from the init chain would be
+    // caught — desktop focuses right after history load, so a window this
+    // long is ample.
+    await page.waitForTimeout(1500);
+    await expect(chatTextarea).not.toBeFocused();
+  });
+
   test('focus moves to the new task input when switching tasks in-app', async ({ page }) => {
     const taskA = await createTaskWithStatus(page, 'review', 'switch-a');
     const taskB = await createTaskWithStatus(page, 'review', 'switch-b');

@@ -20,6 +20,7 @@
     import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
+    import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
     import ReviewBar from './ReviewBar.svelte';
@@ -1128,6 +1129,9 @@
 
     let destroyed = $state(false);
 
+    // On mobile, selecting a task must not auto-focus the chat input (pops the keyboard)
+    const { isMobile } = useIsMobile();
+
     // Mobile keyboard: track visualViewport shrink and add padding to keep input visible
     let keyboardOffset = $state(0);
     let chatFormRef: HTMLElement | null = $state(null);
@@ -1231,8 +1235,8 @@
             // 5. Allow live events — buffer replay is done, DB state is loaded.
             suppressEvents = false;
 
-            // 6. Initial focus
-            if (!destroyed) chatFormComp?.focus();
+            // 6. Initial focus (skipped on mobile — auto-focus pops the virtual keyboard)
+            if (!destroyed && !isMobile) chatFormComp?.focus();
 
             // Override model selection with task-specific values if set
             try {

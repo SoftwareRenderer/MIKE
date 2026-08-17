@@ -21,7 +21,22 @@ describe('TaskChat chat input initial focus', () => {
     it('guards the initial focus against a destroyed component', () => {
         // If the user navigates away during async init, the focus attempt must be
         // skipped (the component is unmounted by then).
-        const guarded = taskChatSource.match(/if \(!destroyed\) chatFormComp\?\.focus\(\)/);
-        expect(guarded, 'expected `if (!destroyed) chatFormComp?.focus()`').not.toBeNull();
+        const guarded = taskChatSource.match(/if \(!destroyed &&/);
+        expect(guarded, 'expected initial focus to be guarded on `!destroyed`').not.toBeNull();
+    });
+
+    it('does not auto-focus the chat input on mobile', () => {
+        // On mobile, selecting a task should not pop the virtual keyboard.
+        // The initial focus in the onMount init chain must be gated on a
+        // mobile check (via useIsMobile).
+        const mobileGuard = taskChatSource.match(
+            /if \(!destroyed && !isMobile\) chatFormComp\?\.focus\(\)/
+        );
+        expect(mobileGuard, 'expected initial focus to be skipped when isMobile').not.toBeNull();
+    });
+
+    it('uses the shared useIsMobile composable for the mobile check', () => {
+        expect(taskChatSource, 'expected useIsMobile import').toContain("from '$lib/composables/use-is-mobile.svelte'");
+        expect(taskChatSource, 'expected useIsMobile() call').toMatch(/useIsMobile\(\)/);
     });
 });
