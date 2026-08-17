@@ -52,6 +52,19 @@ describe('StreamState', () => {
         expect(s.state.awaitingResponse).toBe(false);
         expect(s.state.queuePosition).toBe(0);
     });
+
+    it('clearAwaiting resets queue position (task holds its gate slot once tokens flow)', () => {
+        const s = new StreamState();
+        s.state.awaitingResponse = true;
+        s.state.queuePosition = 2;
+        s.state.queueEstimatedWait = 60;
+        s.state.promptProgress = 40;
+        s.clearAwaiting();
+        expect(s.state.awaitingResponse).toBe(false);
+        expect(s.state.queuePosition).toBe(0);
+        expect(s.state.queueEstimatedWait).toBe(0);
+        expect(s.state.promptProgress).toBe(0);
+    });
 });
 
 describe('tool_result truncation metadata', () => {
@@ -494,6 +507,44 @@ describe('createStreamHandler', () => {
         expect(stream.state.awaitingResponse).toBe(true);
         handleEvent({ type: 'status', data: { state: 'idle' } }, false, 'p1', 't1');
         expect(stream.state.awaitingResponse).toBe(false);
+    });
+
+    it('queue position resets once the first token of the granted call arrives', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'queue', data: { position: 3, estimated_wait_seconds: 30 } }, false, 'p1', 't1');
+        expect(stream.state.queuePosition).toBe(3);
+        // Gate slot granted — tokens start flowing, the task is no longer queued.
+        handleEvent({ type: 'token', data: { text: 'Hello' } }, false, 'p1', 't1');
+        expect(stream.state.queuePosition).toBe(0);
+        expect(stream.state.queueEstimatedWait).toBe(0);
+        expect(stream.state.awaitingResponse).toBe(false);
+    });
+
+    it('status:running does not arm awaitingResponse while a response is actively streaming', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'Hello' } }, false, 'p1', 't1');
+        expect(stream.state.currentAssistantId).not.toBeNull();
+        // Mid-stream status (e.g. "Repetitive response detected") must not flash the indicator.
+        handleEvent({ type: 'status', data: { state: 'running', activity: 'Repetitive response detected' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(false);
+    });
+
+    it('status:running does not arm awaitingResponse while tool calls are in flight', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: {} } }, false, 'p1', 't1');
+        expect(stream.state.activeToolCalls.size).toBe(1);
+        handleEvent({ type: 'status', data: { state: 'running', activity: 'Sandbox recreated for mode change (act)' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(false);
+    });
+
+    it('status:running with retry activity still arms awaitingResponse even mid-stream', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'Hello' } }, false, 'p1', 't1');
+        // A retried LLM call is a genuinely pending request — arm unconditionally.
+        handleEvent({ type: 'status', data: { state: 'running', activity: 'Connection interrupted (timeout), retrying... (attempt 2/3)' } }, false, 'p1', 't1');
+        expect(stream.state.awaitingResponse).toBe(true);
+        expect(stream.state.retryCount).toBe(2);
     });
 
     it('tool_result resolves pending tool call via activeToolCalls lookup', () => {
