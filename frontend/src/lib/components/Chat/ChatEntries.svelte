@@ -7,6 +7,8 @@
     import QueueIndicator from './QueueIndicator.svelte';
     import { formatToolArgs } from '$lib/utils/toolArgs';
     import { SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
+    import { appStore } from '$lib/stores';
+    import { fullscreenToggleTitle } from '$lib/utils/keyboard';
 
     let {
         entries,
@@ -87,6 +89,8 @@
     // Scroll element — the real (non-virtualized) chat message container.
     // Reactive so the parent is notified whenever the mounted container changes.
     let chatScrollEl: HTMLElement | null = $state(null);
+
+    const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
 
     // Track whether the user is scrolled to the bottom of the chat
     let atBottom = $state(true);
@@ -237,7 +241,7 @@
         <div class="chat-sticky-header" role="status" aria-live="polite">
             <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title="Scroll to message" aria-label="Scroll to message">{computedStickyMessage}</button>
             {#if onToggleFullscreen}
-                <button type="button" class="chat-sticky-fullscreen" onclick={onToggleFullscreen} title="Toggle fullscreen" aria-label="Toggle fullscreen">
+                <button type="button" class="chat-sticky-fullscreen" onclick={onToggleFullscreen} title={fullscreenTitle} aria-label="Toggle fullscreen">
                     {#if isChatFullscreen}
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     {:else}

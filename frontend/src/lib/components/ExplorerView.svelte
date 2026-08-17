@@ -17,7 +17,7 @@
     import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles, loadEditorTabs, saveEditorTabs, clearEditorDraft, clearEditorHistory } from '$lib/storage';
     import type { LSPSymbol } from '$lib/utils/lsp-symbols';
     import { appStore, dialogStore } from '$lib/stores';
-    import { effectiveOpenTerminalKey, formatShortcut } from '$lib/utils/keyboard';
+    import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips
     // keep the shortcut text even when keycap hints are hidden).
@@ -509,6 +509,19 @@
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
             e.preventDefault();
             toggleFind();
+        }
+        // Toggle-fullscreen shortcut (default Ctrl+Up): maximize/minimize the
+        // editor when it is the focused area (file open, no commit diff).
+        if (e.key === 'ArrowUp' && !e.repeat && !e.defaultPrevented && !diffCommit && openFiles.length > 0) {
+            const key = effectiveToggleFullscreenKey(appStore.config);
+            if (key && matchShortcut(key, e)) {
+                const active = document.activeElement;
+                const center = document.querySelector('.explorer-center-column');
+                if (active instanceof HTMLElement && center?.contains(active)) {
+                    e.preventDefault();
+                    toggleEditorFullscreen();
+                }
+            }
         }
     }
 

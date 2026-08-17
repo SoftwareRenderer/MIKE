@@ -15,10 +15,10 @@ function mockUserAgent(ua: string) {
 }
 
 /** Render the tab with per-row scoped queries (rows share class/aria names). */
-function renderTab(props: { createTaskKey?: string; createTaskSubmitKey?: string; openTerminalKey?: string; startTaskKey?: string } = {}) {
+function renderTab(props: { createTaskKey?: string; createTaskSubmitKey?: string; openTerminalKey?: string; startTaskKey?: string; toggleFullscreenKey?: string } = {}) {
     const onDirty = vi.fn();
     const utils = render(PreferencesTab, {
-        props: { createTaskKey: undefined, createTaskSubmitKey: undefined, openTerminalKey: undefined, startTaskKey: undefined, onDirty, ...props },
+        props: { createTaskKey: undefined, createTaskSubmitKey: undefined, openTerminalKey: undefined, startTaskKey: undefined, toggleFullscreenKey: undefined, onDirty, ...props },
     });
     const row = (id: string) => within(utils.container.querySelector(`[data-shortcut="${id}"]`)!);
     return {
@@ -28,6 +28,7 @@ function renderTab(props: { createTaskKey?: string; createTaskSubmitKey?: string
         submit: row('create_task_submit'),
         terminal: row('open_terminal'),
         start: row('start_task'),
+        fullscreen: row('toggle_fullscreen'),
     };
 }
 
@@ -289,6 +290,62 @@ describe('PreferencesTab submit row', () => {
         await fireEvent.click(submit.getByRole('button', { name: 'Clear shortcut' }));
         expect(submit.getByRole('button', { name: /create task \(submit\) shortcut/i }).textContent).toBe('None');
         expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('PreferencesTab toggle-fullscreen row', () => {
+    it('shows the default key "Ctrl+Up" when no binding is stored (any platform)', () => {
+        mockUserAgent(MAC_UA);
+        const { fullscreen } = renderTab();
+        expect(fullscreen.getByRole('button', { name: /toggle fullscreen shortcut/i }).textContent).toBe('Ctrl+Up');
+        mockUserAgent(WIN_UA);
+        const { fullscreen: fullscreenWin } = renderTab();
+        expect(fullscreenWin.getByRole('button', { name: /toggle fullscreen shortcut/i }).textContent).toBe('Ctrl+Up');
+    });
+
+    it('shows a custom binding formatted, with Reset and Clear controls', () => {
+        const { fullscreen } = renderTab({ toggleFullscreenKey: 'shift+alt+f' });
+        const chip = fullscreen.getByRole('button', { name: /toggle fullscreen shortcut/i });
+        expect(chip.textContent).toBe('Shift+Alt+F');
+        expect(fullscreen.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
+        expect(fullscreen.getByRole('button', { name: 'Clear shortcut' })).toBeTruthy();
+    });
+
+    it('shows "None" and no Clear control when the shortcut is disabled', () => {
+        const { fullscreen } = renderTab({ toggleFullscreenKey: '' });
+        expect(fullscreen.getByRole('button', { name: /toggle fullscreen shortcut/i }).textContent).toBe('None');
+        expect(fullscreen.queryByRole('button', { name: 'Clear shortcut' })).toBeNull();
+        expect(fullscreen.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
+    });
+
+    it('captures a combo and assigns it to the toggle-fullscreen binding only', async () => {
+        const { fullscreen, start, onDirty } = renderTab();
+        const chip = fullscreen.getByRole('button', { name: /toggle fullscreen shortcut/i });
+        await fireEvent.click(chip);
+        await fireEvent.keyDown(window, { key: 'F', shiftKey: true, altKey: true });
+        expect(chip.textContent).toBe('Shift+Alt+F');
+        // The other rows are untouched.
+        expect(start.getByRole('button', { name: /start task shortcut/i }).textContent).toBe('Ctrl+Enter');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+
+    it('resets to the default binding', async () => {
+        const { fullscreen, onDirty } = renderTab({ toggleFullscreenKey: 'shift+alt+f' });
+        await fireEvent.click(fullscreen.getByRole('button', { name: 'Reset to default' }));
+        expect(fullscreen.getByRole('button', { name: /toggle fullscreen shortcut/i }).textContent).toBe('Ctrl+Up');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears the shortcut (disables it)', async () => {
+        const { fullscreen, onDirty } = renderTab();
+        await fireEvent.click(fullscreen.getByRole('button', { name: 'Clear shortcut' }));
+        expect(fullscreen.getByRole('button', { name: /toggle fullscreen shortcut/i }).textContent).toBe('None');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+
+    it('describes its purpose for the focused area', () => {
+        const { fullscreen } = renderTab();
+        expect(fullscreen.getAllByText(/focused area/i).length).toBeGreaterThan(0);
     });
 });
 

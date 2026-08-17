@@ -32,7 +32,8 @@
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
     import { mount, unmount } from 'svelte';
-    import { dialogStore } from '$lib/stores';
+    import { appStore, dialogStore } from '$lib/stores';
+    import { fullscreenToggleTitle } from '$lib/utils/keyboard';
     import { reconcileExternalChange } from '$lib/utils/editor-merge';
     import { javascript } from '@codemirror/lang-javascript';
     import { python } from '@codemirror/lang-python';
@@ -91,6 +92,8 @@
         mobileFullscreen?: boolean;
         isMobile?: boolean;
     } = $props();
+
+    const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
 
     let content = $state('');
     let loading = $state(false);
@@ -1149,7 +1152,7 @@
             </div>
             <div class="editor-actions">
                 {#if onToggleFullscreen}
-                    <button type="button" class="editor-icon-btn editor-fullscreen-toggle" onclick={onToggleFullscreen} title="Toggle fullscreen">
+                    <button type="button" class="editor-icon-btn editor-fullscreen-toggle" onclick={onToggleFullscreen} title={fullscreenTitle}>
                         {#if mobileFullscreen}
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 2V6H14M6 14V10H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         {:else}
