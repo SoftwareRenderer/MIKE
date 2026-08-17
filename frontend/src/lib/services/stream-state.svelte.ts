@@ -61,6 +61,8 @@ export class StreamState {
     clearAwaiting() {
         if (this.state.awaitingResponse) this.state.awaitingResponse = false;
         this.state.promptProgress = 0;
+        this.state.queuePosition = 0;
+        this.state.queueEstimatedWait = 0;
         this.clearRetry();
     }
 
