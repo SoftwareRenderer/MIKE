@@ -380,6 +380,9 @@
         return null;
     });
 
+    // Settings → Preferences → UI: hide the model badge on board cards.
+    let hideModelBadge = $derived(appStore.config?.hide_model_badge === true);
+
     // Model badge: always "auto" behavior
     // Model only (1 provider) or provider+model (2+)
     const MODEL_COLORS = [
@@ -793,7 +796,7 @@
                     {statusBadge.text}
                 </div>
             {/if}
-            {#if modelBadge.text}
+            {#if modelBadge.text && !hideModelBadge}
                 {#if modelBadge.isAgent}
                     <div class="badge model-badge agent-badge" style="background: {modelBadge.color}11; color: {modelBadge.color}">
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-right: 3px">

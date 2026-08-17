@@ -319,6 +319,13 @@ User-customizable shortcuts, persisted server-side (`keyboard_shortcuts` JSON in
 - **Adding a new shortcut**: `*string` field in `types.KeyboardShortcuts` (`backend/types/domain.go`) + all-nil check in `normalizeKeyboardShortcuts` (`backend/config/config.go`); field in `KeyboardShortcuts` (`$lib/types.ts`) + default in `DEFAULT_SHORTCUTS`; row in `ConfigModal/PreferencesTab.svelte`; field in the `ConfigModal.svelte` save payload (always send all bindings); dispatch — board/global: `use-keyboard-shortcuts.svelte.ts`, dialog-scoped: the owning component.
 - **Tests**: `backend/config/config_test.go`, `utils/__tests__/keyboard.unit.ts`, `__tests__/preferences-tab.unit.svelte.ts`, `__tests__/start-panel.unit.svelte.ts` (key hint), e2e `preferences-keyboard.spec.ts` (isolated project — mutates server config), `create-task-submit-shortcut.spec.ts`, `terminal-shortcut.spec.ts`.
 
+### UI Preferences (Settings → Preferences → UI)
+Non-keyboard UI preferences, persisted server-side as top-level `*bool` config fields (same save/load plumbing as `hide_hints` — `PUT /api/config`, `parseBoolPtr` in `GetConfig`, `configResponse` with `omitempty`). Saved through the shared Settings Save/Cancel flow.
+
+- `hide_model_badge` (bool — hides the `.model-badge` on board task cards; `nil` = visible). Gated in `Card.svelte` via `$derived(appStore.config?.hide_model_badge === true)`; the status badge and subtask progress are unaffected.
+- **Adding a new UI preference**: `*bool` field in `types.Config` (`backend/types/domain.go`); read in `GetConfig` + write in `UpdateConfig` + field in `configResponse` (`backend/config/config.go`) + PUT merge in `HandleConfig`; field in `Config` (`$lib/types.ts`); state + hydrate + save payload in `ConfigModal.svelte`; toggle row in `ConfigModal/PreferencesTab.svelte` (UI section); row in the consuming component reading `appStore.config`.
+- **Tests**: `backend/config/config_test.go` (round-trip + omitted-when-nil), `__tests__/preferences-tab.unit.svelte.ts`, `__tests__/card-model-badge.unit.svelte.ts`, e2e `preferences-hide-model-badge.spec.ts` (isolated project — mutates server config).
+
 ### Board Arrow-Key Navigation
 Arrow keys move **real DOM focus** (highlight = the global `:focus-visible` ring) — no separate "highlighted" store. `Enter` opens the focused card via the existing card keydown handler; `Alt+Arrow` keeps moving tasks (card handler `stopPropagation`s, and the arrow handler ignores modifiers).
 

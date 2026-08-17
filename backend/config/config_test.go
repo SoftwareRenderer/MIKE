@@ -60,6 +60,77 @@ func TestAutoSummarizeThreshold_Roundtrip(t *testing.T) {
 	}
 }
 
+func TestHideModelBadge_UnsetDefault(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if cfg.HideModelBadge != nil {
+		t.Fatalf("expected nil HideModelBadge when unset, got %v", *cfg.HideModelBadge)
+	}
+}
+
+func TestHideModelBadge_RoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.HideModelBadge = ptrBool(true)
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.HideModelBadge == nil || !*read.HideModelBadge {
+		t.Fatalf("expected hide_model_badge=true after update, got %v", read.HideModelBadge)
+	}
+}
+
+// An explicit false must round-trip as present (non-nil), not collapse to the
+// default (badge visible).
+func TestHideModelBadge_FalseRoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.HideModelBadge = ptrBool(true)
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	cfg.HideModelBadge = ptrBool(false)
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.HideModelBadge == nil || *read.HideModelBadge {
+		t.Fatalf("expected hide_model_badge=false (present), got %v", read.HideModelBadge)
+	}
+}
+
+// A nil HideModelBadge must be omitted from the /api/config JSON.
+func TestHideModelBadge_OmittedWhenNil(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	b, err := json.Marshal(cs.buildConfigResponse(cfg))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "hide_model_badge") {
+		t.Fatalf("expected hide_model_badge omitted from response when nil, got %s", b)
+	}
+}
+
 func TestGetConfigRespectsWorkspaceDirOverride(t *testing.T) {
 	cs := testConfigStore(t)
 	overrideDir := t.TempDir()

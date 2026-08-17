@@ -8,6 +8,7 @@
         openTerminalKey = $bindable<string | undefined>(),
         startTaskKey = $bindable<string | undefined>(),
         hideHints = $bindable(false),
+        hideModelBadge = $bindable(false),
         onDirty,
     }: {
         createTaskKey?: string | undefined;
@@ -15,6 +16,7 @@
         openTerminalKey?: string | undefined;
         startTaskKey?: string | undefined;
         hideHints?: boolean;
+        hideModelBadge?: boolean;
         onDirty?: () => void;
     } = $props();
 
@@ -145,6 +147,21 @@
     {#if invalidFlash}
         <p class="invalid-hint" role="alert">Invalid key — use a letter or a modifier combo.</p>
     {/if}
+</section>
+
+<section class="section">
+    <div class="section-header">
+        <h3 class="section-label">UI</h3>
+    </div>
+    <div class="shortcut-row">
+        <div class="shortcut-info">
+            <span class="shortcut-name">Hide model badge</span>
+            <span id="hide-model-badge-desc" class="shortcut-desc">Hide the model badge shown on task cards</span>
+        </div>
+        <div class="shortcut-controls">
+            <ToggleSwitch bind:checked={hideModelBadge} ariaLabel="Hide model badge" ariaDescribedby="hide-model-badge-desc" onChange={() => onDirty?.()} />
+        </div>
+    </div>
 </section>
 
 <style>
