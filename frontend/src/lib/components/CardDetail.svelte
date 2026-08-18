@@ -607,8 +607,8 @@
             if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
                 // Cyclic column focus switching: Board -> Chat -> Diff -> Board.
                 // Plain arrows keep native text-cursor movement in editable
-                // focus (incl. the chat input); Ctrl+arrows switch columns
-                // from any focus — the keyboard way out of the chat input.
+                // focus (incl. the chat input); Ctrl+Alt+arrows switch columns
+                // from any focus
                 const active = document.activeElement;
                 if (!canSwitchDetailColumn({
                     ctrlKey: e.ctrlKey,

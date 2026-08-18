@@ -9,10 +9,10 @@ export type DetailColumnId = 'board' | 'chat' | 'diff';
 
 /** Gate for the Left/Right column switch. Plain arrows only switch from
  *  non-editable focus (editables keep native text-cursor movement);
- *  Ctrl+arrows switch from any focus — the keyboard way out of the chat
- *  input. Never switches while a file is being edited (code-editor word
- *  movement), a column is fullscreen, a modal is open, on mobile, or the
- *  event was already handled. */
+ *  Ctrl+Alt+arrows switch from any focus — the keyboard way out of the chat
+ *  input (plain Ctrl+arrows stay native, e.g. word jump). Never switches
+ *  while a file is being edited (code-editor word movement), a column is
+ *  fullscreen, a modal is open, on mobile, or the event was already handled. */
 export function canSwitchDetailColumn(opts: {
     ctrlKey: boolean;
     altKey: boolean;
@@ -30,12 +30,15 @@ export function canSwitchDetailColumn(opts: {
         ctrlKey, altKey, metaKey, shiftKey, defaultPrevented, isMobile,
         blocked, editingFile, diffFullscreen, chatFullscreen, isEditable,
     } = opts;
-    if (altKey || metaKey || shiftKey) return false;
+    const ctrlAlt = ctrlKey && altKey;
+    if (metaKey || shiftKey) return false;
+    if (altKey && !ctrlAlt) return false; // Alt without Ctrl
+    if (ctrlKey && !ctrlAlt) return false; // plain Ctrl: no switch (native word jump)
     if (defaultPrevented) return false;
     if (isMobile) return false;
     if (blocked) return false;
     if (editingFile || diffFullscreen || chatFullscreen) return false;
-    if (isEditable && !ctrlKey) return false;
+    if (isEditable && !ctrlAlt) return false;
     return true;
 }
 
