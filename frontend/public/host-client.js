@@ -115,6 +115,13 @@
             save: () => call('editor.save', {}),
         },
 
+        preview: {
+            /** Serve a doc; resolves to { token, url }. Supersedes this editor's previous doc. */
+            serve: (content) => call('preview.serve', { content: String(content || '') }),
+            /** Free a served doc early (TTL is the backstop). */
+            release: (token) => call('preview.release', { token: String(token || '') }),
+        },
+
         log: (level, message) => call('log.write', { level: level || 'info', message: String(message || '') }),
 
         loading: (message) => call('ui.status', { state: 'loading', message: String(message || '') }),

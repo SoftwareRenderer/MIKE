@@ -13,6 +13,7 @@ import { uiCapabilities } from './handlers/ui';
 import { storageCapabilities } from './handlers/storage';
 import { editorCapabilities } from './handlers/editor';
 import { themeCapabilities } from './handlers/theme';
+import { previewCapabilities } from './handlers/preview';
 
 export {
     CAP_CREATE_TASK_INSERT_TEXT,
@@ -52,6 +53,10 @@ export {
     CAP_THEME_GET,
     CAP_THEME_UPDATE,
 } from './handlers/theme';
+export {
+    CAP_PREVIEW_SERVE,
+    CAP_PREVIEW_RELEASE,
+} from './handlers/preview';
 
 /** Fully-qualified capability name → definition. */
 export const SUPPORTED_CAPABILITIES: Record<string, CapabilityDef> = {
@@ -63,6 +68,7 @@ export const SUPPORTED_CAPABILITIES: Record<string, CapabilityDef> = {
     ...storageCapabilities,
     ...editorCapabilities,
     ...themeCapabilities,
+    ...previewCapabilities,
 };
 
 /**

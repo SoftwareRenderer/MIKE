@@ -18,7 +18,8 @@
         const _v = uiInjector.getPointVersion(INJECTION_POINTS.FILE_EDITOR);
         const anchorEl = extAnchorEl;
         if (!anchorEl) return;
-        uiInjector.renderSlot(INJECTION_POINTS.FILE_EDITOR, { component: 'FileEditor', filePath, projectId }, anchorEl);
+        // taskId lets host capabilities (e.g. preview.serve) resolve the task worktree.
+        uiInjector.renderSlot(INJECTION_POINTS.FILE_EDITOR, { component: 'FileEditor', filePath, projectId, taskId }, anchorEl);
         return () => uiInjector.teardownSlot(INJECTION_POINTS.FILE_EDITOR, anchorEl);
     });
     import { highlightSelectionMatches } from '@codemirror/search';

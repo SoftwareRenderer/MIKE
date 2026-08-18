@@ -54,6 +54,7 @@ type Server struct {
 	extLSPMgr      *lsp.ExtensionLSPManager
 	lspHandler     *lsp.LSPHandler
 	loginLimiter   *RateLimiter
+	previewStore   *previewStore
 	mux            *http.ServeMux
 	addr           string
 	frontendDist   string
@@ -113,6 +114,8 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		projectMux:   make(map[string]*sync.Mutex),
 		loginLimiter: newLoginRateLimiter(),
 	}
+	s.previewStore = newPreviewStore()
+	s.previewStore.startSweeper()
 
 	// Create session manager — fails if MIKE_LOGIN_PASSWORD is not set
 	sessionMgr, err := auth.NewSessionManager(store)
@@ -472,6 +475,10 @@ func newHybridListener(l net.Listener, stdCfg *stdtls.Config) *hybridListener {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	// Stop preview document cleanup
+	if s.previewStore != nil {
+		s.previewStore.stopSweeper()
+	}
 	// Stop all LSP connections and sandbox containers
 	if s.lspHandler != nil {
 		s.lspHandler.Close()
