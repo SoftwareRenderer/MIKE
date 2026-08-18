@@ -162,6 +162,12 @@
 
     // File editor overlay
     let editingFile = $state<{ path: string; lineNumber: number; displayPath: string } | null>(null);
+    let editingFilePath = $derived(editingFile?.path ?? '');
+    let editingFileLine = $derived(editingFile?.lineNumber ?? 0);
+    let editingFileDisplayPath = $derived(editingFile?.displayPath ?? '');
+    let editingTaskId = $derived(task?.id ?? '');
+    let editingTaskProjectId = $derived(task?.project_id ?? '');
+    let editingBaseRef = $derived(diffCache.state.baseRef ?? '');
     let editorFullscreen = $state(false);
     // Diff viewer fullscreen
     let diffFullscreen = $state(false);
@@ -954,14 +960,14 @@
                             {@const FileEditor = FileEditorComponent}
                             <FileEditor
                                 mode="diff"
-                                filePath={editingFile.path}
-                                targetLine={editingFile.lineNumber}
-                                displayPath={editingFile.displayPath}
-                                projectId={task.project_id}
-                                taskId={task.id}
+                                filePath={editingFilePath}
+                                targetLine={editingFileLine}
+                                displayPath={editingFileDisplayPath}
+                                projectId={editingTaskProjectId}
+                                taskId={editingTaskId}
                                 projectPath={projectPath}
                                 workspaceDir={workspaceDir}
-                                baseRef={diffCache.state.baseRef}
+                                baseRef={editingBaseRef}
                                 onClose={closeDiffEditor}
                                 onToggleFullscreen={toggleEditorFullscreen}
                                 mobileFullscreen={editorFullscreen}
