@@ -1,8 +1,49 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { resolveDetailColumn, resolveDiffFileTarget, type DetailColumnId } from '../use-task-detail-column-nav';
+import { resolveDetailColumn, resolveDiffFileTarget, canSwitchDetailColumn, type DetailColumnId } from '../use-task-detail-column-nav';
 
 // Pure resolvers for task-view column nav; DOM fixtures mirror CardDetail.
 const ORDER: DetailColumnId[] = ['board', 'chat', 'diff'];
+
+describe('canSwitchDetailColumn', () => {
+    const base = {
+        ctrlKey: false, altKey: false, metaKey: false, shiftKey: false,
+        defaultPrevented: false, isMobile: false, blocked: false,
+        editingFile: false, diffFullscreen: false, chatFullscreen: false,
+        isEditable: false,
+    };
+
+    it('switches on plain arrows from non-editable focus', () => {
+        expect(canSwitchDetailColumn(base)).toBe(true);
+    });
+
+    it('plain arrows in editable focus keep native text behavior (no switch)', () => {
+        expect(canSwitchDetailColumn({ ...base, isEditable: true })).toBe(false);
+    });
+
+    it('Ctrl+arrows switch columns even in editable focus (chat input escape)', () => {
+        expect(canSwitchDetailColumn({ ...base, ctrlKey: true })).toBe(true);
+        expect(canSwitchDetailColumn({ ...base, ctrlKey: true, isEditable: true })).toBe(true);
+    });
+
+    it('never switches while a file is being edited (code-editor word movement)', () => {
+        expect(canSwitchDetailColumn({ ...base, editingFile: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, ctrlKey: true, editingFile: true, isEditable: true })).toBe(false);
+    });
+
+    it('Alt/Meta/Shift never switch (even with Ctrl)', () => {
+        expect(canSwitchDetailColumn({ ...base, altKey: true, ctrlKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, metaKey: true, ctrlKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, shiftKey: true, ctrlKey: true })).toBe(false);
+    });
+
+    it('never switches when blocked (modal), fullscreen, mobile, or defaultPrevented', () => {
+        expect(canSwitchDetailColumn({ ...base, blocked: true, ctrlKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, diffFullscreen: true, ctrlKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, chatFullscreen: true, ctrlKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, isMobile: true, ctrlKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, defaultPrevented: true, ctrlKey: true })).toBe(false);
+    });
+});
 
 describe('resolveDetailColumn', () => {
     it('Right cycles board -> chat -> diff -> board', () => {

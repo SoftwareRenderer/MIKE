@@ -125,7 +125,8 @@ test.describe.serial('Task view column navigation', () => {
         await page.keyboard.press('ArrowRight');
         expect(await activeInfo(page)).toMatchObject({ isChatInput: true });
 
-        await page.keyboard.press('ArrowRight');
+        // Plain arrows edit text in the chat input; Ctrl+Arrow leaves it.
+        await page.keyboard.press('Control+ArrowRight');
         expect(await activeInfo(page)).toMatchObject({ isDiffHeader: true, inDiff: true });
 
         // Wrap: Right from Diff -> Board
@@ -139,8 +140,35 @@ test.describe.serial('Task view column navigation', () => {
         await page.keyboard.press('ArrowLeft');
         expect(await activeInfo(page)).toMatchObject({ isChatInput: true });
 
-        await page.keyboard.press('ArrowLeft');
+        await page.keyboard.press('Control+ArrowLeft');
         expect(await activeInfo(page)).toMatchObject({ isOverviewCard: true, inBoard: true });
+    });
+
+    test('Left/Right in the chat input is native text editing (no column switch)', async ({ page }) => {
+        const input = page.locator('.column-chat textarea');
+        await input.focus();
+        await input.fill('hello world'); // caret at end (11)
+
+        await page.keyboard.press('ArrowLeft');
+        expect(await activeInfo(page)).toMatchObject({ isChatInput: true, inChat: true });
+        expect(await input.evaluate(el => (el as HTMLTextAreaElement).selectionStart)).toBe(10);
+
+        await page.keyboard.press('ArrowRight');
+        expect(await activeInfo(page)).toMatchObject({ isChatInput: true, inChat: true });
+        expect(await input.evaluate(el => (el as HTMLTextAreaElement).selectionStart)).toBe(11);
+    });
+
+    test('Ctrl+Left/Right in the chat input switch columns', async ({ page }) => {
+        const input = page.locator('.column-chat textarea');
+        await input.focus();
+        await input.fill('hello world');
+
+        await page.keyboard.press('Control+ArrowRight');
+        expect(await activeInfo(page)).toMatchObject({ isDiffHeader: true, inDiff: true });
+
+        // Back: Ctrl+Left from Diff lands on the chat input again.
+        await page.keyboard.press('Control+ArrowLeft');
+        expect(await activeInfo(page)).toMatchObject({ isChatInput: true });
     });
 
     test('Up/Down move between overview cards when the Board column has focus', async ({ page }) => {
