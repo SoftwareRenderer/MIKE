@@ -7,6 +7,38 @@
 
 export type DetailColumnId = 'board' | 'chat' | 'diff';
 
+/** Gate for the Left/Right column switch. Plain arrows only switch from
+ *  non-editable focus (editables keep native text-cursor movement);
+ *  Ctrl+arrows switch from any focus — the keyboard way out of the chat
+ *  input. Never switches while a file is being edited (code-editor word
+ *  movement), a column is fullscreen, a modal is open, on mobile, or the
+ *  event was already handled. */
+export function canSwitchDetailColumn(opts: {
+    ctrlKey: boolean;
+    altKey: boolean;
+    metaKey: boolean;
+    shiftKey: boolean;
+    defaultPrevented: boolean;
+    isMobile: boolean;
+    blocked: boolean;
+    editingFile: boolean;
+    diffFullscreen: boolean;
+    chatFullscreen: boolean;
+    isEditable: boolean;
+}): boolean {
+    const {
+        ctrlKey, altKey, metaKey, shiftKey, defaultPrevented, isMobile,
+        blocked, editingFile, diffFullscreen, chatFullscreen, isEditable,
+    } = opts;
+    if (altKey || metaKey || shiftKey) return false;
+    if (defaultPrevented) return false;
+    if (isMobile) return false;
+    if (blocked) return false;
+    if (editingFile || diffFullscreen || chatFullscreen) return false;
+    if (isEditable && !ctrlKey) return false;
+    return true;
+}
+
 /** Cyclic Left/Right over the columns. `current` null (or not in `order`) is
  *  the neutral anchor: Right -> first, Left -> last. */
 export function resolveDetailColumn(
