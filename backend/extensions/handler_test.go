@@ -1117,6 +1117,189 @@ func TestHandleCheckUpdates_NoCommitChange(t *testing.T) {
 	}
 }
 
+// setupChangelogRegistry writes a registry index (as file:// registry.json) and
+// optionally a published changelog file at <base>/<author-slug>/<name>.
+func setupChangelogRegistry(t *testing.T, index RegistryIndex, changelog string) string {
+	t.Helper()
+	base := t.TempDir()
+	indexJSON, err := json.Marshal(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "registry.json"), indexJSON, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if changelog != "" {
+		entry := index[0]
+		dir := filepath.Join(base, authorDir(entry.Author))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, entry.Name), []byte(changelog), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return "file://" + filepath.Join(base, "registry.json")
+}
+
+func TestHandleCheckUpdates_Changelog(t *testing.T) {
+	commitA := strings.Repeat("a", 64) // installed
+	commitB := strings.Repeat("b", 64) // available
+	index := RegistryIndex{{
+		Name:    "changelog-ext",
+		Version: "1.0.0",
+		Type:    ExtensionTypeUI,
+		Author:  "Software Renderer",
+		Commit:  commitB,
+	}}
+	changelog := `{"hash":"` + commitA + `","version":"1.0.0","description":"Initial release"}` + "\n" +
+		`{"hash":"` + commitB + `","version":"1.0.0","description":"Fix hover offsets"}` + "\n"
+	registryURL := setupChangelogRegistry(t, index, changelog)
+
+	h := testHandler(t)
+	h.config.RegistryURL = registryURL
+
+	ext := makeTestExt("changelog-ext", "changelog-ext", ExtensionTypeUI)
+	ext.Commit = commitA
+	_ = h.store.Create(ext)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
+	w := httptest.NewRecorder()
+	h.HandleCheckUpdates(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var result []ExtensionUpdate
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("result count = %d, want 1", len(result))
+	}
+	// Only the change newer than the installed hash is reported.
+	if len(result[0].Changelog) != 1 {
+		t.Fatalf("changelog count = %d, want 1 (%+v)", len(result[0].Changelog), result[0].Changelog)
+	}
+	if result[0].Changelog[0].Hash != commitB || result[0].Changelog[0].Description != "Fix hover offsets" {
+		t.Errorf("changelog[0] = %+v, want the commitB entry", result[0].Changelog[0])
+	}
+}
+
+func TestHandleCheckUpdates_ChangelogNoMatchingHash(t *testing.T) {
+	// Changelog exists but does not contain the installed hash → no changes shown.
+	index := RegistryIndex{{
+		Name:    "changelog-ext",
+		Version: "1.0.0",
+		Type:    ExtensionTypeUI,
+		Author:  "Software Renderer",
+		Commit:  strings.Repeat("b", 64),
+	}}
+	changelog := `{"hash":"` + strings.Repeat("c", 64) + `","version":"1.0.0","description":"x"}` + "\n" +
+		`{"hash":"` + strings.Repeat("b", 64) + `","version":"1.0.0","description":"y"}` + "\n"
+	registryURL := setupChangelogRegistry(t, index, changelog)
+
+	h := testHandler(t)
+	h.config.RegistryURL = registryURL
+
+	ext := makeTestExt("changelog-ext", "changelog-ext", ExtensionTypeUI)
+	ext.Commit = strings.Repeat("a", 64) // absent from the changelog
+	_ = h.store.Create(ext)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
+	w := httptest.NewRecorder()
+	h.HandleCheckUpdates(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var result []ExtensionUpdate
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("result count = %d, want 1", len(result))
+	}
+	if len(result[0].Changelog) != 0 {
+		t.Errorf("changelog = %+v, want empty (no matching hash)", result[0].Changelog)
+	}
+}
+
+func TestHandleCheckUpdates_ChangelogFetchFails(t *testing.T) {
+	// No changelog published → the update is still reported, non-fatal.
+	index := RegistryIndex{{
+		Name:    "changelog-ext",
+		Version: "1.0.0",
+		Type:    ExtensionTypeUI,
+		Author:  "Software Renderer",
+		Commit:  strings.Repeat("b", 64),
+	}}
+	registryURL := setupChangelogRegistry(t, index, "") // no changelog file
+
+	h := testHandler(t)
+	h.config.RegistryURL = registryURL
+
+	ext := makeTestExt("changelog-ext", "changelog-ext", ExtensionTypeUI)
+	ext.Commit = strings.Repeat("a", 64)
+	_ = h.store.Create(ext)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
+	w := httptest.NewRecorder()
+	h.HandleCheckUpdates(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var result []ExtensionUpdate
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("result count = %d, want 1 (fetch failure must not block update detection)", len(result))
+	}
+	if len(result[0].Changelog) != 0 {
+		t.Errorf("changelog = %+v, want empty", result[0].Changelog)
+	}
+}
+
+func TestHandleCheckUpdates_NoChangelogForVersionUpdate(t *testing.T) {
+	// Non-git-pinned (version-only) updates have no commit to key on — no
+	// changelog is fetched or shown, even if one is published.
+	index := RegistryIndex{{
+		Name:    "ver-ext",
+		Version: "2.0.0",
+		Type:    ExtensionTypeUI,
+		Author:  "Software Renderer",
+	}}
+	changelog := `{"hash":"` + strings.Repeat("b", 64) + `","version":"2.0.0","description":"should not appear"}` + "\n"
+	registryURL := setupChangelogRegistry(t, index, changelog)
+
+	h := testHandler(t)
+	h.config.RegistryURL = registryURL
+
+	ext := makeTestExt("ver-ext", "ver-ext", ExtensionTypeUI)
+	ext.Version = "1.0.0" // no Commit — legacy version-pinned install
+	_ = h.store.Create(ext)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/extensions/check-updates", nil)
+	w := httptest.NewRecorder()
+	h.HandleCheckUpdates(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var result []ExtensionUpdate
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("result count = %d, want 1", len(result))
+	}
+	if len(result[0].Changelog) != 0 {
+		t.Errorf("changelog = %+v, want empty for version-only update", result[0].Changelog)
+	}
+}
+
 func TestHandleCheckUpdates_NewPermissions(t *testing.T) {
 	// Registry version requests more UI permissions than the installed version.
 	index := RegistryIndex{
@@ -1774,5 +1957,3 @@ func TestHandleProxy_DoesNotFollowRedirects(t *testing.T) {
 		t.Fatal("proxy followed a redirect to a non-allowed host (SSRF via redirect)")
 	}
 }
-
-
