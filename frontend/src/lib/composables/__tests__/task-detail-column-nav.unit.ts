@@ -20,28 +20,37 @@ describe('canSwitchDetailColumn', () => {
         expect(canSwitchDetailColumn({ ...base, isEditable: true })).toBe(false);
     });
 
-    it('Ctrl+arrows switch columns even in editable focus (chat input escape)', () => {
-        expect(canSwitchDetailColumn({ ...base, ctrlKey: true })).toBe(true);
-        expect(canSwitchDetailColumn({ ...base, ctrlKey: true, isEditable: true })).toBe(true);
+    it('Ctrl+Alt+arrows switch columns even in editable focus (chat input escape)', () => {
+        expect(canSwitchDetailColumn({ ...base, ctrlKey: true, altKey: true })).toBe(true);
+        expect(canSwitchDetailColumn({ ...base, ctrlKey: true, altKey: true, isEditable: true })).toBe(true);
+    });
+
+    it('plain Ctrl+arrows never switch (native word jump)', () => {
+        expect(canSwitchDetailColumn({ ...base, ctrlKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, ctrlKey: true, isEditable: true })).toBe(false);
+    });
+
+    it('Alt alone never switches', () => {
+        expect(canSwitchDetailColumn({ ...base, altKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, altKey: true, isEditable: true })).toBe(false);
     });
 
     it('never switches while a file is being edited (code-editor word movement)', () => {
         expect(canSwitchDetailColumn({ ...base, editingFile: true })).toBe(false);
-        expect(canSwitchDetailColumn({ ...base, ctrlKey: true, editingFile: true, isEditable: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, ctrlKey: true, altKey: true, editingFile: true, isEditable: true })).toBe(false);
     });
 
-    it('Alt/Meta/Shift never switch (even with Ctrl)', () => {
-        expect(canSwitchDetailColumn({ ...base, altKey: true, ctrlKey: true })).toBe(false);
-        expect(canSwitchDetailColumn({ ...base, metaKey: true, ctrlKey: true })).toBe(false);
-        expect(canSwitchDetailColumn({ ...base, shiftKey: true, ctrlKey: true })).toBe(false);
+    it('Meta/Shift never switch (even with Ctrl+Alt)', () => {
+        expect(canSwitchDetailColumn({ ...base, metaKey: true, ctrlKey: true, altKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, shiftKey: true, ctrlKey: true, altKey: true })).toBe(false);
     });
 
     it('never switches when blocked (modal), fullscreen, mobile, or defaultPrevented', () => {
-        expect(canSwitchDetailColumn({ ...base, blocked: true, ctrlKey: true })).toBe(false);
-        expect(canSwitchDetailColumn({ ...base, diffFullscreen: true, ctrlKey: true })).toBe(false);
-        expect(canSwitchDetailColumn({ ...base, chatFullscreen: true, ctrlKey: true })).toBe(false);
-        expect(canSwitchDetailColumn({ ...base, isMobile: true, ctrlKey: true })).toBe(false);
-        expect(canSwitchDetailColumn({ ...base, defaultPrevented: true, ctrlKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, blocked: true, ctrlKey: true, altKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, diffFullscreen: true, ctrlKey: true, altKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, chatFullscreen: true, ctrlKey: true, altKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, isMobile: true, ctrlKey: true, altKey: true })).toBe(false);
+        expect(canSwitchDetailColumn({ ...base, defaultPrevented: true, ctrlKey: true, altKey: true })).toBe(false);
     });
 });
 
