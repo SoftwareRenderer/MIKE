@@ -197,6 +197,14 @@
             label: 'Save the open file',
             description: 'Can save the file currently open in the editor.',
         },
+        'preview.serve': {
+            label: 'Show a live page preview',
+            description: `Can display the open file as a live web page in a sandboxed preview.`,
+        },
+        'preview.release': {
+            label: 'Close a preview page',
+            description: 'Closes a preview page that was previously opened.',
+        },
     };
 
     // Get list of capability keys for an installed extension

@@ -42,35 +42,19 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 	}
 	taskID := r.URL.Query().Get("task")
 
-	// Determine worktree path (host filesystem)
-	var worktreePath string
-	if taskID != "" {
-		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
-		if err != nil {
-			JSONError(w, http.StatusNotFound, "task worktree not found")
-			return
-		}
-		worktreePath = wtPath
-	} else {
-		worktreePath = project.Path
-	}
 	// Sandbox availability check (required but don't exec inside sandbox)
 	if project.SandboxEnabled {
 		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
 			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
 			return
 		}
-		// Translate sandbox path to host path
-		mountPath := "/home/sandbox/" + project.Name
-		cleanPath := filepath.Clean(path)
-		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
-			rel := cleanPath[len(mountPath):]
-			if rel == "" {
-				path = worktreePath
-			} else {
-				path = filepath.Join(worktreePath, rel)
-			}
-		}
+	}
+	// Resolve the host worktree path and translate sandbox mount paths
+	// (shared with /api/preview).
+	worktreePath, path, err := s.resolveWorktreeForFile(project, taskID, path)
+	if err != nil {
+		JSONError(w, http.StatusNotFound, "task worktree not found")
+		return
 	}
 	// Validate path is within allowed project root
 	if err := s.validateFSPath(path, r); err != nil {

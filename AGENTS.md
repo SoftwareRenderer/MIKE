@@ -378,6 +378,11 @@ The Extensions system replaces hardcoded LSP configurations with user-defined an
 - `GET /api/extensions/{id}/logs` — Get sandbox logs
 - `GET /api/extensions/build-progress?name=` — SSE build progress stream
 
+**Preview endpoints** (served to sandboxed preview iframes — see "Preview capability" below):
+- `POST /api/preview` — session + CSRF; stores a document, returns `{token, url}`
+- `GET /api/preview/{token}/[path...]` — public (token is the bearer): the doc or a sibling asset
+- `DELETE /api/preview/{token}` — session + CSRF; releases the doc early (TTL is the backstop)
+
 **Extension types:**
 - `lsp` — Language Server Protocol servers (run in gVisor sandboxes)
 - `ui` — UI plugins (inject into existing components via slots)
@@ -506,6 +511,58 @@ Extension-specific tests are colocated under `extensions/<type>/<name>/tests/`
 (loading Playwright from the frontend workspace), not in `frontend/tests/`. Shared
 extension logic (e.g. the markdown↔Wordgard serializer in `serializer.js`) is a
 plain script loaded by both the extension and its tests — never copy it.
+
+**Preview capability (`preview.serve` / `preview.release`):** Generic host
+support for UI extensions that render the open file (e.g. the
+`html-preview` extension — "Preview" footer button for `.html`/`.xhtml`/`.svg`
+files, full-bleed overlay, live refresh on `editor.contentChange`, and
+root-relative `src`/`href`/CSS-`url()` refs rewritten to file-relative before
+serve so the file's directory is the preview's site root).
+
+- **Capability** (`frontend/src/lib/extensions/handlers/preview.ts`):
+  `preview.serve(content)` POSTs to `POST /api/preview` and returns
+  `{token, url}`. The `project`/`path`/`task` body fields are filled by the
+  host from its OWN injection context (`FileEditor` passes `filePath`,
+  `projectId`, `taskId`) — never from extension arguments, so an extension can
+  not make the server serve files from an arbitrary directory. A new serve
+  from the same editor implicitly releases that editor's previous doc
+  (anchor-scoped tracking in `preview.ts`, generation-ordered so a stale
+  in-flight serve can't release a newer serve's doc). `preview.release(token)`
+  DELETEs the doc early — html-preview uses it for immediate reclaim on
+  close; re-serves are implicit and the TTL sweep is the backstop.
+- **Go** (`backend/server/handler_preview.go`): in-memory store — 128-bit
+  bearer token, 10-min idle TTL (refreshed per read), 32-doc cap (oldest
+  evicted), 10 MB/doc, 30 s background sweep. `GET /api/preview/{token}/`
+  serves the doc (content type derived from the previewed file's extension —
+  host-controlled from the injection context, defaulting to
+  `text/html; charset=utf-8`; `Cache-Control: no-store`; permissive preview
+  CSP); `GET /api/preview/{token}/<rel>` serves sibling
+  assets under the file's own directory (worktree-aware resolution shared
+  with `/api/fs/read`; `filepath.Clean` + `filepath.Rel` containment +
+  `EvalSymlinks` re-containment — traversal and symlink escapes are 404).
+  The doc URL ends in `/` so relative asset URLs resolve under it.
+- **Security model** (host protection first): the doc loads in a nested
+  `<iframe sandbox="allow-scripts">` (opaque origin) inside the extension's
+  already-sandboxed iframe → the previewed page cannot read host cookies
+  (session cookie is HttpOnly + SameSite=Lax and is not attached to
+  cross-site requests), cannot touch the host DOM, cannot navigate the top
+  window, submit forms, or pop up windows; `/api` mutations additionally
+  require the CSRF header. Its only network power is outbound connections
+  from the user's browser (CDN assets etc.) — same as opening the file in a
+  regular browser. The permissive CSP on the doc response is intentional
+  (scripts/external assets must work); CORSMiddleware therefore skips the
+  app-wide strict CSP on `/api/preview/*` (multiple CSP headers union to the
+  most restrictive and would neuter the preview). No `frame-ancestors`
+  directive — the doc must be frameable. Isolation is regression-tested in
+  e2e by probes the previewed page runs on itself (opaque origin: host DOM/
+  Web Storage/cookies unreadable — `document.cookie` throws; host API
+  responses CORS-rejected since the server sets no CORS headers; the nested
+  iframe's `sandbox="allow-scripts"` attribute is asserted as deployed).
+- **Files**: `backend/server/handler_preview.go` (+`_test.go`),
+  `frontend/src/lib/extensions/handlers/preview.ts` (+`__tests__/preview.unit.ts`),
+  `frontend/public/host-client.js` (`extHost.preview.{serve,release}`),
+  `extensions/softwarerenderer/html-preview/` (extension, incl.
+  `tests/html-preview-iframe.mjs`), e2e `frontend/tests/e2e/html-preview.spec.ts`.
 
 **Registry:** URL sourced exclusively from the `MIKE_REGISTRY_URL` env var (no longer DB-backed; default `https://getmike.dev/extensions/registry.json`). Bare filesystem paths (no `http(s)://`/`file://` scheme) are treated as local files resolved against the working directory (e.g. `MIKE_REGISTRY_URL=../MIKE-extensions/registry.json`). Extensions are git-pinned: each entry carries `author`/`repo`/`commit`/`subdir`, and the server clones the repo, checks out exactly `commit` (a full 40-char SHA-1 or 64-char SHA-256 hash), verifies `git rev-parse HEAD` matches, and only then installs the `subdir` content into `./extensions/<author>/<name>`.
 

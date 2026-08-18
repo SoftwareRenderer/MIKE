@@ -41,6 +41,10 @@ func isPublicPath(path, method string) bool {
 	if strings.HasPrefix(path, "/extensions/") {
 		return true
 	}
+	// Preview docs/assets
+	if strings.HasPrefix(path, "/api/preview/") {
+		return method == http.MethodGet || method == http.MethodHead
+	}
 	// PWA assets (manifest, service worker, icons) are always public
 	if path == "/manifest.webmanifest" ||
 		path == "/sw.js" ||
@@ -69,14 +73,15 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 
-		// Content Security Policy
-		csp := "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self';"
-		if nonce, ok := r.Context().Value(nonceKey).(string); ok && nonce != "" {
-			csp += fmt.Sprintf(" script-src 'self' 'nonce-%s';", nonce)
-		} else {
-			csp += " script-src 'self';"
+		if !strings.HasPrefix(r.URL.Path, "/api/preview/") {
+			csp := "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self';"
+			if nonce, ok := r.Context().Value(nonceKey).(string); ok && nonce != "" {
+				csp += fmt.Sprintf(" script-src 'self' 'nonce-%s';", nonce)
+			} else {
+				csp += " script-src 'self';"
+			}
+			w.Header().Set("Content-Security-Policy", csp)
 		}
-		w.Header().Set("Content-Security-Policy", csp)
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
