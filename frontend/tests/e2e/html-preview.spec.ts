@@ -1,14 +1,25 @@
 import { test, expect, type Browser, type Page, type Frame } from '@playwright/test';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'path';
+import {
+    getProjectId,
+    apiGetConfig,
+    getTaskData,
+    ensureTaskStarted,
+    createTaskViaApi,
+    navigateToTask,
+    csrfFetch,
+} from './helpers';
 
 // HTML preview extension — end-to-end: installs the local extension via
 // install-local, then verifies the Preview button (HTML-family only), the
 // rendered preview (scripts run, root-relative + relative sibling assets
-// load), live refresh on edits, code-view restore, and host isolation
-// (the previewed page probes its own sandbox: no host DOM/storage/cookies,
-// host API responses CORS-rejected). Fixtures live in a uniquely named
-// /tmp/kanban-test-repo subdir removed in afterAll.
+// load), and the preview-as-code-view-mirror contract: unsaved code-view
+// edits refresh the preview live, and external on-disk changes flow
+// code-view → preview in both the explorer and the task view. Also covers
+// host isolation (the previewed page probes its own sandbox: no host
+// DOM/storage/cookies, host API responses CORS-rejected). Fixtures live in
+// a uniquely named /tmp/kanban-test-repo subdir removed in afterAll.
 
 const TEST_REPO = '/tmp/kanban-test-repo';
 const TS = Date.now();
@@ -71,6 +82,25 @@ const REL_CSS_FIXTURE = `#rel-box {
 `;
 
 const SVG_FIXTURE = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="teal"/></svg>`;
+
+// Task-view fixture (lives in a task worktree): minimal page, one title.
+const TASK_FIXTURE = (tag: string) =>
+    `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><h1 id="title">TASK-PREVIEW-${tag}</h1></body></html>`;
+
+/** Worktree host path for a task: <workspace_dir>/<projectId>/<taskId> (authenticated in-page config read). */
+async function getWorktreeDir(page: Page, projectId: string, taskId: string): Promise<string> {
+    const config = await apiGetConfig(page);
+    const workspaceDir = config?.workspace_dir || '';
+    return join(workspaceDir, projectId, taskId);
+}
+
+/** Poll the previewed document's #title (the frame is replaced on every re-serve). */
+async function previewTitle(page: Page): Promise<string | null> {
+    const f = page.frames().find(fr => fr.url().includes('/api/preview/'));
+    if (!f) return null;
+    const el = f.locator('#title');
+    return (await el.count()) > 0 ? el.textContent() : null;
+}
 
 // No page fixture in beforeAll/afterAll — dedicated logged-in context.
 async function setupPage(browser: Browser) {
@@ -230,7 +260,7 @@ test.describe.serial('HTML Preview extension', () => {
     await expect(btn).not.toHaveClass(/active/);
   });
 
-  test('code-view edits refresh the preview live', async ({ page }) => {
+  test('code-view edits (even unsaved) refresh the preview live', async ({ page }) => {
     await openFile(page, [`html-preview-${TS}`, PAGE_FILE]);
     const btn = previewButton(page);
     await expect(btn).toBeVisible({ timeout: 10000 });
@@ -239,9 +269,11 @@ test.describe.serial('HTML Preview extension', () => {
     const frame = await previewFrameOf(page);
     await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
 
-    // Edit the code view (the CodeMirror view stays in the DOM while hidden).
-    const updated = `LIVE-UPDATED-${TS}`;
-    const newContent = HTML_FIXTURE.replace('HTML Preview Fixture', updated);
+    // Edit the code view only (CodeMirror dispatch; the on-disk file is
+    // untouched). The preview mirrors the code view, so it must follow the
+    // unsaved buffer.
+    const bufferOnly = `LIVE-BUFFER-${TS}`;
+    const newContent = HTML_FIXTURE.replace('HTML Preview Fixture', bufferOnly);
     await page.evaluate((content) => {
       const cm = document.querySelector('.file-editor.active .cm-editor') as any;
       cm.__view.dispatch({
@@ -249,17 +281,58 @@ test.describe.serial('HTML Preview extension', () => {
       });
     }, newContent);
 
-    // Debounced re-serve + reload → the preview shows the new title.
-    await expect.poll(async () => {
-      const f = page.frames().find(fr => fr.url().includes('/api/preview/'));
-      if (!f) return null;
-      const el = f.locator('#title');
-      return (await el.count()) > 0 ? await el.textContent() : null;
-    }, { timeout: 15000 }).toContain(updated);
+    // Extension debounce (300ms) + re-serve: the preview must pick up the
+    // buffer content without any save or disk write.
+    await expect.poll(() => previewTitle(page), { timeout: 15000 }).toContain(bufferOnly);
 
-    // Toggle off and restore the original fixture (cleanup for other tests).
+    // Toggle off, then drop the persisted editor draft so later tests open
+    // with a clean (disk-matching) buffer.
     await btn.click();
     await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
+    const filePath = join(FIXTURE_DIR, PAGE_FILE);
+    await page.evaluate(async (path) => {
+      return new Promise<void>((resolve) => {
+        const req = indexedDB.open('kanban-storage', 3);
+        req.onsuccess = () => {
+          const tx = req.result.transaction('editor-drafts', 'readwrite');
+          tx.objectStore('editor-drafts').delete(path);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+        };
+        req.onerror = () => resolve();
+      });
+    }, filePath);
+  });
+
+  test('external on-disk changes refresh the code view and the preview live', async ({ page }) => {
+    await openFile(page, [`html-preview-${TS}`, PAGE_FILE]);
+    const btn = previewButton(page);
+    await expect(btn).toBeVisible({ timeout: 10000 });
+    await btn.click();
+    await expect(page.locator('.file-editor.active .editor-wrapper')).toHaveCSS('display', 'none', { timeout: 10000 });
+    const frame = await previewFrameOf(page);
+    await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
+
+    // Change the file on disk (terminal/agent/git equivalent). The fs watcher
+    // (500ms) must reconcile the code view, and the preview must mirror it.
+    const updated = `LIVE-DISK-${TS}`;
+    const newContent = HTML_FIXTURE.replace('HTML Preview Fixture', updated);
+    const filePath = join(FIXTURE_DIR, PAGE_FILE);
+    writeFileSync(filePath, newContent);
+    try {
+      // (a) The code view reconciles the on-disk content into the buffer.
+      await expect.poll(() => page.evaluate(() => {
+        const cm = document.querySelector('.file-editor.active .cm-editor') as any;
+        return cm ? cm.__view.state.doc.toString() : '';
+      }), { timeout: 20000 }).toContain(updated);
+      // (b) The preview mirrors the code view.
+      await expect.poll(() => previewTitle(page), { timeout: 20000 }).toContain(updated);
+    } finally {
+      // Restore the original fixture (cleanup for other tests), then toggle off.
+      writeFileSync(filePath, HTML_FIXTURE);
+      await btn.click();
+      await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
+    }
   });
 
   test('previewed page is isolated from the host', async ({ page }) => {
@@ -289,5 +362,62 @@ test.describe.serial('HTML Preview extension', () => {
 
     await btn.click();
     await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
+  });
+
+  test('task view: on-disk changes (e.g. agent writes) refresh the preview live', async ({ page }) => {
+    test.setTimeout(90000);
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+    const projectId = await getProjectId(page);
+    // Own task (not the shared global-setup ones) — moved back to backlog in finally.
+    const taskId = await createTaskViaApi(page, projectId, `preview live ${TS}`);
+    let worktreeDir = '';
+    try {
+      // Start the task (executor creates the worktree); wait for the branch.
+      await ensureTaskStarted(page, projectId, taskId);
+      await expect(async () => {
+        const t = await getTaskData(page, projectId, taskId);
+        expect(t.branch).toBeTruthy();
+      }).toPass({ timeout: 30000 });
+
+      // Write an HTML fixture into the worktree (like an agent would).
+      worktreeDir = await getWorktreeDir(page, projectId, taskId);
+      const absDir = join(worktreeDir, `preview-live-${TS}`);
+      const absFile = join(absDir, 'index.html');
+      mkdirSync(absDir, { recursive: true });
+      writeFileSync(absFile, TASK_FIXTURE('V1'));
+
+      // Open the task view; the untracked fixture must appear in the diff column.
+      await navigateToTask(page, taskId, projectId);
+      const fileSection = page.locator('.diff-file-section', { hasText: `preview-live-${TS}` });
+      await expect(fileSection).toBeVisible({ timeout: 30000 });
+
+      // Open the editor from a diff row and start the preview.
+      await fileSection.locator('.diff-row-clickable').first().click();
+      await expect(page.locator('.file-editor .cm-editor')).toBeVisible({ timeout: 15000 });
+      const btn = page.locator('.file-editor .ext-footer-btn', { hasText: 'Preview' });
+      await expect(btn).toBeVisible({ timeout: 10000 });
+      await btn.click();
+      await expect(page.locator('.file-editor .editor-wrapper')).toHaveCSS('display', 'none', { timeout: 10000 });
+      const frame = await previewFrameOf(page);
+      await expect(frame.locator('#title')).toHaveText('TASK-PREVIEW-V1', { timeout: 15000 });
+
+      // External (agent/terminal) write to the worktree file.
+      writeFileSync(absFile, TASK_FIXTURE('V2'));
+      // (a) The diff-mode code view reconciles the on-disk content...
+      await expect.poll(() => page.evaluate(() => {
+        const cm = document.querySelector('.file-editor .cm-editor') as any;
+        return cm ? cm.__view.state.doc.toString() : '';
+      }), { timeout: 20000 }).toContain('TASK-PREVIEW-V2');
+      // (b) ...and the preview mirrors it.
+      await expect.poll(() => previewTitle(page), { timeout: 20000 }).toContain('TASK-PREVIEW-V2');
+    } finally {
+      try { rmSync(join(worktreeDir, `preview-live-${TS}`), { recursive: true, force: true }); } catch { /* ignore */ }
+      // Return the task to backlog (stops the executor; keeps shared board helpers stable).
+      await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+        method: 'POST',
+        body: { status: 'backlog' },
+      });
+    }
   });
 });
