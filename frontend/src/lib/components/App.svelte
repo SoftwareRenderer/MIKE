@@ -3,14 +3,14 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
-import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
+    import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
-import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
-import { getBoardCache, boardCacheKey } from '$lib/storage';
-import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
-import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
-import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
-import kanbanIcon from '$lib/assets/icons/kanban.svg';
+    import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
+    import { getBoardCache, boardCacheKey } from '$lib/storage';
+    import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
+    import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
+    import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
+    import kanbanIcon from '$lib/assets/icons/kanban.svg';
     import type { Project, Task, Config, StreamEvent } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
@@ -411,7 +411,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 }
             },
             onFsEvent: (op, path) => {
-                if (showExplorerViewVal || showTaskExplorerVal) {
+                if (showExplorerViewVal || showTaskExplorerVal || (uiStore.showCardDetail && appStore.selectedTask)) {
                     fsEventQueue = [...fsEventQueue, { op, path }];
                 }
             },
@@ -1179,10 +1179,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         onClose={() => { showTaskExplorerVal = false; updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: null, file: null }, false, true); fsEventQueue = []; }}
                     />
                 {:else if uiStore.showCardDetail && appStore.selectedTask}
-                    <CardDetail task={appStore.selectedTask} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
+                    <CardDetail task={appStore.selectedTask} tasks={tasks} projectPath={currentProject?.path} projectName={currentProject?.name} workspaceDir={cfg?.workspace_dir} sandboxEnabled={currentProject?.sandbox_enabled} fsEventQueue={fsEventQueue} activeTab={cardDetailActiveTab} onActiveTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => cardDetailActiveTab = tab} onClose={(status?: string) => {
                         if (status) scrollToColumn = status;
                         uiStore.showCardDetail = false;
                         appStore.selectedTask = null;
+                        fsEventQueue = [];
                         updateUrl({ project: currentProject?.id }, true, true);
                     }} onSelectTask={(t: Task) => {
                         // Push URL first so the subscription sees updated URL and skips replaceState

@@ -151,13 +151,12 @@
         onHasChanges(filePath, hasChanges);
     });
 
-    // When an fs_event targets the currently-open file, merge the external edit
-    // into the buffer without discarding the user's unsaved edits
+    // On any fs_event, reconcile THIS editor's own file against disk
     let lastHandledEvent: { op: string; path: string } | null = null;
     $effect(() => {
         const evt = pendingFsEvent;
         if (!evt) return;
-        if (mode !== 'explorer' || !active || evt.path !== filePath) return;
+        if (!active) return;
         if (loading || !editorReady || fileNotFound || fileTooLarge) return;
         if (lastHandledEvent === evt) return;
         lastHandledEvent = evt;

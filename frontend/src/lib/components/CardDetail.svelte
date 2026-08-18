@@ -51,7 +51,7 @@
     import MultiSelectBar from './MultiSelectBar.svelte';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
 
-    let { task, tasks, projectPath, projectName, workspaceDir, sandboxEnabled, onClose, onSelectTask, onRefreshBoard, onOpenTerminal, onOpenExplorer, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; tasks?: Task[]; projectPath?: string; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; onOpenTerminal?: () => void; onOpenExplorer?: () => void; activeTab?: 'context' | 'chat' | 'diff' | 'checkpoint'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff' | 'checkpoint') => void } = $props();
+    let { task, tasks, projectPath, projectName, workspaceDir, sandboxEnabled, fsEventQueue, onClose, onSelectTask, onRefreshBoard, onOpenTerminal, onOpenExplorer, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; tasks?: Task[]; projectPath?: string; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; fsEventQueue?: { op: 'create' | 'delete'; path: string }[]; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; onOpenTerminal?: () => void; onOpenExplorer?: () => void; activeTab?: 'context' | 'chat' | 'diff' | 'checkpoint'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff' | 'checkpoint') => void } = $props();
 
     let allTasks = $derived(tasks || appStore.board?.tasks || []);
 
@@ -193,8 +193,24 @@
             return `/home/sandbox/${projectName}/${relativePath}`;
         }
         if (!workspaceDir) return null;
-        return `${workspaceDir.replace(/\/+$/, '')}/${task.id}/${relativePath}`;
+
+        return `${workspaceDir.replace(/\/+$/, '')}/${task.project_id}/${task.id}/${relativePath}`;
     }
+
+    // Consume fs events from the shared queue
+    let pendingFsEvent = $state<{ op: 'create' | 'delete'; path: string } | null>(null);
+    let lastFsQueueLen = $state(0);
+    $effect(() => {
+        const len = (fsEventQueue || []).length;
+        if (len === 0) {
+            lastFsQueueLen = 0;
+            return;
+        }
+        if (len > lastFsQueueLen) {
+            pendingFsEvent = (fsEventQueue || [])[len - 1];
+            lastFsQueueLen = len;
+        }
+    });
 
     function handleDiffLineClick(relativePath: string, lineNumber: number) {
         const fullPath = resolveFilePath(relativePath);
@@ -968,6 +984,7 @@
                                 projectPath={projectPath}
                                 workspaceDir={workspaceDir}
                                 baseRef={editingBaseRef}
+                                pendingFsEvent={pendingFsEvent}
                                 onClose={closeDiffEditor}
                                 onToggleFullscreen={toggleEditorFullscreen}
                                 mobileFullscreen={editorFullscreen}
