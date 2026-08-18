@@ -32,6 +32,12 @@ func (s *Server) setupRoutes() {
 	// LSP WebSocket
 	s.mux.HandleFunc("/api/lsp", s.lspHandler.HandleLSP)
 
+	// HTML/SVG preview documents (served to sandboxed preview iframes)
+	s.mux.HandleFunc("POST /api/preview", s.HandlePreviewServe)
+	s.mux.HandleFunc("GET /api/preview/{token}", s.HandlePreviewGet)
+	s.mux.HandleFunc("GET /api/preview/{token}/{path...}", s.HandlePreviewGet)
+	s.mux.HandleFunc("DELETE /api/preview/{token}", s.HandlePreviewDelete)
+
 	// Extensions
 	s.mux.HandleFunc("GET /api/extensions", s.extHandler.HandleList)
 	s.mux.HandleFunc("/api/extensions/{id}", func(w http.ResponseWriter, r *http.Request) {
