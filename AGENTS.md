@@ -512,10 +512,10 @@ Extension-specific tests are colocated under `extensions/<type>/<name>/tests/`
 extension logic (e.g. the markdown↔Wordgard serializer in `serializer.js`) is a
 plain script loaded by both the extension and its tests — never copy it.
 
-**Preview capability (`preview.serve` / `preview.release`):** Generic host
-support for UI extensions that render the open file (e.g. the
+**Preview capability (`preview.serve` / `preview.release`):**
+Generic host support for UI extensions that render the open file (e.g. the
 `html-preview` extension — "Preview" footer button for `.html`/`.xhtml`/`.svg`
-files, full-bleed overlay, live refresh on `editor.contentChange`, and
+files, full-bleed overlay, live refresh as the code view changes, and
 root-relative `src`/`href`/CSS-`url()` refs rewritten to file-relative before
 serve so the file's directory is the preview's site root).
 
@@ -561,8 +561,12 @@ serve so the file's directory is the preview's site root).
 - **Files**: `backend/server/handler_preview.go` (+`_test.go`),
   `frontend/src/lib/extensions/handlers/preview.ts` (+`__tests__/preview.unit.ts`),
   `frontend/public/host-client.js` (`extHost.preview.{serve,release}`),
+  `FileEditor.svelte` (fs_event → `checkExternalChange` reconcile in all
+  modes; `editor.contentChange` forwarded per anchor),
+  `CardDetail.svelte` (consumes `fsEventQueue` → diff-mode `FileEditor`),
   `extensions/softwarerenderer/html-preview/` (extension, incl.
-  `tests/html-preview-iframe.mjs`), e2e `frontend/tests/e2e/html-preview.spec.ts`.
+  `tests/html-preview-iframe.mjs`), e2e `frontend/tests/e2e/html-preview.spec.ts`
+  (incl. Task View live-update and code-view-mirror semantics tests).
 
 **Registry:** URL sourced exclusively from the `MIKE_REGISTRY_URL` env var (no longer DB-backed; default `https://getmike.dev/extensions/registry.json`). Bare filesystem paths (no `http(s)://`/`file://` scheme) are treated as local files resolved against the working directory (e.g. `MIKE_REGISTRY_URL=../MIKE-extensions/registry.json`). Extensions are git-pinned: each entry carries `author`/`repo`/`commit`/`subdir`, and the server clones the repo, checks out exactly `commit` (a full 40-char SHA-1 or 64-char SHA-256 hash), verifies `git rev-parse HEAD` matches, and only then installs the `subdir` content into `./extensions/<author>/<name>`.
 
