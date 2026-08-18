@@ -569,6 +569,13 @@ export interface RegistryEntry {
     local_path?: string;
 }
 
+/** A single changelog entry from an extension's published CHANGELOG.jsonl. */
+export interface ExtensionChangelogEntry {
+    hash: string;
+    version: string;
+    description: string;
+}
+
 export interface ExtensionUpdate {
     id: string;
     name: string;
@@ -578,5 +585,7 @@ export interface ExtensionUpdate {
     available_commit?: string;
     /** UI permissions this update would newly grant (present in the registry version but not installed). */
     new_permissions?: string[];
+    /** Changes newer than the installed commit, oldest → newest. */
+    changelog?: ExtensionChangelogEntry[];
 }
 

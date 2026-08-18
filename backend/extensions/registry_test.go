@@ -555,3 +555,69 @@ func TestRegistryClient_DoesNotFollowRedirects(t *testing.T) {
 		t.Fatalf("registry client followed a redirect: %v", err)
 	}
 }
+
+func TestFetchChangelog_URLDerivation(t *testing.T) {
+	// The changelog is fetched from <registry-base>/<author-slug>/<name> —
+	// the same base location that serves the registry index.
+	const changelog = `{"hash":"aaa","version":"1.0.0","description":"x"}`
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.URL.Path == "/exts/microsoft/typescript-language-server" {
+			w.Write([]byte(changelog))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	rc := NewRegistryClient()
+	data, err := rc.FetchChangelog(server.URL+"/exts/registry.json", "Microsoft", "typescript-language-server")
+	if err != nil {
+		t.Fatalf("FetchChangelog: %v", err)
+	}
+	if gotPath != "/exts/microsoft/typescript-language-server" {
+		t.Errorf("requested path = %q, want /exts/microsoft/typescript-language-server", gotPath)
+	}
+	if data != changelog {
+		t.Errorf("data = %q, want %q", data, changelog)
+	}
+}
+
+func TestFetchChangelog_FileBase(t *testing.T) {
+	// file:// registry base (local-registry workflow): the changelog file
+	// lives next to the registry index file.
+	base := t.TempDir()
+	if err := os.WriteFile(filepath.Join(base, "registry.json"), []byte(`[]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(base, "go-team")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const changelog = `{"hash":"aaa","version":"1.0.0","description":"x"}`
+	if err := os.WriteFile(filepath.Join(dir, "gopls"), []byte(changelog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc := NewRegistryClient()
+	data, err := rc.FetchChangelog("file://"+filepath.Join(base, "registry.json"), "Go Team", "gopls")
+	if err != nil {
+		t.Fatalf("FetchChangelog: %v", err)
+	}
+	if data != changelog {
+		t.Errorf("data = %q, want %q", data, changelog)
+	}
+}
+
+func TestFetchChangelog_Missing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	rc := NewRegistryClient()
+	if _, err := rc.FetchChangelog(server.URL+"/exts/registry.json", "Microsoft", "missing"); err == nil {
+		t.Fatal("expected error fetching a missing changelog, got nil")
+	}
+}
