@@ -914,6 +914,7 @@ func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Req
 						CurrentCommit:    ext.Commit,
 						AvailableCommit:  entry.Commit,
 						NewPermissions:   newPermissions(ext.Manifest.Capabilities, entry.Capabilities),
+						Changelog:        h.changelogForUpdate(entry, ext.Commit),
 					})
 				}
 				break
@@ -932,6 +933,21 @@ func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Req
 	}
 
 	httputil.JSONResponse(w, http.StatusOK, updates)
+}
+
+// changelogForUpdate fetches the extension's published changelog and returns
+// the entries newer than sinceHash (oldest → newest). Changelogs are
+// best-effort metadata: any failure (not published, fetch error) yields an
+// empty list and never blocks update detection.
+func (h *ExtensionHandler) changelogForUpdate(entry RegistryEntry, sinceHash string) []ChangelogEntry {
+	if sinceHash == "" {
+		return nil
+	}
+	data, err := h.registry.FetchChangelog(h.config.RegistryURL, entry.Author, entry.Name)
+	if err != nil {
+		return nil
+	}
+	return ChangelogSince(ParseChangelog(data), sinceHash)
 }
 
 // HandleSandboxLogs returns sandbox logs (streaming).
@@ -1378,6 +1394,11 @@ type ExtensionUpdate struct {
 	// NewPermissions lists the UI permissions the update would newly grant
 	// (present in the registry version but not the installed one).
 	NewPermissions []string `json:"new_permissions,omitempty"`
+	// Changelog lists the changes (oldest → newest) newer than the installed
+	// commit, from the extension's published changelog. Empty when no
+	// changelog is published, it cannot be fetched, the installed commit is
+	// not in it, or the update is not git-pinned.
+	Changelog []ChangelogEntry `json:"changelog,omitempty"`
 }
 
 // maskConfig masks sensitive config values based on the manifest's config_schema.

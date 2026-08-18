@@ -113,6 +113,25 @@ func (rc *RegistryClient) FetchIndex(url string) (RegistryIndex, error) {
 	return index, nil
 }
 
+// FetchChangelog fetches an extension's changelog from the central registry
+// server and returns its raw content. The URL is derived from the registry
+// base URL by appending "<author-slug>/<name>" — the same base location that
+// serves the registry index (works for http(s):// and file:// URLs, and for
+// bare local paths).
+func (rc *RegistryClient) FetchChangelog(baseURL, author, name string) (string, error) {
+	body, err := rc.fetchContent(ResolveURL(baseURL, authorDir(author)+"/"+name))
+	if err != nil {
+		return "", fmt.Errorf("fetch changelog for %s/%s: %w", author, name, err)
+	}
+	defer body.Close()
+
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return "", fmt.Errorf("read changelog for %s/%s: %w", author, name, err)
+	}
+	return string(data), nil
+}
+
 // FetchDockerfile downloads a Dockerfile and returns its contents.
 func (rc *RegistryClient) FetchDockerfile(url string) (string, error) {
 	body, err := rc.fetchContent(url)

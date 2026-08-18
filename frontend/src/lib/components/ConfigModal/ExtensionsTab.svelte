@@ -633,6 +633,19 @@
                                 <span class="update-name">{update.name}</span>
                                 <span class="update-versions">{update.current_version} → {update.available_version}</span>
                             </div>
+                            {#if (update.changelog ?? []).length > 0}
+                                <div class="update-changelog">
+                                    <div class="update-changelog-title">Changes since {update.current_version}:</div>
+                                    <ul class="update-changelog-list">
+                                        {#each update.changelog as change}
+                                            <li class="update-changelog-item">
+                                                <span class="update-changelog-desc">{change.description}</span>
+                                                {#if change.hash}<code class="update-changelog-hash" title={change.hash}>{change.hash.slice(0, 7)}</code>{/if}
+                                            </li>
+                                        {/each}
+                                    </ul>
+                                </div>
+                            {/if}
                             {#if newPerms.length > 0}
                                 <div class="update-new-perms">
                                     <div class="update-new-perms-title">This update requests new permissions:</div>
@@ -1360,6 +1373,52 @@
         font-size: 0.78rem;
         color: var(--color-text-secondary);
         line-height: 1.4;
+    }
+
+    .update-changelog {
+        flex-basis: 100%;
+        margin: 0.25rem 0 0.5rem;
+        padding: 0.6rem 0.75rem;
+        background: rgba(88, 166, 255, 0.08);
+        border: 1px solid rgba(88, 166, 255, 0.25);
+        border-radius: 6px;
+    }
+
+    .update-changelog-title {
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: var(--color-text-secondary);
+        margin-bottom: 0.4rem;
+    }
+
+    .update-changelog-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+    }
+
+    .update-changelog-item {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+    }
+
+    .update-changelog-desc {
+        font-size: 0.82rem;
+        color: var(--color-text-primary);
+        line-height: 1.4;
+    }
+
+    .update-changelog-hash {
+        font-size: 0.72rem;
+        color: var(--color-text-tertiary);
+        background: rgba(88, 166, 255, 0.12);
+        padding: 0.05rem 0.3rem;
+        border-radius: 4px;
+        white-space: nowrap;
     }
 
     /* Extension list */
