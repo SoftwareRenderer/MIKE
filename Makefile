@@ -39,7 +39,7 @@ test-go: ## Run Go unit tests (~60s, parallel)
 	go test ./backend/... ./pkg/... -count=1 -parallel 8
 
 .PHONY: test-frontend
-test-frontend: ## Run frontend unit tests (vitest, ~1s)
+test-frontend: ## Run frontend unit tests (vitest, ~10s)
 	cd frontend && npm test
 
 .PHONY: test-e2e
@@ -50,13 +50,20 @@ test-e2e: ## Run e2e tests (Playwright, manages its own server)
 # Dev
 # ---------------------------------------------------------------------------
 
+# Dev defaults for `make run` — exporting your own vars overrides these.
+# (MIKE_ENCRYPTION_KEY must match the key that encrypted values in
+# data/kanban.db if you need stored secrets to decrypt.)
+MIKE_ENCRYPTION_KEY ?= dev-local-key
+MIKE_LOGIN_PASSWORD ?= test
+MIKE_TLS ?= 0
+
 .PHONY: run
-run: ## Start dev server (background, no TLS)
-	LOGIN_PASSWORD=test KANBAN_TLS=0 ./kanban &
+run: ## Start dev server (background, no TLS, dev defaults)
+	MIKE_ENCRYPTION_KEY=$(MIKE_ENCRYPTION_KEY) MIKE_LOGIN_PASSWORD=$(MIKE_LOGIN_PASSWORD) MIKE_TLS=$(MIKE_TLS) ./kanban &
 
 .PHONY: stop
-stop: ## Stop dev server
-	pkill -f "./kanban"
+stop: ## Stop dev server (exact process name; -f would match any path containing */kanban)
+	pkill -x kanban
 
 # ---------------------------------------------------------------------------
 # Clean
