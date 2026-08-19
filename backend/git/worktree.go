@@ -241,6 +241,10 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	}
 	defer mu.Unlock()
 
+	// Keep worktree content out of the project's git state when the worktrees
+	// dir lives inside the project directory.
+	wm.ensureWorktreesExcluded(project, worktreesDir)
+
 	if err := os.MkdirAll(filepath.Join(worktreesDir, projectID), 0o755); err != nil {
 		return "", "", fmt.Errorf("create worktrees dir: %w", err)
 	}
@@ -305,6 +309,60 @@ func (wm *WorktreeManager) CreateWorktree(projectID, taskID, branchName, sourceB
 	}
 
 	return worktreePath, baseRef, nil
+}
+
+// ensureWorktreesExcluded idempotently appends the worktrees dir to .git/info/exclude
+// when it's inside the project, keeping untracked worktree files out of git status.
+// Best-effort: never blocks worktree creation.
+func (wm *WorktreeManager) ensureWorktreesExcluded(project *types.Project, worktreesDir string) {
+	cleanRoot := filepath.Clean(project.Path)
+	cleanWT := filepath.Clean(worktreesDir)
+	rel, err := filepath.Rel(cleanRoot, cleanWT)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return // worktrees dir is not inside the project
+	}
+
+	// Locate the repo's exclude file. A project that is itself a git worktree
+	// has a .git file (pointing at the real git dir) rather than a directory.
+	gitDir := filepath.Join(cleanRoot, ".git")
+	if info, err := os.Stat(gitDir); err == nil && !info.IsDir() {
+		if data, err := os.ReadFile(gitDir); err == nil {
+			line := strings.TrimSpace(string(data))
+			if strings.HasPrefix(line, "gitdir: ") {
+				dir := strings.TrimSpace(strings.TrimPrefix(line, "gitdir: "))
+				if !filepath.IsAbs(dir) {
+					dir = filepath.Join(cleanRoot, dir)
+				}
+				gitDir = dir
+			}
+		}
+	}
+	excludePath := filepath.Join(gitDir, "info", "exclude")
+
+	// Escape git-exclude glob characters in the path.
+	entry := strings.NewReplacer(`*`, `\*`, `?`, `\?`, `[`, `\[`).Replace(rel) + string(filepath.Separator)
+
+	data, err := os.ReadFile(excludePath)
+	if err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(line) == entry {
+				return // already excluded
+			}
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(gitDir, "info"), 0o755); err != nil {
+		log.Printf("[worktree] project=%s failed to create info dir: %v", project.ID, err)
+		return
+	}
+	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		log.Printf("[worktree] project=%s failed to open info/exclude: %v", project.ID, err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.WriteString("\n# kanban worktrees (kept out of project status)\n" + entry + "\n"); err != nil {
+		log.Printf("[worktree] project=%s failed to write info/exclude: %v", project.ID, err)
+	}
 }
 
 // RemoveWorktree removes a task's worktree and its branch.
