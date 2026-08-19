@@ -264,8 +264,12 @@ function ensureTestRepo(): void {
         fs.writeFileSync(`${repo}/README.md`, readme);
         try {
             execSync('git init', { cwd: repo });
+            // Set a local git identity so backend commits (e.g. commit-and-done,
+            // which don't pass -c flags) succeed even when no global git config exists.
+            execSync('git config user.email "test@kanban.local"', { cwd: repo });
+            execSync('git config user.name "Test"', { cwd: repo });
             execSync('git add README.md', { cwd: repo });
-            execSync('git -c user.email="test@kanban.local" -c user.name="Test" commit -m "Initial commit"', { cwd: repo });
+            execSync('git commit -m "Initial commit"', { cwd: repo });
         } catch (e) {
             console.error(`[global-setup] Failed to create ${label}:`, e);
             throw e;

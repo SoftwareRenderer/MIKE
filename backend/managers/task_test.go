@@ -432,6 +432,96 @@ func gitRun(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// gitOutput runs a git command in dir and returns its stdout.
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := osexec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+	}
+	return string(out)
+}
+
+// TestHandleCommitAndDone_ExcludesUnstagedFiles: untracked worktree files stay local.
+func TestHandleCommitAndDone_ExcludesUnstagedFiles(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	h.commitQueue = exec.NewCommitQueue()
+
+	proj, err := s.GetProject(projID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+
+	task := &types.Task{
+		ID:              "cdn-unstaged",
+		ProjectID:       projID,
+		Title:           "Commit and done unstaged",
+		Prompt:          "make changes",
+		Status:          "review",
+		Branch:          "task/cdn-unstaged",
+		CurrentThreadID: "thread-cdn",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	wtPath, _, err := h.worktreeMgr.CreateWorktree(projID, task.ID, task.Branch, "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	// Staged change (should be committed) and untracked file (must not be).
+	if err := os.WriteFile(filepath.Join(wtPath, "staged.txt"), []byte("staged content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, wtPath, "add", "staged.txt")
+	if err := os.WriteFile(filepath.Join(wtPath, "scratch.txt"), []byte("scratch content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/commit", h.HandleCommitAndDone)
+	body, _ := json.Marshal(map[string]string{"commit_message": "test commit"})
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projID+"/tasks/"+task.ID+"/commit", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("commit-and-done status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	updated, err := s.GetTask(projID, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.Status != "done" {
+		t.Fatalf("task status = %q, want done", updated.Status)
+	}
+
+	// Untracked file must remain in the worktree...
+	if _, err := os.Stat(filepath.Join(wtPath, "scratch.txt")); err != nil {
+		t.Errorf("scratch.txt should remain in the worktree: %v", err)
+	}
+	// ...and must not exist in the project's main folder.
+	if _, err := os.Stat(filepath.Join(proj.Path, "scratch.txt")); !os.IsNotExist(err) {
+		t.Errorf("scratch.txt must not be copied to the project dir (stat err=%v)", err)
+	}
+	// It must not be part of the merged branch either.
+	if out := gitOutput(t, proj.Path, "log", "--all", "--oneline", "--", "scratch.txt"); strings.TrimSpace(out) != "" {
+		t.Errorf("scratch.txt appears in project branch history: %s", out)
+	}
+	// And it must not show up as untracked content in the project status.
+	if status := gitOutput(t, proj.Path, "status", "--porcelain"); strings.Contains(status, "scratch.txt") {
+		t.Errorf("scratch.txt appears in project git status: %s", status)
+	}
+	// The staged change must still be committed and merged into the project.
+	if out := gitOutput(t, proj.Path, "show", "HEAD:staged.txt"); !strings.Contains(out, "staged content") {
+		t.Errorf("staged.txt not merged into project HEAD, got: %q", out)
+	}
+}
+
 // newTaskHandlerWithExecutor builds a TaskHandler wired to a real executor,
 // backed by a temp git repo (needed for subtask worktree/branch setup).
 func newTaskHandlerWithExecutor(t *testing.T) (*TaskHandler, *store.Store, string) {

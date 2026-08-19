@@ -779,6 +779,13 @@ class MyCache {
 - Add matching `background` color so scrolling content doesn't show through
 - Add `border-bottom` for visual separation from content below
 
+### Commit and Move to Done — unstaged/untracked files
+- "Commit and move to done" (`HandleCommitAndDone`, `backend/managers/task.go`) commits **only staged** changes. Untracked (never-staged) files in the worktree must never be copied into the project's main checkout or merged into the project branch — they stay in the worktree and are discarded when the task is deleted.
+- Merge-conflict resolution commit (`commitConflictResolution`, `backend/exec/merge_conflicts.go`) stages with `git add -u` (tracked changes only), NOT `git add -A`, so it cannot sweep in untracked WIP files.
+- When the worktrees dir lives **inside** the project directory, `CreateWorktree` (`backend/git/worktree.go`, `ensureWorktreesExcluded`) idempotently appends the worktrees dir to the repo's local `.git/info/exclude` so worktree content never shows in the project's `git status` and is never swept into project-level `git stash -u` during a merge. Local-only (never committed, doesn't touch `.gitignore`).
+- **Test env:** backend commit-and-done commits don't pass `-c` git-author flags, so they require a repo/global git identity. `global-setup.ts` sets a local identity on the test repos — don't remove it or commit-and-done e2e tests fail silently (the commit is skipped, task still moves to Done).
+- Tests: `backend/managers/task_test.go` (`TestHandleCommitAndDone_ExcludesUnstagedFiles`), `backend/exec/merge_conflict_resolution_test.go` (`TestCommitConflictResolution_DoesNotSweepUntrackedFiles`), `backend/git/worktree_test.go` (`TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus`, `TestCreateWorktree_NoExcludeWhenWorktreesOutsideProject`), e2e `frontend/tests/e2e/commit-and-done-unstaged.spec.ts`.
+
 ## Licensing
 
 This project is licensed under **Apache 2.0** (`LICENSE`, `NOTICE`). Dependency

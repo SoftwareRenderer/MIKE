@@ -93,6 +93,103 @@ func writeFile(t *testing.T, dir, name, content string) {
 	}
 }
 
+// TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus: in-project worktrees are excluded from git status.
+func TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	os.MkdirAll(repoDir, 0o755)
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "user.name", "Test")
+	writeFile(t, repoDir, "README.md", "# Test\n")
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "Initial")
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	s, err := store.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	// Worktrees dir INSIDE the project directory.
+	worktreesDir := filepath.Join(repoDir, ".worktrees")
+	os.MkdirAll(worktreesDir, 0o755)
+	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
+
+	projID := "proj-in-repo"
+	proj := &types.Project{ID: projID, Name: "in-repo", Path: repoDir}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &types.Task{ID: "wt-exclude-task", ProjectID: projID, Title: "t", Status: "in_progress"}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	wm := NewWorktreeManager(s, cfgStore)
+	wtPath, _, err := wm.CreateWorktree(projID, task.ID, "task/wt-exclude", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	// Untracked (unstaged) file in the worktree — the user's WIP content.
+	writeFile(t, wtPath, "scratch.txt", "unstaged\n")
+
+	// A local exclude entry must have been written for the worktrees dir.
+	excludePath := filepath.Join(repoDir, ".git", "info", "exclude")
+	data, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("read info/exclude: %v", err)
+	}
+	if !strings.Contains(string(data), ".worktrees/\n") {
+		t.Errorf("info/exclude should contain .worktrees/, got:\n%s", data)
+	}
+
+	// The project's git status must not list the worktrees dir (or its files).
+	cmd := exec.Command("git", "-C", repoDir, "status", "--porcelain")
+	out, _ := cmd.CombinedOutput()
+	if strings.Contains(string(out), ".worktrees") {
+		t.Errorf("project status should not mention the worktrees dir, got:\n%s", out)
+	}
+
+	// Idempotent: a second worktree must not duplicate the entry.
+	task2 := &types.Task{ID: "wt-exclude-task2", ProjectID: projID, Title: "t2", Status: "in_progress"}
+	if err := s.CreateTask(task2); err != nil {
+		t.Fatalf("create task2: %v", err)
+	}
+	if _, _, err := wm.CreateWorktree(projID, task2.ID, "task/wt-exclude2", ""); err != nil {
+		t.Fatalf("create worktree2: %v", err)
+	}
+	data, _ = os.ReadFile(excludePath)
+	if n := strings.Count(string(data), ".worktrees/\n"); n != 1 {
+		t.Errorf("expected exactly one .worktrees/ exclude entry, got %d:\n%s", n, data)
+	}
+}
+
+// TestCreateWorktree_NoExcludeWhenWorktreesOutsideProject: no exclude entry when worktrees are outside.
+func TestCreateWorktree_NoExcludeWhenWorktreesOutsideProject(t *testing.T) {
+	repoDir, taskID, s, _, wm := setupTestRepo(t)
+
+	proj, err := s.GetProject("test-project")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if _, _, err := wm.CreateWorktree(proj.ID, taskID, "task/"+taskID, ""); err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	excludePath := filepath.Join(repoDir, ".git", "info", "exclude")
+	data, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatalf("read info/exclude: %v", err)
+	}
+	if strings.Contains(string(data), "worktrees") {
+		t.Errorf("no exclude entry expected when worktrees are outside the project, got:\n%s", data)
+	}
+}
+
 func TestResolveDiffBaseline_RejectsFatalBaseRef(t *testing.T) {
 	_, taskID, _, _, wm := setupTestRepo(t)
 
