@@ -1,904 +1,279 @@
 # AGENTS.md
 
+## Repo Map
+- `backend/` — Go server: API handlers, exec loop, LLM client, git/worktrees, sandbox, extensions.
+- `frontend/` — Svelte 5 SPA (Vite). Built to `frontend/dist/`, served as static files by the Go server. No dev server in the normal workflow.
+- `pkg/bridge/` — sandbox-bridge protocol/client. `pkg/sandboxruntime/` — podman/gVisor runtime + bridge binary discovery.
+- `extensions/` — **installed** extensions (`<author>/<name>`), materialized by the registry installer. Don't hand-edit.
+- `../MIKE-extensions/` — source repo for published extensions (`<type>/<name>/`). Its `registry.json` is **generated** — never edit by hand.
+- `scripts/gen-registry.py` — regenerates `../MIKE-extensions/registry.json` from extension manifests.
+- `Makefile` — build/run/test entry points. `data/` — SQLite DB, TLS certs, trace files. `prompts/` — LLM prompt templates.
+
 ## Required Dependencies
 
 ### gVisor
-
-gVisor (`runsc`) is required for project sandboxing. When a project has sandboxing enabled, task tool calls and terminal sessions run inside gVisor-isolated containers.
-
-**Notes:**
-- gVisor must run in rootless mode
-- Podman sandbox commands run via `podman --runtime runsc`
-- Without gVisor, projects with sandboxing enabled will refuse to start tasks (hard error, no fallback)
+gVisor (`runsc`) is required for project sandboxing — task tool calls and terminal sessions run inside gVisor-isolated containers. Rootless only; podman sandbox commands run via `podman --runtime runsc`. Without it, sandboxed projects refuse to start tasks (hard error, no fallback). Sandbox unit tests require `runsc`.
 
 ### Sandbox Bridge
+`sandbox-bridge` is a static Go binary that runs inside each sandbox container and services tool calls (read, write, edit, bash, shell) over TCP, avoiding a `podman exec` per call. The host connects to a 127.0.0.1 port mapped via `podman -p` to the container (bridge listens on 0.0.0.0:9999).
 
-The sandbox bridge (`sandbox-bridge`) is a lightweight binary that runs inside each sandbox container and handles tool calls (read, write, edit, bash, shell) over TCP. This eliminates the overhead of spawning `podman exec` per tool call.
-
-**Build:**
-```bash
-# Build for Linux (CGO_ENABLED=0 for static build)
-CGO_ENABLED=0 GOOS=linux go build -trimpath -o sandbox/sandbox-bridge -ldflags="-s -w" ./pkg/bridge/agent
-```
-
-**Runtime discovery:** The server finds `sandbox-bridge` via (in order):
-1. `MIKE_AGENT_PATH` environment variable
-2. Next to the running executable — `sandbox-bridge` and `sandbox/sandbox-bridge`
-3. Current directory — `sandbox-bridge` and `sandbox/sandbox-bridge`
-
-**Required:** The sandbox-bridge binary is required for sandbox mode. Container creation fails if the binary is not found.
-
-**Architecture:**
-```
-Host (kanban server)                    Container (sandbox)
-─────────────────                       ─────────────────
-                                        ┌──────────────┐
-SandboxManager ──TCP──► 127.0.0.1:PORT ─► sandbox-bridge  │
-                     (mapped via          (listens on    │
-                      podman -p)          0.0.0.0:9999)  │
-                                        └──────────────┘
-```
-
-**Protocol:** Custom binary framing — 9-byte header (MsgID + Type + Length) + typed payload. Supports streaming via Chunk frames before a final Result/Error frame.
+- **Build:** `CGO_ENABLED=0 GOOS=linux go build -trimpath -o sandbox/sandbox-bridge -ldflags="-s -w" ./pkg/bridge/agent`
+- **Discovery** (`pkg/sandboxruntime/runtime.go`), in order: 1. `MIKE_AGENT_PATH` env var, 2. `sandbox-bridge` / `sandbox/sandbox-bridge` next to the executable, 3. same relative paths in the CWD. Container creation fails if not found (required for sandbox mode).
+- **Protocol:** binary framing — 9-byte header (MsgID + Type + Length) + typed payload; streaming via Chunk frames before the final Result/Error. `MethodLSP` (0x0A) is the JSON-RPC passthrough; each LSP extension runs in its own gVisor sandbox.
 
 ## Server Management
 
-The agent is responsible for starting/stopping the server.
-
 ```bash
-# Start (background)
-./kanban &
-
-# Stop
-pkill -f "./kanban"
-
-# Verify running
-curl -s http://localhost:3000/api/config
+make run    # background dev server, no TLS (dev defaults: password=test, dev-only MIKE_ENCRYPTION_KEY)
+make stop   # pkill the server
+curl -sk https://localhost:3000/api/config   # verify (401 JSON = up); use http:// with --no-tls
 ```
+Or manually: `./kanban &` (requires `MIKE_ENCRYPTION_KEY` and `MIKE_LOGIN_PASSWORD` exported). `make run`'s defaults are overridable by exporting your own vars — export your real `MIKE_ENCRYPTION_KEY` if stored secrets in `data/kanban.db` must decrypt.
 
 ### HTTPS / TLS
-
-TLS is **enabled by default** with auto-generated self-signed certificates.
-
-| Mode | Flag / Env Var | Description |
-|------|----------------|-------------|
-| **Default (HTTPS)** | (none) | Auto-generates self-signed cert in `data/tls/` on first startup |
-| **Custom certs** | `--tls-cert=path --tls-key=path` or `MIKE_TLS_CERT` + `MIKE_TLS_KEY` | Uses user-provided certificate and key files |
-| **Disable TLS** | `--no-tls` or `MIKE_TLS=0` | Plain HTTP, no TLS |
+TLS is **enabled by default** with an auto-generated self-signed cert in `data/tls/` (localhost/127.0.0.1/::1, 1 year, reused across restarts). Plain HTTP on a TLS-enabled server gets a 301 → https. Custom certs: `--tls-cert/--tls-key` or `MIKE_TLS_CERT`/`MIKE_TLS_KEY`. Disable: `--no-tls` or `MIKE_TLS=0`. With TLS active, WebSockets upgrade to `wss://` and session cookies get `Secure` automatically.
 
 ### Required Environment Variables
 
-The server requires an encryption key to secure sensitive data (like API keys) in the database. If this is not set, the server will refuse to start.
-
 | Env Var | Description |
 |---------|-------------|
-| `MIKE_ENCRYPTION_KEY` | A non-blank string used to derive the AES-256-GCM encryption key. |
-| `MIKE_LOGIN_PASSWORD` | The master password used for server authentication and session creation. |
-| `MIKE_REGISTRY_URL` | The extension registry index URL. Sourced exclusively from this env var (not DB-backed), falling back to the hosted online registry `https://getmike.dev/extensions/registry.json`. Bare filesystem paths (no `http(s)://` or `file://` scheme) are treated as local files, resolved against the working directory. |
-| `MIKE_TRUST_PROXY` | Set to `1` only when the server is deployed behind a trusted reverse proxy that strips client-supplied forwarding headers. When set, the server honors `X-Forwarded-For` (for IP-based rate limiting) and `X-Forwarded-Proto` (for the HTTPS redirect). Default (unset): these headers are **ignored** so an attacker cannot spoof them to bypass login rate limiting or the HTTPS redirect. |
+| `MIKE_ENCRYPTION_KEY` | Non-blank; derives the AES-256-GCM key for sensitive data. Server refuses to start without it. |
+| `MIKE_LOGIN_PASSWORD` | Master password for auth/sessions. Server refuses to start without it. |
+| `MIKE_REGISTRY_URL` | Extension registry index URL. Sourced **exclusively** from this env var (not DB-backed); falls back to `https://getmike.dev/extensions/registry.json`. A bare path (no `http(s)://`/`file://` scheme) is a local file resolved against the CWD. |
+| `MIKE_TRUST_PROXY` | Set to `1` only behind a trusted reverse proxy that strips forwarding headers. Only then are `X-Forwarded-For` (rate-limit IP) and `X-Forwarded-Proto` (HTTPS redirect) honored; unset = ignored so they can't be spoofed. |
 
 ### CLI Flags
+CLI flags take priority over environment variables.
 
 | Flag | Env Var | Default | Description |
 |------|---------|---------|-------------|
-| `--port` | `MIKE_PORT` | `3000` | Server listen port |
-| `--data-dir` | `MIKE_DATA_DIR` | `./data` | Data directory for DB, TLS certs, trace files |
-| `--worktrees-dir` | `MIKE_WORKTREES_DIR` | DB `workspace_dir` (default `./.worktrees`) | Runtime override for the git worktrees dir (not persisted) |
-| `--no-tls` | `MIKE_TLS=0` | *(disabled)* | Disable TLS (plain HTTP) |
-| `--tls-cert` | `MIKE_TLS_CERT` | *(auto-generated)* | Path to TLS certificate file |
-| `--tls-key` | `MIKE_TLS_KEY` | *(auto-generated)* | Path to TLS private key file |
-
-CLI flags take priority over environment variables.
-
-- Self-signed certs are valid for `localhost`, `127.0.0.1`, and `::1` (1 year expiry)
-- Certs are reused across restarts (only generated once)
-- WebSocket connections automatically upgrade to `wss://` when TLS is active
-- Session cookies get the `Secure` flag auto-enabled when TLS is active
+| `--port` | `MIKE_PORT` | `3000` | listen port |
+| `--data-dir` | `MIKE_DATA_DIR` | `./data` | DB, TLS certs, trace files |
+| `--worktrees-dir` | `MIKE_WORKTREES_DIR` | DB `workspace_dir` (default `./.worktrees`) | runtime override, not persisted |
+| `--no-tls` | `MIKE_TLS=0` | *(TLS on)* | plain HTTP |
+| `--tls-cert` / `--tls-key` | `MIKE_TLS_CERT` / `MIKE_TLS_KEY` | *(auto-generated)* | custom cert/key files |
 
 ### Rules
-- **Restarting** Backend changes require a restart. Frontend changes do not require restarts.
-- **Never leave running** after a crash or panic
-- **E2E tests manage their own server** — global-setup starts/stops a test server automatically
-- **Restart manually after tests** — your dev server is killed during test runs
-- **Use background mode** (`&`) for development
-- **Test Driven Development** Validate functionality by testing for established facts
+- **Restarting:** backend changes require a server restart; frontend changes don't.
+- **Never leave running** after a crash or panic — stop the server first.
+- **E2E tests manage their own server** (global-setup starts/stops test servers). Your dev server is **killed** during test runs — restart it with `make run` afterwards.
+- **Use background mode** (`&`) for development.
+- **Test-driven:** validate functionality by testing for established facts before calling a change done.
 
-## Development Workflow (TDD)
+## Testing
 
-### Feature Development Process
-1. **Write tests first** — Create tests that describe the expected behavior
-2. **Run tests** — Confirm tests fail (red phase)
-3. **Implement feature** — Write minimal code to make tests pass
-4. **Run tests** — Confirm tests pass (green phase)
-5. **Refactor** — Clean up code while keeping tests passing. Keep comments concise.
-6. **Update documentation** — Update AGENTS.md if new patterns are introduced
-
-### Test-First Guidelines
-- **Every new feature** must have corresponding tests (Go unit + e2e)
-- **Go unit tests** go in `backend/` alongside the code they test
-- **E2E tests** go in `frontend/tests/e2e/` with descriptive filenames
-- **Use `test.describe.serial()`** when tests share state (same task/messages)
-- **Use unique identifiers** (`Date.now()`) to avoid test interference
-- **Graceful failures** — Tests should pass even if LLM is slow/unavailable
-- **Test the UX** — Verify UI elements, not just API responses
-- **Mock LLM is default** — tests use pre-recorded fixtures, never the real LLM endpoint
-- **Heavy fixtures get a dedicated repo** — specs that create large files or mutate the working tree (e.g. a 900KB Go fixture for `editor-wrap-highlight`) must NOT write into the shared `/tmp/kanban-test-repo` (other specs' `git add -A && git commit` races with them). Instead, init a dedicated repo (e.g. `/tmp/kanban-test-repo-<name>`), create its project in `beforeAll` (use `browser.newContext({ storageState })` — `page` is not available in `beforeAll`) and delete both in `afterAll`, and wrap the describe in `.serial` (`fullyParallel: true` would split the file's tests across workers and race `beforeAll`); see `editor-wrap-highlight.spec.ts`
-- **Wait for selectors** for async operations; Do not use arbitrary timeouts or fixed delays
-- **Config-modifying tests** (model switch, settings, reasoning effort, mode select) run in the `isolated` project on port 3001
-
-### Test Structure
-```typescript
-test.describe.serial('Feature Name', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.waitForSelector('.card', { timeout: 10000 });
-  });
-
-  test('should do something', async ({ page }) => {
-    // 1. Setup - navigate to relevant state
-    // 2. Action - perform user interaction
-    // 3. Assertion - verify expected outcome
-  });
-});
-```
-
-### Running Tests
+### Commands
 ```bash
-# All e2e tests (auto-starts test server + mock LLM)
-cd frontend && npx playwright test
-
-# Specific test file
-npx playwright test task-message-actions
-
-# Specific test by name
-npx playwright test --grep "should edit message"
-
-# With UI for debugging
-npx playwright test --ui
-
-# Frontend unit tests (vitest, ~1s)
-cd frontend && npm test
-
-# All Go unit tests (~60s, parallel)
-go test ./backend/... -count=1 -parallel 8
+cd frontend && npx playwright test                       # e2e (auto-starts test servers + mock LLM)
+npx playwright test task-message-actions                 # one spec file
+npx playwright test --grep "should edit message"         # one test by name
+cd frontend && npm test                                  # frontend unit (vitest, ~10s)
+go test ./backend/... ./pkg/... -count=1 -parallel 8     # Go unit (~60s)
+make test | make test-go | make test-frontend | make test-e2e
 ```
 
-**Playwright config**: `frontend/playwright.config.ts` (parallel, 2 workers, 120s timeout).
-**Two Playwright projects**:
-- `chromium` (port 3000) — all tests except config-modifying suites
-- `isolated` (port 3001, serialized) — config-modifying tests: `model-switch`, `debug-cards`, `settings-model-delete`, `reasoning-effort`, `settings-power`, `mode-select`
+### Test Environment
+Two dedicated test servers with isolated databases plus one shared mock LLM, fully managed by `frontend/tests/global-setup.ts` (torn down and rebuilt each run):
 
-**Before running e2e tests**: If a prior run was interrupted, clean stale state:
+| Server | Port | Data dir | Purpose |
+|--------|------|----------|---------|
+| Main | 3000 | `/tmp/kanban-test-data` | `chromium` Playwright project (default tests) |
+| Isolated | 3001 | `/tmp/kanban-test-data-isolated` | `isolated` project (serialized, 1 worker) — config-modifying suites; see `testMatch` in `frontend/playwright.config.ts` |
+| Mock LLM | 9999 | — | shared; `frontend/tests/mock-llm.js` |
+
+Test repos live at `/tmp/kanban-test-repo` (+ `-2`), worktrees at `/tmp/kanban-test-worktrees/`. The registry is pinned to a local fixture (`frontend/tests/registry-fixture.json`) so registry e2e never hits the hosted registry.
+
+Test servers are spawned via `go run .` and **inherit your shell environment** — export `MIKE_ENCRYPTION_KEY` before running e2e, or global-setup fails with "Server on port 3000 did not start within 15000ms".
+
+If a prior run was interrupted, clean stale state first:
 ```bash
 lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null
 rm -f /tmp/kanban-test-setup.lock
 rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-worktrees
 ```
-Stale processes from interrupted runs hold ports open, and a stale lock file causes global-setup to run teardown instead of setup.
-
-### Test Environment
-E2E tests run against **two dedicated test servers** with isolated databases, fully managed by `global-setup.ts`:
-
-| Server | Port | Data Dir | Purpose |
-|--------|------|----------|----------|
-| Main | 3000 | `/tmp/kanban-test-data` | Default test server (chromium project) |
-| Isolated | 3001 | `/tmp/kanban-test-data-isolated` | Config-modifying tests (isolated project) |
-
-Both servers share a mock LLM on port 9999. Test data dirs, worktrees (`/tmp/kanban-test-worktrees/`), and servers are fully torn down and rebuilt each run.
-
-The test servers are spawned via `go run .` inheriting your shell environment, so `MIKE_ENCRYPTION_KEY` must be exported before running e2e tests — without it the server refuses to start and global-setup fails with `Server on port 3000 did not start within 15000ms`.
-
-**Important**: Your development server is **killed** during test runs. Restart it manually after:
-```bash
-./kanban &
-```
+Stale processes hold the ports (symptom: `ERR_CONNECTION_REFUSED`, or a stale TLS server answering a `--no-tls` test), and a stale lock file makes global-setup run teardown instead of setup.
 
 ### Frontend Unit Tests
-- Run: `cd frontend && npm test` (vitest, jsdom, ~1s, ~235 tests)
-- Test files: `src/**/*.unit.ts`, `src/**/*.unit.svelte.ts`, `src/**/*.unit.spec.ts` — colocated in `__tests__/` directories under `src/lib/`
-- Framework: `vitest` + `@testing-library/svelte`
-- Config: `frontend/vitest.config.ts` (jsdom environment, `$lib` alias)
-- Test modules:
-  - `src/lib/api/__tests__/` — API cache utilities, extensions API
-  - `src/lib/components/__tests__/` — component unit tests
-  - `src/lib/services/` — reactive services (DiffCache, StreamState, StreamHandler, extension-manager, ui-injector)
-  - `src/lib/composables/__tests__/` — reactive composables (multi-select, sw-update, virtual-scroll)
-  - `src/lib/services/__tests__/` — reactive services (`DiffCache`, `StreamState`, `StreamHandler`)
-  - `src/lib/stores/__tests__/` — app store tests
-  - `src/lib/utils/__tests__/` — pure utility functions (`format-time.ts`, `diff-parser.ts`, `sort-tasks.ts`, `chat-entries.ts`)
-  - `src/lib/__tests__/` — setup/alias verification
-- Use `.svelte.ts` extension for any test file importing modules that use Svelte 5 compiler macros (`$state`, `$derived`, `$effect`)
-- Tests are deterministic — no external dependencies (LLM, network, server)
+- vitest + @testing-library/svelte, jsdom. Files: `src/**/*.unit.ts` / `src/**/*.unit.svelte.ts`, colocated in `__tests__/` dirs.
+- Any test file importing a module that uses Svelte 5 compiler macros (`$state`, `$derived`, `$effect`) **must** use the `.svelte.ts` extension.
+- Deterministic — no external dependencies (LLM, network, server).
 
 ### Go Unit Tests
-- Run: `go test ./backend/... ./pkg/... -count=1 -parallel 8` (~60s, ~790 tests)
-- Test packages:
-  - `backend/server/` — API handlers (~175 tests)
-  - `backend/extensions/` — extensions system (~66 tests)
-  - `backend/store/` — database operations (~90 tests)
-  - `backend/exec/` — tool execution (~315 tests)
-  - `backend/git/` — git operations (~55 tests)
-  - `backend/sandbox/` — gVisor sandboxing (~30 tests)
-  - `backend/stream/` — git polling (~25 tests)
-  - `backend/managers/` — board/task/git/project managers (~5 tests)
-  - `backend/types/` — domain types and ID generation (~5 tests)
-  - `backend/prompts/` — prompt templates (~5 tests)
-  - `backend/crypto/` — encryption (~10 tests)
-  - `backend/config/` — config loading and LLM helpers (~5 tests)
-  - `backend/llama/` — LLM client (~10 tests)
-  - `backend/auth/` — auth/session (~10 tests)
-  - `backend/tls/` — TLS config (~10 tests)
-  - `backend/agent/` — agent runner and registry (~17 tests)
-  - `extensions/agent/pi/` — Pi adapter (~16 tests)
-  - `backend/term/` — terminal (~2 tests)
-  - `pkg/bridge/` — sandbox bridge protocol and client (~30 tests)
-  - `backend/httputil/` — HTTP utilities (no tests)
-- Use `testServer(t)` helper for isolated test server with temp DB
-- Use `t.TempDir()` for temporary files/directories (auto-cleaned)
-- Tests are deterministic — no external dependencies (LLM, network)
+- Use the `testServer(t)` helper for an isolated server with a temp DB; `t.TempDir()` for files. Deterministic — no external dependencies.
+- The Pi agent adapter's unit tests live in `../MIKE-extensions/agent/pi` and are run there — they are **not** part of `./backend/... ./pkg/...`.
+
+### E2E Conventions
+- Descriptive spec filenames in `frontend/tests/e2e/`; shared helpers in `helpers.ts`.
+- `test.describe.serial()` when tests share state; unique identifiers (`Date.now()`) to avoid interference; wait for selectors, no arbitrary delays (drag-and-drop is the known exception — headless is slow).
+- **Mock LLM is default** — tests use pre-recorded fixtures, never the real endpoint. Graceful failures when the LLM is slow/unavailable.
+- **Config-modifying tests** (settings, models, shortcuts, mode select, …) must run in the `isolated` project — add them to `testMatch` in `playwright.config.ts`.
+- **Heavy fixtures get a dedicated repo** — specs that create large files or mutate the working tree must NOT write into the shared `/tmp/kanban-test-repo` (other specs' `git add -A && git commit` races with them). Init a dedicated repo (e.g. `/tmp/kanban-test-repo-<name>`), create its project in `beforeAll` (use `browser.newContext({ storageState })` — `page` is not available in `beforeAll`), delete both in `afterAll`, and wrap the describe in `.serial`. See `editor-wrap-highlight.spec.ts`.
+- global-setup sets a **local git identity** on the test repos — don't remove it: backend commit-and-done commits don't pass `-c` author flags, and without it those e2e tests fail silently (commit skipped, task still moves to Done).
 
 ### Mock LLM Server
-- Tests rely on a **mock LLM server** (NOT the real Neptune endpoint) for deterministic, fast results
-- Auto-managed by `frontend/tests/global-setup.ts` — started before tests, stopped after
-- Mock server: `frontend/tests/mock-llm.js` (Node.js HTTP server on port 9999)
-- Fixtures: `frontend/tests/fixtures/` — pre-recorded SSE streaming responses
-- Response routing: mock selects fixture based on request body (tools present + message keywords)
-- Disable mock: `MIKE_USE_MOCK_LLM=0 npx playwright test` (uses real Neptune endpoint)
-
-#### Recording New Fixtures
-When the LLM behavior changes or new response types are needed:
-1. Set `MIKE_USE_MOCK_LLM=0` to use the real Neptune endpoint
-2. Run the relevant test(s) to capture real LLM responses
-3. Record the SSE stream output (use browser DevTools Network tab or server logs)
-4. Save as JSON array in `frontend/tests/fixtures/` — each entry is one SSE `data:` frame
-5. Update `mock-llm.js` routing if new fixture needs keyword matching
-
-#### Fixture Format
-Each fixture is a JSON array of SSE chunks matching the OpenAI streaming API:
-```json
-[
-  {"choices": [{"delta": {"content": "Hello"}, "finish_reason": null}]},
-  {"choices": [{"delta": {"content": " world"}, "finish_reason": null}]},
-  {"choices": [{"delta": {}, "finish_reason": "stop"}, "usage": {"prompt_tokens": 45, "completion_tokens": 2, "total_tokens": 47, "prompt_ms": 320, "predicted_ms": 100}]}
-]
-```
-
-For tool calls, use `delta.tool_calls` instead of `delta.content`:
-```json
-{"choices": [{"delta": {"tool_calls": [{"id": "call_abc", "function": {"name": "read_file", "arguments": "{\"path\":\"README.md\"}"}, "type": "function"}]}, "finish_reason": "tool_calls"}]}
-```
+- `frontend/tests/mock-llm.js` (Node, port 9999). Selects a fixture by request body (tools present + message keywords). Fixtures: `frontend/tests/fixtures/` — JSON arrays of OpenAI streaming SSE chunks.
+- Disable: `MIKE_USE_MOCK_LLM=0 npx playwright test` (real LLM endpoint).
+- Fixture format — one entry per SSE `data:` frame:
+  ```json
+  {"choices": [{"delta": {"content": "Hello"}, "finish_reason": null}]}
+  ```
+  Tool calls use `delta.tool_calls` with `finish_reason: "tool_calls"`; the final frame has `finish_reason: "stop"` plus `usage` (incl. `prompt_ms`/`predicted_ms`).
+- **Recording a new fixture:** run with `MIKE_USE_MOCK_LLM=0`, capture the real SSE stream (browser DevTools Network tab or server logs), save it as a JSON array in `frontend/tests/fixtures/`, and add keyword routing in `mock-llm.js` if needed.
 
 ## Applying Changes
 
 ### Frontend
-1. Edit Svelte components in `frontend/src/lib/components/`
-2. Check types: `cd frontend && npm run check` (svelte-check, catches errors Vite ignores)
-3. Build: `cd frontend && npm run build`
-4. Server serves from `frontend/dist/` — no dev server needed
-5. Browser hard refresh to pick up changes
-6. **No server restart needed** — frontend-only changes are picked up immediately after build
-
-**TypeScript errors**: Keep the codebase TS-clean. Fix all errors from `npm run check` before finishing a task.
+1. Edit Svelte/TS under `frontend/src/`.
+2. `cd frontend && npm run check` (svelte-check) — **keep the codebase TS-clean**; fix all errors before finishing.
+3. `cd frontend && npm run build` — server serves `frontend/dist/`; hard refresh the browser. **No server restart needed.**
 
 ### Backend
-1. Edit Go files in `backend/`
-2. Build: `go build -trimpath -o kanban .`
-3. Restart server to pick up changes
-4. Config persists in SQLite (`data/kanban.db`)
+1. Edit Go under `backend/` (or `pkg/`).
+2. `gofmt -w` the touched files.
+3. `go build -trimpath -o kanban .` (or `make build`) and restart the server. Config persists in SQLite (`data/kanban.db`).
 
-### Default Config
-- Partial updates via PUT `/api/config` (only sends changed fields)
-- Provider-based config model loaded from SQLite — no hardcoded defaults
-- **Primary Providers**: config stores two required provider/model pairs — `worker_provider`/`worker_model` (chat responses) and `utility_provider`/`utility_model` (utility-type requests: title generation, summarization, commit messages, checkpoint labels). Both are required selections in Settings → Providers and may reference LLM or `agent://` providers.
-- **Worker routing**: the frontend defaults chat/task model selection to the configured Worker pair (`resolveWorker` in `$lib/utils/providers.ts`).
-- **Utility routing**: utility-type requests (title generation, summarization, commit messages, checkpoint labels) route through the configured Utility provider/model via `utilityTarget()` in `backend/exec/executor.go`, falling back to the task's own URL/model if unset.
-- Test fixtures use `http://neptune:8010/v1` as example endpoint
-- Workspace: `<project-root>/.worktrees` (stored relative; resolved to absolute at runtime). The `--worktrees-dir` flag / `MIKE_WORKTREES_DIR` env override it at runtime without persisting, so the directory can be relocated.
+### Provider Routing
+- Provider-based config in SQLite; `PUT /api/config` is a partial update (only changed fields). Two required pairs: `worker_provider`/`worker_model` (chat) and `utility_provider`/`utility_model` (titles, summaries, commit messages, checkpoint labels).
+- Worker: the frontend defaults chat/model selection via `resolveWorker` in `$lib/utils/providers.ts`.
+- Utility: backend `utilityTarget()` (`backend/exec/executor.go`) routes utility requests through the utility pair, falling back to the task's own URL/model.
 
 ## Architecture
 
 ### Client-Server Boundary
-- **The frontend client ONLY communicates through the Go server** (`localhost:3000/api/...`). It never calls the LLM endpoint directly.
-- All LLM traffic (chat completions, model listing, etc.) flows: Browser → Go server → LLM server.
-- This means features like "fetch models" must be proxied through a Go endpoint (e.g., `POST /api/config/fetch-models`), not called from the browser.
-- All real-time communication uses WebSocket through the Go server.
-- Model/provider changes are sent via WebSocket `user_message` with optional `model_name`/`llama_server_url` fields.
+- **The frontend ONLY communicates through the Go server** (`localhost:3000/api/...`). It never calls the LLM endpoint directly — all LLM traffic (chat, model listing, e.g. `POST /api/config/fetch-models`) is proxied through Go.
+- All real-time communication is WebSocket through the Go server. Client sends `{"type": "user_message", "data": {"content": "..."}}`; `WSMessage.Data` is `json.RawMessage` in Go → parsed JS value in the browser. Use optimistic UI for user messages (add immediately, skip the echo).
+- Model/provider changes ride a `user_message` with optional `model_name`/`llama_server_url` fields.
 
 ### Keyboard Shortcuts (Settings → Preferences)
-User-customizable shortcuts, persisted server-side (`keyboard_shortcuts` JSON in the `config` table), saved through the shared Settings Save/Cancel flow.
+User-customizable, persisted as `keyboard_shortcuts` JSON in the `config` table via the shared Settings Save/Cancel flow. Defaults in `DEFAULT_SHORTCUTS` + helpers in `$lib/utils/keyboard.ts`: `create_task` `C`, `create_task_submit`/`start_task` platform Ctrl/Cmd+Enter, `open_terminal` Ctrl+`, `toggle_fullscreen` Ctrl+Up.
 
-- **Bindings**: `create_task` (opens the create-task dialog, default `C`), `create_task_submit` (submits in the dialog, default platform-aware `Ctrl+Enter`/`Cmd+Enter`), `open_terminal` (toggles the terminal panel, default **Ctrl+`**), `start_task` (starts the task in the task view while the Start Task button is shown, default platform-aware `Ctrl+Enter`/`Cmd+Enter`), `toggle_fullscreen` (maximizes/minimizes the focused area — chat, diff, file editor, terminal — default **Ctrl+Up**, `control+arrowup`), `hide_hints` (bool — hides keycaps; tooltips keep the text). Defaults live in `DEFAULT_SHORTCUTS` / `defaultCreateTaskSubmitKey()` / `defaultStartTaskKey()` / `effectiveToggleFullscreenKey()` in `$lib/utils/keyboard.ts`.
-- **Format & semantics**: normalized string — modifiers in fixed order `control`, `meta`, `shift`, `alt`, joined with `+` to the key (`c`, `shift+k`, `control+k`). Absent = default, `""` = disabled, otherwise = custom. `PUT /api/config` replaces the whole object — the Settings UI always sends **all** bindings, so omitting one resets it to default.
-- **Capture rules** (`normalizeKey`): rejects modifier-only presses, Escape (cancels capture), named keys without a modifier, and browser-reserved combos (`Control+W/Q/N/T`).
-- **Activation** (wired in `App.svelte` via `use-keyboard-shortcuts.svelte.ts`):
-  - `create_task` — board view only, no modal open, focus not in an editable element.
-  - `open_terminal` — every page with a terminal button (board, task detail, both explorers); fires from any focus, including editable elements. Toggle: the open half is the composable (via `App.svelte`'s `openTerminal()`, which inits the task worktree first when missing); the close half is a capture-phase keydown in `TerminalPanel.svelte` (wins over xterm's own handler). The terminal **button** stays open-only.
-  - `create_task_submit` — handled inside `CreateTaskModal.svelte`; fires from any focus in the dialog; while unset, both `Ctrl+Enter` and `Cmd+Enter` trigger.
-  - `start_task` — handled inside `Chat/TaskChat.svelte` (the owning component, like dialog-scoped bindings); fires only while the Start Task button is visible (task in `backlog`, not loading) and no modal/overlay is open; fires from any focus (the chat input is not rendered while the start button is shown).
-  - `toggle_fullscreen` — maximizes/minimizes the **focused** area (matches its existing fullscreen button), one handler per owning component: `CardDetail.svelte` dispatches by focused column (`.column-chat` → chat; `.column-diff` → editor while a file is being edited, else diff; checkpoint overlay / no-branch state → no-op), `ExplorerView.svelte` / `TaskExplorerView.svelte` → editor when focus is in `.explorer-center-column` with a file open, `TerminalPanel.svelte` → panel when focus is inside it (capture-phase keydown wins over xterm's own handler). Fires from any focus including editable elements; modals are suppressed by focus traps. The icon-only fullscreen buttons show the binding in the `title` tooltip (e.g. "Toggle fullscreen (Ctrl+Up)").
-- **Button hints**: text buttons show a `<kbd class="key-hint">` keycap plus the shortcut in the `title` tooltip; the icon-only terminal buttons (TopBar, TaskHeader, ExplorerView, TaskExplorerView) and the panel's `.close-btn` show the shortcut in the tooltip only (e.g. "Open terminal (Ctrl+`)"). Hints derive from `appStore.config`, are hidden with `hide_hints` (tooltips keep the text) and below 768px; `aria-label`s stay stable for tests.
-- **Adding a new shortcut**: `*string` field in `types.KeyboardShortcuts` (`backend/types/domain.go`) + all-nil check in `normalizeKeyboardShortcuts` (`backend/config/config.go`); field in `KeyboardShortcuts` (`$lib/types.ts`) + default in `DEFAULT_SHORTCUTS`; row in `ConfigModal/PreferencesTab.svelte`; field in the `ConfigModal.svelte` save payload (always send all bindings); dispatch — board/global: `use-keyboard-shortcuts.svelte.ts`, dialog-scoped: the owning component.
-- **Tests**: `backend/config/config_test.go`, `utils/__tests__/keyboard.unit.ts`, `__tests__/preferences-tab.unit.svelte.ts`, `__tests__/start-panel.unit.svelte.ts` (key hint), e2e `preferences-keyboard.spec.ts` (isolated project — mutates server config), `create-task-submit-shortcut.spec.ts`, `terminal-shortcut.spec.ts`, `toggle-fullscreen-shortcut.spec.ts` (default binding toggles chat/diff/terminal fullscreen by focus; rebind behavior in `preferences-keyboard.spec.ts`).
+- **Format & semantics:** normalized `control`+`meta`+`shift`+`alt`+key. Absent = default, `""` = disabled, otherwise = custom. `PUT /api/config` replaces the whole object — the Settings UI always sends **all** bindings, so omitting one resets it to default.
+- **Capture** (`normalizeKey`): rejects modifier-only presses, Escape (cancels capture), named keys without a modifier, and browser-reserved `Ctrl+W/Q/N/T`.
+- **Activation:** board/global bindings in `use-keyboard-shortcuts.svelte.ts` (wired in `App.svelte`); dialog/panel-scoped bindings in the owning component (`CreateTaskModal`, `Chat/TaskChat`, `TerminalPanel`, `CardDetail`, `ExplorerView`, `TaskExplorerView`).
+- **Hints:** text buttons show a `<kbd class="key-hint">` + the shortcut in the `title` tooltip; hidden by `hide_hints` (tooltips keep the text) and below 768px; `aria-label`s stay stable for tests.
+- **Adding a shortcut:** `*string` field in `types.KeyboardShortcuts` (`backend/types/domain.go`) + all-nil check in `normalizeKeyboardShortcuts` (`backend/config/config.go`) + field in `KeyboardShortcuts` (`$lib/types.ts`) + default in `DEFAULT_SHORTCUTS` + row in `ConfigModal/PreferencesTab.svelte` + field in the `ConfigModal.svelte` save payload (always send all bindings) + dispatch (global: `use-keyboard-shortcuts.svelte.ts`; scoped: owning component).
+- **Tests:** `backend/config/config_test.go`, `utils/__tests__/keyboard.unit.ts`, `preferences-tab.unit.svelte.ts`, e2e `preferences-keyboard.spec.ts` (isolated), `create-task-submit-shortcut` / `terminal-shortcut` / `toggle-fullscreen-shortcut` specs.
 
 ### UI Preferences (Settings → Preferences → UI)
-Non-keyboard UI preferences, persisted server-side as top-level `*bool` config fields (same save/load plumbing as `hide_hints` — `PUT /api/config`, `parseBoolPtr` in `GetConfig`, `configResponse` with `omitempty`). Saved through the shared Settings Save/Cancel flow.
-
-- `hide_model_badge` (bool — hides the `.model-badge` on board task cards; `nil` = visible). Gated in `Card.svelte` via `$derived(appStore.config?.hide_model_badge === true)`; the status badge and subtask progress are unaffected.
-- **Adding a new UI preference**: `*bool` field in `types.Config` (`backend/types/domain.go`); read in `GetConfig` + write in `UpdateConfig` + field in `configResponse` (`backend/config/config.go`) + PUT merge in `HandleConfig`; field in `Config` (`$lib/types.ts`); state + hydrate + save payload in `ConfigModal.svelte`; toggle row in `ConfigModal/PreferencesTab.svelte` (UI section); row in the consuming component reading `appStore.config`.
-- **Tests**: `backend/config/config_test.go` (round-trip + omitted-when-nil), `__tests__/preferences-tab.unit.svelte.ts`, `__tests__/card-model-badge.unit.svelte.ts`, e2e `preferences-hide-model-badge.spec.ts` (isolated project — mutates server config).
+Top-level `*bool` config fields with the same save/load plumbing as the shortcuts (`parseBoolPtr` in `GetConfig`, `omitempty` in `configResponse`). Example: `hide_model_badge` gates `.model-badge` in `Card.svelte` (`appStore.config?.hide_model_badge === true`).
+- **Adding:** `*bool` in `types.Config` + read in `GetConfig` / write in `UpdateConfig` + field in `configResponse` + PUT merge in `HandleConfig` (all in `backend/config/config.go`) + field in `Config` (`$lib/types.ts`) + state/hydrate/save payload in `ConfigModal.svelte` + toggle row in `ConfigModal/PreferencesTab.svelte` (UI section) + consume from `appStore.config` in the target component.
+- **Tests:** `backend/config/config_test.go` (round-trip + omitted-when-nil), `preferences-tab.unit.svelte.ts`, `card-model-badge.unit.svelte.ts`, e2e `preferences-hide-model-badge.spec.ts` (isolated).
 
 ### Board Arrow-Key Navigation
-Arrow keys move **real DOM focus** (highlight = the global `:focus-visible` ring) — no separate "highlighted" store. `Enter` opens the focused card via the existing card keydown handler; `Alt+Arrow` keeps moving tasks (card handler `stopPropagation`s, and the arrow handler ignores modifiers).
-
-- **5-column ring**: the project list is the leftmost column — `[Projects] [Backlog] [In Progress] [Review] [Done]`. Left on a backlog card (or Right on a done card) enters the project list, always landing on the **active** project; Right on a project → first backlog card, Left on a project → first done card (closes the ring). Board Left/Right skip empty columns and never wrap within the board.
-- **Cards** (`composables/use-board-arrow-nav.ts`, wired in `App.svelte` with the same gate as the board shortcuts): DOM-driven (queries the rendered columns, so it always matches filters/sorting — `collectNavColumns()` builds the 5-column list). Down/Up = next/prev top-level card in the column, **wrapping both ends**; Left/Right = **first** card of the next non-empty column cyclically. Any arrow press with no card focused (Down/Up/Left/Right) anchors to the first backlog card (first non-empty board column if backlog is empty; never the projects list). Skips editable focus and focus inside `.project-list`. `focus()` + `scrollIntoView({block:'nearest'})` + `preventDefault`.
-- **Project list** (`App/Sidebar.svelte`, per-button `onkeydown`): Up/Down = click (select) prev/next project, wrapping; Right = first backlog card; Left = first done card. Enter/Space = native button click. `stopPropagation` keeps the card handler from also firing. A focused project gets a blue ring via an explicit `.project-item:focus` rule using an **inset box-shadow** (not an outline — the wrapper/content ancestors have `overflow:hidden` for the collapse transition and clip anything drawn outside the button box; `:focus` instead of `:focus-visible` because the handler's `click()+focus()` defeats the heuristic).
-- **Tests**: `composables/__tests__/board-arrow-nav.unit.ts` (pure `resolveArrowTarget`: 5-column ring, wrap/skip/anchor rules), e2e `board-arrow-nav.spec.ts` (chromium project; creates a second project at `/tmp/kanban-test-repo-2` via the API; asserts the accent focus ring on the focused project).
+Arrow keys move **real DOM focus** (the global `:focus-visible` ring) — no separate "highlighted" store. A 5-column ring `[Projects][Backlog][In Progress][Review][Done]`: the project list is the leftmost column (always lands on the active project), board Left/Right skip empty columns and never wrap, Down/Up wrap within a column.
+- Files: pure resolvers `resolveArrowTarget`/`resolveOverviewArrowTarget` in `composables/use-board-arrow-nav.ts`, wired in `App.svelte`; project-list keydown in `App/Sidebar.svelte` (focus ring is an **inset box-shadow** on `.project-item:focus` — ancestors clip outlines, and `click()+focus()` defeats `:focus-visible`).
+- **Tests:** `composables/__tests__/board-arrow-nav.unit.ts`, e2e `board-arrow-nav.spec.ts`.
 
 ### Task View Column Navigation
-In the Task View (`CardDetail.svelte`) the three columns — `[Board overview][Chat][Diff]` — are focusable. Arrow keys move **real DOM focus** (global `:focus-visible` ring is the highlight). All handlers live in `CardDetail.svelte`'s window `keydown` listener, using pure resolvers from `composables/use-task-detail-column-nav.ts` (same pattern as the board arrow nav).
+In the Task View (`CardDetail.svelte`) the three columns `[Board][Chat][Diff]` are focusable; arrow keys move real DOM focus. All handlers live in `CardDetail.svelte`'s window keydown listener, using pure resolvers from `composables/use-task-detail-column-nav.ts` (`resolveDetailColumn`, `resolveDiffFileTarget`, `canSwitchDetailColumn`).
+- Left/Right cycle Board→Chat→Diff→Board. Plain arrows in any editable focus (incl. the chat input) keep native text behavior; **Ctrl+Alt+Left/Right** switches columns from any focus (except while editing a file). Up/Down dispatch on the focused column (overview cards / page-scroll chat / diff file headers).
+- **Tests:** `composables/__tests__/task-detail-column-nav.unit.ts`, e2e `task-view-column-nav.spec.ts`.
 
-- **Left/Right** (cyclic, wraps at both ends): switch the focused column Board → Chat → Diff → Board. Landing targets: Board → currently focused overview card, else first card, else the `.column-context` container; Chat → the chat input (ChatForm textarea), fallback `.chat-messages`; Diff → first `button.diff-file-header`, fallback the `.column-diff` container. Gate is the pure `canSwitchDetailColumn` (`composables/use-task-detail-column-nav.ts`): desktop only, no Meta/Shift, no lone Alt/Ctrl, no modal/overlay open, not `editingFile`/fullscreen. Plain arrows in any editable focus (incl. the chat input) keep native text-cursor movement — like a normal textbox; **Ctrl+Alt+Left/Right** switches columns from any focus (the keyboard way out of the chat input; Tab also works) but never while a file is being edited (code-editor word movement); plain **Ctrl+Left/Right** does not switch (native word jump in the chat input). Vertical arrows in the chat input are also native text editing.
-- **Up/Down** dispatch on the focused column:
-  - **Board** (or neutral focus outside all columns) → next/prev overview card via `resolveOverviewArrowTarget` (existing behavior, wraps).
-  - **Chat** (non-editable focus, e.g. the `.chat-messages` region) → page-scroll the messages by ±`clientHeight` (smooth). Focus in the chat input keeps native text-cursor behavior.
-  - **Diff** → next/prev diff file header via `resolveDiffFileTarget` (wraps both ends; focus inside a file section anchors to that section).
-- **Column containers** `.column-context` and `.column-diff` are `tabindex="-1"` (fallback focus targets); an inset `:focus-visible` offset (`-2px`) is set on them and on `.chat-messages` because the global ring's `2px` offset is clipped by the parent.
-- **Tests**: `composables/__tests__/task-detail-column-nav.unit.ts` (pure `resolveDetailColumn` + `resolveDiffFileTarget` + `canSwitchDetailColumn`), e2e `task-view-column-nav.spec.ts` (chromium project; serial; fixture = in-progress task with a worktree holding two files, verified via `waitForStableHeaders()` so the 2s worktree watcher can't re-render the file list mid-test).
+## Extensions
 
-### Extensions System
-The Extensions system replaces hardcoded LSP configurations with user-defined and downloadable extensions.
+Types: `lsp` (language servers in gVisor sandboxes), `ui` (frontend injection), `agent` (AI agents as subprocesses via WASM adapters).
 
 **Key files:**
-- `backend/extensions/extensions.go` — Domain types (Extension, ExtensionManifest, LSPConfig, UIConfig, SandboxConfig)
-- `backend/extensions/store.go` — SQLite CRUD (ExtensionStore)
-- `backend/extensions/registry.go` — Registry client (FetchIndex, FetchManifest, PullImage, BuildImage)
-- `backend/extensions/sandbox.go` — Sandbox manager (Create/Start/Stop/Destroy, refcount lifecycle)
-- `backend/extensions/handler.go` — REST API handlers (10 endpoints)
-- `backend/lsp/extension_manager.go` — Extension-driven LSP discovery (replaces hardcoded registry)
-- `frontend/src/lib/services/extension-manager.svelte.ts` — Reactive singleton service
-- `frontend/src/lib/services/ui-injector.svelte.ts` — UI injection framework (6 named slots)
-- `frontend/src/lib/components/ConfigModal/ExtensionsTab.svelte` — Settings UI
-- `frontend/src/lib/api/extensions.ts` — API client functions
-- `extensions/lsp/gopls/` — gopls extension package (Dockerfile, manifest.json)
-- `extensions/ui/github-issue-importer/` — GitHub issue importer UI extension
-- `extensions/css/mike-light/` — Light mode CSS theme
-- `extensions/agent/pi/` — Pi Coding Agent adapter (Go source → WASM)
-- `extensions/registry.json` — Default registry index
+- `backend/extensions/` — domain types, `store.go` (SQLite), `registry.go` (FetchIndex/FetchManifest/PullImage/BuildImage), `sandbox.go` (refcount lifecycle), `handler.go` (REST), `changelog.go`
+- `backend/lsp/extension_manager.go` — extension-driven LSP discovery (replaces the hardcoded registry; LSP availability = installed extensions)
+- `frontend/src/lib/services/extension-manager.svelte.ts`, `ui-injector.svelte.ts`; `$lib/api/extensions.ts`; `ConfigModal/ExtensionsTab.svelte`
 
-**API endpoints:**
-- `GET /api/extensions` — List all extensions
-- `GET /api/extensions/{id}` — Get single extension
-- `PUT /api/extensions/{id}` — Update extension
-- `DELETE /api/extensions/{id}` — Delete extension
-- `PATCH /api/extensions/{id}/enabled` — Toggle enabled
-- `GET /api/extensions/registry` — Fetch registry index
-- `POST /api/extensions/install` — Install from registry
-- `GET /api/extensions/check-updates` — Check for updates
-- `GET /api/extensions/{id}/logs` — Get sandbox logs
-- `GET /api/extensions/build-progress?name=` — SSE build progress stream
+**REST:** `/api/extensions` (list/get/update/delete), `PATCH /{id}/enabled`, `/registry`, `/install`, `/check-updates`, `/{id}/logs`, `/build-progress` (SSE), plus the preview endpoints below.
 
-**Preview endpoints** (served to sandboxed preview iframes — see "Preview capability" below):
-- `POST /api/preview` — session + CSRF; stores a document, returns `{token, url}`
-- `GET /api/preview/{token}/[path...]` — public (token is the bearer): the doc or a sibling asset
-- `DELETE /api/preview/{token}` — session + CSRF; releases the doc early (TTL is the backstop)
-
-**Extension types:**
-- `lsp` — Language Server Protocol servers (run in gVisor sandboxes)
-- `ui` — UI plugins (inject into existing components via slots)
-- `agent` — AI coding agents (run as subprocesses, protocol via WASM adapter)
-
-**LSP Discovery:** `ExtensionRegistry.Lookup()` replaces `lsp.Registry.Lookup()` to dynamically resolve language servers from installed extensions. LSP availability is determined by installed extensions, not a global toggle.
-
-**UI Injection:** Extensions are activated based on the current scope. When a component mounts, it calls `renderSlot(scope, context)` to activate extensions registered for that scope.
-
-| Scope | Component | Purpose |
-|---|---|---|
-| `task-card` | `Card.svelte` | Enhance individual task cards (e.g. status badges, custom actions) |
-| `file-editor` | `FileEditor.svelte` | Enhance the code editor (e.g. toolbars, status bars) |
-| `project-board` | `Board.svelte` | Enhance the project board view (e.g. board-level utilities) |
-| `task-chat` | `TaskChat.svelte` | Enhance the chat interface (e.g. input actions, header tools) |
-| `project-sidebar` | `Sidebar.svelte` | Enhance the project sidebar (e.g. project-specific tools) |
-| `file-browser` | `FileBrowser.svelte` | Enhance the project directory selector modal |
-| `create-task` | `CreateTaskModal.svelte` | Enhance the task creation flow (e.g. GitHub issue import) |
+**UI injection:** extensions activate per scope; components call `renderSlot(scope, context)` on mount. Scopes → components: `task-card`→Card, `file-editor`→FileEditor, `project-board`→Board, `task-chat`→TaskChat, `project-sidebar`→Sidebar, `file-browser`→dir picker modal, `create-task`→CreateTaskModal.
 
 ### UI Extensions
+UI extensions are **plain JavaScript modules — not Svelte components** (external bundles carry their own Svelte runtime → `effect_orphan` errors).
 
-UI extensions are **plain JavaScript modules** — not Svelte components. Svelte components cannot be dynamically loaded from external bundles (each bundle carries its own Svelte runtime, causing `effect_orphan` errors).
+- A module default-exports `init({ component, config, ...scopeContext })` and returns a cleanup `() => void`. No Svelte imports; DOM manipulation + `document.createElement('style')` only. `ui.module_url` is served by the Go static handler under `/extensions/...`. `manifest.json` carries metadata, `ui.injection_points`, optional `config_schema`, and `priority` (lower loads first; ties by name).
+- **Source lives in `../MIKE-extensions/<type>/<name>/`.** `../MIKE-extensions/registry.json` is **generated** — regenerate after editing a manifest or bumping a commit:
+  ```bash
+  python3 scripts/gen-registry.py            # regenerate
+  python3 scripts/gen-registry.py --check    # verify up to date (CI)
+  ```
+- **Install model:** entries are git-pinned (`author`/`repo`/`commit`/`subdir`); the server clones the repo, checks out exactly `commit` (full SHA-1/SHA-256), verifies `git rev-parse HEAD` matches, then materializes the subdir into `./extensions/<author>/<name>`. Deploy via Settings → Extensions → "Install from Registry".
+- **Bundling a runtime library (isolation):** keep it **inside the extension folder** (bundle an ESM npm package to a single IIFE committed in the extension dir, with its own `package.json` + build). The core `frontend/` workspace must NOT gain an extension's runtime dependencies.
+- **Extension tests:** colocated under the extension dir's `tests/` (loading Playwright from the frontend workspace), not in `frontend/tests/`. Shared extension logic is a plain script loaded by both the extension and its tests — never copy it.
 
-**Creating a UI extension:**
+### Preview capability
+Generic host support for UI extensions that render the open file (e.g. the `html-preview` extension — overlay + live refresh for `.html`/`.xhtml`/`.svg`, root-relative refs rewritten to file-relative before serve).
 
-1. Create a directory under `extensions/<name>/` with two files:
+- **Host API:** `preview.serve(content)` → `{token, url}`, `preview.release(token)` — `frontend/src/lib/extensions/handlers/preview.ts`, exposed as `extHost.preview.*` in `frontend/public/host-client.js`. The `project`/`path`/`task` body fields are filled by the host from its **own** injection context (FileEditor passes `filePath`/`projectId`/`taskId`), never from extension arguments — an extension can't point the server at arbitrary directories. A re-serve from the same editor implicitly releases its previous doc.
+- **Go** (`backend/server/handler_preview.go`): in-memory; 128-bit token; 10-min idle TTL (refreshed per read); 32-doc cap (oldest evicted); 10 MB/doc; 30 s sweep. `POST /api/preview` (session+CSRF) stores the doc; `GET /api/preview/{token}/[path...]` is public (token is the credential; content type from the previewed file's extension; `Cache-Control: no-store`; permissive CSP — `CORSMiddleware` skips `/api/preview/*` because multiple CSP headers union to the most restrictive); `DELETE /api/preview/{token}` releases early. Sibling assets are worktree-aware with `filepath.Clean`/`Rel` containment + `EvalSymlinks` re-containment — traversal and symlink escapes are 404.
+- **Security model:** the doc loads in a nested `<iframe sandbox="allow-scripts">` (opaque origin) inside the extension's already-sandboxed iframe — no host cookies/DOM/Web Storage access, no top-window navigation, no popups; `/api` mutations still need the CSRF header; no `frame-ancestors` (the doc must be frameable). Isolation is regression-tested by probes in `frontend/tests/e2e/html-preview.spec.ts`.
 
-```text
-extensions/my-extension/
-├── manifest.json
-└── MyExtension.js
-```
-
-2. **`manifest.json`** — Metadata and injection config:
-```json
-{
-    "display_name": "My Extension",
-    "description": "Does something useful",
-    "author": "Author",
-    "deprecated": false,
-    "priority": 0,
-    "ui": {
-        "module_url": "/extensions/my-extension/MyExtension.js",
-        "injection_points": ["create-task"]
-    },
-    "config_schema": {
-        "type": "object",
-        "properties": {
-            "api_key": { "type": "string", "title": "API Key" }
-        }
-    }
-}
-```
-
-**Priority** governs extension loading order. Lower values load first (default `0`). An extension with `priority: 10` loads after one with `priority: 0`. Extensions with the same priority are sorted by name.
-
-3. **`MyExtension.js`** — ES module exporting a default `init` function:
-```js
-export default function init({ component, config }) {
-    // Set up DOM elements, event listeners, etc.
-    // The extension manages its own DOM — no Svelte rendering.
-
-    // Return a cleanup function (called when extension is disabled/unloaded)
-    return () => {
-        // teardown
-    };
-}
-```
-
-The context object passed to `init` contains `component` (component name, e.g. `'CreateTaskModal'`) and `config` (extension config from user settings). Depending on the scope, additional fields like `taskId`, `projectId`, or `filePath` may be provided.
-
-4. **Register in `extensions/registry.json`:**
-```json
-{
-    "name": "my-extension",
-    "version": "1.0.0",
-    "type": "ui",
-    "display_name": "My Extension",
-    "description": "Does something useful",
-    "author": "Author"
-}
-```
-
-**Updating:** Edit the `.js` file and `manifest.json` directly. The Go server serves `extensions/` as static files — no build step needed. Browser hard refresh to pick up changes.
-
-**Registry generation:** the published extensions live in the sibling repo
-`../MIKE-extensions/`, and `registry.json` there is **generated** from the extension
-manifests — do not edit it by hand. After adding/editing an extension manifest or
-bumping a published commit, regenerate it:
-
-```bash
-python3 scripts/gen-registry.py            # regenerate ../MIKE-extensions/registry.json
-python3 scripts/gen-registry.py --check    # verify it's up to date (CI)
-```
-
-The generator scans `../MIKE-extensions/<type>/<name>/manifest.json` for every
-extension and emits a minimal git-pinned registry entry: the repo URL (`repo`),
-the current HEAD commit of the extensions repo (`commit`, a full SHA-1 or SHA-256
-hash), and the extension's subdirectory within the repo (`subdir`). On install the
-verified content is materialized into `./extensions/<author>/<name>` (slugified
-manifest `author`). It also keeps the fields the Browse Registry UI renders
-(e.g. `ui` injection points/permissions and `proxy` allowed domains); the full
-capability config stays in the manifest.
-
-**Deploying:** Install from registry via Settings → Extensions → "Install from Registry".
-
-**Key constraints:**
-- Module must export a `default` function accepting `{ component, config }`
-- Function returns a cleanup `() => void` function
-- No Svelte imports — plain DOM manipulation only
-- CSS is injected via `document.createElement('style')` or inline styles
-- `module_url` is a path served by the Go server's static file handler (`/extensions/...`)
-
-**Bundling a runtime library (isolation):** A UI extension that needs a runtime
-library (e.g. Wordgard for the `markdown-preview` WYSIWYG editor) must keep it
-**inside its own folder** — the core codebase only ships generic capabilities.
-The sandboxed extension iframe loads plain `<script>` tags (CSP `script-src
-'self'`), so an ESM npm package is bundled to a single IIFE committed in the
-extension dir (e.g. `extensions/ui/markdown-preview/lib/wordgard.js`). The
-extension has its own `package.json` declaring that dependency and its own
-build under `build/` (`npm run build` → `node build/build-wordgard.mjs`);
-`node_modules/` and the transient `build/.dist/` are git-ignored. The core
-`frontend/` workspace must NOT gain the extension's runtime dependencies — only
-generic extension capabilities (e.g. `editor.setContent`) belong there.
-Extension-specific tests are colocated under `extensions/<type>/<name>/tests/`
-(loading Playwright from the frontend workspace), not in `frontend/tests/`. Shared
-extension logic (e.g. the markdown↔Wordgard serializer in `serializer.js`) is a
-plain script loaded by both the extension and its tests — never copy it.
-
-**Preview capability (`preview.serve` / `preview.release`):**
-Generic host support for UI extensions that render the open file (e.g. the
-`html-preview` extension — "Preview" footer button for `.html`/`.xhtml`/`.svg`
-files, full-bleed overlay, live refresh as the code view changes, and
-root-relative `src`/`href`/CSS-`url()` refs rewritten to file-relative before
-serve so the file's directory is the preview's site root).
-
-- **Capability** (`frontend/src/lib/extensions/handlers/preview.ts`):
-  `preview.serve(content)` POSTs to `POST /api/preview` and returns
-  `{token, url}`. The `project`/`path`/`task` body fields are filled by the
-  host from its OWN injection context (`FileEditor` passes `filePath`,
-  `projectId`, `taskId`) — never from extension arguments, so an extension can
-  not make the server serve files from an arbitrary directory. A new serve
-  from the same editor implicitly releases that editor's previous doc
-  (anchor-scoped tracking in `preview.ts`, generation-ordered so a stale
-  in-flight serve can't release a newer serve's doc). `preview.release(token)`
-  DELETEs the doc early — html-preview uses it for immediate reclaim on
-  close; re-serves are implicit and the TTL sweep is the backstop.
-- **Go** (`backend/server/handler_preview.go`): in-memory store — 128-bit
-  bearer token, 10-min idle TTL (refreshed per read), 32-doc cap (oldest
-  evicted), 10 MB/doc, 30 s background sweep. `GET /api/preview/{token}/`
-  serves the doc (content type derived from the previewed file's extension —
-  host-controlled from the injection context, defaulting to
-  `text/html; charset=utf-8`; `Cache-Control: no-store`; permissive preview
-  CSP); `GET /api/preview/{token}/<rel>` serves sibling
-  assets under the file's own directory (worktree-aware resolution shared
-  with `/api/fs/read`; `filepath.Clean` + `filepath.Rel` containment +
-  `EvalSymlinks` re-containment — traversal and symlink escapes are 404).
-  The doc URL ends in `/` so relative asset URLs resolve under it.
-- **Security model** (host protection first): the doc loads in a nested
-  `<iframe sandbox="allow-scripts">` (opaque origin) inside the extension's
-  already-sandboxed iframe → the previewed page cannot read host cookies
-  (session cookie is HttpOnly + SameSite=Lax and is not attached to
-  cross-site requests), cannot touch the host DOM, cannot navigate the top
-  window, submit forms, or pop up windows; `/api` mutations additionally
-  require the CSRF header. Its only network power is outbound connections
-  from the user's browser (CDN assets etc.) — same as opening the file in a
-  regular browser. The permissive CSP on the doc response is intentional
-  (scripts/external assets must work); CORSMiddleware therefore skips the
-  app-wide strict CSP on `/api/preview/*` (multiple CSP headers union to the
-  most restrictive and would neuter the preview). No `frame-ancestors`
-  directive — the doc must be frameable. Isolation is regression-tested in
-  e2e by probes the previewed page runs on itself (opaque origin: host DOM/
-  Web Storage/cookies unreadable — `document.cookie` throws; host API
-  responses CORS-rejected since the server sets no CORS headers; the nested
-  iframe's `sandbox="allow-scripts"` attribute is asserted as deployed).
-- **Files**: `backend/server/handler_preview.go` (+`_test.go`),
-  `frontend/src/lib/extensions/handlers/preview.ts` (+`__tests__/preview.unit.ts`),
-  `frontend/public/host-client.js` (`extHost.preview.{serve,release}`),
-  `FileEditor.svelte` (fs_event → `checkExternalChange` reconcile in all
-  modes; `editor.contentChange` forwarded per anchor),
-  `CardDetail.svelte` (consumes `fsEventQueue` → diff-mode `FileEditor`),
-  `extensions/softwarerenderer/html-preview/` (extension, incl.
-  `tests/html-preview-iframe.mjs`), e2e `frontend/tests/e2e/html-preview.spec.ts`
-  (incl. Task View live-update and code-view-mirror semantics tests).
-
-**Registry:** URL sourced exclusively from the `MIKE_REGISTRY_URL` env var (no longer DB-backed; default `https://getmike.dev/extensions/registry.json`). Bare filesystem paths (no `http(s)://`/`file://` scheme) are treated as local files resolved against the working directory (e.g. `MIKE_REGISTRY_URL=../MIKE-extensions/registry.json`). Extensions are git-pinned: each entry carries `author`/`repo`/`commit`/`subdir`, and the server clones the repo, checks out exactly `commit` (a full 40-char SHA-1 or 64-char SHA-256 hash), verifies `git rev-parse HEAD` matches, and only then installs the `subdir` content into `./extensions/<author>/<name>`.
-
-**Changelogs:** Each extension may ship a `CHANGELOG.jsonl` next to its `manifest.json` in the git subdir — one JSON object per line, ordered **oldest → newest** (append-only): `{"hash": "<full commit sha>", "version": "x.y.z", "description": "..."}`. The changelog is uploaded to the central registry server at `<registry-base>/<author-slug>/<name>` (the same base location that serves `registry.json`, derived via `ResolveURL` — so local `file://` registries work too). `GET /api/extensions/check-updates` returns a `changelog` array on git-pinned updates: all entries **newer than the installed commit** (anchored on the first hash match, case-insensitive). No matching hash, no published file, or a fetch error → empty `changelog` (best-effort metadata; never blocks update detection). Legacy version-only updates have no changelog (no commit to key on). UI: `.update-changelog` block in the "Updates Available" section (`ExtensionsTab.svelte`). Key files: `backend/extensions/changelog.go` (`ChangelogEntry`, `ParseChangelog`, `ChangelogSince`), `RegistryClient.FetchChangelog` (`registry.go`), `HandleCheckUpdates`/`changelogForUpdate` (`handler.go`), e2e `extension-changelog.spec.ts`.
-
-**Sandbox:** Each LSP extension runs in a dedicated gVisor sandbox. Bridge protocol uses `MethodLSP` (0x0A) for JSON-RPC passthrough.
+### Changelogs
+An extension may ship `CHANGELOG.jsonl` next to its manifest (one JSON object per line, oldest→newest: `{"hash", "version", "description"}`), published to `<registry-base>/<author-slug>/<name>`. `GET /api/extensions/check-updates` returns entries newer than the installed commit (anchored on the first hash match); no match / no file / fetch error → empty `changelog` (best-effort, never blocks update detection). UI: `.update-changelog` in the "Updates Available" section of `ExtensionsTab.svelte`. Key files: `backend/extensions/changelog.go`, `FetchChangelog` (`registry.go`), `HandleCheckUpdates`, e2e `extension-changelog.spec.ts`.
 
 ### Agent Extensions
+Agent extensions run AI agents (e.g. Pi) as subprocesses. The backend knows **nothing** about agent protocols — all protocol logic lives in the extension's WASM adapter.
 
-Agent extensions run AI coding agents (e.g., Pi) as subprocesses. The backend knows **nothing** about agent protocols — all protocol logic lives in the extension via a WASM adapter.
+`Backend (executor) ←→ AgentRunner (I/O bridge) ←→ WASM Adapter (protocol) ←→ Agent Process`
 
-**Flow:** `Backend (executor) ←→ AgentRunner (I/O bridge) ←→ WASM Adapter (protocol) ←→ Agent Process`
-
-**Key files:** `backend/agent/` (interface, runner, loader, registry), `backend/exec/loop_agent.go` (event loop), `extensions/agent/pi/` (Pi adapter)
-
-**Adapter interface** (`AgentAdapter`): `Init(config)`, `SubprocessConfig()`, `EncodeCommand(cmd, data)`, `ParseOutput(bytes) → []Event`, `HandleUIRequest(id, method)`, `Close()`
-
-**Event types:** `token`, `reasoning`, `tool_call`, `tool_result`, `status`, `stats`, `error`, `persist`, `turn_complete`
-
-**Persistence:** Adapter buffers turn state and emits `EventTypePersist` with `[]PersistEntry` (pre-parsed assistant text, reasoning, tool calls/results). Executor iterates entries generically — zero agent-specific persistence in backend.
-
-**URL scheme:** `agent://<name>` (e.g., `agent://pi`). Legacy `pi://agent` supported.
-
-**Creating an agent extension:**
-
-```
-extensions/agent/my-agent/
-├── adapter.go          # Core logic (zero backend/ imports — compiles to WASM)
-├── adapter_test.go     # Unit tests (run natively)
-├── wasm/main.go        # WASI reactor exports (package main, //go:wasmexport directives)
-├── manifest.json       # {"agent": {"wasm_module": "my-agent.wasm"}}
-└── build.sh            # GOOS=wasip1 GOARCH=wasm go build -trimpath -buildmode=c-shared -o ../my-agent.wasm ./wasm
-```
-
-Adapter core must have **zero `backend/` imports** (WASM compatibility). The `wasm/main.go` wraps the adapter and exports functions via `//go:wasmexport` for the [WASI reactor](https://go.dev/blog/wasmexport) model (`-buildmode=c-shared`, Go 1.24+).
-
-**WASM memory model (zero buffers):**
-- Input: host writes data to WASM linear memory, passes as `string` param
-  (Go runtime maps `string` → `(i32 ptr, i32 len)` automatically)
-- Output: WASM module calls `//go:wasmimport env store_result(string)` host callback
-- The host reads result data from linear memory and delivers it to Go
-- `store_result` fires synchronously during `fn.Call` — before it returns — so
-  a buffered channel (size 1) safely captures the result
-- No shared result buffers, no `malloc`/`lastResultLen`
-- The host calls `_initialize` first (runtime init), then exported functions
-- All user data is JSON-serialized before passing to WASM memory
-- `EventTypePersist` is the only path to DB persistence
-
-**WASM export rules:**
-- `string` params are supported (maps to `(i32, i32)` — ptr + len in linear memory)
-- `string` may be used as a **parameter** only, not as a return value
-- Use `string` params and `//go:wasmimport` callbacks for all data passing — no manual memory management needed
-- `//go:wasmimport` can import host functions (e.g. callbacks for results)
-
-**Example `wasm/main.go`:**
-```go
-package main
-
-import (
-    "encoding/json"
-    "kanban/extensions/agent/my-agent"
-)
-
-var adapter *myagent.Adapter
-
-//go:wasmimport env store_result
-//go:noescape
-func storeResult(data string)
-
-//go:wasmexport Init
-func Init(config string) int32 {
-    adapter = myagent.NewAdapter()
-    if len(config) == 0 {
-        return 1
-    }
-    if err := adapter.Init([]byte(config)); err != nil {
-        return 1
-    }
-    return 0
-}
-
-//go:wasmexport SubprocessConfig
-func SubprocessConfig() {
-    if adapter == nil {
-        storeResult("")
-        return
-    }
-    cfg := adapter.SubprocessConfig()
-    data, _ := json.Marshal(cfg)
-    storeResult(string(data))
-}
-
-//go:wasmexport Close
-func Close() {
-    if adapter != nil {
-        adapter.Close()
-        adapter = nil
-    }
-}
-
-func main() {} // not called in reactor mode
-```
-
-The loader (`backend/agent/loader.go`) uses wazero with `WithStartFunctions("_initialize")` and `api.EncodeI32`/`api.DecodeI32` for parameter encoding.
+- **Adapter interface** (`AgentAdapter`): `Init(config)`, `SubprocessConfig()`, `EncodeCommand(cmd, data)`, `ParseOutput(bytes) → []Event`, `HandleUIRequest(id, method)`, `Close()`. Event types: `token`, `reasoning`, `tool_call`, `tool_result`, `status`, `stats`, `error`, `persist`, `turn_complete`.
+- **Persistence:** `EventTypePersist` carries `[]PersistEntry` (pre-parsed assistant text/reasoning/tool calls); it is the **only** path to DB persistence — the executor iterates entries generically, with zero agent-specific persistence in the backend.
+- **URL scheme:** `agent://<name>` (legacy `pi://agent`). Key files: `backend/agent/` (interface, runner, wazero loader with `WithStartFunctions("_initialize")`, registry), `backend/exec/loop_agent.go`.
+- **WASM memory model (zero buffers):** input = `string` params (the runtime maps them to ptr+len in linear memory); output = a `//go:wasmimport env store_result(string)` host callback that fires synchronously during `fn.Call` (a size-1 buffered channel safely captures it). The host calls `_initialize` first, then exported functions. No shared result buffers, no `malloc`/length bookkeeping.
+- **Creating an agent extension** in `../MIKE-extensions/agent/<name>/`: `adapter.go` (core — **zero `backend/` imports**, unit tests run natively there), `wasm/main.go` (WASI reactor via `//go:wasmexport`, wrapping the adapter; `string` is allowed as a param only, never a return), `build.sh` (`GOOS=wasip1 GOARCH=wasm go build -trimpath -buildmode=c-shared`), `manifest.json` (`agent.wasm_module`), plus its own `LICENSE`/`NOTICE`/`THIRD_PARTY_NOTICES.md`. Reference implementation: `../MIKE-extensions/agent/pi/`.
 
 ## Common Patterns
 
-### Client-Side Storage (`storage.ts`)
-All client-side storage goes through `frontend/src/lib/storage.ts`. Never access IndexedDB directly in components.
-All functions are **async** (return `Promise`).
-
-**Single IndexedDB database:** `kanban-storage` (v3) with these object stores:
-- `drafts` — draft chat text per task (key: taskId)
-- `editor-drafts` — draft file content per file path (key: path)
-- `editor-history` — undo/redo history per file (key: path)
-- `editor-tabs` — open files, active file, pinned files per project (key: projectId)
-- `collapsed-tasks` — collapsed parent task IDs (single key)
-- `collapsed-sections` — collapsed board section IDs (single key)
-- `collapsed-diff-files` — collapsed diff file paths (single key)
-- `unsaved-files` — unsaved file paths per project (key: projectId)
-- `offline-queue` — queued write actions (single key)
-- `explorer-layout` — explorer column widths (single key)
-- `app-settings` — generic key-value for component settings (terminal height, panel ratios, sidebar)
-- `attachments` — draft image attachments per task (key: taskId)
-- `board-cache` — offline mirror of server state (projects, board, config)
-
-**Key functions:**
-- `getDraftText(taskId)` / `setDraftText(taskId, text)` / `clearDraftText(taskId)` — per-task chat input drafts
-- `getEditorDraft(path)` / `setEditorDraft(path, text)` / `clearEditorDraft(path)` — per-file editor drafts
-- `loadEditorHistory(path)` / `saveEditorHistory(path, base, deltas)` / `clearEditorHistory(path)` — editor undo/redo
-- `loadCollapsedTasks()` / `saveCollapsedTasks(ids: Set<string>)` — collapsed parent task IDs (returns `Set<string>`)
-- `loadCollapsedSections()` / `saveCollapsedSections(ids: Set<string>)` — collapsed board sections (returns `Set<string>`)
-- `loadCollapsedDiffFiles()` / `saveCollapsedDiffFiles(ids: Set<string>)` — collapsed diff file paths (returns `Set<string>`)
-- `loadUnsavedFiles(projectId)` / `saveUnsavedFiles(projectId, paths)` — unsaved file paths
-- `loadQueue()` / `saveQueue(actions)` — offline action queue
-- `loadExplorerLayout()` / `saveExplorerLayout(layout)` — explorer column widths
-- `loadAppSetting(key, default)` / `saveAppSetting(key, value)` — generic key-value settings
-- `saveDraftAttachments(taskId, atts)` / `loadDraftAttachments(taskId)` / `clearDraftAttachments(taskId)` — per-task image drafts
-- `setBoardCache(key, value)` / `getBoardCache<T>(key)` / `boardCacheKey(projectId)` — offline board state cache
-- `gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>, allProjectIds?: Set<string>, projectId?: string)` — garbage-collect ALL stale entries. When `projectId` is provided, also cleans the offline message/diff caches (`messages:`/`message-full:`/`diff:` keys in the `board-cache` store) for that project
-
-**GC trigger:** Called in `Board.svelte` after the board is loaded. Components should NOT call `gc()` themselves.
+### Client-Side Storage
+All client-side storage goes through `frontend/src/lib/storage.ts` (async functions; single IndexedDB `kanban-storage`). Never access IndexedDB directly in components. `gc()` (stale-entry sweep, incl. offline message/diff caches for a project) is called only from `Board.svelte` after the board loads — components should NOT call it.
 
 ### Svelte 5 Reactivity
-- Use `$state()` for reactive variables
-- Use `$derived()` for simple computed expressions
-- Use `$derived.by(() => { ... })` for complex multi-line computations (used extensively in Card.svelte, Board.svelte, etc.)
-- Use `$props()` for component props
-- Svelte 4 stores: import `get` from `svelte/store` for `.get()` calls
+- `$state()` (deep reactive), `$derived()` / `$derived.by()`, `$props()`; Svelte 4 stores via `get` from `svelte/store`.
+- Runes work inside classes in `.svelte.ts` files — no version bumpers or `$effect` mirrors; assigning a `$state` field notifies every reader.
+- Directories: `$lib/services/` (plain/reactive services), `$lib/composables/` (reactive helpers), `$lib/utils/` (pure functions).
 
-### Service Reactivity (`.svelte.ts`)
-Svelte 5 runes work inside classes in `.svelte.ts` files — no version bumper or `$effect` sync needed.
-
-**Pattern:**
-```ts
-// $lib/services/my-cache.svelte.ts
-class MyCache {
-    state = $state({ items: [] as Item[], loading: false });
-    addItem(item: Item) { this.state.items = [...this.state.items, item]; }
-}
-```
-```svelte
-<!-- Component -->
-<script lang="ts">
-    const cache = new MyCache();
-    // Read cache.state directly — Svelte tracks deep changes automatically
-</script>
-{#each cache.state.items as item}...
-```
-
-**Why:** `$state()` provides deep proxy-based reactivity. Assigning `this.state.items = [...newItems]` notifies any component reading `cache.state.items`. No manual `version` counter, `_bump()`, or `$effect` mirror needed.
-
-**Directory conventions:** `$lib/services/` for plain TS classes/factories, `$lib/composables/` for reactive helpers, `$lib/utils/` for pure functions.
-
-### WebSocket Protocol
-- Client sends: `{"type": "user_message", "data": {"content": "..."}}`
-- Server processes via `stream.UserMessage` → broadcasts echo as `WSTypeUserMessage` event
-- `WSMessage.Data` is `json.RawMessage` in Go — arrives as a parsed JS value (object or string) in the browser
-- Use optimistic UI for user messages (add immediately, skip echo)
+### Diff & Status Badges
+Diff text is parsed in `$lib/utils/diff-parser.ts` (pure, unit-tested); the diff UI lives in `CardDetail.svelte` (task diff rows) and `DiffViewer.svelte` (staged/unstaged file browser). `getStatusBadge` for diff files is shared from `diff-parser`; `GitStatusPanel.svelte` keeps its own for git entries. Sticky section headers use `position: sticky; top: 0; z-index: 10` + an opaque background.
 
 ### Task IDs
-- Format: `word-word-word` (e.g., `frost-amber-quartz`)
-- Generated from 263-word dictionary in `backend/types/idgen.go`
-- Thread IDs use 2-word format (e.g., `voice-ash`) via `GenerateThreadID()`
-- URL: `/?task=frost-amber-quartz`
+`word-word-word` (e.g. `frost-amber-quartz`) from the dictionary in `backend/types/idgen.go`; thread IDs are 2 words via `GenerateThreadID()`; URL: `/?task=frost-amber-quartz`.
 
 ### Chat UI Rules
-- Never disguise system messages as user messages
-- Streaming cursor only shown during active LLM response
-- `complete` event sent when LLM finishes (text-only or tool calls)
-- User messages: right-aligned with rounded background bubble
-- Action icons (copy/edit/delete) always visible
-- Edit mode: replace message + discard conversation tree
-- Stats format: `X tokens · Ys · Z tok/s` (completion tokens, not total)
-
-### Diff Viewer
-- Raw unified diff from `getTaskDiff()` is parsed into structured rows in `CardDetail.svelte`
-- Row types: `file-header` (`diff --git`, `---`, `+++`), `index`, `hunk-header` (`@@`), `added` (`+`), `removed` (`-`), `context` (` `)
-- Each code row renders as CSS grid: `2rem` line number gutter + content
-- Color coding: `rgba(63,185,80,0.15)` for additions, `rgba(248,81,73,0.15)` for deletions
-- Diff rendering lives in `CardDetail.svelte` (parsed rows) and `DiffViewer.svelte` (staged/unstaged file browser)
-
-### Reactive Status Badge
-- Use `$derived.by(() => { ... })` for task status badges (see `Card.svelte` for the pattern)
-- `getStatusBadge()` is a component-local function (defined in `DiffViewer.svelte` for diff files, `GitStatusPanel.svelte` for git entries) — not a shared utility
-- This ensures the badge updates automatically when `task.execution_state` changes (e.g., idle → running → completed)
-
-### Sticky Section Headers
-- Use `position: sticky; top: 0; z-index: 10;` on section headers within scrollable containers (diff file headers use z-index: 10)
-- Add matching `background` color so scrolling content doesn't show through
-- Add `border-bottom` for visual separation from content below
+- Never disguise system messages as user messages.
+- Streaming cursor only during an active LLM response; a `complete` event is sent when the LLM finishes (text-only or tool calls).
+- User messages: right-aligned bubbles; action icons (copy/edit/delete) always visible; editing replaces the message and discards the conversation tree.
+- Stats format: `X tokens · Ys · Z tok/s` (completion tokens, not total).
 
 ### Commit and Move to Done — unstaged/untracked files
-- "Commit and move to done" (`HandleCommitAndDone`, `backend/managers/task.go`) commits **only staged** changes. Untracked (never-staged) files in the worktree must never be copied into the project's main checkout or merged into the project branch — they stay in the worktree and are discarded when the task is deleted.
-- Merge-conflict resolution commit (`commitConflictResolution`, `backend/exec/merge_conflicts.go`) stages with `git add -u` (tracked changes only), NOT `git add -A`, so it cannot sweep in untracked WIP files.
-- When the worktrees dir lives **inside** the project directory, `CreateWorktree` (`backend/git/worktree.go`, `ensureWorktreesExcluded`) idempotently appends the worktrees dir to the repo's local `.git/info/exclude` so worktree content never shows in the project's `git status` and is never swept into project-level `git stash -u` during a merge. Local-only (never committed, doesn't touch `.gitignore`).
-- **Test env:** backend commit-and-done commits don't pass `-c` git-author flags, so they require a repo/global git identity. `global-setup.ts` sets a local identity on the test repos — don't remove it or commit-and-done e2e tests fail silently (the commit is skipped, task still moves to Done).
-- Tests: `backend/managers/task_test.go` (`TestHandleCommitAndDone_ExcludesUnstagedFiles`), `backend/exec/merge_conflict_resolution_test.go` (`TestCommitConflictResolution_DoesNotSweepUntrackedFiles`), `backend/git/worktree_test.go` (`TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus`, `TestCreateWorktree_NoExcludeWhenWorktreesOutsideProject`), e2e `frontend/tests/e2e/commit-and-done-unstaged.spec.ts`.
+- "Commit and move to done" (`HandleCommitAndDone`, `backend/managers/task.go`) commits **only staged** changes. Untracked (never-staged) files must never be copied into the project's main checkout or merged — they stay in the worktree and are discarded when the task is deleted.
+- The merge-conflict resolution commit (`commitConflictResolution`, `backend/exec/merge_conflicts.go`) stages with `git add -u` (tracked only), NOT `git add -A`.
+- When the worktrees dir lives **inside** the project, `CreateWorktree` (`backend/git/worktree.go`, `ensureWorktreesExcluded`) idempotently appends it to the repo's local `.git/info/exclude` so worktree content never shows in project `git status` or gets swept into project-level `git stash -u`. Local-only, never committed.
+- **Tests:** `backend/managers/task_test.go` (`TestHandleCommitAndDone_ExcludesUnstagedFiles`), `backend/exec/merge_conflict_resolution_test.go` (`TestCommitConflictResolution_DoesNotSweepUntrackedFiles`), `backend/git/worktree_test.go` (`TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus`, `..._NoExcludeWhenWorktreesOutsideProject`), e2e `commit-and-done-unstaged.spec.ts`.
 
 ## Licensing
 
-This project is licensed under **Apache 2.0** (`LICENSE`, `NOTICE`). Dependency
-licenses are **not** changed by our license — each library keeps its own license
-and copyright, which must be preserved. The project's dependency inventory and
-license obligations live in `THIRD_PARTY_NOTICES.md`.
+Apache-2.0 (`LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`). Dependency licenses are **not** changed by our license — each library keeps its own license and copyright.
 
-### Files
-- `LICENSE` — Full Apache-2.0 text (download from https://www.apache.org/licenses/LICENSE-2.0.txt)
-- `NOTICE` — Project copyright + reproduced NOTICE files from Apache-2.0 deps
-- `THIRD_PARTY_NOTICES.md` — Inventory of Go + frontend deps and their licenses
+- **Extensions are independently-licensed projects:** every extension directory carries its own `LICENSE` (Apache-2.0), `NOTICE`, and `THIRD_PARTY_NOTICES.md`. New extensions get all three; new dependencies update that extension's file.
+- **Never remove** a dependency's license/copyright header or NOTICE. Do **not** introduce **GPL/AGPL** dependencies (incompatible with Apache-2.0). MPL-2.0 is OK (don't modify MPL-2.0 files). Apache-2.0 deps that ship a `NOTICE` require its content in our `NOTICE` (currently: wazero). `lightningcss` (MPL-2.0) and `caniuse-lite` (CC-BY-4.0) are build/dev-only — keep them out of the distributed runtime artifact.
+- **Bundled third-party files** (e.g. extension IIFE libraries) keep **their own** license notice — never slap an Apache-2.0 header on them.
+- **Regenerate notices whenever a dependency is added/removed/upgraded:** `go mod tidy` + `go list -m all` (or `go-licenses report ./...`), `cd frontend && npx license-checker --production --summary`, then update `THIRD_PARTY_NOTICES.md` (incl. "Last updated") and `NOTICE`.
 
-### Extensions (`./extensions`) — independently-licensed projects
-`./extensions` organizes several **separate projects**, each hosted independently.
-Each extension is therefore licensed on its own and carries its own declarations:
+## Debugging
 
-- Every extension directory has its own `LICENSE` (Apache-2.0), `NOTICE`, and
-  `THIRD_PARTY_NOTICES.md`.
-
-**When adding a new extension:** give it its own `LICENSE`, `NOTICE`, and
-`THIRD_PARTY_NOTICES.md`. If it bundles a third-party library, keep that library's
-license notice intact and never label it Apache-2.0. When adding a new dependency
-to an existing extension, update that extension's `THIRD_PARTY_NOTICES.md`.
-
-### Rules
-- **Never remove** a dependency's license/copyright header or NOTICE file.
-- Do **not** introduce **GPL/AGPL** dependencies — they are incompatible with
-  Apache-2.0 and would force the whole project toward GPL. (MPL-2.0 is OK; do
-  not modify MPL-2.0 files unless you can release the changes under MPL-2.0.)
-- Apache-2.0 deps that ship a `NOTICE` file require its content to be preserved
-  in our `NOTICE` file (currently: `wazero`).
-- `lightningcss` (MPL-2.0) and `caniuse-lite` (CC-BY-4.0) are build/dev-only;
-  keep them out of the distributed runtime artifact.
-
-### Keeping Third-Party Notices Updated
-Regenerate the notices **whenever** a dependency is added, removed, or upgraded.
-
-```bash
-# Go — verify every module's license is permissive & update the Go table
-go mod tidy
-go-licenses report ./... --template notices.tmpl   # or inspect `go list -m all`
-
-# Frontend — inspect the production dependency license distribution
-cd frontend && npx license-checker --production --summary
-cd frontend && npx license-checker --production --csv
-```
-
-Then update `THIRD_PARTY_NOTICES.md` to match, and re-check:
-
-1. Any new **Apache-2.0** dep with a `NOTICE` file → append its content to `NOTICE`.
-2. Any new **MPL / CC / copyleft** dep → review compatibility and note it.
-3. Any new **GPL/AGPL** dep → reject it (see Rules above).
-4. Bump the "Last updated" date in `THIRD_PARTY_NOTICES.md`.
-
-- **Third-party bundled files** (e.g. `extensions/ui/markdown-preview/lib/wordgard.js`)
-  must keep their **own** license notice and must **not** get an Apache-2.0 header.
-- After editing Go files, run `gofmt -w` on them.
-
-## Debugging Checklist
-1. Server running? `ps aux | grep kanban`
-2. Config correct? `curl /api/config`
-3. Worktrees dir exists? `ls .worktrees/`
-4. Frontend built? `cd frontend && npm run build`
-5. Browser cache cleared? Hard refresh
-6. Check logs: server stdout or `/tmp/kanban.log`
-7. E2E tests passing? `cd frontend && npx playwright test`
-8. Go tests passing? `go test ./backend/... -count=1 -parallel 8`
-9. Stale test state? `lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null && rm -f /tmp/kanban-test-setup.lock && rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated`
+1. Server running? `ps aux | grep kanban` · 2. Config correct? `curl -sk https://localhost:3000/api/config`
+3. Worktrees dir? `ls .worktrees/` · 4. Frontend built? `cd frontend && npm run build` · 5. Hard refresh (browser cache)
+6. Logs: server stdout or `/tmp/kanban.log`
+7. E2E: `cd frontend && npx playwright test` · 8. Go: `go test ./backend/... ./pkg/... -count=1 -parallel 8`
+9. Stale test state? `lsof -ti:3000,3001,9999 | xargs kill 2>/dev/null && rm -f /tmp/kanban-test-setup.lock && rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-worktrees`
 
 ### E2E Test Failures
-- **`ERR_CONNECTION_REFUSED`**: Stale processes from interrupted test runs hold ports. Run cleanup above. Check `lsof -i :3000` for conflicts.
-- **`waiting for locator('.project-item')`**: Test project not created — check global-setup logs
-- **`waiting for locator('.card')`**: No tasks exist — test expects existing tasks
-- **`waiting for locator` (drag-and-drop)**: Headless mode can be slow — add `waitForTimeout` after drag, increase predicate timeout
-- **Mock LLM routing wrong**: Check `mock-llm.js` keyword matching and fixture files
-- **Sandbox toggle blocked by running task**: Test runs in parallel with other tests — move to `isolated` project in `playwright.config.ts`
+- **`ERR_CONNECTION_REFUSED`** / wrong-protocol responses: stale processes from an interrupted run hold the ports — run the cleanup above.
+- **`waiting for locator('.project-item')`**: test project not created — check global-setup logs. **`waiting for locator('.card')`**: no tasks exist.
+- **Drag-and-drop flakes:** headless is slow — add `waitForTimeout` after the drag, increase predicate timeout.
+- **Mock LLM routing wrong:** check keyword matching in `mock-llm.js` and the fixture files.
 
 ### Go Test Failures
-- **`unable to open database file`**: Use `testServer(t)` helper which creates temp DB
-- **`context deadline exceeded`**: Increase test timeout or optimize slow operations
-- **Sandbox tests fail**: Ensure gVisor is installed (`runsc --version`)
+- **`unable to open database file`**: use the `testServer(t)` helper (temp DB).
+- **Sandbox tests fail**: ensure gVisor is installed (`runsc --version`).
+- **`context deadline exceeded`**: raise the timeout or optimize.
 
 ### Diagnostic Tests (Standalone Playwright Scripts)
-For ad-hoc investigation (e.g., tracking API request patterns, debugging race conditions), write standalone Playwright scripts in `frontend/tests/` as `.mjs` files. These run against a live dev server, bypassing the e2e test harness.
-
-**Pattern:**
-```javascript
-import { chromium } from 'playwright';
-
-const requests = [];
-const t0 = Date.now();
-
-// Intercept specific endpoints
-await page.route('**/api/projects/*/tasks/*/diff/file*', async (route) => {
-    const url = new URL(route.request().url());
-    const response = await route.fetch();
-    const body = await response.json().catch(() => ({}));
-    requests.push({ time: Date.now() - t0, path: url.searchParams.get('path'), keys: Object.keys(body) });
-    await route.fulfill({ response, status: response.status(), headers: response.headers(), body: await response.body() });
-});
-```
-
-**Key points:**
-- Start server with `MIKE_LOGIN_PASSWORD=test setsid ./kanban &` + `disown` to keep it alive after the script runs
-- Use `page.evaluate()` with CSRF token from `/api/auth/session` for API calls (POST/PUT/DELETE)
-- Use `route.fulfill()` (not `route.respond()`) — the old API was removed in newer Playwright
-- Track timing with `Date.now() - t0` offsets to correlate requests with server events
-- Use `page.screenshot({ path: '/tmp/debug.png' })` for visual inspection
-- Run: `node frontend/tests/debug-script.mjs`
+For ad-hoc investigation (request patterns, races), write standalone Playwright scripts in `frontend/tests/` as `.mjs` files run against a live dev server: `make run` then `node frontend/tests/<script>.mjs`. Use `page.evaluate()` for API calls (CSRF token from `/api/auth/session` for POST/PUT/DELETE), `route.fetch()` + `route.fulfill()` for interception, `Date.now()` offsets for timing, and `page.screenshot({ path: '/tmp/debug.png' })`.
 
 ### Crash Debugging (Flight Recorder)
-- Go flight recorder runs **always-on** (~1% overhead), writing to `data/kanban.trace`
-- Trace is rotated every 30s — on crash, the file contains ~30s of pre-crash data
-- Analyze a crash trace: `go tool trace -http=:8080 data/kanban.trace` (opens browser UI)
-- Rotated traces kept as `data/kanban.trace.old` — overwritten each rotation
-- Key views: goroutine scheduling, heap allocations, GC activity, syscalls
+The Go flight recorder is always-on (~1% overhead), writing to `data/kanban.trace`, rotated every 30 s (previous file → `data/kanban.trace.old`) — on crash it holds ~30 s of pre-crash data. Analyze: `go tool trace -http=:8080 data/kanban.trace`.

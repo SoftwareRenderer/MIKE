@@ -362,12 +362,33 @@ export function buildDisplayItems(rows: DiffRow[]): DiffDisplayItem[] {
     return items;
 }
 
-/** Truncate long file paths for display, keeping the beginning and end visible. */
+/** Truncate a path for display, keeping the file name (last segment) whole — the ellipsis
+ *  lands in the directory part. Only a name longer than the limit is end-truncated. */
 export function truncatePath(path: string, maxLength = 48): string {
     if (path.length <= maxLength) return path;
-    const head = Math.ceil((maxLength - 3) / 2);
-    const tail = Math.floor((maxLength - 3) / 2);
-    return `${path.slice(0, head)}…${path.slice(path.length - tail)}`;
+    const lastSlash = path.lastIndexOf('/');
+    const filename = lastSlash < 0 ? path : path.slice(lastSlash + 1);
+    const slash = lastSlash < 0 ? '' : '/';
+
+    // Name + '/' + ellipsis doesn't fit — drop the directory, end-truncate the name.
+    if (filename.length + slash.length + 1 > maxLength) {
+        return filename.slice(0, maxLength - 1) + '…';
+    }
+
+    const head = Math.min(8, maxLength - 1 - (slash.length + filename.length));
+    const tailBudget = maxLength - 1 - head;
+
+    // Extend the tail leftward across whole directory segments ('/' boundaries).
+    let tailStart = lastSlash;
+    for (;;) {
+        const prev = path.lastIndexOf('/', tailStart - 1);
+        const nextStart = prev < 0 ? 0 : prev;
+        if (path.length - nextStart > tailBudget) break;
+        tailStart = nextStart;
+        if (tailStart === 0) break;
+    }
+
+    return path.slice(0, head) + '…' + path.slice(tailStart);
 }
 
 /** A single row in a side-by-side diff view. */
