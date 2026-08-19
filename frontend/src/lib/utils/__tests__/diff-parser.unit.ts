@@ -376,15 +376,39 @@ describe('truncatePath', () => {
         expect(truncatePath('short/path.ts', 48)).toBe('short/path.ts');
     });
 
-    it('truncates long paths with ellipsis', () => {
+    it('returns path unchanged when exactly at max length', () => {
+        const exact = 'x'.repeat(48);
+        expect(truncatePath(exact, 48)).toBe(exact);
+    });
+
+    it('keeps the full file name and truncates the directory part', () => {
         const long = 'src/very/long/nested/directory/structure/that/exceeds/limit/file.ts';
         const result = truncatePath(long, 48);
-        // truncatePath uses ceil((48-3)/2) + 1 (ellipsis) + floor((48-3)/2) = 23 + 1 + 22 = 46
-        // (the ellipsis character '…' counts as 1 char in JS string length)
+        expect(result).toBe('src/very…/structure/that/exceeds/limit/file.ts');
         expect(result.length).toBeLessThanOrEqual(48);
         expect(result).toContain('…');
-        expect(result.startsWith('src/')).toBe(true);
         expect(result.endsWith('file.ts')).toBe(true);
+        // tail starts at a segment boundary, never mid-segment
+        expect(result.slice(result.indexOf('…') + 1).startsWith('/')).toBe(true);
+    });
+
+    it('falls back to just /filename when the tail cannot be extended', () => {
+        const long = 'a'.repeat(40) + '/file.txt';
+        const result = truncatePath(long, 48);
+        expect(result).toBe('aaaaaaaa…/file.txt');
+        expect(result.endsWith('/file.txt')).toBe(true);
+    });
+
+    it('truncates the end of the file name when the name alone exceeds the limit', () => {
+        const result = truncatePath('dir/' + 'a'.repeat(50), 48);
+        expect(result).toBe('a'.repeat(47) + '…');
+        expect(result.length).toBe(48);
+        expect(result).not.toContain('dir');
+    });
+
+    it('truncates the end of a file-name-only path', () => {
+        const result = truncatePath('b'.repeat(60), 48);
+        expect(result).toBe('b'.repeat(47) + '…');
     });
 });
 
