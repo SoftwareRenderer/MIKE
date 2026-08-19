@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { GitCommit } from '$lib/types';
     import type { DiffFile, DiffRow } from '$lib/types/diff';
-    import { parseUnifiedDiff, buildSideBySideRows } from '$lib/utils/diff-parser';
+    import { parseUnifiedDiff, buildSideBySideRows, truncatePath } from '$lib/utils/diff-parser';
     import type { SideBySideRow } from '$lib/utils/diff-parser';
     import { highlightLinesAsync, escapeHtml } from '$lib/highlighter';
 import { slide } from 'svelte/transition';
@@ -388,7 +388,7 @@ import { slide } from 'svelte/transition';
                             <svg class="diff-chevron" class:expanded={!collapsed} width="12" height="12" viewBox="0 0 16 16" fill="none">
                                 <path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-                            <span class="diff-file-path" title={cleanPath}>{cleanPath}</span>
+                            <span class="diff-file-path" title={cleanPath}>{truncatePath(cleanPath)}</span>
                             <span class="diff-file-stats">
                                 {#if file.added > 0}
                                     <span class="diff-stat-added">+{file.added}</span>
