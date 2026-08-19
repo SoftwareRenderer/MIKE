@@ -6,9 +6,15 @@
     interface Props {
         view: EditorView;
         onClose: () => void;
+        /**
+         * Called on mount with a function that focuses the find input, and on
+         * destroy with null. Lets the owner refocus the find input (e.g. when
+         * the user pressed Ctrl+F again from the code editor).
+         */
+        onFocusFind?: (fn: (() => void) | null) => void;
     }
 
-    let { view, onClose }: Props = $props();
+    let { view, onClose, onFocusFind }: Props = $props();
 
     let inputEl: HTMLInputElement | null = null;
 // svelte-ignore non_reactive_update — DOM ref via bind:this
@@ -178,6 +184,14 @@
             return;
         }
     }
+
+    // Register the find-input focus callback with the owner (FileEditor). Uses
+    // $effect (runs right after initial render, cleanup on unmount) rather than
+    // onMount so the contract holds in unit tests where onMount is stubbed out.
+    $effect(() => {
+        onFocusFind?.(() => inputEl?.focus());
+        return () => onFocusFind?.(null);
+    });
 
     onMount(() => {
         visible = true;

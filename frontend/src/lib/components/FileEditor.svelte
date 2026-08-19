@@ -223,6 +223,8 @@
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let searchVisible = $state(false);
     let searchApp: any = null;
+    // svelte-ignore non_reactive_update — focus callback registered by CustomSearchPanel
+    let searchFocusFind: (() => void) | null = null;
     let editorCreating = $state(false); // prevent race between loadFile() and $effect
     let gitGutterState: GitGutterState | null = null; // mutable ref for git gutter
 
@@ -273,6 +275,12 @@
     }
 
     function openSearchPanel() {
+        if (searchApp) {
+            // Panel already open (e.g. user pressed Ctrl+F from the code editor) —
+            // refocus the find input instead of no-oping.
+            searchFocusFind?.();
+            return;
+        }
         if (!view || !searchContainerEl) return;
         searchVisible = true;
         const editorView = view;
@@ -282,10 +290,12 @@
                     target: searchContainerEl,
                     props: {
                         view: editorView,
+                        onFocusFind: (fn) => { searchFocusFind = fn; },
                         onClose: () => {
                             searchVisible = false;
                             unmount(searchApp);
                             searchApp = null;
+                            searchFocusFind = null;
                             editorView?.focus();
                         },
                     },
@@ -300,6 +310,7 @@
             unmount(searchApp);
             searchApp = null;
         }
+        searchFocusFind = null;
         view?.focus();
     }
 
@@ -1122,6 +1133,7 @@
             unmount(searchApp);
             searchApp = null;
         }
+        searchFocusFind = null;
         lspClient?.disconnect();
         lspTransport?.release();
         lspTransport = null;
