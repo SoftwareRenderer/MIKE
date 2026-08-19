@@ -43,10 +43,9 @@ func isMergeInProgress(dir string) bool {
 	return err == nil
 }
 
-// getConflictedFiles returns a deduplicated list of files with merge conflicts.
+// GetConflictedFiles returns a deduplicated list of files with merge conflicts.
 // Uses git status --porcelain (catches UU, AD, DU, AA, DD, UD, UA) and falls back
 // to git diff --diff-filter=U (catches binary conflicts and renames).
-// GetConflictedFiles returns a list of files with merge conflicts in the given directory.
 func GetConflictedFiles(dir string) []string {
 	seen := make(map[string]struct{})
 	var files []string
@@ -173,7 +172,7 @@ func getMergeStatusOutput(dir string) string {
 // Uses a fallback chain: primary scan → fallback scan → auto-continue → diagnostic error.
 // On success, stages files, commits, and logs a merge_resolution message.
 // On failure, aborts the merge and returns the error.
-func (te *TaskExecutor) tryResolveMergeConflicts(dir, projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
+func (te *TaskExecutor) tryResolveMergeConflicts(dir, taskID, targetBranch, taskBranch string, task *types.Task) error {
 	// Confirm we're actually in a merge state
 	if !isMergeInProgress(dir) {
 		// Not a merge conflict — likely a hook failure, lock issue, or other git error
@@ -332,8 +331,9 @@ func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath
 			commitOK = false
 		}
 		if commitOK {
-			if err := te.gitRun(worktreePath, "add", "-A"); err != nil {
-				log.Printf("[merge] task=%s git add -A failed: %v", taskID, err)
+			// `add -u` stages only tracked changes — never sweeps untracked files.
+			if err := te.gitRun(worktreePath, "add", "-u"); err != nil {
+				log.Printf("[merge] task=%s git add -u failed: %v", taskID, err)
 				commitOK = false
 			}
 		}

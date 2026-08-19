@@ -881,6 +881,77 @@ func TestMergeConflictResolution_CommitIsMergeCommit(t *testing.T) {
 	}
 }
 
+// TestCommitConflictResolution_DoesNotSweepUntrackedFiles: `add -u` path skips untracked files.
+func TestCommitConflictResolution_DoesNotSweepUntrackedFiles(t *testing.T) {
+	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
+
+	taskID := "no-sweep-task"
+	task := &types.Task{
+		ID:               taskID,
+		ProjectID:        projectID,
+		Title:            "No Sweep Test",
+		Prompt:           "resolve conflicts",
+		Status:           "in_progress",
+		Branch:           "task/no-sweep",
+		BaseRef:          "master",
+		LlamaServerURL:   "http://localhost:8080",
+		ModelName:        "test-model",
+		HasMergeConflict: true,
+		AutoMerge:        true,
+		CurrentThreadID:  "thread-1",
+	}
+	if err := te.store.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	// Task branch with a committed change.
+	runGit(t, repoDir, "checkout", "-b", "task/no-sweep")
+	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("task change\n"), 0o644)
+	runGit(t, repoDir, "add", "shared.txt")
+	runGit(t, repoDir, "commit", "-m", "task edit")
+	runGit(t, repoDir, "checkout", "master")
+
+	// Worktree on the task branch, in a final-merge conflict state (no MERGE_HEAD).
+	wtPath, err := te.worktreeMgr.WorktreePath(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(wtPath, 0o755)
+	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, "task/no-sweep")
+	runGitInDir(t, wtPath, "checkout", "task/no-sweep")
+	if isMergeInProgress(wtPath) {
+		t.Fatal("precondition: no merge should be in progress")
+	}
+
+	// The LLM's resolution edit (tracked, unstaged) plus a user's untracked file.
+	os.WriteFile(filepath.Join(wtPath, "shared.txt"), []byte("resolved\n"), 0o644)
+	os.WriteFile(filepath.Join(wtPath, "untracked.txt"), []byte("unstaged content\n"), 0o644)
+
+	commitOK, _ := te.commitConflictResolution(projectID, taskID, wtPath, task)
+	if !commitOK {
+		t.Fatal("commitConflictResolution should succeed")
+	}
+
+	// The resolution edit must be committed and merged into the project branch.
+	if out := runGitCmd(repoDir, "show", "master:shared.txt").output; strings.TrimSpace(out) != "resolved" {
+		t.Errorf("master shared.txt should hold the resolution, got %q", out)
+	}
+	// The untracked file must NOT be committed or merged into the project.
+	if out := runGitCmd(repoDir, "log", "--all", "--oneline", "--", "untracked.txt").output; strings.TrimSpace(out) != "" {
+		t.Errorf("untracked.txt must not be committed, but it is in history: %s", out)
+	}
+	if res := runGitCmd(repoDir, "cat-file", "-e", "master:untracked.txt"); res.exitCode == 0 {
+		t.Error("untracked.txt must not be on the project's master branch")
+	}
+	// It must remain in the worktree, still untracked.
+	if _, err := os.Stat(filepath.Join(wtPath, "untracked.txt")); err != nil {
+		t.Error("untracked.txt should remain in the worktree")
+	}
+	if status := runGitCmd(wtPath, "status", "--porcelain").output; !strings.Contains(status, "untracked.txt") {
+		t.Errorf("untracked.txt should still be untracked in the worktree, status:\n%s", status)
+	}
+}
+
 // gitCmdResult holds the result of a git command.
 type gitCmdResult struct {
 	output   string

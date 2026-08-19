@@ -1849,7 +1849,7 @@ func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, task
 	if mergeErr != nil {
 		// Merge conflict — detect, set flag for LLM resolution, then abort
 		task, _ := te.store.GetTaskByTaskID(taskID)
-		if resolveErr := te.tryResolveMergeConflicts(dir, projectID, taskID, targetBranch, taskBranch, task); resolveErr != nil {
+		if resolveErr := te.tryResolveMergeConflicts(dir, taskID, targetBranch, taskBranch, task); resolveErr != nil {
 			if errors.Is(resolveErr, ErrNotAMergeConflict) {
 				// Not a conflict — git merge failed for another reason (hook, lock, etc.)
 				// Include git output so the user sees the actual reason
