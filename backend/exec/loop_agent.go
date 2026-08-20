@@ -509,7 +509,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 
 	// Auto-start next sibling if subtask
 	if task.ParentTaskID != "" {
-		_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID, task.Status)
+		_ = te.AutoStartNextSibling(projectID, task.ID, task.ParentTaskID)
 	}
 }
 

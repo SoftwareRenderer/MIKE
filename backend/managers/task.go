@@ -519,8 +519,42 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	}
 	started := false
 	if req.Status == "in_progress" && task.ExecutionState != "running" {
-		// If this task is a subtask, use subtask-aware start (moves parent only, not siblings)
-		if task.ParentTaskID != "" {
+		children, _ := h.store.GetChildren(taskID)
+		if len(children) > 0 {
+			// Task with subtasks: start the deepest startable one; this task
+			// stays started-but-pending until all children are done.
+			h.moveAllDescendantsToInProgress(taskID)
+			selectedID := h.SelectSubtaskToStart(task, children)
+			if selectedID != "" {
+				log.Printf("[move] task=%s has subtasks, starting subtask %s", taskID, selectedID)
+				if err := h.StartSubtaskWithParent(projectID, selectedID, true); err != nil {
+					log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
+					// Keep task in in_progress (user's explicit action); record error for visibility
+					task.ExecutionState = "idle"
+					task.Output = err.Error()
+				} else {
+					started = true
+				}
+			} else if exec.ChildrenAllDone(children) {
+				// All subtasks done — start this task's own execution.
+				var err error
+				if task.ParentTaskID != "" {
+					err = h.StartSubtaskWithParent(projectID, taskID, false)
+				} else {
+					err = h.executor.StartTask(projectID, taskID, false)
+				}
+				if err != nil {
+					log.Printf("[move] task=%s start failed: %v", taskID, err)
+					task.ExecutionState = "idle"
+					task.Status = originalStatus
+					task.Output = err.Error()
+				} else {
+					started = true
+				}
+			}
+			// else: subtasks still finishing (review/failed) — stay started-but-pending
+		} else if task.ParentTaskID != "" {
+			// Leaf subtask: subtask-aware start (branch from parent, inherit model config)
 			if err := h.StartSubtaskWithParent(projectID, taskID, false); err != nil {
 				log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
 				task.ExecutionState = "idle"
@@ -530,38 +564,23 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 				started = true
 			}
 		} else {
-			// Check if task has subtasks — if so, move all incomplete children and start at deepest level
-			children, _ := h.store.GetChildren(taskID)
-			if len(children) > 0 {
-				h.moveAllDescendantsToInProgress(taskID)
-				selectedID := h.SelectSubtaskToStart(task, children)
-				if selectedID != "" {
-					log.Printf("[move] task=%s has subtasks, starting subtask %s via LLM selection", taskID, selectedID)
-					if err := h.StartSubtaskWithParent(projectID, selectedID, true); err != nil {
-						log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
-						// Keep parent in in_progress (user's explicit action); record error for visibility
-						task.ExecutionState = "idle"
-						task.Output = err.Error()
-					}
-				}
+			if err := h.executor.StartTask(projectID, taskID, false); err != nil {
+				log.Printf("[move] task=%s auto-start failed: %v", taskID, err)
+				task.ExecutionState = "idle"
+				task.Status = originalStatus
+				task.Output = err.Error()
 			} else {
-				if err := h.executor.StartTask(projectID, taskID, false); err != nil {
-					log.Printf("[move] task=%s auto-start failed: %v", taskID, err)
-					task.ExecutionState = "idle"
-					task.Status = originalStatus
-					task.Output = err.Error()
-				} else {
-					started = true
-				}
+				started = true
 			}
 		}
 	}
-	// Reload after successful start to pick up branch set by prepareTaskExecution.
-	// The start path calls UpdateTask internally, but our stale task object would
-	// overwrite fields like branch with empty values.
+	// Reload after a successful start so the final UpdateTask doesn't clobber the
+	// branch set by the start path. Re-apply the target status: starting a
+	// subtask instead of this task leaves its row's status stale.
 	if started {
 		reloaded, err := h.store.GetTask(projectID, taskID)
 		if err == nil {
+			reloaded.Status = req.Status
 			task = reloaded
 		}
 	}
@@ -576,7 +595,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 
 	// If a subtask moved to review/done, auto-start the next sibling
 	if task.ParentTaskID != "" && (req.Status == "review" || req.Status == "done") {
-		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID, req.Status)
+		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID)
 	}
 
 	h.refreshTaskPorts(task)
@@ -585,8 +604,8 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 }
 
 // autoStartNextSibling delegates to the executor's sibling auto-start logic.
-func (h *TaskHandler) autoStartNextSibling(projectID, finishedTaskID, parentTaskID, finishedStatus string) error {
-	return h.executor.AutoStartNextSibling(projectID, finishedTaskID, parentTaskID, finishedStatus)
+func (h *TaskHandler) autoStartNextSibling(projectID, finishedTaskID, parentTaskID string) error {
+	return h.executor.AutoStartNextSibling(projectID, finishedTaskID, parentTaskID)
 }
 
 // moveAllDescendantsToInProgress recursively moves all descendant tasks (children, grandchildren, etc.)
@@ -626,6 +645,12 @@ func (h *TaskHandler) moveAllDescendants(projectID, taskID, targetStatus string)
 		d := &descendants[i]
 		// Skip already-running descendants (e.g., just auto-started by the move handler)
 		if d.ExecutionState == "running" {
+			continue
+		}
+		// Moving to In Progress is a start: only backlog descendants join. Review
+		// awaits a human, done work is complete, and in_progress tasks are managed
+		// by the autostart chain — dragging them out would bypass the gates.
+		if targetStatus == "in_progress" && d.Status != "backlog" {
 			continue
 		}
 		// Stop the executor if the descendant was in In Progress and is being moved out
@@ -997,7 +1022,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 
 	// If a subtask was marked done, auto-start the next sibling
 	if task.ParentTaskID != "" {
-		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID, "done")
+		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID)
 	}
 
 	h.refreshTaskPorts(task)
@@ -1250,39 +1275,52 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 	}
 
 	if len(children) > 0 {
+		// User explicitly started this task: move it to In Progress
+		// (started-but-pending) until its subtasks are done.
+		if task.Status == "backlog" {
+			task.Status = "in_progress"
+			task.ExecutionState = "idle"
+			task.UpdatedAt = time.Now().UTC()
+			if err := h.store.UpdateTask(task); err != nil {
+				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+		}
 		// Move all incomplete descendants (children, grandchildren, etc.) to in_progress.
-		// The parent stays in its current column (e.g., backlog) while subtasks run.
 		h.moveAllDescendantsToInProgress(taskID)
-		// Task has subtasks — use LLM to pick the best one
+		// Task has subtasks — start the deepest startable one (LLM picks when several).
 		selectedID := h.SelectSubtaskToStart(task, children)
-		if selectedID == "" {
-			// All subtasks are done — start the parent's own execution
+		if selectedID != "" {
+			log.Printf("[start-parent] task=%s selected subtask %s to start", taskID, selectedID)
+			// Autostarted: ask_question is auto-answered from parent context
+			// instead of stopping for a human.
+			if err := h.StartSubtaskWithParent(projectID, selectedID, true); err != nil {
+				log.Printf("[start-parent] task=%s error: %v", taskID, err)
+				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			startedTask, _ := h.store.GetTask(projectID, selectedID)
+			if startedTask != nil {
+				h.refreshTaskPorts(startedTask)
+				h.boardStreamMgr.BroadcastTaskUpdated(projectID, startedTask)
+			}
+			httputil.JSONResponse(w, http.StatusOK, startedTask)
+			return
+		}
+		// No startable subtask: start its own execution only if all children
+		// are done, else stay started-but-pending.
+		if exec.ChildrenAllDone(children) {
 			if err := h.executor.StartTask(projectID, taskID, false); err != nil {
 				log.Printf("[start-parent] task=%s all subtasks done, start failed: %v", taskID, err)
 				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			task, _ = h.store.GetTask(projectID, taskID)
-			h.refreshTaskPorts(task)
-			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
-			httputil.JSONResponse(w, http.StatusOK, task)
-			return
 		}
-		log.Printf("[start-parent] task=%s selected subtask %s to start", taskID, selectedID)
-		// The parent's subtasks run autonomously — mark this one auto-started so its
-		// ask_question calls are auto-answered from parent context instead of stopping
-		// for a human (consistent with sibling continuations via AutoStartNextSibling).
-		if err := h.StartSubtaskWithParent(projectID, selectedID, true); err != nil {
-			log.Printf("[start-parent] task=%s error: %v", taskID, err)
-			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		startedTask, _ := h.store.GetTask(projectID, selectedID)
-		if startedTask != nil {
-			h.refreshTaskPorts(startedTask)
-			h.boardStreamMgr.BroadcastTaskUpdated(projectID, startedTask)
-		}
-		httputil.JSONResponse(w, http.StatusOK, startedTask)
+		task, _ = h.store.GetTask(projectID, taskID)
+		h.refreshTaskPorts(task)
+		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+		httputil.JSONResponse(w, http.StatusOK, task)
 		return
 	}
 
@@ -1335,7 +1373,9 @@ func (h *TaskHandler) HandleStopWithCascade(w http.ResponseWriter, r *http.Reque
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleStartSubtask explicitly starts a single subtask without moving the parent.
+// HandleStartSubtask starts a subtask. If it has children, the deepest
+// startable descendant runs instead; the subtask waits started-but-pending
+// until its children are done.
 func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
@@ -1348,6 +1388,9 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 		httputil.JSONError(w, http.StatusNotFound, "task not found")
 		return
 	}
+	if task.Status == "backlog" {
+		task.ExecutionState = "idle"
+	}
 	task.Status = "in_progress"
 	task.UpdatedAt = time.Now().UTC()
 	if err := h.store.UpdateTask(task); err != nil {
@@ -1355,6 +1398,37 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+
+	children, _ := h.store.GetChildren(taskID)
+	if len(children) > 0 {
+		h.moveAllDescendantsToInProgress(taskID)
+		selectedID := h.SelectSubtaskToStart(task, children)
+		if selectedID != "" {
+			log.Printf("[start-subtask] task=%s has subtasks, starting subtask %s", taskID, selectedID)
+			if err := h.StartSubtaskWithParent(projectID, selectedID, true); err != nil {
+				log.Printf("[start-subtask] task=%s error: %v", taskID, err)
+				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			startedTask, _ := h.store.GetTask(projectID, selectedID)
+			if startedTask != nil {
+				h.refreshTaskPorts(startedTask)
+				h.boardStreamMgr.BroadcastTaskUpdated(projectID, startedTask)
+			}
+			httputil.JSONResponse(w, http.StatusOK, startedTask)
+			return
+		}
+		if !exec.ChildrenAllDone(children) {
+			// Subtasks still finishing (review/failed) — stay started-but-pending.
+			task, _ = h.store.GetTask(projectID, taskID)
+			h.refreshTaskPorts(task)
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+			httputil.JSONResponse(w, http.StatusOK, task)
+			return
+		}
+		// All children done — fall through and start the subtask's own execution.
+	}
+
 	if err := h.executor.StartTask(projectID, taskID, false); err != nil {
 		log.Printf("[start-subtask] task=%s error: %v", taskID, err)
 		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
