@@ -4,7 +4,7 @@
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
-    import { isDangerousPermission, sortPermissions } from '$lib/utils/extension-permissions';
+    import { isDangerousPermission, hasDangerousPermissions, sortPermissions } from '$lib/utils/extension-permissions';
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
 
@@ -82,6 +82,11 @@
     let selectedExtension: Extension | null = $state(null);
     // Extension id whose local path is revealed (clicked its "Local" badge).
     let revealedLocalPath = $state<string | null>(null);
+
+    // Install confirmation: set when the user clicks Install on an extension
+    // that declares sandbox-escaping permissions; the dialog reviews the full
+    // declared permission list before the install starts.
+    let pendingInstall = $state<{ entry: RegistryEntry; isLocal: boolean } | null>(null);
 
     // Human-readable labels for UI injection points
     const INJECTION_POINT_LABELS: Record<string, string> = {
@@ -278,14 +283,34 @@
         buildProgress = { ...buildProgress, [name]: { progress, message, error } };
     }
 
+    // Kick off an install from Browse. Extensions that declare sandbox-escaping
+    // permissions first go through the install confirm dialog, so the user
+    // reviews what they are granting before the install starts.
+    function handleInstall(entry: RegistryEntry, isLocal: boolean) {
+        const perms = (entry.capabilities?.ui?.permissions ?? []) as string[];
+        if (hasDangerousPermissions(perms)) {
+            pendingInstall = { entry, isLocal };
+            return;
+        }
+        void runInstall(entry, isLocal);
+    }
+
+    // Confirm the pending install from the dialog and start it.
+    function confirmPendingInstall() {
+        const pending = pendingInstall;
+        pendingInstall = null;
+        if (pending) void runInstall(pending.entry, pending.isLocal);
+    }
+
     // Install an extension, streaming progress into the card as it happens.
     // Local (unpublished) extensions install from the filesystem, bypassing the registry.
-    async function handleInstall(name: string, isLocal = false, author?: string) {
+    async function runInstall(entry: RegistryEntry, isLocal: boolean) {
+        const name = entry.name;
         if (installing.has(name)) return;
         error = '';
         installing = new Set(installing).add(name);
         try {
-            const stream = isLocal ? installLocalExtension(author ?? '', name) : installExtension(name);
+            const stream = isLocal ? installLocalExtension(entry.author, name) : installExtension(name);
             for await (const event of stream) {
                 setBuildProgress(event.extension, event.progress, event.message, event.error);
                 if (event.done) {
@@ -1022,6 +1047,45 @@
         </BaseModal>
     {/if}
 
+    <!-- Install Confirm: shown before installing an extension that declares
+         sandbox-escaping permissions; the user reviews the full declared
+         permission list before the install starts. -->
+    {#if pendingInstall}
+        {#snippet installConfirmFooter()}
+            <button type="button" class="btn-secondary" onclick={() => pendingInstall = null}>Cancel</button>
+            <button type="button" class="btn-primary" onclick={confirmPendingInstall}>Install</button>
+        {/snippet}
+
+        {@const pendingPerms = sortPermissions((pendingInstall.entry.capabilities?.ui?.permissions ?? []) as string[])}
+        <BaseModal
+            title={`Install "${pendingInstall.entry.display_name || pendingInstall.entry.name}"?`}
+            width="480px"
+            modalClass="install-confirm-modal"
+            footer={installConfirmFooter}
+            onClose={() => { pendingInstall = null; }}
+        >
+            <p class="install-confirm-intro">This extension requests the following permissions:</p>
+            <div class="cap-permission-list">
+                {#each pendingPerms as perm}
+                    {@const info = PERMISSION_DESCRIPTIONS[perm]}
+                    <div class="cap-permission">
+                        <span class="cap-permission-name">
+                            {info?.label || perm}
+                            {#if isDangerousPermission(perm)}
+                                <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Potentially dangerous: can escape the sandbox"><title>Potentially dangerous: can escape the sandbox</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                            {/if}
+                        </span>
+                        {#if info?.description}
+                            <span class="cap-permission-desc">{info.description}</span>
+                        {:else}
+                            <span class="cap-permission-desc">Requested a permission this version does not document.</span>
+                        {/if}
+                    </div>
+                {/each}
+            </div>
+        </BaseModal>
+    {/if}
+
     <!-- Browse View -->
     {#if activeView === 'browse'}
         <div class="browse-view">
@@ -1080,7 +1144,7 @@
                                     {#if extensions.some(e => identityKey(e.author, e.name) === identityKey(entry.author, entry.name))}
                                         <span class="installed-badge">Installed</span>
                                     {:else}
-                                        <button class="btn btn-primary btn-small" onclick={() => handleInstall(entry.name, isUnpublished, entry.author)} disabled={installing.has(entry.name)}>
+                                        <button class="btn btn-primary btn-small" onclick={() => handleInstall(entry, isUnpublished)} disabled={installing.has(entry.name)}>
                                             {#if installing.has(entry.name)}
                                                 <span class="spinner"></span>
                                                 Installing...
@@ -1924,6 +1988,12 @@
         font-size: 0.78rem;
         color: var(--color-text-secondary);
         line-height: 1.4;
+    }
+
+    .install-confirm-intro {
+        margin: 0 0 0.6rem;
+        font-size: 0.85rem;
+        color: var(--color-text-secondary);
     }
 
     /* Radio group (matches SandboxConfigModal) */

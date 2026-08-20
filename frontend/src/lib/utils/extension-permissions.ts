@@ -22,6 +22,15 @@ export function isDangerousPermission(perm: string): boolean {
 }
 
 /**
+ * True when a permission list contains at least one sandbox-escaping
+ * permission. Used to decide whether an install warrants a permission
+ * review before it starts.
+ */
+export function hasDangerousPermissions(permissions: readonly string[]): boolean {
+    return permissions.some(isDangerousPermission);
+}
+
+/**
  * Stable partition for a permission list: dangerous permissions first,
  * everything else in its original (manifest declaration) order — within both
  * groups, relative order is preserved.
