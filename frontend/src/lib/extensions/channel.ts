@@ -10,7 +10,18 @@ import type {
     InjectionContext,
     InjectionPoint,
 } from './types';
-import { SUPPORTED_CAPABILITIES, CAP_EDITOR_ADD_FOOTER_BUTTON, CAP_EDITOR_REMOVE_FOOTER_BUTTON, CAP_THEME_GET } from './capabilities';
+import {
+    SUPPORTED_CAPABILITIES,
+    CAP_EDITOR_ADD_FOOTER_BUTTON,
+    CAP_EDITOR_REMOVE_FOOTER_BUTTON,
+    CAP_THEME_GET,
+    CAP_UI_STATUS,
+    CAP_EDITOR_GET_CONTENT,
+    CAP_EDITOR_CONTENT_CHANGE,
+    CAP_EDITOR_SET_OVERLAY,
+    CAP_PREVIEW_SERVE,
+    CAP_PREVIEW_RELEASE,
+} from './capabilities';
 import { cleanupFooterButtons } from './handlers/editor';
 
 export interface ExtensionHostOptions {
@@ -47,8 +58,16 @@ export class ExtensionHostChannel {
         this.granted.add('config.get');
         this.granted.add('log.write');
         this.granted.add(CAP_THEME_GET);
+        this.granted.add(CAP_UI_STATUS);
         if (this.granted.has(CAP_EDITOR_ADD_FOOTER_BUTTON)) {
             this.granted.add(CAP_EDITOR_REMOVE_FOOTER_BUTTON);
+        }
+        if (this.granted.has(CAP_EDITOR_GET_CONTENT)) {
+            this.granted.add(CAP_EDITOR_CONTENT_CHANGE);
+        }
+        if (this.granted.has(CAP_EDITOR_SET_OVERLAY)) {
+            this.granted.add(CAP_PREVIEW_SERVE);
+            this.granted.add(CAP_PREVIEW_RELEASE);
         }
 
         this.listener = (ev: MessageEvent) => this.onMessage(ev);

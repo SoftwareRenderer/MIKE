@@ -11,6 +11,13 @@ import {
     CAP_LOG_WRITE,
     CAP_EDITOR_ADD_FOOTER_BUTTON,
     CAP_EDITOR_REMOVE_FOOTER_BUTTON,
+    CAP_EDITOR_GET_CONTENT,
+    CAP_EDITOR_CONTENT_CHANGE,
+    CAP_EDITOR_SET_OVERLAY,
+    CAP_PREVIEW_SERVE,
+    CAP_PREVIEW_SERVE_SCRIPTS,
+    CAP_PREVIEW_SERVE_NETWORK,
+    CAP_PREVIEW_RELEASE,
     CAP_THEME_GET,
 } from '../capabilities';
 import type { HostRequest } from '../types';
@@ -59,8 +66,8 @@ describe('ExtensionHostChannel capability enforcement', () => {
         channel.start();
         const init = messages[0];
         expect(init.type).toBe('init');
-        // config.get, log.write, and theme.get are implicit grants added by the channel.
-        expect(init.granted).toEqual([CAP_CONFIG_GET, CAP_LOG_WRITE, CAP_THEME_GET]);
+        // config.get, log.write, theme.get, and ui.status are implicit grants added by the channel.
+        expect(init.granted).toEqual([CAP_CONFIG_GET, CAP_LOG_WRITE, CAP_THEME_GET, CAP_UI_STATUS]);
         expect(init.config).toEqual({ key: 'value' });
         channel.destroy();
     });
@@ -98,6 +105,72 @@ describe('ExtensionHostChannel capability enforcement', () => {
         const { channel, messages } = makeChannel([CAP_CONFIG_GET]);
         channel.start();
         expect(messages[0].granted).not.toContain(CAP_EDITOR_REMOVE_FOOTER_BUTTON);
+        channel.destroy();
+    });
+
+    it('grants ui.status implicitly — no manifest declaration needed', async () => {
+        // Loading/error indicators render inside the extension's own anchor —
+        // safe by construction, so always granted like config.get/log.write.
+        const { channel, contentWindow, messages } = makeChannel([CAP_CONFIG_GET]);
+        channel.start();
+        expect(messages[0].granted).toContain(CAP_UI_STATUS);
+        send(channel, contentWindow, { type: 'call', id: 'us', cap: CAP_UI_STATUS, args: { state: 'loading', message: 'x' } });
+        await flush();
+        const resp = messages[messages.length - 1];
+        expect(resp.ok).toBe(true);
+        channel.destroy();
+    });
+
+    it('grants editor.contentChange implicitly when editor.getContent is granted', () => {
+        // Reading the file implies seeing its subsequent edits (a live view
+        // must stay in sync) — no separate declaration needed.
+        const { channel, messages } = makeChannel([CAP_EDITOR_GET_CONTENT]);
+        channel.start();
+        expect(messages[0].granted).toContain(CAP_EDITOR_CONTENT_CHANGE);
+        channel.destroy();
+    });
+
+    it('does not grant editor.contentChange without editor.getContent', () => {
+        const { channel, messages } = makeChannel([CAP_CONFIG_GET]);
+        channel.start();
+        expect(messages[0].granted).not.toContain(CAP_EDITOR_CONTENT_CHANGE);
+        channel.destroy();
+    });
+
+    it('grants preview.serve + preview.release implicitly when editor.setOverlay is granted', async () => {
+        // A replaced editor view needs a served page to show and a way to
+        // close it — the strict-CSP serve and release are implied by
+        // setOverlay even when not declared.
+        const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_SET_OVERLAY]);
+        channel.start();
+        const init = messages[0];
+        expect(init.granted).toContain(CAP_PREVIEW_SERVE);
+        expect(init.granted).toContain(CAP_PREVIEW_RELEASE);
+        // release is a real call: it passes the grant check (the jsdom fetch
+        // behind it fails for an unrelated reason — never 'not granted').
+        send(channel, contentWindow, { type: 'call', id: 'pr', cap: CAP_PREVIEW_RELEASE, args: { token: 't' } });
+        await flush();
+        const resp = messages[messages.length - 1];
+        expect(resp.ok).toBe(false);
+        expect(resp.error).not.toContain('not granted');
+        channel.destroy();
+    });
+
+    it('does not grant preview.serve/preview.release without editor.setOverlay', () => {
+        const { channel, messages } = makeChannel([CAP_CONFIG_GET]);
+        channel.start();
+        expect(messages[0].granted).not.toContain(CAP_PREVIEW_SERVE);
+        expect(messages[0].granted).not.toContain(CAP_PREVIEW_RELEASE);
+        channel.destroy();
+    });
+
+    it('never implies preview.serveScripts/preview.serveNetwork — they stay explicit', () => {
+        // They relax the preview isolation posture — even a full setOverlay
+        // grant must not imply them.
+        const { channel, messages } = makeChannel([CAP_EDITOR_SET_OVERLAY]);
+        channel.start();
+        expect(messages[0].granted).not.toContain(CAP_PREVIEW_SERVE_SCRIPTS);
+        expect(messages[0].granted).not.toContain(CAP_PREVIEW_SERVE_NETWORK);
         channel.destroy();
     });
 

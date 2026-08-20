@@ -4,6 +4,7 @@
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
+    import { isDangerousPermission, sortPermissions } from '$lib/utils/extension-permissions';
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
 
@@ -118,8 +119,12 @@
     };
 
     // Human-readable explanations for sandboxed UI extension permissions.
-    // Non-technical, user-facing wording. Unknown permission names fall back
-    // to the raw name in the UI.
+    // Non-technical, user-facing wording. Only permissions an extension
+    // actually DECLARES are listed — always-granted ones (config.get,
+    // log.write, theme.get, ui.status) and implied ones (e.g.
+    // editor.removeFooterButton, editor.contentChange, preview.serve,
+    // preview.release) have no entry. Unknown/legacy names fall back to the
+    // raw name in the UI.
     const PERMISSION_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
         'createTask.description.insertText': {
             label: 'Edit the task description',
@@ -132,18 +137,6 @@
         'network.proxy': {
             label: 'Reach external services',
             description: 'Can make requests to external services through the server, limited to the allowed domains listed below.',
-        },
-        'config.get': {
-            label: 'Read its own settings',
-            description: 'Can read the settings you configured for this extension.',
-        },
-        'log.write': {
-            label: 'Write to the console',
-            description: 'Can write diagnostic entries to the browser developer console.',
-        },
-        'ui.status': {
-            label: 'Show loading/error indicators',
-            description: 'Can show a spinner, error message, or hide its status indicator.',
         },
         'ui.setSize': {
             label: 'Resize its own panel',
@@ -169,13 +162,9 @@
             label: 'Add a button to the editor',
             description: 'Can add a button to the bottom toolbar of the code editor.',
         },
-        'editor.removeFooterButton': {
-            label: 'Remove its editor button',
-            description: 'Can remove a button it previously added to the code editor toolbar.',
-        },
         'editor.getContent': {
             label: 'Read the open file',
-            description: 'Can read the full contents of the file currently open in the editor.',
+            description: 'Can read the full contents of the file currently open in the editor, and keep seeing it as the file is edited.',
         },
         'editor.setContent': {
             label: 'Write to the open file',
@@ -183,11 +172,7 @@
         },
         'editor.setOverlay': {
             label: 'Replace the editor view',
-            description: 'Can hide the code editor and show its own view in its place, and restore the editor afterwards.',
-        },
-        'editor.contentChange': {
-            label: 'See file edits',
-            description: 'Can receive updates when the content of the open file changes.',
+            description: 'Can hide the code editor, show its own view in its place, and restore the editor.',
         },
         'editor.jumpToLine': {
             label: 'Jump to a line in the file',
@@ -197,10 +182,6 @@
             label: 'Save the open file',
             description: 'Can save the file currently open in the editor.',
         },
-        'preview.serve': {
-            label: 'Show a live page preview',
-            description: `Can display the open file as a live web page in a preview pane.`,
-        },
         'preview.serveScripts': {
             label: 'Run scripts in the preview',
             description: `Can run scripts in the preview`,
@@ -208,10 +189,6 @@
         'preview.serveNetwork': {
             label: 'Send/receive data in the preview',
             description: `Can use commands such as fetch() to send/receive data across the network.`,
-        },
-        'preview.release': {
-            label: 'Close a preview page',
-            description: 'Closes a preview page that was previously opened.',
         },
     };
 
@@ -666,10 +643,15 @@
                                 <div class="update-new-perms">
                                     <div class="update-new-perms-title">This update requests new permissions:</div>
                                     <ul class="update-new-perms-list">
-                                        {#each newPerms as perm}
+                                        {#each sortPermissions(newPerms) as perm}
                                             {@const info = PERMISSION_DESCRIPTIONS[perm]}
                                             <li class="update-new-perm">
-                                                <span class="update-new-perm-name">{info?.label || perm}</span>
+                                                <span class="update-new-perm-name">
+                                                    {info?.label || perm}
+                                                    {#if isDangerousPermission(perm)}
+                                                        <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Potentially dangerous: can escape the sandbox"><title>Potentially dangerous: can escape the sandbox</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                                                    {/if}
+                                                </span>
                                                 {#if info?.description}<span class="update-new-perm-desc">{info.description}</span>{/if}
                                             </li>
                                         {/each}
@@ -987,10 +969,15 @@
                                     <div class="cap-detail-extra cap-detail-extra-block">
                                         <span class="cap-detail-label">Permissions:</span>
                                         <div class="cap-permission-list">
-                                            {#each caps.ui.permissions as perm}
+                                            {#each sortPermissions(caps.ui.permissions) as perm}
                                                 {@const info = PERMISSION_DESCRIPTIONS[perm]}
                                                 <div class="cap-permission">
-                                                    <span class="cap-permission-name">{info?.label || perm}</span>
+                                                    <span class="cap-permission-name">
+                                                        {info?.label || perm}
+                                                        {#if isDangerousPermission(perm)}
+                                                            <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Potentially dangerous: can escape the sandbox"><title>Potentially dangerous: can escape the sandbox</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                                                        {/if}
+                                                    </span>
                                                     {#if info?.description}
                                                         <span class="cap-permission-desc">{info.description}</span>
                                                     {:else}
@@ -1380,6 +1367,9 @@
     }
 
     .update-new-perm-name {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         font-size: 0.82rem;
         font-weight: 600;
         color: var(--color-text-primary);
@@ -1917,9 +1907,17 @@
     }
 
     .cap-permission-name {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         font-size: 0.8rem;
         font-weight: 600;
         color: var(--color-text-primary);
+    }
+
+    .perm-danger-icon {
+        flex: none;
+        color: var(--color-warning, #e0a030);
     }
 
     .cap-permission-desc {

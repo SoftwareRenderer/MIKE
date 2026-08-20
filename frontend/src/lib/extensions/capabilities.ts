@@ -78,10 +78,8 @@ export const SUPPORTED_CAPABILITIES: Record<string, CapabilityDef> = {
  * Always returns a subset of the manifest's requested permissions that exist
  * in the catalog — least privilege. Unknown/unsupported names are dropped.
  *
- * It's not necessary for extensions to grant implied permissions: creating a
- * button via `editor.addFooterButton` implies `editor.footerButtonClick` (the
- * click only ever carries the button's own `id`) and `editor.removeFooterButton`
- * (removal is scoped to the extension's own buttons only).
+ * Implied permissions need no manifest declaration (applied by the channel —
+ * see `ExtensionHostChannel`)
  */
 export function computeGrants(requested: string[] | undefined): string[] {
     if (!requested || !Array.isArray(requested)) return [];
