@@ -142,6 +142,10 @@ function selectResponse(parsed) {
         .map(m => (m.content || '').toLowerCase());
     const lastUserMsg = userMessages.length > 0 ? userMessages[userMessages.length - 1] : '';
 
+    // Whether the conversation already contains tool results (used by plan-mode
+    // routing below and by the tool-result routing further down).
+    const hasToolResults = messages.some(m => m.role === 'tool');
+
     // Plan mode: LLM creates subtasks via create_task tool, then calls request_review.
     // First call (no tool results yet): return create_task tool call.
     // After create_task result: return request_review to end planning.
@@ -202,7 +206,6 @@ function selectResponse(parsed) {
     // with text (not another tool call) to avoid infinite tool-call loops.
     // After enough tool cycles, call request_review to terminate.
     // Use per-conversation counting (tool message count) instead of a global counter.
-    const hasToolResults = messages.some(m => m.role === 'tool');
     if (hasToolResults) {
         const toolResultCount = messages.filter(m => m.role === 'tool').length;
         // After 2+ tool results, signal task complete to terminate the executor
