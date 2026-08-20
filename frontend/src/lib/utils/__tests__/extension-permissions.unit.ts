@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     DANGEROUS_PERMISSIONS,
     isDangerousPermission,
+    hasDangerousPermissions,
     sortPermissions,
 } from '../extension-permissions';
 
@@ -34,6 +35,25 @@ describe('isDangerousPermission (sandbox-escaping permissions only)', () => {
     it('does not flag unknown permission names', () => {
         expect(isDangerousPermission('files.read')).toBe(false);
         expect(isDangerousPermission('')).toBe(false);
+    });
+});
+
+describe('hasDangerousPermissions', () => {
+    it('is true when at least one permission is sandbox-escaping', () => {
+        expect(hasDangerousPermissions(['editor.save', 'network.proxy'])).toBe(true);
+        expect(hasDangerousPermissions(['preview.serveScripts'])).toBe(true);
+    });
+
+    it('is false for lists without dangerous permissions', () => {
+        expect(hasDangerousPermissions(['editor.save', 'storage.get', 'ui.setSize'])).toBe(false);
+    });
+
+    it('is false for an empty list', () => {
+        expect(hasDangerousPermissions([])).toBe(false);
+    });
+
+    it('is false for unknown permission names', () => {
+        expect(hasDangerousPermissions(['files.read', ''])).toBe(false);
     });
 });
 
