@@ -121,11 +121,10 @@ func TestPreviewServesDocWithoutSession(t *testing.T) {
 	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Errorf("Content-Type = %q, want text/html…", ct)
 	}
+	// Default (no allow_network) → strict, zero-egress policy.
 	csp := rr.Header().Get("Content-Security-Policy")
-	for _, want := range []string{"script-src * 'unsafe-inline'", "style-src * 'unsafe-inline'", "object-src 'none'", "form-action 'none'"} {
-		if !strings.Contains(csp, want) {
-			t.Errorf("CSP missing %q:\n%s", want, csp)
-		}
+	if csp != previewDocCSPStrict {
+		t.Errorf("default doc must carry the strict CSP, got:\n%s", csp)
 	}
 	if strings.Contains(csp, "frame-ancestors") {
 		t.Errorf("preview doc must be frameable (no frame-ancestors), got:\n%s", csp)
@@ -136,6 +135,51 @@ func TestPreviewServesDocWithoutSession(t *testing.T) {
 	if body := rr.Body.String(); body != html {
 		t.Errorf("body = %q, want %q", body, html)
 	}
+}
+
+// allow_network opts the doc into the legacy permissive policy.
+func TestPreviewServesPermissiveCSPWhenAllowNetwork(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	html := "<!DOCTYPE html><html><body><h1>hi</h1></body></html>"
+	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{"content": html, "allow_network": true})
+
+	rr := getPreview(t, s, "/api/preview/"+token+"/")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("doc GET: expected 200, got %d %s", rr.Code, rr.Body.String())
+	}
+	csp := rr.Header().Get("Content-Security-Policy")
+	if csp != previewDocCSPNetwork {
+		t.Errorf("allow_network doc must carry the permissive CSP, got:\n%s", csp)
+	}
+	if strings.Contains(csp, "frame-ancestors") {
+		t.Errorf("preview doc must be frameable (no frame-ancestors), got:\n%s", csp)
+	}
+}
+
+// INVARIANT: no load-type directive of the strict policy may carry a `*` — a
+// wildcard there is a live exfil channel (the load request itself delivers the
+// URL to the remote server). connect-src must be fully closed.
+func TestPreviewDocCSPStrict_NoWildcardInLoadDirectives(t *testing.T) {
+	for _, name := range []string{"default-src", "script-src", "style-src", "img-src", "font-src", "media-src", "frame-src", "worker-src", "object-src"} {
+		if got := cspDirectiveValue(previewDocCSPStrict, name); strings.Contains(got, "*") {
+			t.Errorf("strict CSP: %q must not contain a wildcard, got %q", name, got)
+		}
+	}
+	if got := cspDirectiveValue(previewDocCSPStrict, "connect-src"); got != "'none'" {
+		t.Errorf("strict CSP: connect-src = %q, want 'none'", got)
+	}
+}
+
+// cspDirectiveValue extracts one directive's value from a CSP string ("" if absent).
+func cspDirectiveValue(csp, name string) string {
+	for _, part := range strings.Split(csp, ";") {
+		fields := strings.Fields(part)
+		if len(fields) > 0 && fields[0] == name {
+			return strings.Join(fields[1:], " ")
+		}
+	}
+	return ""
 }
 
 // Doc Content-Type follows the previewed file's extension (host-derived).
@@ -512,7 +556,7 @@ func TestPreviewSelfReference_ServesServedContent(t *testing.T) {
 	if body := rr.Body.String(); body != content {
 		t.Errorf("body = %q, want served content %q", body, content)
 	}
-	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSP {
+	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSPStrict {
 		t.Errorf("self-ref doc must carry the preview CSP, got %q", csp)
 	}
 }

@@ -55,6 +55,8 @@ export {
 } from './handlers/theme';
 export {
     CAP_PREVIEW_SERVE,
+    CAP_PREVIEW_SERVE_SCRIPTS,
+    CAP_PREVIEW_SERVE_NETWORK,
     CAP_PREVIEW_RELEASE,
 } from './handlers/preview';
 

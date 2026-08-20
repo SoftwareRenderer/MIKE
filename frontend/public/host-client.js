@@ -116,8 +116,17 @@
         },
 
         preview: {
-            /** Serve a doc; resolves to { token, url }. Supersedes this editor's previous doc. */
-            serve: (content) => call('preview.serve', { content: String(content || '') }),
+            /**
+             * Serve a doc; resolves to { token, url }; supersedes this editor's
+             * previous doc. (scripts, network) select the posture
+             */
+            serve: (content, scripts, network) => {
+                const cap = network ? 'preview.serveNetwork' : scripts ? 'preview.serveScripts' : 'preview.serve';
+                if (!granted.includes(cap)) {
+                    return Promise.reject(new Error(cap + ' is not declared by this extension (manifest permissions)'));
+                }
+                return call(cap, { content: String(content || '') });
+            },
             /** Free a served doc early (TTL is the backstop). */
             release: (token) => call('preview.release', { token: String(token || '') }),
         },
