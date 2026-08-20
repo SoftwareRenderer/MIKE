@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ExtensionHostChannel } from '../channel';
 import {
     CAP_PREVIEW_SERVE,
+    CAP_PREVIEW_SERVE_SCRIPTS,
+    CAP_PREVIEW_SERVE_NETWORK,
     CAP_PREVIEW_RELEASE,
     SUPPORTED_CAPABILITIES,
     computeGrants,
@@ -51,18 +53,19 @@ function failResponse(status: number) {
 }
 
 describe('preview capability catalog', () => {
-    it('registers preview.serve and preview.release as call capabilities', () => {
-        expect(SUPPORTED_CAPABILITIES[CAP_PREVIEW_SERVE]).toBeTruthy();
-        expect(SUPPORTED_CAPABILITIES[CAP_PREVIEW_SERVE].kind).toBe('call');
-        expect(typeof SUPPORTED_CAPABILITIES[CAP_PREVIEW_SERVE].handler).toBe('function');
-        expect(SUPPORTED_CAPABILITIES[CAP_PREVIEW_RELEASE]).toBeTruthy();
-        expect(SUPPORTED_CAPABILITIES[CAP_PREVIEW_RELEASE].kind).toBe('call');
-        expect(typeof SUPPORTED_CAPABILITIES[CAP_PREVIEW_RELEASE].handler).toBe('function');
+    it('registers the three serve postures and preview.release as call capabilities', () => {
+        for (const cap of [CAP_PREVIEW_SERVE, CAP_PREVIEW_SERVE_SCRIPTS, CAP_PREVIEW_SERVE_NETWORK, CAP_PREVIEW_RELEASE]) {
+            expect(SUPPORTED_CAPABILITIES[cap], cap).toBeTruthy();
+            expect(SUPPORTED_CAPABILITIES[cap].kind).toBe('call');
+            expect(typeof SUPPORTED_CAPABILITIES[cap].handler).toBe('function');
+        }
     });
 
     it('grants only declared, known preview capabilities', () => {
-        const granted = computeGrants([CAP_PREVIEW_SERVE, CAP_PREVIEW_RELEASE, 'preview.bogus']);
+        const granted = computeGrants([CAP_PREVIEW_SERVE, CAP_PREVIEW_SERVE_SCRIPTS, CAP_PREVIEW_SERVE_NETWORK, CAP_PREVIEW_RELEASE, 'preview.bogus']);
         expect(granted).toContain(CAP_PREVIEW_SERVE);
+        expect(granted).toContain(CAP_PREVIEW_SERVE_SCRIPTS);
+        expect(granted).toContain(CAP_PREVIEW_SERVE_NETWORK);
         expect(granted).toContain(CAP_PREVIEW_RELEASE);
         expect(granted).not.toContain('preview.bogus');
     });
@@ -97,6 +100,7 @@ describe('preview.serve', () => {
         expect(body.project).toBe('p1');
         expect(body.path).toBe('/proj/page.html');
         expect(body.task).toBe('t1');
+        expect(body.allow_network).toBe(false);
 
         const resp = messages.find((m) => m.type === 'response' && m.id === 'm1');
         expect(resp.ok).toBe(true);
@@ -117,8 +121,56 @@ describe('preview.serve', () => {
         await flush();
 
         const body = JSON.parse(apiFetchMock.mock.calls[0][1]?.body as string);
-        expect(body).toEqual({ content: '<svg/>', project: 'p2', path: 'page.html', task: '' });
+        expect(body).toEqual({ content: '<svg/>', project: 'p2', path: 'page.html', task: '', allow_network: false });
         expect(messages.find((m) => m.id === 'm1')?.ok).toBe(true);
+    });
+
+    it('preview.serveScripts serves the strict CSP (scripts posture)', async () => {
+        okResponse({ token: 'tokS', url: '/api/preview/tokS/' });
+        const { channel, contentWindow } = makeChannel([CAP_PREVIEW_SERVE_SCRIPTS], {
+            component: 'FileEditor', filePath: 'p.html', projectId: 'p1',
+        });
+
+        send(channel, contentWindow, {
+            type: 'call', id: 'm1', cap: CAP_PREVIEW_SERVE_SCRIPTS, args: { content: '<html/>' },
+        });
+        await flush();
+
+        const body = JSON.parse(apiFetchMock.mock.calls[0][1]?.body as string);
+        expect(body.allow_network).toBe(false);
+    });
+
+    it('preview.serveNetwork is the only capability that serves the permissive CSP', async () => {
+        okResponse({ token: 'tokN', url: '/api/preview/tokN/' });
+        const { channel, contentWindow } = makeChannel([CAP_PREVIEW_SERVE_NETWORK], {
+            component: 'FileEditor', filePath: 'p.html', projectId: 'p1',
+        });
+
+        send(channel, contentWindow, {
+            type: 'call', id: 'm1', cap: CAP_PREVIEW_SERVE_NETWORK, args: { content: '<html/>' },
+        });
+        await flush();
+
+        const body = JSON.parse(apiFetchMock.mock.calls[0][1]?.body as string);
+        expect(body.allow_network).toBe(true);
+    });
+
+    it('rejects preview.serveNetwork when the extension did not declare it', async () => {
+        // Granted only the base postures — the permissive path must be
+        // unreachable even for a known extension.
+        const { channel, contentWindow, messages } = makeChannel(
+            [CAP_PREVIEW_SERVE, CAP_PREVIEW_SERVE_SCRIPTS], {},
+        );
+
+        send(channel, contentWindow, {
+            type: 'call', id: 'm1', cap: CAP_PREVIEW_SERVE_NETWORK, args: { content: '<html/>' },
+        });
+        await flush();
+
+        const resp = messages.find((m) => m.id === 'm1');
+        expect(resp.ok).toBe(false);
+        expect(resp.error).toContain('not granted');
+        expect(apiFetchMock).not.toHaveBeenCalled();
     });
 
     it('rejects the call when not granted', async () => {

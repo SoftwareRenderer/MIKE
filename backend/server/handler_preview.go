@@ -27,20 +27,21 @@ const (
 	previewSweepPeriod = 30 * time.Second // TTL sweep interval
 )
 
-// previewDocCSP is deliberately permissive so a page renders like it would
-// in a regular browser. Host protection comes from the sandbox model (nested
-// sandbox="allow-scripts" iframe → opaque origin: no cookies, no host DOM, no
-// top navigation; mutations also need CSRF), not from this policy.
-// frame-ancestors must be ABSENT — the doc must stay frameable; the 128-bit
-// token is the access credential. Full model: AGENTS.md "Preview capability".
-const previewDocCSP = "default-src * data: blob: 'unsafe-inline'; script-src * 'unsafe-inline' data: blob:; style-src * 'unsafe-inline' data: blob:; img-src * data: blob:; font-src * data: blob:; connect-src * data: blob:; frame-src * data: blob:; worker-src * blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+// previewDocCSPStrict is the DEFAULT policy
+const previewDocCSPStrict = "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' data: blob:; style-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; font-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; worker-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+
+// previewDocCSPNetwork is the permissive policy (remote resources and
+// full egress). Served only when the extension's "allow network" setting opts
+// in per serve
+const previewDocCSPNetwork = "default-src * data: blob: 'unsafe-inline'; script-src * 'unsafe-inline' data: blob:; style-src * 'unsafe-inline' data: blob:; img-src * data: blob:; font-src * data: blob:; connect-src * data: blob:; frame-src * data: blob:; worker-src * blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
 
 // previewDoc is a served preview document.
 type previewDoc struct {
-	content    string // document text (HTML/SVG/XHTML/…)
-	fileName   string // previewed file's base name ("" if unknown)
-	baseDir    string // host dir for relative assets ("" = self-contained)
-	lastAccess time.Time
+	content      string // document text (HTML/SVG/XHTML/…)
+	fileName     string // previewed file's base name ("" if unknown)
+	baseDir      string // host dir for relative assets ("" = self-contained)
+	allowNetwork bool   // true → permissive CSP (extension opt-in); false → strict
+	lastAccess   time.Time
 }
 
 // previewDocContentType: natural type of the previewed file (host-derived —
@@ -94,14 +95,14 @@ func (ps *previewStore) stopSweeper() {
 	}
 }
 
-func (ps *previewStore) put(content, fileName, baseDir string) string {
+func (ps *previewStore) put(content, fileName, baseDir string, allowNetwork bool) string {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	for len(ps.docs) >= previewMaxLive {
 		ps.evictOldestLocked()
 	}
 	token := newPreviewToken()
-	ps.docs[token] = &previewDoc{content: content, fileName: fileName, baseDir: baseDir, lastAccess: time.Now()}
+	ps.docs[token] = &previewDoc{content: content, fileName: fileName, baseDir: baseDir, allowNetwork: allowNetwork, lastAccess: time.Now()}
 	return token
 }
 
@@ -156,11 +157,14 @@ func newPreviewToken() string {
 
 // previewServeRequest: only `content` comes from the client; project/path/task
 // identify the editor's open file (host-filled) for sibling-asset resolution.
+// AllowNetwork is the extension's "allow network" opt-in; it only ever widens
+// the doc's CSP (default: strict).
 type previewServeRequest struct {
-	Content string `json:"content"`
-	Project string `json:"project"`
-	Path    string `json:"path"`
-	Task    string `json:"task"`
+	Content      string `json:"content"`
+	Project      string `json:"project"`
+	Path         string `json:"path"`
+	Task         string `json:"task"`
+	AllowNetwork bool   `json:"allow_network"`
 }
 
 // HandlePreviewServe — POST /api/preview (session + CSRF). Stores the doc and
@@ -201,7 +205,7 @@ func (s *Server) HandlePreviewServe(w http.ResponseWriter, r *http.Request) {
 		fileName = filepath.Base(hostPath)
 	}
 
-	token := s.previewStore.put(req.Content, fileName, baseDir)
+	token := s.previewStore.put(req.Content, fileName, baseDir, req.AllowNetwork)
 	JSONResponse(w, http.StatusOK, map[string]any{
 		"token": token,
 		"url":   "/api/preview/" + token + "/",
@@ -230,7 +234,11 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 
 	writeDoc := func() {
 		w.Header().Set("Content-Type", previewDocContentType(doc.fileName))
-		w.Header().Set("Content-Security-Policy", previewDocCSP)
+		csp := previewDocCSPStrict
+		if doc.allowNetwork {
+			csp = previewDocCSPNetwork
+		}
+		w.Header().Set("Content-Security-Policy", csp)
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
