@@ -1235,7 +1235,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						}})
 						te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 						if setup.task.ParentTaskID != "" {
-							_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID, setup.task.Status)
+							_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID)
 						}
 						return
 					}
@@ -1332,7 +1332,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					te.broadcastDiffIfGitCmd(setup.projectID, setup.task.ID, setup.task)
 				}
 				if setup.task.ParentTaskID != "" {
-					_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID, setup.task.Status)
+					_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID)
 				}
 				return
 			}
@@ -1513,7 +1513,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 			// If this is a subtask, auto-start the next sibling
 			if setup.task.ParentTaskID != "" {
-				_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID, setup.task.Status)
+				_ = te.AutoStartNextSibling(setup.projectID, setup.task.ID, setup.task.ParentTaskID)
 			}
 		} else if lc.reasoningContent.Len() > 0 {
 			// Reasoning-only response: no visible content, no tool calls.

@@ -658,3 +658,239 @@ func TestHandleStartWithSubtasks_MarksSubtaskAutostarted(t *testing.T) {
 		t.Errorf("child task should be marked autostarted=true when started via its parent (got %v)", child.Autostarted)
 	}
 }
+
+// --- Autostart chain: start paths (chain = started-but-pending, deepest first) ---
+
+// createChainTask creates a task for chain tests. When seed is true, the
+// task's thread is seeded with a user + assistant message pair so StartTask
+// persists state and returns early without invoking the LLM.
+func createChainTask(t *testing.T, s *store.Store, projectID, id, title, status, execState, parentID, threadID string, seed bool) {
+	t.Helper()
+	now := time.Now().UTC()
+	task := &types.Task{
+		ID: id, ProjectID: projectID, Title: title, Prompt: title + " prompt",
+		Status: status, ExecutionState: execState, ParentTaskID: parentID,
+		LlamaServerURL: "http://localhost:8080", ModelName: "test-model",
+		OperatingMode: "act", CurrentThreadID: threadID,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	if seed && threadID != "" {
+		for _, m := range []*types.TaskMessage{
+			{ID: id + "-u", TaskID: id, ThreadID: threadID, Role: "user", Content: task.Prompt, CreatedAt: now},
+			{ID: id + "-a", TaskID: id, ThreadID: threadID, Role: "assistant", Content: "Done.", CreatedAt: now},
+		} {
+			if err := s.CreateTaskMessage(m); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+func postToMux(t *testing.T, mux *http.ServeMux, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	if body != nil {
+		if err := json.NewEncoder(&buf).Encode(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, path, &buf)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	return rr
+}
+
+// TestHandleStartWithSubtasks_MovesParentToInProgress verifies that starting a
+// backlog parent via POST /start moves the parent itself to In Progress
+// (started-but-pending) while the deepest subtask starts running.
+func TestHandleStartWithSubtasks_MovesParentToInProgress(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "par-mip", "Parent", "backlog", "idle", "", "thread-par-mip", false)
+	createChainTask(t, s, projID, "child-mip", "Child", "backlog", "idle", "par-mip", "thread-child-mip", true)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStartWithSubtasks)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-mip/start", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HandleStartWithSubtasks status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	parent, _ := s.GetTaskByTaskID("par-mip")
+	if parent.Status != "in_progress" {
+		t.Errorf("parent should move to In Progress (started-but-pending), got %q", parent.Status)
+	}
+	if parent.ExecutionState != "idle" {
+		t.Errorf("parent should stay pending (not running), got %q", parent.ExecutionState)
+	}
+
+	child, _ := s.GetTaskByTaskID("child-mip")
+	if child.Status != "in_progress" || child.ExecutionState != "running" {
+		t.Errorf("deepest subtask should be running: status=%q state=%q", child.Status, child.ExecutionState)
+	}
+	if !child.Autostarted {
+		t.Error("subtask started via its parent should be marked autostarted")
+	}
+}
+
+// TestHandleStartWithSubtasks_AllChildrenDoneStartsOwnExecution verifies that
+// starting a parent whose subtasks are all done starts the parent's own
+// execution.
+func TestHandleStartWithSubtasks_AllChildrenDoneStartsOwnExecution(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "par-ad", "Parent", "backlog", "idle", "", "thread-par-ad", true)
+	createChainTask(t, s, projID, "child-ad", "Child", "done", "completed", "par-ad", "", false)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStartWithSubtasks)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-ad/start", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HandleStartWithSubtasks status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	parent, _ := s.GetTaskByTaskID("par-ad")
+	if parent.Status != "in_progress" || parent.ExecutionState != "running" {
+		t.Errorf("parent should start its own execution once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
+	}
+	if parent.Autostarted {
+		t.Error("user-initiated start should not mark the task autostarted")
+	}
+}
+
+// TestHandleStartWithSubtasks_BlockedChildrenStayPending verifies that starting
+// a parent whose subtask is in Review does not start anything — the parent
+// stays started-but-pending until the child is moved to Done.
+func TestHandleStartWithSubtasks_BlockedChildrenStayPending(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "par-blk", "Parent", "backlog", "idle", "", "thread-par-blk", false)
+	createChainTask(t, s, projID, "child-blk", "Child", "review", "idle", "par-blk", "", false)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStartWithSubtasks)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-blk/start", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HandleStartWithSubtasks status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	parent, _ := s.GetTaskByTaskID("par-blk")
+	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
+		t.Errorf("parent should be started-but-pending: status=%q state=%q", parent.Status, parent.ExecutionState)
+	}
+	child, _ := s.GetTaskByTaskID("child-blk")
+	if child.Status != "review" {
+		t.Errorf("child should stay in review, got %q", child.Status)
+	}
+}
+
+// TestHandleStartSubtask_WithChildren_StartsDeepestSubtask verifies that
+// starting a subtask that has children of its own starts the deepest
+// descendant — the subtask's own execution must wait for its children.
+func TestHandleStartSubtask_WithChildren_StartsDeepestSubtask(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "root-nsp", "Root", "backlog", "idle", "", "", false)
+	createChainTask(t, s, projID, "mid-nsp", "Mid", "backlog", "idle", "root-nsp", "thread-mid-nsp", false)
+	createChainTask(t, s, projID, "leaf-nsp", "Leaf", "backlog", "idle", "mid-nsp", "thread-leaf-nsp", true)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start-subtask", h.HandleStartSubtask)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/mid-nsp/start-subtask", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HandleStartSubtask status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	mid, _ := s.GetTaskByTaskID("mid-nsp")
+	if mid.Status != "in_progress" || mid.ExecutionState != "idle" {
+		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
+	}
+	leaf, _ := s.GetTaskByTaskID("leaf-nsp")
+	if leaf.Status != "in_progress" || leaf.ExecutionState != "running" {
+		t.Errorf("deepest descendant should be running: status=%q state=%q", leaf.Status, leaf.ExecutionState)
+	}
+	if !leaf.Autostarted {
+		t.Error("deepest descendant should be marked autostarted")
+	}
+}
+
+// TestHandleMove_SubtaskWithChildren_StartsDeepestSubtask verifies that moving
+// a subtask with its own children to In Progress starts the deepest
+// descendant, not the subtask's own execution.
+func TestHandleMove_SubtaskWithChildren_StartsDeepestSubtask(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "root-msc", "Root", "backlog", "idle", "", "", false)
+	createChainTask(t, s, projID, "mid-msc", "Mid", "backlog", "idle", "root-msc", "thread-mid-msc", false)
+	createChainTask(t, s, projID, "leaf-msc", "Leaf", "backlog", "idle", "mid-msc", "thread-leaf-msc", true)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", h.HandleMove)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/mid-msc/move", map[string]any{"status": "in_progress"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HandleMove status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	mid, _ := s.GetTaskByTaskID("mid-msc")
+	if mid.Status != "in_progress" || mid.ExecutionState != "idle" {
+		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
+	}
+	leaf, _ := s.GetTaskByTaskID("leaf-msc")
+	if leaf.Status != "in_progress" || leaf.ExecutionState != "running" {
+		t.Errorf("deepest descendant should be running: status=%q state=%q", leaf.Status, leaf.ExecutionState)
+	}
+}
+
+// TestHandleMove_ParentAllChildrenDone_StartsOwnExecution verifies that moving
+// a parent with all-done subtasks to In Progress starts the parent's own
+// execution.
+func TestHandleMove_ParentAllChildrenDone_StartsOwnExecution(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "par-mad", "Parent", "backlog", "idle", "", "thread-par-mad", true)
+	createChainTask(t, s, projID, "child-mad", "Child", "done", "completed", "par-mad", "", false)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", h.HandleMove)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-mad/move", map[string]any{"status": "in_progress"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HandleMove status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	parent, _ := s.GetTaskByTaskID("par-mad")
+	if parent.Status != "in_progress" || parent.ExecutionState != "running" {
+		t.Errorf("parent should start its own execution once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
+	}
+}
+
+// TestHandleMove_ParentWithGatedChildren_KeepsThemInPlace verifies that moving
+// a parent to In Progress (a start) moves backlog descendants along but does
+// not drag them out of review (human gate) or done.
+func TestHandleMove_ParentWithGatedChildren_KeepsThemInPlace(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "par-gate", "Parent", "backlog", "idle", "", "thread-par-gate", true)
+	createChainTask(t, s, projID, "child-gate-review", "InReview", "review", "idle", "par-gate", "", false)
+	createChainTask(t, s, projID, "child-gate-done", "Done", "done", "completed", "par-gate", "", false)
+	createChainTask(t, s, projID, "child-gate-backlog", "Backlog", "backlog", "idle", "par-gate", "thread-child-gate-backlog", true)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", h.HandleMove)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-gate/move", map[string]any{"status": "in_progress"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HandleMove status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	parent, _ := s.GetTaskByTaskID("par-gate")
+	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
+		t.Errorf("parent should stay started-but-pending: status=%q state=%q", parent.Status, parent.ExecutionState)
+	}
+	backlog, _ := s.GetTaskByTaskID("child-gate-backlog")
+	if backlog.Status != "in_progress" {
+		t.Errorf("backlog child should follow parent to In Progress: status=%q", backlog.Status)
+	}
+	review, _ := s.GetTaskByTaskID("child-gate-review")
+	if review.Status != "review" {
+		t.Errorf("review child must not be dragged into In Progress: status=%q", review.Status)
+	}
+	done, _ := s.GetTaskByTaskID("child-gate-done")
+	if done.Status != "done" {
+		t.Errorf("done child must not be dragged into In Progress: status=%q", done.Status)
+	}
+}
