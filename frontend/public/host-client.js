@@ -137,6 +137,17 @@
 
         error: (message) => call('ui.status', { state: 'error', message: String(message || '') }),
 
+        /**
+         * Host-rendered app-level modal (the extension's own iframe is
+         * invisible/collapsed, so it can't render this itself). Resolves
+         * when the user dismisses it.
+         */
+        modal: (opts) => call('ui.modal', {
+            message: String((opts && opts.message) || ''),
+            ...(opts && opts.title !== undefined ? { title: String(opts.title) } : {}),
+            ...(opts && opts.confirmLabel !== undefined ? { confirmLabel: String(opts.confirmLabel) } : {}),
+        }),
+
         hide: () => call('ui.status', { state: 'hidden' }),
 
         setSize: (height) => call('ui.setSize', { height: Number(height) || 0 }),
