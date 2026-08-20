@@ -199,7 +199,15 @@
         },
         'preview.serve': {
             label: 'Show a live page preview',
-            description: `Can display the open file as a live web page in a sandboxed preview.`,
+            description: `Can display the open file as a live web page in a preview pane.`,
+        },
+        'preview.serveScripts': {
+            label: 'Run scripts in the preview',
+            description: `Can run scripts in the preview`,
+        },
+        'preview.serveNetwork': {
+            label: 'Send/receive data in the preview',
+            description: `Can use commands such as fetch() to send/receive data across the network.`,
         },
         'preview.release': {
             label: 'Close a preview page',
