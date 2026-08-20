@@ -541,12 +541,13 @@ func TestSubtaskBlockBacklogWhenParentInProgress(t *testing.T) {
 	// Move subtask to review
 	moveTask(t, s, projID, subID, "review")
 
-	// Move parent to in_progress — subtask follows (new behavior: all descendants move with parent)
+	// Move parent to in_progress — the parent starts but the review subtask
+	// stays put (human gate); the parent waits started-but-pending.
 	moveTask(t, s, projID, parentID, "in_progress")
 
-	// Subtask should have been moved to in_progress with its parent
-	if getTaskStatus(t, s, projID, subID) != "in_progress" {
-		t.Fatalf("subtask should follow parent to in_progress, got %s", getTaskStatus(t, s, projID, subID))
+	// Review subtask must not be dragged into in_progress by the parent move
+	if getTaskStatus(t, s, projID, subID) != "review" {
+		t.Fatalf("review subtask must stay in review, got %s", getTaskStatus(t, s, projID, subID))
 	}
 
 	// Try to move subtask to backlog — should be blocked (ancestor is in_progress)
@@ -558,10 +559,10 @@ func TestSubtaskBlockBacklogWhenParentInProgress(t *testing.T) {
 		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	// Subtask should still be in in_progress (blocked from moving to backlog)
+	// Subtask should still be in review (blocked from moving to backlog)
 	status := getTaskStatus(t, s, projID, subID)
-	if status != "in_progress" {
-		t.Fatalf("expected in_progress (blocked), got %s", status)
+	if status != "review" {
+		t.Fatalf("expected review (blocked), got %s", status)
 	}
 }
 

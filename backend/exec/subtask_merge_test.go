@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kanban/backend/config"
 	"kanban/backend/git"
@@ -757,7 +758,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	te.StopTask(subtask1ID)
 
 	// AutoStartNextSibling should NOT start subtask2 because parent is in backlog
-	err = te.AutoStartNextSibling(projectID, subtask1ID, parentID, "review")
+	err = te.AutoStartNextSibling(projectID, subtask1ID, parentID)
 	if err != nil {
 		t.Fatalf("AutoStartNextSibling failed: %v", err)
 	}
@@ -859,7 +860,7 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 	te.StopTask(subtask1ID)
 
 	// AutoStartNextSibling should start subtask2 (parent is in_progress)
-	err = te.AutoStartNextSibling(projectID, subtask1ID, parentID, "review")
+	err = te.AutoStartNextSibling(projectID, subtask1ID, parentID)
 	if err != nil {
 		t.Fatalf("AutoStartNextSibling failed: %v", err)
 	}
@@ -1068,7 +1069,7 @@ func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
 	te.StopTask(subtaskID)
 
 	// AutoStartNextSibling with no incomplete siblings and all done
-	err = te.AutoStartNextSibling(projectID, subtaskID, parentID, "done")
+	err = te.AutoStartNextSibling(projectID, subtaskID, parentID)
 	if err != nil {
 		t.Fatalf("AutoStartNextSibling failed: %v", err)
 	}
@@ -1727,4 +1728,299 @@ func TestExtractSlugPrefix(t *testing.T) {
 			t.Errorf("extractSlugPrefix(%q) = %q, want %q", tc.input, got, tc.expected)
 		}
 	}
+}
+
+// --- Autostart chain: readiness-aware selection ---
+
+// seedThread seeds a task's thread with a user prompt followed by an
+// assistant reply so that StartTask persists the autostarted flag and returns
+// early without invoking the LLM.
+func seedThread(t *testing.T, s *store.Store, taskID, threadID, prompt string) {
+	t.Helper()
+	now := time.Now().UTC()
+	for _, m := range []*types.TaskMessage{
+		{ID: taskID + "-u", TaskID: taskID, ThreadID: threadID, Role: "user", Content: prompt, CreatedAt: now},
+		{ID: taskID + "-a", TaskID: taskID, ThreadID: threadID, Role: "assistant", Content: "Done.", CreatedAt: now},
+	} {
+		if err := s.CreateTaskMessage(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func containsTaskID(tasks []types.Task, id string) bool {
+	for _, t := range tasks {
+		if t.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// TestFindDeepestStartableSubtasks_DeepestFirst verifies that only the
+// startable subtasks at the deepest level are returned: a shallower startable
+// sibling waits while a deeper branch still has pending work, and becomes a
+// candidate once its subtree is done.
+func TestFindDeepestStartableSubtasks_DeepestFirst(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+
+	c1ID, c2ID, g1ID, g2ID := "c1-depth", "c2-depth", "g1-depth", "g2-depth"
+	tasks := []*types.Task{
+		{ID: c1ID, ProjectID: projectID, Title: "C1", Prompt: "c1", Status: "in_progress", ExecutionState: "idle"},
+		{ID: c2ID, ProjectID: projectID, Title: "C2", Prompt: "c2", Status: "in_progress", ExecutionState: "idle"},
+		{ID: g1ID, ProjectID: projectID, Title: "G1", Prompt: "g1", Status: "in_progress", ExecutionState: "idle", ParentTaskID: c1ID},
+		{ID: g2ID, ProjectID: projectID, Title: "G2", Prompt: "g2", Status: "in_progress", ExecutionState: "idle", ParentTaskID: c1ID},
+	}
+	for _, tk := range tasks {
+		if err := te.store.CreateTask(tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c1, _ := te.store.GetTaskByTaskID(c1ID)
+	c2, _ := te.store.GetTaskByTaskID(c2ID)
+
+	// Deepest startable subtasks: G1 and G2 (C2, a shallower startable leaf,
+	// waits for C1's subtree).
+	deepest := te.FindDeepestStartableSubtasks([]types.Task{*c1, *c2})
+	if len(deepest) != 2 || !containsTaskID(deepest, g1ID) || !containsTaskID(deepest, g2ID) {
+		t.Fatalf("deepest = %v, want [g1 g2]", idsOf(deepest))
+	}
+	if containsTaskID(deepest, c2ID) {
+		t.Errorf("c2 should not be a candidate while g1/g2 are pending")
+	}
+
+	// Once C1's children are done, C1 itself becomes startable at its level.
+	for _, id := range []string{g1ID, g2ID} {
+		tk, _ := te.store.GetTaskByTaskID(id)
+		tk.Status = "done"
+		tk.ExecutionState = "completed"
+		te.store.UpdateTask(tk)
+	}
+	c1, _ = te.store.GetTaskByTaskID(c1ID)
+	c2, _ = te.store.GetTaskByTaskID(c2ID)
+	deepest = te.FindDeepestStartableSubtasks([]types.Task{*c1, *c2})
+	if len(deepest) != 2 || !containsTaskID(deepest, c1ID) || !containsTaskID(deepest, c2ID) {
+		t.Fatalf("deepest = %v, want [c1 c2]", idsOf(deepest))
+	}
+}
+
+// TestFindDeepestStartableSubtasks_SkipsReviewBlocked verifies that a task with
+// a child in Review is NOT startable (it must wait for the child to be moved
+// to Done), and that its other pending children are found instead.
+func TestFindDeepestStartableSubtasks_SkipsReviewBlocked(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+
+	c1ID, r1ID, r2ID := "c1-review", "r1-review", "r2-review"
+	tasks := []*types.Task{
+		{ID: c1ID, ProjectID: projectID, Title: "C1", Prompt: "c1", Status: "in_progress", ExecutionState: "idle"},
+		{ID: r1ID, ProjectID: projectID, Title: "R1", Prompt: "r1", Status: "review", ExecutionState: "idle", ParentTaskID: c1ID},
+	}
+	for _, tk := range tasks {
+		if err := te.store.CreateTask(tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c1, _ := te.store.GetTaskByTaskID(c1ID)
+
+	// C1 has a child in review — neither C1 nor R1 is startable.
+	deepest := te.FindDeepestStartableSubtasks([]types.Task{*c1})
+	if len(deepest) != 0 {
+		t.Fatalf("deepest = %v, want none (C1 blocked on review child)", idsOf(deepest))
+	}
+
+	// A second child in a startable state IS found.
+	if err := te.store.CreateTask(&types.Task{ID: r2ID, ProjectID: projectID, Title: "R2", Prompt: "r2", Status: "in_progress", ExecutionState: "idle", ParentTaskID: c1ID}); err != nil {
+		t.Fatal(err)
+	}
+	c1, _ = te.store.GetTaskByTaskID(c1ID)
+	deepest = te.FindDeepestStartableSubtasks([]types.Task{*c1})
+	if len(deepest) != 1 || !containsTaskID(deepest, r2ID) {
+		t.Fatalf("deepest = %v, want [r2]", idsOf(deepest))
+	}
+}
+
+// TestAllChildrenDone covers the readiness predicate: no children, all done,
+// one in review, one in backlog.
+func TestAllChildrenDone(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+
+	parentID := "parent-child-done"
+	if err := te.store.CreateTask(&types.Task{ID: parentID, ProjectID: projectID, Title: "P", Prompt: "p", Status: "in_progress", ExecutionState: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// No children — vacuously done.
+	if ok, err := te.AllChildrenDone(parentID); err != nil || !ok {
+		t.Fatalf("no children: ok=%v err=%v, want true", ok, err)
+	}
+
+	children := []*types.Task{
+		{ID: "cd-1", ProjectID: projectID, Title: "A", Prompt: "a", Status: "done", ExecutionState: "completed", ParentTaskID: parentID},
+		{ID: "cd-2", ProjectID: projectID, Title: "B", Prompt: "b", Status: "done", ExecutionState: "completed", ParentTaskID: parentID},
+	}
+	for _, tk := range children {
+		if err := te.store.CreateTask(tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ok, _ := te.AllChildrenDone(parentID); !ok {
+		t.Fatal("all children done: ok=false, want true")
+	}
+
+	// One child in review — not done.
+	tk, _ := te.store.GetTaskByTaskID("cd-2")
+	tk.Status = "review"
+	tk.ExecutionState = "idle"
+	te.store.UpdateTask(tk)
+	if ok, _ := te.AllChildrenDone(parentID); ok {
+		t.Fatal("child in review: ok=true, want false")
+	}
+
+	// One child in backlog — not done.
+	tk.Status = "backlog"
+	te.store.UpdateTask(tk)
+	if ok, _ := te.AllChildrenDone(parentID); ok {
+		t.Fatal("child in backlog: ok=true, want false")
+	}
+}
+
+// TestAutoStartNextSibling_StartsParentWhenAllChildrenDone verifies that when
+// all of an in_progress parent's children are done, the parent itself is
+// autostarted.
+func TestAutoStartNextSibling_StartsParentWhenAllChildrenDone(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+
+	parentID := "parent-start-when-done"
+	parent := &types.Task{
+		ID: parentID, ProjectID: projectID, Title: "Parent", Prompt: "Parent prompt",
+		Status: "in_progress", ExecutionState: "idle", CurrentThreadID: "thread-psd",
+		LlamaServerURL: "http://localhost:8080", ModelName: "test-model",
+	}
+	te.store.CreateTask(parent)
+	seedThread(t, te.store, parentID, "thread-psd", "Parent prompt")
+
+	for _, id := range []string{"s1-done", "s2-done"} {
+		te.store.CreateTask(&types.Task{
+			ID: id, ProjectID: projectID, Title: id, Prompt: "sub",
+			Status: "done", ExecutionState: "completed", ParentTaskID: parentID,
+		})
+	}
+
+	// s1 "just finished"; s2 is already done → the parent must start.
+	err := te.AutoStartNextSibling(projectID, "s1-done", parentID)
+	if err != nil {
+		t.Fatalf("AutoStartNextSibling failed: %v", err)
+	}
+
+	p, _ := te.store.GetTaskByTaskID(parentID)
+	if p.Status != "in_progress" || p.ExecutionState != "running" {
+		t.Errorf("parent should be running after all children done: status=%q state=%q", p.Status, p.ExecutionState)
+	}
+	if !p.Autostarted {
+		t.Error("parent should be marked autostarted when started by the chain")
+	}
+}
+
+// TestAutoStartNextSibling_ReviewBlocksChainThenUnblocks verifies the chain
+// with a review gate (G → P → C1 → R1, plus G → C2): R1's review blocks C1
+// but bubbles up to start C2; R1 → Done unblocks C1; C1 → Done starts P;
+// P and C2 done → G starts (the root runs last).
+func TestAutoStartNextSibling_ReviewBlocksChainThenUnblocks(t *testing.T) {
+	te, _, projectID := setupExecutorWithGitForSubtask(t)
+
+	gID, pID, c1ID, c2ID, r1ID := "g-root", "p-mid", "c1-mid2", "c2-side", "r1-leaf"
+	tasks := []*types.Task{
+		{ID: gID, ProjectID: projectID, Title: "G", Prompt: "G prompt", Status: "in_progress", ExecutionState: "idle", CurrentThreadID: "thread-g", LlamaServerURL: "http://localhost:8080", ModelName: "test-model"},
+		{ID: pID, ProjectID: projectID, Title: "P", Prompt: "P prompt", Status: "in_progress", ExecutionState: "idle", ParentTaskID: gID, CurrentThreadID: "thread-p", LlamaServerURL: "http://localhost:8080", ModelName: "test-model"},
+		{ID: c1ID, ProjectID: projectID, Title: "C1", Prompt: "C1 prompt", Status: "in_progress", ExecutionState: "idle", ParentTaskID: pID, CurrentThreadID: "thread-c1", LlamaServerURL: "http://localhost:8080", ModelName: "test-model"},
+		{ID: c2ID, ProjectID: projectID, Title: "C2", Prompt: "C2 prompt", Status: "in_progress", ExecutionState: "idle", ParentTaskID: gID, CurrentThreadID: "thread-c2", LlamaServerURL: "http://localhost:8080", ModelName: "test-model"},
+		{ID: r1ID, ProjectID: projectID, Title: "R1", Prompt: "R1 prompt", Status: "in_progress", ExecutionState: "idle", ParentTaskID: c1ID},
+	}
+	for _, tk := range tasks {
+		if err := te.store.CreateTask(tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id, thread := range map[string]string{gID: "thread-g", pID: "thread-p", c1ID: "thread-c1", c2ID: "thread-c2"} {
+		seedThread(t, te.store, id, thread, "prompt")
+	}
+
+	// R1 finishes without auto-merge → Review (human gate).
+	r1, _ := te.store.GetTaskByTaskID(r1ID)
+	r1.Status = "review"
+	r1.ExecutionState = "idle"
+	te.store.UpdateTask(r1)
+
+	// 1) C1 and P must NOT start (blocked on R1 in review); G's other branch
+	//    (C2) is started via bubble-up.
+	if err := te.AutoStartNextSibling(projectID, r1ID, c1ID); err != nil {
+		t.Fatalf("AutoStartNextSibling (review) failed: %v", err)
+	}
+	c1, _ := te.store.GetTaskByTaskID(c1ID)
+	if c1.ExecutionState == "running" {
+		t.Fatal("C1 must not start while its child R1 is in review")
+	}
+	p, _ := te.store.GetTaskByTaskID(pID)
+	if p.ExecutionState == "running" {
+		t.Fatal("P must not start while its subtree is blocked on review")
+	}
+	c2, _ := te.store.GetTaskByTaskID(c2ID)
+	if c2.ExecutionState != "running" {
+		t.Fatalf("C2 (G's other branch) should have started via bubble-up, state=%q", c2.ExecutionState)
+	}
+
+	// 2) R1 moved to Done → C1 starts.
+	r1, _ = te.store.GetTaskByTaskID(r1ID)
+	r1.Status = "done"
+	r1.ExecutionState = "completed"
+	te.store.UpdateTask(r1)
+	if err := te.AutoStartNextSibling(projectID, r1ID, c1ID); err != nil {
+		t.Fatalf("AutoStartNextSibling (r1 done) failed: %v", err)
+	}
+	c1, _ = te.store.GetTaskByTaskID(c1ID)
+	if c1.ExecutionState != "running" || !c1.Autostarted {
+		t.Fatalf("C1 should start (autostarted) once R1 is done: state=%q autostarted=%v", c1.ExecutionState, c1.Autostarted)
+	}
+	p, _ = te.store.GetTaskByTaskID(pID)
+	if p.ExecutionState == "running" {
+		t.Fatal("P must not start while C1 is still running")
+	}
+
+	// 3) C1 done → P starts.
+	c1, _ = te.store.GetTaskByTaskID(c1ID)
+	c1.Status = "done"
+	c1.ExecutionState = "completed"
+	te.store.UpdateTask(c1)
+	if err := te.AutoStartNextSibling(projectID, c1ID, pID); err != nil {
+		t.Fatalf("AutoStartNextSibling (c1 done) failed: %v", err)
+	}
+	p, _ = te.store.GetTaskByTaskID(pID)
+	if p.ExecutionState != "running" || !p.Autostarted {
+		t.Fatalf("P should start (autostarted) once C1 is done: state=%q autostarted=%v", p.ExecutionState, p.Autostarted)
+	}
+
+	// 4) C2 done and P done → G starts (root runs last).
+	c2, _ = te.store.GetTaskByTaskID(c2ID)
+	c2.Status = "done"
+	c2.ExecutionState = "completed"
+	te.store.UpdateTask(c2)
+	p, _ = te.store.GetTaskByTaskID(pID)
+	p.Status = "done"
+	p.ExecutionState = "completed"
+	te.store.UpdateTask(p)
+	if err := te.AutoStartNextSibling(projectID, pID, gID); err != nil {
+		t.Fatalf("AutoStartNextSibling (p done) failed: %v", err)
+	}
+	g, _ := te.store.GetTaskByTaskID(gID)
+	if g.ExecutionState != "running" || !g.Autostarted {
+		t.Fatalf("G should start (autostarted) once all children are done: state=%q autostarted=%v", g.ExecutionState, g.Autostarted)
+	}
+}
+
+func idsOf(tasks []types.Task) []string {
+	out := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		out = append(out, t.ID)
+	}
+	return out
 }
