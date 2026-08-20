@@ -173,6 +173,8 @@ In the Task View (`CardDetail.svelte`) the three columns `[Board][Chat][Diff]` a
 
 Types: `lsp` (language servers in gVisor sandboxes), `ui` (frontend injection), `agent` (AI agents as subprocesses via WASM adapters).
 
+NEVER commit. The user will commit manually.
+
 **Key files:**
 - `backend/extensions/` — domain types, `store.go` (SQLite), `registry.go` (FetchIndex/FetchManifest/PullImage/BuildImage), `sandbox.go` (refcount lifecycle), `handler.go` (REST), `changelog.go`
 - `backend/lsp/extension_manager.go` — extension-driven LSP discovery (replaces the hardcoded registry; LSP availability = installed extensions)
