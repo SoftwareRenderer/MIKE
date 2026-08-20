@@ -1,14 +1,20 @@
 /**
- * `preview.serve(content)` → { token, url } for a nested sandboxed preview
- * iframe; `preview.release(token)` frees the doc early (TTL is the backstop).
- * A new serve from the same editor implicitly releases that editor's
- * previous doc. Security: project/path/task come from the host's own
- * injection context, never from extension arguments.
+ * `preview.serve` / `preview.serveScripts` / `preview.serveNetwork` →
+ * { token, url } for a nested sandboxed preview iframe; `preview.release(token)`
+ * frees the doc early (TTL is the backstop). A new serve from the same editor
+ * implicitly releases its previous doc.
+ *
+ *  - preview.serve:        strict CSP (default), paired with a bare sandbox
+ *  - preview.serveScripts: strict CSP, paired with allow-scripts
+ *  - preview.serveNetwork: permissive-CSP path (scripts + network)
+ * See the CSP constants in backend/server/handler_preview.go.
  */
 import type { CapabilityDef, HostContext } from '../types';
 import { apiFetch } from '$lib/api/helpers';
 
 export const CAP_PREVIEW_SERVE = 'preview.serve';
+export const CAP_PREVIEW_SERVE_SCRIPTS = 'preview.serveScripts';
+export const CAP_PREVIEW_SERVE_NETWORK = 'preview.serveNetwork';
 export const CAP_PREVIEW_RELEASE = 'preview.release';
 
 // Per editor instance (anchor element): the last-served doc token plus a
@@ -27,7 +33,7 @@ interface ServeResult {
     url: string;
 }
 
-async function serve(ctx: HostContext, args: { content: string }): Promise<ServeResult> {
+async function serve(ctx: HostContext, args: { content: string }, allowNetwork: boolean): Promise<ServeResult> {
     // Order overlapping serves by request time: bump the generation before the
     // async POST; only the latest generation applies on completion (a stale
     // completion orphans its doc — the server TTL reclaims it — instead of
@@ -48,6 +54,7 @@ async function serve(ctx: HostContext, args: { content: string }): Promise<Serve
             project: typeof context.projectId === 'string' ? context.projectId : '',
             path: typeof context.filePath === 'string' ? context.filePath : '',
             task: typeof context.taskId === 'string' ? context.taskId : '',
+            allow_network: allowNetwork,
         }),
     });
     if (!res.ok) {
@@ -83,10 +90,25 @@ async function release(ctx: HostContext, args: { token: string }): Promise<{ ok:
 }
 
 export const previewCapabilities: Record<string, CapabilityDef> = {
+    // Strict CSP (zero egress) — the default posture; the extension pairs it
+    // with a bare sandbox (no scripts).
     [CAP_PREVIEW_SERVE]: {
         kind: 'call',
         argsSchema: { content: 'string' },
-        handler: serve,
+        handler: (ctx, args) => serve(ctx, args, false),
+    },
+    // Strict CSP (zero egress) with scripts allowed; paired with allow-scripts.
+    [CAP_PREVIEW_SERVE_SCRIPTS]: {
+        kind: 'call',
+        argsSchema: { content: 'string' },
+        handler: (ctx, args) => serve(ctx, args, false),
+    },
+    // The only permissive-CSP path (legacy open network) — must be declared in
+    // the extension's manifest permissions.
+    [CAP_PREVIEW_SERVE_NETWORK]: {
+        kind: 'call',
+        argsSchema: { content: 'string' },
+        handler: (ctx, args) => serve(ctx, args, true),
     },
     [CAP_PREVIEW_RELEASE]: {
         kind: 'call',
