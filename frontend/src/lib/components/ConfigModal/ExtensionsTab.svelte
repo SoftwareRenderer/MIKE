@@ -147,6 +147,10 @@
             label: 'Resize its own panel',
             description: 'Can change the height of the space it occupies on the page.',
         },
+        'ui.modal': {
+            label: 'Show a modal',
+            description: 'Can display a popup modal.',
+        },
         'storage.get': {
             label: 'Read its saved data',
             description: 'Can read data it previously saved for the current task or project.',

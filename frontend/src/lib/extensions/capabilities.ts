@@ -31,6 +31,7 @@ export {
 export {
     CAP_UI_STATUS,
     CAP_UI_SET_SIZE,
+    CAP_UI_MODAL,
 } from './handlers/ui';
 export {
     CAP_STORAGE_GET,
