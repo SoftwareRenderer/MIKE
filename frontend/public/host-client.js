@@ -123,7 +123,7 @@
             serve: (content, scripts, network) => {
                 const cap = network ? 'preview.serveNetwork' : scripts ? 'preview.serveScripts' : 'preview.serve';
                 if (!granted.includes(cap)) {
-                    return Promise.reject(new Error(cap + ' is not declared by this extension (manifest permissions)'));
+                    return Promise.reject(new Error(cap + ' is not granted to this extension'));
                 }
                 return call(cap, { content: String(content || '') });
             },

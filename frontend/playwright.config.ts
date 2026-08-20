@@ -24,8 +24,8 @@ export default defineConfig({
           ...devices['Desktop Chrome'],
           storageState: STORAGE_STATE,
       },
-      // Exclude config-modifying suites (run on isolated server)
-      testMatch: /\/tests\/e2e\/(?!settings-provider|settings-power|settings-model-pricing|debug-cards|mode-select|cost-badge|preferences-keyboard|preferences-hide-model-badge|auto-summarize-proceed).*\.spec\.ts$/,
+      // Exclude config/state-modifying suites (run on isolated server)
+      testMatch: /\/tests\/e2e\/(?!settings-provider|settings-power|settings-model-pricing|debug-cards|mode-select|cost-badge|preferences-keyboard|preferences-hide-model-badge|auto-summarize-proceed|extensions-danger-permissions).*\.spec\.ts$/,
     },
     {
       name: 'isolated',
@@ -34,8 +34,8 @@ export default defineConfig({
           baseURL: 'http://localhost:3001',
           storageState: STORAGE_STATE_ISOLATED,
       },
-      // Config-modifying suites on isolated server; serialized to avoid races
-      testMatch: ['**/settings-provider.spec.ts', '**/settings-power.spec.ts', '**/settings-model-pricing.spec.ts', '**/debug-cards.spec.ts', '**/mode-select.spec.ts', '**/cost-badge.spec.ts', '**/preferences-keyboard.spec.ts', '**/preferences-hide-model-badge.spec.ts', '**/auto-summarize-proceed.spec.ts'],
+      // Config/state-modifying suites on isolated server; serialized to avoid races
+      testMatch: ['**/settings-provider.spec.ts', '**/settings-power.spec.ts', '**/settings-model-pricing.spec.ts', '**/debug-cards.spec.ts', '**/mode-select.spec.ts', '**/cost-badge.spec.ts', '**/preferences-keyboard.spec.ts', '**/preferences-hide-model-badge.spec.ts', '**/auto-summarize-proceed.spec.ts', '**/extensions-danger-permissions.spec.ts'],
       fullyParallel: false,
       workers: 1,
     },
