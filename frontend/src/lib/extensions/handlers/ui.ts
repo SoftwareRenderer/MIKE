@@ -4,9 +4,11 @@
  * to surface status or reveal custom content.
  */
 import type { CapabilityDef, HostContext } from '../types';
+import { showExtensionModal } from '../modal';
 
 export const CAP_UI_STATUS = 'ui.status';
 export const CAP_UI_SET_SIZE = 'ui.setSize';
+export const CAP_UI_MODAL = 'ui.modal';
 
 export const uiCapabilities: Record<string, CapabilityDef> = {
     [CAP_UI_STATUS]: {
@@ -20,6 +22,19 @@ export const uiCapabilities: Record<string, CapabilityDef> = {
                 default: throw new Error(`unknown ui.status state: ${args.state}`);
             }
         },
+    },
+    [CAP_UI_MODAL]: {
+        kind: 'call',
+        argsSchema: { message: 'string' },
+        // Resolves when the user dismisses the modal — `extHost.modal()` is
+        // an "await the user acknowledged" primitive.
+        handler: (ctx: HostContext, args: { message: string, title?: string, confirmLabel?: string }) =>
+            showExtensionModal({
+                title: args.title,
+                message: args.message,
+                confirmLabel: args.confirmLabel,
+                extensionName: ctx.extensionName,
+            }),
     },
     [CAP_UI_SET_SIZE]: {
         kind: 'call',

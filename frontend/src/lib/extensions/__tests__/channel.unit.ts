@@ -7,6 +7,7 @@ import {
     CAP_NETWORK_PROXY,
     CAP_UI_STATUS,
     CAP_UI_SET_SIZE,
+    CAP_UI_MODAL,
     CAP_STORAGE_SET,
     CAP_LOG_WRITE,
     CAP_EDITOR_ADD_FOOTER_BUTTON,
@@ -422,6 +423,110 @@ describe('ExtensionHostChannel ui.* controls', () => {
         const resp = messages[messages.length - 1];
         expect(resp.ok).toBe(false);
         expect(resp.error).toContain('unknown ui.status state');
+        channel.destroy();
+    });
+});
+
+describe('ExtensionHostChannel ui.modal', () => {
+    let anchor: HTMLDivElement;
+
+    beforeEach(() => {
+        document.body.innerHTML = '';
+        anchor = document.createElement('div');
+        document.body.appendChild(anchor);
+    });
+
+    function dismissModal() {
+        const btn = document.querySelector('[data-ext-modal] button') as HTMLButtonElement | null;
+        expect(btn).toBeTruthy();
+        btn!.click();
+    }
+
+    it('renders an app-level dialog with title, message, and attribution', async () => {
+        const { channel, contentWindow, messages } = makeChannel([CAP_UI_MODAL], {});
+        channel.start();
+        send(channel, contentWindow, {
+            type: 'call', id: 'm1', cap: CAP_UI_MODAL,
+            args: { title: 'Preview stopped', message: 'The page navigated away.', confirmLabel: 'Close' },
+        });
+        await flush();
+        // App-level: rendered into document.body, NOT the injection anchor.
+        const overlay = document.querySelector('[data-ext-modal]');
+        expect(overlay).toBeTruthy();
+        expect(anchor.querySelector('[data-ext-modal]')).toBeNull();
+        const dialog = overlay!.querySelector('[role="dialog"]');
+        expect(dialog).toBeTruthy();
+        expect(dialog!.getAttribute('aria-modal')).toBe('true');
+        expect(overlay!.textContent).toContain('Preview stopped');
+        expect(overlay!.textContent).toContain('The page navigated away.');
+        expect(overlay!.textContent).toContain('Shown by Test');
+        const btn = overlay!.querySelector('button') as HTMLButtonElement;
+        expect(btn.textContent).toBe('Close');
+        // No response yet — the call resolves when the user dismisses.
+        expect(messages.some((m) => m.type === 'response' && m.id === 'm1')).toBe(false);
+        dismissModal();
+        await flush();
+        expect(document.querySelector('[data-ext-modal]')).toBeNull();
+        const resp = messages.find((m) => m.type === 'response' && m.id === 'm1');
+        expect(resp && resp.ok).toBe(true);
+        channel.destroy();
+    });
+
+    it('closes on Escape (topmost only when stacked)', async () => {
+        const { channel, contentWindow } = makeChannel([CAP_UI_MODAL], {});
+        channel.start();
+        send(channel, contentWindow, { type: 'call', id: 'm2', cap: CAP_UI_MODAL, args: { message: 'first' } });
+        await flush();
+        send(channel, contentWindow, { type: 'call', id: 'm3', cap: CAP_UI_MODAL, args: { message: 'second' } });
+        await flush();
+        expect(document.querySelectorAll('[data-ext-modal]')).toHaveLength(2);
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        await flush();
+        // Only the topmost closed; the bottom one stays open.
+        expect(document.querySelectorAll('[data-ext-modal]')).toHaveLength(1);
+        expect(document.querySelector('[data-ext-modal]')!.textContent).toContain('first');
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        await flush();
+        expect(document.querySelectorAll('[data-ext-modal]')).toHaveLength(0);
+        channel.destroy();
+    });
+
+    it('closes on backdrop click, not on dialog click', async () => {
+        const { channel, contentWindow } = makeChannel([CAP_UI_MODAL], {});
+        channel.start();
+        send(channel, contentWindow, { type: 'call', id: 'm4', cap: CAP_UI_MODAL, args: { message: 'x' } });
+        await flush();
+        const overlay = document.querySelector('[data-ext-modal]') as HTMLElement;
+        overlay.querySelector('[role="dialog"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await flush();
+        expect(document.querySelector('[data-ext-modal]')).toBeTruthy();
+        overlay.dispatchEvent(new MouseEvent('click'));
+        await flush();
+        expect(document.querySelector('[data-ext-modal]')).toBeNull();
+        channel.destroy();
+    });
+
+    it('rejects a missing message arg', async () => {
+        const { channel, contentWindow, messages } = makeChannel([CAP_UI_MODAL], {});
+        channel.start();
+        send(channel, contentWindow, { type: 'call', id: 'm5', cap: CAP_UI_MODAL, args: { title: 'no message' } });
+        await flush();
+        const resp = messages[messages.length - 1];
+        expect(resp.ok).toBe(false);
+        expect(resp.error).toContain("missing 'message'");
+        expect(document.querySelector('[data-ext-modal]')).toBeNull();
+        channel.destroy();
+    });
+
+    it('is not implicitly granted — an ungranted call renders nothing', async () => {
+        const { channel, contentWindow, messages } = makeChannel([], {});
+        channel.start();
+        send(channel, contentWindow, { type: 'call', id: 'm6', cap: CAP_UI_MODAL, args: { message: 'x' } });
+        await flush();
+        const resp = messages[messages.length - 1];
+        expect(resp.ok).toBe(false);
+        expect(resp.error).toContain('capability not granted: ui.modal');
+        expect(document.querySelector('[data-ext-modal]')).toBeNull();
         channel.destroy();
     });
 });

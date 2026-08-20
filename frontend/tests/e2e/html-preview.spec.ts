@@ -410,7 +410,7 @@ test.describe.serial('HTML Preview extension', () => {
         async () => (await page.request.get(docUrl)).status(),
         { timeout: 5000 },
     ).toBe(200);
-    await expect(page.locator('[data-ext-status]', { hasText: 'navigate away' })).toHaveCount(0);
+    await expect(page.locator('[data-ext-modal]', { hasText: 'navigate away' })).toHaveCount(0);
 
     // Toggle off → code view restored.
     await btn.click();
@@ -556,8 +556,12 @@ test.describe.serial('HTML Preview extension', () => {
         async () => (await page.request.get(docUrl)).status(),
         { timeout: 10000 },
     ).toBe(404);
-    // The user is told what happened.
-    await expect(page.locator('[data-ext-status]', { hasText: 'navigate away' })).toBeVisible({ timeout: 10000 });
+    // The user is told what happened — as an app-level modal.
+    const modal = page.locator('[data-ext-modal]', { hasText: 'navigate away' });
+    await expect(modal).toBeVisible({ timeout: 10000 });
+    // Dismiss it.
+    await modal.locator('button').click();
+    await expect(modal).toHaveCount(0);
     // The editor is back.
     await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
   });
@@ -591,7 +595,12 @@ test.describe.serial('HTML Preview extension', () => {
         async () => (await page.request.get(docUrl)).status(),
         { timeout: 10000 },
     ).toBe(404);
-    await expect(page.locator('[data-ext-status]', { hasText: 'navigate away' })).toBeVisible({ timeout: 10000 });
+    // The user is told what happened — as an app-level modal.
+    const modal = page.locator('[data-ext-modal]', { hasText: 'navigate away' });
+    await expect(modal).toBeVisible({ timeout: 10000 });
+    // Dismiss it.
+    await modal.locator('button').click();
+    await expect(modal).toHaveCount(0);
     await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
   });
 

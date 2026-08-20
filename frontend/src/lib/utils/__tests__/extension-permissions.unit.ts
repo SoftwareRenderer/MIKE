@@ -25,6 +25,7 @@ describe('isDangerousPermission (sandbox-escaping permissions only)', () => {
             'preview.release',
             'ui.status',
             'ui.setSize',
+            'ui.modal',
             'createTask.events.paste',
             'storage.get',
         ]) {
