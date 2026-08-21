@@ -325,7 +325,15 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const projectId = params.get('project');
         const taskId = params.get('task');
         const fileParam = params.get('file') || '';
-        urlFileId = (fileParam && (fileParam.startsWith(currentProject?.path || '') || fileParam.startsWith('/home/sandbox/'))) ? fileParam : '';
+        const fileProject = (projectId ? projects.find(p => p.id === projectId) : null) ?? currentProject;
+        const fileProjectPath = fileProject?.path ?? '';
+        const fileProjectBase = fileProjectPath.split('/').filter(Boolean).pop() ?? '';
+        const fileSandboxMount = fileProject?.sandbox_enabled && fileProjectBase
+            ? '/home/sandbox/' + fileProjectBase
+            : '';
+        const fileInBounds = (fileProjectPath && fileParam.startsWith(fileProjectPath)) ||
+            (fileSandboxMount && fileParam.startsWith(fileSandboxMount));
+        urlFileId = fileParam && fileInBounds ? fileParam : '';
 
         // If URL has no project param, go back to project list
         if (!projectId && currentProject) {

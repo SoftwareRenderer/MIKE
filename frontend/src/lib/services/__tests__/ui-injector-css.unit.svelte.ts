@@ -63,24 +63,56 @@ describe('UIInjector CSS extension handling', () => {
     });
 
     it('injects a <link> tag when a CSS extension has css_url', () => {
-        injector.registerFromExtensions([makeCSSExtension('/extensions/mike-light/styles.css')]);
+        injector.registerFromExtensions([makeCSSExtension('styles.css')]);
 
         const link = document.getElementById('kanban-theme-stylesheet');
         expect(link).toBeTruthy();
         expect(link?.getAttribute('rel')).toBe('stylesheet');
-        expect(link?.getAttribute('href')).toBe('/extensions/mike-light/styles.css');
+        expect(link?.getAttribute('href')).toBe('/extensions/test/test-theme/styles.css');
     });
 
     it('caches the CSS URL in localStorage', () => {
-        injector.registerFromExtensions([makeCSSExtension('/extensions/mike-light/styles.css')]);
+        injector.registerFromExtensions([makeCSSExtension('styles.css')]);
 
         const cached = localStorage.getItem('kanban-theme-css');
-        expect(cached).toBe('/extensions/mike-light/styles.css');
+        expect(cached).toBe('/extensions/test/test-theme/styles.css');
+    });
+
+    it('resolves a leading-slash css_url against the extension base (not server root)', () => {
+        injector.registerFromExtensions([makeCSSExtension('/styles.css')]);
+
+        const link = document.getElementById('kanban-theme-stylesheet');
+        expect(link?.getAttribute('href')).toBe('/extensions/test/test-theme/styles.css');
+    });
+
+    it('rejects an external (https) css_url — no stylesheet injected', () => {
+        injector.registerFromExtensions([makeCSSExtension('https://evil.example/theme.css')]);
+
+        expect(document.getElementById('kanban-theme-stylesheet')).toBeFalsy();
+        expect(localStorage.getItem('kanban-theme-css')).toBeNull();
+    });
+
+    it('rejects a protocol-relative css_url — no stylesheet injected', () => {
+        injector.registerFromExtensions([makeCSSExtension('//evil.example/theme.css')]);
+
+        expect(document.getElementById('kanban-theme-stylesheet')).toBeFalsy();
+        expect(localStorage.getItem('kanban-theme-css')).toBeNull();
+    });
+
+    it('a rejected css_url does not block a subsequent valid CSS extension', () => {
+        const bad = makeCSSExtension('https://evil.example/theme.css');
+        const good = makeCSSExtension('styles.css');
+        good.id = 'test-ext-2';
+        good.name = 'good-theme';
+
+        injector.registerFromExtensions([bad, good]);
+
+        expect(document.getElementById('kanban-theme-stylesheet')?.getAttribute('href')).toBe('/extensions/test/good-theme/styles.css');
     });
 
     it('removes the <link> tag when no CSS extension is active', () => {
         // First inject
-        injector.registerFromExtensions([makeCSSExtension('/extensions/mike-light/styles.css')]);
+        injector.registerFromExtensions([makeCSSExtension('styles.css')]);
         expect(document.getElementById('kanban-theme-stylesheet')).toBeTruthy();
 
         // Then register with no CSS extensions
@@ -90,7 +122,7 @@ describe('UIInjector CSS extension handling', () => {
     });
 
     it('clears localStorage when CSS extension is removed', () => {
-        injector.registerFromExtensions([makeCSSExtension('/extensions/mike-light/styles.css')]);
+        injector.registerFromExtensions([makeCSSExtension('styles.css')]);
         expect(localStorage.getItem('kanban-theme-css')).toBeTruthy();
 
         injector.registerFromExtensions([]);
@@ -98,25 +130,25 @@ describe('UIInjector CSS extension handling', () => {
     });
 
     it('removes the stylesheet when CSS extension is disabled', () => {
-        injector.registerFromExtensions([makeCSSExtension('/extensions/mike-light/styles.css', true)]);
+        injector.registerFromExtensions([makeCSSExtension('styles.css', true)]);
         expect(document.getElementById('kanban-theme-stylesheet')).toBeTruthy();
 
         // Disable the extension
-        injector.registerFromExtensions([makeCSSExtension('/extensions/mike-light/styles.css', false)]);
+        injector.registerFromExtensions([makeCSSExtension('styles.css', false)]);
         expect(document.getElementById('kanban-theme-stylesheet')).toBeFalsy();
     });
 
     it('swaps stylesheet when css_url changes', () => {
-        injector.registerFromExtensions([makeCSSExtension('/theme/dark.css')]);
-        expect(document.getElementById('kanban-theme-stylesheet')?.getAttribute('href')).toBe('/theme/dark.css');
+        injector.registerFromExtensions([makeCSSExtension('theme/dark.css')]);
+        expect(document.getElementById('kanban-theme-stylesheet')?.getAttribute('href')).toBe('/extensions/test/test-theme/theme/dark.css');
 
         // Create a new extension with different css_url
-        const lightExt = makeCSSExtension('/theme/light.css');
+        const lightExt = makeCSSExtension('theme/light.css');
         lightExt.id = 'test-ext-2';
         lightExt.name = 'mike-light';
         injector.registerFromExtensions([lightExt]);
 
-        expect(document.getElementById('kanban-theme-stylesheet')?.getAttribute('href')).toBe('/theme/light.css');
+        expect(document.getElementById('kanban-theme-stylesheet')?.getAttribute('href')).toBe('/extensions/test/mike-light/theme/light.css');
     });
 
     it('does not inject for LSP extensions', () => {
@@ -185,18 +217,18 @@ describe('UIInjector CSS extension handling', () => {
     });
 
     it('first enabled CSS extension with css_url wins', () => {
-        const ext1 = makeCSSExtension('/theme/first.css');
-        const ext2 = makeCSSExtension('/theme/second.css');
+        const ext1 = makeCSSExtension('theme/first.css');
+        const ext2 = makeCSSExtension('theme/second.css');
         ext2.id = 'test-ext-2';
         ext2.name = 'second-theme';
 
         injector.registerFromExtensions([ext1, ext2]);
 
-        expect(document.getElementById('kanban-theme-stylesheet')?.getAttribute('href')).toBe('/theme/first.css');
+        expect(document.getElementById('kanban-theme-stylesheet')?.getAttribute('href')).toBe('/extensions/test/test-theme/theme/first.css');
     });
 
     it('clearCache removes the stylesheet', () => {
-        injector.registerFromExtensions([makeCSSExtension('/extensions/mike-light/styles.css')]);
+        injector.registerFromExtensions([makeCSSExtension('styles.css')]);
         expect(document.getElementById('kanban-theme-stylesheet')).toBeTruthy();
 
         injector.clearCache();
@@ -205,10 +237,10 @@ describe('UIInjector CSS extension handling', () => {
     });
 
     it('skips no-op when css_url is unchanged', () => {
-        injector.registerFromExtensions([makeCSSExtension('/theme/same.css')]);
+        injector.registerFromExtensions([makeCSSExtension('theme/same.css')]);
         const firstLink = document.getElementById('kanban-theme-stylesheet');
 
-        injector.registerFromExtensions([makeCSSExtension('/theme/same.css')]);
+        injector.registerFromExtensions([makeCSSExtension('theme/same.css')]);
         const secondLink = document.getElementById('kanban-theme-stylesheet');
 
         // Same element reference (not recreated)
@@ -216,7 +248,7 @@ describe('UIInjector CSS extension handling', () => {
     });
 
     it('CSS extension does not register UI injection points', () => {
-        injector.registerFromExtensions([makeCSSExtension('/theme/test.css')]);
+        injector.registerFromExtensions([makeCSSExtension('theme/test.css')]);
 
         // CSS extensions should not create injection registrations
         expect(injector.registrations.length).toBe(0);

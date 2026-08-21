@@ -104,6 +104,7 @@
         const remaining = 4 - editAttachments.length;
         for (let i = 0; i < Math.min(remaining, files.length); i++) {
             const file = files[i];
+            if (!file.type.startsWith('image/')) continue;
             if (file.size > 4 * 1024 * 1024) continue;
             const reader = new FileReader();
             reader.onload = () => {
