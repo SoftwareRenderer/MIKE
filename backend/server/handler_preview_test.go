@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -48,12 +49,31 @@ func servePreview(t *testing.T, s *Server, cookie, csrfToken string, body map[st
 
 // getPreview: unauthenticated GET (preview iframes never send a session).
 func getPreview(t *testing.T, s *Server, target string) *httptest.ResponseRecorder {
+	return getPreviewWithHeaders(t, s, target, nil)
+}
+
+func getPreviewWithHeaders(t *testing.T, s *Server, target string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "http://localhost"+target, nil)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 	rr := httptest.NewRecorder()
 	handler := s.CORSMiddleware(s.SessionMiddleware(s.CSRFMiddleware(CompressMiddleware(s.mux))))
 	handler.ServeHTTP(rr, req)
 	return rr
+}
+
+// navState reads GET /api/preview/{token}/nav with a session.
+func navState(t *testing.T, s *Server, cookie, token string) map[string]any {
+	t.Helper()
+	req := testRequest("GET", "/api/preview/"+token+"/nav", nil)
+	withAuth(req, cookie)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /nav: %d %s", rr.Code, rr.Body.String())
+	}
+	return mustJSON[map[string]any](t, rr.Body)
 }
 
 // getPreviewFollowing follows up to 3 redirects (e.g. no-trailing-slash).
@@ -493,13 +513,19 @@ func TestResolveFSFilePath_ProjectRoot(t *testing.T) {
 	initGitRepo(t, dir)
 	projectID := createTestProjectInDir(t, s, dir)
 
-	got, _, err := s.resolveFSFilePath(projectID, "", "nested/page.html")
+	root, got, host, err := s.resolveFSFilePath(projectID, "", "nested/page.html")
 	if err != nil {
 		t.Fatalf("resolveFSFilePath: %v", err)
 	}
+	if root != filepath.Clean(dir) {
+		t.Fatalf("worktree root = %q, want %q", root, dir)
+	}
 	want := filepath.Join(filepath.Clean(dir), "nested")
 	if filepath.Clean(got) != want {
-		t.Fatalf("got %q, want %q", got, want)
+		t.Fatalf("dir = %q, want %q", got, want)
+	}
+	if filepath.Clean(host) != filepath.Join(filepath.Clean(dir), "nested", "page.html") {
+		t.Fatalf("hostPath = %q", host)
 	}
 }
 
@@ -509,33 +535,104 @@ func TestResolveFSFilePath_AbsolutePath(t *testing.T) {
 	initGitRepo(t, dir)
 	projectID := createTestProjectInDir(t, s, dir)
 
-	got, _, err := s.resolveFSFilePath(projectID, "", filepath.Join(dir, "page.html"))
+	root, got, _, err := s.resolveFSFilePath(projectID, "", filepath.Join(dir, "page.html"))
 	if err != nil {
 		t.Fatalf("resolveFSFilePath: %v", err)
 	}
+	if root != filepath.Clean(dir) {
+		t.Fatalf("worktree root = %q, want %q", root, dir)
+	}
 	if filepath.Clean(got) != filepath.Clean(dir) {
-		t.Fatalf("got %q, want %q", got, dir)
+		t.Fatalf("dir = %q, want %q", got, dir)
 	}
 }
 
 func TestResolveFSFilePath_OutsideProject(t *testing.T) {
 	s := testServer(t)
 	projectID, _ := previewTestProject(t, s)
-	if _, _, err := s.resolveFSFilePath(projectID, "", "../elsewhere/page.html"); err == nil {
+	if _, _, _, err := s.resolveFSFilePath(projectID, "", "../elsewhere/page.html"); err == nil {
 		t.Fatal("expected error for path outside project")
 	}
-	if _, _, err := s.resolveFSFilePath(projectID, "", "/etc/passwd"); err == nil {
+	if _, _, _, err := s.resolveFSFilePath(projectID, "", "/etc/passwd"); err == nil {
 		t.Fatal("expected error for absolute path outside project")
 	}
 }
 
 func TestResolveFSFilePath_MissingInputs(t *testing.T) {
 	s := testServer(t)
-	if _, _, err := s.resolveFSFilePath("", "", "page.html"); err == nil {
+	if _, _, _, err := s.resolveFSFilePath("", "", "page.html"); err == nil {
 		t.Fatal("expected error for empty project")
 	}
-	if _, _, err := s.resolveFSFilePath("some-id", "", ""); err == nil {
+	if _, _, _, err := s.resolveFSFilePath("some-id", "", ""); err == nil {
 		t.Fatal("expected error for empty path")
+	}
+}
+
+// The serve url is the doc's directory under the token root: root-level file
+// → token root; subdirectory file → the dir (so relative links resolve
+// against the file's siblings and ../ walks to the worktree root).
+func TestPreviewServe_URLReflectsDocDirectory(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, _ := previewTestProject(t, s)
+
+	tokenRoot, urlRoot := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "index.html",
+	})
+	if urlRoot != "/api/preview/"+tokenRoot+"/" {
+		t.Fatalf("root-level url = %q, want /api/preview/%s/", urlRoot, tokenRoot)
+	}
+
+	tokenSub, urlSub := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "docs/page.html",
+	})
+	if urlSub != "/api/preview/"+tokenSub+"/docs/" {
+		t.Fatalf("subdir url = %q, want /api/preview/%s/docs/", urlSub, tokenSub)
+	}
+
+	tokenDeep, urlDeep := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "a/b/c.html",
+	})
+	if urlDeep != "/api/preview/"+tokenDeep+"/a/b/" {
+		t.Fatalf("deep url = %q, want /api/preview/%s/a/b/", urlDeep, tokenDeep)
+	}
+}
+
+// A file that is only inside the workspace dir (not under the worktree root)
+// keeps the old self-contained behavior: asset root = the file's own dir, doc
+// url at the token root.
+func TestPreviewServe_WorkspaceOnlyPathFallsBackToFileDir(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, _ := previewTestProject(t, s)
+
+	cfg, err := s.configStore.GetConfig()
+	if err != nil || cfg.WorkspaceDir == "" {
+		t.Fatalf("need a configured workspace dir, got %+v / %v", cfg.WorkspaceDir, err)
+	}
+	strayDir := filepath.Join(cfg.WorkspaceDir, "stray-"+randHex(4))
+	if err := os.MkdirAll(strayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(strayDir, "page.html"), []byte("<html></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	token, url := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": filepath.Join(strayDir, "page.html"),
+	})
+	if url != "/api/preview/"+token+"/" {
+		t.Fatalf("fallback url = %q, want the token root", url)
+	}
+	doc := s.previewStore.get(token)
+	if doc == nil {
+		t.Fatal("doc not in store")
+	}
+	if doc.baseDir != filepath.Clean(strayDir) {
+		t.Fatalf("fallback baseDir = %q, want %q", doc.baseDir, strayDir)
+	}
+	if doc.dirRel != "" {
+		t.Fatalf("fallback dirRel = %q, want empty", doc.dirRel)
 	}
 }
 
@@ -579,6 +676,391 @@ func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// --- doc-directory routing (widened root) ------------------------------------
+
+// A doc in a subdirectory serves at /token/<dirRel>/: the dir URL (with or
+// without slash), the bare-token redirect, and the token root (a 404, not a
+// listing).
+func TestPreviewDoc_SubdirDirectoryRouting(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, _ := previewTestProject(t, s)
+	content := "<html><body>SERVED</body></html>"
+	token, url := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": content, "project": projectID, "path": "docs/page.html",
+	})
+
+	// The doc at its directory URL.
+	rr := getPreview(t, s, url)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("doc GET %s: %d %s", url, rr.Code, rr.Body.String())
+	}
+	if rr.Body.String() != content {
+		t.Fatalf("body = %q, want %q", rr.Body.String(), content)
+	}
+	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSPStrict {
+		t.Errorf("doc CSP = %q, want strict", csp)
+	}
+
+	// No-slash dir URL → 301 to the slashed one.
+	rr = getPreview(t, s, "/api/preview/"+token+"/docs")
+	if rr.Code != http.StatusMovedPermanently && rr.Code != http.StatusFound {
+		t.Fatalf("no-slash dir GET: expected redirect, got %d", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "/api/preview/"+token+"/docs/" {
+		t.Errorf("Location = %q", loc)
+	}
+
+	// Bare token (no slash) → the doc's directory.
+	rr = getPreview(t, s, "/api/preview/"+token)
+	if rr.Code != http.StatusMovedPermanently && rr.Code != http.StatusFound {
+		t.Fatalf("bare-token GET: expected redirect, got %d", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "/api/preview/"+token+"/docs/" {
+		t.Errorf("Location = %q, want the doc dir", loc)
+	}
+
+	// The token root itself: the worktree root, not a doc → 404 (no listing).
+	rr = getPreview(t, s, "/api/preview/"+token+"/")
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("token root GET: expected 404, got %d", rr.Code)
+	}
+}
+
+// Self-reference from a subdir doc's dir: /token/docs/page.html → served
+// content, not the disk file.
+func TestPreviewSelfReference_SubdirDoc(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, dir := previewTestProject(t, s)
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "page.html"), []byte("ON-DISK"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	content := "<html><body>EDITED</body></html>"
+	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": content, "project": projectID, "path": "docs/page.html",
+	})
+	rr := getPreview(t, s, "/api/preview/"+token+"/docs/page.html")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("self-ref GET: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr.Body.String() != content {
+		t.Fatalf("body = %q, want served content %q", rr.Body.String(), content)
+	}
+}
+
+// Widened root: a subdir doc reaches BOTH its own dir's files and files at
+// the worktree root.
+func TestPreviewSubdirDoc_SiblingsResolveFromWorktreeRoot(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, dir := previewTestProject(t, s)
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "root.css"), []byte("root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "local.css"), []byte("local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "docs/page.html",
+	})
+
+	rr := getPreview(t, s, "/api/preview/"+token+"/root.css")
+	if rr.Code != http.StatusOK || rr.Body.String() != "root" {
+		t.Fatalf("worktree-root asset: %d %q", rr.Code, rr.Body.String())
+	}
+	rr = getPreview(t, s, "/api/preview/"+token+"/docs/local.css")
+	if rr.Code != http.StatusOK || rr.Body.String() != "local" {
+		t.Fatalf("doc-dir asset: %d %q", rr.Code, rr.Body.String())
+	}
+}
+
+// Sibling DOCUMENTS carry the doc CSP (strict by default, permissive with
+// allow_network) — a navigated page must keep the doc's egress posture.
+func TestPreviewSiblingDoc_CarriesDocCSP(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, dir := previewTestProject(t, s)
+	if err := os.WriteFile(filepath.Join(dir, "page2.html"), []byte("<html></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "style.css"), []byte("body{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "page.html",
+	})
+	rr := getPreview(t, s, "/api/preview/"+token+"/page2.html")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("sibling doc GET: %d", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSPStrict {
+		t.Errorf("sibling doc CSP = %q, want strict", csp)
+	}
+
+	// Non-document siblings keep no CSP.
+	rr = getPreview(t, s, "/api/preview/"+token+"/style.css")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("css GET: %d", rr.Code)
+	}
+	if csp := rr.Header().Get("Content-Security-Policy"); csp != "" {
+		t.Errorf("non-doc sibling must carry no CSP, got %q", csp)
+	}
+}
+
+func TestPreviewSiblingDoc_PermitsCSPWithAllowNetwork(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, dir := previewTestProject(t, s)
+	if err := os.WriteFile(filepath.Join(dir, "page2.html"), []byte("<html></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "page.html",
+		"allow_network": true,
+	})
+	rr := getPreview(t, s, "/api/preview/"+token+"/page2.html")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("sibling doc GET: %d", rr.Code)
+	}
+	if csp := rr.Header().Get("Content-Security-Policy"); csp != previewDocCSPNetwork {
+		t.Errorf("sibling doc CSP = %q, want permissive", csp)
+	}
+}
+
+// --- root-relative rewrite ---------------------------------------------------
+
+var rewriteTestRoot = "/api/preview/" + strings.Repeat("a", 32) + "/"
+
+func TestRewriteRootRelative_Attributes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"double-quoted", `<a href="/x.html">`, `<a href="` + rewriteTestRoot + `x.html">`},
+		{"single-quoted", `<a href='/x.html'>`, `<a href='` + rewriteTestRoot + `x.html'>`},
+		{"spaced-equals", `<a href = "/x.html">`, `<a href = "` + rewriteTestRoot + `x.html">`},
+		{"src", `<img src="/img/p.png">`, `<img src="` + rewriteTestRoot + `img/p.png">`},
+		{"action", `<form action="/submit">`, `<form action="` + rewriteTestRoot + `submit">`},
+		{"poster", `<video poster="/p.jpg">`, `<video poster="` + rewriteTestRoot + `p.jpg">`},
+		{"content-attr", `<meta content="/x">`, `<meta content="` + rewriteTestRoot + `x">`},
+		{"bare-root", `<a href="/">`, `<a href="` + rewriteTestRoot + `">`},
+		{"protocol-relative", `<a href="//cdn.example/x">`, `<a href="//cdn.example/x">`},
+		{"absolute", `<a href="https://example.com/x">`, `<a href="https://example.com/x">`},
+		{"relative", `<a href="sub/x.html">`, `<a href="sub/x.html">`},
+		{"dot-relative", `<a href="./x.html">`, `<a href="./x.html">`},
+		{"meta-refresh-delayed", `<meta http-equiv="refresh" content="2;url=/x">`, `<meta http-equiv="refresh" content="2;url=/x">`},
+		{"two-refs", `<a href="/a"><b src="/b.png">`, `<a href="` + rewriteTestRoot + `a"><b src="` + rewriteTestRoot + `b.png">`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rewriteRootRelative(tc.in, rewriteTestRoot); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRewriteRootRelative_CSSUrl(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"unquoted", `background: url(/img/bg.png)`, `background: url(` + rewriteTestRoot + `img/bg.png)`},
+		{"double-quoted", `background: url("/img/bg.png")`, `background: url("` + rewriteTestRoot + `img/bg.png")`},
+		{"single-quoted", `background: url('/img/bg.png')`, `background: url('` + rewriteTestRoot + `img/bg.png')`},
+		{"spaced", `background: url( /img/bg.png )`, `background: url( ` + rewriteTestRoot + `img/bg.png )`},
+		{"protocol-relative-quoted", `url("//cdn.example/b.png")`, `url("//cdn.example/b.png")`},
+		{"protocol-relative-unquoted", `url(//cdn.example/b.png)`, `url(//cdn.example/b.png)`},
+		{"absolute", `url(https://x/b.png)`, `url(https://x/b.png)`},
+		{"relative", `url(relative/b.png)`, `url(relative/b.png)`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rewriteRootRelative(tc.in, rewriteTestRoot); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Serve applies the rewrite to HTML-family files only (the content type is
+// host-derived from the file name).
+func TestPreviewServe_RewriteAppliesToHTMLFamilyOnly(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, _ := previewTestProject(t, s)
+
+	// index.html → root-rewritten.
+	tokenHTML, urlHTML := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": `<a href="/x.html"></a>`, "project": projectID, "path": "index.html",
+	})
+	root := urlHTML // the doc url ends in / and is the token root (root-level file)
+	rr := getPreview(t, s, urlHTML)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("doc GET: %d", rr.Code)
+	}
+	want := `<a href="` + root + `x.html"></a>`
+	if body := rr.Body.String(); body != want {
+		t.Fatalf("html body = %q, want %q", body, want)
+	}
+	_ = tokenHTML
+
+	// README.md → untouched.
+	_, urlMD := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": `<a href="/x.md"></a>`, "project": projectID, "path": "README.md",
+	})
+	rr = getPreview(t, s, urlMD)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("md doc GET: %d", rr.Code)
+	}
+	if body := rr.Body.String(); body != `<a href="/x.md"></a>` {
+		t.Fatalf("md body = %q (want untouched)", body)
+	}
+}
+
+// The size cap is enforced on the STORED (post-rewrite) content: dense
+// root-refs can push content over the cap after substitution.
+func TestPreviewStorePut_RewriteGrowthExceedsCap(t *testing.T) {
+	ps := newPreviewStore()
+	unit := `a href="/x">` // 10 chars → ~55 after rewrite
+	n := previewMaxContent / len(unit)
+	content := strings.Repeat(unit, n) // ≤ cap pre-rewrite
+	if _, err := ps.put(content, "index.html", "", "", false); err == nil {
+		t.Fatal("expected errPreviewTooLarge for content that exceeds the cap post-rewrite")
+	} else if !errors.Is(err, errPreviewTooLarge) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Control: same size, no refs → stored fine.
+	if _, err := ps.put(strings.Repeat("x", n*len(unit)), "index.html", "", "", false); err != nil {
+		t.Fatalf("no-ref content at the cap must store: %v", err)
+	}
+}
+
+// --- nav record + /nav endpoint ------------------------------------------------
+
+func TestPreviewNavRecord_CommittedDocumentsBumpSequence(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	projectID, dir := previewTestProject(t, s)
+	for name, content := range map[string]string{
+		"page2.html": "<html></html>",
+		"style.css":  "body{}",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{
+		"content": "<html></html>", "project": projectID, "path": "page.html",
+	})
+	docNav := map[string]string{"Sec-Fetch-Dest": "document"}
+	frameNav := map[string]string{"Sec-Fetch-Dest": "iframe"}
+	imgSub := map[string]string{"Sec-Fetch-Dest": "image"}
+
+	st := navState(t, s, cookie, token)
+	expectNav := func(label string, wantSeq int, wantPath string, wantOK, wantIsDoc bool) {
+		t.Helper()
+		st = navState(t, s, cookie, token)
+		if st["seq"].(float64) != float64(wantSeq) || st["path"].(string) != wantPath ||
+			st["ok"].(bool) != wantOK || st["isDoc"].(bool) != wantIsDoc {
+			t.Fatalf("%s: %v (want seq %d path %q ok %v isDoc %v)", label, st, wantSeq, wantPath, wantOK, wantIsDoc)
+		}
+	}
+
+	// No document request yet → seq 0, no record.
+	expectNav("initial", 0, "", false, false)
+
+	// Doc GET as a top-frame load (dest=document) → seq 1, the doc itself.
+	rr := getPreviewWithHeaders(t, s, "/api/preview/"+token+"/", docNav)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("doc GET: %d", rr.Code)
+	}
+	expectNav("after doc GET (document)", 1, "", true, true)
+
+	// The preview frame is a SUBFRAME — real frame loads carry dest=iframe
+	// (empirically verified in Chromium); those must record too.
+	rr = getPreviewWithHeaders(t, s, "/api/preview/"+token+"/", frameNav)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("doc GET (iframe): %d", rr.Code)
+	}
+	expectNav("after doc GET (iframe)", 2, "", true, true)
+
+	// Subresource GETs (no dest / dest=image) never bump.
+	rr = getPreview(t, s, "/api/preview/"+token+"/page2.html")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("subresource GET: %d", rr.Code)
+	}
+	expectNav("after subresource (no dest)", 2, "", true, true)
+	rr = getPreviewWithHeaders(t, s, "/api/preview/"+token+"/style.css", imgSub)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("img GET: %d", rr.Code)
+	}
+	expectNav("after subresource (image)", 2, "", true, true)
+
+	// Sibling page frame navigation (dest=iframe) → in-tree, not the doc.
+	rr = getPreviewWithHeaders(t, s, "/api/preview/"+token+"/page2.html", frameNav)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("sibling doc GET: %d", rr.Code)
+	}
+	expectNav("after sibling nav", 3, "page2.html", true, false)
+
+	// A non-HTML sibling as a document-dest request: it commits a document
+	// frame-wise, but the record tracks HTML-family documents only (a CSS
+	// "navigation" is a degenerate case the watchdog may contain).
+	rr = getPreviewWithHeaders(t, s, "/api/preview/"+token+"/style.css", frameNav)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("css GET: %d", rr.Code)
+	}
+	expectNav("after css nav (non-HTML)", 3, "page2.html", true, false)
+
+	// Missing in-tree file: 404 commits no document → the record stays put
+	// (the watchdog sees a stale record and contains the navigation).
+	rr = getPreviewWithHeaders(t, s, "/api/preview/"+token+"/nope.html", frameNav)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("missing GET: %d", rr.Code)
+	}
+	expectNav("after 404 nav", 3, "page2.html", true, false)
+
+	// Self-reference → isDoc=true (serves the stored content).
+	rr = getPreviewWithHeaders(t, s, "/api/preview/"+token+"/page.html", frameNav)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("self-ref GET: %d", rr.Code)
+	}
+	expectNav("after self-ref nav", 4, "page.html", true, true)
+}
+
+func TestPreviewNav_RequiresSession(t *testing.T) {
+	s := testServer(t)
+	req := testRequest("GET", "/api/preview/some-token/nav", nil)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without session, got %d", rr.Code)
+	}
+}
+
+func TestPreviewNav_UnknownToken(t *testing.T) {
+	s := testServer(t)
+	cookie, _ := loginTestCSRF(t, s)
+	req := testRequest("GET", "/api/preview/nonexistent-token/nav", nil)
+	withAuth(req, cookie)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown token, got %d", rr.Code)
+	}
 }
 
 // sanity: the JSON body decodes into the expected request shape

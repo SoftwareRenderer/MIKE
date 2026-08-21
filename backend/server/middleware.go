@@ -41,8 +41,8 @@ func isPublicPath(path, method string) bool {
 	if strings.HasPrefix(path, "/extensions/") {
 		return true
 	}
-	// Preview docs/assets
-	if strings.HasPrefix(path, "/api/preview/") {
+	// Preview docs/assets (the /nav control endpoint stays session-authed)
+	if strings.HasPrefix(path, "/api/preview/") && !isPreviewNavPath(path) {
 		return method == http.MethodGet || method == http.MethodHead
 	}
 	// PWA assets (manifest, service worker, icons) are always public
@@ -60,6 +60,17 @@ func isPublicPath(path, method string) bool {
 	return false
 }
 
+// isPreviewNavPath reports whether the path is exactly
+// /api/preview/<token>/nav (4 path segments) — the session-authed watchdog
+// endpoint. A file named "nav" inside a subdirectory has more segments, so
+// it stays a public preview asset, not this route.
+func isPreviewNavPath(path string) bool {
+	if !strings.HasPrefix(path, "/api/preview/") || !strings.HasSuffix(path, "/nav") {
+		return false
+	}
+	return strings.Count(path, "/") == 4
+}
+
 // CORSMiddleware handles CORS, CSP, and other security headers.
 func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +84,7 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 
-		if !strings.HasPrefix(r.URL.Path, "/api/preview/") {
+		if !strings.HasPrefix(r.URL.Path, "/api/preview/") || isPreviewNavPath(r.URL.Path) {
 			csp := "default-src 'self'; frame-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; form-action 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self';"
 			if nonce, ok := r.Context().Value(nonceKey).(string); ok && nonce != "" {
 				csp += fmt.Sprintf(" script-src 'self' 'nonce-%s';", nonce)

@@ -36,6 +36,8 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/preview", s.HandlePreviewServe)
 	s.mux.HandleFunc("GET /api/preview/{token}", s.HandlePreviewGet)
 	s.mux.HandleFunc("GET /api/preview/{token}/{path...}", s.HandlePreviewGet)
+	// Watchdog nav state (session-authed; the exact route wins over {path...})
+	s.mux.HandleFunc("GET /api/preview/{token}/nav", s.HandlePreviewNav)
 	s.mux.HandleFunc("DELETE /api/preview/{token}", s.HandlePreviewDelete)
 
 	// Extensions
