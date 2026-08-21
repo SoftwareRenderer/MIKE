@@ -41,6 +41,7 @@ TLS is **enabled by default** with an auto-generated self-signed cert in `data/t
 | `MIKE_LOGIN_PASSWORD` | Master password for auth/sessions. Server refuses to start without it. |
 | `MIKE_REGISTRY_URL` | Extension registry index URL. Sourced **exclusively** from this env var (not DB-backed); falls back to `https://getmike.dev/extensions/registry.json`. A bare path (no `http(s)://`/`file://` scheme) is a local file resolved against the CWD. |
 | `MIKE_TRUST_PROXY` | Set to `1` only behind a trusted reverse proxy that strips forwarding headers. Only then are `X-Forwarded-For` (rate-limit IP) and `X-Forwarded-Proto` (HTTPS redirect) honored; unset = ignored so they can't be spoofed. |
+| `MIKE_BIND` | Server bind address (e.g. `127.0.0.1` for localhost-only). Unset/empty (or `0.0.0.0`/`::`) = all interfaces (default). |
 
 ### CLI Flags
 CLI flags take priority over environment variables.
@@ -48,6 +49,7 @@ CLI flags take priority over environment variables.
 | Flag | Env Var | Default | Description |
 |------|---------|---------|-------------|
 | `--port` | `MIKE_PORT` | `3000` | listen port |
+| `--bind` | `MIKE_BIND` | *(all interfaces)* | bind address; e.g. `127.0.0.1` for localhost-only |
 | `--data-dir` | `MIKE_DATA_DIR` | `./data` | DB, TLS certs, trace files |
 | `--worktrees-dir` | `MIKE_WORKTREES_DIR` | DB `workspace_dir` (default `./.worktrees`) | runtime override, not persisted |
 | `--no-tls` | `MIKE_TLS=0` | *(TLS on)* | plain HTTP |
