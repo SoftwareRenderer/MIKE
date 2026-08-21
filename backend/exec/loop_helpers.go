@@ -97,11 +97,12 @@ func (te *TaskExecutor) broadcastDiffIfGitCmd(projectID, taskID string, task *ty
 // to get the fork branch for diff baseline.
 func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *types.Task, state *executionState, forkBranch string) {
 	// Use BaseCommit (fixed hash) when available, matches API handler
-	baseline := task.BaseRef
-	if task.BaseCommit != "" {
-		baseline = task.BaseCommit
+	project, pErr := te.store.GetProject(projectID)
+	projectPath, originBranch := "", ""
+	if pErr == nil && project != nil {
+		projectPath, originBranch = project.Path, project.OriginBranch
 	}
-	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, baseline, task.Branch, forkBranch)
+	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(task.ID, te.worktreeMgr.ResolveTaskBaseline(projectPath, originBranch, task), task.Branch, forkBranch)
 	diffResult, err := te.worktreeMgr.GetTaskDiff(taskID, baseRef, "")
 	if err != nil || (diffResult.Diff == "" && len(diffResult.Untracked) == 0) {
 		return
@@ -136,6 +137,74 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 		HasCommittedChanges: diffResult.CommittedDiff != "",
 		AlreadyMerged:       stats.AlreadyMerged,
 	})
+}
+
+// computeTaskDiffStats computes the current diff-stats broadcast payload for a task,
+// including committed-but-unmerged changes (unlike checkAndBroadcastDiff, which only
+// fires on working-tree changes). Returns nil when the task has no visible changes
+// or its worktree/branch cannot be resolved.
+func (te *TaskExecutor) computeTaskDiffStats(projectID, taskID string) *stream.DiffStatsEvent {
+	task, err := te.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		return nil
+	}
+	project, err := te.store.GetProject(projectID)
+	if err != nil || project == nil || project.Path == "" {
+		return nil
+	}
+	thread, _ := te.store.GetThread(task.CurrentThreadID)
+	forkBranch := ""
+	if thread != nil {
+		forkBranch = thread.GitBranch
+	}
+	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(taskID, te.worktreeMgr.ResolveTaskBaseline(project.Path, project.OriginBranch, task), task.Branch, forkBranch)
+	headRef := ""
+	if task.Status == "done" {
+		headRef = task.BranchTip
+		if headRef == "" {
+			headRef = task.Branch
+		}
+	}
+	diffResult, err := te.worktreeMgr.GetTaskDiff(taskID, baseRef, headRef)
+	if err != nil {
+		return nil
+	}
+	if diffResult.Diff == "" && len(diffResult.Untracked) == 0 && diffResult.CommittedDiff == "" {
+		return nil
+	}
+	stats := stream.ComputeDiffStats(diffResult, *task)
+	// Check if task branch commits are already merged into the target branch.
+	if targetBranch, ok := stream.CheckAlreadyMerged(*task); ok {
+		stats.AlreadyMerged = te.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
+	}
+	return &stream.DiffStatsEvent{
+		ProjectID:           projectID,
+		TaskID:              taskID,
+		DiffHash:            stream.ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash),
+		ShortStat:           diffResult.ShortStat,
+		FilesN:              stats.VisibleTracked + stats.VisibleUntracked,
+		UntrackedN:          stats.VisibleUntracked,
+		UntrackedLines:      stats.UntrackedLines,
+		TrackedAdd:          stats.TrackedAdd,
+		TrackedDel:          stats.TrackedDel,
+		ChangedHashes:       diffResult.GetPerFileHashes(),
+		StagedPaths:         diffResult.StagedPaths,
+		HasCommittedChanges: diffResult.CommittedDiff != "",
+		AlreadyMerged:       stats.AlreadyMerged,
+	}
+}
+
+// broadcastParentDiffStats recomputes and broadcasts the parent task's diff stats
+// after a subtask merge moved the parent's branch. A parent that was never started
+// has no diff watcher of its own, so without this its card would not surface the
+// merged changes (button stuck on "Move to done" instead of "Commit and move to done").
+func (te *TaskExecutor) broadcastParentDiffStats(projectID, parentID string) {
+	if te.appStreamMgr == nil || parentID == "" {
+		return
+	}
+	if event := te.computeTaskDiffStats(projectID, parentID); event != nil {
+		te.appStreamMgr.BroadcastDiffStats(*event)
+	}
 }
 
 // extractPrevSummary returns the content of the most recent summarization message.

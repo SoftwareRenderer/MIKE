@@ -157,6 +157,7 @@ type WorktreeManager struct {
 	configStore *config.ConfigStore
 	worktreeMu  sync.Map // per-project mutex for worktree creation
 	stashMu     sync.Map // per-project mutex for stash operations
+	mergeMu     sync.Map // per-project mutex for merges using the project's main checkout
 
 }
 
@@ -180,6 +181,16 @@ func (wm *WorktreeManager) getProjectWorktreeMu(projectID string) *sync.Mutex {
 // Stash is repo-wide, so concurrent stash operations from different worktrees must be serialized.
 func (wm *WorktreeManager) GetProjectStashMu(projectID string) *sync.Mutex {
 	mu, _ := wm.stashMu.LoadOrStore(projectID, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
+// GetProjectMergeMu returns a per-project mutex for serializing merges that
+// operate on the project's main checkout (root-task merges). The main checkout
+// has a single HEAD/index — interleaved merges clobber each other's checkout,
+// stashes, and restore. Lock order: always acquired BEFORE (never after) the
+// project stash mutex.
+func (wm *WorktreeManager) GetProjectMergeMu(projectID string) *sync.Mutex {
+	mu, _ := wm.mergeMu.LoadOrStore(projectID, &sync.Mutex{})
 	return mu.(*sync.Mutex)
 }
 
@@ -1880,6 +1891,57 @@ func (wm *WorktreeManager) gitRunOutput(dir string, args ...string) (string, err
 func (wm *WorktreeManager) gitCurrentBranch(dir string) (string, error) {
 	out, err := wm.gitRunOutput(dir, "rev-parse", "--abbrev-ref", "HEAD")
 	return strings.TrimSpace(out), err
+}
+
+// DivergenceBase returns the commit at which taskBranch diverged from the project's main branch
+func (wm *WorktreeManager) DivergenceBase(projectPath, mainBranch, taskBranch string) string {
+	if projectPath == "" || taskBranch == "" {
+		return ""
+	}
+	if mainBranch == "" {
+		var err error
+		mainBranch, err = wm.gitCurrentBranch(projectPath)
+		if err != nil {
+			return ""
+		}
+	}
+	if mainBranch == "" || mainBranch == "HEAD" {
+		// Detached HEAD — no main branch to measure divergence from.
+		return ""
+	}
+	out, err := wm.gitRunOutput(projectPath, "merge-base", taskBranch, mainBranch)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// baselineUsable reports whether a recorded baseline ref is a meaningful
+// diff baseline for the task's branch
+func (wm *WorktreeManager) baselineUsable(projectPath, baseline, taskBranch string) bool {
+	if baseline == "" {
+		return false
+	}
+	if baseline == taskBranch {
+		return false
+	}
+	if projectPath == "" {
+		return true
+	}
+	out, err := wm.gitRunOutput(projectPath, "rev-parse", "--verify", "--quiet", baseline+"^{commit}")
+	return err == nil && strings.TrimSpace(out) != ""
+}
+
+// ResolveTaskBaseline returns the git ref to diff a task against: its recorded BaseCommit
+func (wm *WorktreeManager) ResolveTaskBaseline(projectPath, originBranch string, task *types.Task) string {
+	baseline := task.BaseRef
+	if task.BaseCommit != "" {
+		baseline = task.BaseCommit
+	}
+	if task.Branch != "" && !wm.baselineUsable(projectPath, baseline, task.Branch) {
+		baseline = wm.DivergenceBase(projectPath, originBranch, task.Branch)
+	}
+	return baseline
 }
 
 // GitRunInWorktree runs a git command in the task's worktree directory.
