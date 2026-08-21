@@ -492,7 +492,7 @@ export interface UIExtensionConfig {
 }
 
 export interface CSSExtensionConfig {
-    css_url: string; // global stylesheet URL (relative to server root)
+    css_url: string; // global stylesheet path (resolved against the extension's own served directory; external URLs are rejected)
 }
 
 export interface ConfigSchema {

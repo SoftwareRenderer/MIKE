@@ -39,12 +39,31 @@ export default defineConfig({
                 globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
                 runtimeCaching: [
                     {
+                        // Extension assets (served from disk by the Go server, not part
+                        // of the build) — shorter TTL so registry updates (incl. security
+                        // fixes shipped in an extension) reach clients within a week.
+                        urlPattern: ({ url }) => url.pathname.includes('/extensions/'),
+                        handler: 'CacheFirst',
+                        options: {
+                            cacheName: 'kanban-extensions',
+                            expiration: {
+                                maxEntries: 50,
+                                maxAgeSeconds: 7 * 24 * 60 * 60, // 7 days
+                            },
+                            cacheableResponse: {
+                                statuses: [0, 200],
+                            },
+                        },
+                    },
+                    {
                         // Cache the app shell (JS, CSS, assets) — skip API calls entirely
                         urlPattern: ({ url }) => {
                             const href = url.href;
                             // Never cache or intercept API requests — let them fail naturally
                             // so the offline queue in queue.ts takes over
                             if (href.includes('/api/')) return false;
+                            // Extension assets have their own (shorter-TTL) rule above
+                            if (url.pathname.includes('/extensions/')) return false;
                             return true;
                         },
                         handler: 'CacheFirst',
