@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime/trace"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -33,6 +35,7 @@ func main() {
 
 	// CLI flags
 	port := flag.Int("port", 0, "Server listen port (default: $MIKE_PORT or 3000)")
+	bind := flag.String("bind", "", "Server bind address (default: $MIKE_BIND or all interfaces; e.g. 127.0.0.1 for localhost-only)")
 	dataDir := flag.String("data-dir", "", "Data directory for DB, TLS certs, trace files (default: $MIKE_DATA_DIR or ./data)")
 	worktreesDir := flag.String("worktrees-dir", "", "Runtime override for the git worktrees dir (default: $MIKE_WORKTREES_DIR or ./.worktrees)")
 	noTLS := flag.Bool("no-tls", false, "Disable TLS (plain HTTP); overrides $MIKE_TLS")
@@ -145,7 +148,15 @@ func main() {
 		}
 	}
 
-	addr := fmt.Sprintf(":%d", effectivePort)
+	// Bind address: flag > env var > all interfaces (default, backward compatible)
+	effectiveBind := *bind
+	if effectiveBind == "" {
+		effectiveBind = os.Getenv("MIKE_BIND")
+	}
+	addr := listenAddr(effectiveBind, effectivePort)
+	if _, err := net.ResolveTCPAddr("tcp", addr); err != nil {
+		log.Fatalf("Invalid bind address %q (from --bind / MIKE_BIND): %v", addr, err)
+	}
 
 	srv, err := server.NewServer(dbPath, worktreesOverride, addr, frontendDist, tlsCfg)
 	if err != nil {
@@ -168,4 +179,14 @@ func main() {
 	trace.Stop()
 	traceFile.Close()
 	srv.Shutdown(context.Background())
+}
+
+// listenAddr builds the server listen address from a bind address and port
+func listenAddr(bind string, port int) string {
+	switch bind {
+	case "", "0.0.0.0", "::":
+		return fmt.Sprintf(":%d", port)
+	default:
+		return net.JoinHostPort(bind, strconv.Itoa(port))
+	}
 }

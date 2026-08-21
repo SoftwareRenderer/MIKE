@@ -810,7 +810,7 @@ func (s *Server) optionalProject(r *http.Request) (*types.Project, error) {
 	return project, nil
 }
 
-// validateFSPath ensures the path is within the project root or workspace.
+// validateFSPath ensures the path is within the project root or workspace
 func (s *Server) validateFSPath(path string, r *http.Request) error {
 	project, err := s.optionalProject(r)
 	if err != nil {
@@ -823,18 +823,19 @@ func (s *Server) validateFSPath(path string, r *http.Request) error {
 	cleanPath := filepath.Clean(path)
 	cleanRoot := filepath.Clean(project.Path)
 
-	// Handle sandbox paths: /home/sandbox/<basename>/... → convert to host path
-	// The sandbox mounts the worktree, not the project. The worktree basename
-	// is the task ID. We can't resolve the exact worktree here, so we check
-	// if the path is within the workspace directory instead.
+	// Sandbox mount path
+	if strings.HasPrefix(cleanPath, "/home/sandbox/") {
+		mountPath := "/home/sandbox/" + project.Name
+		if project.SandboxEnabled && (cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator))) {
+			return nil
+		}
+		return fmt.Errorf("path outside allowed project directory")
+	}
+
 	cfg, cfgErr := s.configStore.GetConfig()
 	var workspaceDir string
 	if cfgErr == nil && cfg.WorkspaceDir != "" {
 		workspaceDir = filepath.Clean(cfg.WorkspaceDir)
-	}
-	if workspaceDir != "" && strings.HasPrefix(cleanPath, "/home/sandbox/") {
-		// Sandbox path — allow if workspace is configured (worktree will be resolved by caller)
-		return nil
 	}
 
 	// Host path: allow if within project root or workspace directory
@@ -1117,6 +1118,14 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Host filesystem (no project or sandbox disabled)
+	// Project-scoped mkdir must stay within the project (or workspace); the
+	// no-project directory-picker flow intentionally has no constraint.
+	if project != nil {
+		if err := s.validateFSPath(req.Path, r); err != nil {
+			JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	// Check parent exists
 	parent := filepath.Dir(req.Path)
 	info, err := os.Stat(parent)
