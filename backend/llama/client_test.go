@@ -542,11 +542,18 @@ type reasoningParamsCase struct {
 
 var reasoningParamCases = []reasoningParamsCase{
 	{effort: "default", budgetSent: false, controlSent: false, effortSent: "", enableThink: false},
+	{effort: "none", budgetSent: true, budgetTokens: 0, controlSent: false, effortSent: "", enableThink: true},
+	// "off" is the legacy name for "none".
 	{effort: "off", budgetSent: true, budgetTokens: 0, controlSent: false, effortSent: "", enableThink: true},
 	{effort: "low", budgetSent: true, budgetTokens: 512, controlSent: true, effortSent: "low"},
 	{effort: "medium", budgetSent: true, budgetTokens: 2048, controlSent: true, effortSent: "medium"},
 	{effort: "high", budgetSent: true, budgetTokens: 8192, controlSent: true, effortSent: "high"},
-	{effort: "max", budgetSent: true, budgetTokens: -1, controlSent: true, effortSent: "max"},
+	// "max" is no longer a known level — it passes through verbatim like any custom value.
+	{effort: "max", budgetSent: false, controlSent: true, effortSent: "max"},
+	// Custom values pass through verbatim (no thinking budget).
+	{effort: "xhigh", budgetSent: false, controlSent: true, effortSent: "xhigh"},
+	{effort: "4096", budgetSent: false, controlSent: true, effortSent: "4096"},
+	{effort: "  xhigh  ", budgetSent: false, controlSent: true, effortSent: "xhigh"},
 }
 
 func assertReasoningParams(t *testing.T, captured map[string]any, tc reasoningParamsCase) {

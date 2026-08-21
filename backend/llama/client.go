@@ -61,29 +61,28 @@ func parseRetryAfter(v string) time.Duration {
 	return 0
 }
 
-// reasoningEffortTokens: thinking budget per level ("off"/"default" send none).
+// reasoningEffortTokens: thinking budget per level ("none"/"off"/"default" send none).
 var reasoningEffortTokens = map[string]int{
 	"low":    512,
 	"medium": 2048,
 	"high":   8192,
-	"max":    -1, // unlimited
 }
 
-// applyReasoningParams sets request fields for an effort level: "off" disables
-// thinking, "default" sends nothing, budget levels send budget + control + effort.
+// applyReasoningParams sets request fields for an effort level
 func applyReasoningParams(reqBody map[string]any, effort string) {
+	effort = strings.TrimSpace(effort)
 	switch effort {
-	case "off":
+	case "", "default":
+		// Server decides.
+	case "none", "off":
 		reqBody["thinking_budget_tokens"] = 0
 		reqBody["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
-	case "default":
-		// Server decides.
 	default:
 		if budget, ok := reasoningEffortTokens[effort]; ok {
 			reqBody["thinking_budget_tokens"] = budget
-			reqBody["reasoning_control"] = true
-			reqBody["reasoning_effort"] = effort
 		}
+		reqBody["reasoning_control"] = true
+		reqBody["reasoning_effort"] = effort
 	}
 }
 

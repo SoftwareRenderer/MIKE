@@ -78,7 +78,7 @@
     interface ModelEntry {
         name: string;
         readonly: boolean; // true = fetched from API, not editable
-        reasoning_effort?: 'default' | 'off' | 'low' | 'medium' | 'high' | 'max';
+        reasoning_effort?: string; // known level or custom value (passed through to the server)
         context_window?: number | null; // nil if not reported by LLM; editable in UI
         // Per-model overrides; null = inherit provider default
         input_price?: number | null;
@@ -559,7 +559,7 @@
                         url: p.url.trim(),
                         models: p.models.filter(m => m.name.trim()).map(m => ({
                             name: m.name.trim(),
-                            reasoning_effort: m.reasoning_effort || 'default',
+                            reasoning_effort: (m.reasoning_effort || '').trim() || 'default',
                             // undefined = omitted (inherit provider default)
                             context_window: m.context_window ?? undefined,
                             input_price: m.input_price ?? undefined,
