@@ -49,11 +49,14 @@ function extBaseURL(ext: Extension): string {
 // resolveAssetURL resolves a manifest asset path (e.g. a css_url) against the
 // extension's served base, so a relative path like "./styles.css" or
 // "styles.css" resolves to /extensions/<author>/<name>/styles.css.
+// Only same-origin assets are allowed: URLs with a scheme (http:, https:,
+// data:, …) or protocol-relative URLs (//host/…) are rejected ('') — a CSS
+// extension must not load its global stylesheet from an external origin.
+// A leading '/' is treated as relative to the extension's own directory
+// (never as a server-root path).
 function resolveAssetURL(ext: Extension, asset: string): string {
     if (!asset) return asset;
-    if (/^([a-z][a-z0-9+.-]*:)?\/\//i.test(asset) || asset.startsWith('/')) {
-        return asset; // absolute URL or server-root path — use as-is
-    }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(asset) || asset.startsWith('//')) return ''; // external — reject
     return `${extBaseURL(ext)}/${asset.replace(/^\.?\//, '')}`;
 }
 
