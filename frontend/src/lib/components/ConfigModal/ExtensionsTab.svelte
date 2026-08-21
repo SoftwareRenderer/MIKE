@@ -128,8 +128,8 @@
     // actually DECLARES are listed — always-granted ones (config.get,
     // log.write, theme.get, ui.status) and implied ones (e.g.
     // editor.removeFooterButton, editor.contentChange, preview.serve,
-    // preview.release) have no entry. Unknown/legacy names fall back to the
-    // raw name in the UI.
+    // preview.release, preview.navState) have no entry. Unknown/legacy names
+    // fall back to the raw name in the UI.
     const PERMISSION_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
         'createTask.description.insertText': {
             label: 'Edit the task description',

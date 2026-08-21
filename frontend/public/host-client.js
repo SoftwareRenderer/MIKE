@@ -129,6 +129,13 @@
             },
             /** Free a served doc early (TTL is the backstop). */
             release: (token) => call('preview.release', { token: String(token || '') }),
+            /**
+             * The token's last document navigation { seq, path, ok, isDoc }
+             * — server-side truth for the watchdog's in-tree allow-list
+             * decision (the frame's own URL is unreadable: opaque origin).
+             * Rejects if the doc is gone (404) — treat as an escape.
+             */
+            navState: (token) => call('preview.navState', { token: String(token || '') }),
         },
 
         log: (level, message) => call('log.write', { level: level || 'info', message: String(message || '') }),

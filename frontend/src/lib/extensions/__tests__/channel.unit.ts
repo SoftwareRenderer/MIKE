@@ -19,6 +19,7 @@ import {
     CAP_PREVIEW_SERVE_SCRIPTS,
     CAP_PREVIEW_SERVE_NETWORK,
     CAP_PREVIEW_RELEASE,
+    CAP_PREVIEW_NAV_STATE,
     CAP_THEME_GET,
 } from '../capabilities';
 import type { HostRequest } from '../types';
@@ -172,6 +173,28 @@ describe('ExtensionHostChannel capability enforcement', () => {
         channel.start();
         expect(messages[0].granted).not.toContain(CAP_PREVIEW_SERVE_SCRIPTS);
         expect(messages[0].granted).not.toContain(CAP_PREVIEW_SERVE_NETWORK);
+        channel.destroy();
+    });
+
+    it('grants preview.navState implicitly with any preview capability', () => {
+        // The watchdog's decision channel only reports what the server served
+        // under the extension's own tokens, so it rides along with whichever
+        // preview capability is granted (declared or implied by setOverlay).
+        const declared = makeChannel([CAP_PREVIEW_SERVE_SCRIPTS]);
+        declared.channel.start();
+        expect(declared.messages[0].granted).toContain(CAP_PREVIEW_NAV_STATE);
+        declared.channel.destroy();
+
+        const implied = makeChannel([CAP_EDITOR_SET_OVERLAY]);
+        implied.channel.start();
+        expect(implied.messages[0].granted).toContain(CAP_PREVIEW_NAV_STATE);
+        implied.channel.destroy();
+    });
+
+    it('does not grant preview.navState without any preview capability', () => {
+        const { channel, messages } = makeChannel([CAP_UI_MODAL]);
+        channel.start();
+        expect(messages[0].granted).not.toContain(CAP_PREVIEW_NAV_STATE);
         channel.destroy();
     });
 

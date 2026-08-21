@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,17 +31,29 @@ const (
 // previewDocCSPStrict is the DEFAULT policy
 const previewDocCSPStrict = "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' data: blob:; style-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; font-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; worker-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
 
-// previewDocCSPNetwork is the permissive policy (remote resources and
-// full egress). Served only when the extension's "allow network" setting opts
-// in per serve
+// previewDocCSPNetwork — the permissive policy; served only when the
+// extension's "allow network" setting opts in per serve
 const previewDocCSPNetwork = "default-src * data: blob: 'unsafe-inline'; script-src * 'unsafe-inline' data: blob:; style-src * 'unsafe-inline' data: blob:; img-src * data: blob:; font-src * data: blob:; connect-src * data: blob:; frame-src * data: blob:; worker-src * blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'"
+
+// previewNavRecord — only committed HTML-family page loads are recorded
+// (see isDocNav). A 404 or an out-of-tree navigation leaves the record
+// stale, and the extension's watchdog rejects any navigation that didn't
+// produce a fresh record.
+type previewNavRecord struct {
+	path  string // token-relative path ("" = the doc's own dir)
+	ok    bool   // the response committed (2xx)
+	isDoc bool   // the doc's own content (dir URL or self-reference)
+}
 
 // previewDoc is a served preview document.
 type previewDoc struct {
-	content      string // document text (HTML/SVG/XHTML/…)
+	content      string
 	fileName     string // previewed file's base name ("" if unknown)
-	baseDir      string // host dir for relative assets ("" = self-contained)
-	allowNetwork bool   // true → permissive CSP (extension opt-in); false → strict
+	baseDir      string // worktree root, or the file's own dir when outside it ("" = self-contained)
+	dirRel       string // doc's dir relative to baseDir ("" = baseDir itself)
+	allowNetwork bool   // the extension's "allow network" opt-in (true: permissive CSP, false: strict)
+	navSeq       int    // committed page loads under this token; the watchdog compares it to detect a fresh load
+	lastNav      previewNavRecord
 	lastAccess   time.Time
 }
 
@@ -95,15 +108,82 @@ func (ps *previewStore) stopSweeper() {
 	}
 }
 
-func (ps *previewStore) put(content, fileName, baseDir string, allowNetwork bool) string {
+// errPreviewTooLarge: the stored (post-rewrite) content exceeds the cap.
+var errPreviewTooLarge = errors.New("preview content too large")
+
+func (ps *previewStore) put(content, fileName, baseDir, dirRel string, allowNetwork bool) (string, error) {
+	// Mint the token first — the rewrite target is built from it.
+	token := newPreviewToken()
+	if isHTMLFamilyCT(previewDocContentType(fileName)) {
+		content = rewriteRootRelative(content, "/api/preview/"+token+"/")
+	}
+	if len(content) > previewMaxContent {
+		return "", errPreviewTooLarge
+	}
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	for len(ps.docs) >= previewMaxLive {
 		ps.evictOldestLocked()
 	}
-	token := newPreviewToken()
-	ps.docs[token] = &previewDoc{content: content, fileName: fileName, baseDir: baseDir, allowNetwork: allowNetwork, lastAccess: time.Now()}
-	return token
+	ps.docs[token] = &previewDoc{content: content, fileName: fileName, baseDir: baseDir, dirRel: dirRel, allowNetwork: allowNetwork, lastAccess: time.Now()}
+	return token, nil
+}
+
+// isHTMLFamilyCT — content types the browser renders as pages; only these
+// get the root-relative rewrite and the doc CSP on sibling responses.
+func isHTMLFamilyCT(ct string) bool {
+	return strings.HasPrefix(ct, "text/html") ||
+		ct == "image/svg+xml" ||
+		ct == "application/xhtml+xml"
+}
+
+func previewDocCSP(doc *previewDoc) string {
+	if doc.allowNetwork {
+		return previewDocCSPNetwork
+	}
+	return previewDocCSPStrict
+}
+
+var (
+	// Root-relative href/src/action/poster/content="/…". Groups: prefix
+	// through the opening quote, the "/", and the rest of the ref (the closing
+	// quote is not consumed, so the substitution leaves it in place).
+	rootRelAttrRe = regexp.MustCompile(`(\b(?:href|src|action|poster|content)\s*=\s*["'])(/)([^"']*)`)
+	// CSS url(/…), quote optional; group 3 stops before ) or a quote.
+	rootRelURLRe = regexp.MustCompile(`(url\(\s*["']?)(/)([^)"']*)`)
+)
+
+// rewriteRootRelative — the browser resolves "/x" against the origin (the
+// host app), but the preview site starts at the worktree, served under the
+// token. Absolute and protocol-relative refs are left alone.
+func rewriteRootRelative(content, root string) string {
+	content = rewriteRootRel(content, root, rootRelAttrRe)
+	return rewriteRootRel(content, root, rootRelURLRe)
+}
+
+// rewriteRootRel — RE2 has no backreferences, so the substitution rebuilds
+// each match from its groups: prefix (group 1) + token root + ref remainder
+// (group 3).
+func rewriteRootRel(content, root string, re *regexp.Regexp) string {
+	locs := re.FindAllStringSubmatchIndex(content, -1)
+	if len(locs) == 0 {
+		return content
+	}
+	var b strings.Builder
+	b.Grow(len(content) + 64*len(locs))
+	last := 0
+	for _, loc := range locs {
+		if loc[5] < len(content) && content[loc[5]] == '/' { // "//…" → protocol-relative
+			continue
+		}
+		b.WriteString(content[last:loc[0]])
+		b.WriteString(content[loc[2]:loc[3]]) // prefix incl. opening quote
+		b.WriteString(root)
+		b.WriteString(content[loc[6]:loc[7]])
+		last = loc[1]
+	}
+	b.WriteString(content[last:])
+	return b.String()
 }
 
 func (ps *previewStore) get(token string) *previewDoc {
@@ -121,6 +201,25 @@ func (ps *previewStore) delete(token string) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	delete(ps.docs, token)
+}
+
+func (ps *previewStore) recordNav(token, rel string, ok, isDoc bool) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if doc, exists := ps.docs[token]; exists {
+		doc.navSeq++
+		doc.lastNav = previewNavRecord{path: rel, ok: ok, isDoc: isDoc}
+	}
+}
+
+func (ps *previewStore) lastNav(token string) (seq int, rec previewNavRecord, ok bool) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	doc, exists := ps.docs[token]
+	if !exists {
+		return 0, previewNavRecord{}, false
+	}
+	return doc.navSeq, doc.lastNav, true
 }
 
 func (ps *previewStore) sweep(now time.Time) {
@@ -144,21 +243,22 @@ func (ps *previewStore) evictOldestLocked() {
 	delete(ps.docs, oldest)
 }
 
-// newPreviewToken returns a 128-bit random token (32 hex chars) — the sole
-// bearer for the public document/asset GETs.
+// newPreviewToken — 128 bits of randomness; the only credential for the
+// public document/asset GETs.
 func newPreviewToken() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// crypto/rand failure is a fatal environment problem; don't fail the request.
+		// crypto/rand failing means the environment is broken; fall back rather
+		// than fail the request.
 		return strconv.FormatInt(time.Now().UnixNano(), 16)
 	}
 	return hex.EncodeToString(b)
 }
 
-// previewServeRequest: only `content` comes from the client; project/path/task
-// identify the editor's open file (host-filled) for sibling-asset resolution.
-// AllowNetwork is the extension's "allow network" opt-in; it only ever widens
-// the doc's CSP (default: strict).
+// previewServeRequest: only `content` comes from the client. The host fills
+// project/path/task (the editor's open file) so the server can resolve
+// sibling assets. AllowNetwork is the extension's opt-in; it only widens the
+// doc's CSP (default: strict).
 type previewServeRequest struct {
 	Content      string `json:"content"`
 	Project      string `json:"project"`
@@ -167,8 +267,9 @@ type previewServeRequest struct {
 	AllowNetwork bool   `json:"allow_network"`
 }
 
-// HandlePreviewServe — POST /api/preview (session + CSRF). Stores the doc and
-// returns {token, url}; url ends in "/" so relative asset URLs resolve under it.
+// HandlePreviewServe — POST /api/preview (session + CSRF). url is the doc's
+// directory under the token, so relative refs resolve against the file's
+// siblings.
 func (s *Server) HandlePreviewServe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -194,72 +295,125 @@ func (s *Server) HandlePreviewServe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	baseDir, fileName := "", ""
+	baseDir, dirRel, fileName := "", "", ""
 	if req.Project != "" || req.Path != "" {
-		dir, hostPath, err := s.resolveFSFilePath(req.Project, req.Task, req.Path)
+		worktreeRoot, dir, hostPath, err := s.resolveFSFilePath(req.Project, req.Task, req.Path)
 		if err != nil {
 			JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		baseDir = dir
 		fileName = filepath.Base(hostPath)
+		baseDir = worktreeRoot // widened asset root: the whole worktree
+		rel, err := filepath.Rel(worktreeRoot, dir)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			// The file is outside the worktree (a workspace-only path): use
+			// its own directory as the asset root instead.
+			baseDir = dir
+		} else if rel != "." {
+			dirRel = filepath.ToSlash(rel)
+		}
 	}
 
-	token := s.previewStore.put(req.Content, fileName, baseDir, req.AllowNetwork)
+	token, err := s.previewStore.put(req.Content, fileName, baseDir, dirRel, req.AllowNetwork)
+	if err != nil {
+		JSONError(w, http.StatusRequestEntityTooLarge, err.Error())
+		return
+	}
+	url := "/api/preview/" + token + "/"
+	if dirRel != "" {
+		url += dirRel + "/"
+	}
 	JSONResponse(w, http.StatusOK, map[string]any{
 		"token": token,
-		"url":   "/api/preview/" + token + "/",
+		"url":   url,
 	})
 }
 
-// HandlePreviewGet — public GET /api/preview/{token}[/...]; the token is the
-// bearer (opaque-origin preview iframes can't send a session). Empty subpath
-// → the doc (no-slash → trailing-slash redirect); otherwise a sibling asset.
+// HandlePreviewGet — public GET /api/preview/{token}[/...]; the token is
+// the only credential (the preview iframe has an opaque origin and can't
+// send a session cookie). The doc serves at its own directory under the
+// token; other paths are sibling files from the worktree. Sibling pages
+// carry the doc's CSP, so a page the doc navigates to keeps the same egress
+// posture.
 func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	token := r.PathValue("token")
 	if token == "" {
 		http.NotFound(w, r)
 		return
 	}
 	doc := s.previewStore.get(token)
+	// A real page load (not a css/js/img subresource)? The preview frame is a
+	// subframe, and Chromium sends Sec-Fetch-Dest: "iframe" for in-subframe
+	// navigations, not "document".
+	isDocNav := func() bool {
+		dest := r.Header.Get("Sec-Fetch-Dest")
+		return dest == "document" || dest == "iframe"
+	}
 	if doc == nil {
 		JSONError(w, http.StatusNotFound, "preview not found")
 		return
 	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	rel := strings.TrimPrefix(r.PathValue("path"), "/")
+	rel = strings.TrimSuffix(rel, "/") // directory URLs may carry a trailing slash
 
 	writeDoc := func() {
 		w.Header().Set("Content-Type", previewDocContentType(doc.fileName))
-		csp := previewDocCSPStrict
-		if doc.allowNetwork {
-			csp = previewDocCSPNetwork
-		}
-		w.Header().Set("Content-Security-Policy", csp)
+		w.Header().Set("Content-Security-Policy", previewDocCSP(doc))
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
 			_, _ = io.WriteString(w, doc.content)
 		}
+		if isDocNav() {
+			s.previewStore.recordNav(token, rel, true, true)
+		}
 	}
 
+	// The token root: the doc's directory when the file is at the worktree
+	// root, otherwise the worktree root itself (no listing).
 	if rel == "" {
+		if doc.dirRel == "" {
+			if !strings.HasSuffix(r.URL.Path, "/") {
+				http.Redirect(w, r, "/api/preview/"+token+"/", http.StatusMovedPermanently)
+				return
+			}
+			writeDoc()
+			return
+		}
+		if r.URL.Path == "/api/preview/"+token {
+			http.Redirect(w, r, "/api/preview/"+token+"/"+doc.dirRel+"/", http.StatusMovedPermanently)
+			return
+		}
+		JSONError(w, http.StatusNotFound, "preview not found")
+		return
+	}
+
+	// The doc's own directory: /token/<dirRel>/ (a file at the worktree root
+	// has dirRel "" and was handled at the token root above).
+	if rel == doc.dirRel {
 		if !strings.HasSuffix(r.URL.Path, "/") {
-			http.Redirect(w, r, "/api/preview/"+token+"/", http.StatusMovedPermanently)
+			http.Redirect(w, r, "/api/preview/"+token+"/"+doc.dirRel+"/", http.StatusMovedPermanently)
 			return
 		}
 		writeDoc()
 		return
 	}
 
-	// Self-reference (<a href="index.html">) → served content (possibly
-	// unsaved), not the disk file.
-	if doc.fileName != "" && strings.EqualFold(rel, doc.fileName) {
-		writeDoc()
-		return
+	// Self-reference: a link to the doc's own file name serves the stored
+	// content (possibly unsaved), not the file on disk.
+	if doc.fileName != "" {
+		selfRel := doc.fileName
+		if doc.dirRel != "" {
+			selfRel = doc.dirRel + "/" + doc.fileName
+		}
+		if strings.EqualFold(rel, selfRel) {
+			writeDoc()
+			return
+		}
 	}
 
 	if doc.baseDir == "" {
@@ -286,12 +440,44 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", previewAssetContentType(file))
+	ct := previewAssetContentType(file)
+	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "no-store")
+	if isHTMLFamilyCT(ct) {
+		// A sibling page the doc navigates to must keep the doc's CSP;
+		// otherwise the posture could be skipped by linking to a sibling .html.
+		w.Header().Set("Content-Security-Policy", previewDocCSP(doc))
+		if isDocNav() {
+			s.previewStore.recordNav(token, rel, true, false)
+		}
+	}
 	w.WriteHeader(http.StatusOK)
 	if r.Method != http.MethodHead {
 		_, _ = io.CopyN(w, f, info.Size())
 	}
+}
+
+// HandlePreviewNav — GET /api/preview/{token}/nav (session-authed). Returns
+// the last page load under the token; the extension asks this after a frame
+// load it didn't start, and allows the navigation only if a fresh record
+// came back. A file at the worktree root literally named "nav" is hidden by
+// this route (documented limitation).
+func (s *Server) HandlePreviewNav(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	seq, nav, ok := s.previewStore.lastNav(r.PathValue("token"))
+	if !ok {
+		JSONError(w, http.StatusNotFound, "preview not found")
+		return
+	}
+	JSONResponse(w, http.StatusOK, map[string]any{
+		"seq":   seq,
+		"path":  nav.path,
+		"ok":    nav.ok,
+		"isDoc": nav.isDoc,
+	})
 }
 
 // HandlePreviewDelete — DELETE /api/preview/{token} (session + CSRF); the
@@ -365,19 +551,20 @@ func (s *Server) resolveWorktreeForFile(project *types.Project, taskID, path str
 	return worktreePath, path, nil
 }
 
-// resolveFSFilePath resolves an editor file path to (dir, hostPath),
-// confined to the project root or the configured workspace directory.
-func (s *Server) resolveFSFilePath(projectID, taskID, filePath string) (dir, hostPath string, err error) {
+// resolveFSFilePath resolves an editor file path to (worktreeRoot, dir,
+// hostPath). The path must be inside the project root or the configured
+// workspace dir. worktreeRoot is the preview's asset root.
+func (s *Server) resolveFSFilePath(projectID, taskID, filePath string) (worktreeRoot, dir, hostPath string, err error) {
 	if projectID == "" || filePath == "" {
-		return "", "", errors.New("project and path are required")
+		return "", "", "", errors.New("project and path are required")
 	}
 	project, err := s.store.GetProject(projectID)
 	if err != nil {
-		return "", "", errors.New("project not found")
+		return "", "", "", errors.New("project not found")
 	}
 	worktreePath, hostPath, err := s.resolveWorktreeForFile(project, taskID, filePath)
 	if err != nil {
-		return "", "", errors.New("task worktree not found")
+		return "", "", "", errors.New("task worktree not found")
 	}
 	// Relative paths resolve against the worktree root defensively.
 	if !filepath.IsAbs(hostPath) {
@@ -391,10 +578,11 @@ func (s *Server) resolveFSFilePath(projectID, taskID, filePath string) (dir, hos
 	}
 	cleanPath := filepath.Clean(hostPath)
 	cleanRoot := filepath.Clean(project.Path)
+	cleanWorktree := filepath.Clean(worktreePath)
 	inProject := cleanPath == cleanRoot || strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator))
 	inWorkspace := workspaceDir != "" && (cleanPath == workspaceDir || strings.HasPrefix(cleanPath, workspaceDir+string(os.PathSeparator)))
 	if !inProject && !inWorkspace {
-		return "", "", errors.New("path outside allowed project directory")
+		return "", "", "", errors.New("path outside allowed project directory")
 	}
-	return filepath.Dir(cleanPath), cleanPath, nil
+	return cleanWorktree, filepath.Dir(cleanPath), cleanPath, nil
 }

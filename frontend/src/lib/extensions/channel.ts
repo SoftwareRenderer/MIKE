@@ -20,7 +20,10 @@ import {
     CAP_EDITOR_CONTENT_CHANGE,
     CAP_EDITOR_SET_OVERLAY,
     CAP_PREVIEW_SERVE,
+    CAP_PREVIEW_SERVE_SCRIPTS,
+    CAP_PREVIEW_SERVE_NETWORK,
     CAP_PREVIEW_RELEASE,
+    CAP_PREVIEW_NAV_STATE,
 } from './capabilities';
 import { cleanupFooterButtons } from './handlers/editor';
 
@@ -68,6 +71,17 @@ export class ExtensionHostChannel {
         if (this.granted.has(CAP_EDITOR_SET_OVERLAY)) {
             this.granted.add(CAP_PREVIEW_SERVE);
             this.granted.add(CAP_PREVIEW_RELEASE);
+        }
+        // The watchdog's decision channel rides along with any preview
+        // capability: it only reports what the server served under the
+        // extension's own tokens.
+        if (
+            this.granted.has(CAP_PREVIEW_SERVE) ||
+            this.granted.has(CAP_PREVIEW_SERVE_SCRIPTS) ||
+            this.granted.has(CAP_PREVIEW_SERVE_NETWORK) ||
+            this.granted.has(CAP_PREVIEW_RELEASE)
+        ) {
+            this.granted.add(CAP_PREVIEW_NAV_STATE);
         }
 
         this.listener = (ev: MessageEvent) => this.onMessage(ev);

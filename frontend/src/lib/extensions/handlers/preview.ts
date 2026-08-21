@@ -1,12 +1,15 @@
 /**
  * `preview.serve` / `preview.serveScripts` / `preview.serveNetwork` →
- * { token, url } for a nested sandboxed preview iframe; `preview.release(token)`
- * frees the doc early (TTL is the backstop). A new serve from the same editor
- * implicitly releases its previous doc.
+ * { token, url } for a nested sandboxed preview iframe.
+ * `preview.release(token)` frees the doc early (the server's TTL is the
+ * backstop). `preview.navState(token)` returns the last page load under the
+ * token; the extension uses it to decide whether an unexpected frame load
+ * navigated within the tree.
+ * A new serve from the same editor implicitly releases its previous doc.
  *
  *  - preview.serve:        strict CSP (default), paired with a bare sandbox
  *  - preview.serveScripts: strict CSP, paired with allow-scripts
- *  - preview.serveNetwork: permissive-CSP path (scripts + network)
+ *  - preview.serveNetwork: permissive CSP (scripts + network)
  * See the CSP constants in backend/server/handler_preview.go.
  */
 import type { CapabilityDef, HostContext } from '../types';
@@ -16,12 +19,12 @@ export const CAP_PREVIEW_SERVE = 'preview.serve';
 export const CAP_PREVIEW_SERVE_SCRIPTS = 'preview.serveScripts';
 export const CAP_PREVIEW_SERVE_NETWORK = 'preview.serveNetwork';
 export const CAP_PREVIEW_RELEASE = 'preview.release';
+export const CAP_PREVIEW_NAV_STATE = 'preview.navState';
 
-// Per editor instance (anchor element): the last-served doc token plus a
-// serve generation. A serve applies (implicit release + tracking) only if it
-// is still the latest requested — a stale completion must not release the doc
-// a newer serve already installed. WeakMap — entries vanish when the editor
-// unmounts, no cleanup hook.
+// Per editor (anchor element): last installed doc token + generation.
+// A serve only applies if it's still the newest requested — otherwise it
+// would release the doc a newer serve installed. WeakMap: entries die with
+// the editor.
 interface AnchorTracking {
     token?: string;
     gen: number;
@@ -33,11 +36,18 @@ interface ServeResult {
     url: string;
 }
 
+// seq only grows, so the extension can tell a fresh load from a stale
+// record; isDoc marks the doc's own content vs a sibling file.
+interface NavState {
+    seq: number;
+    path: string;
+    ok: boolean;
+    isDoc: boolean;
+}
+
 async function serve(ctx: HostContext, args: { content: string }, allowNetwork: boolean): Promise<ServeResult> {
-    // Order overlapping serves by request time: bump the generation before the
-    // async POST; only the latest generation applies on completion (a stale
-    // completion orphans its doc — the server TTL reclaims it — instead of
-    // releasing the doc a newer serve installed).
+    // Bump before the async POST; only the newest generation applies on
+    // completion (a stale serve must not release a newer serve's doc).
     let gen = 0;
     if (ctx.anchor) {
         const t = trackingByAnchor.get(ctx.anchor);
@@ -64,8 +74,8 @@ async function serve(ctx: HostContext, args: { content: string }, allowNetwork: 
     if (ctx.anchor) {
         const cur = trackingByAnchor.get(ctx.anchor);
         if (cur && cur.gen === gen) {
-            // Implicit release: supersede this editor's previous doc (explicit
-            // preview.release is still used for immediate reclaim on close).
+            // Implicit release of this editor's previous doc (preview.release
+            // covers close).
             const prev = cur.token;
             if (prev && prev !== result.token) {
                 apiFetch(`/api/preview/${prev}`, { method: 'DELETE' }).catch(() => {});
@@ -74,6 +84,21 @@ async function serve(ctx: HostContext, args: { content: string }, allowNetwork: 
         }
     }
     return result;
+}
+
+// Asked after a frame load the extension didn't start (the frame's URL is
+// unreadable — opaque origin). Throws if the doc is gone; the extension
+// treats that as an escape.
+async function navState(_ctx: HostContext, args: { token: string }): Promise<NavState> {
+    const token = String(args.token || '');
+    if (!token) {
+        throw new Error('token is required');
+    }
+    const res = await apiFetch(`/api/preview/${token}/nav`);
+    if (!res.ok) {
+        throw new Error(`preview nav state failed (${res.status})`);
+    }
+    return res.json();
 }
 
 async function release(ctx: HostContext, args: { token: string }): Promise<{ ok: boolean }> {
@@ -114,5 +139,12 @@ export const previewCapabilities: Record<string, CapabilityDef> = {
         kind: 'call',
         argsSchema: { token: 'string' },
         handler: release,
+    },
+    // Watchdog nav state (session-authed endpoint — the extension iframe is
+    // opaque-origin and asks through the host).
+    [CAP_PREVIEW_NAV_STATE]: {
+        kind: 'call',
+        argsSchema: { token: 'string' },
+        handler: navState,
     },
 };

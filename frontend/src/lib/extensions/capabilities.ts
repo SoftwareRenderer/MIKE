@@ -59,6 +59,7 @@ export {
     CAP_PREVIEW_SERVE_SCRIPTS,
     CAP_PREVIEW_SERVE_NETWORK,
     CAP_PREVIEW_RELEASE,
+    CAP_PREVIEW_NAV_STATE,
 } from './handlers/preview';
 
 /** Fully-qualified capability name → definition. */

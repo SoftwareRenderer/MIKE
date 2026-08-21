@@ -5,6 +5,7 @@ import {
     CAP_PREVIEW_SERVE_SCRIPTS,
     CAP_PREVIEW_SERVE_NETWORK,
     CAP_PREVIEW_RELEASE,
+    CAP_PREVIEW_NAV_STATE,
     SUPPORTED_CAPABILITIES,
     computeGrants,
 } from '../capabilities';
@@ -53,8 +54,8 @@ function failResponse(status: number) {
 }
 
 describe('preview capability catalog', () => {
-    it('registers the three serve postures and preview.release as call capabilities', () => {
-        for (const cap of [CAP_PREVIEW_SERVE, CAP_PREVIEW_SERVE_SCRIPTS, CAP_PREVIEW_SERVE_NETWORK, CAP_PREVIEW_RELEASE]) {
+    it('registers the three serve postures, preview.release and preview.navState as call capabilities', () => {
+        for (const cap of [CAP_PREVIEW_SERVE, CAP_PREVIEW_SERVE_SCRIPTS, CAP_PREVIEW_SERVE_NETWORK, CAP_PREVIEW_RELEASE, CAP_PREVIEW_NAV_STATE]) {
             expect(SUPPORTED_CAPABILITIES[cap], cap).toBeTruthy();
             expect(SUPPORTED_CAPABILITIES[cap].kind).toBe('call');
             expect(typeof SUPPORTED_CAPABILITIES[cap].handler).toBe('function');
@@ -62,11 +63,12 @@ describe('preview capability catalog', () => {
     });
 
     it('grants only declared, known preview capabilities', () => {
-        const granted = computeGrants([CAP_PREVIEW_SERVE, CAP_PREVIEW_SERVE_SCRIPTS, CAP_PREVIEW_SERVE_NETWORK, CAP_PREVIEW_RELEASE, 'preview.bogus']);
+        const granted = computeGrants([CAP_PREVIEW_SERVE, CAP_PREVIEW_SERVE_SCRIPTS, CAP_PREVIEW_SERVE_NETWORK, CAP_PREVIEW_RELEASE, CAP_PREVIEW_NAV_STATE, 'preview.bogus']);
         expect(granted).toContain(CAP_PREVIEW_SERVE);
         expect(granted).toContain(CAP_PREVIEW_SERVE_SCRIPTS);
         expect(granted).toContain(CAP_PREVIEW_SERVE_NETWORK);
         expect(granted).toContain(CAP_PREVIEW_RELEASE);
+        expect(granted).toContain(CAP_PREVIEW_NAV_STATE);
         expect(granted).not.toContain('preview.bogus');
     });
 });
@@ -197,6 +199,54 @@ describe('preview.serve', () => {
         const resp = messages.find((m) => m.type === 'response' && m.id === 'm1');
         expect(resp.ok).toBe(false);
         expect(resp.error).toContain('400');
+    });
+});
+
+describe('preview.navState', () => {
+    beforeEach(() => { apiFetchMock.mockReset(); });
+
+    it('GETs the token nav endpoint and passes the record through', async () => {
+        okResponse({ seq: 2, path: 'docs/page2.html', ok: true, isDoc: false });
+        const { channel, contentWindow, messages } = makeChannel([CAP_PREVIEW_NAV_STATE], {});
+
+        send(channel, contentWindow, {
+            type: 'call', id: 'm1', cap: CAP_PREVIEW_NAV_STATE, args: { token: 'tok123' },
+        });
+        await flush();
+
+        expect(apiFetchMock).toHaveBeenCalledTimes(1);
+        const [url, init] = apiFetchMock.mock.calls[0];
+        expect(url).toBe('/api/preview/tok123/nav');
+        expect(init?.method).toBeUndefined(); // GET
+        const resp = messages.find((m) => m.id === 'm1');
+        expect(resp.ok).toBe(true);
+        expect(resp.data).toEqual({ seq: 2, path: 'docs/page2.html', ok: true, isDoc: false });
+    });
+
+    it('throws on non-ok (unknown token → the extension treats it as an escape)', async () => {
+        failResponse(404);
+        const { channel, contentWindow, messages } = makeChannel([CAP_PREVIEW_NAV_STATE], {});
+
+        send(channel, contentWindow, {
+            type: 'call', id: 'm1', cap: CAP_PREVIEW_NAV_STATE, args: { token: 'gone' },
+        });
+        await flush();
+
+        const resp = messages.find((m) => m.id === 'm1');
+        expect(resp.ok).toBe(false);
+        expect(resp.error).toContain('404');
+    });
+
+    it('rejects the call when not granted', async () => {
+        const { channel, contentWindow, messages } = makeChannel([], {});
+        send(channel, contentWindow, {
+            type: 'call', id: 'm1', cap: CAP_PREVIEW_NAV_STATE, args: { token: 'tok123' },
+        });
+        await flush();
+        const resp = messages.find((m) => m.id === 'm1');
+        expect(resp.ok).toBe(false);
+        expect(resp.error).toContain('not granted');
+        expect(apiFetchMock).not.toHaveBeenCalled();
     });
 });
 
