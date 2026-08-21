@@ -63,6 +63,24 @@ func TestMiddlewarePublicPathExtensions(t *testing.T) {
 	}
 }
 
+func TestMiddlewarePublicPathPreviewNavDistinction(t *testing.T) {
+	s := testServer(t)
+
+	// The watchdog control endpoint is session-authed…
+	rr := testResponse(t, s, testRequest(http.MethodGet, "/api/preview/tok123/nav", nil))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("/api/preview/{token}/nav without session: status = %d, want 401", rr.Code)
+	}
+
+	// …but preview docs/assets stay public — including a file literally
+	// named "nav" in a subdir (unknown token → 404 from the handler, not 401
+	// from the auth middleware).
+	rr = testResponse(t, s, testRequest(http.MethodGet, "/api/preview/tok123/sub/nav", nil))
+	if rr.Code == http.StatusUnauthorized {
+		t.Fatalf("/api/preview/{token}/sub/nav: status = 401; subdir files named nav must be public")
+	}
+}
+
 func TestMiddlewareProtectedPathNoCookie(t *testing.T) {
 	s := testServer(t)
 

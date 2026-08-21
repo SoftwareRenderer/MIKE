@@ -22,16 +22,25 @@ import {
 //    at all (the sandbox refuses even <meta refresh>).
 //  - SCRIPTS ON: strict zero-egress CSP, opaque-origin isolation; external
 //    self-navigation is blocked in flight by the host's frame-src 'self',
-//    allowed same-origin navs (incl. <meta refresh>) are contained by the
-//    load-event watchdog (frame reset, token released, warned).
-// Fixtures live in a uniquely named /tmp/kanban-test-repo subdir, removed in afterAll.
+//    same-origin navs OUT of the tree (incl. <meta refresh>) are contained
+//    by the load-event watchdog (frame reset, token released, warned).
+//  - IN-TREE NAVIGATION: the doc may navigate to any file in the project
+//    tree (links, JS, <meta refresh>) — the watchdog asks the server's nav
+//    record (GET /nav) and allows only fresh in-tree serves; navigated
+//    sibling documents carry the same doc CSP as the root doc, and the live
+//    refresh is paused while the preview is on another in-tree page.
+// Fixtures live in a uniquely named /tmp/kanban-test-repo subdir (plus one
+// root-level CSS file for the widened asset root), removed in afterAll.
 
 const TEST_REPO = '/tmp/kanban-test-repo';
 const TS = Date.now();
 const FIXTURE_DIR = `${TEST_REPO}/html-preview-${TS}`;
 const PAGE_FILE = 'index.html';
+const PAGE2_FILE = 'page2.html';
+const PAGE3_FILE = 'sub/page3.html';
 const REFRESH_FILE = 'meta-refresh.html';
-const CSS_FILE = 'style.css';
+const REFRESH_IN_TREE_FILE = 'meta-refresh-2.html';
+const ROOT_CSS_FILE = `preview-root-css-${TS}.css`;
 const REL_CSS_FILE = 'rel.css';
 const SVG_FILE = 'logo.svg';
 
@@ -70,12 +79,13 @@ function buildHtmlFixture(exfilBase: string): string {
 <html>
 <head>
   <meta charset="utf-8">
-  <link rel="stylesheet" href="/${CSS_FILE}">
+  <link rel="stylesheet" href="/${ROOT_CSS_FILE}">
   <link rel="stylesheet" href="${REL_CSS_FILE}">
   <link rel="stylesheet" href="${exfilBase}/style-static?ref=css">
 </head>
 <body>
   <h1 id="title">HTML Preview Fixture</h1>
+  <a id="to-page2" href="${PAGE2_FILE}">page 2</a>
   <p id="js-target">before</p>
   <div id="styled">styled box</div>
   <div id="rel-box">relative box</div>
@@ -165,6 +175,41 @@ const REFRESH_FIXTURE = `<!DOCTYPE html>
 </head>
 <body>
   <h1 id="title">META-REFRESH</h1>
+</body>
+</html>`;
+
+// In-tree <meta refresh> (scripts-on): the refresh targets a SIBLING in the
+// tree — the watchdog must ACCEPT it (the /api/health refresh above stays
+// the out-of-tree containment case).
+const REFRESH_IN_TREE_FIXTURE = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="2;url=${PAGE2_FILE}">
+</head>
+<body>
+  <h1 id="title">META-REFRESH-INTREE</h1>
+</body>
+</html>`;
+
+// Multi-page in-tree fixtures: index → page2 → sub/page3, and page2 links
+// back to index.html — the doc's SELF-REFERENCE, which serves the CURRENT
+// stored content, not the on-disk file.
+const PAGE2_FIXTURE = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+  <h1 id="title">PAGE-2</h1>
+  <a id="to-page3" href="${PAGE3_FILE}">page 3</a>
+  <a id="to-index" href="${PAGE_FILE}">index</a>
+</body>
+</html>`;
+
+const PAGE3_FIXTURE = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+  <h1 id="title">PAGE-3</h1>
 </body>
 </html>`;
 
@@ -271,9 +316,15 @@ test.describe.serial('HTML Preview extension', () => {
     mkdirSync(FIXTURE_DIR, { recursive: true });
     writeFileSync(join(FIXTURE_DIR, PAGE_FILE), HTML_FIXTURE);
     writeFileSync(join(FIXTURE_DIR, REFRESH_FILE), REFRESH_FIXTURE);
-    writeFileSync(join(FIXTURE_DIR, CSS_FILE), CSS_FIXTURE);
+    // Root-relative /<ROOT_CSS_FILE> now means the WORKTREE ROOT (widened
+    // asset root) — the file lives at the repo root, uniquely named.
+    writeFileSync(join(TEST_REPO, ROOT_CSS_FILE), CSS_FIXTURE);
     writeFileSync(join(FIXTURE_DIR, REL_CSS_FILE), REL_CSS_FIXTURE);
     writeFileSync(join(FIXTURE_DIR, SVG_FILE), SVG_FIXTURE);
+    mkdirSync(join(FIXTURE_DIR, 'sub'), { recursive: true });
+    writeFileSync(join(FIXTURE_DIR, PAGE2_FILE), PAGE2_FIXTURE);
+    writeFileSync(join(FIXTURE_DIR, PAGE3_FILE), PAGE3_FIXTURE);
+    writeFileSync(join(FIXTURE_DIR, REFRESH_IN_TREE_FILE), REFRESH_IN_TREE_FIXTURE);
 
     const { context, page } = await setupPage(browser);
     try {
@@ -312,6 +363,7 @@ test.describe.serial('HTML Preview extension', () => {
       }
     } catch { /* best-effort cleanup */ }
     try { rmSync(FIXTURE_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { rmSync(join(TEST_REPO, ROOT_CSS_FILE), { force: true }); } catch { /* ignore */ }
   });
 
   test('Preview button appears for HTML/SVG files but not Markdown', async ({ page }) => {
@@ -356,7 +408,9 @@ test.describe.serial('HTML Preview extension', () => {
 
     // Static content + local sibling assets render.
     await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
-    // Root-relative /style.css — rewritten to file-relative by the extension.
+    // Root-relative /<ROOT_CSS_FILE> — rewritten SERVER-side to the token's
+    // root (the worktree root): the file lives at the repo root, one level
+    // ABOVE the doc's directory (widened asset root).
     await expect(frame.locator('#styled')).toHaveCSS('color', 'rgb(255, 0, 85)', { timeout: 15000 });
     await expect(frame.locator('#styled')).toHaveCSS('background-color', 'rgb(10, 20, 30)');
     // Relative rel.css also loads.
@@ -604,6 +658,207 @@ test.describe.serial('HTML Preview extension', () => {
     await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
   });
 
+  test('in-tree navigation: links within the project tree are allowed (scripts off)', async ({ page }) => {
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'PUT', body: { config: { allow_scripts: false, allow_network: false } } });
+
+    await openFile(page, [`html-preview-${TS}`, PAGE_FILE]);
+    const btn = previewButton(page);
+    await expect(btn).toBeVisible({ timeout: 10000 });
+
+    const docResponse = page.waitForResponse(
+        (resp) => resp.url().includes('/api/preview/') && resp.request().resourceType() === 'document',
+    );
+    await btn.click();
+    const docUrl = (await docResponse).url(); // .../<token>/<fixture-dir>/ (the doc's own dir)
+    const frame = await previewFrameOf(page);
+    await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
+
+    // First hop: a sibling page (relative link, same token).
+    await frame.locator('#to-page2').click();
+    await expect(frame.locator('#title')).toHaveText('PAGE-2', { timeout: 15000 });
+    expect(frame.url()).toContain('/api/preview/');
+    expect(frame.url()).toContain(PAGE2_FILE);
+    await expect(page.locator('[data-ext-modal]', { hasText: 'navigate away' })).toHaveCount(0);
+    await expect(btn).toHaveClass(/active/);
+    await expect.poll(async () => (await page.request.get(docUrl)).status(), { timeout: 5000 }).toBe(200);
+
+    // Second hop: a page under a subdirectory.
+    await frame.locator('#to-page3').click();
+    await expect(frame.locator('#title')).toHaveText('PAGE-3', { timeout: 15000 });
+    await expect(page.locator('[data-ext-modal]', { hasText: 'navigate away' })).toHaveCount(0);
+
+    // Toggle off → code view restored.
+    await btn.click();
+    await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
+    await expect(btn).not.toHaveClass(/active/);
+  });
+
+  test('scripts-on: in-tree JS navigation is allowed; cross-origin is still contained', async ({ page }) => {
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'PUT', body: { config: { allow_scripts: true, allow_network: false } } });
+
+    await openFile(page, [`html-preview-${TS}`, PAGE_FILE]);
+    const btn = previewButton(page);
+    await expect(btn).toBeVisible({ timeout: 10000 });
+
+    const docResponse = page.waitForResponse(
+        (resp) => resp.url().includes('/api/preview/') && resp.request().resourceType() === 'document',
+    );
+    await btn.click();
+    const docUrl = (await docResponse).url();
+    const frame = await previewFrameOf(page);
+    await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
+
+    await frame.evaluate(() => { window.location = 'page2.html'; });
+    await expect(frame.locator('#title')).toHaveText('PAGE-2', { timeout: 15000 });
+    await expect(page.locator('[data-ext-modal]', { hasText: 'navigate away' })).toHaveCount(0);
+    await expect(btn).toHaveClass(/active/);
+    await expect.poll(async () => (await page.request.get(docUrl)).status(), { timeout: 5000 }).toBe(200);
+
+    // Cross-origin: the host CSP blocks the load in flight, then the watchdog
+    // contains it (the nav record is still page2's).
+    const egressBeforeNav = egressRequests.length;
+    await frame.evaluate((nav) => { window.location = nav; }, `${egressBase}/nav?leak=scripts-on-in-tree-escape`);
+    const modal = page.locator('[data-ext-modal]', { hasText: 'navigate away' });
+    await expect(modal).toBeVisible({ timeout: 10000 });
+    expect(egressRequests, 'blocked navigation must not reach the egress listener').toHaveLength(egressBeforeNav);
+    await expect.poll(
+        async () => (await page.request.get(docUrl)).status(),
+        { timeout: 10000 },
+    ).toBe(404);
+    await modal.locator('button').click();
+    await expect(modal).toHaveCount(0);
+    await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
+  });
+
+  test('navigated sibling documents carry the doc CSP (posture preserved)', async ({ page }) => {
+    // Strict posture: scripts on, network off.
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'PUT', body: { config: { allow_scripts: true, allow_network: false } } });
+
+    await openFile(page, [`html-preview-${TS}`, PAGE_FILE]);
+    const btn = previewButton(page);
+    await expect(btn).toBeVisible({ timeout: 10000 });
+
+    const docResponse = page.waitForResponse(
+        (resp) => resp.url().includes('/api/preview/') && resp.request().resourceType() === 'document',
+    );
+    await btn.click();
+    const docUrl = (await docResponse).url();
+    const frame = await previewFrameOf(page);
+    await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
+
+    // The navigated sibling's DOCUMENT response must carry the strict doc
+    // CSP — a navigated page must not escape the doc's egress posture.
+    const page2Response = page.waitForResponse(
+        (resp) => resp.url().includes(PAGE2_FILE) && resp.request().resourceType() === 'document',
+    );
+    await frame.evaluate(() => { window.location = 'page2.html'; });
+    const csp = (await page2Response).headers()['content-security-policy'] || '';
+    expect(csp, 'navigated sibling doc carries the strict CSP').toContain("connect-src 'none'");
+    expect(csp, 'no wildcard in any load-type directive').not.toMatch(
+        /(script|style|img|font|media|frame|worker|object)-src[^;]*\*/);
+    await expect(frame.locator('#title')).toHaveText('PAGE-2', { timeout: 15000 });
+    await expect(page.locator('[data-ext-modal]', { hasText: 'navigate away' })).toHaveCount(0);
+
+    // Non-document siblings keep the no-CSP behavior (unchanged). rel.css
+    // lives in the doc's own dir (docUrl is the fixture dir under the token).
+    const cssResp = await page.request.get(docUrl + REL_CSS_FILE);
+    expect(cssResp.status()).toBe(200);
+    expect(cssResp.headers()['content-security-policy'], 'sibling asset responses carry no doc CSP').toBeUndefined();
+
+    // Flip allow_network, open a CLEAN page (the fixture's egress probes
+    // would genuinely leave — the afterAll audit must stay green).
+    await btn.click();
+    await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'PUT', body: { config: { allow_scripts: true, allow_network: true } } });
+    await openFile(page, [`html-preview-${TS}`, PAGE2_FILE]);
+    await previewButton(page).click();
+    const frameN = await previewFrameOf(page);
+    await expect(frameN.locator('#title')).toHaveText('PAGE-2', { timeout: 15000 });
+    const page3Resp = page.waitForResponse(
+        (resp) => resp.url().includes('page3.html') && resp.request().resourceType() === 'document',
+    );
+    await frameN.evaluate(() => { window.location = 'sub/page3.html'; });
+    const cspN = (await page3Resp).headers()['content-security-policy'] || '';
+    expect(cspN, 'allow_network → permissive CSP on navigated docs').toContain('connect-src *');
+    await expect(frameN.locator('#title')).toHaveText('PAGE-3', { timeout: 15000 });
+    await previewButton(page).click();
+    await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
+  });
+
+  test('scripts-on in-tree meta-refresh: same-tree navigation is allowed, no warning', async ({ page }) => {
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'PUT', body: { config: { allow_scripts: true, allow_network: false } } });
+
+    await openFile(page, [`html-preview-${TS}`, REFRESH_IN_TREE_FILE]);
+    const btn = previewButton(page);
+    await expect(btn).toBeVisible({ timeout: 10000 });
+    await btn.click();
+    const frame = await previewFrameOf(page);
+    await expect(frame.locator('#title')).toHaveText('META-REFRESH-INTREE', { timeout: 10000 });
+
+    // The 2s refresh navigates to page2.html — in-tree, so allowed.
+    await expect(frame.locator('#title')).toHaveText('PAGE-2', { timeout: 15000 });
+    await expect(page.locator('[data-ext-modal]', { hasText: 'navigate away' })).toHaveCount(0);
+    await expect(btn).toHaveClass(/active/);
+
+    // Toggle off → code view restored.
+    await btn.click();
+    await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
+    await expect(btn).not.toHaveClass(/active/);
+  });
+
+  test('live refresh is paused while the preview is on another in-tree page', async ({ page }) => {
+    await csrfFetch(page, `/api/extensions/${extId}`, { method: 'PUT', body: { config: { allow_scripts: false, allow_network: false } } });
+
+    await openFile(page, [`html-preview-${TS}`, PAGE_FILE]);
+    const btn = previewButton(page);
+    await expect(btn).toBeVisible({ timeout: 10000 });
+    await btn.click();
+    const frame = await previewFrameOf(page);
+    await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
+
+    await frame.locator('#to-page2').click();
+    await expect(frame.locator('#title')).toHaveText('PAGE-2', { timeout: 15000 });
+
+    // Edit the code view: the refresh must not yank the preview back to the
+    // doc while the user is browsing.
+    const newContent = HTML_FIXTURE.replace('HTML Preview Fixture', `LIVE-BROWSED-${TS}`);
+    await page.evaluate((content) => {
+      const cm = document.querySelector('.file-editor.active .cm-editor') as any;
+      cm.__view.dispatch({ changes: { from: 0, to: cm.__view.state.doc.length, insert: content } });
+    }, newContent);
+    // Well past the 300ms debounce: still on page2.
+    await page.waitForTimeout(1000);
+    await expect(frame.locator('#title')).toHaveText('PAGE-2');
+
+    // Self-reference link back to the doc (serves the stored content), then
+    // edit: refresh works again.
+    await frame.locator('#to-index').click();
+    await expect(frame.locator('#title')).toHaveText('HTML Preview Fixture', { timeout: 15000 });
+    const backContent = HTML_FIXTURE.replace('HTML Preview Fixture', `LIVE-BACK-${TS}`);
+    await page.evaluate((content) => {
+      const cm = document.querySelector('.file-editor.active .cm-editor') as any;
+      cm.__view.dispatch({ changes: { from: 0, to: cm.__view.state.doc.length, insert: content } });
+    }, backContent);
+    await expect.poll(() => previewTitle(page), { timeout: 15000 }).toContain(`LIVE-BACK-${TS}`);
+
+    // Toggle off and drop the persisted editor draft so later tests open clean.
+    await btn.click();
+    await expect(page.locator('.file-editor.active .editor-wrapper')).toBeVisible({ timeout: 10000 });
+    const filePath = join(FIXTURE_DIR, PAGE_FILE);
+    await page.evaluate(async (path) => {
+      return new Promise<void>((resolve) => {
+        const req = indexedDB.open('kanban-storage', 3);
+        req.onsuccess = () => {
+          const tx = req.result.transaction('editor-drafts', 'readwrite');
+          tx.objectStore('editor-drafts').delete(path);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+        };
+        req.onerror = () => resolve();
+      });
+    }, filePath);
+  });
+
   test('task view: on-disk changes (e.g. agent writes) refresh the preview live', async ({ page }) => {
     test.setTimeout(90000);
     await page.goto('/');
@@ -613,7 +868,7 @@ test.describe.serial('HTML Preview extension', () => {
     const taskId = await createTaskViaApi(page, projectId, `preview live ${TS}`);
     let worktreeDir = '';
     try {
-      // Start the task (executor creates the worktree); wait for the branch.
+      // Start the task so the executor creates the worktree; wait for the branch.
       await ensureTaskStarted(page, projectId, taskId);
       await expect(async () => {
         const t = await getTaskData(page, projectId, taskId);
