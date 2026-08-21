@@ -229,7 +229,7 @@ export interface KeyboardShortcuts {
 
 export interface ProviderModel {
     name: string;
-    reasoning_effort?: 'default' | 'off' | 'low' | 'medium' | 'high' | 'max';
+    reasoning_effort?: string; // known level or a custom value passed through verbatim to the server
     context_window?: number; // nil if not reported by LLM
     input_price?: number;
     output_price?: number;
@@ -238,14 +238,13 @@ export interface ProviderModel {
     power_consumption_w?: number;
 }
 
-/** Reasoning effort options for the settings UI. */
+/** Known reasoning effort levels offered as suggestions; any other value is a custom effort passed through verbatim to the server. */
 export const REASONING_EFFORT_OPTIONS: Array<{ value: string; label: string }> = [
     { value: 'default', label: 'Default' },
-    { value: 'off', label: 'Off' },
+    { value: 'none', label: 'None' },
     { value: 'low', label: 'Low' },
     { value: 'medium', label: 'Medium' },
     { value: 'high', label: 'High' },
-    { value: 'max', label: 'Max' },
 ];
 
 export interface Provider {

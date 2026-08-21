@@ -1,40 +1,60 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { apiPutConfig, apiGetConfig, waitForConfig, createTaskViaApi, navigateToTask, waitForChatForm, getTaskData, waitForSendButton } from './helpers';
+
+/**
+ * Seeds the given providers and then sets the worker/utility refs by the
+ * server-assigned provider ID — the Settings modal resolves worker/utility
+ * selections by provider ID, not by name. Returns a map of provider name → ID.
+ */
+async function seedProvidersByIds(
+    page: Page,
+    providers: any[],
+    refs: { worker: string; workerModel: string; utility: string; utilityModel: string },
+): Promise<Record<string, string>> {
+    await apiPutConfig(page, { providers });
+    const config = await apiGetConfig(page);
+    const idByName: Record<string, string> = {};
+    for (const p of config?.providers || []) {
+        idByName[p.name] = String(p.id);
+    }
+    await apiPutConfig(page, {
+        worker_provider: idByName[refs.worker],
+        worker_model: refs.workerModel,
+        utility_provider: idByName[refs.utility],
+        utility_model: refs.utilityModel,
+    });
+    return idByName;
+}
 
 // ─── Model Switcher Tests ───────────────────────────────────────────────────
 
 test.describe.serial('Model switcher in task view', () => {
     test.beforeEach(async ({ page }) => {
-        // Set up config with two providers
-        await apiPutConfig(page, {
-            providers: [
-                {
-                    name: 'provider-a',
-                    display_name: 'Provider A',
-                    url: 'http://localhost:9999/v1',
-                    models: [
-                        { name: 'model-a1', reasoning_effort: 'medium' },
-                        { name: 'model-a2', reasoning_effort: 'high' },
-                    ],
-                    concurrency: 2,
-                },
-                {
-                    name: 'provider-b',
-                    display_name: 'Provider B',
-                    url: 'http://localhost:9998/v1',
-                    models: [
-                        { name: 'model-b1', reasoning_effort: 'low' },
-                    ],
-                    concurrency: 1,
-                },
-            ],
-            worker_provider: 'provider-a',
-            worker_model: 'model-a1',
-            utility_provider: 'provider-a',
-            utility_model: 'model-a1',
-        });
+        // Set up config with two providers; worker/utility refs are the
+        // server-assigned provider IDs (the Settings modal resolves by ID).
+        const idByName = await seedProvidersByIds(page, [
+            {
+                name: 'provider-a',
+                display_name: 'Provider A',
+                url: 'http://localhost:9999/v1',
+                models: [
+                    { name: 'model-a1', reasoning_effort: 'medium' },
+                    { name: 'model-a2', reasoning_effort: 'high' },
+                ],
+                concurrency: 2,
+            },
+            {
+                name: 'provider-b',
+                display_name: 'Provider B',
+                url: 'http://localhost:9998/v1',
+                models: [
+                    { name: 'model-b1', reasoning_effort: 'low' },
+                ],
+                concurrency: 1,
+            },
+        ], { worker: 'provider-a', workerModel: 'model-a1', utility: 'provider-a', utilityModel: 'model-a1' });
         await waitForConfig(page, c =>
-            c.providers && c.providers.length >= 2
+            c.providers && c.providers.length >= 2 && c.worker_provider === idByName['provider-a']
         );
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
@@ -80,8 +100,8 @@ test.describe.serial('Model switcher in task view', () => {
         await page.click('.provider-trigger');
         await page.waitForSelector('.portal-provider-dropdown', { timeout: 5000 });
 
-        // Select provider-b
-        await page.click('.provider-option:has-text("Provider B")');
+        // Select provider-b (LLM display names are derived from the URL: host:port)
+        await page.click('.provider-option:has-text("localhost:9998")');
 
         // Wait for the provider dropdown to close and model to update
         await expect(page.locator('.portal-provider-dropdown')).toBeHidden({ timeout: 5000 });
@@ -197,24 +217,20 @@ test.describe.serial('Settings Model Delete', () => {
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 2000 }).catch(() => {});
 
     // Set up a provider with models in non-alphabetical order
-    // This exposes the bug where sorted display index != actual array index
-    await apiPutConfig(page, {
-      providers: [
-        {
-          name: 'delete-test',
-          display_name: 'Delete Test',
-          url: 'http://delete-test:9999/v1',
-          models: ['zebra', 'alpha', 'mango'],
-          concurrency: 1,
-        },
-      ],
-      worker_provider: 'delete-test',
-      worker_model: 'alpha',
-      utility_provider: 'delete-test',
-      utility_model: 'alpha',
-    });
+    // This exposes the bug where sorted display index != actual array index.
+    // Worker/utility refs are the server-assigned provider IDs (the Settings
+    // modal resolves by ID, not by name).
+    const idByName = await seedProvidersByIds(page, [
+      {
+        name: 'delete-test',
+        display_name: 'Delete Test',
+        url: 'http://delete-test:9999/v1',
+        models: ['zebra', 'alpha', 'mango'],
+        concurrency: 1,
+      },
+    ], { worker: 'delete-test', workerModel: 'alpha', utility: 'delete-test', utilityModel: 'alpha' });
     await waitForConfig(page, c =>
-      c.providers && c.providers.length === 1 && c.providers[0].name === 'delete-test'
+      c.providers && c.providers.length === 1 && c.providers[0].name === 'delete-test' && c.worker_provider === idByName['delete-test']
     );
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
@@ -286,8 +302,10 @@ test.describe.serial('Settings Model Delete', () => {
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
+    // The UI save clears LLM provider names (display names are derived from the
+    // URL), so look the provider up by its URL.
     const config = await apiGetConfig(page);
-    const provider = config.providers.find((p: any) => p.name === 'delete-test-9999');
+    const provider = config.providers.find((p: any) => p.url === 'http://delete-test:9999/v1');
     expect(provider).toBeDefined();
     const savedModelNames = provider.models.map((m: any) => (typeof m === 'string' ? m : m.name));
     expect(savedModelNames).toContain('alpha');
@@ -300,28 +318,24 @@ test.describe.serial('Settings Model Delete', () => {
 
 test.describe.serial('Reasoning effort setting', () => {
     test.beforeEach(async ({ page }) => {
-        // Ensure a provider exists (parallel tests may have cleared config)
-        await apiPutConfig(page, {
-            providers: [{
-                name: 'test-localhost-9999',
-                display_name: 'Test Server',
-                url: 'http://localhost:9999/v1',
-                models: ['model-a', 'model-b'],
-                concurrency: 2,
-            }],
-            worker_provider: 'test-localhost-9999',
-            worker_model: 'model-a',
-            utility_provider: 'test-localhost-9999',
-            utility_model: 'model-a',
-        });
+        // Ensure a provider exists (parallel tests may have cleared config).
+        // Worker/utility refs are the server-assigned provider IDs (the
+        // Settings modal resolves by ID, not by name).
+        const idByName = await seedProvidersByIds(page, [{
+            name: 'test-localhost-9999',
+            display_name: 'Test Server',
+            url: 'http://localhost:9999/v1',
+            models: ['model-a', 'model-b'],
+            concurrency: 2,
+        }], { worker: 'test-localhost-9999', workerModel: 'model-a', utility: 'test-localhost-9999', utilityModel: 'model-a' });
         await waitForConfig(page, c =>
-            c.providers && c.providers.length >= 1
+            c.providers && c.providers.length >= 1 && c.worker_provider === idByName['test-localhost-9999']
         );
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
     });
 
-    test('should show reasoning effort select for each model in settings', async ({ page }) => {
+    test('should show reasoning effort suggestions when the input has focus', async ({ page }) => {
         // Open settings modal
         await page.click('.icon-btn[aria-label="Settings"]');
         await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
@@ -329,30 +343,35 @@ test.describe.serial('Reasoning effort setting', () => {
         // Expand a provider card
         const providerHeader = page.locator('.provider-card-header').first();
         await providerHeader.click();
-        // Wait for reasoning selects to appear (replaces waitForTimeout(300))
-        await expect(page.locator('.reasoning-effort-select').first()).toBeVisible({ timeout: 5000 });
+        // Wait for reasoning effort inputs to appear (replaces waitForTimeout(300))
+        await expect(page.locator('.reasoning-effort-input').first()).toBeVisible({ timeout: 5000 });
 
-        // Check that reasoning effort selects exist
-        const reasoningSelects = page.locator('.reasoning-effort-select');
+        // Check that reasoning effort inputs exist
+        const reasoningInputs = page.locator('.reasoning-effort-input');
         const modelRows = page.locator('.model-row');
         const modelCount = await modelRows.count();
 
         if (modelCount > 0) {
-            // Each model row should have a reasoning effort select
-            expect(await reasoningSelects.count()).toBe(modelCount);
+            // Each model row should have a reasoning effort input
+            expect(await reasoningInputs.count()).toBe(modelCount);
 
-            // Verify the select has expected options using allOptions()
-            const selectElement = reasoningSelects.first();
-            const options = await selectElement.evaluateAll((selects: HTMLSelectElement[]) => {
-                const select = selects[0];
-                return Array.from(select.options).map(o => o.value);
-            });
-            expect(options[0]).toBe('default'); // default is the first option
-            expect(options).toContain('off');
-            expect(options).toContain('low');
-            expect(options).toContain('medium');
-            expect(options).toContain('high');
-            expect(options).toContain('max');
+            // Focusing the input opens the suggestion list with the known levels
+            await reasoningInputs.first().focus();
+            const optionList = page.locator('.reasoning-effort-list');
+            await expect(optionList).toBeVisible({ timeout: 5000 });
+            const options = page.locator('.reasoning-effort-list .reasoning-effort-option');
+            const labels = await options.evaluateAll(opts => opts.map(o => o.textContent || ''));
+            expect(labels).toEqual(['Default', 'None', 'Low', 'Medium', 'High']);
+
+            // Typing filters the suggestions
+            await reasoningInputs.first().fill('med');
+            const filtered = await options.evaluateAll(opts => opts.map(o => o.textContent || ''));
+            expect(filtered).toEqual(['Medium']);
+
+            // Restore the value and close the list
+            await reasoningInputs.first().fill('default');
+            await page.keyboard.press('Escape');
+            await expect(optionList).toBeHidden({ timeout: 5000 });
         }
     });
 
@@ -381,10 +400,10 @@ test.describe.serial('Reasoning effort setting', () => {
             await modelInputs.last().fill(`test-model-${Date.now()}`);
         }
 
-        // Check that the reasoning effort select for the new row defaults to 'default'
-        const allSelects = page.locator('.reasoning-effort-select');
-        const lastSelect = allSelects.last();
-        const defaultValue = await lastSelect.inputValue();
+        // Check that the reasoning effort input for the new row defaults to 'default'
+        const allInputs = page.locator('.reasoning-effort-input');
+        const lastInput = allInputs.last();
+        const defaultValue = await lastInput.inputValue();
         expect(defaultValue).toBe('default');
 
         // Cancel — model edits mark the form dirty; dismiss the discard dialog.
@@ -408,12 +427,15 @@ test.describe.serial('Reasoning effort setting', () => {
         // Wait for details to appear (replaces waitForTimeout(200))
         await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
 
-        const reasoningSelects = page.locator('.reasoning-effort-select');
-        const count = await reasoningSelects.count();
+        const reasoningInputs = page.locator('.reasoning-effort-input');
+        const count = await reasoningInputs.count();
 
         if (count > 0) {
-            // Change first model's reasoning effort to 'high'
-            await reasoningSelects.first().selectOption({ value: 'high' });
+            // Change first model's reasoning effort to 'high' via the suggestion list
+            const effortInput = reasoningInputs.first();
+            await effortInput.focus();
+            await page.locator('.reasoning-effort-list .reasoning-effort-option', { hasText: 'High' }).click();
+            await expect(effortInput).toHaveValue('high');
 
             // Save
             await page.click('button:has-text("Save")');
@@ -430,12 +452,12 @@ test.describe.serial('Reasoning effort setting', () => {
             await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
 
             // Check that the value persisted
-            const savedSelect = page.locator('.reasoning-effort-select').first();
-            const savedValue = await savedSelect.inputValue();
+            const savedInput = page.locator('.reasoning-effort-input').first();
+            const savedValue = await savedInput.inputValue();
             expect(savedValue).toBe('high');
 
             // Change to 'default' and save to verify it also round-trips
-            await savedSelect.selectOption({ value: 'default' });
+            await savedInput.fill('default');
             await page.click('button:has-text("Save")');
             // Wait for modal to close (replaces waitForTimeout(500))
             await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
@@ -445,7 +467,7 @@ test.describe.serial('Reasoning effort setting', () => {
             await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
             await providerHeader.click();
             await expect(page.locator('.provider-details')).toBeVisible({ timeout: 3000 });
-            const finalValue = await page.locator('.reasoning-effort-select').first().inputValue();
+            const finalValue = await page.locator('.reasoning-effort-input').first().inputValue();
             expect(finalValue).toBe('default');
 
             // Close settings
@@ -457,40 +479,87 @@ test.describe.serial('Reasoning effort setting', () => {
             await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
         }
     });
+
+    test('should persist a custom reasoning effort after save', async ({ page }) => {
+        // Open settings
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+
+        // Expand first provider
+        const providerHeader = page.locator('.provider-card-header').first();
+        await providerHeader.click();
+        await expect(page.locator('.provider-details')).toBeVisible({ timeout: 5000 });
+
+        const reasoningInputs = page.locator('.reasoning-effort-input');
+        if (await reasoningInputs.count() === 0) return;
+
+        // Type a value that is not one of the known levels (no suggestion matches)
+        await reasoningInputs.first().fill('xhigh');
+        await expect(reasoningInputs.first()).toHaveValue('xhigh');
+        await expect(page.locator('.reasoning-effort-list')).toBeHidden();
+
+        // Save
+        await page.click('button:has-text("Save")');
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
+
+        // The custom value must round-trip through the config API (model-a is the
+        // first model). The UI save clears LLM provider names, so look up by URL.
+        const config = await apiGetConfig(page);
+        const provider = config.providers.find((p: any) => p.url === 'http://localhost:9999/v1');
+        expect(provider).toBeDefined();
+        const modelA = provider.models.find((m: any) => (typeof m === 'string' ? m : m.name) === 'model-a');
+        expect(modelA).toBeDefined();
+        expect(modelA.reasoning_effort).toBe('xhigh');
+
+        // Reopen settings and verify the input shows the custom value
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        await providerHeader.click();
+        await expect(page.locator('.provider-details')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('.reasoning-effort-input').first()).toHaveValue('xhigh');
+
+        // Close settings (beforeEach resets the config for the next test)
+        await page.click('button:has-text("Cancel")');
+        const discardBtn = page.getByRole('button', { name: 'Discard' });
+        if (await discardBtn.isVisible().catch(() => false)) {
+            await discardBtn.click();
+        }
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+    });
 });
 
 // ─── Primary Providers Tests ────────────────────────────────────────────────
 
 test.describe.serial('Primary Providers', () => {
+    // Server-assigned provider IDs (the modal resolves worker/utility by ID).
+    let workerProviderId = '';
+    let utilityProviderId = '';
+
     test.beforeEach(async ({ page }) => {
         await page.keyboard.press('Escape').catch(() => {});
         await expect(page.locator('.modal')).not.toBeVisible({ timeout: 2000 }).catch(() => {});
 
-        // Set up two providers
-        await apiPutConfig(page, {
-            providers: [
-                {
-                    name: 'primary-a',
-                    display_name: 'Primary A',
-                    url: 'http://localhost:9999/v1',
-                    models: [{ name: 'model-a1' }, { name: 'model-a2' }],
-                    concurrency: 1,
-                },
-                {
-                    name: 'primary-b',
-                    display_name: 'Primary B',
-                    url: 'http://localhost:9998/v1',
-                    models: [{ name: 'model-b1' }],
-                    concurrency: 1,
-                },
-            ],
-            worker_provider: 'primary-a',
-            worker_model: 'model-a1',
-            utility_provider: 'primary-b',
-            utility_model: 'model-b1',
-        });
+        // Set up two providers; worker/utility refs are the assigned IDs.
+        const idByName = await seedProvidersByIds(page, [
+            {
+                name: 'primary-a',
+                display_name: 'Primary A',
+                url: 'http://localhost:9999/v1',
+                models: [{ name: 'model-a1' }, { name: 'model-a2' }],
+                concurrency: 1,
+            },
+            {
+                name: 'primary-b',
+                display_name: 'Primary B',
+                url: 'http://localhost:9998/v1',
+                models: [{ name: 'model-b1' }],
+                concurrency: 1,
+            },
+        ], { worker: 'primary-a', workerModel: 'model-a1', utility: 'primary-b', utilityModel: 'model-b1' });
+        workerProviderId = idByName['primary-a'];
+        utilityProviderId = idByName['primary-b'];
         await waitForConfig(page, c =>
-            c.providers && c.providers.length >= 2 && c.worker_provider === 'primary-a'
+            c.providers && c.providers.length >= 2 && c.worker_provider === workerProviderId
         );
         await page.goto('/');
         await page.waitForSelector('.card', { timeout: 10000 });
@@ -505,14 +574,14 @@ test.describe.serial('Primary Providers', () => {
         await expect(page.locator('.primary-provider-row').nth(0)).toContainText('Worker');
         await expect(page.locator('.primary-provider-row').nth(1)).toContainText('Utility');
 
-        // Worker provider select has correct value
+        // Worker provider select has the assigned ID as its value
         const workerSelects = page.locator('.primary-provider-row').nth(0).locator('.primary-provider-select');
-        await expect(workerSelects.nth(0)).toHaveValue('primary-a');
+        await expect(workerSelects.nth(0)).toHaveValue(workerProviderId);
         await expect(workerSelects.nth(1)).toHaveValue('model-a1');
 
         // Utility provider select has correct value
         const utilitySelects = page.locator('.primary-provider-row').nth(1).locator('.primary-provider-select');
-        await expect(utilitySelects.nth(0)).toHaveValue('primary-b');
+        await expect(utilitySelects.nth(0)).toHaveValue(utilityProviderId);
         await expect(utilitySelects.nth(1)).toHaveValue('model-b1');
     });
 
@@ -543,12 +612,13 @@ test.describe.serial('Primary Providers', () => {
         await expect(page.locator('.modal')).not.toBeVisible({ timeout: 10000 });
 
         const config = await apiGetConfig(page);
-        // Provider names are regenerated from URLs on save, so worker/utility
-        // provider references must point at a provider matching the configured URL.
+        // Provider names are cleared for LLM providers on UI save, so worker/
+        // utility provider references (provider IDs) must resolve to a provider
+        // matching the configured URL.
         expect(config.worker_model).toBe('model-a2');
         expect(config.utility_model).toBe('model-b1');
-        const workerProvider = config.providers.find((p: any) => p.name === config.worker_provider);
-        const utilityProvider = config.providers.find((p: any) => p.name === config.utility_provider);
+        const workerProvider = config.providers.find((p: any) => String(p.id) === config.worker_provider);
+        const utilityProvider = config.providers.find((p: any) => String(p.id) === config.utility_provider);
         expect(workerProvider).toBeDefined();
         expect(workerProvider.url).toBe('http://localhost:9999/v1');
         expect(utilityProvider).toBeDefined();
