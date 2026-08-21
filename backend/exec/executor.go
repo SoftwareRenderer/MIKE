@@ -1766,12 +1766,20 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			}
 			createCmd := osexec.Command("git", "-C", project.Path, "branch", targetBranch, startPoint)
 			if out, err := createCmd.CombinedOutput(); err != nil {
-				log.Printf("[merge] task=%s failed to create branch %q from %q: %s", taskID, targetBranch, startPoint, string(out))
-				te.logSystemMessage(taskID, task.CurrentThreadID, "error",
-					fmt.Sprintf("Error: could not create branch %q from %q — merge skipped.", targetBranch, startPoint))
-				return fmt.Errorf("create branch %q: %w", targetBranch, err)
+				// A concurrent merge may have created it between our check and
+				// now — re-verify before failing.
+				recheck := osexec.Command("git", "-C", project.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+targetBranch)
+				if recheck.Run() == nil {
+					log.Printf("[merge] task=%s branch %q created by a concurrent merge, proceeding", taskID, targetBranch)
+				} else {
+					log.Printf("[merge] task=%s failed to create branch %q from %q: %s", taskID, targetBranch, startPoint, string(out))
+					te.logSystemMessage(taskID, task.CurrentThreadID, "error",
+						fmt.Sprintf("Error: could not create branch %q from %q — merge skipped.", targetBranch, startPoint))
+					return fmt.Errorf("create branch %q: %w", targetBranch, err)
+				}
+			} else {
+				log.Printf("[merge] task=%s created branch %q from %q", taskID, targetBranch, startPoint)
 			}
-			log.Printf("[merge] task=%s created branch %q from %q", taskID, targetBranch, startPoint)
 		}
 	}
 	if targetBranch == "" || targetBranch == "HEAD" {
@@ -1792,24 +1800,45 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 	}
 
 	if mergeInWorktree != "" {
-		return te.mergeInWorktree(projectID, mergeInWorktree, targetBranch, taskBranch, taskID, task.ParentTaskID)
-	}
-	// For root tasks only: if the target branch is checked out in a worktree, use it.
-	// For child tasks, we always merge into the parent's worktree (created above if needed).
-	if task.ParentTaskID == "" {
-		if wtPath := te.findWorktreeForBranch(projectID, targetBranch); wtPath != "" {
-			return te.mergeInWorktree(projectID, wtPath, targetBranch, taskBranch, taskID, "")
+		err := te.mergeInWorktree(projectID, mergeInWorktree, targetBranch, taskBranch, taskID, task.ParentTaskID)
+		if err == nil && task.ParentTaskID != "" {
+			te.broadcastParentDiffStats(projectID, task.ParentTaskID)
 		}
+		return err
 	}
-	return te.mergeInProject(projectID, targetBranch, taskBranch, taskID)
+	// Root tasks only reach mergeInProject (child tasks always merge into the
+	// parent's worktree above). The worktree routing for the target branch
+	// happens inside it, under the project merge lock.
+	err = te.mergeInProject(projectID, targetBranch, taskBranch, taskID)
+	if err == nil && task.ParentTaskID != "" {
+		te.broadcastParentDiffStats(projectID, task.ParentTaskID)
+	}
+	return err
 }
 
 // mergeInProject performs a merge in the project's main directory.
 func (te *TaskExecutor) mergeInProject(projectID, targetBranch, taskBranch, taskID string) error {
 	project, _ := te.store.GetProject(projectID)
+	// Serialize against other merges on this project's main checkout: it has a
+	// single HEAD/index, so interleaved merges clobber each other's checkout,
+	// stashes, and restore. Held for the whole sequence below (capture →
+	// merge → restore → stash pop). Lock order: before the project stash mutex.
+	te.worktreeMgr.GetProjectMergeMu(projectID).Lock()
+	defer te.worktreeMgr.GetProjectMergeMu(projectID).Unlock()
 	// Prune stale worktree registrations so a deleted worktree doesn't block checkout.
 	te.worktreeMgr.GitRunInProject(projectID, "worktree", "prune")
-	return te.mergeInto(projectID, project.Path, targetBranch, taskBranch, taskID)
+	// If the target branch is checked out in a worktree, merge there instead.
+	// This check must run under the merge lock: an in-flight main-checkout
+	// merge temporarily checks the target out in the main checkout, which an
+	// unlocked scan would mis-route to (skipping both the lock and the
+	// checkout restore).
+	if wtPath := te.findWorktreeForBranch(projectID, targetBranch); wtPath != "" {
+		return te.mergeInWorktree(projectID, wtPath, targetBranch, taskBranch, taskID, "")
+	}
+	// The merge temporarily switches the project's main checkout to the target
+	// branch. Remember what it is on now so the merge can put it back — the
+	// user's working checkout is theirs, not the merge's.
+	return te.mergeInto(projectID, project.Path, targetBranch, taskBranch, taskID, currentCheckoutRef(project.Path))
 }
 
 // findWorktreeForBranch returns the path of the worktree that has the given branch
@@ -1853,13 +1882,40 @@ func (te *TaskExecutor) mergeInWorktree(projectID, worktreePath, targetBranch, t
 		te.GetWorktreeMu(ownerTaskID).Lock()
 		defer te.GetWorktreeMu(ownerTaskID).Unlock()
 	}
-	return te.mergeInto(projectID, worktreePath, targetBranch, taskBranch, taskID)
+	// Worktrees must stay on their own branch — no checkout restore.
+	return te.mergeInto(projectID, worktreePath, targetBranch, taskBranch, taskID, "")
+}
+
+// currentCheckoutRef returns the ref (branch name, or SHA when detached) that
+// dir's HEAD is on. Returns "" when it cannot be determined — in that case the
+// merge leaves the checkout where it ends up, as before.
+func currentCheckoutRef(dir string) string {
+	cmd := osexec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	ref := strings.TrimSpace(string(out))
+	if ref == "" || ref == "HEAD" {
+		// Detached HEAD — remember the exact commit.
+		cmd = osexec.Command("git", "rev-parse", "HEAD")
+		cmd.Dir = dir
+		out, err = cmd.Output()
+		if err != nil {
+			return ""
+		}
+		ref = strings.TrimSpace(string(out))
+	}
+	return ref
 }
 
 // mergeInto performs a merge of taskBranch into targetBranch inside the given directory.
 // Both mergeInProject and mergeInWorktree delegate here — the only difference between them
-// is the directory in which git commands are run.
-func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, taskID string) error {
+// is the directory in which git commands are run. When restoreRef is non-empty and differs
+// from targetBranch, dir's checkout is switched back to restoreRef after the merge,
+// preserving the caller's checkout state.
+func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, taskID, restoreRef string) error {
 	// Stash any working tree changes (serialized with shared stash mutex).
 	hadStash := false
 	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
@@ -1874,6 +1930,16 @@ func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, task
 			te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 		}
 	}()
+	// Restore the caller's checkout after the merge. Registered after the
+	// stash-pop defer above, so (LIFO) it runs first and the stashed changes
+	// pop back onto the user's own branch rather than the merge target.
+	if restoreRef != "" && restoreRef != targetBranch {
+		defer func() {
+			if _, err := te.worktreeMgr.GitRunInDirOutput(dir, "checkout", "-f", restoreRef); err != nil {
+				log.Printf("[merge] task=%s failed to restore checkout to %s: %v", taskID, restoreRef, err)
+			}
+		}()
+	}
 
 	// Checkout target branch
 	if err := te.worktreeMgr.GitRunInDir(dir, "checkout", "-f", targetBranch); err != nil {

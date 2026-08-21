@@ -666,7 +666,12 @@ func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request) {
 	if thread != nil {
 		forkBranch = thread.GitBranch
 	}
-	baseRef, _ := h.worktreeMgr.ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, forkBranch)
+	project, _ := h.store.GetProject(projectID)
+	projectPath, originBranch := "", ""
+	if project != nil {
+		projectPath, originBranch = project.Path, project.OriginBranch
+	}
+	baseRef, _ := h.worktreeMgr.ResolveDiffBaseline(taskID, h.worktreeMgr.ResolveTaskBaseline(projectPath, originBranch, task), task.Branch, forkBranch)
 
 	result, err := h.worktreeMgr.GetTaskCommits(taskID, baseRef)
 	if err != nil {
@@ -816,11 +821,12 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 			forkBranch = thread.GitBranch
 		}
 		// Use the captured base commit for the original baseline to avoid moving branch pointers.
-		baseline := task.BaseRef
-		if task.BaseCommit != "" {
-			baseline = task.BaseCommit
+		project, _ := h.store.GetProject(projectID)
+		projectPath, originBranch := "", ""
+		if project != nil {
+			projectPath, originBranch = project.Path, project.OriginBranch
 		}
-		baseRef, _ = h.worktreeMgr.ResolveDiffBaseline(taskID, baseline, task.Branch, forkBranch)
+		baseRef, _ = h.worktreeMgr.ResolveDiffBaseline(taskID, h.worktreeMgr.ResolveTaskBaseline(projectPath, originBranch, task), task.Branch, forkBranch)
 	}
 
 	// Use headRef directly to show changes accumulated up to AND including the checkpoint.

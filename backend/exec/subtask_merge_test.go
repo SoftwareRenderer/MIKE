@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -268,6 +269,359 @@ func TestMergeBranch_SubtaskMergesIntoParentBranch(t *testing.T) {
 	runGit(t, repoDir, "checkout", "master")
 	if _, err := os.Stat(subtaskFile); err == nil {
 		t.Error("subtask file should NOT exist on master (origin) branch — merge should target parent, not origin")
+	}
+}
+
+// TestMergeBranch_CreatesMissingBaseBranch verifies that a root task with an
+// explicitly configured base branch that doesn't exist yet (a custom name
+// typed into Edit Task for a separate exploration branch) gets the branch
+// created from the project HEAD before the merge — so commit-and-done lands
+// the task's work on the new branch instead of failing at checkout.
+func TestMergeBranch_CreatesMissingBaseBranch(t *testing.T) {
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+
+	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Skipf("cannot determine main branch: %v", err)
+	}
+	mainBranch := strings.TrimSpace(string(out))
+	if mainBranch == "" || mainBranch == "HEAD" {
+		t.Skipf("cannot determine main branch: %q", mainBranch)
+	}
+
+	taskID := "root-custom-base"
+	task := &types.Task{
+		ID:             taskID,
+		ProjectID:      projectID,
+		Title:          "Root with custom base",
+		Prompt:         "Explore an idea",
+		Status:         "review",
+		Branch:         "task/" + taskID,
+		BaseRef:        "explore/idea", // custom name, not yet a branch in the repo
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}
+	te.store.CreateTask(task)
+
+	// Task branch with a commit on it; the project checkout stays on main.
+	runGit(t, repoDir, "branch", task.Branch)
+	runGit(t, repoDir, "checkout", task.Branch)
+	taskFile := filepath.Join(repoDir, "idea_file.txt")
+	os.WriteFile(taskFile, []byte("idea work\n"), 0o644)
+	runGit(t, repoDir, "add", "idea_file.txt")
+	runGit(t, repoDir, "commit", "-m", "idea work")
+	runGit(t, repoDir, "checkout", mainBranch)
+
+	if out, err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "explore/idea").CombinedOutput(); err == nil {
+		t.Fatalf("precondition failed: explore/idea should not exist yet: %s", out)
+	}
+
+	if err := te.MergeBranch(projectID, taskID, task); err != nil {
+		t.Fatalf("MergeBranch failed: %v", err)
+	}
+
+	// The base branch now exists and contains the task's commit.
+	cmd = exec.Command("git", "-C", repoDir, "show", "explore/idea:idea_file.txt")
+	out, err = cmd.Output()
+	if err != nil {
+		t.Fatalf("idea_file.txt should exist on explore/idea after merge: %v (%s)", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "idea work" {
+		t.Errorf("unexpected content on explore/idea: %q", string(out))
+	}
+
+	// The base branch was created from the project HEAD (main), not from the
+	// task branch: main itself must NOT contain the task's file.
+	if out, err := exec.Command("git", "-C", repoDir, "show", mainBranch+":idea_file.txt").CombinedOutput(); err == nil {
+		t.Errorf("main branch should NOT contain the task file after merging into the custom base: %s", out)
+	}
+
+	// The project's main checkout must be back on the branch it was on before
+	// the merge (mergeInto restores it).
+	cmd = exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err = cmd.Output()
+	if err != nil {
+		t.Fatalf("cannot determine checkout after merge: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != mainBranch {
+		t.Errorf("main checkout should be restored to %s, got %q", mainBranch, got)
+	}
+}
+
+// TestMergeInto_RestoresProjectCheckout verifies that a root-task merge
+// restores the project's main checkout to where the user was working —
+// branch and uncommitted changes — after merging into the target branch.
+func TestMergeInto_RestoresProjectCheckout(t *testing.T) {
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+
+	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Skipf("cannot determine main branch: %v", err)
+	}
+	mainBranch := strings.TrimSpace(string(out))
+	if mainBranch == "" || mainBranch == "HEAD" {
+		t.Skipf("cannot determine main branch: %q", mainBranch)
+	}
+
+	// The user is working on their own branch with uncommitted changes.
+	runGit(t, repoDir, "checkout", "-b", "user-feature")
+	localFile := filepath.Join(repoDir, "local_edit.txt")
+	os.WriteFile(localFile, []byte("user's in-progress work\n"), 0o644)
+
+	// A task branch (forked from main) with a commit to merge into main. The
+	// main checkout stays on user-feature — so the merge runs in the project
+	// directory and must restore the checkout afterwards.
+	taskID := "restore-checkout"
+	taskBranch := "task/" + taskID
+	runGit(t, repoDir, "checkout", "-b", taskBranch, mainBranch)
+	taskFile := filepath.Join(repoDir, "task_file.txt")
+	os.WriteFile(taskFile, []byte("task work\n"), 0o644)
+	runGit(t, repoDir, "add", "task_file.txt")
+	runGit(t, repoDir, "commit", "-m", "task work")
+	runGit(t, repoDir, "checkout", "user-feature")
+
+	task := &types.Task{
+		ID:             taskID,
+		ProjectID:      projectID,
+		Title:          "Restore checkout",
+		Prompt:         "Merge test",
+		Status:         "review",
+		Branch:         taskBranch,
+		BaseRef:        mainBranch,
+		LlamaServerURL: "http://localhost:8080",
+		ModelName:      "test-model",
+	}
+	te.store.CreateTask(task)
+
+	if err := te.MergeBranch(projectID, taskID, task); err != nil {
+		t.Fatalf("MergeBranch failed: %v", err)
+	}
+
+	// The merge landed on the main branch...
+	cmd = exec.Command("git", "-C", repoDir, "show", mainBranch+":task_file.txt")
+	out, err = cmd.Output()
+	if err != nil {
+		t.Fatalf("task_file.txt should exist on %s after merge: %v (%s)", mainBranch, err, out)
+	}
+	if strings.TrimSpace(string(out)) != "task work" {
+		t.Errorf("unexpected content on %s: %q", mainBranch, string(out))
+	}
+
+	// ...and the main checkout is back on the user's branch...
+	cmd = exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err = cmd.Output()
+	if err != nil {
+		t.Fatalf("cannot determine checkout after merge: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "user-feature" {
+		t.Errorf("main checkout should be restored to user-feature, got %q", got)
+	}
+
+	// ...with the user's uncommitted changes back in the working tree.
+	data, err := os.ReadFile(localFile)
+	if err != nil {
+		t.Fatalf("user's uncommitted file should be restored: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "user's in-progress work" {
+		t.Errorf("unexpected restored content: %q", string(data))
+	}
+
+	// The user's branch itself must not have received the merge.
+	if out, err := exec.Command("git", "-C", repoDir, "show", "user-feature:task_file.txt").CombinedOutput(); err == nil {
+		t.Errorf("user-feature should NOT contain the task file: %s", out)
+	}
+}
+
+// TestMergeBranch_ConcurrentProjectMerges verifies that simultaneous root-task
+// merges on the same project don't clobber each other's main-checkout state:
+// both succeed (including a shared custom base that only one of them may
+// create), each lands on the shared base, main stays clean, and the checkout
+// is restored.
+func TestMergeBranch_ConcurrentProjectMerges(t *testing.T) {
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+
+	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Skipf("cannot determine main branch: %v", err)
+	}
+	mainBranch := strings.TrimSpace(string(out))
+	if mainBranch == "" || mainBranch == "HEAD" {
+		t.Skipf("cannot determine main branch: %q", mainBranch)
+	}
+
+	// Two tasks that merge into the SAME not-yet-existing custom base — the
+	// create-branch race and the main-checkout race in one.
+	mkTask := func(taskID, file, content string) *types.Task {
+		taskBranch := "task/" + taskID
+		runGit(t, repoDir, "checkout", "-b", taskBranch, mainBranch)
+		os.WriteFile(filepath.Join(repoDir, file), []byte(content+"\n"), 0o644)
+		runGit(t, repoDir, "add", file)
+		runGit(t, repoDir, "commit", "-m", file)
+		runGit(t, repoDir, "checkout", mainBranch)
+		task := &types.Task{
+			ID:             taskID,
+			ProjectID:      projectID,
+			Title:          taskID,
+			Prompt:         "p",
+			Status:         "review",
+			Branch:         taskBranch,
+			BaseRef:        "shared-base",
+			LlamaServerURL: "http://localhost:8080",
+			ModelName:      "test-model",
+		}
+		te.store.CreateTask(task)
+		return task
+	}
+	taskA := mkTask("conc-a", "file_a.txt", "A")
+	taskB := mkTask("conc-b", "file_b.txt", "B")
+
+	// Start both merges at the same instant.
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	start := make(chan struct{})
+	for i, task := range []*types.Task{taskA, taskB} {
+		i, task := i, task
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs[i] = te.MergeBranch(projectID, task.ID, task)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if errs[0] != nil || errs[1] != nil {
+		t.Fatalf("concurrent merges should both succeed: a=%v b=%v", errs[0], errs[1])
+	}
+
+	// Both files landed on the shared base...
+	for _, f := range []string{"file_a.txt", "file_b.txt"} {
+		out, err := exec.Command("git", "-C", repoDir, "show", "shared-base:"+f).Output()
+		if err != nil {
+			t.Fatalf("%s should be on shared-base: %v (%s)", f, err, out)
+		}
+	}
+
+	// ...main stayed clean...
+	if out, err := exec.Command("git", "-C", repoDir, "show", mainBranch+":file_a.txt").CombinedOutput(); err == nil {
+		t.Errorf("main must NOT contain file_a.txt: %s", out)
+	}
+
+	// ...and the main checkout was restored to where both merges started.
+	out, err = exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("cannot determine checkout after merges: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != mainBranch {
+		t.Errorf("main checkout should be restored to %s, got %q", mainBranch, got)
+	}
+}
+
+// TestMergeBranch_ConcurrentDifferentTargets exposes the main-checkout
+// clobbering race: two root tasks merging into DIFFERENT not-yet-existing
+// bases at the same time. Without serialization, one merge can run after the
+// other's `git checkout -f` switched the shared checkout — landing on the
+// wrong branch — and the stashed working-tree changes can pop onto the wrong
+// branch.
+func TestMergeBranch_ConcurrentDifferentTargets(t *testing.T) {
+	te, repoDir, projectID, _ := setupExecutorWithGit(t)
+
+	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Skipf("cannot determine main branch: %v", err)
+	}
+	mainBranch := strings.TrimSpace(string(out))
+	if mainBranch == "" || mainBranch == "HEAD" {
+		t.Skipf("cannot determine main branch: %q", mainBranch)
+	}
+
+	// Uncommitted work in the main checkout — must survive both merges and
+	// pop back onto the user's branch, not a merge target.
+	localFile := filepath.Join(repoDir, "local_edit.txt")
+	os.WriteFile(localFile, []byte("user's in-progress work\n"), 0o644)
+
+	mkTask := func(taskID, base, file, content string) *types.Task {
+		taskBranch := "task/" + taskID
+		runGit(t, repoDir, "checkout", "-b", taskBranch, mainBranch)
+		os.WriteFile(filepath.Join(repoDir, file), []byte(content+"\n"), 0o644)
+		runGit(t, repoDir, "add", file)
+		runGit(t, repoDir, "commit", "-m", file)
+		runGit(t, repoDir, "checkout", mainBranch)
+		task := &types.Task{
+			ID:             taskID,
+			ProjectID:      projectID,
+			Title:          taskID,
+			Prompt:         "p",
+			Status:         "review",
+			Branch:         taskBranch,
+			BaseRef:        base,
+			LlamaServerURL: "http://localhost:8080",
+			ModelName:      "test-model",
+		}
+		te.store.CreateTask(task)
+		return task
+	}
+	taskA := mkTask("conc-x", "base-x", "file_x.txt", "X")
+	taskB := mkTask("conc-y", "base-y", "file_y.txt", "Y")
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	start := make(chan struct{})
+	for i, task := range []*types.Task{taskA, taskB} {
+		i, task := i, task
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs[i] = te.MergeBranch(projectID, task.ID, task)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if errs[0] != nil || errs[1] != nil {
+		t.Fatalf("concurrent merges should both succeed: x=%v y=%v", errs[0], errs[1])
+	}
+
+	// Each file must be on ITS OWN target — and only there.
+	checks := []struct {
+		ref  string
+		file string
+		want bool
+	}{
+		{"base-x", "file_x.txt", true},
+		{"base-x", "file_y.txt", false},
+		{"base-y", "file_y.txt", true},
+		{"base-y", "file_x.txt", false},
+		{mainBranch, "file_x.txt", false},
+		{mainBranch, "file_y.txt", false},
+	}
+	for _, c := range checks {
+		_, err := exec.Command("git", "-C", repoDir, "show", c.ref+":"+c.file).Output()
+		if c.want && err != nil {
+			t.Errorf("%s should be on %s (wrong-branch merge?)", c.file, c.ref)
+		}
+		if !c.want && err == nil {
+			t.Errorf("%s should NOT be on %s (wrong-branch merge?)", c.file, c.ref)
+		}
+	}
+
+	// The user's uncommitted changes must be back on the main branch.
+	data, err := os.ReadFile(localFile)
+	if err != nil || strings.TrimSpace(string(data)) != "user's in-progress work" {
+		t.Errorf("user's uncommitted changes should be restored (err=%v, data=%q)", err, localFile)
+	}
+
+	// And the checkout is back on the main branch.
+	out, err = exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("cannot determine checkout after merges: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != mainBranch {
+		t.Errorf("main checkout should be restored to %s, got %q", mainBranch, got)
 	}
 }
 
@@ -1248,6 +1602,99 @@ func TestMergeBranch_ParentBranchCreatedOnDemand(t *testing.T) {
 	if _, err := cmd.CombinedOutput(); err == nil {
 		t.Error("subtask file should NOT exist on master — merge must target parent branch, not origin")
 	}
+}
+
+// TestMergeBranch_ParentDiffStatsAfterSubtaskMerge verifies that after a subtask
+// merges into its parent's branch, the parent's diff stats reflect the merged
+// committed changes (drives the card's "Commit and move to done" button). The
+// parent was never started: it has a branch but no recorded base_ref/base_commit.
+func TestMergeBranch_ParentDiffStatsAfterSubtaskMerge(t *testing.T) {
+	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
+
+	parentID := "parent-stats"
+	parent := &types.Task{
+		ID:        parentID,
+		ProjectID: projectID,
+		Title:     "Parent Task",
+		Prompt:    "Parent prompt",
+		Status:    "backlog",
+	}
+	te.store.CreateTask(parent)
+
+	subtaskID := "subtask-stats"
+	subtask := &types.Task{
+		ID:           subtaskID,
+		ProjectID:    projectID,
+		Title:        "Subtask",
+		Prompt:       "Subtask prompt",
+		Status:       "review",
+		Branch:       "task/" + subtaskID,
+		ParentTaskID: parentID,
+	}
+	te.store.CreateTask(subtask)
+
+	// Subtask branch with its own commit (branched from master).
+	runGit(t, repoDir, "branch", subtask.Branch, "master")
+	runGit(t, repoDir, "checkout", subtask.Branch)
+	os.WriteFile(filepath.Join(repoDir, "subtask_merged.txt"), []byte("subtask work\n"), 0o644)
+	runGit(t, repoDir, "add", "subtask_merged.txt")
+	runGit(t, repoDir, "commit", "-m", "subtask work")
+	// The project's main checkout is on master when the parent branch is created.
+	runGit(t, repoDir, "checkout", "master")
+
+	// Parent branch + worktree are auto-created (parent never started — no
+	// base_ref/base_commit recorded).
+	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	if err := te.EnsureParentBranch(projectID, parentFromDB); err != nil {
+		t.Fatalf("EnsureParentBranch failed: %v", err)
+	}
+	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
+	if parentFromDB.Branch == "" {
+		t.Fatal("parent should have a branch after EnsureParentBranch")
+	}
+
+	// No changes yet — no stats.
+	if ev := te.computeTaskDiffStats(projectID, parentID); ev != nil {
+		t.Fatalf("expected no diff stats before the merge, got %+v", ev)
+	}
+
+	// Merge the subtask into the parent branch.
+	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	if err := te.MergeBranch(projectID, subtaskID, subtaskFromDB); err != nil {
+		t.Fatalf("MergeBranch failed: %v", err)
+	}
+
+	// The parent's stats must now surface the merged commit.
+	ev := te.computeTaskDiffStats(projectID, parentID)
+	if ev == nil {
+		t.Fatal("expected diff stats for the parent after the subtask merge")
+	}
+	if ev.TaskID != parentID || ev.ProjectID != projectID {
+		t.Errorf("unexpected event identity: task=%q project=%q", ev.TaskID, ev.ProjectID)
+	}
+	if !ev.HasCommittedChanges {
+		t.Error("expected HasCommittedChanges for the merged subtask changes")
+	}
+	if ev.FilesN != 1 {
+		t.Errorf("expected 1 changed file, got %d", ev.FilesN)
+	}
+	if ev.TrackedAdd != 1 {
+		t.Errorf("expected 1 added line, got %d", ev.TrackedAdd)
+	}
+	if _, ok := ev.ChangedHashes["subtask_merged.txt"]; !ok {
+		t.Errorf("expected subtask_merged.txt in changed hashes, got keys: %v", hashKeys(ev.ChangedHashes))
+	}
+	if ev.AlreadyMerged {
+		t.Error("parent branch is not yet merged into main — AlreadyMerged must be false")
+	}
+}
+
+func hashKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // TestMergeBranch_RootTaskMergesIntoOriginBranch verifies that a root task

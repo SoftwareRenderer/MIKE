@@ -719,11 +719,12 @@ func (asm *AppStreamManager) getDiffBaseline(task types.Task) string {
 	}
 	// Use BaseCommit (fixed hash captured at task start) when available,
 	// falling back to BaseRef (branch name). Matches API handler logic.
-	baseline := task.BaseRef
-	if task.BaseCommit != "" {
-		baseline = task.BaseCommit
+	project, err := asm.store.GetProject(task.ProjectID)
+	projectPath, originBranch := "", ""
+	if err == nil && project != nil {
+		projectPath, originBranch = project.Path, project.OriginBranch
 	}
-	baseRef, _ := asm.worktreeMgr.ResolveDiffBaseline(task.ID, baseline, task.Branch, forkBranch)
+	baseRef, _ := asm.worktreeMgr.ResolveDiffBaseline(task.ID, asm.worktreeMgr.ResolveTaskBaseline(projectPath, originBranch, &task), task.Branch, forkBranch)
 	return baseRef
 }
 
