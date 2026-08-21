@@ -216,6 +216,150 @@ func TestResolveDiffBaseline_ValidBaseRef(t *testing.T) {
 	}
 }
 
+func revParse(t *testing.T, dir, ref string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", ref).Output()
+	if err != nil {
+		t.Fatalf("git rev-parse %s: %v", ref, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestDivergenceBase_ReturnsForkPoint verifies that for a branch forked from the main
+// branch with commits on both sides, DivergenceBase returns the fork point.
+func TestDivergenceBase_ReturnsForkPoint(t *testing.T) {
+	repoDir, _, _, _, wm := setupTestRepo(t)
+
+	mainBranch, err := wm.gitCurrentBranch(repoDir)
+	if err != nil || mainBranch == "" || mainBranch == "HEAD" {
+		t.Skipf("cannot determine main branch: %v", err)
+	}
+	forkPoint := revParse(t, repoDir, "HEAD")
+
+	// Fork a task branch from the initial commit.
+	runGit(t, repoDir, "branch", "task/divergent")
+
+	// Advance the task branch with its own commit.
+	runGit(t, repoDir, "checkout", "task/divergent")
+	writeFile(t, repoDir, "branch.txt", "branch\n")
+	runGit(t, repoDir, "add", "branch.txt")
+	runGit(t, repoDir, "commit", "-m", "branch commit")
+
+	// Advance main with its own commit.
+	runGit(t, repoDir, "checkout", mainBranch)
+	writeFile(t, repoDir, "main.txt", "main\n")
+	runGit(t, repoDir, "add", "main.txt")
+	runGit(t, repoDir, "commit", "-m", "main commit")
+
+	if got := wm.DivergenceBase(repoDir, mainBranch, "task/divergent"); got != forkPoint {
+		t.Errorf("DivergenceBase(explicit main) = %q, want fork point %q", got, forkPoint)
+	}
+	// Empty mainBranch falls back to the project's current branch.
+	if got := wm.DivergenceBase(repoDir, "", "task/divergent"); got != forkPoint {
+		t.Errorf("DivergenceBase(empty main) = %q, want fork point %q", got, forkPoint)
+	}
+}
+
+// TestDivergenceBase_InvalidRefs verifies the fallback returns "" when refs cannot
+// be resolved, so callers keep their current (empty baseline) behavior.
+func TestDivergenceBase_InvalidRefs(t *testing.T) {
+	repoDir, _, _, _, wm := setupTestRepo(t)
+
+	if got := wm.DivergenceBase(repoDir, "main", ""); got != "" {
+		t.Errorf("empty taskBranch should return empty, got %q", got)
+	}
+	if got := wm.DivergenceBase("", "main", "task/x"); got != "" {
+		t.Errorf("empty projectPath should return empty, got %q", got)
+	}
+	if got := wm.DivergenceBase(repoDir, "main", "task/does-not-exist"); got != "" {
+		t.Errorf("nonexistent branch should return empty, got %q", got)
+	}
+}
+
+// TestDivergenceBase_DetachedHead verifies that with an empty mainBranch and a
+// detached project HEAD there is no main branch to measure divergence from.
+func TestDivergenceBase_DetachedHead(t *testing.T) {
+	repoDir, _, _, _, wm := setupTestRepo(t)
+
+	mainBranch, err := wm.gitCurrentBranch(repoDir)
+	if err != nil || mainBranch == "" || mainBranch == "HEAD" {
+		t.Skipf("cannot determine main branch: %v", err)
+	}
+	runGit(t, repoDir, "checkout", "--detach", "HEAD")
+
+	if got := wm.DivergenceBase(repoDir, "", "main"); got != "" {
+		t.Errorf("detached HEAD with empty main should return empty, got %q", got)
+	}
+	// An explicit main still resolves.
+	if got := wm.DivergenceBase(repoDir, mainBranch, mainBranch); got == "" {
+		t.Error("explicit main should resolve, got empty")
+	}
+}
+
+// TestResolveTaskBaseline_Usability verifies the baseline fallback for tasks
+// with a branch but no USABLE recorded baseline: an unset base, a base that
+// equals the task's own branch, or a custom base name that doesn't exist in
+// the repo (e.g. typed into Edit Task before the branch was created) all
+// fall back to the divergence point, while valid recorded baselines are kept.
+func TestResolveTaskBaseline_Usability(t *testing.T) {
+	repoDir, _, _, _, wm := setupTestRepo(t)
+
+	mainBranch, err := wm.gitCurrentBranch(repoDir)
+	if err != nil || mainBranch == "" || mainBranch == "HEAD" {
+		t.Skipf("cannot determine main branch: %v", err)
+	}
+	forkPoint := revParse(t, repoDir, "HEAD")
+
+	// Fork a task branch with a commit on it.
+	runGit(t, repoDir, "branch", "task/baseline-check")
+	runGit(t, repoDir, "checkout", "task/baseline-check")
+	writeFile(t, repoDir, "work.txt", "work\n")
+	runGit(t, repoDir, "add", "work.txt")
+	runGit(t, repoDir, "commit", "-m", "task work")
+	task := &types.Task{Branch: "task/baseline-check"}
+
+	// No recorded baseline → divergence point.
+	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, task); got != forkPoint {
+		t.Errorf("empty baseline = %q, want divergence point %q", got, forkPoint)
+	}
+
+	// Base == the task's own branch (structurally empty diff) → divergence point.
+	own := *task
+	own.BaseRef = "task/baseline-check"
+	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, &own); got != forkPoint {
+		t.Errorf("own-branch baseline = %q, want divergence point %q", got, forkPoint)
+	}
+
+	// Custom base name that doesn't exist in the repo → divergence point.
+	missing := *task
+	missing.BaseRef = "explore/idea"
+	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, &missing); got != forkPoint {
+		t.Errorf("missing-branch baseline = %q, want divergence point %q", got, forkPoint)
+	}
+
+	// A valid, different base is kept as-is.
+	valid := *task
+	valid.BaseRef = mainBranch
+	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, &valid); got != mainBranch {
+		t.Errorf("valid baseline = %q, want %q", got, mainBranch)
+	}
+
+	// BaseCommit (start-time hash) always wins, even over a broken BaseRef.
+	hash := *task
+	hash.BaseRef = "explore/idea"
+	hash.BaseCommit = forkPoint
+	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, &hash); got != forkPoint {
+		t.Errorf("BaseCommit should win, got %q", got)
+	}
+
+	// A task without a branch passes the recorded baseline through untouched
+	// (nothing to resolve a divergence point against).
+	noBranch := &types.Task{BaseRef: "explore/idea"}
+	if got := wm.ResolveTaskBaseline(repoDir, mainBranch, noBranch); got != "explore/idea" {
+		t.Errorf("no-branch baseline = %q, want pass-through %q", got, "explore/idea")
+	}
+}
+
 func TestGetTaskDiff_RejectsFatalBaseRef(t *testing.T) {
 	_, taskID, _, _, wm := setupTestRepo(t)
 
