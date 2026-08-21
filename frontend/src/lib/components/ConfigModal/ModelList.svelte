@@ -4,7 +4,7 @@
     interface ModelEntry {
         name: string;
         readonly: boolean;
-        reasoning_effort?: 'default' | 'off' | 'low' | 'medium' | 'high' | 'max';
+        reasoning_effort?: string; // known level or custom value (passed through to the server)
         context_window?: number | null;
         // Per-model pricing/power overrides — null = inherit provider default
         input_price?: number | null;
@@ -31,6 +31,54 @@
         if (next.has(modelIdx)) next.delete(modelIdx);
         else next.add(modelIdx);
         expandedRows = next;
+    }
+
+    // Reasoning-effort suggestion list: which model row's list is open + active option.
+    // effortQuery is the text typed since focus — the pre-filled value does not
+    // filter the list shown on focus (matches native datalist behavior).
+    let effortOpen = $state(-1);
+    let effortActive = $state(0);
+    let effortQuery = $state('');
+
+    function closeEffortList() {
+        effortOpen = -1;
+    }
+
+    // Suggestion options filtered by the typed text (empty = all).
+    function visibleEffortOptions(): Array<{ value: string; label: string }> {
+        const q = effortQuery.trim().toLowerCase();
+        if (!q) return REASONING_EFFORT_OPTIONS;
+        return REASONING_EFFORT_OPTIONS.filter(o => o.value.toLowerCase().includes(q));
+    }
+
+    function selectEffort(mi: number, value: string) {
+        models[mi].reasoning_effort = value;
+        effortOpen = -1;
+        onDirty?.();
+    }
+
+    function handleEffortKeydown(e: KeyboardEvent, mi: number) {
+        const opts = visibleEffortOptions();
+        const n = opts.length;
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (n === 0) return;
+            if (effortOpen !== mi) {
+                effortOpen = mi;
+                effortActive = 0;
+                return;
+            }
+            effortActive = e.key === 'ArrowDown'
+                ? (effortActive + 1) % n
+                : (effortActive - 1 + n) % n;
+        } else if (e.key === 'Enter') {
+            if (effortOpen === mi && n > 0 && (models[mi].reasoning_effort ?? '').trim() !== opts[effortActive].value) {
+                e.preventDefault();
+                selectEffort(mi, opts[effortActive].value);
+            }
+        } else if (e.key === 'Escape') {
+            closeEffortList();
+        }
     }
 
     // '' → null (inherit provider default)
@@ -91,19 +139,39 @@
                             aria-label="Context window for {model.name || 'this model'}"
                         />
                     </div>
-                    <select
-                        class="reasoning-effort-select"
-                        value={model.reasoning_effort || 'default'}
-                        oninput={(e) => { model.reasoning_effort = (e.target as HTMLSelectElement).value as 'default' | 'off' | 'low' | 'medium' | 'high' | 'max'; onDirty?.(); }}
-                        aria-label="Reasoning effort for {model.name || 'this model'}"
-                        title="Reasoning effort (thinking budget)"
-                    >
-                        <optgroup label="Reasoning effort">
-                            {#each REASONING_EFFORT_OPTIONS as option}
-                                <option value={option.value}>{option.label}</option>
-                            {/each}
-                        </optgroup>
-                    </select>
+                    <div class="reasoning-effort-field">
+                        <input
+                            type="text"
+                            class="reasoning-effort-input"
+                            value={model.reasoning_effort ?? 'default'}
+                            onfocus={() => { effortOpen = mi; effortActive = 0; effortQuery = ''; }}
+                            oninput={(e) => { model.reasoning_effort = (e.target as HTMLInputElement).value; effortActive = 0; effortQuery = (e.target as HTMLInputElement).value; onDirty?.(); }}
+                            onblur={closeEffortList}
+                            onkeydown={(e) => handleEffortKeydown(e, mi)}
+                            placeholder="default"
+                            role="combobox"
+                            aria-expanded={effortOpen === mi && visibleEffortOptions().length > 0}
+                            aria-controls={`reasoning-effort-list-${index}-${mi}`}
+                            aria-activedescendant={effortOpen === mi ? `reasoning-effort-opt-${index}-${mi}-${Math.min(effortActive, Math.max(visibleEffortOptions().length - 1, 0))}` : undefined}
+                            aria-label="Reasoning effort for {model.name || 'this model'}"
+                            title="Reasoning effort (thinking budget). Pick a known level or type a custom value; custom values are sent to the server as-is."
+                        />
+                        {#if effortOpen === mi && visibleEffortOptions().length > 0}
+                            <div class="reasoning-effort-list" role="listbox" id={`reasoning-effort-list-${index}-${mi}`}>
+                                {#each visibleEffortOptions() as opt, oi}
+                                    <div
+                                        id={`reasoning-effort-opt-${index}-${mi}-${oi}`}
+                                        class="reasoning-effort-option"
+                                        class:active={oi === effortActive}
+                                        role="option"
+                                        tabindex="-1"
+                                        aria-selected={oi === effortActive}
+                                        onmousedown={(e) => { e.preventDefault(); selectEffort(mi, opt.value); }}
+                                    >{opt.label}</div>
+                                {/each}
+                            </div>
+                        {/if}
+                    </div>
                     <button
                         type="button"
                         class="btn-expand-model"
@@ -324,19 +392,53 @@
         color: var(--color-text-tertiary);
         font-style: italic;
     }
-    .reasoning-effort-select {
+    .reasoning-effort-field {
+        position: relative;
+        width: 100%;
+        flex-shrink: 0;
+    }
+    .reasoning-effort-input {
+        width: 100%;
         font-size: 0.75rem;
         padding: 2px 4px;
         background: var(--color-surface-1);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
         color: var(--color-text-secondary);
-        cursor: pointer;
-        flex-shrink: 0;
     }
-    .reasoning-effort-select:focus {
+    .reasoning-effort-input:focus {
         outline: none;
         border-color: var(--color-accent);
+    }
+    .reasoning-effort-input::placeholder {
+        color: var(--color-text-tertiary);
+        font-style: italic;
+    }
+    .reasoning-effort-list {
+        position: absolute;
+        top: calc(100% + 2px);
+        left: 0;
+        right: 0;
+        z-index: 30;
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        overflow: hidden;
+    }
+    .reasoning-effort-option {
+        font-size: 0.75rem;
+        line-height: 1.2;
+        padding: 4px 8px;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+    }
+    .reasoning-effort-option:hover,
+    .reasoning-effort-option.active {
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
     }
     .btn-expand-model {
         display: flex;
