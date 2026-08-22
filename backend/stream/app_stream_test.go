@@ -393,3 +393,100 @@ func TestTaskEventDelivery(t *testing.T) {
 		t.Fatal("expected hasTaskSubscribers=false after second unsubscribe")
 	}
 }
+
+// TestSandboxStatsTaskEventPayload verifies the sandbox_stats task event
+// serializes as flat JSON with the stats object under data.
+func TestSandboxStatsTaskEventPayload(t *testing.T) {
+	stats := &types.SandboxMemoryStats{
+		Running:   true,
+		CurrentMB: 412,
+		LimitMB:   1024,
+		PeakMB:    512,
+		OOMKills:  1,
+	}
+	payload := TaskEventPayload("test-task", types.StreamEvent{Type: types.WSTypeSandboxStats, Data: stats})
+	frame, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	msg := assertFlatJSON(t, frame, "type", "data", "task_event")
+	if msg["task_id"] != "test-task" {
+		t.Fatalf("expected task_id=test-task, got %v", msg["task_id"])
+	}
+	if msg["event"] != "sandbox_stats" {
+		t.Fatalf("expected event=sandbox_stats, got %v", msg["event"])
+	}
+	data := msg["data"].(map[string]any)
+	if data["running"] != true || data["memory_current_mb"] != float64(412) ||
+		data["memory_limit_mb"] != float64(1024) || data["memory_peak_mb"] != float64(512) ||
+		data["oom_kills"] != float64(1) {
+		t.Fatalf("unexpected stats payload: %v", data)
+	}
+}
+
+// TestLatestSandboxStatsFrame verifies the on-subscribe latest-stats seam:
+// nil without a provider, nil when the provider reports unknown stats, and a
+// well-formed frame otherwise.
+func TestLatestSandboxStatsFrame(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+
+	if frame := asm.latestSandboxStatsFrame("p1", "t1"); frame != nil {
+		t.Fatalf("expected nil frame without provider, got %s", frame)
+	}
+
+	asm.SetSandboxStatsProvider(func(projectID, taskID string) *types.SandboxMemoryStats {
+		return nil
+	})
+	if frame := asm.latestSandboxStatsFrame("p1", "t1"); frame != nil {
+		t.Fatalf("expected nil frame when provider returns nil, got %s", frame)
+	}
+
+	gotProject, gotTask := "", ""
+	asm.SetSandboxStatsProvider(func(projectID, taskID string) *types.SandboxMemoryStats {
+		gotProject, gotTask = projectID, taskID
+		return &types.SandboxMemoryStats{Running: true, CurrentMB: 100, LimitMB: 512}
+	})
+	frame := asm.latestSandboxStatsFrame("proj-x", "task-y")
+	if frame == nil {
+		t.Fatal("expected frame from provider, got nil")
+	}
+	if gotProject != "proj-x" || gotTask != "task-y" {
+		t.Fatalf("provider called with (%q, %q), want (\"proj-x\", \"task-y\")", gotProject, gotTask)
+	}
+	msg := assertFlatJSON(t, frame, "type", "data", "task_event")
+	if msg["event"] != "sandbox_stats" {
+		t.Fatalf("expected event=sandbox_stats, got %v", msg["event"])
+	}
+	data := msg["data"].(map[string]any)
+	if data["running"] != true || data["memory_current_mb"] != float64(100) || data["memory_limit_mb"] != float64(512) {
+		t.Fatalf("unexpected stats payload: %v", data)
+	}
+}
+
+// TestTaskBufferClearedOnTaskDeleted verifies that deleting a task drops its
+// replay buffer, so a late subscriber can never be replayed the deleted
+// task's frames (deletion bypasses the terminal status/complete events that
+// normally clear the buffer).
+func TestTaskBufferClearedOnTaskDeleted(t *testing.T) {
+	asm := NewAppStreamManager(nil, nil)
+
+	// Accumulate a few non-terminal frames in the task buffer.
+	for i := 0; i < 3; i++ {
+		asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "x"}})
+	}
+	if got := len(asm.GetTaskBuffer("proj-1", "task-1")); got != 3 {
+		t.Fatalf("buffer before delete = %d frames, want 3", got)
+	}
+
+	asm.BroadcastTaskDeleted("proj-1", "task-1")
+	if got := len(asm.GetTaskBuffer("proj-1", "task-1")); got != 0 {
+		t.Fatalf("buffer after delete = %d frames, want 0", got)
+	}
+
+	// Other tasks' buffers are untouched.
+	asm.SendTaskEvent("proj-1", "task-2", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "y"}})
+	if got := len(asm.GetTaskBuffer("proj-1", "task-2")); got != 1 {
+		t.Fatalf("other task buffer = %d frames, want 1", got)
+	}
+}

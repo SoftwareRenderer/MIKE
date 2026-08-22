@@ -25,11 +25,12 @@ const (
 	WSTypeCheckpointComplete WSMessageType = "git_checkpoint_complete"
 	WSTypeMergeResolution    WSMessageType = "merge_resolution"
 	WSTypeBuildProgress      WSMessageType = "build_progress"
+	WSTypeSandboxStats       WSMessageType = "sandbox_stats"
 	WSTypePorts              WSMessageType = "ports"
 	WSTypePromptProgress     WSMessageType = "prompt_progress"
 	WSTypeHint               WSMessageType = "hint"
 	WSTypeExtensionChange    WSMessageType = "extension_change"
-	WSTypeModels              WSMessageType = "models"
+	WSTypeModels             WSMessageType = "models"
 )
 
 // StreamEvent carries a typed payload to broadcast.
@@ -107,7 +108,7 @@ type StreamErrorEvent struct {
 
 // StreamPortsEvent carries assigned port mappings for a running task.
 type StreamPortsEvent struct {
-	TaskID string       `json:"task_id"`
+	TaskID string         `json:"task_id"`
 	Ports  []AssignedPort `json:"ports"`
 }
 
