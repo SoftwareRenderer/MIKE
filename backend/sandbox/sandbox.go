@@ -44,7 +44,7 @@ type SandboxOpts struct {
 	NetworkIsolation bool
 	MemoryLimit      int
 	ForwardPorts     []types.PortForward
-	AgentSandbox     *types.AgentSandbox     // mounts and envs for agent sandbox
+	AgentSandbox     *types.AgentSandbox // mounts and envs for agent sandbox
 	SkillsDir        string
 	SandboxMounts    []types.SandboxMount
 	SandboxEnvs      []types.SandboxEnv
@@ -423,6 +423,17 @@ func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath 
 		// Clean up on start failure
 		_, _ = sm.podmanExec("rm", "-f", containerName)
 		return nil, fmt.Errorf("start container: %w (%s)", err, startOut)
+	}
+
+	// Enforce the memory limit in the container's cgroup. runsc (with the
+	// required ignore-cgroups flag) never applies the OCI spec's
+	// linux.resources, so podman's --memory alone is not enforced. Fail open:
+	// if the limit cannot be applied (e.g. non-cgroup-v2 host), log loudly and
+	// continue — the sandbox still works, just without a cap.
+	if opts.MemoryLimit > 0 {
+		if err := sm.rt.ApplyMemoryLimit(containerName, opts.MemoryLimit); err != nil {
+			log.Printf("[sandbox] task=%s WARNING: memory limit %dMB not enforced (cgroup write failed): %v", taskID, opts.MemoryLimit, err)
+		}
 	}
 
 	// Start agent in container via podman exec (stdin/stdout protocol)
@@ -1007,7 +1018,7 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 func ProjectImageName(projectName string) string {
 	safeName := strings.ReplaceAll(projectName, " ", "-")
 	safeName = strings.ReplaceAll(safeName, "/", "-")
-    safeName = strings.ToLower(safeName)
+	safeName = strings.ToLower(safeName)
 	if ProjectImagePrefix == "" {
 		return safeName
 	}

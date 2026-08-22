@@ -102,6 +102,58 @@ func TestValidateImageRef(t *testing.T) {
 	}
 }
 
+func TestParseUnifiedCgroupPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		contents string
+		want     string
+		wantErr  bool
+	}{
+		{
+			name:     "single v2 line",
+			contents: "0::/user.slice/user-1000.slice/user@1000.service/user.slice/libpod-conmon-abc.scope\n",
+			want:     "/user.slice/user-1000.slice/user@1000.service/user.slice/libpod-conmon-abc.scope",
+		},
+		{
+			name:     "multi-line with v1 controllers",
+			contents: "12:memory:/\n11:cpu,cpuacct:/\n0::/system.slice/docker.service\n",
+			want:     "/system.slice/docker.service",
+		},
+		{
+			name:     "v2 root",
+			contents: "0::\n",
+			want:     "/",
+		},
+		{
+			name:     "v1 only",
+			contents: "12:memory:/\n11:cpu,cpuacct:/\n",
+			wantErr:  true,
+		},
+		{
+			name:     "empty",
+			contents: "",
+			wantErr:  true,
+		},
+		{
+			name:     "whitespace only",
+			contents: " \n\t\n",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseUnifiedCgroupPath(tt.contents)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseUnifiedCgroupPath(%q) error = %v, wantErr %v", tt.contents, err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("parseUnifiedCgroupPath(%q) = %q, want %q", tt.contents, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateDockerfilePath(t *testing.T) {
 	tests := []struct {
 		name    string

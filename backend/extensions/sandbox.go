@@ -123,6 +123,15 @@ func (sm *ExtensionSandboxManager) IsAvailable() bool {
 	return sm.available
 }
 
+// extensionMemoryLimit resolves the memory limit (MB) for an extension's
+// sandbox: the extension's configured value, or DefaultExtensionMemory.
+func extensionMemoryLimit(ext *Extension) int {
+	if ext.SandboxConfig.MemoryLimit > 0 {
+		return ext.SandboxConfig.MemoryLimit
+	}
+	return DefaultExtensionMemory
+}
+
 // buildExtensionCreateArgs assembles the `podman create` argument list for an
 // extension sandbox container.
 //
@@ -170,11 +179,7 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 	}
 
 	// Memory limit
-	memoryLimit := ext.SandboxConfig.MemoryLimit
-	if memoryLimit == 0 {
-		memoryLimit = DefaultExtensionMemory
-	}
-	createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memoryLimit))
+	createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", extensionMemoryLimit(ext)))
 
 	// Custom mounts
 	for _, m := range ext.SandboxConfig.Mounts {
@@ -272,6 +277,13 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	if err != nil {
 		_, _ = exec.Command("podman", "rm", "-f", containerName).CombinedOutput()
 		return nil, fmt.Errorf("start container: %w (%s)", err, startOut)
+	}
+
+	// Enforce the memory limit in the container's cgroup (runsc does not
+	// apply OCI resource limits itself — see sandboxruntime.ApplyMemoryLimit).
+	// Fail open: warn and continue if it cannot be applied.
+	if memErr := sm.rt.ApplyMemoryLimit(containerName, extensionMemoryLimit(ext)); memErr != nil {
+		log.Printf("[ext-sandbox] ext=%s WARNING: memory limit %dMB not enforced (cgroup write failed): %v", ext.ID, extensionMemoryLimit(ext), memErr)
 	}
 
 	log.Printf("[ext-sandbox] ext=%s created and started container %s (mounts: %d projects)", ext.ID, containerName, len(projectMounts))
