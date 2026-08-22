@@ -1,6 +1,8 @@
 <script lang="ts">
     import type { GitCommit } from '$lib/types';
     import VirtualList from '$lib/components/VirtualList.svelte';
+    import { getHistoryDensity, buildCommitTooltip } from '$lib/utils/git-history';
+    import type { HistoryDensity } from '$lib/utils/git-history';
 
     let { projectId, currentBranch, commits, originTip, loading, hasMore, onCommitSelected, onLoadMore, selectedCommitHash }: {
         projectId: string;
@@ -14,16 +16,37 @@
         selectedCommitHash?: string;
     } = $props();
 
+    // Layout density — degrades fields as the panel narrows (see git-history.ts).
+    let density = $state<HistoryDensity>('normal');
+    // svelte-ignore non_reactive_update — DOM ref via bind:this
+    let graphEl: HTMLElement | null = null;
+
+    $effect(() => {
+        const el = graphEl;
+        if (!el) return;
+        density = getHistoryDensity(el.clientWidth);
+        const ro = new ResizeObserver(() => {
+            density = getHistoryDensity(el.clientWidth);
+        });
+        ro.observe(el);
+        return () => ro.disconnect();
+    });
+
     interface CommitDisplay {
         commit: GitCommit;
         dateFormatted: string;
+        dateFull: string;
         primaryBranch: string | null;
         isCurrentBranch: boolean;
         isUnpushed: boolean;
         isOriginTip: boolean;
+        /** Row tooltip carrying every field the row may hide; undefined at normal density. */
+        rowTitle: string | undefined;
     }
 
     let commitDisplays = $derived.by<CommitDisplay[]>(() => {
+        // Track density so the derived recomputes when the panel resizes.
+        density;
         let tipIndex = -1;
         if (originTip) {
             tipIndex = commits.findIndex(c => c.hash === originTip);
@@ -48,6 +71,7 @@
             }
 
             let dateFormatted = '';
+            let dateFull = '';
             if (c.date) {
                 try {
                     const diffMs = now - new Date(c.date).getTime();
@@ -66,12 +90,23 @@
                             else dateFormatted = `${Math.floor(diffDays / 365)}y ago`;
                         }
                     }
+                    dateFull = new Date(c.date).toLocaleString();
                 } catch {
                     dateFormatted = c.date.slice(0, 10);
+                    dateFull = c.date;
                 }
             }
 
-            return { commit: c, dateFormatted, primaryBranch, isCurrentBranch, isUnpushed, isOriginTip };
+            return {
+                commit: c,
+                dateFormatted,
+                dateFull,
+                primaryBranch,
+                isCurrentBranch,
+                isUnpushed,
+                isOriginTip,
+                rowTitle: buildCommitTooltip(c, density, { primaryBranch, isOriginTip, dateFormatted: dateFull }),
+            };
         });
     });
 
@@ -98,7 +133,7 @@
     });
 </script>
 
-<div class="git-graph">
+<div class="git-graph" bind:this={graphEl} data-density={density}>
     <div class="git-graph-header">
         <span class="git-graph-label">History</span>
     </div>
@@ -118,6 +153,7 @@
                         class:selectable={!!onCommitSelected}
                         class:selected={commit.hash === selectedCommitHash}
                         class:unpushed={d.isUnpushed}
+                        title={d.rowTitle}
                         role={onCommitSelected ? 'button' : 'listitem'}
                         tabindex={onCommitSelected ? 0 : undefined}
                         onclick={() => onCommitSelected?.(commit, idx)}
@@ -128,7 +164,7 @@
                             <div
                                 class="git-dot"
                                 class:unpushed={d.isUnpushed}
-                                title={commit.short}
+                                title={d.rowTitle ? undefined : commit.short}
                             ></div>
                         </div>
 
@@ -136,11 +172,11 @@
                         <div class="git-commit-info">
                             <!-- Subject + badges on one line -->
                             <div class="git-commit-line">
-                                <span class="git-commit-subject" title={commit.subject}>{commit.subject}</span>
+                                <span class="git-commit-subject" title={d.rowTitle ? undefined : commit.subject}>{commit.subject}</span>
 
                                 <!-- Origin tip badge — shown before branch badge -->
                                 {#if d.isOriginTip}
-                                    <span class="git-badge origin-badge" title="Pushed to origin">
+                                    <span class="git-badge origin-badge" title={d.rowTitle ? undefined : 'Pushed to origin'}>
                                         <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <circle cx="6" cy="6" r="2"/>
                                             <circle cx="10" cy="10" r="2"/>
@@ -148,13 +184,13 @@
                                             <line x1="6" y1="4" x2="6" y2="2"/>
                                             <line x1="10" y1="12" x2="10" y2="14"/>
                                         </svg>
-                                        origin
+                                        <span class="git-badge-label">origin</span>
                                     </span>
                                 {/if}
 
                                 <!-- Branch badge -->
                                 {#if d.primaryBranch}
-                                    <span class="git-badge branch-badge" class:current={d.isCurrentBranch} title="Branch">
+                                    <span class="git-badge branch-badge" class:current={d.isCurrentBranch} title={d.rowTitle ? undefined : 'Branch'}>
                                         <svg width="8" height="8" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <circle cx="6" cy="6" r="2"/>
                                             <circle cx="10" cy="10" r="2"/>
@@ -162,19 +198,19 @@
                                             <line x1="6" y1="4" x2="6" y2="2"/>
                                             <line x1="10" y1="12" x2="10" y2="14"/>
                                         </svg>
-                                        {d.primaryBranch}
+                                        <span class="git-badge-label">{d.primaryBranch}</span>
                                     </span>
                                 {/if}
                             </div>
 
                             <div class="git-commit-meta">
                                 {#if commit.author}
-                                    <span class="git-commit-author" title={commit.author}>{commit.author}</span>
+                                    <span class="git-commit-author" title={d.rowTitle ? undefined : commit.author}>{commit.author}</span>
                                 {/if}
                                 {#if d.dateFormatted}
                                     <span class="git-commit-date">{d.dateFormatted}</span>
                                 {/if}
-                                <span class="git-commit-hash" title={commit.hash}>{commit.short}</span>
+                                <span class="git-commit-hash" title={d.rowTitle ? undefined : commit.hash}>{commit.short}</span>
                             </div>
                         </div>
                     </div>
@@ -328,7 +364,8 @@
         min-width: 0;
     }
 
-    /* Badges — inline, never wrap */
+    /* Badges — inline, never wrap. The branch badge may shrink and ellipsize
+       its label so long branch names don't crush the commit subject. */
     .git-badge {
         display: inline-flex;
         align-items: center;
@@ -340,11 +377,20 @@
         flex-shrink: 0;
         line-height: 1;
     }
+    .git-badge-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+    }
 
-    /* Branch badge — default grey */
+    /* Branch badge — default grey, shrinks before the subject does */
     .git-badge.branch-badge {
         color: var(--color-text-secondary);
         background: color-mix(in srgb, white 8%, transparent);
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
     }
     /* Branch badge — current branch is blue */
     .git-badge.branch-badge.current {
@@ -392,5 +438,36 @@
         font-size: 0.75rem;
         color: var(--color-text-tertiary);
         opacity: 0.7;
+        /* Never wrap ("1h ago" → 2 lines breaks the fixed 36px row):
+           the author shrinks/ellipsizes before the date does. */
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    /* Density degradation (data-density on .git-graph, set by ResizeObserver):
+       hidden fields are carried by the row tooltip. */
+
+    /* compact: origin badge collapses to icon-only */
+    .git-graph[data-density='compact'] .git-badge.origin-badge .git-badge-label,
+    .git-graph[data-density='tight'] .git-badge.origin-badge .git-badge-label,
+    .git-graph[data-density='tighest'] .git-badge.origin-badge .git-badge-label {
+        display: none;
+    }
+
+    /* tight: date hidden */
+    .git-graph[data-density='tight'] .git-commit-date,
+    .git-graph[data-density='tighest'] .git-commit-date {
+        display: none;
+    }
+
+    /* tighest: author hidden */
+    .git-graph[data-density='tighest'] .git-commit-author {
+        display: none;
+    }
+
+    /* No orphaned separator when the date is hidden (author's trailing dot) */
+    .git-graph[data-density='tight'] .git-commit-author::after,
+    .git-graph[data-density='tighest'] .git-commit-author::after {
+        content: none;
     }
 </style>
