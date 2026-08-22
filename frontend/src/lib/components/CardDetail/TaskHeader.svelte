@@ -6,6 +6,8 @@
     import SandboxPanel from '../SandboxPanel.svelte';
     import type { Task } from '$lib/types';
     import { appStore } from '$lib/stores';
+    import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
+    import { isSandboxMemoryWarning } from '$lib/utils/memory-stats';
     import { effectiveOpenTerminalKey, formatShortcut } from '$lib/utils/keyboard';
 
     let {
@@ -32,6 +34,25 @@
 
     let showSandboxPanel = $state(false);
 
+    // Live sandbox memory stats for this task (WS-pushed; the most recent
+    // value persists while the task is idle).
+    const stats = $derived(sandboxStatsStore.get(task.id));
+    const memWarning = $derived(isSandboxMemoryWarning(stats));
+
+    // Sandbox button tooltip — live usage + OOM kills when known.
+    const sandboxTitle = $derived.by(() => {
+        let title = 'Sandbox enabled';
+        if (stats?.running) {
+            title += stats.memory_limit_mb > 0
+                ? ` · ${stats.memory_current_mb} / ${stats.memory_limit_mb} MB`
+                : ` · ${stats.memory_current_mb} MB`;
+        }
+        if (stats && stats.oom_kills > 0) {
+            title += ` · ${stats.oom_kills} OOM kill${stats.oom_kills > 1 ? 's' : ''}`;
+        }
+        return `${title} (click for details)`;
+    });
+
     // Terminal button tooltip — always shows the effective shortcut (tooltips
     // keep the shortcut text even when keycap hints are hidden).
     const terminalButtonTitle = $derived.by(() => {
@@ -50,8 +71,11 @@
         <div class="header-main">
             {#if sandboxEnabled !== undefined}
                 {#if sandboxEnabled}
-                    <button class="icon-btn" onclick={() => { showSandboxPanel = true; }} title="Sandbox enabled (click for details)">
+                    <button class="icon-btn sandbox-btn" onclick={() => { showSandboxPanel = true; }} title={sandboxTitle} aria-label={sandboxTitle}>
                         <Icon src={shieldIcon} width={14} height={14} />
+                        {#if memWarning}
+                            <span class="mem-dot" aria-hidden="true"></span>
+                        {/if}
                     </button>
                 {:else}
                     <span class="sandbox-badge" title="Sandbox disabled">
@@ -87,7 +111,7 @@
 </div>
 
 {#if showSandboxPanel}
-    <SandboxPanel {task} onClose={() => { showSandboxPanel = false; }} />
+    <SandboxPanel {task} {stats} onClose={() => { showSandboxPanel = false; }} />
 {/if}
 
 <style>
@@ -155,6 +179,19 @@
         padding: 6px;
         border-radius: var(--radius-sm);
         color: var(--color-text-tertiary);
+    }
+    .sandbox-btn {
+        position: relative;
+    }
+    .mem-dot {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--color-status-red);
+        pointer-events: none;
     }
     .header-actions {
         display: flex;
