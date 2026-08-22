@@ -4,8 +4,9 @@
     import { get } from 'svelte/store';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
-    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
+    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
     import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
+    import { repoNameFromGitUrl } from '$lib/utils/repo-name';
     import { getBoardCache, boardCacheKey } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
@@ -940,13 +941,45 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     async function handleCloneProject(gitUrl: string, targetDir: string, sandboxEnabled: boolean) {
         showFileBrowserVal = false;
         addProjectError = '';
+        // Optimistic placeholder so the sidebar shows a clone progress bar in
+        // the same tick as the click — the real project only exists on the
+        // server after the (potentially long) git clone finishes.
+        const placeholderId = `clone-pending-${Date.now()}`;
+        const placeholder: Project = {
+            id: placeholderId,
+            name: repoNameFromGitUrl(gitUrl),
+            path: '',
+            cloning: true,
+            cloneProgress: 0,
+            sandbox_enabled: sandboxEnabled,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        };
+        projects.push(placeholder);
+        appStore.projects = projects;
         try {
-            const proj = await createProject(targetDir, sandboxEnabled, gitUrl);
-            projects.push(proj);
+            const proj = await cloneProject(targetDir, gitUrl, sandboxEnabled, (percent) => {
+                const p = projects.find(x => x.id === placeholderId);
+                if (p && p.cloneProgress !== percent) {
+                    p.cloneProgress = percent;
+                }
+            });
+            const idx = projects.findIndex(p => p.id === placeholderId);
+            if (idx >= 0) {
+                projects.splice(idx, 1, proj);
+            } else {
+                // A project-list refresh replaced the array mid-clone — append.
+                projects.push(proj);
+            }
             appStore.projects = projects;
             clearTaskDetail();
             selectProject(proj);
         } catch (e) {
+            const idx = projects.findIndex(p => p.id === placeholderId);
+            if (idx >= 0) {
+                projects.splice(idx, 1);
+            }
+            appStore.projects = projects;
             addProjectError = String(e);
             showFileBrowserVal = true;
         }

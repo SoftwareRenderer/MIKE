@@ -76,28 +76,9 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	// If git_url is provided, clone the repo into <path>/<repo-name> first,
 	// then proceed with normal project creation from the cloned directory.
 	if req.GitUrl != "" {
-		if err := validateGitCloneURL(req.GitUrl); err != nil {
-			httputil.JSONError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		repoName, err := repoNameFromGitURL(req.GitUrl)
+		targetPath, err := prepareCloneTarget(req)
 		if err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		// Validate the target parent exists and is a directory.
-		info, err := os.Stat(req.Path)
-		if err != nil {
-			httputil.JSONError(w, http.StatusBadRequest, "clone target parent does not exist: "+err.Error())
-			return
-		}
-		if !info.IsDir() {
-			httputil.JSONError(w, http.StatusBadRequest, "clone target parent is not a directory")
-			return
-		}
-		targetPath := filepath.Join(req.Path, repoName)
-		if _, err := os.Stat(targetPath); err == nil {
-			httputil.JSONError(w, http.StatusBadRequest, "target directory already exists: "+targetPath)
 			return
 		}
 		cmd := osexec.Command("git", "clone", req.GitUrl, targetPath)
@@ -108,19 +89,57 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		req.Path = targetPath
 	}
 
-	info, err := os.Stat(req.Path)
-	if err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "path does not exist: "+err.Error())
+	p, code, msg := h.createProjectFromRequest(req)
+	if p == nil {
+		httputil.JSONError(w, code, msg)
 		return
 	}
+	httputil.JSONResponse(w, code, p)
+}
+
+// prepareCloneTarget validates the clone source URL and resolves the clone
+// target directory (<path>/<repo-name>) inside the existing parent dir
+// req.Path. Returns the target path, or an error describing what is wrong.
+func prepareCloneTarget(req types.CreateProjectRequest) (string, error) {
+	if err := validateGitCloneURL(req.GitUrl); err != nil {
+		return "", err
+	}
+	repoName, err := repoNameFromGitURL(req.GitUrl)
+	if err != nil {
+		return "", err
+	}
+	// Validate the target parent exists and is a directory.
+	info, err := os.Stat(req.Path)
+	if err != nil {
+		return "", fmt.Errorf("clone target parent does not exist: %w", err)
+	}
 	if !info.IsDir() {
-		httputil.JSONError(w, http.StatusBadRequest, "path is not a directory")
-		return
+		return "", fmt.Errorf("clone target parent is not a directory")
+	}
+	targetPath := filepath.Join(req.Path, repoName)
+	if _, err := os.Stat(targetPath); err == nil {
+		return "", fmt.Errorf("target directory already exists: %s", targetPath)
+	}
+	return targetPath, nil
+}
+
+// createProjectFromRequest validates that req.Path is an existing git
+// repository directory and persists the new project. On success it returns
+// the project and http.StatusCreated; on failure it returns nil with the
+// HTTP status code and a client-facing message.
+func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest) (*types.Project, int, string) {
+	req.Path = strings.TrimSpace(req.Path)
+
+	info, err := os.Stat(req.Path)
+	if err != nil {
+		return nil, http.StatusBadRequest, "path does not exist: " + err.Error()
+	}
+	if !info.IsDir() {
+		return nil, http.StatusBadRequest, "path is not a directory"
 	}
 
 	if !git.IsGitRepo(req.Path) {
-		httputil.JSONError(w, http.StatusBadRequest, "path is not a git repository")
-		return
+		return nil, http.StatusBadRequest, "path is not a git repository"
 	}
 
 	name := req.Name
@@ -130,8 +149,7 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 
 	// Validate project name to prevent injection when used in image refs, mount paths, etc.
 	if err := sandboxruntime.ValidateProjectName(name); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, err.Error())
-		return
+		return nil, http.StatusBadRequest, err.Error()
 	}
 
 	// Collect existing project IDs to avoid collisions
@@ -148,13 +166,11 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	// Block creating a project with sandbox disabled unless DANGER_ZONE=1
 	if !req.SandboxEnabled && os.Getenv("DANGER_ZONE") != "1" {
-		httputil.JSONError(w, http.StatusForbidden, "cannot create project with sandbox disabled — set DANGER_ZONE=1 to allow")
-		return
+		return nil, http.StatusForbidden, "cannot create project with sandbox disabled — set DANGER_ZONE=1 to allow"
 	}
 	// When sandbox is enabled, network isolation must be explicitly specified
 	if req.SandboxEnabled && req.SandboxNetworkIsolation == nil {
-		httputil.JSONError(w, http.StatusBadRequest, "sandbox_network_isolation is required when sandbox_enabled is true")
-		return
+		return nil, http.StatusBadRequest, "sandbox_network_isolation is required when sandbox_enabled is true"
 	}
 	networkIsolation := false
 	if req.SandboxNetworkIsolation != nil {
@@ -178,10 +194,80 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.CreateProject(p); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to create project: "+err.Error())
+		return nil, http.StatusInternalServerError, "failed to create project: " + err.Error()
+	}
+	return p, http.StatusCreated, ""
+}
+
+// HandleClone streams a git clone with live progress over SSE, then creates
+// the project from the cloned directory.
+//
+// Body: CreateProjectRequest with Path = clone-into parent directory and
+// GitUrl = repository to clone (both required).
+//
+// Emits one JSON object per "data:" frame:
+//
+//	{"type":"status","message":"..."}  — informational
+//	{"type":"progress","percent":42}   — clone progress (0-100)
+//	{"type":"done","project":{...}}    — success, project created
+//	{"type":"error","message":"..."}   — failure, no project created
+func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
+	var req types.CreateProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	httputil.JSONResponse(w, http.StatusCreated, p)
+	req.Path = strings.TrimSpace(req.Path)
+	if req.Path == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "path is required")
+		return
+	}
+	if req.GitUrl == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "git_url is required")
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		httputil.JSONError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	sendEvent := func(event map[string]any) {
+		data, _ := json.Marshal(event)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	// Validate source URL and target location up front (same rules as
+	// HandleCreate) so common failures are known before any work starts.
+	targetPath, err := prepareCloneTarget(req)
+	if err != nil {
+		sendEvent(map[string]any{"type": "error", "message": err.Error()})
+		return
+	}
+
+	sendEvent(map[string]any{"type": "status", "message": "Cloning " + req.GitUrl + " into " + targetPath + "..."})
+
+	out, err := git.CloneWithProgress(req.GitUrl, targetPath, func(percent int) {
+		sendEvent(map[string]any{"type": "progress", "percent": percent})
+	})
+	if err != nil {
+		// Drop the partial clone so a retry can start clean.
+		_ = os.RemoveAll(targetPath)
+		sendEvent(map[string]any{"type": "error", "message": "git clone failed: " + strings.TrimSpace(out)})
+		return
+	}
+
+	req.Path = targetPath
+	if p, _, msg := h.createProjectFromRequest(req); p != nil {
+		sendEvent(map[string]any{"type": "done", "project": p})
+	} else {
+		sendEvent(map[string]any{"type": "error", "message": msg})
+	}
 }
 
 // HandleStats returns aggregated token usage stats for a project.
