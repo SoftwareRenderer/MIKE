@@ -25,10 +25,14 @@ export class DialogStore {
         taskId?: string;
         _resolve?: (value: string | null) => void;
     } | null>(null);
+    /**
+     * A stat value may be a snapshot number or a live getter; getters let the
+     * dialog's visualization track reactive sources (e.g. stream state) in real time.
+     */
     public compressContextDialog = $state<{
-        used?: number;
-        limit?: number;
-        sessionCost?: number;
+        used?: number | (() => number);
+        limit?: number | (() => number);
+        sessionCost?: number | (() => number);
         confirmText?: string;
         cancelText?: string;
         _resolve?: (value: boolean) => void;
@@ -70,11 +74,13 @@ export class DialogStore {
     /**
      * Show the Compress Context dialog (includes a context donut + stats) and
      * return a Promise that resolves to true (confirmed) or false (cancelled).
+     * Pass getters for `used`/`limit`/`sessionCost` to keep the visualization
+     * and stats updating in real time while the dialog is open.
      */
     public showCompressContextDialog(options: {
-        used?: number;
-        limit?: number;
-        sessionCost?: number;
+        used?: number | (() => number);
+        limit?: number | (() => number);
+        sessionCost?: number | (() => number);
         confirmText?: string;
         cancelText?: string;
     }): Promise<boolean> {

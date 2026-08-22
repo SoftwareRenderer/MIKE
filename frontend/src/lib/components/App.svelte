@@ -3,6 +3,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
+    import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
     import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
@@ -12,7 +13,7 @@
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
     import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
     import kanbanIcon from '$lib/assets/icons/kanban.svg';
-    import type { Project, Task, Config, StreamEvent } from '$lib/types';
+    import type { Project, Task, Config, StreamEvent, SandboxMemoryStats } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
@@ -439,6 +440,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onTaskDeleted: (task_id: string) => {
                 tasks = tasks.filter(t => t.id !== task_id);
                 appStore.board = { ...appStore.board!, tasks };
+                sandboxStatsStore.remove(task_id);
                 if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
                     clearTaskDetail();
                 }
@@ -450,6 +452,12 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 }
             },
             onTaskEvent: (task_id: string, event: StreamEvent) => {
+                if (event.type === 'sandbox_stats') {
+                    // Sandbox memory stats live in their own store (keyed by
+                    // task) — not in the single-slot task event context.
+                    sandboxStatsStore.set(task_id, event.data as SandboxMemoryStats);
+                    return;
+                }
                 if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
                     taskEventContext.set({ task_id, ...event });
                 }

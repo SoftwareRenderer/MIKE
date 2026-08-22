@@ -897,6 +897,74 @@ func TestMemoryLimitEnforced(t *testing.T) {
 	}
 }
 
+// TestGetMemoryStats verifies live memory sampling from the container's
+// cgroup: a running container reports usage and the applied limit, and the
+// task reports not-running once untracked.
+func TestGetMemoryStats(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	taskID := "test-memstats-task"
+
+	// 512MB limit; the background hog below allocates ~200MB and holds it.
+	// The limit sits far above the ~200MB hog so the cgroup OOM killer can't
+	// truncate the allocation before the usage assertion below (the container
+	// baseline varies with host load).
+	if _, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{MemoryLimit: 512}); err != nil {
+		t.Fatalf("create sandbox with memory limit: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	// Untracked task reports not-running.
+	if stats := sm.GetMemoryStats("no-such-task"); stats.Running {
+		t.Error("expected not-running for untracked task")
+	}
+
+	// Background hog: allocate ~200MB (209715200 bytes) and hold it for 30s.
+	const hog = `( x=a; while [ ${#x} -lt 209715200 ]; do x="$x$x"; done; sleep 30 ) & echo hog-started`
+	out, err := sm.Exec(taskID, hog, nil)
+	if err != nil {
+		t.Fatalf("start background memhog: %v (%s)", err, out)
+	}
+
+	// Wait for the allocation to show up in memory.current.
+	var stats *types.SandboxMemoryStats
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		stats = sm.GetMemoryStats(taskID)
+		if stats.Running && stats.CurrentMB >= 150 {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if stats == nil || !stats.Running {
+		t.Fatalf("expected running container, got %+v", stats)
+	}
+	if stats.LimitMB != 512 {
+		t.Errorf("LimitMB = %d, want 512", stats.LimitMB)
+	}
+	if stats.CurrentMB < 150 {
+		t.Errorf("CurrentMB = %d, want >= 150 (hog allocated ~200MB)", stats.CurrentMB)
+	}
+
+	// After Stop the task is untracked → not-running.
+	if err := sm.Stop(taskID); err != nil {
+		t.Fatalf("stop sandbox: %v", err)
+	}
+	if stats := sm.GetMemoryStats(taskID); stats.Running {
+		t.Error("expected not-running after Stop")
+	}
+}
+
 func TestCreateWithCapabilities(t *testing.T) {
 	agentPath := findAgentBinary(t)
 	os.Setenv("MIKE_AGENT_PATH", agentPath)

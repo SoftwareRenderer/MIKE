@@ -1,15 +1,22 @@
 <script lang="ts">
 
-    import type { Task, Project } from '$lib/types';
+    import type { Task, Project, SandboxMemoryStats } from '$lib/types';
     import { getProject } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
+    import { isNearMemoryLimit } from '$lib/utils/memory-stats';
 import BaseModal from './BaseModal.svelte';
 
-    let { task, onClose }: {
+    let { task, stats, onClose }: {
         task: Task;
+        stats: SandboxMemoryStats | null;
         onClose: () => void;
     } = $props();
+
+    function memoryPct(s: SandboxMemoryStats): number {
+        if (!s.running || s.memory_limit_mb <= 0 || s.memory_current_mb <= 0) return 0;
+        return Math.min(100, Math.round((s.memory_current_mb / s.memory_limit_mb) * 100));
+    }
 
     let project = $state<Project | null>(null);
     let loading = $state(true);
@@ -41,6 +48,37 @@ import BaseModal from './BaseModal.svelte';
             <div class="status-notice">
 Sandbox Isolation is enabled for this project
             </div>
+
+            <!-- Live memory usage (WS-pushed; most recent value persists while idle) -->
+            {#if stats}
+                <div class="memory-section">
+                    <div class="memory-row">
+                        <span class="memory-label">Memory Usage</span>
+                        <span class="memory-value">
+                            {#if stats.running}
+                                {stats.memory_limit_mb > 0
+                                    ? `${stats.memory_current_mb} / ${stats.memory_limit_mb} MB`
+                                    : `${stats.memory_current_mb} MB (no limit)`}
+                            {:else}
+                                Not running
+                            {/if}
+                        </span>
+                    </div>
+                    {#if stats.running && stats.memory_limit_mb > 0}
+                        <div class="memory-bar">
+                            <div class="memory-bar-fill" class:warn={isNearMemoryLimit(stats)} style="width: {memoryPct(stats)}%"></div>
+                        </div>
+                    {/if}
+                    {#if stats.memory_peak_mb > 0}
+                        <div class="memory-peak">Peak {stats.memory_peak_mb} MB</div>
+                    {/if}
+                    {#if stats.oom_kills > 0}
+                        <div class="oom-warning" role="alert">
+                            <span class="oom-warning-count">{stats.oom_kills}</span> process{stats.oom_kills > 1 ? 'es' : ''} OOM-killed — memory limit reached
+                        </div>
+                    {/if}
+                </div>
+            {/if}
 
             {#if loading}
                 <div class="loading">Loading settings...</div>
@@ -171,6 +209,69 @@ Sandbox Isolation is enabled for this project
         color: var(--color-primary);
         font-size: 0.8125rem;
         line-height: 1.4;
+    }
+
+    .memory-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 12px;
+        background: var(--color-surface-2);
+        border-radius: var(--radius-md);
+    }
+
+    .memory-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .memory-label {
+        font-size: 0.8125rem;
+        color: var(--color-text-secondary);
+    }
+
+    .memory-value {
+        font-size: 0.8125rem;
+        color: var(--color-text-primary);
+        font-family: var(--font-mono, monospace);
+    }
+
+    .memory-bar {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--color-surface-3);
+        overflow: hidden;
+    }
+
+    .memory-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        background: var(--color-primary);
+        transition: width 0.3s ease;
+    }
+
+    .memory-bar-fill.warn {
+        background: var(--color-status-red);
+    }
+
+    .memory-peak {
+        font-size: 0.75rem;
+        color: var(--color-text-tertiary);
+    }
+
+    .oom-warning {
+        padding: 8px 10px;
+        background: rgba(248, 81, 73, 0.1);
+        border: 1px solid rgba(248, 81, 73, 0.3);
+        border-radius: var(--radius-md);
+        color: var(--color-status-red);
+        font-size: 0.8125rem;
+    }
+
+    .oom-warning-count {
+        font-weight: 700;
     }
 
     .loading {

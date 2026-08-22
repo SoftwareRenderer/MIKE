@@ -1,6 +1,8 @@
 package sandboxruntime
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -151,6 +153,97 @@ func TestParseUnifiedCgroupPath(t *testing.T) {
 				t.Errorf("parseUnifiedCgroupPath(%q) = %q, want %q", tt.contents, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestReadCgroupMemory(t *testing.T) {
+	const (
+		mb = int64(1024 * 1024)
+	)
+	tests := []struct {
+		name    string
+		files   map[string]string
+		want    CgroupMemory
+		wantErr bool
+	}{
+		{
+			name: "full cgroup with limit and oom kills",
+			files: map[string]string{
+				"memory.current": "104857600\n", // 100 MB
+				"memory.peak":    "209715200\n", // 200 MB
+				"memory.max":     "536870912\n", // 512 MB
+				"memory.events":  "high 0\nmax 1\nlow 0\noom 0\noom_kill 3\n",
+			},
+			want: CgroupMemory{CurrentBytes: 100 * mb, PeakBytes: 200 * mb, MaxBytes: 512 * mb, OOMKills: 3},
+		},
+		{
+			// "max" (unlimited) behaves like an absent limit: MaxBytes stays 0.
+			name: "unlimited memory.max",
+			files: map[string]string{
+				"memory.current": "4194304\n", // 4 MB
+				"memory.max":     "max\n",
+			},
+			want: CgroupMemory{CurrentBytes: 4 * mb},
+		},
+		{
+			name: "missing memory.peak is tolerated",
+			files: map[string]string{
+				"memory.current": "1048576\n", // 1 MB
+				"memory.max":     "1073741824\n",
+			},
+			want: CgroupMemory{CurrentBytes: 1 * mb, MaxBytes: 1024 * mb},
+		},
+		{
+			name: "missing memory.max and memory.events are tolerated",
+			files: map[string]string{
+				"memory.current": "1048576\n",
+			},
+			want: CgroupMemory{CurrentBytes: 1 * mb},
+		},
+		{
+			name: "events without oom_kill line",
+			files: map[string]string{
+				"memory.current": "1048576\n",
+				"memory.events":  "high 0\nmax 0\nlow 0\noom 0\n",
+			},
+			want: CgroupMemory{CurrentBytes: 1 * mb},
+		},
+		{
+			name:    "missing memory.current",
+			files:   map[string]string{},
+			wantErr: true,
+		},
+		{
+			name: "malformed memory.current",
+			files: map[string]string{
+				"memory.current": "garbage\n",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, content := range tt.files {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+					t.Fatalf("write %s: %v", name, err)
+				}
+			}
+			got, err := ReadCgroupMemory(dir)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ReadCgroupMemory() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("ReadCgroupMemory() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReadCgroupMemory_MissingDir(t *testing.T) {
+	if _, err := ReadCgroupMemory(filepath.Join(t.TempDir(), "nonexistent")); err == nil {
+		t.Error("expected error for missing cgroup directory")
 	}
 }
 
