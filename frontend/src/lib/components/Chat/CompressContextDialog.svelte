@@ -5,12 +5,21 @@
     import ContextDonut from './ContextDonut.svelte';
 
     let open = $state(false);
-    let used = $state(0);
-    let limit = $state(0);
-    let sessionCost = $state(0);
     let confirmText = $state('Compress');
     let cancelText = $state('Cancel');
     let resolveFn: ((value: boolean) => void) | null = $state(null);
+
+    /** Resolve a stat that may be a snapshot number or a live getter. */
+    function resolveStat(value: number | (() => number) | undefined): number {
+        const n = typeof value === 'function' ? value() : (value ?? 0);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    // Derived from the dialog store so the donut + stats track live sources
+    // (e.g. stream state) in real time while the dialog is open.
+    let used = $derived(resolveStat(dialogStore.compressContextDialog?.used));
+    let limit = $derived(resolveStat(dialogStore.compressContextDialog?.limit));
+    let sessionCost = $derived(resolveStat(dialogStore.compressContextDialog?.sessionCost));
 
     let percentage = $derived(limit > 0 ? Math.round((used / limit) * 100) : 0);
 
@@ -57,9 +66,6 @@
     $effect(() => {
         const value = dialogStore.compressContextDialog;
         if (value) {
-            used = value.used ?? 0;
-            limit = value.limit ?? 0;
-            sessionCost = value.sessionCost ?? 0;
             confirmText = value.confirmText ?? 'Compress';
             cancelText = value.cancelText ?? 'Cancel';
             resolveFn = value._resolve ?? null;
