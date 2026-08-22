@@ -191,6 +191,16 @@ type AssignedPort struct {
 	ContainerPort int `json:"container_port"`
 }
 
+// SandboxMemoryStats is the live memory usage of a task's sandbox container.
+// LimitMB 0 means no enforced limit
+type SandboxMemoryStats struct {
+	Running   bool   `json:"running"`
+	CurrentMB int64  `json:"memory_current_mb"`
+	LimitMB   int64  `json:"memory_limit_mb"`
+	PeakMB    int64  `json:"memory_peak_mb"`
+	OOMKills  uint64 `json:"oom_kills"`
+}
+
 // SandboxMount specifies a custom host path bind mount for sandbox containers.
 type SandboxMount struct {
 	HostPath      string `json:"host_path"`

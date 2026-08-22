@@ -68,6 +68,7 @@ type SandboxManager struct {
 	agents        map[string]*agentConn      // taskID -> agent pipes + process
 	clients       map[string]*sandbox.Client // taskID -> agent client (cached)
 	livenessCache map[string]time.Time       // taskID -> last time running was confirmed
+	cgroupDirs    map[string]string          // taskID -> cgroup v2 dir (resolved once per container)
 	available     bool
 }
 
@@ -81,6 +82,7 @@ func NewSandboxManager() *SandboxManager {
 		agents:        make(map[string]*agentConn),
 		clients:       make(map[string]*sandbox.Client),
 		livenessCache: make(map[string]time.Time),
+		cgroupDirs:    make(map[string]string),
 	}
 	sm.available = sm.checkAvailable()
 	if sm.available {
@@ -839,6 +841,7 @@ func (sm *SandboxManager) Stop(taskID string) error {
 		delete(sm.agents, taskID)
 	}
 	delete(sm.livenessCache, taskID)
+	delete(sm.cgroupDirs, taskID)
 	sm.mu.Unlock()
 
 	// Close agent client
@@ -950,6 +953,62 @@ func (sm *SandboxManager) GetContainerPorts(taskID string) ([]types.AssignedPort
 		ports = append(ports, types.AssignedPort{HostPort: hostPort, ContainerPort: containerPort})
 	}
 	return ports, nil
+}
+
+// ActiveTaskIDs returns the IDs of all containers tracked in the current
+// server session (task-level IDs plus project-level "proj:..." keys).
+func (sm *SandboxManager) ActiveTaskIDs() []string {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	ids := make([]string, 0, len(sm.active))
+	for id := range sm.active {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// GetMemoryStats returns the live memory usage of the task's sandbox container
+// by reading the container's cgroup v2 memory controller
+func (sm *SandboxManager) GetMemoryStats(taskID string) *types.SandboxMemoryStats {
+	sm.mu.Lock()
+	name, tracked := sm.active[taskID]
+	dir := sm.cgroupDirs[taskID]
+	sm.mu.Unlock()
+
+	if !tracked {
+		return &types.SandboxMemoryStats{}
+	}
+
+	if dir == "" {
+		var err error
+		dir, err = sm.rt.ContainerCgroupDir(name)
+		if err != nil {
+			return &types.SandboxMemoryStats{}
+		}
+		sm.mu.Lock()
+		if sm.cgroupDirs[taskID] == "" {
+			sm.cgroupDirs[taskID] = dir
+		}
+		sm.mu.Unlock()
+	}
+
+	mem, err := sandboxruntime.ReadCgroupMemory(dir)
+	if err != nil {
+		// cgroup gone (container stopped or removed) — drop the cached dir so
+		// the next call re-resolves it.
+		sm.mu.Lock()
+		delete(sm.cgroupDirs, taskID)
+		sm.mu.Unlock()
+		return &types.SandboxMemoryStats{}
+	}
+
+	return &types.SandboxMemoryStats{
+		Running:   true,
+		CurrentMB: mem.CurrentBytes >> 20,
+		LimitMB:   mem.MaxBytes >> 20,
+		PeakMB:    mem.PeakBytes >> 20,
+		OOMKills:  mem.OOMKills,
+	}
 }
 
 // ImageReady checks if a container image is available locally.

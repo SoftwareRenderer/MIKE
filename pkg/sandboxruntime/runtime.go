@@ -378,6 +378,62 @@ func (r *Runtime) ContainerCgroupDir(name string) (string, error) {
 	return filepath.Join(cgroupRoot, filepath.Clean(path)), nil
 }
 
+// CgroupMemory holds memory statistics read from a cgroup v2 memory controller.
+type CgroupMemory struct {
+	CurrentBytes int64  // memory.current — current usage
+	PeakBytes    int64  // memory.peak — high-water mark (0 when the file is absent)
+	MaxBytes     int64  // memory.max — limit in bytes (0 when unlimited ("max") or absent)
+	OOMKills     uint64 // oom_kill counter from memory.events
+}
+
+// ReadCgroupMemory reads the memory controller statistics from a cgroup v2
+// directory. Optional files are tolerated: memory.peak does not exist on older
+// kernels (reported as 0), and a missing memory.max/memory.events simply yields
+// zero/absent values. A missing or malformed memory.current — the one file
+// that must be present in a live cgroup — is an error.
+func ReadCgroupMemory(dir string) (CgroupMemory, error) {
+	var m CgroupMemory
+
+	cur, err := os.ReadFile(filepath.Join(dir, "memory.current"))
+	if err != nil {
+		return m, fmt.Errorf("read memory.current: %w", err)
+	}
+	m.CurrentBytes, err = strconv.ParseInt(strings.TrimSpace(string(cur)), 10, 64)
+	if err != nil {
+		return m, fmt.Errorf("parse memory.current: %w", err)
+	}
+
+	if peak, err := os.ReadFile(filepath.Join(dir, "memory.peak")); err == nil {
+		if p, perr := strconv.ParseInt(strings.TrimSpace(string(peak)), 10, 64); perr == nil {
+			m.PeakBytes = p
+		}
+	}
+
+	// A numeric memory.max is the enforced limit; "max" (unlimited) and a
+	// missing file both leave MaxBytes at 0 — the only distinction downstream
+	// needs is "limit known" vs. "no enforced limit".
+	if maxData, err := os.ReadFile(filepath.Join(dir, "memory.max")); err == nil {
+		if s := strings.TrimSpace(string(maxData)); s != "max" {
+			if v, verr := strconv.ParseInt(s, 10, 64); verr == nil {
+				m.MaxBytes = v
+			}
+		}
+	}
+
+	if events, err := os.ReadFile(filepath.Join(dir, "memory.events")); err == nil {
+		for _, line := range strings.Split(string(events), "\n") {
+			if count, ok := strings.CutPrefix(strings.TrimSpace(line), "oom_kill "); ok {
+				if n, nerr := strconv.ParseUint(strings.TrimSpace(count), 10, 64); nerr == nil {
+					m.OOMKills = n
+				}
+				break
+			}
+		}
+	}
+
+	return m, nil
+}
+
 // ApplyMemoryLimit enforces a hard memory limit on a running container by
 // writing directly into its cgroup. This is required because runsc (which
 // needs --runtime-flag ignore-cgroups under rootless) does not apply the OCI

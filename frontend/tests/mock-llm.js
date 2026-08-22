@@ -46,6 +46,8 @@ const toolCallRename = loadFixture('tool_call_rename');
 const toolCallRenameTs = loadFixture('tool_call_rename_ts');
 const toolCallSummarize = loadFixture('tool_call_summarize');
 const textResponseReasoning = loadFixture('text_response_reasoning');
+const toolCallSandboxSleep = loadFixture('tool_call_sandbox_sleep');
+const toolCallSandboxMemhog = loadFixture('tool_call_sandbox_memhog');
 
 let requestCount = 0;
 // Prompts already failed once (fail-once e2e).
@@ -145,6 +147,32 @@ function selectResponse(parsed) {
     // Whether the conversation already contains tool results (used by plan-mode
     // routing below and by the tool-result routing further down).
     const hasToolResults = messages.some(m => m.role === 'tool');
+
+    // Sandbox memory e2e probes (keyword-gated to the probe tasks' prompts).
+    // Must stay ABOVE the plan-mode check below: when prompts/skills/ exists,
+    // the skill name "plan-first" is in every system prompt and also matches
+    // that regex, which would hijack the probe tasks into the plan fixtures.
+    // First call: a bash tool call that runs in the sandbox (sleep keeps the
+    // container alive; memhog allocates past the memory limit so the cgroup
+    // OOM killer fires). Follow-up (tool result present): plain text ends the
+    // turn and the task stays in_progress (deterministic in any environment).
+    const sandboxProbeFixture =
+        /sandbox-memhog-probe/i.test(lastUserMsg) ? toolCallSandboxMemhog :
+        /sandbox-sleep-probe/i.test(lastUserMsg) ? toolCallSandboxSleep : null;
+    if (hasTools && sandboxProbeFixture) {
+        return hasToolResults
+            ? { chunks: toolCallComplete, chunkDelay: 1 }
+            : { chunks: sandboxProbeFixture, chunkDelay: 1 };
+    }
+    // Probe termination: once the probe command's result is back, a text
+    // response triggers the loop detector's "Is the task complete?" user
+    // message — the probe keyword is no longer the last user message. The
+    // command's marker output identifies the probe conversation; end the turn
+    // with request_review (deterministic in every environment).
+    if (hasTools && /is the task complete\?/i.test(lastUserMsg) &&
+        messages.some(m => m.role === 'tool' && /SANDBOX-(SLEEP|MEMHOG)-PROBE-DONE/.test(m.content || ''))) {
+        return { chunks: toolCallTaskComplete, chunkDelay: 1 };
+    }
 
     // Plan mode: LLM creates subtasks via create_task tool, then calls request_review.
     // First call (no tool results yet): return create_task tool call.
@@ -305,6 +333,8 @@ const server = http.createServer((req, res) => {
                                     chunks === textLoop ? 'text_loop' :
                                     chunks === phraseRepeat ? 'phrase_repeat' :
                                     chunks === toolCallResponse ? 'tool_call' :
+                                    chunks === toolCallSandboxSleep ? 'tool_call_sandbox_sleep' :
+                                    chunks === toolCallSandboxMemhog ? 'tool_call_sandbox_memhog' :
                                     chunks === toolCallComplete ? 'tool_call_complete' :
                                     chunks === textResponseSlow ? 'text_slow' :
                                     chunks === textResponseLong ? 'text_long' : 'text';

@@ -36,6 +36,17 @@ export interface AssignedPort {
     container_port: number;
 }
 
+// Live memory usage of a task's sandbox container, pushed as the
+// `sandbox_stats` task event. Values are whole MB; 0 means unknown and
+// limit_mb 0 means no enforced limit.
+export interface SandboxMemoryStats {
+    running: boolean;
+    memory_current_mb: number;
+    memory_limit_mb: number;
+    memory_peak_mb: number;
+    oom_kills: number;
+}
+
 export interface Project {
     id: string;
     name: string;
@@ -387,6 +398,7 @@ export type StreamEventType =
     | 'merge_resolution'
     | 'diff_changed'
     | 'build_progress'
+    | 'sandbox_stats'
     | 'port_conflict'
     | 'prompt_progress'
     | 'hint';
