@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -327,6 +328,82 @@ func (r *Runtime) BuildImage(imageName, dockerfilePath string, onProgress func(l
 	pw.Close()
 	if waitErr != nil {
 		return fmt.Errorf("build image %s: %w", imageName, waitErr)
+	}
+	return nil
+}
+
+// cgroupRoot is the mount point of the cgroup v2 (unified) hierarchy.
+const cgroupRoot = "/sys/fs/cgroup"
+
+// parseUnifiedCgroupPath extracts the cgroup v2 (unified hierarchy) path from
+// /proc/<pid>/cgroup content. On cgroup v2 hosts the file contains a line of
+// the form "0::<path>" (e.g. "0::/user.slice/.../libpod-conmon-<id>.scope").
+// Returns an error when no unified line is present (pure cgroup v1 host).
+func parseUnifiedCgroupPath(contents string) (string, error) {
+	for _, line := range strings.Split(contents, "\n") {
+		line = strings.TrimSpace(line)
+		if path, ok := strings.CutPrefix(line, "0::"); ok {
+			if path == "" {
+				return "/", nil // process is in the cgroup root
+			}
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("no cgroup v2 (unified) entry found")
+}
+
+// ContainerCgroupDir returns the host cgroup v2 directory of the container's
+// init process (e.g. /sys/fs/cgroup/user.slice/.../libpod-conmon-<id>.scope).
+// The container must be running.
+func (r *Runtime) ContainerCgroupDir(name string) (string, error) {
+	out, err := r.PodmanExec("inspect", "-f", "{{.State.Pid}}", name)
+	if err != nil {
+		return "", fmt.Errorf("inspect container %s: %w", name, err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || pid <= 0 {
+		return "", fmt.Errorf("container %s is not running (pid %q)", name, strings.TrimSpace(string(out)))
+	}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+	if err != nil {
+		return "", fmt.Errorf("read cgroup for pid %d: %w", pid, err)
+	}
+	path, err := parseUnifiedCgroupPath(string(data))
+	if err != nil {
+		return "", fmt.Errorf("container %s: %w", name, err)
+	}
+	if !filepath.IsAbs(path) {
+		path = "/" + path
+	}
+	return filepath.Join(cgroupRoot, filepath.Clean(path)), nil
+}
+
+// ApplyMemoryLimit enforces a hard memory limit on a running container by
+// writing directly into its cgroup. This is required because runsc (which
+// needs --runtime-flag ignore-cgroups under rootless) does not apply the OCI
+// spec's linux.resources, so podman's --memory flag alone is never enforced.
+//
+// Writes memory.max = limitMB MiB. It also writes memory.swap.max = 0 on a
+// best-effort basis: without it, a host with swap reclaims overshoot into
+// swap instead of OOM-killing, turning the hard limit into a soft one.
+// Returns an error if the limit cannot be applied; the caller decides whether
+// to fail open (sandbox runs unlimited) or fail closed.
+func (r *Runtime) ApplyMemoryLimit(name string, limitMB int) error {
+	if limitMB <= 0 {
+		return fmt.Errorf("memory limit must be positive, got %d", limitMB)
+	}
+	dir, err := r.ContainerCgroupDir(name)
+	if err != nil {
+		return err
+	}
+	maxBytes := int64(limitMB) << 20
+	if err := os.WriteFile(filepath.Join(dir, "memory.max"), []byte(strconv.FormatInt(maxBytes, 10)), 0); err != nil {
+		return fmt.Errorf("set memory.max in %s: %w", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "memory.swap.max"), []byte("0"), 0); err != nil {
+		// Non-fatal: hosts without a swap controller still enforce memory.max
+		// as a hard cap (there is no swap to absorb the overshoot).
+		log.Printf("[sandboxruntime] %s: could not set memory.swap.max=0 (swap not isolated): %v", name, err)
 	}
 	return nil
 }
