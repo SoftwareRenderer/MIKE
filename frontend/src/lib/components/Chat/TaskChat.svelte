@@ -738,10 +738,12 @@
     let summarizeController: AbortController | null = null;
 
     async function handleSummarize() {
+        // Pass live getters so the dialog's donut + stats update in real time
+        // (e.g. while a task keeps streaming in the background).
         const confirmed = await dialogStore.showCompressContextDialog({
-            used: stream.state.contextState.used,
-            limit: stream.state.contextState.limit,
-            sessionCost: stream.state.sessionCost,
+            used: () => stream.state.contextState.used,
+            limit: () => stream.state.contextState.limit,
+            sessionCost: () => stream.state.sessionCost,
             confirmText: 'Compress',
             cancelText: 'Cancel',
         });
