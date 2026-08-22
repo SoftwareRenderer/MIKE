@@ -1,5 +1,6 @@
 <script lang="ts">
     
+    import { tick } from 'svelte';
     import type { Config, Provider, Extension } from '$lib/types';
     import { isAgentProvider, AGENT_URL_PREFIX } from '$lib/types';
     import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
@@ -245,6 +246,28 @@
         }
     }
 
+    // Matches the `transition:slide={{ duration: 200 }}` in ProviderCard.svelte —
+    // wait for the slide-in to settle so the scroll target has its final height.
+    const PROVIDER_CARD_SLIDE_SETTLE_MS = 250;
+
+    /**
+     * After a new provider card is appended, scroll the card's input area into the modal's visible area
+     */
+    async function revealNewProvider(index: number, kind: 'llm' | 'agent') {
+        await tick();
+        await new Promise(r => setTimeout(r, PROVIDER_CARD_SLIDE_SETTLE_MS));
+        if (kind === 'llm') {
+            // Target the URL input
+            const urlInput = document.getElementById(`provider-url-${index}`);
+            if (!urlInput) return;
+            urlInput.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            urlInput.focus({ preventScroll: true });
+        } else {
+            // Agent cards carry no inputs — reveal the card itself.
+            document.querySelector(`.provider-card[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+    }
+
     function addProvider() {
         providers.push({
             uid: `new-${++_providerUidCounter}-${Date.now()}`,
@@ -269,6 +292,7 @@
             testResult: null,
         });
         markDirty();
+        void revealNewProvider(providers.length - 1, 'llm');
     }
 
     let agentMenuOpen = $state(false);
@@ -339,6 +363,7 @@
             testResult: null,
         });
         markDirty();
+        void revealNewProvider(providers.length - 1, 'agent');
     }
 
     function removeProvider(idx: number) {
@@ -962,7 +987,6 @@
         min-width: 0;
     }
 
-    /* Mobile: title + close on top row, tabs below */
     @media (max-width: 768px) {
         .header-wrap {
             flex-wrap: wrap;
@@ -971,6 +995,7 @@
             order: 3;
             flex-basis: 100%;
             margin-top: 8px;
+            overflow-x: auto;
         }
         .header-actions {
             order: 2;

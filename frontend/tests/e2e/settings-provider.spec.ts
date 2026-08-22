@@ -754,3 +754,101 @@ test.describe.serial('Provider max requests per second', () => {
         await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
     });
 });
+
+// ─── Add Provider Scroll Tests ─────────────────────────────────────────────
+
+test.describe.serial('Add provider scroll', () => {
+    test.beforeEach(async ({ page }) => {
+        await page.keyboard.press('Escape').catch(() => {});
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 2000 }).catch(() => {});
+    });
+
+    test('should scroll the new provider input area into view and focus the URL input', async ({ page }) => {
+        // Two providers with many models each — expanded, they make the
+        // providers list far taller than the modal's visible area.
+        const manyModels = (prefix: string) =>
+            Array.from({ length: 12 }, (_, i) => ({ name: `${prefix}-model-${i}` }));
+        const idByName = await seedProvidersByIds(page, [
+            { name: 'scroll-a', url: 'http://scroll-a:9999/v1', models: manyModels('a'), concurrency: 1 },
+            { name: 'scroll-b', url: 'http://scroll-b:9999/v1', models: manyModels('b'), concurrency: 1 },
+        ], { worker: 'scroll-a', workerModel: 'a-model-0', utility: 'scroll-a', utilityModel: 'a-model-0' });
+        await waitForConfig(page, c =>
+            c.providers && c.providers.length === 2 && c.worker_provider === idByName['scroll-a']
+        );
+        await page.goto('/');
+        await page.waitForSelector('.card', { timeout: 10000 });
+
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+
+        // Expand both provider cards so the list extends well past the fold.
+        const cards = page.locator('.provider-card');
+        for (let i = 0; i < (await cards.count()); i++) {
+            const details = cards.nth(i).locator('.provider-details');
+            if (!await details.isVisible().catch(() => false)) {
+                await cards.nth(i).locator('.provider-card-header').click();
+            }
+            await expect(details).toBeVisible({ timeout: 5000 });
+        }
+
+        // Scroll the modal back to the top — the bottom of the list (where a
+        // new card would land) is now out of view. (Index-based locator: .last()
+        // would re-resolve to the new card after it is added.)
+        await page.$eval('.modal-body', el => (el.scrollTop = 0));
+        await expect(cards.nth(1).locator('.provider-details')).not.toBeInViewport();
+
+        // Add a fresh LLM provider — its input area must be scrolled into view.
+        await page.getByRole('button', { name: '+ Add Provider' }).click();
+        const newCard = page.locator('.provider-card').last();
+        await expect(newCard.locator('.provider-details')).toBeVisible({ timeout: 5000 });
+
+        const urlInput = newCard.getByLabel('Provider URL');
+        await expect(urlInput).toBeInViewport({ timeout: 5000 });
+        await expect(urlInput).toBeFocused();
+
+        // Discard the unsaved provider
+        await page.click('button:has-text("Cancel")');
+        const discardBtn = page.getByRole('button', { name: 'Discard' });
+        if (await discardBtn.isVisible().catch(() => false)) {
+            await discardBtn.click();
+        }
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+    });
+
+    test('should not scroll when the new provider input area is already visible', async ({ page }) => {
+        // A single collapsed provider: the primary providers section + the two
+        // card headers + the new card's input area fit in the (fixed 600px)
+        // modal body, so the input area is already visible and nothing needs
+        // to move.
+        const idByName = await seedProvidersByIds(page, [
+            { name: 'scroll-compact', url: 'http://scroll-compact:9999/v1', models: [{ name: 'model-c' }], concurrency: 1 },
+        ], { worker: 'scroll-compact', workerModel: 'model-c', utility: 'scroll-compact', utilityModel: 'model-c' });
+        await waitForConfig(page, c => c.providers && c.providers.length === 1 && c.worker_provider === idByName['scroll-compact']);
+        await page.goto('/');
+        await page.waitForSelector('.card', { timeout: 10000 });
+
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+        const scrollTopBefore = await page.$eval('.modal-body', el => el.scrollTop);
+
+        await page.getByRole('button', { name: '+ Add Provider' }).click();
+        const newCard = page.locator('.provider-card').last();
+        await expect(newCard.locator('.provider-details')).toBeVisible({ timeout: 5000 });
+
+        const urlInput = newCard.getByLabel('Provider URL');
+        await expect(urlInput).toBeInViewport({ timeout: 5000 });
+        // Focusing is the final step of the reveal — once it lands, the reveal
+        // (including any scroll) has fully completed.
+        await expect(urlInput).toBeFocused();
+        // The input area was already visible — the modal body must not have scrolled.
+        expect(await page.$eval('.modal-body', el => el.scrollTop)).toBe(scrollTopBefore);
+
+        // Discard the unsaved provider
+        await page.click('button:has-text("Cancel")');
+        const discardBtn = page.getByRole('button', { name: 'Discard' });
+        if (await discardBtn.isVisible().catch(() => false)) {
+            await discardBtn.click();
+        }
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+    });
+});
