@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -830,6 +831,69 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 	}
 	if output != "hello\n" {
 		t.Fatalf("unexpected output: %q", output)
+	}
+
+	// Verify the cgroup memory limit was actually applied. runsc does not
+	// apply the OCI spec's linux.resources itself, so Create writes
+	// memory.max into the container's cgroup — this is what makes the
+	// --memory flag effective.
+	cgDir, err := sm.rt.ContainerCgroupDir(ContainerNamePrefix + "-" + taskID)
+	if err != nil {
+		t.Fatalf("resolve container cgroup dir: %v", err)
+	}
+	maxData, err := os.ReadFile(filepath.Join(cgDir, "memory.max"))
+	if err != nil {
+		t.Fatalf("read memory.max: %v", err)
+	}
+	if got := strings.TrimSpace(string(maxData)); got != "536870912" {
+		t.Errorf("cgroup memory.max = %q, want 536870912 (512M)", got)
+	}
+}
+
+// TestMemoryLimitEnforced verifies the sandbox memory limit is a hard cap:
+// a process that allocates past the limit is OOM-killed by the kernel cgroup
+// OOM killer (exit 137) while the sandbox container itself survives.
+func TestMemoryLimitEnforced(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	dir := t.TempDir()
+	taskID := "test-mem-enforced"
+
+	// 128MB limit; the memhog below allocates ~512MB.
+	if _, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{MemoryLimit: 128}); err != nil {
+		t.Fatalf("create sandbox with memory limit: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	// A variable-doubling loop allocates ~512MB of anonymous memory using
+	// only the shell (no extra tools in the base image). If the cgroup limit
+	// is enforced, the kernel OOM-kills the process before it finishes.
+	const memhog = `x=a; while [ ${#x} -lt 536870912 ]; do x="$x$x"; done; echo MEMHOG-OK`
+	out, err := sm.Exec(taskID, memhog, nil)
+	if err == nil {
+		t.Fatalf("memhog succeeded despite 128MB limit (limit not enforced); output: %q", out)
+	}
+	if strings.Contains(out, "MEMHOG-OK") {
+		t.Error("memhog reported success despite 128MB limit")
+	}
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 137 {
+		t.Errorf("memhog exit = %v (output %q), want exit 137 (SIGKILL from cgroup OOM)", err, out)
+	}
+
+	// The sandbox container must still be running — the OOM kill targets the
+	// over-allocating process, not the whole sandbox.
+	if !sm.ContainerIsRunning(taskID) {
+		t.Error("sandbox container is not running after OOM kill")
 	}
 }
 
