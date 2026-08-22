@@ -126,6 +126,9 @@ type AppStreamManager struct {
 	taskBufMu   sync.Mutex
 	taskBuffers map[string][]taskFrame // task key -> ring buffer
 	taskBufSize int
+
+	// Latest-known sandbox memory stats
+	sandboxStatsProvider func(projectID, taskID string) *types.SandboxMemoryStats
 }
 
 type taskFrame struct {
@@ -298,6 +301,47 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 			}
 		}()
 	}
+
+	// Deliver the latest known sandbox memory stats after the buffer replay so
+	// clients opening the task view see the most recent usage even when the
+	// task is idle (the buffer above is cleared when execution completes).
+	if frame := asm.latestSandboxStatsFrame(projectID, taskID); frame != nil {
+		go func() {
+			client.writeMu.Lock()
+			defer client.writeMu.Unlock()
+			_ = conn.Write(context.Background(), websocket.MessageText, frame)
+		}()
+	}
+}
+
+// latestSandboxStatsFrame returns the task_event frame carrying the
+// provider's latest known sandbox memory stats for the task, or nil when no
+// provider is registered or it reports no known stats.
+func (asm *AppStreamManager) latestSandboxStatsFrame(projectID, taskID string) []byte {
+	asm.mu.RLock()
+	provider := asm.sandboxStatsProvider
+	asm.mu.RUnlock()
+	if provider == nil {
+		return nil
+	}
+	stats := provider(projectID, taskID)
+	if stats == nil {
+		return nil
+	}
+	frame, err := json.Marshal(TaskEventPayload(taskID, types.StreamEvent{Type: types.WSTypeSandboxStats, Data: stats}))
+	if err != nil {
+		return nil
+	}
+	return frame
+}
+
+// SetSandboxStatsProvider registers the source of latest-known sandbox memory
+// stats. The function is called on every subscribe_task; returning nil
+// (unknown task) sends nothing.
+func (asm *AppStreamManager) SetSandboxStatsProvider(fn func(projectID, taskID string) *types.SandboxMemoryStats) {
+	asm.mu.Lock()
+	asm.sandboxStatsProvider = fn
+	asm.mu.Unlock()
 }
 
 func (asm *AppStreamManager) unsubscribeTask(conn *websocket.Conn, projectID, taskID string) {
@@ -372,16 +416,20 @@ func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 	asm.bufferRaw(frame)
 }
 
-// SendTaskEvent sends a task-level event to all clients subscribed to the task.
-func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types.StreamEvent) {
-	// Build flat JSON: {"type":"task_event","task_id":"...","type":"token","data":{...}}
-	payload := map[string]any{
+// TaskEventPayload builds the flat task_event envelope shared by SendTaskEvent
+// and on-subscribe replays (e.g. the latest sandbox stats).
+func TaskEventPayload(taskID string, event types.StreamEvent) map[string]any {
+	return map[string]any{
 		"type":    "task_event",
 		"task_id": taskID,
 		"event":   string(event.Type),
 		"data":    event.Data,
 	}
-	asm.sendTaskPayload(projectID, taskID, payload)
+}
+
+// SendTaskEvent sends a task-level event to all clients subscribed to the task.
+func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types.StreamEvent) {
+	asm.sendTaskPayload(projectID, taskID, TaskEventPayload(taskID, event))
 
 	// Clear per-task buffer when a streaming turn ends, so reconnecting clients
 	// don't get stale tokens from a previous turn.
@@ -558,6 +606,11 @@ func (asm *AppStreamManager) BroadcastTaskUpdated(projectID string, task any) {
 
 // BroadcastTaskDeleted sends a task_deleted event and project_counts to all clients.
 func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
+	// Drop the task's replay buffer: a deleted task's frames (tokens, stats,
+	// …) must never be replayed to a late subscriber. The buffer is normally
+	// cleared by terminal status/complete events, but deletion bypasses the
+	// executor lifecycle.
+	asm.clearTaskBuffer(projectID + ":" + taskID)
 	asm.sendBoardPayload(projectID, map[string]any{
 		"type":    "task_deleted",
 		"task_id": taskID,

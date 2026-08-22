@@ -34,31 +34,32 @@ import (
 
 // Server is the main HTTP server.
 type Server struct {
-	store          *store.Store
-	configStore    *config.ConfigStore
-	sessionMgr     *auth.SessionManager
-	projectHandler *managers.ProjectHandler
-	taskHandler    *managers.TaskHandler
-	boardHandler   *managers.BoardHandler
-	appStreamMgr   *stream.AppStreamManager
-	depHandler     *managers.DependencyHandler
-	reviewHandler  *managers.ReviewHandler
-	gitHandler     *managers.GitHandler
-	executor       *kanbanexec.TaskExecutor
-	terminalMgr    *term.TerminalManager
-	sandboxMgr     *sandbox.SandboxManager
-	agentRegistry  *agent.AgentRegistry
-	extStore       *extensions.ExtensionStore
-	extSandboxMgr  *extensions.ExtensionSandboxManager
-	extHandler     *extensions.ExtensionHandler
-	extLSPMgr      *lsp.ExtensionLSPManager
-	lspHandler     *lsp.LSPHandler
-	loginLimiter   *RateLimiter
-	previewStore   *previewStore
-	mux            *http.ServeMux
-	addr           string
-	frontendDist   string
-	tlsConfig      *tls.Config
+	store               *store.Store
+	configStore         *config.ConfigStore
+	sessionMgr          *auth.SessionManager
+	projectHandler      *managers.ProjectHandler
+	taskHandler         *managers.TaskHandler
+	boardHandler        *managers.BoardHandler
+	appStreamMgr        *stream.AppStreamManager
+	depHandler          *managers.DependencyHandler
+	reviewHandler       *managers.ReviewHandler
+	gitHandler          *managers.GitHandler
+	executor            *kanbanexec.TaskExecutor
+	terminalMgr         *term.TerminalManager
+	sandboxMgr          *sandbox.SandboxManager
+	sandboxStatsSampler *stream.SandboxStatsSampler
+	agentRegistry       *agent.AgentRegistry
+	extStore            *extensions.ExtensionStore
+	extSandboxMgr       *extensions.ExtensionSandboxManager
+	extHandler          *extensions.ExtensionHandler
+	extLSPMgr           *lsp.ExtensionLSPManager
+	lspHandler          *lsp.LSPHandler
+	loginLimiter        *RateLimiter
+	previewStore        *previewStore
+	mux                 *http.ServeMux
+	addr                string
+	frontendDist        string
+	tlsConfig           *tls.Config
 
 	// worktreeMux serializes git operations per task.
 
@@ -131,6 +132,11 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	worktreeMgr := git.NewWorktreeManager(store, cfgStore)
 	s.appStreamMgr = stream.NewAppStreamManager(store, worktreeMgr)
 	s.sandboxMgr = sandbox.NewSandboxManager()
+	// Sandbox memory stats: sample running tasks every 2 s, push sandbox_stats
+	// task events on change, and serve the most recent usage on task subscribe.
+	s.sandboxStatsSampler = stream.NewSandboxStatsSampler(s.sandboxMgr, store, s.appStreamMgr, stream.DefaultSandboxStatsInterval)
+	s.appStreamMgr.SetSandboxStatsProvider(s.sandboxStatsSampler.LatestStatsProvider())
+	s.sandboxStatsSampler.Start()
 	s.boardHandler = managers.NewBoardHandler(store, s.appStreamMgr, cfgStore, s.sandboxMgr)
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr, nil) // agentRegistry wired after creation
 	// Wire port assignment callback → store + WebSocket broadcast
@@ -489,7 +495,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.extSandboxMgr != nil {
 		s.extSandboxMgr.Close()
 	}
-	// Clean up all task sandbox containers
+	// Stop sandbox memory sampling, then clean up all task sandbox containers
+	if s.sandboxStatsSampler != nil {
+		s.sandboxStatsSampler.Stop()
+	}
 	if s.sandboxMgr != nil {
 		s.sandboxMgr.Cleanup()
 	}
