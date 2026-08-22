@@ -89,6 +89,7 @@ func (s *Server) setupRoutes() {
 	// Projects
 	s.mux.HandleFunc("GET /api/projects", s.projectHandler.HandleList)
 	s.mux.HandleFunc("POST /api/projects", s.projectHandler.HandleCreate)
+	s.mux.HandleFunc("POST /api/projects/clone", s.projectHandler.HandleClone)
 	s.mux.HandleFunc("GET /api/projects/counts", s.projectHandler.HandleCounts)
 	s.mux.HandleFunc("/api/projects/{projectID}", s.projectHandler.HandleByID)
 	s.mux.HandleFunc("/api/projects/{projectID}/board", s.boardHandler.HandleGetBoard)

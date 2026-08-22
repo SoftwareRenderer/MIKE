@@ -33,6 +33,7 @@ export {
     getProjectStats,
     resetProjectStats,
     createProject,
+    cloneProject,
     updateProject,
     buildSandboxImageStream,
     deleteProject,

@@ -92,9 +92,11 @@
                 <div class="project-item-content">
                     <button
                         class="project-item"
+                        class:cloning={p.cloning}
                         onkeydown={(e) => handleProjectItemKeydown(e, i)}
-                        onclick={() => onSelectProject(p)}
-                        title={projectCounts[p.id]?.review > 0 ? `${p.name} - ${projectCounts[p.id].review} task${projectCounts[p.id].review === 1 ? '' : 's'} available for review` : `Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}`}
+                        onclick={() => { if (!p.cloning) onSelectProject(p); }}
+                        aria-busy={p.cloning ? 'true' : undefined}
+                        title={p.cloning ? `Cloning repository… (${p.cloneProgress ?? 0}%)` : projectCounts[p.id]?.review > 0 ? `${p.name} - ${projectCounts[p.id].review} task${projectCounts[p.id].review === 1 ? '' : 's'} available for review` : `Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}`}
                     >
                         {#if isMobile || !collapsed}
                             {#if p.sandbox_enabled}
@@ -108,10 +110,15 @@
                             {/if}
                         {/if}
                         <span class="project-name">{p.name}</span>
-                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled}>
+                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled} class:cloning={p.cloning}>
                             {getProjectAbbr(p.name)}
                         </span>
-                        {#if (isMobile || !collapsed) && projectCounts[p.id]}
+                        {#if p.cloning && (isMobile || !collapsed)}
+                            <!-- Determinate clone progress (streamed from the server) -->
+                            <span class="clone-progress" role="progressbar" aria-label="Clone progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p.cloneProgress ?? 0}>
+                                <span class="clone-progress-bar" style={`width: ${p.cloneProgress ?? 0}%`}></span>
+                            </span>
+                        {:else if (isMobile || !collapsed) && projectCounts[p.id]}
                             <span class="project-stats">
                                 <span class="stat-badge" style="color: var(--color-column-backlog)" title="Backlog">
                                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -129,7 +136,7 @@
                         {/if}
                     </button>
                 </div>
-                {#if isMobile || !collapsed}
+                {#if (isMobile || !collapsed) && !p.cloning}
                 <button
                     class="project-remove-btn"
                     onclick={(e) => { e.stopPropagation(); onRemoveProject(p); }}
@@ -297,6 +304,33 @@
     }
     .project-item:hover {
         background: var(--color-surface-2);
+    }
+    .project-item.cloning {
+        cursor: progress;
+    }
+    /* Clone progress bar (determinate — width set inline from streamed %) */
+    .clone-progress {
+        flex: 1;
+        min-width: 48px;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--color-surface-3);
+        overflow: hidden;
+    }
+    .clone-progress-bar {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--color-accent);
+        transition: width 0.2s ease;
+    }
+    /* Collapsed sidebar has no room for the bar — pulse the abbreviation instead */
+    .project-abbr.cloning {
+        animation: clone-abbr-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes clone-abbr-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.35; }
     }
     /* Focused-project ring: must stay an INSET box-shadow — ancestor overflow:hidden
        (collapse transition) clips any outline drawn outside the button box. */
