@@ -1,5 +1,5 @@
 import type { Board, Project, ProjectCounts, ProjectStats } from '../types';
-import { API_BASE, apiFetch, apiError } from './helpers';
+import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
 import {
     getOfflineStatus,
     enqueueAction,
@@ -13,6 +13,7 @@ import {
 import { setBoardCache, getBoardCache, boardCacheKey } from '../storage';
 import { markCached } from './cache';
 import type { ReorderRequest } from '../types';
+import { repoNameFromGitUrl } from '../utils/repo-name';
 
 /** Fetch all projects from the server. Falls back to cached copy on failure.
  * Always tries the network first — the isOffline flag tracks WebSocket state,
@@ -72,6 +73,120 @@ export async function createProject(path: string, sandboxEnabled = false, gitUrl
         } as Project);
     }
     return createProjectRaw(path, sandboxEnabled, gitUrl);
+}
+
+// -- Clone with live progress (SSE) --
+
+/** Terminal events emitted by POST /api/projects/clone (one JSON object per SSE frame). */
+export type CloneEvent =
+    | { type: 'status'; message: string }
+    | { type: 'progress'; percent: number }
+    | { type: 'done'; project: Project }
+    | { type: 'error'; message: string };
+
+/** Parse a single SSE `data:` frame payload from the clone endpoint.
+ * Returns null for non-JSON or unrecognized frames (defensive — the current
+ * server only emits CloneEvent objects). */
+export function parseCloneEvent(data: string): CloneEvent | null {
+    if (!data.startsWith('{')) return null;
+    try {
+        const obj = JSON.parse(data) as Record<string, unknown>;
+        switch (obj.type) {
+            case 'status':
+                return { type: 'status', message: String(obj.message ?? '') };
+            case 'progress':
+                return { type: 'progress', percent: Number(obj.percent ?? 0) };
+            case 'done':
+                return { type: 'done', project: obj.project as Project };
+            case 'error':
+                return { type: 'error', message: String(obj.message ?? 'clone failed') };
+            default:
+                return null;
+        }
+    } catch {
+        return null;
+    }
+}
+
+/** Clone a git repository into a new project, streaming live clone progress
+ * (0-100) via onProgress while online. Offline, the action is queued and
+ * replayed through the synchronous create endpoint on reconnect. */
+export async function cloneProject(
+    targetDir: string,
+    gitUrl: string,
+    sandboxEnabled: boolean,
+    onProgress?: (percent: number) => void,
+): Promise<Project> {
+    if (getOfflineStatus()) {
+        return await queueWrite('createProject', { path: targetDir, sandboxEnabled, gitUrl }, {
+            id: '', name: repoNameFromGitUrl(gitUrl), path: targetDir, sandbox_enabled: sandboxEnabled,
+            created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        } as Project);
+    }
+    return cloneProjectRaw(targetDir, gitUrl, sandboxEnabled, onProgress);
+}
+
+async function cloneProjectRaw(
+    targetDir: string,
+    gitUrl: string,
+    sandboxEnabled: boolean,
+    onProgress?: (percent: number) => void,
+): Promise<Project> {
+    const token = await ensureCsrfToken();
+    const headers = new Headers({ 'Content-Type': 'application/json' });
+    if (token) headers.set('X-CSRF-Token', token);
+
+    const body: Record<string, unknown> = {
+        path: targetDir,
+        git_url: gitUrl,
+        sandbox_enabled: sandboxEnabled,
+    };
+    if (sandboxEnabled) {
+        body.sandbox_network_isolation = true;
+    }
+
+    const res = await fetch(`${API_BASE}/projects/clone`, {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        // Early failures (bad body, missing git_url) arrive as plain JSON.
+        throw await apiError(res, 'Failed to clone project');
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('Streaming not supported');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let project: Project | null = null;
+    let errorMessage: string | null = null;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const event = parseCloneEvent(line.slice(6));
+            if (!event) continue;
+            if (event.type === 'progress') {
+                onProgress?.(event.percent);
+            } else if (event.type === 'done') {
+                project = event.project;
+            } else if (event.type === 'error') {
+                errorMessage = event.message;
+            }
+        }
+    }
+
+    if (errorMessage) throw new Error(errorMessage);
+    if (!project) throw new Error('Clone completed without result');
+    return project;
 }
 
 /** Update project metadata (name, sandbox settings). Queued when offline. */

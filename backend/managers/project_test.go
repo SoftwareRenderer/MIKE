@@ -1,7 +1,10 @@
 package managers
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,6 +98,195 @@ func TestHandleCreateClone(t *testing.T) {
 	}
 	if !git.IsGitRepo(expectedPath) {
 		t.Fatal("cloned path is not a git repository")
+	}
+}
+
+// makeCommittedRepo creates a non-bare git repo with `commits` commits at
+// path. The file:// form of its URL is returned: cloning a plain local path
+// uses git's hardlink optimization (no pack transfer, no progress output),
+// while file:// goes through the upload-pack protocol and reports progress.
+func makeCommittedRepo(t *testing.T, path string, commits int) string {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", path}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v (%s)", args, err, out)
+		}
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@test.com")
+	runGit("config", "user.name", "Test")
+	for i := 0; i < commits; i++ {
+		content := fmt.Sprintf("line %d %s", i, strings.Repeat("x", 512))
+		if err := os.WriteFile(filepath.Join(path, "data.txt"), []byte(content), 0o644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+		runGit("add", "data.txt")
+		runGit("commit", "-m", "commit")
+	}
+	return "file://" + path
+}
+
+// readSSEEvents parses the "data: <json>" frames of an SSE response body.
+func readSSEEvents(t *testing.T, body io.Reader) []map[string]any {
+	t.Helper()
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	var events []map[string]any
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(line[len("data: "):]), &ev); err != nil {
+			t.Fatalf("bad SSE frame %q: %v", line, err)
+		}
+		events = append(events, ev)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("read SSE: %v", err)
+	}
+	return events
+}
+
+// TestHandleCloneStreamsProgress verifies that HandleClone streams clone
+// progress events and finishes with a done event carrying the new project.
+func TestHandleCloneStreamsProgress(t *testing.T) {
+	t.Setenv("DANGER_ZONE", "1")
+	h, _ := testProjectHandler(t)
+	tmp := t.TempDir()
+	src := makeCommittedRepo(t, filepath.Join(tmp, "my-remote-repo"), 20)
+	workspace := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+
+	body, _ := json.Marshal(types.CreateProjectRequest{Path: workspace, GitUrl: src})
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/clone", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	h.HandleClone(rr, req)
+
+	if ct := rr.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("content-type = %q, want text/event-stream", ct)
+	}
+
+	events := readSSEEvents(t, rr.Body)
+	if len(events) == 0 {
+		t.Fatal("no SSE events")
+	}
+
+	sawProgress := false
+	var lastPct int
+	for i, ev := range events {
+		switch ev["type"] {
+		case "progress":
+			sawProgress = true
+			pct, ok := ev["percent"].(float64)
+			if !ok {
+				t.Fatalf("event %d: percent not a number: %v", i, ev)
+			}
+			if pct < 0 || pct > 100 {
+				t.Fatalf("event %d: percent out of range: %v", i, ev)
+			}
+			if int(pct) <= lastPct {
+				t.Fatalf("progress not strictly increasing at event %d: %v", i, events)
+			}
+			lastPct = int(pct)
+		case "status", "done":
+		case "error":
+			t.Fatalf("unexpected error event: %v", ev)
+		default:
+			t.Fatalf("unknown event type: %v", ev)
+		}
+	}
+	if !sawProgress {
+		t.Fatal("no progress events")
+	}
+	if lastPct != 100 {
+		t.Fatalf("final progress = %d, want 100", lastPct)
+	}
+	last := events[len(events)-1]
+	if last["type"] != "done" {
+		t.Fatalf("last event = %v, want done", last)
+	}
+	proj, ok := last["project"].(map[string]any)
+	if !ok {
+		t.Fatalf("done event without project: %v", last)
+	}
+	if proj["name"] != "my-remote-repo" {
+		t.Fatalf("project name = %v", proj["name"])
+	}
+	wantPath := filepath.Join(workspace, "my-remote-repo")
+	if proj["path"] != wantPath {
+		t.Fatalf("project path = %v, want %v", proj["path"], wantPath)
+	}
+	if !git.IsGitRepo(wantPath) {
+		t.Fatal("clone target is not a git repository")
+	}
+	// The project must be persisted.
+	if _, err := h.store.GetProject(proj["id"].(string)); err != nil {
+		t.Fatalf("project not persisted: %v", err)
+	}
+}
+
+// TestHandleCloneTargetExists verifies the failure path: a pre-existing
+// target dir yields a terminal error event and no project.
+func TestHandleCloneTargetExists(t *testing.T) {
+	t.Setenv("DANGER_ZONE", "1")
+	h, _ := testProjectHandler(t)
+	tmp := t.TempDir()
+	src := makeCommittedRepo(t, filepath.Join(tmp, "my-remote-repo"), 3)
+	workspace := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, "my-remote-repo"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	body, _ := json.Marshal(types.CreateProjectRequest{Path: workspace, GitUrl: src})
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/clone", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	h.HandleClone(rr, req)
+
+	events := readSSEEvents(t, rr.Body)
+	if len(events) != 1 {
+		t.Fatalf("expected a single error event, got %d: %v", len(events), events)
+	}
+	if events[0]["type"] != "error" {
+		t.Fatalf("event = %v, want error", events[0])
+	}
+	if !strings.Contains(events[0]["message"].(string), "already exists") {
+		t.Fatalf("message = %v, want 'already exists'", events[0]["message"])
+	}
+	projects, _ := h.store.ListProjects()
+	for _, p := range projects {
+		if p.Name == "my-remote-repo" {
+			t.Fatalf("project created despite failed clone: %v", p)
+		}
+	}
+}
+
+// TestHandleCloneBadURL verifies that an invalid git URL fails fast with an
+// error event (no clone attempted).
+func TestHandleCloneBadURL(t *testing.T) {
+	t.Setenv("DANGER_ZONE", "1")
+	h, _ := testProjectHandler(t)
+	tmp := t.TempDir()
+
+	body, _ := json.Marshal(types.CreateProjectRequest{Path: tmp, GitUrl: "-evil-flag"})
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/clone", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	h.HandleClone(rr, req)
+
+	events := readSSEEvents(t, rr.Body)
+	if len(events) != 1 || events[0]["type"] != "error" {
+		t.Fatalf("events = %v, want single error", events)
+	}
+	if !strings.Contains(events[0]["message"].(string), "dash") {
+		t.Fatalf("message = %v", events[0]["message"])
 	}
 }
 

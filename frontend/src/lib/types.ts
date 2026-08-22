@@ -40,6 +40,12 @@ export interface Project {
     id: string;
     name: string;
     path: string;
+    // Client-only flags for the in-flight "clone from git" placeholder row:
+    // `cloning` marks the optimistic sidebar entry (never persisted), and
+    // `cloneProgress` carries the 0-100 clone percentage streamed from the
+    // server while it runs.
+    cloning?: boolean;
+    cloneProgress?: number;
     origin_branch?: string;
     sandbox_enabled?: boolean;
     sandbox_network_isolation?: boolean;
