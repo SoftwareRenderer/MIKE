@@ -65,11 +65,11 @@ type ExtensionManifest struct {
 
 // Capabilities groups the functional capabilities an extension provides.
 type Capabilities struct {
-	LSP   *LSPConfig   `json:"lsp,omitempty"`
-	UI    *UIConfig    `json:"ui,omitempty"`
-	CSS   *CSSConfig   `json:"css,omitempty"`
-	Agent *AgentConfig `json:"agent,omitempty"`
-	Proxy *ProxyConfig `json:"proxy,omitempty"` // server-side proxy capability
+	LSP     *LSPConfig     `json:"lsp,omitempty"`
+	UI      *UIConfig      `json:"ui,omitempty"`
+	CSS     *CSSConfig     `json:"css,omitempty"`
+	Agent   *AgentConfig   `json:"agent,omitempty"`
+	Network *NetworkConfig `json:"network,omitempty"` // server-side network capability
 }
 
 // GetLSP returns the LSP capability, or nil if not present.
@@ -104,19 +104,19 @@ func (c *Capabilities) GetAgent() *AgentConfig {
 	return c.Agent
 }
 
-// GetProxy returns the Proxy capability, or nil if not present.
-func (c *Capabilities) GetProxy() *ProxyConfig {
+// GetNetwork returns the Network capability, or nil if not present.
+func (c *Capabilities) GetNetwork() *NetworkConfig {
 	if c == nil {
 		return nil
 	}
-	return c.Proxy
+	return c.Network
 }
 
-// ProxyConfig defines server-side proxy settings for external API access.
+// NetworkConfig defines server-side network settings for external API access.
 // Extensions must declare this capability to use the proxy endpoint.
 // Headers can use {{property_name}} placeholders which are resolved from
 // the extension's configuration at request time.
-type ProxyConfig struct {
+type NetworkConfig struct {
 	AllowedDomains []string          `json:"allowed_domains,omitempty"` // whitelist of domains the proxy may contact
 	Headers        map[string]string `json:"headers,omitempty"`         // header templates (e.g. "Authorization": "token {{github_token}}")
 }
