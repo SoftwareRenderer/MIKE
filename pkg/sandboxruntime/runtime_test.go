@@ -247,6 +247,49 @@ func TestReadCgroupMemory_MissingDir(t *testing.T) {
 	}
 }
 
+func TestClearCgroupMemoryLimit(t *testing.T) {
+	dir := t.TempDir()
+	// Simulate a cgroup with a 512 MB limit and no swap.
+	if err := os.WriteFile(filepath.Join(dir, "memory.max"), []byte("536870912"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "memory.swap.max"), []byte("0"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "memory.current"), []byte("1048576"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := clearCgroupMemoryLimit(dir); err != nil {
+		t.Fatalf("clearCgroupMemoryLimit() = %v", err)
+	}
+
+	for _, f := range []string{"memory.max", "memory.swap.max"} {
+		data, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if string(data) != "max" {
+			t.Errorf("%s = %q, want max", f, data)
+		}
+	}
+
+	// The cleared cgroup reads back as unlimited.
+	mem, err := ReadCgroupMemory(dir)
+	if err != nil {
+		t.Fatalf("ReadCgroupMemory() = %v", err)
+	}
+	if mem.MaxBytes != 0 {
+		t.Errorf("MaxBytes = %d, want 0 (unlimited)", mem.MaxBytes)
+	}
+}
+
+func TestClearCgroupMemoryLimit_MissingDir(t *testing.T) {
+	if err := clearCgroupMemoryLimit(filepath.Join(t.TempDir(), "nonexistent")); err == nil {
+		t.Error("expected error for missing cgroup directory")
+	}
+}
+
 func TestValidateDockerfilePath(t *testing.T) {
 	tests := []struct {
 		name    string

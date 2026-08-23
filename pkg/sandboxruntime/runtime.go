@@ -463,3 +463,28 @@ func (r *Runtime) ApplyMemoryLimit(name string, limitMB int) error {
 	}
 	return nil
 }
+
+// ClearMemoryLimit removes any memory limit from a running container by
+// writing "max" into its cgroup.
+//
+// Returns an error if the limit cannot be cleared; the caller decides whether
+// to fail open (sandbox keeps its old limit) or fail closed.
+func (r *Runtime) ClearMemoryLimit(name string) error {
+	dir, err := r.ContainerCgroupDir(name)
+	if err != nil {
+		return err
+	}
+	return clearCgroupMemoryLimit(dir)
+}
+
+// clearCgroupMemoryLimit writes "max" into the cgroup's memory.max and
+// memory.swap.max files, removing any memory limit.
+func clearCgroupMemoryLimit(dir string) error {
+	if err := os.WriteFile(filepath.Join(dir, "memory.max"), []byte("max"), 0); err != nil {
+		return fmt.Errorf("clear memory.max in %s: %w", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "memory.swap.max"), []byte("max"), 0); err != nil {
+		log.Printf("[sandboxruntime] could not set memory.swap.max=max in %s: %v", dir, err)
+	}
+	return nil
+}

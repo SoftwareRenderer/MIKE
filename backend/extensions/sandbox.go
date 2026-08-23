@@ -21,7 +21,8 @@ const (
 	// ExtensionContainerPrefix is the prefix for extension sandbox container names.
 	ExtensionContainerPrefix = "kanban-ext"
 	// DefaultExtensionMemory is the default memory limit for extension sandboxes (MB).
-	DefaultExtensionMemory = 256
+	// 0 means no limit — extension sandboxes run unlimited unless the user sets one.
+	DefaultExtensionMemory = 0
 	// ExtensionLivenessTTL is how long to cache a liveness check result.
 	ExtensionLivenessTTL = 5 * time.Minute
 	// ExtensionStopGracePeriod is how long to keep a sandbox alive after the last
@@ -126,12 +127,13 @@ func (sm *ExtensionSandboxManager) IsAvailable() bool {
 }
 
 // extensionMemoryLimit resolves the memory limit (MB) for an extension's
-// sandbox: the extension's configured value, or DefaultExtensionMemory.
+// sandbox: the extension's configured value. 0 means no limit; negative
+// values are clamped to 0.
 func extensionMemoryLimit(ext *Extension) int {
-	if ext.SandboxConfig.MemoryLimit > 0 {
-		return ext.SandboxConfig.MemoryLimit
+	if ext.SandboxConfig.MemoryLimit < 0 {
+		return 0
 	}
-	return DefaultExtensionMemory
+	return ext.SandboxConfig.MemoryLimit
 }
 
 // buildExtensionCreateArgs assembles the `podman create` argument list for an
@@ -180,8 +182,10 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		createArgs = append(createArgs, "-e", fmt.Sprintf("%s=%s", env.Key, env.Value))
 	}
 
-	// Memory limit
-	createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", extensionMemoryLimit(ext)))
+	// Memory limit (0 = no limit — omit the flag so the container starts unlimited)
+	if memLimit := extensionMemoryLimit(ext); memLimit > 0 {
+		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memLimit))
+	}
 
 	// Custom mounts
 	for _, m := range ext.SandboxConfig.Mounts {
@@ -283,9 +287,12 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 
 	// Enforce the memory limit in the container's cgroup (runsc does not
 	// apply OCI resource limits itself — see sandboxruntime.ApplyMemoryLimit).
-	// Fail open: warn and continue if it cannot be applied.
-	if memErr := sm.rt.ApplyMemoryLimit(containerName, extensionMemoryLimit(ext)); memErr != nil {
-		log.Printf("[ext-sandbox] ext=%s WARNING: memory limit %dMB not enforced (cgroup write failed): %v", ext.ID, extensionMemoryLimit(ext), memErr)
+	// Fail open: warn and continue if it cannot be applied. 0 = no limit: the
+	// container's cgroup is unlimited by default, so nothing to write.
+	if memLimit := extensionMemoryLimit(ext); memLimit > 0 {
+		if memErr := sm.rt.ApplyMemoryLimit(containerName, memLimit); memErr != nil {
+			log.Printf("[ext-sandbox] ext=%s WARNING: memory limit %dMB not enforced (cgroup write failed): %v", ext.ID, memLimit, memErr)
+		}
 	}
 
 	log.Printf("[ext-sandbox] ext=%s created and started container %s (mounts: %d projects)", ext.ID, containerName, len(projectMounts))
@@ -498,6 +505,53 @@ func (sm *ExtensionSandboxManager) Close() {
 		log.Printf("[ext-sandbox] shutdown: stopping ext=%s", extID)
 		sm.Stop(extID)
 	}
+}
+
+// UpdateMemoryLimit persists a new memory limit (MB)
+func (sm *ExtensionSandboxManager) UpdateMemoryLimit(extID string, limitMB int) error {
+	if limitMB < 0 {
+		limitMB = 0
+	}
+
+	ext, err := sm.store.GetByID(extID)
+	if err != nil {
+		return fmt.Errorf("load extension %s: %w", extID, err)
+	}
+	ext.SandboxConfig.MemoryLimit = limitMB
+	// Keep config.memory_limit in sync with sandbox_config (the edit form's
+	// save path keys off config).
+	if ext.Config == nil {
+		ext.Config = map[string]any{}
+	}
+	ext.Config["memory_limit"] = limitMB
+	if err := sm.store.Update(extID, ext); err != nil {
+		return fmt.Errorf("persist memory limit for extension %s: %w", extID, err)
+	}
+
+	if err := sm.ApplyMemoryLimit(extID, limitMB); err != nil {
+		return fmt.Errorf("apply memory limit %dMB to running sandbox %s: %w", limitMB, extID, err)
+	}
+	return nil
+}
+
+// ApplyMemoryLimit applies the given memory limit (MB)
+func (sm *ExtensionSandboxManager) ApplyMemoryLimit(extID string, limitMB int) error {
+	sm.mu.Lock()
+	state, ok := sm.states[extID]
+	sm.mu.Unlock()
+
+	if !ok {
+		return nil
+	}
+	running, err := sm.rt.IsRunning(state.containerName)
+	if err != nil || !running {
+		return nil
+	}
+
+	if limitMB <= 0 {
+		return sm.rt.ClearMemoryLimit(state.containerName)
+	}
+	return sm.rt.ApplyMemoryLimit(state.containerName, limitMB)
 }
 
 // GetMemoryStats returns the live memory usage of the extension's sandbox
