@@ -1,5 +1,9 @@
 <script lang="ts">
-    let { cursorLine, cursorCol, lineCount, charCount, onFind, onWrapToggle, lspReady, lspConnecting, lspError, lspLanguage, lspServerName, lspServerVersion, lspMessage }: {
+    import { fetchLSPSandboxMemory } from '$lib/api/lsp';
+    import { formatSandboxMemory, isSandboxMemoryWarning } from '$lib/utils/memory-stats';
+    import type { SandboxMemoryStats } from '$lib/types';
+
+    let { cursorLine, cursorCol, lineCount, charCount, onFind, onWrapToggle, lspReady, lspConnecting, lspError, lspLanguage, lspServerName, lspServerVersion, lspMessage, lspWorkspace, lspFile }: {
         cursorLine: number;
         cursorCol: number;
         lineCount: number;
@@ -13,16 +17,44 @@
         lspServerName?: string;
         lspServerVersion?: string;
         lspMessage?: string;
+        // Absolute host paths identifying the LSP workspace + open file; used
+        // to fetch the LSP sandbox's memory usage for the status tooltip.
+        lspWorkspace?: string;
+        lspFile?: string;
     } = $props();
 
     let lspTooltipVisible = $state(false);
+    let lspSandboxStats = $state<SandboxMemoryStats | null>(null);
+    let lspMemoryLoading = $state(false);
+    // Monotonic fetch sequence: closing the tooltip (or reopening it) invalidates
+    // any in-flight fetch so a stale result never lands in a (re)opened tooltip.
+    let lspMemoryFetchSeq = 0;
     let showFileStats = $state(false);
     let wordWrap = $state(false);
 
     const lspStatusLabel = $derived(lspReady ? lspLanguage || 'LSP' : '-');
 
-    function toggleLspTooltip() {
+    // The memory row is only meaningful when the editor provides the LSP
+    // workspace/file context (and the LSP footer section is rendered).
+    const lspMemoryRowVisible = $derived(!!lspWorkspace && !!lspFile);
+
+    async function toggleLspTooltip() {
         lspTooltipVisible = !lspTooltipVisible;
+        if (lspTooltipVisible && lspMemoryRowVisible) {
+            // One-shot fetch on open (no polling while open).
+            const seq = ++lspMemoryFetchSeq;
+            lspSandboxStats = null;
+            lspMemoryLoading = true;
+            const stats = await fetchLSPSandboxMemory(lspWorkspace!, lspFile!);
+            if (seq === lspMemoryFetchSeq) {
+                lspSandboxStats = stats;
+                lspMemoryLoading = false;
+            }
+        } else {
+            lspMemoryFetchSeq++;
+            lspSandboxStats = null;
+            lspMemoryLoading = false;
+        }
     }
 
     function toggleWordWrap() {
@@ -60,6 +92,14 @@
                             {#if lspError}{lspError}{:else if lspReady}Connected{:else}Connecting...{/if}
                         </span>
                     </div>
+                    {#if lspMemoryRowVisible}
+                        <div class="lsp-tooltip-row">
+                            <span class="lsp-tooltip-label">Sandbox Memory</span>
+                            <span class="lsp-tooltip-value" class:lsp-error={isSandboxMemoryWarning(lspSandboxStats)}>
+                                {lspMemoryLoading ? '…' : formatSandboxMemory(lspSandboxStats)}
+                            </span>
+                        </div>
+                    {/if}
                     {#if lspMessage}
                         <div class="lsp-tooltip-row">
                             <span class="lsp-tooltip-label">LSP Log</span>

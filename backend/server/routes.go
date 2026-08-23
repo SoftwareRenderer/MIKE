@@ -31,6 +31,8 @@ func (s *Server) setupRoutes() {
 
 	// LSP WebSocket
 	s.mux.HandleFunc("/api/lsp", s.lspHandler.HandleLSP)
+	// LSP sandbox memory stats (for the editor LSP status tooltip)
+	s.mux.HandleFunc("/api/lsp/memory", s.lspHandler.HandleSandboxMemory)
 
 	// HTML/SVG preview documents (served to sandboxed preview iframes)
 	s.mux.HandleFunc("POST /api/preview", s.HandlePreviewServe)

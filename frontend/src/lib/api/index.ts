@@ -116,6 +116,9 @@ export type { AppStream, AppStreamCallbacks } from './stream';
 // -- Terminal --
 export { createTerminal, createProjectTerminal, isTerminalStale } from './terminal';
 
+// -- LSP --
+export { fetchLSPSandboxMemory } from './lsp';
+
 // -- Extensions --
 export {
     listExtensions,
