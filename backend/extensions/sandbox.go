@@ -21,7 +21,8 @@ const (
 	// ExtensionContainerPrefix is the prefix for extension sandbox container names.
 	ExtensionContainerPrefix = "kanban-ext"
 	// DefaultExtensionMemory is the default memory limit for extension sandboxes (MB).
-	DefaultExtensionMemory = 256
+	// 0 means no limit — extension sandboxes run unlimited unless the user sets one.
+	DefaultExtensionMemory = 0
 	// ExtensionLivenessTTL is how long to cache a liveness check result.
 	ExtensionLivenessTTL = 5 * time.Minute
 	// ExtensionStopGracePeriod is how long to keep a sandbox alive after the last
@@ -36,6 +37,7 @@ type ExtensionSandboxManager struct {
 	clients       map[string]*sandbox.Client        // extID -> bridge client
 	refs          map[string]int                    // extID -> active client count
 	states        map[string]*extensionSandboxState // extID -> runtime state
+	cgroupDirs    map[string]string                 // extID -> cached cgroup v2 memory dir
 	registry      *RegistryClient
 	store         *ExtensionStore
 	available     bool
@@ -75,6 +77,7 @@ func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *Ext
 		clients:       make(map[string]*sandbox.Client),
 		refs:          make(map[string]int),
 		states:        make(map[string]*extensionSandboxState),
+		cgroupDirs:    make(map[string]string),
 		registry:      reg,
 		store:         store,
 		available:     checkExtensionSandboxAvailable(),
@@ -124,12 +127,13 @@ func (sm *ExtensionSandboxManager) IsAvailable() bool {
 }
 
 // extensionMemoryLimit resolves the memory limit (MB) for an extension's
-// sandbox: the extension's configured value, or DefaultExtensionMemory.
+// sandbox: the extension's configured value. 0 means no limit; negative
+// values are clamped to 0.
 func extensionMemoryLimit(ext *Extension) int {
-	if ext.SandboxConfig.MemoryLimit > 0 {
-		return ext.SandboxConfig.MemoryLimit
+	if ext.SandboxConfig.MemoryLimit < 0 {
+		return 0
 	}
-	return DefaultExtensionMemory
+	return ext.SandboxConfig.MemoryLimit
 }
 
 // buildExtensionCreateArgs assembles the `podman create` argument list for an
@@ -178,8 +182,10 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		createArgs = append(createArgs, "-e", fmt.Sprintf("%s=%s", env.Key, env.Value))
 	}
 
-	// Memory limit
-	createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", extensionMemoryLimit(ext)))
+	// Memory limit (0 = no limit — omit the flag so the container starts unlimited)
+	if memLimit := extensionMemoryLimit(ext); memLimit > 0 {
+		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memLimit))
+	}
 
 	// Custom mounts
 	for _, m := range ext.SandboxConfig.Mounts {
@@ -281,9 +287,12 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 
 	// Enforce the memory limit in the container's cgroup (runsc does not
 	// apply OCI resource limits itself — see sandboxruntime.ApplyMemoryLimit).
-	// Fail open: warn and continue if it cannot be applied.
-	if memErr := sm.rt.ApplyMemoryLimit(containerName, extensionMemoryLimit(ext)); memErr != nil {
-		log.Printf("[ext-sandbox] ext=%s WARNING: memory limit %dMB not enforced (cgroup write failed): %v", ext.ID, extensionMemoryLimit(ext), memErr)
+	// Fail open: warn and continue if it cannot be applied. 0 = no limit: the
+	// container's cgroup is unlimited by default, so nothing to write.
+	if memLimit := extensionMemoryLimit(ext); memLimit > 0 {
+		if memErr := sm.rt.ApplyMemoryLimit(containerName, memLimit); memErr != nil {
+			log.Printf("[ext-sandbox] ext=%s WARNING: memory limit %dMB not enforced (cgroup write failed): %v", ext.ID, memLimit, memErr)
+		}
 	}
 
 	log.Printf("[ext-sandbox] ext=%s created and started container %s (mounts: %d projects)", ext.ID, containerName, len(projectMounts))
@@ -442,6 +451,7 @@ func (sm *ExtensionSandboxManager) stopLocked(extID string) {
 	delete(sm.clients, extID)
 	delete(sm.refs, extID)
 	delete(sm.states, extID)
+	delete(sm.cgroupDirs, extID)
 
 	log.Printf("[ext-sandbox] ext=%s stopped", extID)
 }
@@ -495,6 +505,111 @@ func (sm *ExtensionSandboxManager) Close() {
 		log.Printf("[ext-sandbox] shutdown: stopping ext=%s", extID)
 		sm.Stop(extID)
 	}
+}
+
+// UpdateMemoryLimit persists a new memory limit (MB)
+func (sm *ExtensionSandboxManager) UpdateMemoryLimit(extID string, limitMB int) error {
+	if limitMB < 0 {
+		limitMB = 0
+	}
+
+	ext, err := sm.store.GetByID(extID)
+	if err != nil {
+		return fmt.Errorf("load extension %s: %w", extID, err)
+	}
+	ext.SandboxConfig.MemoryLimit = limitMB
+	// Keep config.memory_limit in sync with sandbox_config (the edit form's
+	// save path keys off config).
+	if ext.Config == nil {
+		ext.Config = map[string]any{}
+	}
+	ext.Config["memory_limit"] = limitMB
+	if err := sm.store.Update(extID, ext); err != nil {
+		return fmt.Errorf("persist memory limit for extension %s: %w", extID, err)
+	}
+
+	if err := sm.ApplyMemoryLimit(extID, limitMB); err != nil {
+		return fmt.Errorf("apply memory limit %dMB to running sandbox %s: %w", limitMB, extID, err)
+	}
+	return nil
+}
+
+// ApplyMemoryLimit applies the given memory limit (MB)
+func (sm *ExtensionSandboxManager) ApplyMemoryLimit(extID string, limitMB int) error {
+	sm.mu.Lock()
+	state, ok := sm.states[extID]
+	sm.mu.Unlock()
+
+	if !ok {
+		return nil
+	}
+	running, err := sm.rt.IsRunning(state.containerName)
+	if err != nil || !running {
+		return nil
+	}
+
+	if limitMB <= 0 {
+		return sm.rt.ClearMemoryLimit(state.containerName)
+	}
+	return sm.rt.ApplyMemoryLimit(state.containerName, limitMB)
+}
+
+// GetMemoryStats returns the live memory usage of the extension's sandbox
+// container by reading its cgroup v2 memory controller. Returns zero stats
+// (Running: false) when the sandbox was never created, is not running, or
+// the cgroup cannot be read. The resolved cgroup directory is cached per
+// extension and invalidated when a read fails (cgroup gone — container
+// stopped or removed).
+func (sm *ExtensionSandboxManager) GetMemoryStats(extID string) *types.SandboxMemoryStats {
+	sm.mu.Lock()
+	state, ok := sm.states[extID]
+	dir := sm.cgroupDirs[extID]
+	sm.mu.Unlock()
+
+	if !ok {
+		return &types.SandboxMemoryStats{}
+	}
+
+	if dir == "" {
+		var err error
+		dir, err = sm.rt.ContainerCgroupDir(state.containerName)
+		if err != nil {
+			return &types.SandboxMemoryStats{}
+		}
+		sm.mu.Lock()
+		if sm.cgroupDirs[extID] == "" {
+			sm.cgroupDirs[extID] = dir
+		}
+		sm.mu.Unlock()
+	}
+
+	stats, err := memoryStatsFromDir(dir)
+	if err != nil {
+		// Drop the cached dir so the next call re-resolves it.
+		sm.mu.Lock()
+		delete(sm.cgroupDirs, extID)
+		sm.mu.Unlock()
+		return &types.SandboxMemoryStats{}
+	}
+	return stats
+}
+
+// memoryStatsFromDir reads the cgroup v2 memory controller statistics from
+// dir and converts them to MB-granularity SandboxMemoryStats. A missing or
+// malformed memory.current is an error; the optional peak/max/events files
+// are tolerated (see sandboxruntime.ReadCgroupMemory).
+func memoryStatsFromDir(dir string) (*types.SandboxMemoryStats, error) {
+	mem, err := sandboxruntime.ReadCgroupMemory(dir)
+	if err != nil {
+		return nil, err
+	}
+	return &types.SandboxMemoryStats{
+		Running:   true,
+		CurrentMB: mem.CurrentBytes >> 20,
+		LimitMB:   mem.MaxBytes >> 20,
+		PeakMB:    mem.PeakBytes >> 20,
+		OOMKills:  mem.OOMKills,
+	}, nil
 }
 
 // IsRunning checks if an extension sandbox is running.

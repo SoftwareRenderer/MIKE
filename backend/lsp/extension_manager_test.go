@@ -119,6 +119,49 @@ func TestExtensionRegistry_Lookup_NoExtensions(t *testing.T) {
 	}
 }
 
+func TestExtensionRegistry_Lookup_ExtensionlessPath(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	if err := store.Create(makeTestLSPExt("gopls", "go")); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	reg := NewExtensionRegistry(store)
+	// Extensionless paths (workspace directories, Makefile-style files) must
+	// not panic (previously panicked slicing the empty extension) and must
+	// simply not match.
+	if cfg := reg.Lookup("/tmp/workspace"); cfg != nil {
+		t.Errorf("Lookup(\"/tmp/workspace\") = %+v, want nil", cfg)
+	}
+	if cfg := reg.Lookup("/tmp/workspace/Makefile"); cfg != nil {
+		t.Errorf("Lookup(\"/tmp/workspace/Makefile\") = %+v, want nil", cfg)
+	}
+	// Extension matching still works after the fix.
+	if cfg := reg.Lookup("/tmp/workspace/main.go"); cfg == nil || cfg.Language != "go" {
+		t.Errorf("Lookup(main.go) = %+v, want go config", cfg)
+	}
+}
+
+func TestLookupExtensionByFile_Extensionless(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	if err := store.Create(makeTestLSPExt("gopls", "go")); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	reg := extensions.NewRegistryClient()
+	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	mgr := NewExtensionLSPManager(store, sandbox, nil)
+
+	// Must return an error, not panic, for an extensionless file.
+	if _, err := mgr.lookupExtensionByFile("/tmp/workspace/Makefile"); err == nil {
+		t.Error("expected error for extensionless file")
+	}
+}
+
 func TestExtensionRegistry_Lookup_Disabled(t *testing.T) {
 	store := testExtensionStore(t)
 	if err := store.InitSchema(); err != nil {
@@ -711,5 +754,69 @@ func TestAdaptProjectMounts(t *testing.T) {
 	emptyMgr := NewExtensionLSPManager(nil, nil, projStore2)
 	if got := emptyMgr.adaptProjectMounts(filepath.Join(root, "empty"), "/mnt/empty"); got != nil {
 		t.Errorf("adaptProjectMounts(no mounts) = %v, want nil", got)
+	}
+}
+
+// ─── SandboxMemory ──────────────────────────────────────────────────────────
+
+func TestExtensionLSPManager_SandboxMemory_NoClient(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	if err := store.Create(makeTestLSPExt("gopls", "go")); err != nil {
+		t.Fatalf("Create(gopls): %v", err)
+	}
+	reg := extensions.NewRegistryClient()
+	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	mgr := NewExtensionLSPManager(store, sandbox, nil)
+
+	stats := mgr.SandboxMemory("/tmp/workspace", "/tmp/workspace/main.go")
+	if stats == nil || stats.Running || stats.CurrentMB != 0 || stats.LimitMB != 0 {
+		t.Errorf("SandboxMemory() = %+v, want zero stats (no client)", stats)
+	}
+}
+
+func TestExtensionLSPManager_SandboxMemory_NoExtensionForFile(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	if err := store.Create(makeTestLSPExt("gopls", "go")); err != nil {
+		t.Fatalf("Create(gopls): %v", err)
+	}
+	reg := extensions.NewRegistryClient()
+	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	mgr := NewExtensionLSPManager(store, sandbox, nil)
+
+	// Python file with only a Go extension installed → no lookup match.
+	stats := mgr.SandboxMemory("/tmp/workspace", "/tmp/workspace/script.py")
+	if stats == nil || stats.Running || stats.CurrentMB != 0 {
+		t.Errorf("SandboxMemory() = %+v, want zero stats (no extension for file)", stats)
+	}
+}
+
+func TestExtensionLSPManager_SandboxMemory_ClientWithoutSandbox(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	if err := store.Create(makeTestLSPExt("gopls", "go")); err != nil {
+		t.Fatalf("Create(gopls): %v", err)
+	}
+	reg := extensions.NewRegistryClient()
+	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	mgr := NewExtensionLSPManager(store, sandbox, nil)
+
+	// Inject a client whose extension sandbox was never created.
+	mgr.clients[processKey("/tmp/workspace", "go")] = &sandboxClient{
+		workspace:   "/tmp/workspace",
+		language:    "go",
+		extensionID: "gopls",
+	}
+
+	stats := mgr.SandboxMemory("/tmp/workspace", "/tmp/workspace/main.go")
+	if stats == nil || stats.Running {
+		t.Errorf("SandboxMemory() = %+v, want Running=false (sandbox not created)", stats)
 	}
 }
