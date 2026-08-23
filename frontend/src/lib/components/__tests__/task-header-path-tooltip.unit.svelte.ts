@@ -46,6 +46,9 @@ afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+    // Tests may have stubbed navigator.clipboard — drop the own property so
+    // the jsdom default is restored.
+    delete (navigator as { clipboard?: unknown }).clipboard;
 });
 
 const WORKSPACE_DIR = '/home/tester/projects/kanban/.worktrees';
@@ -91,9 +94,77 @@ describe('TaskHeader path tooltip (mobile)', () => {
 
         const tip = container.querySelector('.path-tooltip');
         expect(tip).toBeTruthy();
-        expect(tip!.textContent).toBe(FULL_PATH);
+        expect(tip!.querySelector('.path-tooltip-text')!.textContent).toBe(FULL_PATH);
         expect(tip!.getAttribute('role')).toBe('tooltip');
         expect(label.getAttribute('aria-describedby')).toBe('task-header-path-tooltip');
+    });
+
+    it('copies the full path to the clipboard from the tooltip button', async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+        const { container } = renderHeader();
+        const label = container.querySelector('.project-prefix') as HTMLElement;
+
+        await tap(label);
+        const copyBtn = container.querySelector('.path-tooltip-copy') as HTMLButtonElement;
+        expect(copyBtn).toBeTruthy();
+        expect(copyBtn.textContent).toContain('Copy');
+
+        await fireEvent.click(copyBtn);
+        await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(FULL_PATH));
+        // Confirmation swaps in, tooltip stays open.
+        await vi.waitFor(() => expect(copyBtn.textContent).toContain('Copied'));
+        expect(container.querySelector('.path-tooltip')).toBeTruthy();
+    });
+
+    it('does not dismiss the tooltip when the copy button is tapped', async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+        const { container } = renderHeader();
+        const label = container.querySelector('.project-prefix') as HTMLElement;
+
+        await tap(label);
+        const copyBtn = container.querySelector('.path-tooltip-copy') as HTMLButtonElement;
+
+        // Real tap sequence on the button.
+        copyBtn.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+        await fireEvent.click(copyBtn);
+        expect(container.querySelector('.path-tooltip')).toBeTruthy();
+        expect(writeText).toHaveBeenCalledWith(FULL_PATH);
+    });
+
+    it('falls back to execCommand when the async clipboard API is unavailable', async () => {
+        Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+        const execCommand = vi.fn(() => true);
+        const originalExec = document.execCommand;
+        document.execCommand = execCommand;
+        try {
+            const { container } = renderHeader();
+            const label = container.querySelector('.project-prefix') as HTMLElement;
+
+            await tap(label);
+            const copyBtn = container.querySelector('.path-tooltip-copy') as HTMLButtonElement;
+            await fireEvent.click(copyBtn);
+            await vi.waitFor(() => expect(execCommand).toHaveBeenCalledWith('copy'));
+            await vi.waitFor(() => expect(copyBtn.textContent).toContain('Copied'));
+        } finally {
+            document.execCommand = originalExec;
+        }
+    });
+
+    it('keeps the tooltip open without confirmation when the copy fails', async () => {
+        const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+        Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+        const { container } = renderHeader();
+        const label = container.querySelector('.project-prefix') as HTMLElement;
+
+        await tap(label);
+        const copyBtn = container.querySelector('.path-tooltip-copy') as HTMLButtonElement;
+        await fireEvent.click(copyBtn);
+        // Let the rejected promise settle.
+        await new Promise((r) => setTimeout(r, 0));
+        expect(copyBtn.textContent).toContain('Copy');
+        expect(container.querySelector('.path-tooltip')).toBeTruthy();
     });
 
     it('toggles off when the label is tapped again', async () => {
