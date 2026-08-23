@@ -58,7 +58,7 @@ test.describe.serial('Dangerous permission warnings in Extensions tab', () => {
     // rendered text content, so normalize before comparing.)
     const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
     const names = page.locator('.cap-permission-name');
-    await expect(names).toHaveCount(5);
+    await expect(names).toHaveCount(6);
     const labels = (await names.allTextContents()).map(norm);
     expect(labels[0]).toContain('Run scripts in the preview');
     expect(labels[0]).toContain('Potentially dangerous');
@@ -68,11 +68,12 @@ test.describe.serial('Dangerous permission warnings in Extensions tab', () => {
       'Add a button to the editor',
       'Replace the editor view',
       'Read the open file',
+      'Show a modal',
     ]);
     for (let i = 0; i < 2; i++) {
       expect(await names.nth(i).locator('svg.perm-danger-icon').count()).toBe(1);
     }
-    for (let i = 2; i < 5; i++) {
+    for (let i = 2; i < 6; i++) {
       expect(await names.nth(i).locator('svg.perm-danger-icon').count()).toBe(0);
     }
   });

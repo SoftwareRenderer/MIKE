@@ -468,10 +468,10 @@ export interface ExtensionCapabilities {
     ui?: UIExtensionConfig;
     css?: CSSExtensionConfig;
     agent?: AgentExtensionConfig;
-    proxy?: ProxyExtensionConfig;
+    network?: NetworkExtensionConfig;
 }
 
-export interface ProxyExtensionConfig {
+export interface NetworkExtensionConfig {
     allowed_domains: string[];
     headers?: Record<string, string>;
 }

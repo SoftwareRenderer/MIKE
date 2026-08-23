@@ -4,6 +4,8 @@ import {
     isDangerousPermission,
     hasDangerousPermissions,
     sortPermissions,
+    hasNetworkCapability,
+    requiresInstallReview,
 } from '../extension-permissions';
 
 describe('isDangerousPermission (sandbox-escaping permissions only)', () => {
@@ -103,5 +105,58 @@ describe('sortPermissions (stable: dangerous first, manifest order kept)', () =>
         const perms = ['editor.save', 'network.proxy'];
         sortPermissions(perms);
         expect(perms).toEqual(['editor.save', 'network.proxy']);
+    });
+});
+
+describe('hasNetworkCapability (manifest-level network capability)', () => {
+    it('is true when a network capability object is declared', () => {
+        expect(hasNetworkCapability({ network: { allowed_domains: ['api.github.com'] } })).toBe(true);
+    });
+
+    it('is true for an empty network capability object (declared = dangerous)', () => {
+        expect(hasNetworkCapability({ network: {} })).toBe(true);
+    });
+
+    it('is false without a network capability', () => {
+        expect(hasNetworkCapability({ ui: { permissions: [] } })).toBe(false);
+        expect(hasNetworkCapability({})).toBe(false);
+    });
+
+    it('is false for missing, null, or non-object capabilities / network values', () => {
+        expect(hasNetworkCapability(undefined)).toBe(false);
+        expect(hasNetworkCapability(null)).toBe(false);
+        expect(hasNetworkCapability({ network: null })).toBe(false);
+    });
+});
+
+describe('requiresInstallReview (network capability OR dangerous permissions)', () => {
+    it('is true for a network capability with no UI permissions', () => {
+        expect(requiresInstallReview({ capabilities: { network: { allowed_domains: ['x.dev'] } } })).toBe(true);
+    });
+
+    it('is true for dangerous UI permissions without a network capability', () => {
+        expect(requiresInstallReview({ capabilities: { ui: { permissions: ['network.proxy'] } } })).toBe(true);
+    });
+
+    it('is true when both are declared', () => {
+        expect(
+            requiresInstallReview({
+                capabilities: { ui: { permissions: ['network.proxy'] }, network: { allowed_domains: ['x.dev'] } },
+            }),
+        ).toBe(true);
+    });
+
+    it('is false for safe permissions only', () => {
+        expect(requiresInstallReview({ capabilities: { ui: { permissions: ['editor.save', 'storage.get'] } } })).toBe(false);
+    });
+
+    it('is false for missing or empty capabilities', () => {
+        expect(requiresInstallReview({ capabilities: undefined })).toBe(false);
+        expect(requiresInstallReview({})).toBe(false);
+        expect(requiresInstallReview({ capabilities: {} })).toBe(false);
+    });
+
+    it('does not treat a legacy "proxy" key as the network capability', () => {
+        expect(requiresInstallReview({ capabilities: { proxy: { allowed_domains: ['x.dev'] } } })).toBe(false);
     });
 });
