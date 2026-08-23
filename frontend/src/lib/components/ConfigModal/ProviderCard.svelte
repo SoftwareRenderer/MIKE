@@ -107,12 +107,16 @@
             </div>
         </div>
         <div class="provider-actions">
-            <button type="button" class="btn-remove-provider" onclick={handleRemove} title="Remove provider" aria-label="Remove provider">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-            </button>
+            {#if provider.kind !== 'agent'}
+                <!-- Agent providers are derived from enabled agent extensions and can't be
+                     removed here — disabling/uninstalling the extension removes the provider. -->
+                <button type="button" class="btn-remove-provider" onclick={handleRemove} title="Remove provider" aria-label="Remove provider">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            {/if}
             <button type="button" class="btn-expand" onclick={(e) => { e.stopPropagation(); handleToggle(); }} aria-expanded={provider.expanded} aria-label={provider.expanded ? 'Collapse provider details' : 'Expand provider details'} title={provider.expanded ? 'Collapse' : 'Expand'}>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" class:expanded={provider.expanded}>
                     <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>

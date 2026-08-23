@@ -1,52 +1,61 @@
-import { test, expect } from '@playwright/test';
-import { getProjectId, csrfFetch } from './helpers';
+import { test, expect, type Browser, type Page } from '@playwright/test';
+import { apiPutConfig, apiGetConfig, installPiExtension, deletePiExtension } from './helpers';
+
+/**
+ * Agent provider hides operating mode.
+ *
+ * Agent providers are registry-derived: the only way one exists is with the
+ * corresponding agent extension installed AND enabled. This spec installs the
+ * local `pi` agent extension on the isolated server (offline — files are
+ * already materialized in the repo's extensions/ directory) and uninstalls it
+ * afterwards, leaving exactly one LLM provider as the other option.
+ *
+ * Runs in the `isolated` project: installing an extension mutates server
+ * state, and the suite is serialized to avoid races on the shared DB.
+ */
+
+const STORAGE_STATE = '/tmp/kanban-test-storage-state.json.isolated';
+// browser.newContext() does not reliably inherit the project's use.baseURL —
+// pass it explicitly so these API calls hit the isolated server (3001).
+const BASE_URL = 'http://localhost:3001';
+const LLM_URL = 'http://agent-mode-test:9999/v1';
+const LLM_MODEL = 'agent-mode-model';
 
 test.describe.serial('Agent provider hides operating mode', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.waitForSelector('.project-item', { timeout: 10000 });
+  let context: Awaited<ReturnType<Browser['newContext']>>;
+  let ctxPage: Page;
+
+  test.beforeAll(async ({ browser }) => {
+    context = await browser.newContext({ storageState: STORAGE_STATE, baseURL: BASE_URL });
+    ctxPage = await context.newPage();
+    await ctxPage.goto('/');
+    await ctxPage.waitForSelector('.project-item', { timeout: 10000 });
+
+    // Install + enable pi so an agent provider exists in the config.
+    await installPiExtension(ctxPage);
+
+    // Exactly one LLM provider (the tests assert a single non-agent option).
+    await apiPutConfig(ctxPage, {
+      providers: [{ name: 'agent-mode-llm', url: LLM_URL, models: [{ name: LLM_MODEL }], concurrency: 1 }],
+    });
+    const cfg = await apiGetConfig(ctxPage);
+    const id = String(cfg.providers.find((p: any) => p.url === LLM_URL)?.id ?? '');
+    expect(id).not.toBe('');
+    await apiPutConfig(ctxPage, {
+      worker_provider: id, worker_model: LLM_MODEL,
+      utility_provider: id, utility_model: LLM_MODEL,
+    });
   });
 
-  // Helper to add agent provider to config
-  async function addAgentProvider(page: any) {
-    const config = await page.evaluate(async () => {
-      const res = await fetch('/api/config');
-      return res.ok ? res.json() : null;
-    });
-    const csrf = await page.evaluate(async () => {
-      const res = await fetch('/api/auth/session');
-      const data = await res.json();
-      return data.csrf_token || '';
-    });
-
-    await page.evaluate(async ({ csrfToken, config }) => {
-      const providers = [...(config.providers || [])];
-      const hasAgent = providers.some((p: any) => p.url?.startsWith('agent://'));
-      if (!hasAgent) {
-        providers.push({
-          name: 'pi',
-          display_name: 'Pi Coding Agent',
-          kind: 'agent',
-          url: 'agent://pi',
-          models: [],
-          concurrency: 1,
-        });
-      }
-      fetch('/api/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-        credentials: 'include',
-        body: JSON.stringify({ ...config, providers }),
-      });
-    }, { csrfToken: csrf, config });
-
-    await page.reload();
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-  }
+  test.afterAll(async () => {
+    // Uninstall pi so the isolated DB stays clean for the other serialized specs.
+    await deletePiExtension(ctxPage).catch(() => {});
+    await context?.close().catch(() => {});
+  });
 
   test('should hide Operating Mode when agent is selected in Create Task modal', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    await addAgentProvider(page);
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
 
     // Open the Create Task modal
     await page.locator('.add-task-btn').first().click();
@@ -82,8 +91,8 @@ test.describe.serial('Agent provider hides operating mode', () => {
   });
 
   test('should hide Operating Mode when agent is selected in Edit Task modal', async ({ page }) => {
-    const projectId = await getProjectId(page);
-    await addAgentProvider(page);
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
 
     // Get an existing task
     const cards = page.locator('.card');

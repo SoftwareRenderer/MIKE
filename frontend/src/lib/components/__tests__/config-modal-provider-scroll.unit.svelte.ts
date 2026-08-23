@@ -1,14 +1,10 @@
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { render, fireEvent, cleanup, waitFor } from '@testing-library/svelte';
 import ConfigModal from '$lib/components/ConfigModal.svelte';
-import type { Config, Extension } from '$lib/types';
-import { listExtensions } from '$lib/api/extensions';
+import type { Config } from '$lib/types';
 
 // The mock factory is hoisted above module imports, so everything it needs
 // must be defined inside the factory itself.
-vi.mock('$lib/api/extensions', () => ({
-    listExtensions: vi.fn(async (): Promise<Extension[]> => []),
-}));
 
 /** scrollIntoView calls recorded by the jsdom stub (jsdom doesn't implement it). */
 const scrolled: Array<{ el: Element; options: ScrollIntoViewOptions | boolean | undefined }> = [];
@@ -35,12 +31,6 @@ beforeAll(() => {
     });
 });
 
-beforeEach(() => {
-    // Deterministic default regardless of test order (restoreAllMocks does not
-    // reset vi.fn implementations).
-    vi.mocked(listExtensions).mockResolvedValue([]);
-});
-
 afterEach(() => {
     cleanup();
     scrolled.length = 0;
@@ -62,35 +52,6 @@ function makeConfig(): Config {
     };
 }
 
-function makeAgentExtension(): Extension {
-    return {
-        id: 'ext-1',
-        name: 'pi',
-        version: '1.0.0',
-        type: 'agent',
-        manifest: {
-            display_name: 'Pi',
-            description: 'Minimal agent harness',
-            author: 'Pi',
-            version: '1.0.0',
-            capabilities: {
-                agent: {
-                    wasm_module: 'pi.wasm',
-                    sandbox_mount: { host_path: '/root/.pi/agent', container_path: '/root/.pi/agent', mode: 'rw' },
-                },
-            },
-        },
-        config: {},
-        container_config: {},
-        sandbox_config: { network_isolation: true, memory_limit: 0 },
-        install_source: 'registry',
-        enabled: true,
-        running: false,
-        installed_at: '2025-01-01T00:00:00Z',
-        built_at: '2025-01-01T00:00:00Z',
-    };
-}
-
 function renderModal() {
     return render(ConfigModal, {
         props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() },
@@ -99,13 +60,11 @@ function renderModal() {
 
 /**
  * Let the mount-time $effect cycle settle: it rebuilds `providers` from the
- * config prop and kicks off the (mocked) agent list load, and re-runs when the
- * agents-loading flags flip. Until it settles, it would clobber providers
- * added by a click that lands in the same microtask window (in the browser it
- * settles in the first microtask, long before a user could click).
+ * config prop. Until it settles, it would clobber providers added by a click
+ * that lands in the same microtask window (in the browser it settles in the
+ * first microtask, long before a user could click).
  */
 async function settle() {
-    await vi.waitFor(() => expect(listExtensions).toHaveBeenCalled(), { timeout: 1000 });
     await new Promise(r => setTimeout(r, 20));
 }
 
@@ -131,27 +90,10 @@ describe('ConfigModal — reveal newly added provider card', () => {
         expect(document.activeElement).toBe(urlInput);
     });
 
-    it('scrolls the new agent card into view when adding an agent from the menu', async () => {
-        vi.mocked(listExtensions).mockResolvedValue([makeAgentExtension()]);
+    it('does not offer an Add Agent button (agents come from installed extensions)', async () => {
         const { container } = renderModal();
         await settle();
-
-        fireEvent.click(container.querySelector('button[title="Add a coding agent"]') as HTMLButtonElement);
-
-        // The menu item appears once the (mocked) extension list resolves.
-        const menuItem = await waitFor(() => {
-            const item = container.querySelector('.agent-menu-item');
-            expect(item).toBeTruthy();
-            return item;
-        }, { timeout: 1000 });
-        expect(menuItem).toBeTruthy();
-        fireEvent.click(menuItem!);
-
-        await waitFor(() => expect(scrolled).toHaveLength(1), { timeout: 1000 });
-        expect(scrolled[0].el.getAttribute('data-index')).toBe('1');
-        expect(scrolled[0].options).toEqual({ block: 'nearest', behavior: 'smooth' });
-
-        // Agent cards have no inputs — focus must not land inside a provider card.
-        expect(document.activeElement?.closest('.provider-card') ?? null).toBeNull();
+        expect(container.querySelector('button[title="Add a coding agent"]')).toBeNull();
+        expect(container.querySelector('.agent-menu')).toBeNull();
     });
 });

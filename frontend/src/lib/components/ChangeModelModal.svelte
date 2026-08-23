@@ -38,7 +38,7 @@
             if (worker.provider && worker.modelName) {
                 selectedUrl = worker.url;
                 selectedModel = worker.modelName;
-            } else if (providers[0].models.length > 0) {
+            } else if ((providers[0].models?.length ?? 0) > 0) {
                 selectedUrl = providers[0].url;
                 selectedModel = getModelName(providers[0].models[0]);
             }
