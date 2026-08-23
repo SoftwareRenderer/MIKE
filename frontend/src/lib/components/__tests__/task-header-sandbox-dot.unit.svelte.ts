@@ -100,6 +100,27 @@ describe('TaskHeader sandbox memory dot', () => {
         await vi.waitFor(() => expect(container.querySelector('.mem-dot')).not.toBeNull());
     });
 
+    it('shows the dot when the peak reached the limit (low current usage, no OOM)', async () => {
+        const { container } = renderHeader();
+        sandboxStatsStore.set('task-1', stats({ memory_current_mb: 10, memory_peak_mb: 1024, memory_limit_mb: 1024 }));
+        await vi.waitFor(() => expect(container.querySelector('.mem-dot')).not.toBeNull());
+    });
+
+    it('shows the dot when the peak reached the limit while not running (idle, most recent stats)', async () => {
+        const { container } = renderHeader();
+        sandboxStatsStore.set('task-1', stats({ running: false, memory_current_mb: 0, memory_peak_mb: 1024, memory_limit_mb: 1024 }));
+        await vi.waitFor(() => expect(container.querySelector('.mem-dot')).not.toBeNull());
+    });
+
+    it('shows no dot when the peak is just below the limit and usage is healthy', async () => {
+        const { container } = renderHeader();
+        const btn = () => container.querySelector('button.sandbox-btn') as HTMLButtonElement;
+        sandboxStatsStore.set('task-1', stats({ memory_current_mb: 100, memory_peak_mb: 1023, memory_limit_mb: 1024 }));
+        // Wait until the store update is reflected (title changed), then assert no dot.
+        await vi.waitFor(() => expect(btn().title).toBe('Sandbox enabled · 100 / 1024 MB (click for details)'));
+        expect(container.querySelector('.mem-dot')).toBeNull();
+    });
+
     it('updates the button title with live usage and OOM kills', async () => {
         const { container } = renderHeader();
         const btn = () => container.querySelector('button.sandbox-btn') as HTMLButtonElement;
@@ -111,5 +132,17 @@ describe('TaskHeader sandbox memory dot', () => {
 
         sandboxStatsStore.set('task-1', stats({ memory_current_mb: 10, oom_kills: 2 }));
         await vi.waitFor(() => expect(btn().title).toBe('Sandbox enabled · 10 / 1024 MB · 2 OOM kills (click for details)'));
+    });
+
+    it('appends the peak-reached clause to the button title', async () => {
+        const { container } = renderHeader();
+        const btn = () => container.querySelector('button.sandbox-btn') as HTMLButtonElement;
+
+        sandboxStatsStore.set('task-1', stats({ memory_current_mb: 10, memory_peak_mb: 1024, memory_limit_mb: 1024 }));
+        await vi.waitFor(() => expect(btn().title).toBe('Sandbox enabled · 10 / 1024 MB · peak reached limit (click for details)'));
+
+        // Combined with OOM kills: usage → OOM kills → peak.
+        sandboxStatsStore.set('task-1', stats({ memory_current_mb: 10, memory_peak_mb: 1024, memory_limit_mb: 1024, oom_kills: 2 }));
+        await vi.waitFor(() => expect(btn().title).toBe('Sandbox enabled · 10 / 1024 MB · 2 OOM kills · peak reached limit (click for details)'));
     });
 });
