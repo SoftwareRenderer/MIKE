@@ -92,6 +92,41 @@ func (s *Store) queryTasksByProject(projectID string) ([]types.Task, error) {
 	return tasks, rows.Err()
 }
 
+// GetInFlightTasks returns all tasks whose execution state indicates an
+// active run (running/pulling_image). Executors live in memory and die with
+// the process, so at startup every such row is stale and needs recovery.
+func (s *Store) GetInFlightTasks() ([]types.Task, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(
+		`SELECT id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost FROM tasks WHERE execution_state IN ('running', 'pulling_image')`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tasks := []types.Task{}
+	for rows.Next() {
+		var t types.Task
+		if err := scanTask(rows, &t); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+// UpdateTaskSessionCost updates only the session_cost of a task. Targeted
+// (single-column) write so executor-exit bookkeeping can never clobber the
+// task's current status/execution_state with a stale in-memory copy.
+func (s *Store) UpdateTaskSessionCost(taskID string, cost float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`UPDATE tasks SET session_cost = ?, updated_at = ? WHERE id = ?`, cost, now.Format(time.RFC3339), taskID)
+	return err
+}
+
 // UpdateTask updates all fields of a task.
 func (s *Store) UpdateTask(t *types.Task) error {
 	s.mu.Lock()
@@ -119,6 +154,28 @@ func (s *Store) UpdateTaskExecutionState(taskID, projectID, executionState strin
 	_, err := s.db.Exec(`UPDATE tasks SET execution_state = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
 		executionState, now.Format(time.RFC3339), taskID, projectID)
 	return err
+}
+
+// TransitionInFlightTask atomically moves an in-flight task (running /
+// pulling_image) to the given execution state
+func (s *Store) TransitionInFlightTask(taskID, projectID, executionState string, output *string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	var res sql.Result
+	var err error
+	if output != nil {
+		res, err = s.db.Exec(`UPDATE tasks SET execution_state = ?, output = ?, updated_at = ? WHERE id = ? AND project_id = ? AND execution_state IN ('running','pulling_image')`,
+			executionState, *output, now.Format(time.RFC3339), taskID, projectID)
+	} else {
+		res, err = s.db.Exec(`UPDATE tasks SET execution_state = ?, updated_at = ? WHERE id = ? AND project_id = ? AND execution_state IN ('running','pulling_image')`,
+			executionState, now.Format(time.RFC3339), taskID, projectID)
+	}
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // SetTaskTitle updates the task title and clears the title_generating flag

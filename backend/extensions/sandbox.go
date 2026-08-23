@@ -1,6 +1,7 @@
 package extensions
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -105,8 +106,12 @@ func checkExtensionSandboxAvailable() bool {
 }
 
 // cleanupStaleContainers removes any kanban-ext-* containers left behind.
+// The list call is time-bounded: best-effort cleanup, and a wedged podman
+// must not block server startup.
 func (sm *ExtensionSandboxManager) cleanupStaleContainers() {
-	out, err := sm.rt.PodmanExec("ps", "-a", "--filter", fmt.Sprintf("name=%s-", ExtensionContainerPrefix), "--format", "{{.Names}}")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := sm.rt.PodmanExecContext(ctx, "ps", "-a", "--filter", fmt.Sprintf("name=%s-", ExtensionContainerPrefix), "--format", "{{.Names}}")
 	if err != nil {
 		log.Printf("[ext-sandbox] startup: failed to list stale containers: %v", err)
 		return

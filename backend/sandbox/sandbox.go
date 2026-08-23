@@ -3,6 +3,7 @@ package sandbox
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -99,10 +100,10 @@ func NewSandboxManager() *SandboxManager {
 }
 
 // cleanupStaleContainers removes any kanban-sandbox-* containers left behind
-// by a previous server session (e.g. crash, SIGKILL). This runs at startup
-// so stale containers don't accumulate across restarts.
 func (sm *SandboxManager) cleanupStaleContainers() {
-	out, err := sm.rt.PodmanExec("ps", "-a", "--filter", "name=kanban-sandbox-", "--format", "{{.Names}}")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := sm.rt.PodmanExecContext(ctx, "ps", "-a", "--filter", "name=kanban-sandbox-", "--format", "{{.Names}}")
 	if err != nil {
 		log.Printf("[sandbox] startup: failed to list stale containers: %v", err)
 		return

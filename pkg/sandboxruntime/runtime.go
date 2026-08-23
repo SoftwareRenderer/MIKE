@@ -2,6 +2,7 @@ package sandboxruntime
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -105,6 +106,14 @@ func NewRuntime() *Runtime {
 // PodmanExec runs a podman command and returns the combined output.
 func (r *Runtime) PodmanExec(args ...string) ([]byte, error) {
 	c := exec.Command("podman", args...)
+	return c.CombinedOutput()
+}
+
+// PodmanExecContext is like PodmanExec but bounds execution to the context's
+// deadline. Use it for best-effort calls (e.g. startup cleanup) where a wedged
+// podman must not block the caller indefinitely.
+func (r *Runtime) PodmanExecContext(ctx context.Context, args ...string) ([]byte, error) {
+	c := exec.CommandContext(ctx, "podman", args...)
 	return c.CombinedOutput()
 }
 
