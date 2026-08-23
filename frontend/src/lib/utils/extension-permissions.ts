@@ -2,9 +2,11 @@
  * Permission display helpers for the Settings → Extensions UI.
  *
  * "Dangerous" = a permission that escapes the sandbox or loosens its isolation
- * (external requests, running a page's scripts, page network egress). Dangerous
- * permissions get a warning icon next to their label and sort to the top of the
- * permission lists, so they are the first thing a reviewer sees.
+ * (external requests, running a page's scripts, page network egress), or the
+ * manifest-level `network` capability, which lets the server make outbound
+ * requests to the extension's allowed domains. Dangerous items get a warning
+ * icon and sort to the top of the lists, so they are the first thing a
+ * reviewer sees.
  *
  * File-mutating permissions (editor.setContent / editor.save) are deliberately
  * NOT flagged — they are the obvious contract of editor extensions, not a
@@ -28,6 +30,23 @@ export function isDangerousPermission(perm: string): boolean {
  */
 export function hasDangerousPermissions(permissions: readonly string[]): boolean {
     return permissions.some(isDangerousPermission);
+}
+
+/**
+ * True when a registry/local entry declares the manifest-level `network`
+ * capability (server-side egress to the extension's allowed domains).
+ */
+export function hasNetworkCapability(capabilities?: Record<string, any> | null): boolean {
+    return !!capabilities?.network;
+}
+
+/**
+ * True when an install warrants a pre-install review dialog: the entry
+ * declares the `network` capability, or at least one sandbox-escaping
+ * permission.
+ */
+export function requiresInstallReview(entry: { capabilities?: Record<string, any> | null }): boolean {
+    return hasNetworkCapability(entry.capabilities) || hasDangerousPermissions((entry.capabilities?.ui?.permissions ?? []) as string[]);
 }
 
 /**
