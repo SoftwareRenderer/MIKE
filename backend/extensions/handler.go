@@ -1157,7 +1157,7 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 }
 
 // HandleProxy proxies requests to external APIs on behalf of an extension.
-// The extension must declare a `proxy` capability in its manifest with
+// The extension must declare a `network` capability in its manifest with
 // allowed_domains and optional header templates.
 func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
@@ -1174,8 +1174,8 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 		httputil.JSONError(w, http.StatusForbidden, "extension is not enabled")
 		return
 	}
-	if ext.Manifest.Capabilities.GetProxy() == nil {
-		httputil.JSONError(w, http.StatusForbidden, "extension does not have proxy capability")
+	if ext.Manifest.Capabilities.GetNetwork() == nil {
+		httputil.JSONError(w, http.StatusForbidden, "extension does not have network capability")
 		return
 	}
 
@@ -1207,7 +1207,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	allowed := false
-	for _, d := range ext.Manifest.Capabilities.GetProxy().AllowedDomains {
+	for _, d := range ext.Manifest.Capabilities.GetNetwork().AllowedDomains {
 		if d == u.Hostname() {
 			allowed = true
 			break
@@ -1220,7 +1220,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 
 	// Resolve header templates from extension config
 	headers := make(map[string]string)
-	for k, template := range ext.Manifest.Capabilities.GetProxy().Headers {
+	for k, template := range ext.Manifest.Capabilities.GetNetwork().Headers {
 		resolved := resolveProxyTemplate(template, ext.Config)
 		if resolved == "" || resolved == template {
 			continue // skip unresolved or empty headers

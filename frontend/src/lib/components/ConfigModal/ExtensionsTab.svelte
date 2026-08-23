@@ -4,7 +4,7 @@
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
-    import { isDangerousPermission, hasDangerousPermissions, sortPermissions } from '$lib/utils/extension-permissions';
+    import { isDangerousPermission, requiresInstallReview, sortPermissions } from '$lib/utils/extension-permissions';
     import { effectiveConfigFields, initialEditConfig } from '$lib/utils/extension-config';
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
@@ -85,7 +85,8 @@
     let revealedLocalPath = $state<string | null>(null);
 
     // Install confirmation: set when the user clicks Install on an extension
-    // that declares sandbox-escaping permissions; the dialog reviews the full
+    // that declares the network capability or sandbox-escaping permissions;
+    // the dialog reviews the network capability (allowed domains) and the full
     // declared permission list before the install starts.
     let pendingInstall = $state<{ entry: RegistryEntry; isLocal: boolean } | null>(null);
 
@@ -102,8 +103,8 @@
 
     // Capability descriptions
     const CAPABILITY_DESCRIPTIONS: Record<string, { label: string; description: string }> = {
-        proxy: {
-            label: 'Proxy',
+        network: {
+            label: 'Network',
             description: 'Enables external API access for specific domains, within the boundaries of declared capabilities.',
         },
         lsp: {
@@ -142,7 +143,7 @@
         },
         'network.proxy': {
             label: 'Reach external services',
-            description: 'Can make requests to external services through the server, limited to the allowed domains listed below.',
+            description: 'Can make requests to external services through the server, limited to the allowed domains of its Network capability.',
         },
         'ui.setSize': {
             label: 'Resize its own panel',
@@ -211,12 +212,12 @@
         if (caps.ui) keys.push('ui');
         if (caps.css) keys.push('css');
         if (caps.agent) keys.push('agent');
-        if (caps.proxy) keys.push('proxy');
+        if (caps.network) keys.push('network');
         return keys;
     }
 
     // Get capability keys for a registry entry.
-    // Prefers the entry's declared capabilities (which may include e.g. proxy
+    // Prefers the entry's declared capabilities (which may include e.g. network
     // alongside ui), falling back to the capability implied by its type.
     function getRegistryCapabilityKeys(entry: RegistryEntry): string[] {
         if (entry.capabilities && Object.keys(entry.capabilities).length > 0) {
@@ -288,12 +289,12 @@
         buildProgress = { ...buildProgress, [name]: { progress, message, error } };
     }
 
-    // Kick off an install from Browse. Extensions that declare sandbox-escaping
-    // permissions first go through the install confirm dialog, so the user
-    // reviews what they are granting before the install starts.
+    // Kick off an install from Browse. Extensions that declare the network
+    // capability or sandbox-escaping permissions first go through the install
+    // confirm dialog, so the user reviews what they are granting before the
+    // install starts.
     function handleInstall(entry: RegistryEntry, isLocal: boolean) {
-        const perms = (entry.capabilities?.ui?.permissions ?? []) as string[];
-        if (hasDangerousPermissions(perms)) {
+        if (requiresInstallReview(entry)) {
             pendingInstall = { entry, isLocal };
             return;
         }
@@ -716,7 +717,7 @@
                                         {#if getCapabilityKeys(ext).length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
                                                 {#each getCapabilityKeys(ext) as capKey}
-                                                    <button class="cap-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-proxy={capKey === 'proxy'} aria-label="{CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey} capability for {ext.manifest.display_name || ext.name}. Click to learn more" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>
+                                                    <button class="cap-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} aria-label="{CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey} capability for {ext.manifest.display_name || ext.name}. Click to learn more" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>
                                                         {CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey}
                                                     </button>
                                                 {/each}
@@ -789,11 +790,11 @@
                             {#if ext.manifest.description}
                                 <p class="ext-description">{ext.manifest.description}</p>
                             {/if}
-                            {#if ext.manifest.capabilities?.proxy?.allowed_domains?.length}
+                            {#if ext.manifest.capabilities?.network?.allowed_domains?.length}
                                 <div class="ext-proxy-domains">
                                     <span class="ext-proxy-label">Connects to:</span>
                                     <div class="cap-detail-tags">
-                                        {#each ext.manifest.capabilities.proxy.allowed_domains as domain}
+                                        {#each ext.manifest.capabilities.network.allowed_domains as domain}
                                             <button class="cap-detail-tag" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>{domain}</button>
                                         {/each}
                                     </div>
@@ -974,17 +975,17 @@
                         {#if info}
                             <div class="cap-detail" role="listitem">
                                 <div class="cap-detail-header">
-                                    <span class="cap-detail-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-proxy={capKey === 'proxy'}>
+                                    <span class="cap-detail-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'}>
                                         {info.label}
                                     </span>
                                 </div>
                                 <p class="cap-detail-desc">{info.description}</p>
-                                <!-- Proxy: show allowed domains -->
-                                {#if capKey === 'proxy' && caps?.proxy?.allowed_domains?.length}
+                                <!-- Network: show allowed domains -->
+                                {#if capKey === 'network' && caps?.network?.allowed_domains?.length}
                                     <div class="cap-detail-extra">
                                         <span class="cap-detail-label">Allowed domains:</span>
                                         <div class="cap-detail-tags">
-                                            {#each caps.proxy.allowed_domains as domain}
+                                            {#each caps.network.allowed_domains as domain}
                                                 <span class="cap-detail-tag">{domain}</span>
                                             {/each}
                                         </div>
@@ -1060,7 +1061,8 @@
     {/if}
 
     <!-- Install Confirm: shown before installing an extension that declares
-         sandbox-escaping permissions; the user reviews the full declared
+         the network capability or sandbox-escaping permissions; the user
+         reviews the network capability (allowed domains) and the full declared
          permission list before the install starts. -->
     {#if pendingInstall}
         {#snippet installConfirmFooter()}
@@ -1069,6 +1071,7 @@
         {/snippet}
 
         {@const pendingPerms = sortPermissions((pendingInstall.entry.capabilities?.ui?.permissions ?? []) as string[])}
+        {@const pendingNetwork = pendingInstall.entry.capabilities?.network}
         <BaseModal
             title={`Install "${pendingInstall.entry.display_name || pendingInstall.entry.name}"?`}
             width="480px"
@@ -1078,6 +1081,22 @@
         >
             <p class="install-confirm-intro">This extension requests the following permissions:</p>
             <div class="cap-permission-list">
+                {#if pendingNetwork}
+                    <div class="cap-permission">
+                        <span class="cap-permission-name">
+                            {CAPABILITY_DESCRIPTIONS.network.label}
+                            <svg class="perm-danger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Potentially dangerous: can escape the sandbox"><title>Potentially dangerous: can escape the sandbox</title><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                        </span>
+                        <span class="cap-permission-desc">{CAPABILITY_DESCRIPTIONS.network.description}</span>
+                        {#if pendingNetwork.allowed_domains?.length}
+                            <div class="cap-detail-tags">
+                                {#each pendingNetwork.allowed_domains as domain}
+                                    <span class="cap-detail-tag">{domain}</span>
+                                {/each}
+                            </div>
+                        {/if}
+                    </div>
+                {/if}
                 {#each pendingPerms as perm}
                     {@const info = PERMISSION_DESCRIPTIONS[perm]}
                     <div class="cap-permission">
@@ -1136,7 +1155,7 @@
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
                                                 {#each regCapKeys as regCapKey}
                                                     {@const regCapInfo = CAPABILITY_DESCRIPTIONS[regCapKey]}
-                                                    <button class="cap-badge" class:cap-lsp={regCapKey === 'lsp'} class:cap-ui={regCapKey === 'ui'} class:cap-css={regCapKey === 'css'} class:cap-agent={regCapKey === 'agent'} class:cap-proxy={regCapKey === 'proxy'} aria-label="{regCapInfo.label} capability for {entry.display_name || entry.name}. {regCapInfo.description}" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>
+                                                    <button class="cap-badge" class:cap-lsp={regCapKey === 'lsp'} class:cap-ui={regCapKey === 'ui'} class:cap-css={regCapKey === 'css'} class:cap-agent={regCapKey === 'agent'} class:cap-network={regCapKey === 'network'} aria-label="{regCapInfo.label} capability for {entry.display_name || entry.name}. {regCapInfo.description}" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>
                                                         {regCapInfo.label}
                                                     </button>
                                                 {/each}
@@ -1188,11 +1207,11 @@
                             {#if entry.description}
                                 <p class="ext-description">{entry.description}</p>
                             {/if}
-                            {#if entry.capabilities?.proxy?.allowed_domains?.length}
+                            {#if entry.capabilities?.network?.allowed_domains?.length}
                                 <div class="ext-proxy-domains">
                                     <span class="ext-proxy-label">Connects to:</span>
                                     <div class="cap-detail-tags">
-                                        {#each entry.capabilities.proxy.allowed_domains as domain}
+                                        {#each entry.capabilities.network.allowed_domains as domain}
                                             <button class="cap-detail-tag" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>{domain}</button>
                                         {/each}
                                     </div>
@@ -1813,7 +1832,7 @@
         border-color: rgba(163, 113, 247, 0.3);
     }
 
-    .cap-proxy {
+    .cap-network {
         background: rgba(236, 72, 153, 0.15);
         color: #ec4899;
         border-color: rgba(236, 72, 153, 0.3);

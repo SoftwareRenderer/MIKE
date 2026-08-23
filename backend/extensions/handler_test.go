@@ -1975,7 +1975,7 @@ func makeProxyExt(t *testing.T, h *ExtensionHandler, domains []string) {
 	t.Helper()
 	ext := makeTestExt("proxy-ext", "proxy", ExtensionTypeUI)
 	ext.Manifest.Capabilities = &Capabilities{
-		Proxy: &ProxyConfig{AllowedDomains: domains},
+		Network: &NetworkConfig{AllowedDomains: domains},
 	}
 	if err := h.store.Create(ext); err != nil {
 		t.Fatalf("Create proxy ext: %v", err)
