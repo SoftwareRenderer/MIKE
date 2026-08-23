@@ -23,3 +23,17 @@ export function isSandboxMemoryWarning(stats: SandboxMemoryStats | null | undefi
     if (!stats) return false;
     return isNearMemoryLimit(stats) || stats.oom_kills > 0;
 }
+
+/**
+ * One-line usage summary shared by all sandbox memory UIs (the editor-footer
+ * LSP status tooltip and the task Sandbox panel): "N / L MB", "N MB (no
+ * limit)", "Not running". null (fetch failed / no data) renders as "—".
+ */
+export function formatSandboxMemory(stats: SandboxMemoryStats | null | undefined): string {
+    if (!stats) return '—';
+    if (!stats.running) return 'Not running';
+    if (stats.memory_limit_mb > 0) {
+        return `${stats.memory_current_mb} / ${stats.memory_limit_mb} MB`;
+    }
+    return `${stats.memory_current_mb} MB (no limit)`;
+}

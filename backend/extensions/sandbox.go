@@ -36,6 +36,7 @@ type ExtensionSandboxManager struct {
 	clients       map[string]*sandbox.Client        // extID -> bridge client
 	refs          map[string]int                    // extID -> active client count
 	states        map[string]*extensionSandboxState // extID -> runtime state
+	cgroupDirs    map[string]string                 // extID -> cached cgroup v2 memory dir
 	registry      *RegistryClient
 	store         *ExtensionStore
 	available     bool
@@ -75,6 +76,7 @@ func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *Ext
 		clients:       make(map[string]*sandbox.Client),
 		refs:          make(map[string]int),
 		states:        make(map[string]*extensionSandboxState),
+		cgroupDirs:    make(map[string]string),
 		registry:      reg,
 		store:         store,
 		available:     checkExtensionSandboxAvailable(),
@@ -442,6 +444,7 @@ func (sm *ExtensionSandboxManager) stopLocked(extID string) {
 	delete(sm.clients, extID)
 	delete(sm.refs, extID)
 	delete(sm.states, extID)
+	delete(sm.cgroupDirs, extID)
 
 	log.Printf("[ext-sandbox] ext=%s stopped", extID)
 }
@@ -495,6 +498,64 @@ func (sm *ExtensionSandboxManager) Close() {
 		log.Printf("[ext-sandbox] shutdown: stopping ext=%s", extID)
 		sm.Stop(extID)
 	}
+}
+
+// GetMemoryStats returns the live memory usage of the extension's sandbox
+// container by reading its cgroup v2 memory controller. Returns zero stats
+// (Running: false) when the sandbox was never created, is not running, or
+// the cgroup cannot be read. The resolved cgroup directory is cached per
+// extension and invalidated when a read fails (cgroup gone — container
+// stopped or removed).
+func (sm *ExtensionSandboxManager) GetMemoryStats(extID string) *types.SandboxMemoryStats {
+	sm.mu.Lock()
+	state, ok := sm.states[extID]
+	dir := sm.cgroupDirs[extID]
+	sm.mu.Unlock()
+
+	if !ok {
+		return &types.SandboxMemoryStats{}
+	}
+
+	if dir == "" {
+		var err error
+		dir, err = sm.rt.ContainerCgroupDir(state.containerName)
+		if err != nil {
+			return &types.SandboxMemoryStats{}
+		}
+		sm.mu.Lock()
+		if sm.cgroupDirs[extID] == "" {
+			sm.cgroupDirs[extID] = dir
+		}
+		sm.mu.Unlock()
+	}
+
+	stats, err := memoryStatsFromDir(dir)
+	if err != nil {
+		// Drop the cached dir so the next call re-resolves it.
+		sm.mu.Lock()
+		delete(sm.cgroupDirs, extID)
+		sm.mu.Unlock()
+		return &types.SandboxMemoryStats{}
+	}
+	return stats
+}
+
+// memoryStatsFromDir reads the cgroup v2 memory controller statistics from
+// dir and converts them to MB-granularity SandboxMemoryStats. A missing or
+// malformed memory.current is an error; the optional peak/max/events files
+// are tolerated (see sandboxruntime.ReadCgroupMemory).
+func memoryStatsFromDir(dir string) (*types.SandboxMemoryStats, error) {
+	mem, err := sandboxruntime.ReadCgroupMemory(dir)
+	if err != nil {
+		return nil, err
+	}
+	return &types.SandboxMemoryStats{
+		Running:   true,
+		CurrentMB: mem.CurrentBytes >> 20,
+		LimitMB:   mem.MaxBytes >> 20,
+		PeakMB:    mem.PeakBytes >> 20,
+		OOMKills:  mem.OOMKills,
+	}, nil
 }
 
 // IsRunning checks if an extension sandbox is running.

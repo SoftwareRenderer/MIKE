@@ -4,7 +4,7 @@
     import { getProject } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
-    import { isNearMemoryLimit } from '$lib/utils/memory-stats';
+    import { isNearMemoryLimit, formatSandboxMemory } from '$lib/utils/memory-stats';
 import BaseModal from './BaseModal.svelte';
 
     let { task, stats, onClose }: {
@@ -60,15 +60,7 @@ Sandbox Isolation is enabled for this project
                 <div class="memory-section">
                     <div class="memory-row">
                         <span class="memory-label">Memory Usage</span>
-                        <span class="memory-value">
-                            {#if stats.running}
-                                {stats.memory_limit_mb > 0
-                                    ? `${stats.memory_current_mb} / ${stats.memory_limit_mb} MB`
-                                    : `${stats.memory_current_mb} MB (no limit)`}
-                            {:else}
-                                Not running
-                            {/if}
-                        </span>
+                        <span class="memory-value">{formatSandboxMemory(stats)}</span>
                     </div>
                     {#if stats.memory_limit_mb > 0}
                         <!-- Stays visible when not running: empty track + peak tick -->
