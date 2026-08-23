@@ -21,7 +21,6 @@ vi.mock('$lib/context', () => {
     return {
         getStreamingContext: () => writable(new Set<string>()),
         getTaskDiffStatsContext: () => writable({}),
-        getTaskDiffContext: () => writable({}),
         getCommitQueueContext: () => writable({}),
         getExpandedTasksContext: () => writable(new Set<string>()),
         getTaskEventContext: () => writable(null),

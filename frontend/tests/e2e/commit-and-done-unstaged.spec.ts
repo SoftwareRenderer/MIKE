@@ -1,19 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 import { existsSync, writeFileSync, mkdirSync } from 'fs';
-import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask } from './helpers';
+import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask, getWorktreePath, worktreeExists } from './helpers';
 
 // Test project and worktrees locations (managed by global-setup.ts)
 const TEST_REPO = '/tmp/kanban-test-repo';
-
-function getWorktreePath(projectId: string, taskId: string): string {
-  return `/tmp/kanban-test-worktrees/${projectId}/${taskId}`;
-}
-
-function worktreeExists(projectId: string, taskId: string): boolean {
-  const path = getWorktreePath(projectId, taskId);
-  return existsSync(path) && existsSync(`${path}/.git`);
-}
 
 /** Write a file into the task worktree and stage it (git add). */
 function writeStagedFile(projectId: string, taskId: string, filePath: string, content: string): void {

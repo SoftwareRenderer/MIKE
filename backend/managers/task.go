@@ -1084,6 +1084,8 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 		}
 	}
 	h.terminalMgr.RemoveSession(taskID)
+	// Drop the cached done-task diff snapshot (the FK cascade is a backstop).
+	_ = h.store.DeleteTaskDiffSnapshot(taskID)
 	// Delete from database - find project first
 	var projectID string
 	if taskErr == nil {

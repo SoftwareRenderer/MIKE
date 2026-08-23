@@ -183,3 +183,66 @@ describe('offline diff cache', () => {
         await expect(getTaskDiff('p1', 't1', { checkpointIndex: 0 })).rejects.toBeTruthy();
     });
 });
+
+describe('done-task diff cache (immutable head-ref diff)', () => {
+    beforeEach(() => {
+        vi.resetModules();
+        vi.stubGlobal('indexedDB', createMockIndexedDB());
+    });
+
+    it('serves the cached done diff without any network call', async () => {
+        const storage = await import('$lib/storage');
+        const { isFromCache } = await import('$lib/api/cache');
+        mockRejectedFetch();
+        const fetchMock = vi.mocked(fetch);
+        await storage.setBoardCache(storage.doneDiffCacheKey('p1', 't1', 'sha-tip'), diff);
+
+        const { getTaskDiff } = await import('$lib/api/git');
+        const result = await getTaskDiff('p1', 't1', { headRef: 'sha-tip' });
+
+        expect(result).toMatchObject(diff);
+        expect(isFromCache(result)).toBe(true);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('persists the done diff after a successful fetch', async () => {
+        const storage = await import('$lib/storage');
+        mockResolvedFetch(diff);
+
+        const { getTaskDiff } = await import('$lib/api/git');
+        const result = await getTaskDiff('p1', 't1', { headRef: 'sha-tip' });
+
+        expect(result).toEqual(diff);
+        const cached = await storage.getBoardCache(storage.doneDiffCacheKey('p1', 't1', 'sha-tip'));
+        expect(cached).toEqual(diff);
+    });
+
+    it('falls back to the cached done diff when the network fails', async () => {
+        const storage = await import('$lib/storage');
+        const { isFromCache } = await import('$lib/api/cache');
+        await storage.setBoardCache(storage.doneDiffCacheKey('p1', 't1', 'sha-tip'), diff);
+        mockRejectedFetch();
+
+        const { getTaskDiff } = await import('$lib/api/git');
+        const result = await getTaskDiff('p1', 't1', { headRef: 'sha-tip' });
+
+        // Wait: cache-first means the cached copy is returned BEFORE the fetch
+        // is even attempted, so this is indistinguishable from a hit — both
+        // must yield the marked cached copy.
+        expect(result).toMatchObject(diff);
+        expect(isFromCache(result)).toBe(true);
+    });
+
+    it('does NOT use the done cache for checkpoint, custom-base, or full requests', async () => {
+        const storage = await import('$lib/storage');
+        mockRejectedFetch();
+        await storage.setBoardCache(storage.doneDiffCacheKey('p1', 't1', 'sha-tip'), diff);
+
+        const { getTaskDiff } = await import('$lib/api/git');
+        // Each of these bypasses the done cache, so a network failure rejects
+        // even though the done cache exists.
+        await expect(getTaskDiff('p1', 't1', { headRef: 'sha-tip', full: true })).rejects.toBeTruthy();
+        await expect(getTaskDiff('p1', 't1', { headRef: 'sha-tip', baseRef: 'sha-base' })).rejects.toBeTruthy();
+        await expect(getTaskDiff('p1', 't1', { headRef: 'sha-tip', checkpointIndex: 0 })).rejects.toBeTruthy();
+    });
+});

@@ -15,6 +15,7 @@ import (
 	"kanban/backend/git"
 	"kanban/backend/httputil"
 	"kanban/backend/store"
+	"kanban/backend/stream"
 	"kanban/backend/types"
 )
 
@@ -793,6 +794,21 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	checkpointIdx := -1
 	if checkpointIdxStr != "" {
 		checkpointIdx, _ = strconv.Atoi(checkpointIdxStr)
+	}
+
+	// The canonical done-task diff (pinned BaseCommit..BranchTip) is immutable —
+	// serve it from the persistent snapshot instead of re-running git on every
+	// open. Arbitrary ref comparisons (custom base/head), checkpoint diffs, and
+	// full (untruncated) requests still go through the live computation.
+	if task.Status == "done" && task.BranchTip != "" && customBase == "" && checkpointIdxStr == "" && !fullDiff &&
+		(headRef == "" || headRef == task.BranchTip) {
+		if d, err := stream.MaterializeDoneTaskDiff(h.store, h.worktreeMgr, projectID, task); err == nil && d != nil && d.HasChanges {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(d.DiffJSON))
+			return
+		}
+		// Snapshot error or empty diff: fall through to the live computation below.
 	}
 
 	// For done tasks, always show the committed diff (BaseCommit..BranchTip).

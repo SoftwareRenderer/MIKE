@@ -1645,6 +1645,42 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	}, nil
 }
 
+// TaskDiffFromRepo computes a commit-to-commit TaskDiff
+func (wm *WorktreeManager) TaskDiffFromRepo(repoPath, baseRef, headRef string, skipTruncate ...bool) (*TaskDiff, error) {
+	if repoPath == "" || headRef == "" {
+		return nil, fmt.Errorf("TaskDiffFromRepo: repoPath and headRef are required")
+	}
+	target := baseRef
+	if target == "" {
+		target = "HEAD"
+	}
+	diffOut, err := wm.gitRunOutput(repoPath, "diff", fmt.Sprintf("%s..%s", target, headRef))
+	if err != nil {
+		return nil, fmt.Errorf("git diff: %w", err)
+	}
+	shortStat := shortStatFromDiff(diffOut)
+	diffOut, annotations := wm.filterLargeBinaryDiffs(repoPath, diffOut)
+
+	var truncatedFiles []string
+	var originalStats map[string]FileChangeStats
+	if doTruncate := len(skipTruncate) == 0 || !skipTruncate[0]; doTruncate {
+		originalStats = countFileChanges(diffOut)
+		diffOut, truncatedFiles = truncateDiffLines(diffOut, defaultMaxChangeLines)
+	}
+	tracked := parseUnifiedDiffToFiles(diffOut, truncatedFiles, originalStats, annotations)
+	if tracked == nil {
+		tracked = make(map[string]*TrackedDiffFile)
+	}
+	return &TaskDiff{
+		Diff:              diffOut,
+		Tracked:           tracked,
+		Untracked:         []UntrackedFile{},
+		ShortStat:         shortStat,
+		TruncatedFiles:    truncatedFiles,
+		OriginalFileStats: originalStats,
+	}, nil
+}
+
 // -- Helper functions --
 
 // fileAnnotation holds metadata for a file whose diff was replaced with an annotation.

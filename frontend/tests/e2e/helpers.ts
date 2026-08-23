@@ -1,4 +1,6 @@
 import { expect, Page, Locator } from '@playwright/test';
+import { execSync } from 'child_process';
+import { existsSync, writeFileSync, mkdirSync } from 'fs';
 
 /**
  * Find a provider by its reference string: the stable integer ID (as a string)
@@ -350,4 +352,28 @@ export async function createAndOpenTask(page: Page, title?: string): Promise<str
   const taskId = await createTaskViaApi(page, projectId, taskPrompt);
   await navigateToTask(page, taskId);
   return taskId;
+}
+
+// --- Worktree helpers (test servers use MIKE_WORKTREES_DIR=/tmp/kanban-test-worktrees) ---
+
+export function getWorktreePath(projectId: string, taskId: string): string {
+  return `/tmp/kanban-test-worktrees/${projectId}/${taskId}`;
+}
+
+export function worktreeExists(projectId: string, taskId: string): boolean {
+  const path = getWorktreePath(projectId, taskId);
+  // Check for a proper git worktree (has .git file pointing to the main repo)
+  return existsSync(path) && existsSync(`${path}/.git`);
+}
+
+export function writeFileInWorktree(projectId: string, taskId: string, filePath: string, content: string): void {
+  const worktreePath = getWorktreePath(projectId, taskId);
+  mkdirSync(worktreePath, { recursive: true });
+  writeFileSync(`${worktreePath}/${filePath}`, content);
+  // Stage the file so git detects it
+  try {
+    execSync(`cd ${worktreePath} && git add ${filePath}`);
+  } catch {
+    // git add might fail if worktree isn't fully initialized; untracked files are still detected
+  }
 }
