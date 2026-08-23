@@ -3,6 +3,7 @@
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import { getWorktreeDisplayPath } from '$lib/utils/path';
+    import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import SandboxPanel from '../SandboxPanel.svelte';
     import type { Task } from '$lib/types';
     import { appStore } from '$lib/stores';
@@ -59,6 +60,84 @@
         const key = effectiveOpenTerminalKey(appStore.config);
         return key ? `Open terminal (${formatShortcut(key)})` : 'Open terminal';
     });
+
+    // Full worktree display path shown in the header (CSS-ellipsized when it
+    // doesn't fit; the native `title` below only appears on hover).
+    const fullPath = $derived(getWorktreeDisplayPath(workspaceDir || '', task.project_id, taskId));
+
+    // Mobile: tapping the (truncated) path shows the full path as a tooltip —
+    // native `title` tooltips never trigger on touch. Auto-hides after a few
+    // seconds; outside taps and viewport changes dismiss it early.
+    const isMobileCtx = useIsMobile();
+    let pathTip = $state<{ top: number; left: number } | null>(null);
+    let pathTipTimer: ReturnType<typeof setTimeout> | null = null;
+    let pathSpanEl = $state<HTMLSpanElement | null>(null);
+    let pathTipEl = $state<HTMLDivElement | null>(null);
+
+    const PATH_TIP_VISIBLE_MS = 2500;
+    const PATH_TIP_MARGIN = 8;
+
+    function clearPathTip() {
+        if (pathTipTimer) {
+            clearTimeout(pathTipTimer);
+            pathTipTimer = null;
+        }
+        document.removeEventListener('pointerdown', handleOutsidePointerDown, true);
+        window.removeEventListener('resize', handlePathTipViewportChange);
+        window.removeEventListener('orientationchange', handlePathTipViewportChange);
+        pathTip = null;
+    }
+
+    function handleOutsidePointerDown(e: PointerEvent) {
+        // pointerdown fires before the span's click — ignore taps on the
+        // label itself so re-tapping toggles the tooltip off (via the click
+        // handler) instead of close-then-reopen.
+        if (pathSpanEl && e.target instanceof Node && pathSpanEl.contains(e.target)) return;
+        clearPathTip();
+    }
+
+    // The tooltip is positioned with fixed pixel coordinates — any viewport
+    // change (rotation, resize) would leave it anchored to stale geometry.
+    function handlePathTipViewportChange() {
+        clearPathTip();
+    }
+
+    function handlePathTap() {
+        if (!isMobileCtx.isMobile || !fullPath) return;
+        if (pathTip) {
+            clearPathTip();
+            return;
+        }
+        const rect = pathSpanEl?.getBoundingClientRect();
+        if (!rect) return;
+
+        // Anchor below the label (the header is the topmost row, so there is
+        // no room above), left-aligned to it, clamped to the viewport.
+        const estWidth = Math.min(360, window.innerWidth * 0.8);
+        const left = Math.max(PATH_TIP_MARGIN, Math.min(rect.left, window.innerWidth - PATH_TIP_MARGIN - estWidth));
+        pathTip = { top: rect.bottom + 6, left };
+
+        pathTipTimer = setTimeout(clearPathTip, PATH_TIP_VISIBLE_MS);
+        document.addEventListener('pointerdown', handleOutsidePointerDown, true);
+        window.addEventListener('resize', handlePathTipViewportChange);
+        window.addEventListener('orientationchange', handlePathTipViewportChange);
+
+        // The width estimate may not match the rendered (wrapped) width —
+        // clamp against the real box after layout.
+        requestAnimationFrame(() => {
+            const tip = pathTipEl;
+            if (!tip || !pathTip) return;
+            const box = tip.getBoundingClientRect();
+            if (box.right > window.innerWidth - PATH_TIP_MARGIN) {
+                tip.style.left = `${Math.max(PATH_TIP_MARGIN, window.innerWidth - PATH_TIP_MARGIN - box.width)}px`;
+            } else if (box.left < PATH_TIP_MARGIN) {
+                tip.style.left = `${PATH_TIP_MARGIN}px`;
+            }
+        });
+    }
+
+    // Release tooltip listeners when the header unmounts (task view closed).
+    $effect(() => clearPathTip);
 </script>
 
 <div class="header">
@@ -83,7 +162,9 @@
                     </span>
                 {/if}
             {/if}
-            <span class="project-prefix" title={getWorktreeDisplayPath(workspaceDir || '', task.project_id, taskId)}>{getWorktreeDisplayPath(workspaceDir || '', task.project_id, taskId)}</span>
+            <!-- svelte-ignore a11y_click_events_have_key_events — mobile-only tap target on the label (no keyboard equivalent; desktop uses the native title tooltip) -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <span class="project-prefix" bind:this={pathSpanEl} title={fullPath} aria-describedby={pathTip ? 'task-header-path-tooltip' : undefined} onclick={handlePathTap}>{fullPath}</span>
             <span class="badge" style="background:{badge.color}18;color:{badge.color};border-color:{badge.color}40">
                 {badge.text}
             </span>
@@ -112,6 +193,10 @@
 
 {#if showSandboxPanel}
     <SandboxPanel {task} {stats} onClose={() => { showSandboxPanel = false; }} />
+{/if}
+
+{#if pathTip}
+    <div id="task-header-path-tooltip" class="path-tooltip" role="tooltip" bind:this={pathTipEl} style:top="{pathTip.top}px" style:left="{pathTip.left}px">{fullPath}</div>
 {/if}
 
 <style>
@@ -216,5 +301,25 @@
     .icon-btn:disabled {
         opacity: 0.35;
         cursor: not-allowed;
+    }
+    /* Mobile full-path tooltip — fixed so it escapes the label's overflow:
+       hidden truncation; pointer-events off so taps pass through (an outside
+       tap dismisses it). */
+    .path-tooltip {
+        position: fixed;
+        z-index: 9000;
+        max-width: min(80vw, 360px);
+        padding: 6px 10px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-surface-3);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        line-height: 1.4;
+        color: var(--color-text-primary);
+        word-break: break-all;
+        white-space: normal;
+        pointer-events: none;
     }
 </style>
