@@ -3,6 +3,7 @@
     import { dialogStore } from '$lib/stores';
     import { getProviderDisplayName } from '$lib/utils/providers';
     import AgentSection from './AgentSection.svelte';
+    import HelpIcon from './HelpIcon.svelte';
     import ModelList from './ModelList.svelte';
     import PricingSection from './PricingSection.svelte';
 
@@ -202,24 +203,14 @@
                     <div class="option-row">
                         <div class="option-label-group">
                             <label class="option-label" for={`concurrency-${index}`}>Concurrency</label>
-                            <span class="help-icon" title="Max tasks running concurrently on this provider; also caps in-flight LLM requests to this number.">
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
-                                </svg>
-                            </span>
+                            <HelpIcon label="Concurrency" text="Max tasks running concurrently on this provider; also caps in-flight LLM requests to this number." />
                         </div>
                         <input id={`concurrency-${index}`} type="number" bind:value={provider.concurrency} min="1" max="20" class="option-input" onchange={() => onDirty?.()} />
                     </div>
                     <div class="option-row">
                         <div class="option-label-group">
                             <label class="option-label" for={`max-rps-${index}`}>Max requests/sec</label>
-                            <span class="help-icon" title="Maximum new requests started per second to this provider. 0 = unlimited.">
-                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                    <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-                                    <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>
-                                </svg>
-                            </span>
+                            <HelpIcon label="Max requests/sec" text="Maximum new requests started per second to this provider. 0 = unlimited." />
                         </div>
                         <input id={`max-rps-${index}`} type="number" min="0" step="1" bind:value={provider.max_requests_per_second} class="option-input" onchange={() => onDirty?.()} />
                     </div>
@@ -478,17 +469,6 @@
     .option-label {
         font-size: 0.75rem;
         color: var(--color-text-secondary);
-    }
-    .help-icon {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--color-text-secondary);
-        opacity: 0.5;
-        cursor: help;
-    }
-    .help-icon:hover {
-        opacity: 0.8;
     }
     .option-input {
         width: 60px;
