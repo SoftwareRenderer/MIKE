@@ -1,10 +1,11 @@
 <script lang="ts">
-    import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv, SchemaProperty } from '$lib/types';
+    import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv } from '$lib/types';
     import { listExtensions, listLocalExtensions, getRegistryIndex, installExtension, installLocalExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
     import { isDangerousPermission, hasDangerousPermissions, sortPermissions } from '$lib/utils/extension-permissions';
+    import { effectiveConfigFields, initialEditConfig } from '$lib/utils/extension-config';
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
 
@@ -459,7 +460,9 @@
     function openEdit(ext: Extension) {
         editingExtension = ext;
         editExtensionId = ext.id;
-        editConfig = { ...ext.config };
+        // For LSP extensions this seeds the host-owned memory_limit from the
+        // effective sandbox_config value (0 = no limit).
+        editConfig = initialEditConfig(ext);
         const lsp = ext.manifest.capabilities?.lsp;
         editLspSettings = {
             editor_enabled: lsp?.editor_enabled ?? true,
@@ -501,21 +504,6 @@
         } finally {
             saving = false;
         }
-    }
-
-    // Get config schema fields for an extension
-    function getConfigSchemaFields(ext: Extension): Array<{ key: string; title: string; type: string; description?: string; default?: any; sensitive?: boolean; enum?: any[] }> {
-        const schema = ext.manifest.config_schema;
-        if (!schema || !schema.properties) return [];
-        return schema.properties.map((p: SchemaProperty) => ({
-            key: p.key,
-            title: p.title || p.key,
-            description: p.description,
-            type: p.type || 'string',
-            default: p.default,
-            sensitive: p.sensitive || false,
-            enum: p.enum,
-        }));
     }
 
     // Format built_at timestamp as a readable relative time
@@ -769,7 +757,7 @@
                                         {/if}
                                     </button>
                                     {/if}
-                                    {#if ext.manifest.config_schema}
+                                    {#if ext.manifest.config_schema || ext.type === 'lsp'}
                                     <button class="btn btn-icon" title="Edit" onclick={() => openEdit(ext)}>
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -835,10 +823,10 @@
 
         <BaseModal title={`Edit: ${editingExtension.manifest.display_name || editingExtension.name}`} width="480px" footer={editFooter} onClose={closeEdit}>
             <!-- Config Schema Fields -->
-            {#if getConfigSchemaFields(editingExtension).length > 0}
+            {#if effectiveConfigFields(editingExtension).length > 0}
                 <div class="config-fields">
                     <h4>Configuration</h4>
-                    {#each getConfigSchemaFields(editingExtension) as field}
+                    {#each effectiveConfigFields(editingExtension) as field}
                         <div class="config-field">
                             <label class="field-label" for="edit-config-{field.key}">{field.title}</label>
                             {#if field.description}
@@ -909,8 +897,28 @@
                         </div>
                     {/each}
                 </div>
-            {:else}
+            {:else if editingExtension.type !== 'lsp'}
                 <p class="no-schema">No configurable fields for this extension.</p>
+            {/if}
+            <!-- Sandbox (host-owned) — every LSP extension runs in a sandbox, so
+                 the memory limit is always available, declared or not. -->
+            {#if editingExtension?.type === 'lsp'}
+                <div class="config-fields">
+                    <h4>Sandbox</h4>
+                    <div class="config-field">
+                        <label class="field-label" for="edit-config-memory_limit">Memory Limit (MB)</label>
+                        <p class="field-desc">Maximum memory for the language server sandbox. 0 = no limit. Applied immediately on save.</p>
+                        <input
+                            id="edit-config-memory_limit"
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={editConfig.memory_limit ?? 0}
+                            oninput={(e) => editConfig.memory_limit = Math.max(0, Number((e.target as HTMLInputElement).value))}
+                            class="config-input"
+                        />
+                    </div>
+                </div>
             {/if}
             <!-- LSP Settings -->
             {#if editingExtension?.type === 'lsp'}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MEMORY_WARNING_RATIO, isNearMemoryLimit, isSandboxMemoryWarning } from '$lib/utils/memory-stats';
+import { MEMORY_WARNING_RATIO, isNearMemoryLimit, isSandboxMemoryWarning, formatSandboxMemory } from '$lib/utils/memory-stats';
 import type { SandboxMemoryStats } from '$lib/types';
 
 function stats(overrides: Partial<SandboxMemoryStats> = {}): SandboxMemoryStats {
@@ -65,5 +65,25 @@ describe('isSandboxMemoryWarning', () => {
 
     it('is true on OOM kills while not running (most recent stats after the task went idle)', () => {
         expect(isSandboxMemoryWarning(stats({ running: false, memory_current_mb: 0, oom_kills: 1 }))).toBe(true);
+    });
+});
+
+describe('formatSandboxMemory', () => {
+    it('renders an em dash for null/undefined (no data / fetch failed)', () => {
+        expect(formatSandboxMemory(null)).toBe('—');
+        expect(formatSandboxMemory(undefined)).toBe('—');
+    });
+
+    it('renders "Not running" when the sandbox is not running', () => {
+        expect(formatSandboxMemory(stats({ running: false }))).toBe('Not running');
+    });
+
+    it('renders "current / limit MB" when a limit is known', () => {
+        expect(formatSandboxMemory(stats({ memory_current_mb: 128, memory_limit_mb: 256 }))).toBe('128 / 256 MB');
+        expect(formatSandboxMemory(stats({ memory_current_mb: 0, memory_limit_mb: 256 }))).toBe('0 / 256 MB');
+    });
+
+    it('renders "current MB (no limit)" when the limit is unknown (0)', () => {
+        expect(formatSandboxMemory(stats({ memory_current_mb: 42, memory_limit_mb: 0 }))).toBe('42 MB (no limit)');
     });
 });

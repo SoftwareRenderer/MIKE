@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"kanban/backend/httputil"
+	"kanban/backend/types"
 )
 
 // JSONRPCMessage represents a JSON-RPC 2.0 message.
@@ -97,6 +100,7 @@ type lspManager interface {
 	Release(workspacePath, language string)
 	SendToServer(process *LSPProcess, msg json.RawMessage) error
 	ServerMessageCh() <-chan json.RawMessage
+	SandboxMemory(workspacePath, filePath string) *types.SandboxMemoryStats
 }
 
 // LSPHandler bridges frontend LSP clients to backend-managed language server processes.
@@ -150,6 +154,32 @@ func (h *LSPHandler) SetWorkspaceValidator(fn func(workspace string) bool) {
 func (h *LSPHandler) Close() {
 	close(h.serverRouterDone)
 	h.wg.Wait()
+}
+
+// HandleSandboxMemory is the HTTP handler for GET /api/lsp/memory.
+// It returns the cgroup memory usage of the sandbox running the language
+// server for the given workspace+file. Query params: workspace, file.
+func (h *LSPHandler) HandleSandboxMemory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	workspace := r.URL.Query().Get("workspace")
+	file := r.URL.Query().Get("file")
+	if workspace == "" || file == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "workspace and file query params are required")
+		return
+	}
+
+	// validateWorkspace is set once at startup (write-once) — read without
+	// locking, mirroring handleSubscription.
+	if h.validateWorkspace != nil && !h.validateWorkspace(workspace) {
+		httputil.JSONError(w, http.StatusForbidden, "workspace not allowed")
+		return
+	}
+
+	httputil.JSONResponse(w, http.StatusOK, h.manager.SandboxMemory(workspace, file))
 }
 
 // HandleLSP is the HTTP handler for the LSP WebSocket endpoint at /api/lsp.

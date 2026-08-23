@@ -1227,6 +1227,8 @@
                 {lspServerName}
                 {lspServerVersion}
                 lspMessage={lspMessageLog}
+                lspWorkspace={lspWorkspaceRoot}
+                lspFile={lspFilePath}
             />
         {/if}
     {/if}

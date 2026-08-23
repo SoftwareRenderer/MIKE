@@ -268,7 +268,7 @@ func TestHandleUpdate(t *testing.T) {
 func TestHandleUpdate_ConfigMemoryLimitSync(t *testing.T) {
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
-	ext.SandboxConfig.MemoryLimit = 256 // default
+	ext.SandboxConfig.MemoryLimit = 256 // a previously-applied limit
 	if err := h.store.Create(ext); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -301,6 +301,76 @@ func TestHandleUpdate_ConfigMemoryLimitSync(t *testing.T) {
 	// Config should also contain the value
 	if ml, ok := got.Config["memory_limit"]; !ok || ml != float64(512) {
 		t.Errorf("Config[\"memory_limit\"] = %v, want 512", ml)
+	}
+}
+
+func TestHandleUpdate_MemoryLimitZeroClearsLimit(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
+	ext.SandboxConfig.MemoryLimit = 512 // a previously-applied limit
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Save 0 (no limit) via the edit form's config payload. No sandbox is
+	// running, so the live-apply path is a no-op and the update still succeeds.
+	body := map[string]any{
+		"config": map[string]any{
+			"memory_limit": float64(0),
+		},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.HandleUpdate(w, req, "test-ext")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	got, err := h.store.GetByID("test-ext")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.SandboxConfig.MemoryLimit != 0 {
+		t.Errorf("SandboxConfig.MemoryLimit = %d, want 0 (cleared)", got.SandboxConfig.MemoryLimit)
+	}
+	if ml, ok := got.Config["memory_limit"]; !ok || ml != float64(0) {
+		t.Errorf("Config[\"memory_limit\"] = %v, want 0", ml)
+	}
+}
+
+func TestHandleUpdate_MemoryLimitNegativeClampedToZero(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	body := map[string]any{
+		"config": map[string]any{
+			"memory_limit": float64(-64),
+		},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.HandleUpdate(w, req, "test-ext")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	got, err := h.store.GetByID("test-ext")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.SandboxConfig.MemoryLimit != 0 {
+		t.Errorf("SandboxConfig.MemoryLimit = %d, want 0 (negative clamped)", got.SandboxConfig.MemoryLimit)
 	}
 }
 

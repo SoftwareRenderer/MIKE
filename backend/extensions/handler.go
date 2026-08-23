@@ -194,6 +194,8 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	oldMemoryLimit := ext.SandboxConfig.MemoryLimit
+
 	var req UpdateExtensionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
@@ -267,12 +269,19 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 	}
 	// Sync config.memory_limit → SandboxConfig.MemoryLimit
 	// The edit form saves memory_limit via config_schema, but sandbox reads SandboxConfig.
+	// 0 = no limit; negative values are clamped to 0.
 	if req.Config != nil {
 		if ml, ok := req.Config["memory_limit"]; ok {
 			switch v := ml.(type) {
 			case float64:
+				if v < 0 {
+					v = 0
+				}
 				ext.SandboxConfig.MemoryLimit = int(v)
 			case int:
+				if v < 0 {
+					v = 0
+				}
 				ext.SandboxConfig.MemoryLimit = v
 			}
 		}
@@ -331,6 +340,13 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 	if err := h.store.Update(id, ext); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to update extension: "+err.Error())
 		return
+	}
+
+	// Apply the saved memory limit to a running sandbox
+	if ext.IsLSP() && ext.SandboxConfig.MemoryLimit != oldMemoryLimit {
+		if memErr := h.sandbox.ApplyMemoryLimit(id, ext.SandboxConfig.MemoryLimit); memErr != nil {
+			log.Printf("[extensions] ext=%s WARNING: memory limit %dMB not applied to running sandbox: %v", id, ext.SandboxConfig.MemoryLimit, memErr)
+		}
 	}
 
 	statuses := h.sandbox.ListRunning()
