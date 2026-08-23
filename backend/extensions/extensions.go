@@ -353,7 +353,7 @@ func lspSandboxFromManifest(m *ExtensionManifest) *SandboxConfig {
 func sandboxConfigFromManifest(m *SandboxConfig) SandboxConfig {
 	sc := SandboxConfig{
 		NetworkIsolation: true,
-		MemoryLimit:      DefaultExtensionMemory,
+		MemoryLimit:      DefaultExtensionMemory, // 0 = no limit
 	}
 	if m == nil {
 		return sc
@@ -384,9 +384,9 @@ type RegistryEntry struct {
 	Image         string        `json:"image,omitempty"`          // OCI image reference
 	DockerfileURL string        `json:"dockerfile_url,omitempty"` // URL to Dockerfile
 	Capabilities  *Capabilities `json:"capabilities,omitempty"`   // capability config (mirrors manifest)
-	Repo   string `json:"repo,omitempty"`
-	Commit string `json:"commit,omitempty"`
-	Subdir string `json:"subdir,omitempty"`
+	Repo          string        `json:"repo,omitempty"`
+	Commit        string        `json:"commit,omitempty"`
+	Subdir        string        `json:"subdir,omitempty"`
 	// LocalPath is the absolute on-disk directory of a filesystem (unpublished)
 	// extension, as returned by the local-extensions endpoint.
 	LocalPath string `json:"local_path,omitempty"`

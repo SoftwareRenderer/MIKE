@@ -711,8 +711,10 @@ func TestSandboxConfigFromManifest(t *testing.T) {
 	if !def.NetworkIsolation {
 		t.Error("default NetworkIsolation should be true")
 	}
-	if def.MemoryLimit != DefaultExtensionMemory {
-		t.Errorf("default MemoryLimit = %d, want %d", def.MemoryLimit, DefaultExtensionMemory)
+	// Pinned explicitly: the contract is 0 = no limit (LSP sandboxes run
+	// unlimited unless the user sets a limit).
+	if def.MemoryLimit != 0 {
+		t.Errorf("default MemoryLimit = %d, want 0 (no limit)", def.MemoryLimit)
 	}
 
 	// Manifest envs/mounts are carried over; defaults preserved.

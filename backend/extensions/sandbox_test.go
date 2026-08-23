@@ -1,6 +1,7 @@
 package extensions
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -91,14 +92,92 @@ func findSubstr(s, substr string) bool {
 }
 
 func TestDefaultExtensionMemory(t *testing.T) {
-	if DefaultExtensionMemory != 256 {
-		t.Errorf("DefaultExtensionMemory = %d, want 256", DefaultExtensionMemory)
+	// 0 = no limit: LSP sandboxes run unlimited unless the user sets a limit.
+	if DefaultExtensionMemory != 0 {
+		t.Errorf("DefaultExtensionMemory = %d, want 0 (no limit)", DefaultExtensionMemory)
 	}
 }
 
 func TestExtensionContainerPrefix(t *testing.T) {
 	if ExtensionContainerPrefix != "kanban-ext" {
 		t.Errorf("ExtensionContainerPrefix = %q, want kanban-ext", ExtensionContainerPrefix)
+	}
+}
+
+func TestApplyMemoryLimit_NotRunningIsNoOp(t *testing.T) {
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil) // nil store is ok for this test
+	// No sandbox was created — applying or clearing a limit is a silent no-op:
+	// the next Create applies the persisted limit from scratch.
+	if err := sm.ApplyMemoryLimit("no-such-ext", 512); err != nil {
+		t.Errorf("ApplyMemoryLimit(512) = %v, want nil (no running sandbox)", err)
+	}
+	if err := sm.ApplyMemoryLimit("no-such-ext", 0); err != nil {
+		t.Errorf("ApplyMemoryLimit(0) = %v, want nil (no running sandbox)", err)
+	}
+}
+
+// TestApplyMemoryLimit_RunningSandbox verifies the live-apply path against a
+// real gVisor container: the limit written at Create can be raised and
+// cleared in place (no container restart). Skipped without runsc/podman or
+// when the container cannot be created (e.g. offline image pull).
+func TestApplyMemoryLimit_RunningSandbox(t *testing.T) {
+	if !checkExtensionSandboxAvailable() {
+		t.Skip("gVisor (runsc) or podman not available")
+	}
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+	sm.available = true
+	_, filename, _, _ := runtime.Caller(0)
+	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
+	t.Setenv("MIKE_AGENT_PATH", filepath.Join(projectRoot, "sandbox", "sandbox-bridge"))
+
+	const extID = "test-live-mem"
+	containerName := ExtensionContainerPrefix + "-" + extID
+	defer func() {
+		_ = sm.Stop(extID)
+		_ = sm.rt.RemoveContainer(containerName)
+	}()
+
+	ext := &Extension{
+		ID:              extID,
+		ContainerConfig: ContainerConfig{Image: "docker.io/library/ubuntu:latest"},
+		SandboxConfig:   SandboxConfig{MemoryLimit: 256},
+	}
+	if _, err := sm.Create(ext, nil); err != nil {
+		t.Skipf("cannot create sandbox container: %v", err)
+	}
+
+	readMax := func() string {
+		dir, err := sm.rt.ContainerCgroupDir(containerName)
+		if err != nil {
+			t.Fatalf("ContainerCgroupDir: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "memory.max"))
+		if err != nil {
+			t.Fatalf("read memory.max: %v", err)
+		}
+		return strings.TrimSpace(string(data))
+	}
+
+	if got, want := readMax(), fmt.Sprintf("%d", 256<<20); got != want {
+		t.Fatalf("after Create(256): memory.max = %q, want %s", got, want)
+	}
+
+	// Raise the limit live.
+	if err := sm.ApplyMemoryLimit(extID, 512); err != nil {
+		t.Fatalf("ApplyMemoryLimit(512) = %v", err)
+	}
+	if got, want := readMax(), fmt.Sprintf("%d", 512<<20); got != want {
+		t.Errorf("after ApplyMemoryLimit(512): memory.max = %q, want %s", got, want)
+	}
+
+	// Clear the limit live (0 = no limit).
+	if err := sm.ApplyMemoryLimit(extID, 0); err != nil {
+		t.Fatalf("ApplyMemoryLimit(0) = %v", err)
+	}
+	if got := readMax(); got != "max" {
+		t.Errorf("after ApplyMemoryLimit(0): memory.max = %q, want max", got)
 	}
 }
 
@@ -481,6 +560,33 @@ func TestBuildExtensionCreateArgs_EntrypointAndImage(t *testing.T) {
 	if !hasArg(args, "chmod +x /sandbox-bridge && sleep infinity") {
 		t.Error("args missing sleep infinity entrypoint")
 	}
+}
+
+func TestBuildExtensionCreateArgs_MemoryLimit(t *testing.T) {
+	t.Run("zero limit omits the memory flag", func(t *testing.T) {
+		// Default (unset) sandbox config = 0 = no limit.
+		ext := &Extension{ID: "ext-mem-zero"}
+		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-zero", "ubuntu:latest", nil)
+		if hasArg(args, "--memory") {
+			t.Errorf("args should not set --memory for a 0 (no-limit) sandbox: %v", args)
+		}
+	})
+
+	t.Run("negative limit is clamped to no limit", func(t *testing.T) {
+		ext := &Extension{ID: "ext-mem-neg", SandboxConfig: SandboxConfig{MemoryLimit: -64}}
+		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-neg", "ubuntu:latest", nil)
+		if hasArg(args, "--memory") {
+			t.Errorf("args should not set --memory for a negative limit: %v", args)
+		}
+	})
+
+	t.Run("positive limit sets the memory flag", func(t *testing.T) {
+		ext := &Extension{ID: "ext-mem-set", SandboxConfig: SandboxConfig{MemoryLimit: 512}}
+		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-set", "ubuntu:latest", nil)
+		if !hasArgPair(args, "--memory", "512M") {
+			t.Errorf("args missing --memory 512M: %v", args)
+		}
+	})
 }
 
 func TestFindLocalDockerfile(t *testing.T) {
