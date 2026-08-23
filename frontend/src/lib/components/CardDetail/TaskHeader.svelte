@@ -8,7 +8,7 @@
     import type { Task } from '$lib/types';
     import { appStore } from '$lib/stores';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
-    import { isSandboxMemoryWarning } from '$lib/utils/memory-stats';
+    import { isSandboxMemoryWarning, isMemoryLimitReached } from '$lib/utils/memory-stats';
     import { effectiveOpenTerminalKey, formatShortcut } from '$lib/utils/keyboard';
 
     let {
@@ -50,6 +50,9 @@
         }
         if (stats && stats.oom_kills > 0) {
             title += ` · ${stats.oom_kills} OOM kill${stats.oom_kills > 1 ? 's' : ''}`;
+        }
+        if (isMemoryLimitReached(stats)) {
+            title += ' · peak reached limit';
         }
         return `${title} (click for details)`;
     });

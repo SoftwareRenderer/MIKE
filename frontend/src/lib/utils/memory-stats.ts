@@ -15,13 +15,27 @@ export function isNearMemoryLimit(stats: SandboxMemoryStats | null | undefined):
 }
 
 /**
+ * True when the container's peak usage ever reached its memory limit. Peak
+ * (cgroup memory.peak) is a high-water mark for the container's lifetime, so
+ * once true it stays true for as long as the stats persist — including while
+ * the task is idle. False when there is no enforced limit (0), the peak is
+ * unknown (0 — e.g. kernels without memory.peak), or there are no stats.
+ */
+export function isMemoryLimitReached(stats: SandboxMemoryStats | null | undefined): boolean {
+    if (!stats) return false;
+    if (stats.memory_limit_mb <= 0 || stats.memory_peak_mb <= 0) return false;
+    return stats.memory_peak_mb >= stats.memory_limit_mb;
+}
+
+/**
  * True when the sandbox button should show its warning dot: usage is near the
- * limit, or any OOM kill happened in the container (the counter is cumulative
- * for the container's lifetime, so the warning persists after usage drops).
+ * limit, the peak ever reached the limit, or any OOM kill happened in the
+ * container (both the peak and the OOM counter are cumulative for the
+ * container's lifetime, so the warning persists after usage drops).
  */
 export function isSandboxMemoryWarning(stats: SandboxMemoryStats | null | undefined): boolean {
     if (!stats) return false;
-    return isNearMemoryLimit(stats) || stats.oom_kills > 0;
+    return isNearMemoryLimit(stats) || stats.oom_kills > 0 || isMemoryLimitReached(stats);
 }
 
 /**
