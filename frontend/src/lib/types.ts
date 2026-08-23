@@ -423,26 +423,6 @@ export type DiffStatsEntry = {
     already_merged?: boolean;
 };
 
-export type DiffEntry = {
-    hash: string;
-    diff?: string;
-    untracked?: Array<{
-        path: string;
-        diff: string;
-        file_size?: number;
-        line_count?: number;
-    }>;
-    files?: Record<string, {
-        hash: string;
-        type: string;
-        added?: number;
-        removed?: number;
-        line_count?: number;
-        file_size?: number;
-    }>;
-    updated_at: number;
-};
-
 export type CommitQueueEntry = { taskID: string; status: 'queued' | 'processing' };
 
 export type TaskEventData = { task_id: string; type: string; data: any };

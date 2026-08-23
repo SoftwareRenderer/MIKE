@@ -8,12 +8,12 @@
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
     import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
-    import { getBoardCache, boardCacheKey } from '$lib/storage';
+    import { getBoardCache, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
     import { useBoardArrowNav } from '$lib/composables/use-board-arrow-nav';
     import kanbanIcon from '$lib/assets/icons/kanban.svg';
-    import type { Project, Task, Config, StreamEvent, SandboxMemoryStats } from '$lib/types';
+    import type { Project, Task, Config, StreamEvent, SandboxMemoryStats, DiffStatsEntry } from '$lib/types';
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
@@ -202,6 +202,11 @@
     }
     let projectCounts: Record<string, { backlog: number; in_progress: number; review: number }> = $state({});
     let taskDiffStats: Record<string, { hash: string; files: number; additions: number; deletions: number }> = $state({});
+    // Cached done-task diff stats, keyed "<projectId>:<taskId>". Done-task diffs
+    // are immutable (pinned BaseCommit..BranchTip), so entries persist in
+    // IndexedDB across sessions: on project subscribe they're declared via
+    // known_stats and the server skips re-sending the stats frame.
+    let doneStatsCache: Record<string, { updated_at: string; stats: DiffStatsEntry }> = $state({});
     let boardRefreshPending = false; // deduplicate rapid refreshBoard calls
     let showFileBrowserVal = $state(false);
     let showExplorerViewVal = $state(false);
@@ -394,22 +399,18 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onDiffStats: (task_id, hash, short_stat, files_n, untracked_n, untracked_lines, tracked_add, tracked_del, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged) => {
                 const additions = tracked_add + (untracked_lines || 0);
                 const deletions = tracked_del;
-                taskDiffStatsContext.update(map => {
-                    map[task_id] = { hash: hash || '', files: files_n, additions, deletions, untracked_n: untracked_n || 0, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged };
-                    return { ...map };
-                });
-            },
-            onDiff: (task_id, hash, diff, untracked, files) => {
-                taskDiffContext.update(map => {
-                    const hasManifest = files && Object.keys(files).length > 0;
-                    const hasLegacy = diff || (untracked?.length ?? 0) > 0;
-                    if (hasManifest || hasLegacy) {
-                        map[task_id] = { hash, diff, untracked, files, updated_at: Date.now() };
-                    } else {
-                        delete map[task_id];
-                    }
-                    return { ...map };
-                });
+                const stats: DiffStatsEntry = { hash: hash || '', files: files_n, additions, deletions, untracked_n: untracked_n || 0, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged };
+                taskDiffStatsContext.update(map => ({ ...map, [task_id]: stats }));
+                // Done-task stats are immutable — persist them so the next
+                // (re)subscribe can declare them via known_stats and skip the
+                // re-send. updated_at comes from the board row, which is what
+                // the server compares against.
+                const t = tasks.find(x => x.id === task_id);
+                if (t && t.status === 'done' && currentProject && t.updated_at) {
+                    const key = `${currentProject.id}:${task_id}`;
+                    doneStatsCache[key] = { updated_at: t.updated_at, stats };
+                    setBoardCache(doneStatsCacheKey(currentProject.id, task_id), doneStatsCache[key]).catch(() => {});
+                }
             },
             onBranch: (branch) => {
                 currentBranch = branch;
@@ -436,6 +437,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 if (appStore.selectedTask?.id === updatedTask.id) {
                     appStore.selectedTask = updatedTask;
                 }
+                // Leaving Done invalidates the cached done-diff stats (the task
+                // is about to accumulate new work).
+                if (updatedTask.status !== 'done' && updatedTask.project_id) {
+                    const key = `${updatedTask.project_id}:${updatedTask.id}`;
+                    if (doneStatsCache[key]) {
+                        const next = { ...doneStatsCache };
+                        delete next[key];
+                        doneStatsCache = next;
+                        removeBoardCache(doneStatsCacheKey(updatedTask.project_id, updatedTask.id)).catch(() => {});
+                    }
+                }
             },
             onTaskDeleted: (task_id: string) => {
                 tasks = tasks.filter(t => t.id !== task_id);
@@ -443,6 +455,21 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 sandboxStatsStore.remove(task_id);
                 if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
                     clearTaskDetail();
+                }
+                taskDiffStatsContext.update(map => {
+                    if (!(task_id in map)) return map;
+                    const next = { ...map };
+                    delete next[task_id];
+                    return next;
+                });
+                if (currentProject) {
+                    const key = `${currentProject.id}:${task_id}`;
+                    if (doneStatsCache[key]) {
+                        const next = { ...doneStatsCache };
+                        delete next[key];
+                        doneStatsCache = next;
+                        removeBoardCache(doneStatsCacheKey(currentProject.id, task_id)).catch(() => {});
+                    }
                 }
             },
             onCommitStatus: (task_id: string, status: 'queued' | 'processing') => {
@@ -494,6 +521,19 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             },
             onExtensionChange: () => {
                 extensionManager.loadExtensions().catch(() => {});
+            },
+        }, {
+            // Declare which done-task stats we already have, so the server
+            // can skip re-sending them on (re)subscribe.
+            getKnownStats: (projectId: string) => {
+                const prefix = projectId + ':';
+                const known: Record<string, string> = {};
+                for (const [key, entry] of Object.entries(doneStatsCache)) {
+                    if (key.startsWith(prefix)) {
+                        known[key.slice(prefix.length)] = entry.updated_at;
+                    }
+                }
+                return known;
             },
         });
         setAppStreamRef(appStream);
@@ -563,7 +603,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
 
     // Initialize context providers
-    const { taskDiffStats: taskDiffStatsContext, taskDiff: taskDiffContext } = createTaskDiffContext();
+    const { taskDiffStats: taskDiffStatsContext } = createTaskDiffContext();
     const commitQueueStatusContext = createCommitQueueContext();
     const expandedTasksContext = createExpandedTasksContext();
     const taskEventContext = createTaskEventContext();
@@ -668,7 +708,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onProjectCounts: (counts) => { projectCounts = counts; },
             onRefresh: () => refreshBoard(),
             onDiffStats: () => {},
-            onDiff: () => {},
             onBranch: (branch) => { currentBranch = branch; },
             onFsEvent: () => {},
             onTaskUpdated: () => {},
@@ -792,6 +831,40 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // Task unsubscribe is handled by the $effect cleanup when appStore.selectedTask changes
     }
 
+    /** Hydrate cached done-task stats (IndexedDB) into the in-memory cache and
+     * the diff-stats context so cards render immediately and the next
+     * subscribe can declare them via known_stats. A cache miss just means the
+     * server sends the stats as usual. */
+    async function hydrateDoneTaskStats(projectId: string, projectTasks: Task[]) {
+        const pending = projectTasks.filter(t => t.status === 'done' && !doneStatsCache[`${projectId}:${t.id}`]);
+        if (pending.length === 0) return;
+        type Hit = { id: string; entry: { updated_at: string; stats: DiffStatsEntry } };
+        const loaded = await Promise.all(pending.map(async t => {
+            try {
+                const cached = await getBoardCache<{ updated_at: string; stats: DiffStatsEntry }>(doneStatsCacheKey(projectId, t.id));
+                return cached ? { id: t.id, entry: cached } as Hit : null;
+            } catch {
+                return null;
+            }
+        }));
+        const hits = loaded.filter((x): x is Hit => x !== null);
+        if (hits.length === 0) return;
+        const next = { ...doneStatsCache };
+        for (const { id, entry } of hits) {
+            next[`${projectId}:${id}`] = entry;
+        }
+        doneStatsCache = next;
+        // Mirror into the context only for tasks without live stats already.
+        const current = get(taskDiffStatsContext);
+        const toAdd: Record<string, DiffStatsEntry> = {};
+        for (const { id, entry } of hits) {
+            if (!(id in current)) toAdd[id] = entry.stats;
+        }
+        if (Object.keys(toAdd).length > 0) {
+            taskDiffStatsContext.update(map => ({ ...map, ...toAdd }));
+        }
+    }
+
     async function refreshBoard() {
         if (!currentProject || boardRefreshPending) return;
         boardRefreshPending = true;
@@ -801,6 +874,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             const b = await getBoard(currentProject.id);
             tasks = b.tasks || [];
             appStore.board = b;
+            void hydrateDoneTaskStats(currentProject.id, tasks);
             // Update selected task reference to point to fresh object from API
             const task = appStore.selectedTask;
             if (task) {
@@ -896,6 +970,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             lastSyncedAt = Date.now();
             // Restore task from URL after board loads (await so task detail renders before return)
             await restoreTaskFromUrl();
+            // Hydrate cached done-task stats BEFORE subscribing so the
+            // known_stats handshake is in place when the server builds the
+            // initial payload (skips re-sending stats we already have).
+            await hydrateDoneTaskStats(p.id, tasks);
             // Subscribe to project for real-time updates
             if (appStream) {
                 appStream.subscribeProject(p.id);

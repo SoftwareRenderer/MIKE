@@ -98,6 +98,12 @@ type AppStreamMessage struct {
 type AppStreamSubscription struct {
 	ProjectID string `json:"project_id"`
 	TaskID    string `json:"task_id,omitempty"`
+	// KnownStats declares, per done task, the task updated_at of the diff
+	// stats the client already has cached. When the value matches the
+	// server-side task.UpdatedAt, the initial task_diff_stats frame for that
+	// task is skipped (the client renders from its own cache — the done-task
+	// diff is immutable, so identical updated_at means identical stats).
+	KnownStats map[string]string `json:"known_stats,omitempty"`
 }
 
 // AppStreamManager manages the /api/stream WebSocket for all app events.
@@ -230,7 +236,9 @@ func (asm *AppStreamManager) subscribeProject(conn *websocket.Conn, projectID st
 			if asm.branchWatcher != nil {
 				_ = asm.branchWatcher.Watch(projectID, project.Path)
 			}
-			_ = asm.projectWatcher.Watch(projectID, project.Path)
+			if asm.projectWatcher != nil {
+				_ = asm.projectWatcher.Watch(projectID, project.Path)
+			}
 		}
 	}
 }
@@ -259,7 +267,9 @@ func (asm *AppStreamManager) unsubscribeProject(conn *websocket.Conn, projectID 
 		if asm.branchWatcher != nil {
 			asm.branchWatcher.Unwatch(projectID)
 		}
-		asm.projectWatcher.Unwatch(projectID)
+		if asm.projectWatcher != nil {
+			asm.projectWatcher.Unwatch(projectID)
+		}
 	}
 }
 
@@ -277,15 +287,11 @@ func (asm *AppStreamManager) subscribeTask(conn *websocket.Conn, projectID, task
 	client.taskSub[key]++
 	asm.mu.Unlock()
 
-	// Done tasks are not watched at startup to avoid unnecessary fsnotify watchers.
-	// Start watching the worktree when the user opens the task so live diff updates
-	// (e.g. branch merges) are still reflected.
-	if asm.watcher != nil && asm.store != nil && asm.worktreeMgr != nil {
-		if task, err := asm.store.GetTaskByTaskID(taskID); err == nil && task.Status == "done" {
-			baseRef := asm.getDiffBaseline(*task)
-			asm.WatchWorktree(taskID, projectID, baseRef)
-		}
-	}
+	// Done tasks are never watched: their canonical diff (pinned
+	// BaseCommit..BranchTip) is immutable and served from the persistent
+	// snapshot, so a watcher could only burn git CPU (its broadcasts are
+	// hash-deduped no-ops). If a done task is moved back to active work, the
+	// executor start path re-registers its watcher.
 
 	// Send per-task buffer so the client can catch up on missed events
 	// (e.g., tokens streamed while the page was reloading).
@@ -761,24 +767,74 @@ func (asm *AppStreamManager) GetTaskBuffer(projectID, taskID string) [][]byte {
 	return asm.getTaskBuffer(projectID + ":" + taskID)
 }
 
-func (asm *AppStreamManager) getDiffBaseline(task types.Task) string {
-	if task.Branch == "" || asm.worktreeMgr == nil {
-		return task.BaseRef
-	}
-	thread, _ := asm.store.GetThread(task.CurrentThreadID)
+// resolveTaskDiffBaseline resolves a task's diff baseline the way every path
+// does: pinned BaseCommit/BaseRef (via ResolveTaskBaseline), divergence
+// fallback for diverged forks, fork-thread merge-base resolution.
+func resolveTaskDiffBaseline(st *store.Store, wm *git.WorktreeManager, projectID string, task *types.Task) (string, error) {
+	thread, _ := st.GetThread(task.CurrentThreadID)
 	forkBranch := ""
 	if thread != nil {
 		forkBranch = thread.GitBranch
 	}
-	// Use BaseCommit (fixed hash captured at task start) when available,
-	// falling back to BaseRef (branch name). Matches API handler logic.
-	project, err := asm.store.GetProject(task.ProjectID)
 	projectPath, originBranch := "", ""
-	if err == nil && project != nil {
+	if project, err := st.GetProject(projectID); err == nil && project != nil {
 		projectPath, originBranch = project.Path, project.OriginBranch
 	}
-	baseRef, _ := asm.worktreeMgr.ResolveDiffBaseline(task.ID, asm.worktreeMgr.ResolveTaskBaseline(projectPath, originBranch, &task), task.Branch, forkBranch)
+	return wm.ResolveDiffBaseline(task.ID, wm.ResolveTaskBaseline(projectPath, originBranch, task), task.Branch, forkBranch)
+}
+
+func (asm *AppStreamManager) getDiffBaseline(task types.Task) string {
+	if task.Branch == "" || asm.worktreeMgr == nil {
+		return task.BaseRef
+	}
+	baseRef, _ := resolveTaskDiffBaseline(asm.store, asm.worktreeMgr, task.ProjectID, &task)
 	return baseRef
+}
+
+// computeAlreadyMerged reports whether the task's branch commits are already
+// merged into the target branch — a single git merge-base call in the project
+// repo, no worktree required.
+func (asm *AppStreamManager) computeAlreadyMerged(projectID string, task types.Task) bool {
+	targetBranch, ok := CheckAlreadyMerged(task)
+	if !ok {
+		return false
+	}
+	project, err := asm.store.GetProject(projectID)
+	if err != nil || project.Path == "" {
+		return false
+	}
+	return asm.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
+}
+
+// sendDoneTaskInitialDiff sends a done task's task_diff_stats frame from the
+// persistent snapshot — no per-connection `git diff` runs. When the client
+// declared (via known_stats) that it already has stats for this exact task
+// state, the frame is skipped entirely.
+func (asm *AppStreamManager) sendDoneTaskInitialDiff(ctx context.Context, client *clientState, conn *websocket.Conn, projectID string, task types.Task, sub AppStreamSubscription) {
+	d, err := MaterializeDoneTaskDiff(asm.store, asm.worktreeMgr, projectID, &task)
+	if err != nil || d == nil || !d.HasChanges {
+		return
+	}
+	// The client already has stats for this exact task state (updated_at
+	// unchanged) — identical refs, identical immutable diff.
+	if known, ok := sub.KnownStats[task.ID]; ok && known != "" && known == task.UpdatedAt.Format(time.RFC3339) {
+		return
+	}
+	var statsFields map[string]any
+	if err := json.Unmarshal([]byte(d.StatsJSON), &statsFields); err != nil {
+		return
+	}
+	// already_merged is deliberately not snapshotted: it can flip (target
+	// branch advances) without the diff changing, so it's recomputed fresh.
+	statsFields["already_merged"] = asm.computeAlreadyMerged(projectID, task)
+	frame := map[string]any{"type": "task_diff_stats", "task_id": task.ID}
+	for k, v := range statsFields {
+		frame[k] = v
+	}
+	msg, _ := json.Marshal(frame)
+	client.writeMu.Lock()
+	conn.Write(ctx, websocket.MessageText, msg)
+	client.writeMu.Unlock()
 }
 
 // HandleStream is the HTTP handler for the /api/stream WebSocket endpoint.
@@ -815,7 +871,9 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 				if asm.branchWatcher != nil {
 					asm.branchWatcher.Unwatch(projectID)
 				}
-				asm.projectWatcher.Unwatch(projectID)
+				if asm.projectWatcher != nil {
+					asm.projectWatcher.Unwatch(projectID)
+				}
 			}
 		}
 	}()
@@ -896,7 +954,7 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 				log.Printf("[app stream] subscribed to project=%s", sub.ProjectID)
 
 				// Send initial data for the project (background to not block the read loop)
-				go asm.sendInitialProjectData(ctx, client, conn, sub.ProjectID)
+				go asm.sendInitialProjectData(ctx, client, conn, sub)
 			}
 
 		case "unsubscribe_project":
@@ -924,7 +982,8 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client *clientState, conn *websocket.Conn, projectID string) {
+func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client *clientState, conn *websocket.Conn, sub AppStreamSubscription) {
+	projectID := sub.ProjectID
 	if asm.store == nil || asm.worktreeMgr == nil {
 		return
 	}
@@ -939,31 +998,26 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			return
 		default:
 		}
+		if task.Status == "done" {
+			// Done tasks are never watched and never hit the worktree watcher's
+			// git baseline resolution — their canonical diff (pinned
+			// BaseCommit..BranchTip) is immutable, so the stored snapshot is the
+			// source of truth (re-watched normally if the task leaves Done).
+			asm.sendDoneTaskInitialDiff(ctx, client, conn, projectID, task, sub)
+			continue
+		}
 		baseRef := asm.getDiffBaseline(task)
 		// Watch worktrees for tasks in active states or with an initialized worktree.
-		// Done tasks are excluded here — their watcher is started lazily when the user
-		// opens the task (see subscribeTask) to avoid unnecessary fsnotify watchers.
 		// Use resolved baseline (same as panel) so card stats match panel display.
-		if task.Status != "done" && (task.Status == "in_progress" || task.Status == "review" || task.Branch != "") {
+		if task.Status == "in_progress" || task.Status == "review" || task.Branch != "" {
 			asm.WatchWorktree(task.ID, projectID, baseRef)
 		}
-		headRef := ""
-		if task.Status == "done" {
-			headRef = task.BranchTip
-			if headRef == "" {
-				headRef = task.Branch
-			}
-		}
-		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, headRef); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0 || diffResult.CommittedDiff != "") {
+		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && (diffResult.Diff != "" || len(diffResult.Untracked) > 0 || diffResult.CommittedDiff != "") {
 			hash := ComputeDiffHash(diffResult.Diff, diffResult.CommittedDiff, diffResult.Untracked, diffResult.StagedHash)
 			stats := ComputeDiffStats(diffResult, task)
 			filesN := stats.VisibleTracked + stats.VisibleUntracked
 			// Check if task branch commits are already merged into the target branch.
-			if targetBranch, ok := CheckAlreadyMerged(task); ok {
-				if project, err := asm.store.GetProject(projectID); err == nil && project.Path != "" {
-					stats.AlreadyMerged = asm.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
-				}
-			}
+			stats.AlreadyMerged = asm.computeAlreadyMerged(projectID, task)
 			statsMsg, _ := json.Marshal(map[string]any{
 				"type":                  "task_diff_stats",
 				"task_id":               task.ID,
@@ -982,70 +1036,9 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			client.writeMu.Lock()
 			conn.Write(ctx, websocket.MessageText, statsMsg)
 			client.writeMu.Unlock()
-
-			// Send manifest for detail view (per-file metadata, no diff content)
-			stagedSet := make(map[string]struct{}, len(diffResult.StagedPaths))
-			for _, p := range diffResult.StagedPaths {
-				stagedSet[p] = struct{}{}
-			}
-			files := make(map[string]map[string]any)
-			for path, f := range diffResult.Tracked {
-				if git.IsInternalFile(path) {
-					continue
-				}
-				_, isStaged := stagedSet[path]
-				entry := map[string]any{
-					"hash":        git.ComputeFileHash(f),
-					"type":        "tracked",
-					"added":       f.Added,
-					"removed":     f.Removed,
-					"truncated":   f.Truncated,
-					"origAdded":   f.OrigAdded,
-					"origRemoved": f.OrigRemoved,
-					"staged":      isStaged,
-				}
-				if f.FileSize != nil {
-					entry["file_size"] = *f.FileSize
-				}
-				if f.IsBinary {
-					entry["is_binary"] = true
-				}
-				files[path] = entry
-			}
-			for _, u := range diffResult.Untracked {
-				if git.IsInternalFile(u.Path) {
-					continue
-				}
-				// Skip untracked files already in the tracked section
-				if _, exists := files[u.Path]; exists {
-					continue
-				}
-				lineCount := len(u.Lines)
-				if u.OrigAdded > 0 {
-					lineCount = u.OrigAdded
-				}
-				entry := map[string]any{
-					"hash":       git.ComputeUntrackedHash(u),
-					"type":       "untracked",
-					"line_count": lineCount,
-					"file_size":  u.FileSize,
-					"added":      lineCount,
-				}
-				if u.IsBinary {
-					entry["is_binary"] = true
-				}
-				files[u.Path] = entry
-			}
-			msg, _ := json.Marshal(map[string]any{
-				"type":       "task_diff",
-				"task_id":    task.ID,
-				"hash":       hash,
-				"files":      files,
-				"short_stat": diffResult.ShortStat,
-			})
-			client.writeMu.Lock()
-			conn.Write(ctx, websocket.MessageText, msg)
-			client.writeMu.Unlock()
+			// Note: the per-file task_diff manifest frame that was sent here is no
+			// longer broadcast — no component reads it; the task detail view
+			// fetches its data via the REST diff endpoint.
 		}
 	}
 
