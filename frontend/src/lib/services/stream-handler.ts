@@ -343,7 +343,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     markNotStreaming();
                     s.awaitingResponse = false;
                     stream.clearRetry();
-                } else if (['stopped', 'failed', 'idle', 'completed'].includes(data.state)) {
+                } else if (['stopped', 'failed', 'idle', 'completed', 'paused'].includes(data.state)) {
                     markNotStreaming();
                     s.awaitingResponse = false;
                     stream.clearRetry();

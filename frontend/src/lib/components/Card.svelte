@@ -374,9 +374,9 @@
         if (streaming || state === 'running') return { text: 'Running', color: 'var(--color-status-blue)' };
         if (state === 'pulling_image') return { text: 'Pulling image', color: 'var(--color-status-blue)' };
         if (hasConflict) return { text: 'Resolving conflict', color: 'var(--color-status-orange)' };
+        if (state === 'paused') return { text: 'Paused', color: 'var(--color-status-yellow)' };
         if (state === 'idle' && task.status === 'in_progress') return { text: 'Pending', color: 'var(--color-status-orange)' };
         if (state === 'failed') return { text: 'Failed', color: 'var(--color-status-red)' };
-        if (state === 'stopped') return { text: 'Stopped', color: 'var(--color-status-yellow)' };
         return null;
     });
 
@@ -543,7 +543,7 @@
     // Pause/Resume for In Progress column
     // Derive liveExecutionState from appStore so it updates reactively
     // when WebSocket broadcasts a board refresh. Falls back to task prop.
-    const STOPPED_STATES = ['stopped', 'failed'];
+    const STOPPED_STATES = ['paused', 'stopped', 'failed'];
     let liveExecutionState = $derived(
         appStore.board?.tasks.find(t => t.id === task.id)?.execution_state ?? task.execution_state
     );

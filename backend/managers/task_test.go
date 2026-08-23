@@ -727,8 +727,10 @@ func TestHandleStartWithSubtasks_MovesParentToInProgress(t *testing.T) {
 	}
 
 	child, _ := s.GetTaskByTaskID("child-mip")
-	if child.Status != "in_progress" || child.ExecutionState != "running" {
-		t.Errorf("deepest subtask should be running: status=%q state=%q", child.Status, child.ExecutionState)
+	// The seeded child's conversation already ends in an assistant message, so
+	// StartTask skips the LLM call and settles into idle (not a stale running).
+	if child.Status != "in_progress" || child.ExecutionState != "idle" {
+		t.Errorf("deepest subtask should be started-but-idle: status=%q state=%q", child.Status, child.ExecutionState)
 	}
 	if !child.Autostarted {
 		t.Error("subtask started via its parent should be marked autostarted")
@@ -751,8 +753,10 @@ func TestHandleStartWithSubtasks_AllChildrenDoneStartsOwnExecution(t *testing.T)
 	}
 
 	parent, _ := s.GetTaskByTaskID("par-ad")
-	if parent.Status != "in_progress" || parent.ExecutionState != "running" {
-		t.Errorf("parent should start its own execution once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
+	// The seeded parent's conversation already ends in an assistant message, so
+	// StartTask skips the LLM call and settles into idle (not a stale running).
+	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
+		t.Errorf("parent should be started-but-idle once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
 	}
 	if parent.Autostarted {
 		t.Error("user-initiated start should not mark the task autostarted")
@@ -805,8 +809,10 @@ func TestHandleStartSubtask_WithChildren_StartsDeepestSubtask(t *testing.T) {
 		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
 	}
 	leaf, _ := s.GetTaskByTaskID("leaf-nsp")
-	if leaf.Status != "in_progress" || leaf.ExecutionState != "running" {
-		t.Errorf("deepest descendant should be running: status=%q state=%q", leaf.Status, leaf.ExecutionState)
+	// The seeded leaf's conversation already ends in an assistant message, so
+	// StartTask skips the LLM call and settles into idle (not a stale running).
+	if leaf.Status != "in_progress" || leaf.ExecutionState != "idle" {
+		t.Errorf("deepest descendant should be started-but-idle: status=%q state=%q", leaf.Status, leaf.ExecutionState)
 	}
 	if !leaf.Autostarted {
 		t.Error("deepest descendant should be marked autostarted")
@@ -834,8 +840,10 @@ func TestHandleMove_SubtaskWithChildren_StartsDeepestSubtask(t *testing.T) {
 		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
 	}
 	leaf, _ := s.GetTaskByTaskID("leaf-msc")
-	if leaf.Status != "in_progress" || leaf.ExecutionState != "running" {
-		t.Errorf("deepest descendant should be running: status=%q state=%q", leaf.Status, leaf.ExecutionState)
+	// The seeded leaf's conversation already ends in an assistant message, so
+	// StartTask skips the LLM call and settles into idle (not a stale running).
+	if leaf.Status != "in_progress" || leaf.ExecutionState != "idle" {
+		t.Errorf("deepest descendant should be started-but-idle: status=%q state=%q", leaf.Status, leaf.ExecutionState)
 	}
 }
 
@@ -855,8 +863,10 @@ func TestHandleMove_ParentAllChildrenDone_StartsOwnExecution(t *testing.T) {
 	}
 
 	parent, _ := s.GetTaskByTaskID("par-mad")
-	if parent.Status != "in_progress" || parent.ExecutionState != "running" {
-		t.Errorf("parent should start its own execution once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
+	// The seeded parent's conversation already ends in an assistant message, so
+	// StartTask skips the LLM call and settles into idle (not a stale running).
+	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
+		t.Errorf("parent should be started-but-idle once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
 	}
 }
 

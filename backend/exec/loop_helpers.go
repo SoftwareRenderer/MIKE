@@ -81,18 +81,63 @@ func (te *TaskExecutor) startGateQueuePoller(gate *ConcurrencyGate, providerURL,
 	}, done
 }
 
-// handleStopped sets the task to stopped state, broadcasts the update, and optionally
-// persists an error message. Used by all ctx.Done and cancellation paths.
-func (te *TaskExecutor) handleStopped(task *types.Task, projectID, taskID string, output, code string, persistError bool) {
-	task.ExecutionState = "idle"
-	task.Status = "review"
-	task.Output = output
-	te.storeTask(task, projectID)
-	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Task stopped by user"}})
-	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-	if persistError {
-		te.sendAndPersistError(taskID, output, code)
+// applyStopTransition transitions an in-flight task row out of its running state
+func applyStopTransition(task *types.Task) bool {
+	if task.ExecutionState != "running" && task.ExecutionState != "pulling_image" {
+		return false
 	}
+	switch task.Status {
+	case "in_progress":
+		task.ExecutionState = "paused"
+		task.Output = "Paused by user"
+	case "done":
+		task.ExecutionState = "completed"
+	default:
+		task.ExecutionState = "idle"
+	}
+	task.UpdatedAt = time.Now().UTC()
+	return true
+}
+
+// sendStopStatusEvent sends the WS status event that tells task subscribers the executor exited
+func (te *TaskExecutor) sendStopStatusEvent(projectID, taskID, state string) {
+	activity := "Task stopped"
+	if state == "paused" {
+		activity = "Task paused by user"
+	}
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": state, "activity": activity}})
+}
+
+// persistStopTransition applies the stop transition
+func (te *TaskExecutor) persistStopTransition(task *types.Task) bool {
+	// Only the paused transition carries user-visible output text; idle and
+	// completed keep the row's previous output.
+	var output *string
+	if task.ExecutionState == "paused" {
+		o := task.Output
+		output = &o
+	}
+	changed, uerr := te.store.TransitionInFlightTask(task.ID, task.ProjectID, task.ExecutionState, output)
+	if uerr != nil {
+		log.Printf("[stop] task=%s in-flight transition failed: %v", task.ID, uerr)
+		return false
+	}
+	if changed {
+		te.appStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
+	}
+	return changed
+}
+
+// handleCancelledTask applies the stop transition
+func (te *TaskExecutor) handleCancelledTask(taskID, projectID string) {
+	fresh, err := te.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		return
+	}
+	if applyStopTransition(fresh) {
+		te.persistStopTransition(fresh)
+	}
+	te.sendStopStatusEvent(projectID, taskID, fresh.ExecutionState)
 }
 
 // modelSwitchResult holds the outputs of applyModelSwitch.

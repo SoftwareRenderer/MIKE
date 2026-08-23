@@ -495,7 +495,12 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	// Stop the executor if the task is moved out of In Progress.
 	// This ensures the goroutine exits and HasRunningTasks() reflects the new state.
 	if originalStatus == "in_progress" && req.Status != "in_progress" && h.executor != nil {
+		wasInFlight := task.ExecutionState == "running" || task.ExecutionState == "pulling_image"
 		_ = h.executor.StopTask(taskID)
+		if wasInFlight {
+			task.ExecutionState = "idle"
+			task.Output = ""
+		}
 	}
 	if req.Status == "done" {
 		task.ExecutionState = "completed"
@@ -643,8 +648,8 @@ func (h *TaskHandler) moveAllDescendants(projectID, taskID, targetStatus string)
 	// Process in reverse order (leaves first) so children are moved before their parents
 	for i := len(descendants) - 1; i >= 0; i-- {
 		d := &descendants[i]
-		// Skip already-running descendants (e.g., just auto-started by the move handler)
-		if d.ExecutionState == "running" {
+		// Skip in-flight descendants
+		if d.ExecutionState == "running" || d.ExecutionState == "pulling_image" {
 			continue
 		}
 		// Moving to In Progress is a start: only backlog descendants join. Review
@@ -1456,7 +1461,11 @@ func (h *TaskHandler) StartSubtaskWithParent(projectID, subtaskID string, autost
 	return h.executor.StartSubtaskWithParent(projectID, subtaskID, autostarted)
 }
 
-// StopTaskAndDescendants stops a task and all its running descendants.
+// StopTaskAndDescendants stops a task and all its in-flight descendants.
+// Each in-flight descendant (leaf-first) and the task itself are transitioned
+// via executor.StopTask (in_progress → paused, done → completed, other
+// columns → idle). Descendants that are not in-flight (pending subtasks) are
+// left untouched.
 func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 	// Get all descendants
 	descendants, err := h.store.GetAllDescendants(taskID)
@@ -1464,43 +1473,18 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 		log.Printf("[stop-cascade] failed to get descendants of %s: %v", taskID, err)
 	}
 
-	// Stop all running descendants (leaf-first order: reverse the list)
+	// Stop all in-flight descendants (leaf-first order: reverse the list)
 	for i := len(descendants) - 1; i >= 0; i-- {
 		d := descendants[i]
-		if d.ExecutionState == "running" {
+		if d.ExecutionState == "running" || d.ExecutionState == "pulling_image" {
 			if err := h.executor.StopTask(d.ID); err != nil {
 				log.Printf("[stop-cascade] failed to stop descendant %s: %v", d.ID, err)
 			}
-			d.ExecutionState = "idle"
-			d.Output = "Stopped by parent"
-			d.UpdatedAt = time.Now().UTC()
-			_ = h.store.UpdateTask(&d)
-			h.boardStreamMgr.BroadcastTaskUpdated(projectID, &d)
 		}
 	}
 
-	// Stop the task itself
-	if err := h.executor.StopTask(taskID); err != nil {
-		// Task might not be running (parent may be idle while subtask runs)
-		task, _ := h.store.GetTask(projectID, taskID)
-		if task != nil && task.ExecutionState == "running" {
-			task.ExecutionState = "idle"
-			task.Output = "Stopped by user"
-			task.UpdatedAt = time.Now().UTC()
-			_ = h.store.UpdateTask(task)
-		}
-		return nil // executor not running is OK
-	}
-
-	task, _ := h.store.GetTask(projectID, taskID)
-	if task != nil {
-		task.ExecutionState = "idle"
-		task.Output = "Stopped by user"
-		task.UpdatedAt = time.Now().UTC()
-		_ = h.store.UpdateTask(task)
-	}
-
-	return nil
+	// Stop the task itself (StopTask works with or without a live executor).
+	return h.executor.StopTask(taskID)
 }
 
 func autoGenerateTitle(prompt string) string {

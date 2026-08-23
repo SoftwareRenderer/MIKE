@@ -114,10 +114,10 @@ export async function startSubtask(projectId: string, taskId: string): Promise<T
     return startSubtaskRaw(projectId, taskId);
 }
 
-/** Stop a running task. Queued when offline. */
+/** Stop (pause) a running task. Queued when offline. */
 export async function stopTask(projectId: string, taskId: string): Promise<Task> {
     if (getOfflineStatus()) {
-        return await queueWrite('stopTask', { projectId, taskId }, { id: taskId, execution_state: 'idle' } as Task);
+        return await queueWrite('stopTask', { projectId, taskId }, { id: taskId, execution_state: 'paused' } as Task);
     }
     return stopTaskRaw(projectId, taskId);
 }

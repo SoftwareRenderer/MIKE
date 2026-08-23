@@ -285,10 +285,10 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	var lc *loopContext
 	defer func() {
 		close(setup.done) // signal executor exit for ForwardUserMessage type-switch
-		// Persist accumulated session cost for this task run.
+		// Persist accumulated session cost for this task run
 		if lc != nil {
 			setup.task.SessionCost = lc.sessionCost
-			te.persistTask(setup)
+			_ = te.store.UpdateTaskSessionCost(setup.task.ID, lc.sessionCost)
 		}
 		// Release the running-task slot if still held (no-op when released at
 		// an idle transition or never acquired — agent providers skip it).
@@ -297,6 +297,9 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		if r := recover(); r != nil {
 			log.Printf("[panic] setup.task=%s recovered from panic: %v", setup.task.ID, r)
 			te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
+			// Transition the task out of its in-flight state (in_progress →
+			// paused) so a panic can't leave a stale "running" row.
+			te.handleCancelledTask(setup.task.ID, setup.projectID)
 		}
 		// Close os.Root to release file descriptor (non-sandbox tasks)
 		te.taskMu.Lock()
@@ -333,7 +336,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	// providers manage their own concurrency and are excluded.
 	if !te.configStore.IsAgentProvider(setup.serverURL) {
 		if !te.acquireTaskSlot(setup, setup.serverURL) {
-			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+			te.handleCancelledTask(setup.task.ID, setup.projectID)
 			return
 		}
 	}
@@ -455,7 +458,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	for {
 		select {
 		case <-setup.ctx.Done():
-			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+			te.handleCancelledTask(setup.task.ID, setup.projectID)
 			return
 		default:
 		}
@@ -489,7 +492,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					// slot to the new provider (may queue while it's saturated).
 					if strings.TrimRight(newURL, "/") != strings.TrimRight(curURL, "/") {
 						if !te.syncTaskSlot(setup, newURL) {
-							te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+							te.handleCancelledTask(setup.task.ID, setup.projectID)
 							return
 						}
 					}
@@ -661,7 +664,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					lc.providerName = switched.providerName
 					if um.ServerURL != "" && strings.TrimRight(um.ServerURL, "/") != strings.TrimRight(prevURL, "/") {
 						if !te.syncTaskSlot(setup, um.ServerURL) {
-							te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+							te.handleCancelledTask(setup.task.ID, setup.projectID)
 							return
 						}
 					}
@@ -690,7 +693,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		onEnqueued, queueDone := te.startGateQueuePoller(te.gate, gateURL, setup.projectID, setup.task.ID, setup.ctx)
 		if _, err := te.gate.Acquire(setup.ctx, gateURL, concurrency, maxRPS, onEnqueued); err != nil {
 			close(queueDone) // cleanup polling goroutine
-			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+			te.handleCancelledTask(setup.task.ID, setup.projectID)
 			return
 		}
 		close(queueDone)
@@ -869,7 +872,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			callCancel()
 			te.gate.Release(gateURL) // Release gate immediately so other tasks can proceed
 			<-streamDone             // Then wait for goroutine to finish
-			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", false)
+			te.handleCancelledTask(setup.task.ID, setup.projectID)
 			return
 		case <-streamDone:
 			// Stream completed normally (or all retries exhausted)
@@ -954,7 +957,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			// If the queued messages moved the task to another provider, move
 			// the running-task slot with it (no-op when the URL is unchanged).
 			if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
-				te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+				te.handleCancelledTask(setup.task.ID, setup.projectID)
 				return
 			}
 
@@ -1507,7 +1510,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 					// A fresh LLM call follows - re-acquire the running-task slot.
 					if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
-						te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+						te.handleCancelledTask(setup.task.ID, setup.projectID)
 						return
 					}
 					continue
@@ -1531,7 +1534,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				// The task went idle after the response - re-acquire the
 				// running-task slot (a provider switch rides along via lc.mc).
 				if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
-					te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+					te.handleCancelledTask(setup.task.ID, setup.projectID)
 					return
 				}
 				setup.task.ExecutionState = "running"
@@ -1588,7 +1591,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		for {
 			select {
 			case <-setup.ctx.Done():
-				te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+				te.handleCancelledTask(setup.task.ID, setup.projectID)
 				return
 			case req := <-setup.summarizeCh:
 				// Manual summarization request from HandleSummarize.
@@ -1632,7 +1635,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				// User message present — continue to LLM call. The task was idle,
 				// so re-acquire the running-task slot first (may queue).
 				if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
-					te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+					te.handleCancelledTask(setup.task.ID, setup.projectID)
 					return
 				}
 				setup.task.Status = "in_progress"
@@ -1666,7 +1669,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				// The task was idle - re-acquire the running-task slot (a
 				// provider switch rides along via lc.mc) before the LLM call.
 				if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
-					te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+					te.handleCancelledTask(setup.task.ID, setup.projectID)
 					return
 				}
 				setup.task.ExecutionState = "running"

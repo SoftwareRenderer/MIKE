@@ -6,6 +6,7 @@
 
     let {
         taskStatus,
+        taskExecutionState,
         showResumeButton,
         showRestartButton,
         isStarting,
@@ -24,6 +25,7 @@
         onModelSelect,
     }: {
         taskStatus: string;
+        taskExecutionState: string;
         showResumeButton: boolean;
         showRestartButton: boolean;
         isStarting: boolean;
@@ -41,8 +43,25 @@
         onMoveToDone: () => Promise<void>;
         onModelSelect: (providerName: string, modelName: string, providerUrl: string, reasoningEffort?: string) => Promise<void>;
     } = $props();
+
+    // Paused: the task was stopped while in progress. It stays in the In
+    // Progress column — Resume continues the conversation from where it left
+    // off (the chat input below stays enabled for sending a new message).
+    let isPaused = $derived(taskExecutionState === 'paused');
 </script>
 
+{#if isPaused}
+    <div class="chat-review-bar">
+        <button class="btn-commit-done" onclick={onStartTask} disabled={isStarting || disabled} title="Resume the paused task">
+            {#if isStarting}
+                <span class="spinner-inline"></span> Resuming...
+            {:else}
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 2l10 6-10 6V2z" fill="currentColor"/></svg>
+                Resume
+            {/if}
+        </button>
+    </div>
+{/if}
 {#if taskStatus === 'done' && onMoveTask}
     <div class="chat-review-bar">
         <button class="btn-move" onclick={() => onMoveTask('review')} title="Move task to Review">
