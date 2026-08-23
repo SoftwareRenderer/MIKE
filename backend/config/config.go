@@ -71,7 +71,8 @@ func (cs *ConfigStore) agentProviders() []types.Provider {
 // filterPersistedProviders removes agent:// providers from the list so they
 // are not persisted to the database. Agent providers are discovered dynamically
 // at runtime from enabled agent extensions and should not be stored alongside
-// user-configured LLM providers.
+// user-configured LLM providers. Providers with a non-agent:// URL but a
+// non-llm kind remain user-persistable.
 func filterPersistedProviders(providers []types.Provider) []types.Provider {
 	filtered := make([]types.Provider, 0, len(providers))
 	for _, p := range providers {
@@ -195,9 +196,10 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 			return nil, err
 		}
 	}
-	// Display names are derived dynamically from the URL on the frontend
+	// Agent providers are derived from enabled agent extensions
+	providers = filterPersistedProviders(providers)
 	for i := range providers {
-		if !strings.HasPrefix(providers[i].URL, "agent://") && providers[i].Kind != "agent" {
+		if providers[i].Kind != "agent" {
 			providers[i].DisplayName = ""
 		}
 	}
@@ -295,6 +297,8 @@ func normalizeKeyboardShortcuts(ks *types.KeyboardShortcuts) *types.KeyboardShor
 // UpdateConfig persists the full server configuration and updates the in-memory override if set.
 // API keys are encrypted before DB storage.
 func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
+	// Agent providers are registry-derived and must never be persisted.
+	c.Providers = filterPersistedProviders(c.Providers)
 	// Assign stable IDs to providers that don't have one yet (new providers).
 	assignProviderIDs(c.Providers)
 	// Enforce minimum concurrency of 1, non-negative rate limit, and encrypt API keys
@@ -435,6 +439,14 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 			providers = append(providers, ap)
 		}
 	}
+	// Providers without a models list (legacy rows, agent providers from an
+	// older server) must serialize as "models": [] rather than null — the
+	// frontend assumes an array.
+	for i := range providers {
+		if providers[i].Models == nil {
+			providers[i].Models = []types.ModelConfig{}
+		}
+	}
 	maskAPIKeys(providers)
 	return configResponse{
 		WorkspaceDir:                  cfg.WorkspaceDir,
@@ -500,7 +512,9 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 							incoming[i].APIKey = &key
 						}
 					}
-					current.Providers = incoming // agent:// providers may be user-configured (ConfigModal); registry providers are merged in buildConfigResponse
+					// agent:// rows in the payload are dropped by UpdateConfig (agent providers
+					// are registry-derived); registry agents are merged in buildConfigResponse.
+					current.Providers = incoming
 				}
 			}
 		}

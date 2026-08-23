@@ -377,3 +377,79 @@ export function writeFileInWorktree(projectId: string, taskId: string, filePath:
     // git add might fail if worktree isn't fully initialized; untracked files are still detected
   }
 }
+
+// --- Agent extension helpers (isolated server) ---
+//
+// Agent providers are registry-derived: they exist only while the corresponding
+// agent extension is installed AND enabled. These helpers install/uninstall the
+// local `pi` agent extension (already materialized in the repo's extensions/
+// directory, which the test servers scan from their CWD).
+
+/**
+ * Install (if needed) and enable the local `pi` agent extension on the server
+ * backing `page`. Returns the extension ID. Idempotent: re-enables if already
+ * installed (e.g. a rerun after an interrupted prior run).
+ */
+export async function installPiExtension(page: Page): Promise<string> {
+  const existingId = await getPiExtensionId(page);
+  if (existingId) {
+    await setExtensionEnabledById(page, existingId, true);
+    return existingId;
+  }
+
+  const { entry, csrf } = await page.evaluate(async () => {
+    const sessionRes = await fetch('/api/auth/session');
+    const session = await sessionRes.json();
+    const localRes = await fetch('/api/extensions/local');
+    const local = await localRes.json();
+    return { entry: local.find((e: any) => e.name === 'pi') || null, csrf: session.csrf_token || '' };
+  });
+  if (!entry) {
+    throw new Error('pi extension not found in local extensions list (extensions/ dir not materialized?)');
+  }
+
+  // install-local streams SSE; the fetch resolves when the install completes.
+  const install = await page.evaluate(async ({ author, csrfToken }) => {
+    const r = await fetch('/api/extensions/install-local', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      credentials: 'include',
+      body: JSON.stringify({ author, name: 'pi' }),
+    });
+    const text = await r.text();
+    return { status: r.status, text };
+  }, { author: entry.author, csrfToken: csrf });
+  if (install.status !== 200 && install.status !== 201) {
+    throw new Error(`install-local failed (${install.status}): ${install.text.slice(0, 300)}`);
+  }
+
+  const id = await getPiExtensionId(page);
+  if (!id) throw new Error('pi extension not found after install');
+  await setExtensionEnabledById(page, id, true);
+  return id;
+}
+
+/** Uninstall the local `pi` agent extension if present (best-effort). */
+export async function deletePiExtension(page: Page): Promise<void> {
+  const id = await getPiExtensionId(page);
+  if (!id) return;
+  const res = await csrfFetch(page, `/api/extensions/${id}`, { method: 'DELETE' });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`delete extension failed (${res.status})`);
+  }
+}
+
+/** The installed `pi` extension's ID, or '' when not installed. */
+export async function getPiExtensionId(page: Page): Promise<string> {
+  return await page.evaluate(async () => {
+    const res = await fetch('/api/extensions');
+    if (!res.ok) return '';
+    const exts = await res.json();
+    return exts.find((e: any) => e.name === 'pi')?.id || '';
+  });
+}
+
+async function setExtensionEnabledById(page: Page, id: string, enabled: boolean): Promise<void> {
+  const res = await csrfFetch(page, `/api/extensions/${id}/enabled`, { method: 'PATCH', body: { enabled } });
+  if (!res.ok) throw new Error(`set extension enabled failed (${res.status})`);
+}
