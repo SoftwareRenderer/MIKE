@@ -19,13 +19,75 @@ import (
 	"github.com/google/uuid"
 )
 
+// storeTask writes task back to the DB, preserving the fields the executor
+// does not own: Title and TitleGenerating belong to the task handlers (user
+// edits, async title generation), so a full-row write from the executor's
+// start-time copy would clobber a title that changed while the task was
+// queued or running. Refresh them from the DB first.
+func (te *TaskExecutor) storeTask(task *types.Task, projectID string) error {
+	if cur, err := te.store.GetTask(projectID, task.ID); err == nil {
+		task.Title = cur.Title
+		task.TitleGenerating = cur.TitleGenerating
+	}
+	return te.store.UpdateTask(task)
+}
+
+// persistTask is storeTask for the executor's task copy.
+func (te *TaskExecutor) persistTask(setup *taskExecSetup) {
+	te.storeTask(setup.task, setup.projectID)
+}
+
+// startGateQueuePoller runs the 1-second queue-status poller used while a
+// caller waits for a gate slot (per-LLM-request gate in the loop, task gate
+// on start/resume/switch). It sends the caller's own queue position and
+// estimated wait to the task stream every second.
+//
+// The returned onEnqueued callback must be passed to gate.Acquire: it hands
+// the caller's queue entry to the poller (via a channel — race-free) as soon
+// as the caller is enqueued, so the reported position is the caller's own
+// rather than the total waiter count. Close the returned done channel to
+// stop the poller.
+func (te *TaskExecutor) startGateQueuePoller(gate *ConcurrencyGate, providerURL, projectID, taskID string, ctx context.Context) (onEnqueued func(*queueEntry), done chan struct{}) {
+	entries := make(chan *queueEntry, 1)
+	done = make(chan struct{})
+	go func() {
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		var entry *queueEntry
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case e := <-entries:
+				entry = e
+				continue
+			case <-tick.C:
+			}
+			pos := gate.Position(providerURL, entry)
+			est := gate.EstimateWait(providerURL, entry)
+			te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeQueue, Data: map[string]any{
+				"position":               pos,
+				"estimated_wait_seconds": est,
+			}})
+		}
+	}()
+	return func(e *queueEntry) {
+		select {
+		case entries <- e:
+		default:
+		}
+	}, done
+}
+
 // handleStopped sets the task to stopped state, broadcasts the update, and optionally
 // persists an error message. Used by all ctx.Done and cancellation paths.
 func (te *TaskExecutor) handleStopped(task *types.Task, projectID, taskID string, output, code string, persistError bool) {
 	task.ExecutionState = "idle"
 	task.Status = "review"
 	task.Output = output
-	te.store.UpdateTask(task)
+	te.storeTask(task, projectID)
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Task stopped by user"}})
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	if persistError {
@@ -43,7 +105,7 @@ type modelSwitchResult struct {
 // applyModelSwitch creates a new LlamaClient for the given serverURL/modelName,
 // updates the modelConfig, and optionally persists the override to the task DB row.
 // If discoverContext is true, it attempts to discover and save the context window.
-func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, serverURL, modelName string, persistToDB, discoverContext bool) modelSwitchResult {
+func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, projectID, serverURL, modelName string, persistToDB, discoverContext bool) modelSwitchResult {
 	reasoningEffort := task.ReasoningEffort
 	if reasoningEffort == "" {
 		reasoningEffort = te.configStore.GetModelReasoningEffort(modelName)
@@ -69,7 +131,7 @@ func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, serv
 		task.LlamaServerURL = serverURL
 		task.ModelName = modelName
 		task.ReasoningEffort = reasoningEffort
-		_ = te.store.UpdateTask(task)
+		te.storeTask(task, projectID)
 	}
 
 	return modelSwitchResult{
@@ -234,7 +296,10 @@ func (te *TaskExecutor) maybeAutoSummarize(setup *taskExecSetup, lc *loopContext
 		return
 	}
 	before := len(lc.messages)
-	lc.messages = te.applySummarization(setup.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, setup.serverURL, activeModel, nil)
+	// Fallback (non-utility) summarization requests go to the task's CURRENT
+	// provider — lc.mc follows mid-run switches, setup.serverURL does not.
+	curURL, _ := lc.mc.get()
+	lc.messages = te.applySummarization(setup.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, curURL, activeModel, nil)
 	if injectProceed && len(lc.messages) > before {
 		te.injectProceedMessage(setup, lc)
 	}
@@ -262,14 +327,14 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 	// Signal the UI that summarization is in progress
 	origTask := task
 	task.Summarizing = true
-	_ = te.store.UpdateTask(task)
+	te.storeTask(task, projectID)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
 	clearFlag := func() {
 		// Clear on the caller's reference too (task may have been reloaded below).
 		origTask.Summarizing = false
 		task.Summarizing = false
-		_ = te.store.UpdateTask(task)
+		te.storeTask(task, projectID)
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	}
 
@@ -400,7 +465,7 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 		task.ExecutionState = "failed"
 		task.Status = "review"
 		task.Output = "Model stuck in loop (max hints exhausted)"
-		te.store.UpdateTask(task)
+		te.storeTask(task, projectID)
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		te.sendAndPersistError(taskID, "Model stuck in loop (max hints exhausted)", "loop_detected")
 		return true // terminate
@@ -501,7 +566,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 		// Store and broadcast assigned ports
 		if len(assignedPorts) > 0 {
 			task.AssignedPorts = assignedPorts
-			te.store.UpdateTask(task)
+			te.storeTask(task, setup.projectID)
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: task.ID, Ports: assignedPorts}})
 		}

@@ -116,7 +116,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		task.Status = "in_progress"
 		task.ExecutionState = "idle"
 		task.UpdatedAt = time.Now().UTC()
-		_ = te.store.UpdateTask(task)
+		_ = te.storeTask(task, projectID)
 		te.appStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
 	}
 
@@ -236,7 +236,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 		log.Printf("[summarize] task=%s cancelling in-progress summarization", taskID)
 		te.cancelSummarize(taskID, projectID)
 		task.Summarizing = false
-		_ = te.store.UpdateTask(task)
+		_ = te.storeTask(task, projectID)
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "cancelled"})
 		return
@@ -244,7 +244,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 
 	// Set summarizing flag so the UI survives refresh and ForwardUserMessage blocks lazy-start.
 	task.Summarizing = true
-	_ = te.store.UpdateTask(task)
+	_ = te.storeTask(task, projectID)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
 	// If task is actively running, send request to the execution loop
@@ -255,7 +255,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 	if state != nil {
 		defer func() {
 			task.Summarizing = false
-			_ = te.store.UpdateTask(task)
+			_ = te.storeTask(task, projectID)
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		}()
 		// Create a cancellable context for this summarize request.
@@ -322,7 +322,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 			delete(te.dbSummarizeCancel.tasks, taskID)
 			te.dbSummarizeCancel.mu.Unlock()
 			task.Summarizing = false
-			_ = te.store.UpdateTask(task)
+			_ = te.storeTask(task, projectID)
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		}()
 

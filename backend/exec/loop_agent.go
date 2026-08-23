@@ -144,7 +144,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	// Store session file path for future restarts.
 	if sessionFile != "" && task.SessionID == "" {
 		task.SessionID = sessionFile
-		te.store.UpdateTask(task)
+		te.storeTask(task, projectID)
 		log.Printf("[agent] task=%s saved sessionFile=%s", task.ID, sessionFile)
 	}
 
@@ -232,7 +232,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 				task.ExecutionState = "idle"
 				task.Status = "review"
 				task.Output = "Stopped by user"
-				te.store.UpdateTask(task)
+				te.storeTask(task, projectID)
 				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Task stopped by user"}})
 				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 				return
@@ -312,7 +312,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			task.ExecutionState = "idle"
 			task.Status = "review"
 			task.Output = "Stopped by user"
-			te.store.UpdateTask(task)
+			te.storeTask(task, projectID)
 			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Task stopped by user"}})
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
@@ -471,7 +471,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		task.ExecutionState = "failed"
 		task.Status = "review"
 		task.Output = fmt.Sprintf("Agent process exited unexpectedly (stopReason=%s)", stopReason)
-		te.store.UpdateTask(task)
+		te.storeTask(task, projectID)
 	}
 
 	// Accumulate session cost into project_token_stats (aggregate increment, not per-message)
@@ -490,7 +490,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	// Persist session cost to the task so it's available when viewing non-streaming tasks.
 	// Accumulate onto any previously carried-over cost (e.g. from a prior executor run).
 	task.SessionCost += finalCost
-	te.store.UpdateTask(task)
+	te.storeTask(task, projectID)
 
 	// Broadcast complete event to clear streaming state on the frontend.
 	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
@@ -572,7 +572,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			if te.sandboxMgr != nil {
 				_ = te.sandboxMgr.Stop(task.ID)
 			}
-			te.store.UpdateTask(task)
+			te.storeTask(task, projectID)
 			*agentEnded = true
 			return
 		}
@@ -583,7 +583,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			if te.sandboxMgr != nil {
 				_ = te.sandboxMgr.Stop(task.ID)
 			}
-			te.store.UpdateTask(task)
+			te.storeTask(task, projectID)
 			*agentEnded = true
 			return
 		}
@@ -593,7 +593,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			_ = te.sandboxMgr.Stop(task.ID)
 		}
 		task.Output = fmt.Sprintf("Agent finished (%s)", stopReason)
-		te.store.UpdateTask(task)
+		te.storeTask(task, projectID)
 		*agentEnded = true
 		return
 	}
@@ -624,7 +624,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			}
 			task.Output = fmt.Sprintf("Agent finished (%s)", stopReason)
 		}
-		te.store.UpdateTask(task)
+		te.storeTask(task, projectID)
 		*agentEnded = true
 		return
 	}
@@ -633,7 +633,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 		task.ExecutionState = "failed"
 		task.Status = "review"
 		task.Output = fmt.Sprintf("Agent ended with error (stopReason=%s)", stopReason)
-		te.store.UpdateTask(task)
+		te.storeTask(task, projectID)
 		*agentEnded = true
 		return
 	}
@@ -642,7 +642,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 		task.ExecutionState = "idle"
 		task.Status = "review"
 		task.Output = "Agent was aborted"
-		te.store.UpdateTask(task)
+		te.storeTask(task, projectID)
 		*agentEnded = true
 		return
 	}
@@ -650,7 +650,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 	task.ExecutionState = "idle"
 	task.Status = "review"
 	task.Output = fmt.Sprintf("Agent finished (%s)", stopReason)
-	te.store.UpdateTask(task)
+	te.storeTask(task, projectID)
 	// Don't set agentEnded = true — keep the event loop alive for follow-up messages.
 	// The agent subprocess still has full conversation context.
 	// The loop will wait for: userMsgChan (follow-up), ctx.Done (stop), or process exit.

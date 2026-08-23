@@ -894,3 +894,131 @@ func TestHandleMove_ParentWithGatedChildren_KeepsThemInPlace(t *testing.T) {
 		t.Errorf("done child must not be dragged into In Progress: status=%q", done.Status)
 	}
 }
+
+// heldTitleLLM is an httptest LLM server that holds every chat request open
+// until Release() is called, simulating a slow (or provider-gate-queued)
+// title generation call. After release it answers with a JSON completion.
+type heldTitleLLM struct {
+	arrived chan struct{} // closed when the chat request arrives
+	release chan struct{} // closed to release the held request
+}
+
+func newHeldTitleLLM() *heldTitleLLM {
+	return &heldTitleLLM{arrived: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (m *heldTitleLLM) Release() { close(m.release) }
+
+func (m *heldTitleLLM) Server() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(m.arrived)
+		<-m.release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Generated Title"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+}
+
+// TestTitleGenerationDoesNotClobberTaskStatus pins the stale full-row write
+// bug: while the title-generation LLM call is in flight (e.g. queued on the
+// provider concurrency gate behind another task's stream), the task gets
+// started (backlog → in_progress). The title update must then write ONLY the
+// title — writing back the row as read at creation time (status backlog)
+// silently un-starts the task.
+func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	worktreesDir := filepath.Join(dir, "worktrees")
+	if err := os.MkdirAll(worktreesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	mock := newHeldTitleLLM()
+	server := mock.Server()
+	defer server.Close()
+
+	providers := `[{"name":"held","display_name":"Held","url":"` + server.URL + `","models":[{"name":"m1","reasoning_effort":"off"}],"concurrency":1}]`
+	s.SetConfigValue("providers", providers)
+	s.SetConfigValue("worker_provider", "")
+	s.SetConfigValue("worker_model", "")
+	s.SetConfigValue("utility_provider", "held")
+	s.SetConfigValue("utility_model", "m1")
+
+	cfgStore := config.NewConfigStore(s, dbPath, "test")
+	cfgStore.SetWorkspaceDirOverride(worktreesDir)
+	wm := git.NewWorktreeManager(s, cfgStore)
+	boardMgr := stream.NewAppStreamManager(s, wm)
+	te := exec.NewTaskExecutor(s, cfgStore, boardMgr, wm, nil, nil, nil, nil)
+	h := NewTaskHandler(s, boardMgr, cfgStore, nil, te, wm, nil, nil)
+	mux := newTaskMux(h)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	proj := &types.Project{ID: "title-clobber-proj", Name: "Title Clobber", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create the task (7-word prompt → title generation runs). The
+	// title-generation goroutine reads the row, then its LLM call is held
+	// open by the mock.
+	rr := doTaskRequest(t, mux, http.MethodPost, "/api/projects/title-clobber-proj/tasks", map[string]any{
+		"prompt":           "please generate a title for this task",
+		"llama_server_url": server.URL,
+		"model_name":       "m1",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create task: %d %s", rr.Code, rr.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("parse created task: %v", err)
+	}
+	taskID, _ := created["id"].(string)
+
+	// Wait for the title call to reach the mock (the row was already read).
+	select {
+	case <-mock.arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("title call never reached the mock LLM")
+	}
+
+	// Start the task while the title call is in flight.
+	task, err := s.GetTask("title-clobber-proj", taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.Status = "in_progress"
+	task.ExecutionState = "running"
+	task.Branch = "task/" + taskID
+	if err := s.UpdateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	// Release the title call → the title update runs.
+	mock.Release()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		done, _ := s.GetTask("title-clobber-proj", taskID)
+		if done != nil && !done.TitleGenerating && done.Title == "Generated Title" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	task, err = s.GetTask("title-clobber-proj", taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Title != "Generated Title" {
+		t.Fatalf("title not updated: %q (title_generating=%v)", task.Title, task.TitleGenerating)
+	}
+	if task.Status != "in_progress" || task.ExecutionState != "running" || task.Branch != "task/"+taskID {
+		t.Fatalf("title update clobbered task state: status=%s exec=%s branch=%q",
+			task.Status, task.ExecutionState, task.Branch)
+	}
+}

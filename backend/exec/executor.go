@@ -40,7 +40,8 @@ type TaskExecutor struct {
 	agentRegistry *agent.AgentRegistry
 	lspMgr        lspManager
 	commitQueue   *CommitQueue
-	gate          *ConcurrencyGate
+	gate          *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
+	taskGate      *ConcurrencyGate // per-provider running-task limit
 	taskMu        sync.Mutex
 	tasks         map[string]*executionState
 	// Per-task mutexes to serialize worktree access across executors and merges.
@@ -177,6 +178,7 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 		lspMgr:        lspMgrI,
 		commitQueue:   commitQueue,
 		gate:          NewConcurrencyGate(),
+		taskGate:      NewConcurrencyGate(),
 		tasks:         make(map[string]*executionState),
 	}
 	te.dbSummarizeCancel.tasks = make(map[string]context.CancelFunc)
@@ -202,7 +204,7 @@ func (te *TaskExecutor) WorktreeMgr() *git.WorktreeManager {
 func (te *TaskExecutor) RunWithGate(ctx context.Context, serverURL string, fn func() error) error {
 	concurrency := te.configStore.GetProviderConcurrency(serverURL)
 	maxRPS := te.configStore.GetProviderMaxRequestsPerSecond(serverURL)
-	if _, _, err := te.gate.Acquire(ctx, serverURL, concurrency, maxRPS); err != nil {
+	if _, err := te.gate.Acquire(ctx, serverURL, concurrency, maxRPS, nil); err != nil {
 		return err
 	}
 	defer te.gate.Release(serverURL)
@@ -598,7 +600,7 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string, auto
 		subtask.ModelName = parent.ModelName
 	}
 	if subtask.LlamaServerURL != "" || subtask.ModelName != "" {
-		if err := te.store.UpdateTask(subtask); err != nil {
+		if err := te.storeTask(subtask, projectID); err != nil {
 			return fmt.Errorf("update subtask model config: %w", err)
 		}
 	}
@@ -621,7 +623,7 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string, auto
 					if actualBranch != "" && actualBranch != parent.Branch {
 						parent.Branch = actualBranch
 						parent.UpdatedAt = time.Now().UTC()
-						_ = te.store.UpdateTask(parent)
+						_ = te.storeTask(parent, projectID)
 						te.appStreamMgr.BroadcastTaskUpdated(projectID, parent)
 					}
 				}
@@ -704,7 +706,7 @@ func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task)
 	}
 	parent.Branch = branchName
 	parent.UpdatedAt = time.Now().UTC()
-	if err := te.store.UpdateTask(parent); err != nil {
+	if err := te.storeTask(parent, projectID); err != nil {
 		// Clean up the worktree if DB update fails
 		_ = te.worktreeMgr.RemoveWorktree(projectID, parent.ID, branchName)
 		return fmt.Errorf("update parent task with branch: %w", err)
@@ -911,7 +913,7 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 	te.appStreamMgr.WatchWorktree(taskID, projectID, watchBaseRef)
 
 	task.UpdatedAt = time.Now().UTC()
-	if err := te.store.UpdateTask(task); err != nil {
+	if err := te.storeTask(task, projectID); err != nil {
 		return nil, fmt.Errorf("update task: %w", err)
 	}
 
@@ -938,6 +940,10 @@ type taskExecSetup struct {
 	sandboxDockerfilePath string
 	sandboxOpts           sandboxmgr.SandboxOpts
 	done                  chan struct{} // closed by executor defer; see executionState.done
+	// taskSlotURL is the provider URL whose running-task slot this execution
+	// currently holds ("" = not held). LLM providers only; agent providers
+	// manage their own concurrency.
+	taskSlotURL string
 }
 
 // prepareTaskExecution sets up the shared infrastructure for task execution.
@@ -1063,7 +1069,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	if updateStatus {
 		task.ExecutionState = "running"
 		task.Status = "in_progress"
-		if err := te.store.UpdateTask(task); err != nil {
+		if err := te.storeTask(task, projectID); err != nil {
 			return nil, err
 		}
 	}
@@ -1092,7 +1098,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		task.ExecutionState = "idle"
 		task.Status = "backlog"
 		task.UpdatedAt = time.Now().UTC()
-		_ = te.store.UpdateTask(task)
+		_ = te.storeTask(task, projectID)
 		return nil, fmt.Errorf("agent requires network to be enabled")
 	}
 
@@ -1243,7 +1249,7 @@ func (te *TaskExecutor) StartTask(projectID, taskID string, autostarted bool) er
 
 	// Persist how this execution was started (backend-only provenance flag).
 	task.Autostarted = autostarted
-	if err := te.store.UpdateTask(task); err != nil {
+	if err := te.storeTask(task, projectID); err != nil {
 		execSetup.cancel()
 		te.taskMu.Lock()
 		delete(te.tasks, taskID)
@@ -1319,7 +1325,7 @@ func (te *TaskExecutor) StopProjectTasks(projectID string) int {
 			// Reset only the running task to idle; preserve its column (status)
 			task.ExecutionState = "idle"
 			te.taskMu.Unlock()
-			_ = te.store.UpdateTask(&task)
+			_ = te.storeTask(&task, projectID)
 		} else {
 			te.taskMu.Unlock()
 		}
@@ -1438,7 +1444,7 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 		return err
 	}
 	task.ExecutionState = "idle"
-	te.store.UpdateTask(task)
+	te.storeTask(task, projectID)
 	return te.StartTask(projectID, taskID, false)
 }
 
@@ -1461,7 +1467,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	// Apply model override from the user message (may arrive before updateTask completes)
 	if reasoningEffort != "" {
 		task.ReasoningEffort = reasoningEffort
-		te.store.UpdateTask(task)
+		te.storeTask(task, projectID)
 	}
 
 	execSetup, err := te.prepareTaskExecution(projectID, taskID, serverURL, modelName, true)
@@ -1470,7 +1476,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 		task.ExecutionState = "failed"
 		task.Status = "review"
 		task.Output = err.Error()
-		_ = te.store.UpdateTask(task)
+		_ = te.storeTask(task, projectID)
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		te.sendAndPersistError(task.ID, err.Error(), "setup_failed")
 		return
