@@ -1,7 +1,7 @@
 import { getContext, setContext } from 'svelte';
 import { writable } from 'svelte/store';
 import type { Writable } from 'svelte/store';
-import type { DiffStatsEntry, DiffEntry, CommitQueueEntry, TaskEventData } from '$lib/types';
+import type { DiffStatsEntry, CommitQueueEntry, TaskEventData } from '$lib/types';
 
 // =============================================================================
 // Streaming Task IDs Context
@@ -28,16 +28,13 @@ export function getStreamingContext(): Writable<Set<string>> {
 // =============================================================================
 
 const TASK_DIFF_STATS_KEY = Symbol('taskDiffStats');
-const TASK_DIFF_KEY = Symbol('taskDiff');
 
-export type { DiffStatsEntry, DiffEntry };
+export type { DiffStatsEntry };
 
 export function createTaskDiffContext() {
     const taskDiffStats = writable<Record<string, DiffStatsEntry>>({});
-    const taskDiff = writable<Record<string, DiffEntry>>({});
     setContext(TASK_DIFF_STATS_KEY, taskDiffStats);
-    setContext(TASK_DIFF_KEY, taskDiff);
-    return { taskDiffStats, taskDiff };
+    return { taskDiffStats };
 }
 
 export function getTaskDiffStatsContext(): Writable<Record<string, DiffStatsEntry>> {

@@ -604,7 +604,10 @@ async function cleanTaskContentCache(allTaskIds: Set<string>, projectId: string)
     const keys = await dbGetAllKeys(STORE_BOARD_CACHE);
     const toDelete = keys.filter(key => {
         const parts = key.split(':');
-        if (parts[0] !== 'messages' && parts[0] !== 'message-full' && parts[0] !== 'diff') return false;
+        // 'diff:<pid>:<tid>' (current worktree diff), 'diff:<pid>:<tid>:<headSHA>'
+        // (done-task branch-tip diff), and 'done-stats:<pid>:<tid>' all carry the
+        // task id at parts[2] and are swept when the task disappears.
+        if (parts[0] !== 'messages' && parts[0] !== 'message-full' && parts[0] !== 'diff' && parts[0] !== 'done-stats') return false;
         if (parts[1] !== projectId) return false; // only current project
         const taskId = parts[2];
         return !allTaskIds.has(taskId);
@@ -647,6 +650,16 @@ export function diffCacheKey(projectId: string, taskId: string): string {
     return `diff:${projectId}:${taskId}`;
 }
 
+/** Cache key for a done task's immutable branch-tip diff (full REST response). */
+export function doneDiffCacheKey(projectId: string, taskId: string, headRef: string): string {
+    return `diff:${projectId}:${taskId}:${headRef}`;
+}
+
+/** Cache key for a done task's cached diff stats + the updated_at they were observed at. */
+export function doneStatsCacheKey(projectId: string, taskId: string): string {
+    return `done-stats:${projectId}:${taskId}`;
+}
+
 /** Save a value to the board cache. */
 export async function setBoardCache(key: string, value: unknown): Promise<void> {
     return dbPut(STORE_BOARD_CACHE, key, { data: value, cachedAt: Date.now() });
@@ -656,6 +669,11 @@ export async function setBoardCache(key: string, value: unknown): Promise<void> 
 export async function getBoardCache<T>(key: string): Promise<T | null> {
     const entry = await dbGet<BoardCacheEntry>(STORE_BOARD_CACHE, key);
     return entry ? (entry.data as T) : null;
+}
+
+/** Remove a value from the board cache. */
+export async function removeBoardCache(key: string): Promise<void> {
+    return dbDelete(STORE_BOARD_CACHE, key);
 }
 
 // ─── Editor tabs (IndexedDB: editor-tabs store) ──────────────────────────────

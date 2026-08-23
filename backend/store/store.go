@@ -222,6 +222,19 @@ CREATE TABLE IF NOT EXISTS project_token_tasks (
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
+-- Immutable diff snapshot for done tasks (BaseCommit..BranchTip — pinned SHAs).
+-- Lazily materialized on first read; valid until the task's base/tip refs change.
+CREATE TABLE IF NOT EXISTS task_diff_snapshots (
+    task_id     TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL,
+    base_commit TEXT NOT NULL,
+    branch_tip  TEXT NOT NULL,
+    stats_json  TEXT NOT NULL,
+    diff_json   TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_parent ON task_dependencies(parent_task_id);

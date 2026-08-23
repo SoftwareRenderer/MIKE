@@ -1225,6 +1225,175 @@ func TestDoneTaskDiffReturnsCommittedDiff(t *testing.T) {
 	}
 }
 
+// TestDoneTaskDiffServedFromSnapshot verifies that the canonical done-task
+// diff is persisted as a snapshot on first fetch and replayed from the
+// snapshot on subsequent fetches — even when git is no longer usable
+// (e.g. the repo or worktree is gone).
+func TestDoneTaskDiffServedFromSnapshot(t *testing.T) {
+	s := testServer(t)
+
+	dir := t.TempDir()
+	exec.Command("git", "-C", dir, "init", "-b", "main").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+
+	os.WriteFile(join(dir, "initial.txt"), []byte("initial\n"), 0644)
+	exec.Command("git", "-C", dir, "add", "initial.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Initial commit").Run()
+	baseCommit := strings.TrimSpace(execOutput(t, "git", "-C", dir, "rev-parse", "HEAD"))
+
+	proj := &types.Project{
+		ID:   "diff-snap-proj",
+		Name: "diff-snap",
+		Path: dir,
+	}
+	s.store.CreateProject(proj)
+
+	exec.Command("git", "-C", dir, "checkout", "-b", "task/test-done-snap").Run()
+	os.WriteFile(join(dir, "new-file.txt"), []byte("committed content\n"), 0644)
+	exec.Command("git", "-C", dir, "add", "new-file.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add new file").Run()
+	branchTip := strings.TrimSpace(execOutput(t, "git", "-C", dir, "rev-parse", "HEAD"))
+
+	task := &types.Task{
+		ID:         "done-snap-task",
+		ProjectID:  proj.ID,
+		Title:      "Done snapshot test",
+		Prompt:     "Test done task diff snapshot",
+		Status:     "done",
+		Branch:     "task/test-done-snap",
+		BaseRef:    "main",
+		BaseCommit: baseCommit,
+		BranchTip:  branchTip,
+	}
+	s.store.CreateTask(task)
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+	diffRequest := func() *httptest.ResponseRecorder {
+		req := testRequest(http.MethodGet, "/api/projects/diff-snap-proj/tasks/done-snap-task/diff", nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		return testResponse(t, s, req)
+	}
+
+	// First fetch materializes the snapshot.
+	first := diffRequest()
+	if first.Code != http.StatusOK {
+		t.Fatalf("first diff fetch returned %d: %s", first.Code, first.Body.String())
+	}
+	snap, err := s.store.GetTaskDiffSnapshot("done-snap-task")
+	if err != nil {
+		t.Fatalf("get snapshot: %v", err)
+	}
+	if snap == nil {
+		t.Fatal("expected a persisted snapshot after the first fetch")
+	}
+	if snap.BaseCommit != baseCommit || snap.BranchTip != branchTip {
+		t.Fatalf("unexpected snapshot refs: %+v", snap)
+	}
+
+	// Break git — the second fetch must be served from the snapshot.
+	if err := os.Rename(join(dir, ".git"), join(dir, ".git.bak")); err != nil {
+		t.Fatalf("rename .git: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Rename(join(dir, ".git.bak"), join(dir, ".git")) })
+
+	second := diffRequest()
+	if second.Code != http.StatusOK {
+		t.Fatalf("second diff fetch returned %d: %s", second.Code, second.Body.String())
+	}
+	if second.Body.String() != first.Body.String() {
+		t.Fatalf("snapshot replay differs from the live response:\nfirst: %s\nsecond: %s", first.Body.String(), second.Body.String())
+	}
+}
+
+// TestDoneTaskDiffSnapshotBypassedForFullAndCustomRefs verifies that full
+// (untruncated) requests and custom ref comparisons still use the live git
+// path and never serve the truncated snapshot.
+func TestDoneTaskDiffSnapshotBypassedForFullAndCustomRefs(t *testing.T) {
+	s := testServer(t)
+
+	dir := t.TempDir()
+	exec.Command("git", "-C", dir, "init", "-b", "main").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+
+	os.WriteFile(join(dir, "initial.txt"), []byte("initial\n"), 0644)
+	exec.Command("git", "-C", dir, "add", "initial.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Initial commit").Run()
+	baseCommit := strings.TrimSpace(execOutput(t, "git", "-C", dir, "rev-parse", "HEAD"))
+
+	proj := &types.Project{
+		ID:   "diff-bypass-proj",
+		Name: "diff-bypass",
+		Path: dir,
+	}
+	s.store.CreateProject(proj)
+
+	exec.Command("git", "-C", dir, "checkout", "-b", "task/test-done-bypass").Run()
+	os.WriteFile(join(dir, "new-file.txt"), []byte("line1\nline2\n"), 0644)
+	exec.Command("git", "-C", dir, "add", "new-file.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add new file").Run()
+	branchTip := strings.TrimSpace(execOutput(t, "git", "-C", dir, "rev-parse", "HEAD"))
+
+	task := &types.Task{
+		ID:         "done-bypass-task",
+		ProjectID:  proj.ID,
+		Title:      "Done bypass test",
+		Prompt:     "Test snapshot bypass",
+		Status:     "done",
+		Branch:     "task/test-done-bypass",
+		BaseRef:    "main",
+		BaseCommit: baseCommit,
+		BranchTip:  branchTip,
+	}
+	s.store.CreateTask(task)
+
+	cookie, csrfToken := loginTestCSRF(t, s)
+
+	// full=1 must go through the live path even for a done task.
+	req := testRequest(http.MethodGet, "/api/projects/diff-bypass-proj/tasks/done-bypass-task/diff?full=1&head="+branchTip, nil)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("full diff fetch returned %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(rr.Body).Decode(&resp)
+	if d, _ := resp["diff"].(string); !strings.Contains(d, "line2") {
+		t.Fatalf("full=1 response missing diff content: %v", resp)
+	}
+
+	// Materialize the snapshot (canonical fetch), then break git: the
+	// canonical request must still succeed from the snapshot while a custom
+	// ref comparison (live path) must fail — proving the bypass guards.
+	req = testRequest(http.MethodGet, "/api/projects/diff-bypass-proj/tasks/done-bypass-task/diff?head="+branchTip, nil)
+	withAuthCSRF(req, cookie, csrfToken)
+	if rr = testResponse(t, s, req); rr.Code != http.StatusOK {
+		t.Fatalf("canonical diff fetch returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if snap, err := s.store.GetTaskDiffSnapshot("done-bypass-task"); err != nil || snap == nil {
+		t.Fatalf("expected a persisted snapshot (err=%v snap=%+v)", err, snap)
+	}
+
+	if err := os.Rename(join(dir, ".git"), join(dir, ".git.bak")); err != nil {
+		t.Fatalf("rename .git: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Rename(join(dir, ".git.bak"), join(dir, ".git")) })
+
+	req = testRequest(http.MethodGet, "/api/projects/diff-bypass-proj/tasks/done-bypass-task/diff?head="+branchTip, nil)
+	withAuthCSRF(req, cookie, csrfToken)
+	if rr = testResponse(t, s, req); rr.Code != http.StatusOK {
+		t.Fatalf("canonical diff from snapshot returned %d: %s", rr.Code, rr.Body.String())
+	}
+
+	req = testRequest(http.MethodGet, "/api/projects/diff-bypass-proj/tasks/done-bypass-task/diff?base=main&head="+branchTip, nil)
+	withAuthCSRF(req, cookie, csrfToken)
+	rr = testResponse(t, s, req)
+	if rr.Code == http.StatusOK {
+		t.Fatalf("expected custom-base diff to fail without git (snapshot bypass), got 200: %s", rr.Body.String())
+	}
+}
+
 // TestSandboxDisableBlockedWithoutDangerZone verifies that disabling sandbox
 // returns 403 Forbidden when DANGER_ZONE is not set to "1".
 func TestSandboxDisableBlockedWithoutDangerZone(t *testing.T) {

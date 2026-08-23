@@ -1,35 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
-import { existsSync, writeFileSync, mkdirSync } from 'fs';
-import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask } from './helpers';
+import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask, worktreeExists, writeFileInWorktree } from './helpers';
 
 // --- Shared utilities ---
 
 function getConfig() {
   return JSON.parse(execSync('curl -s http://localhost:3000/api/config', { encoding: 'utf-8' }));
-}
-
-function getWorktreePath(projectId: string, taskId: string): string {
-  // Test servers use MIKE_WORKTREES_DIR=/tmp/kanban-test-worktrees
-  return `/tmp/kanban-test-worktrees/${projectId}/${taskId}`;
-}
-
-function worktreeExists(projectId: string, taskId: string): boolean {
-  const path = getWorktreePath(projectId, taskId);
-  // Check for a proper git worktree (has .git file pointing to the main repo)
-  return existsSync(path) && existsSync(`${path}/.git`);
-}
-
-function writeFileInWorktree(projectId: string, taskId: string, filePath: string, content: string): void {
-  const worktreePath = getWorktreePath(projectId, taskId);
-  mkdirSync(worktreePath, { recursive: true });
-  writeFileSync(`${worktreePath}/${filePath}`, content);
-  // Stage the file so git detects it
-  try {
-    execSync(`cd ${worktreePath} && git add ${filePath}`);
-  } catch {
-    // git add might fail if worktree isn't fully initialized; untracked files are still detected
-  }
 }
 
 test.describe.serial('Commit Dialog', () => {

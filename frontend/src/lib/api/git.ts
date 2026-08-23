@@ -5,7 +5,7 @@ import {
     queueWrite,
     resetWorktreeRaw,
 } from './queue';
-import { setBoardCache, getBoardCache, diffCacheKey } from '../storage';
+import { setBoardCache, getBoardCache, diffCacheKey, doneDiffCacheKey } from '../storage';
 import { markCached } from './cache';
 
 // -- Git endpoints --
@@ -155,6 +155,16 @@ export async function getTaskDiff(projectId: string, taskId: string, options?: {
     if (options?.checkpointIndex != null) params.set('checkpointIdx', String(options.checkpointIndex));
     const url = params.toString() ? `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff?${params}` : `${API_BASE}/projects/${projectId}/tasks/${taskId}/diff`;
     const isCurrentDiff = !options?.headRef && !options?.baseRef && options?.checkpointIndex == null;
+    // The canonical done-task diff (pinned BaseCommit..BranchTip, requested by
+    // head ref only) is immutable — serve it straight from IndexedDB when we
+    // have it (zero network), and persist it after the first fetch. Checkpoint
+    // diffs and custom-base comparisons share the headRef param but are NOT
+    // the canonical done diff, so they must bypass this cache.
+    const isDoneDiff = !!options?.headRef && !options?.baseRef && options?.checkpointIndex == null && !options?.full;
+    if (isDoneDiff) {
+        const cached = await getBoardCache<TaskDiff>(doneDiffCacheKey(projectId, taskId, options!.headRef!));
+        if (cached) return markCached(cached);
+    }
     try {
         const res = await apiFetch(url);
         if (!res.ok) throw await apiError(res, 'Failed to fetch diff');
@@ -163,11 +173,19 @@ export async function getTaskDiff(projectId: string, taskId: string, options?: {
         if (isCurrentDiff) {
             setBoardCache(diffCacheKey(projectId, taskId), data).catch(() => {});
         }
+        if (isDoneDiff) {
+            setBoardCache(doneDiffCacheKey(projectId, taskId, options!.headRef!), data).catch(() => {});
+        }
         return data;
     } catch (e) {
-        // Fall back to cached copy only for the current diff request
+        // Fall back to a cached copy for the current diff request
         if (isCurrentDiff) {
             const cached = await getBoardCache<TaskDiff>(diffCacheKey(projectId, taskId));
+            if (cached) return markCached(cached);
+        }
+        // ...or for the immutable done diff (a stale cache is still correct)
+        if (isDoneDiff) {
+            const cached = await getBoardCache<TaskDiff>(doneDiffCacheKey(projectId, taskId, options!.headRef!));
             if (cached) return markCached(cached);
         }
         throw e;
