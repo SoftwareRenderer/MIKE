@@ -2519,6 +2519,7 @@ func TestMaybeAutoSummarize_TriggersAboveThreshold(t *testing.T) {
 		contextWindow: &cw,
 		usage:         &types.ChatUsage{PromptTokens: 9200, CompletionTokens: 0},
 		detector:      newLoopDetector(),
+		mc:            &modelConfig{serverURL: server.URL, modelName: "test-model"},
 	}
 	setup := &taskExecSetup{
 		task:      task,
@@ -2601,6 +2602,7 @@ func TestMaybeAutoSummarize_InjectProceedWhenFeedingBack(t *testing.T) {
 		contextWindow: &cw,
 		usage:         &types.ChatUsage{PromptTokens: 9200, CompletionTokens: 0},
 		detector:      newLoopDetector(),
+		mc:            &modelConfig{serverURL: server.URL, modelName: "test-model"},
 	}
 	setup := &taskExecSetup{
 		task:      task,
@@ -2684,6 +2686,7 @@ func TestMaybeAutoSummarize_NoTriggerBelowThreshold(t *testing.T) {
 		contextWindow: &cw,
 		usage:         &types.ChatUsage{PromptTokens: 5000, CompletionTokens: 0},
 		detector:      newLoopDetector(),
+		mc:            &modelConfig{serverURL: server.URL, modelName: "test-model"},
 	}
 	setup := &taskExecSetup{
 		task:      task,

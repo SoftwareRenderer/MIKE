@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,6 +22,13 @@ type queueEntry struct {
 	once     sync.Once     // ensures exactly one signal (serve or cancel)
 	// Set under lock by Release when it pre-counts the entry's slot.
 	served bool
+}
+
+// gateKey normalizes the provider URL (trailing slash) so URLs that differ
+// only by a trailing slash map to the same gate key, no matter how callers
+// format the URL.
+func gateKey(providerURL string) string {
+	return strings.TrimRight(providerURL, "/")
 }
 
 // ConcurrencyGate limits concurrent operations per provider (by URL) and,
@@ -105,7 +113,13 @@ func (g *ConcurrencyGate) removeEntryLocked(entry *queueEntry) {
 // Acquire blocks until a slot and rate allowance are available for the
 // provider (concurrency min 1; maxRPS 0 = unlimited). Returns the entry
 // (nil = granted immediately) and an error if the context is cancelled.
-func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concurrency, maxRPS int) (int, *queueEntry, error) {
+//
+// onEnqueued (may be nil) is invoked with the caller's queue entry as soon
+// as it is enqueued — BEFORE Acquire blocks — so callers can report the
+// caller's own queue position while waiting (Position/EstimateWait with a
+// nil entry count ALL waiters, not just those ahead of the caller).
+func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concurrency, maxRPS int, onEnqueued func(*queueEntry)) (*queueEntry, error) {
+	providerURL = gateKey(providerURL)
 	if concurrency < 1 {
 		concurrency = 1
 	}
@@ -125,13 +139,16 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 	if ps.active < concurrency && !ps.nextAllowed.After(time.Now()) {
 		g.grantLocked(ps, maxRPS)
 		g.mu.Unlock()
-		return 0, nil, nil
+		return nil, nil
 	}
 
 	// Must wait — enqueue
 	entry := &queueEntry{provider: providerURL, done: make(chan struct{})}
 	g.queue = append(g.queue, entry)
 	g.mu.Unlock()
+	if onEnqueued != nil {
+		onEnqueued(entry)
+	}
 
 	// Block until granted or cancelled; the grant condition is re-checked
 	// under lock after every wake. Only the front-most unserved waiter grants
@@ -145,7 +162,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 			g.mu.Unlock()
 			if !served {
 				// Removed without being served — cancelled.
-				return 0, entry, ctx.Err()
+				return entry, ctx.Err()
 			}
 			// Release pre-counted the slot. Wait out the rate window, then
 			// return success; consume the in-flight serve signal (if any) so
@@ -159,7 +176,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 					if !gotSignal {
 						<-entry.done
 					}
-					return 0, entry, nil
+					return entry, nil
 				}
 				wait := time.Until(ps.nextAllowed)
 				g.mu.Unlock()
@@ -170,7 +187,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 					if !gotSignal {
 						<-entry.done // drain in-flight serve send so Release unblocks
 					}
-					return 0, entry, ctx.Err()
+					return entry, ctx.Err()
 				case <-time.After(wait):
 				}
 			}
@@ -182,7 +199,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 			g.removeEntryLocked(entry)
 			g.grantLocked(ps, maxRPS)
 			g.mu.Unlock()
-			return 0, entry, nil
+			return entry, nil
 		}
 
 		// Sleep until something can change: rate window opening, a Release
@@ -209,7 +226,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 			case <-entry.done:
 			default:
 			}
-			return 0, entry, ctx.Err()
+			return entry, ctx.Err()
 		case <-timer.C:
 			// Rate window elapsed (or backoff) — re-check.
 		}
@@ -222,6 +239,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 // rate timer. The signal is sent outside the lock so the waiter runs before
 // Release returns.
 func (g *ConcurrencyGate) Release(providerURL string) {
+	providerURL = gateKey(providerURL)
 	g.mu.Lock()
 
 	ps, ok := g.providers[providerURL]
@@ -285,12 +303,10 @@ func (g *ConcurrencyGate) countAheadLocked(providerURL string, currentEntry *que
 	return ahead, found
 }
 
-// Position returns the 1-indexed queue position for the provider (currentEntry
-// nil counts all waiters); 0 if no one is waiting.
-func (g *ConcurrencyGate) Position(providerURL string, currentEntry *queueEntry) int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
+// positionLocked returns the 1-indexed queue position for the provider
+// (currentEntry nil counts all waiters); 0 if no one is waiting. Caller must
+// hold g.mu.
+func (g *ConcurrencyGate) positionLocked(providerURL string, currentEntry *queueEntry) int {
 	ahead, found := g.countAheadLocked(providerURL, currentEntry)
 	if found {
 		return ahead + 1
@@ -298,21 +314,31 @@ func (g *ConcurrencyGate) Position(providerURL string, currentEntry *queueEntry)
 	return ahead
 }
 
+// Position returns the 1-indexed queue position for the provider (currentEntry
+// nil counts all waiters); 0 if no one is waiting.
+func (g *ConcurrencyGate) Position(providerURL string, currentEntry *queueEntry) int {
+	providerURL = gateKey(providerURL)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.positionLocked(providerURL, currentEntry)
+}
+
 // EstimateWait returns the estimated wait in seconds: average slot duration ×
-// queue position (30s per slot with no history).
+// queue position (Position with the same entry; 30s per slot with no history).
 func (g *ConcurrencyGate) EstimateWait(providerURL string, currentEntry *queueEntry) int {
+	providerURL = gateKey(providerURL)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	ahead, _ := g.countAheadLocked(providerURL, currentEntry)
-	if ahead == 0 {
+	pos := g.positionLocked(providerURL, currentEntry)
+	if pos == 0 {
 		return 0
 	}
 	if g.completions == 0 {
-		return ahead * 30 // default estimate: 30s per slot
+		return pos * 30 // default estimate: 30s per slot
 	}
 	avgSlot := g.totalSlotTime / time.Duration(g.completions)
-	return int((avgSlot * time.Duration(ahead)) / time.Second)
+	return int((avgSlot * time.Duration(pos)) / time.Second)
 }
 
 // Close shuts down the gate and releases all waiting goroutines.

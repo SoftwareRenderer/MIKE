@@ -121,6 +121,30 @@ func (s *Store) UpdateTaskExecutionState(taskID, projectID, executionState strin
 	return err
 }
 
+// SetTaskTitle updates the task title and clears the title_generating flag
+// in a single targeted statement — the async title-generation goroutine must
+// not write the full row (it read the row at task creation, so a full-row
+// update would clobber concurrent changes such as status on task start).
+func (s *Store) SetTaskTitle(projectID, taskID, title string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`UPDATE tasks SET title = ?, title_generating = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
+		title, 0, now.Format(time.RFC3339), taskID, projectID)
+	return err
+}
+
+// ClearTitleGenerating marks title generation as finished without touching
+// any other field of the task row.
+func (s *Store) ClearTitleGenerating(projectID, taskID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`UPDATE tasks SET title_generating = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
+		0, now.Format(time.RFC3339), taskID, projectID)
+	return err
+}
+
 // SetTaskBranchIfEmpty sets branch only if empty. Returns true on success.
 func (s *Store) SetTaskBranchIfEmpty(taskID, projectID, branch string) (bool, error) {
 	s.mu.Lock()

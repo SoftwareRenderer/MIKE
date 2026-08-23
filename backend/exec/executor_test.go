@@ -68,6 +68,8 @@ func setupExecutorWithGit(t *testing.T) (*TaskExecutor, string, string, string) 
 		appStreamMgr: appStreamMgr,
 		worktreeMgr:  worktreeMgr,
 		commitQueue:  NewCommitQueue(),
+		gate:         NewConcurrencyGate(),
+		taskGate:     NewConcurrencyGate(),
 		tasks:        make(map[string]*executionState),
 	}
 

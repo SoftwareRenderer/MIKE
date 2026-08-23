@@ -44,6 +44,8 @@ func newTestExecutor(t *testing.T) *TaskExecutor {
 		store:        s,
 		appStreamMgr: appStreamMgr,
 		configStore:  cs,
+		gate:         NewConcurrencyGate(),
+		taskGate:     NewConcurrencyGate(),
 		tasks:        make(map[string]*executionState),
 	}
 }
@@ -625,6 +627,8 @@ func newTestExecutorWithConfig(t *testing.T, autoMerge, subtasksAutoMerge bool) 
 		store:        s,
 		appStreamMgr: appStreamMgr,
 		configStore:  cs,
+		gate:         NewConcurrencyGate(),
+		taskGate:     NewConcurrencyGate(),
 		tasks:        make(map[string]*executionState),
 	}
 }

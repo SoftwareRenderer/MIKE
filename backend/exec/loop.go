@@ -288,8 +288,12 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		// Persist accumulated session cost for this task run.
 		if lc != nil {
 			setup.task.SessionCost = lc.sessionCost
-			te.store.UpdateTask(setup.task)
+			te.persistTask(setup)
 		}
+		// Release the running-task slot if still held (no-op when released at
+		// an idle transition or never acquired — agent providers skip it).
+		te.releaseTaskSlot(setup)
+
 		if r := recover(); r != nil {
 			log.Printf("[panic] setup.task=%s recovered from panic: %v", setup.task.ID, r)
 			te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Internal error: %v", r), "panic")
@@ -316,13 +320,23 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		// Clear assigned ports when setup.task execution ends
 		if len(setup.task.AssignedPorts) > 0 {
 			setup.task.AssignedPorts = nil
-			te.store.UpdateTask(setup.task)
+			te.persistTask(setup)
 			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 		}
 		// Don't remove the stream here — the broadcaster lives as long as clients are connected.
 		// It's removed only when the setup.task is deleted (via RemoveStream in cleanupTask).
 		// Sandbox container is also kept alive until setup.task deletion.
 	}()
+
+	// Acquire the per-provider running-task slot BEFORE sandbox setup so a
+	// queued task doesn't hold a sandbox container while waiting. Agent
+	// providers manage their own concurrency and are excluded.
+	if !te.configStore.IsAgentProvider(setup.serverURL) {
+		if !te.acquireTaskSlot(setup, setup.serverURL) {
+			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+			return
+		}
+	}
 
 	// Create sandbox if enabled
 	// Get state reference to store sandbox callbacks
@@ -462,7 +476,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					if newModel == "" {
 						newModel = curModel
 					}
-					switched := te.applyModelSwitch(lc.mc, setup.task, newURL, newModel, false, true)
+					switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, newURL, newModel, false, true)
 					lc.client = switched.client
 					lc.providerName = switched.providerName
 					if switched.contextWindow != nil {
@@ -471,6 +485,14 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					lc.detector.reset() // model changed, clear stale text window
 					lc.detector.clearHints()
 					log.Printf("[model-switch] setup.task=%s url=%s model=%s context_window=%v", setup.task.ID, newURL, newModel, lc.contextWindow)
+					// Provider (not just model) changed - move the running-task
+					// slot to the new provider (may queue while it's saturated).
+					if strings.TrimRight(newURL, "/") != strings.TrimRight(curURL, "/") {
+						if !te.syncTaskSlot(setup, newURL) {
+							te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+							return
+						}
+					}
 				}
 			}
 
@@ -505,7 +527,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						setup.task.ExecutionState = "failed"
 						setup.task.Status = "review"
 						setup.task.Output = fmt.Sprintf("Failed to recreate sandbox for mode change: %v", createErr)
-						te.store.UpdateTask(setup.task)
+						te.persistTask(setup)
 						te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 						te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Sandbox recreation failed: %v", createErr), "sandbox_recreate_failed")
 						return
@@ -517,7 +539,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						setup.task.ExecutionState = "failed"
 						setup.task.Status = "review"
 						setup.task.Output = fmt.Sprintf("Failed to connect to sandbox bridge after mode change: %v", clientErr)
-						te.store.UpdateTask(setup.task)
+						te.persistTask(setup)
 						te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 						te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Agent connection failed after mode change: %v", clientErr), "agent_connection_failed")
 						return
@@ -543,7 +565,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					// Broadcast assigned ports if any changed
 					if len(assignedPorts) > 0 {
 						setup.task.AssignedPorts = assignedPorts
-						te.store.UpdateTask(setup.task)
+						te.persistTask(setup)
 						te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: setup.task.ID, Ports: assignedPorts}})
 					}
@@ -582,7 +604,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					setup.task.ExecutionState = "failed"
 					setup.task.Status = "review"
 					setup.task.Output = fmt.Sprintf("Failed to recreate sandbox for config change: %v", createErr)
-					te.store.UpdateTask(setup.task)
+					te.persistTask(setup)
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 					te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Sandbox recreation failed: %v", createErr), "sandbox_recreate_failed")
 					return
@@ -593,7 +615,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					setup.task.ExecutionState = "failed"
 					setup.task.Status = "review"
 					setup.task.Output = fmt.Sprintf("Failed to connect to sandbox bridge after config change: %v", clientErr)
-					te.store.UpdateTask(setup.task)
+					te.persistTask(setup)
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 					te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Agent connection failed after config change: %v", clientErr), "agent_config_failed")
 					return
@@ -604,7 +626,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				te.taskMu.Unlock()
 				if len(assignedPorts) > 0 {
 					setup.task.AssignedPorts = assignedPorts
-					te.store.UpdateTask(setup.task)
+					te.persistTask(setup)
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: setup.task.ID, Ports: assignedPorts}})
 				}
@@ -633,9 +655,16 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 				}
 				if um.ModelName != "" && !te.configStore.IsAgentProvider(um.ServerURL) {
-					switched := te.applyModelSwitch(lc.mc, setup.task, um.ServerURL, um.ModelName, true, false)
+					prevURL, _ := lc.mc.get()
+					switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false)
 					lc.client = switched.client
 					lc.providerName = switched.providerName
+					if um.ServerURL != "" && strings.TrimRight(um.ServerURL, "/") != strings.TrimRight(prevURL, "/") {
+						if !te.syncTaskSlot(setup, um.ServerURL) {
+							te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+							return
+						}
+					}
 				}
 			}
 		default:
@@ -648,36 +677,18 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		lc.assistantContent.Reset()
 		lc.reasoningContent.Reset()
 
-		// Acquire concurrency gate slot before LLM call.
-		_, activeModel := lc.mc.get()
-		concurrency := te.configStore.GetProviderConcurrency(setup.serverURL)
-		maxRPS := te.configStore.GetProviderMaxRequestsPerSecond(setup.serverURL)
+		// Acquire concurrency gate slot before LLM call. Keyed by the CURRENT
+		// provider — lc.mc follows mid-run model/provider switches, while
+		// setup.serverURL is only the start-time URL.
+		gateURL, activeModel := lc.mc.get()
+		concurrency := te.configStore.GetProviderConcurrency(gateURL)
+		maxRPS := te.configStore.GetProviderMaxRequestsPerSecond(gateURL)
 
-		// Queue status polling — runs while waiting for a gate slot.
-		queueDone := make(chan struct{})
-		var entry *queueEntry
-		go func() {
-			tick := time.NewTicker(1 * time.Second)
-			defer tick.Stop()
-			for {
-				select {
-				case <-queueDone:
-					return
-				case <-setup.ctx.Done():
-					return
-				case <-tick.C:
-					pos := te.gate.Position(setup.serverURL, entry)
-					est := te.gate.EstimateWait(setup.serverURL, entry)
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeQueue, Data: map[string]any{
-						"position":               pos,
-						"estimated_wait_seconds": est,
-					}})
-				}
-			}
-		}()
-
-		_, entry, err := te.gate.Acquire(setup.ctx, setup.serverURL, concurrency, maxRPS)
-		if err != nil {
+		// Queue status polling — runs while waiting for a gate slot, reporting
+		// the call's own position (its queue entry is handed to the poller via
+		// the onEnqueued callback as soon as it is enqueued).
+		onEnqueued, queueDone := te.startGateQueuePoller(te.gate, gateURL, setup.projectID, setup.task.ID, setup.ctx)
+		if _, err := te.gate.Acquire(setup.ctx, gateURL, concurrency, maxRPS, onEnqueued); err != nil {
 			close(queueDone) // cleanup polling goroutine
 			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
 			return
@@ -698,7 +709,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		// Set status before the LLM call so the frontend picks up streaming tokens.
 		setup.task.Status = "in_progress"
 		setup.task.ExecutionState = "running"
-		te.store.UpdateTask(setup.task)
+		te.persistTask(setup)
 		te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 
 		// streamFlusher batches streaming events to reduce WebSocket write overhead.
@@ -856,8 +867,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		select {
 		case <-setup.ctx.Done():
 			callCancel()
-			te.gate.Release(setup.serverURL) // Release gate immediately so other tasks can proceed
-			<-streamDone                     // Then wait for goroutine to finish
+			te.gate.Release(gateURL) // Release gate immediately so other tasks can proceed
+			<-streamDone             // Then wait for goroutine to finish
 			te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", false)
 			return
 		case <-streamDone:
@@ -873,7 +884,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				case <-time.After(2 * time.Second):
 					log.Printf("[cancel] setup.task=%s streamDone timeout, forcing continue", setup.task.ID)
 				}
-				te.gate.Release(setup.serverURL)
+				te.gate.Release(gateURL)
 				lc.assistantContent.Reset()
 				lc.reasoningContent.Reset()
 				lc.pendingToolCalls = nil
@@ -892,7 +903,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			case <-time.After(2 * time.Second):
 				log.Printf("[cancel] setup.task=%s streamDone timeout, forcing continue", setup.task.ID)
 			}
-			te.gate.Release(setup.serverURL)
+			te.gate.Release(gateURL)
 
 			// Drain all queued messages from channel (non-blocking).
 			var queuedMsgs []stream.UserMessage
@@ -935,10 +946,16 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					lc.messages = append(lc.messages, userMessageToChatMessage(qm))
 				}
 				if qm.ModelName != "" {
-					switched := te.applyModelSwitch(lc.mc, setup.task, qm.ServerURL, qm.ModelName, true, false)
+					switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, qm.ServerURL, qm.ModelName, true, false)
 					lc.client = switched.client
 					lc.providerName = switched.providerName
 				}
+			}
+			// If the queued messages moved the task to another provider, move
+			// the running-task slot with it (no-op when the URL is unchanged).
+			if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
+				te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+				return
 			}
 
 			// Notify frontend that response was cancelled.
@@ -950,7 +967,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 		if streamErr != nil {
 			// Release gate slot (was acquired before the LLM call above).
-			te.gate.Release(setup.serverURL)
+			te.gate.Release(gateURL)
 			log.Printf("[connect] setup.task=%s LLM connection failed after retries: %v", setup.task.ID, streamErr)
 			te.failTask(setup.task, setup.projectID,
 				fmt.Sprintf("LLM connection failed: %v", streamErr),
@@ -959,7 +976,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		}
 
 		// Release gate slot after LLM call (before tool execution).
-		te.gate.Release(setup.serverURL)
+		te.gate.Release(gateURL)
 
 		assistantText := lc.assistantContent.String()
 
@@ -1163,7 +1180,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					tr := toolResults[askResults[questionIdxs[0]]]
 					setup.task.ExecutionState = "idle"
 					setup.task.Status = "review"
-					te.store.UpdateTask(setup.task)
+					te.persistTask(setup)
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 						"state":    "idle",
@@ -1224,7 +1241,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
 						}
-						te.store.UpdateTask(setup.task)
+						te.persistTask(setup)
 						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 							"state":                setup.task.ExecutionState,
 							"assistant_message_id": assistantMsgID,
@@ -1318,7 +1335,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					setup.task.ExecutionState = "idle"
 					setup.task.Status = "review"
 				}
-				te.store.UpdateTask(setup.task)
+				te.persistTask(setup)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 					"state":                setup.task.ExecutionState,
 					"assistant_message_id": assistantMsgID,
@@ -1342,7 +1359,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				setup.task.ExecutionState = "failed"
 				setup.task.Status = "review"
 				setup.task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
-				te.store.UpdateTask(setup.task)
+				te.persistTask(setup)
 				te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 				te.sendAndPersistError(setup.task.ID, fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures), "max_failures")
 				return
@@ -1446,7 +1463,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				if !setup.task.IsExploreMode() && !setup.task.IsPlanMode() {
 					// In act mode: loop detected, inject hint, continue
 					setup.task.ExecutionState = "running"
-					te.store.UpdateTask(setup.task)
+					te.persistTask(setup)
 					continue
 				}
 				// In exploration/plan mode: text-only responses are valid (brainstorming / planning).
@@ -1458,10 +1475,12 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			// Mark the response complete and the task idle FIRST so the assistant
 			// message renders as finished (streaming cursor stops) before any
 			// auto-summarization runs. This prevents the message from looking like it
-			// is still generating while the summary is produced.
+			// is still generating while the summary is produced. Release the
+			// running-task slot too - an idle task no longer blocks other tasks.
+			te.releaseTaskSlot(setup)
 			setup.task.Status = "review"
 			setup.task.ExecutionState = "idle"
-			te.store.UpdateTask(setup.task)
+			te.persistTask(setup)
 			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
 				"state": "idle", "summary": "Agent finished responding",
@@ -1486,6 +1505,11 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					lc.detector.reset()
 					lc.detector.clearHints()
 					lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
+					// A fresh LLM call follows - re-acquire the running-task slot.
+					if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
+						te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+						return
+					}
 					continue
 				}
 				log.Printf("[user-msg] setup.task=%s received message after response, continuing (setup.regenerate=%v)", setup.task.ID, um.Regenerate)
@@ -1500,12 +1524,18 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 				}
 				if um.ModelName != "" {
-					switched := te.applyModelSwitch(lc.mc, setup.task, um.ServerURL, um.ModelName, true, false)
+					switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false)
 					lc.client = switched.client
 					lc.providerName = switched.providerName
 				}
+				// The task went idle after the response - re-acquire the
+				// running-task slot (a provider switch rides along via lc.mc).
+				if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
+					te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+					return
+				}
 				setup.task.ExecutionState = "running"
-				te.store.UpdateTask(setup.task)
+				te.persistTask(setup)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
 				continue
 			default:
@@ -1571,7 +1601,10 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					continue idleWait
 				}
 				log.Printf("[summarize] setup.task=%s manual summarization requested", setup.task.ID)
-				lc.messages = te.applySummarization(req.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, setup.serverURL, activeModel, req.resultCh)
+				// Fallback (non-utility) summarization requests go to the task's
+				// CURRENT provider - lc.mc follows mid-run switches.
+				sumURL, _ := lc.mc.get()
+				lc.messages = te.applySummarization(req.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, sumURL, activeModel, req.resultCh)
 				lc.detector.reset() // context changed, clear stale text window
 				lc.detector.clearHints()
 				// Count messages before DB sync (includes in-memory summary).
@@ -1580,23 +1613,31 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 				// Clear summarizing flag.
 				setup.task.Summarizing = false
-				te.store.UpdateTask(setup.task)
+				te.persistTask(setup)
 				te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 				// If DB has more messages than we had in-memory, new input arrived.
 				hasQueuedInput := len(lc.messages) > preSyncCount
 				if !hasQueuedInput {
 					// No new user input — stay idle, don't call LLM with just the summary.
+					// Defensive release: the task is expected not to hold a slot
+					// while idle (it was released when it went idle).
+					te.releaseTaskSlot(setup)
 					setup.task.Status = "review"
 					setup.task.ExecutionState = "idle"
-					te.store.UpdateTask(setup.task)
+					te.persistTask(setup)
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 					// Re-block for a user message instead of looping into a fresh LLM call.
 					continue idleWait
 				}
-				// User message present — continue to LLM call.
+				// User message present — continue to LLM call. The task was idle,
+				// so re-acquire the running-task slot first (may queue).
+				if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
+					te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+					return
+				}
 				setup.task.Status = "in_progress"
 				setup.task.ExecutionState = "running"
-				te.store.UpdateTask(setup.task)
+				te.persistTask(setup)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing queued message"}})
 				break idleWait
 			case um := <-setup.userMsgChan:
@@ -1618,12 +1659,18 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					lc.messages, setup.task = te.syncMessagesFromDB(setup.task, setup.worktreePath, setup.project.Name, setup.sandboxEnabled)
 				}
 				if um.ModelName != "" && !te.configStore.IsAgentProvider(um.ServerURL) {
-					switched := te.applyModelSwitch(lc.mc, setup.task, um.ServerURL, um.ModelName, true, false)
+					switched := te.applyModelSwitch(lc.mc, setup.task, setup.projectID, um.ServerURL, um.ModelName, true, false)
 					lc.client = switched.client
 					lc.providerName = switched.providerName
 				}
+				// The task was idle - re-acquire the running-task slot (a
+				// provider switch rides along via lc.mc) before the LLM call.
+				if curURL, _ := lc.mc.get(); curURL != "" && !te.syncTaskSlot(setup, curURL) {
+					te.handleStopped(setup.task, setup.projectID, setup.task.ID, "Stopped by user", "stopped", true)
+					return
+				}
 				setup.task.ExecutionState = "running"
-				te.store.UpdateTask(setup.task)
+				te.persistTask(setup)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
 				break idleWait
 			}
@@ -1731,7 +1778,7 @@ func (te *TaskExecutor) failTask(task *types.Task, projectID, output, code strin
 	task.ExecutionState = "failed"
 	task.Status = "review"
 	task.Output = output
-	te.store.UpdateTask(task)
+	te.storeTask(task, projectID)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	te.sendAndPersistError(task.ID, output, code)
 }

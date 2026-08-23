@@ -1183,17 +1183,19 @@ func (h *TaskHandler) startTitleGeneration(projectID, taskID, prompt string) {
 			}
 		}
 
-		// Update the task with the generated title
-		task.Title = title
-		task.TitleGenerating = false
-		task.UpdatedAt = time.Now().UTC()
-		if err := h.store.UpdateTask(task); err != nil {
+		// Update only the title — a full-row UpdateTask would clobber
+		// concurrent changes made since the row was read at creation time
+		// (e.g. status: backlog → in_progress when the task was started
+		// while the title call was still queued on the provider gate).
+		if err := h.store.SetTaskTitle(projectID, taskID, title); err != nil {
 			log.Printf("[title-gen] task=%s update failed: %v", taskID, err)
 			return
 		}
 
 		log.Printf("[title-gen] task=%s title updated to: %q", taskID, title)
-		h.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
+		if updated, err := h.store.GetTask(projectID, taskID); err == nil {
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, *updated)
+		}
 	}()
 }
 
@@ -1206,14 +1208,14 @@ func (h *TaskHandler) finishTitleGeneration(projectID, taskID string, broadcast 
 	if !task.TitleGenerating {
 		return // already finished
 	}
-	task.TitleGenerating = false
-	task.UpdatedAt = time.Now().UTC()
-	if err := h.store.UpdateTask(task); err != nil {
+	if err := h.store.ClearTitleGenerating(projectID, taskID); err != nil {
 		log.Printf("[title-gen] task=%s finish update failed: %v", taskID, err)
 		return
 	}
 	if broadcast {
-		h.boardStreamMgr.BroadcastTaskUpdated(projectID, *task)
+		if updated, err := h.store.GetTask(projectID, taskID); err == nil {
+			h.boardStreamMgr.BroadcastTaskUpdated(projectID, *updated)
+		}
 	}
 }
 

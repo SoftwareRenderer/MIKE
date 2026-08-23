@@ -422,7 +422,10 @@
             </button>
         {/if}
 
-        {#if awaitingResponse && connected && taskExecutionState === 'running'}
+        <!-- Shown while a running task waits on a request slot, or while a
+             started task (in_progress + idle = "Pending" badge) waits on a
+             running-task slot (provider task concurrency queue). -->
+        {#if awaitingResponse && connected && (taskExecutionState === 'running' || (taskStatus === 'in_progress' && taskExecutionState === 'idle'))}
             <QueueIndicator
                 {queuePosition}
                 {queueEstimatedWait}
