@@ -98,8 +98,8 @@ def simplify_capabilities(manifest_caps):
     """Reduce a manifest capabilities object to what the registry UI renders.
 
     Only fields surfaced in the capabilities modal are kept:
-      - ui:    injection_points ("Modifies") and permissions ("Permissions")
-      - proxy: allowed_domains ("Allowed domains")
+      - ui:      injection_points ("Modifies") and permissions ("Permissions")
+      - network: allowed_domains ("Allowed domains")
       - lsp:   language ("Language") and extensions ("File extensions")
       - css/agent: no detail rows, so an empty config is enough
     Everything else (command, args, headers, wasm_module, ...) lives in the
@@ -119,9 +119,9 @@ def simplify_capabilities(manifest_caps):
                 kept['permissions'] = value['permissions']
             if kept:
                 result['ui'] = kept
-        elif key == 'proxy':
+        elif key == 'network':
             if value.get('allowed_domains'):
-                result['proxy'] = {'allowed_domains': value['allowed_domains']}
+                result['network'] = {'allowed_domains': value['allowed_domains']}
         elif key == 'lsp':
             kept = {}
             if value.get('language'):
