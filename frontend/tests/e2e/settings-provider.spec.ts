@@ -755,6 +755,123 @@ test.describe.serial('Provider max requests per second', () => {
     });
 });
 
+// ─── Test Connection Auto-Fetch Tests ────────────────────────────────────
+
+test.describe.serial('Test connection with empty model list', () => {
+    test.beforeEach(async ({ page }) => {
+        await page.keyboard.press('Escape').catch(() => {});
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 2000 }).catch(() => {});
+
+        // Single provider pointing at the mock LLM (serves /v1/models and
+        // /v1/chat/completions) with an EMPTY model list — the "fetch models
+        // never ran" state.
+        const idByName = await seedProvidersByIds(page, [
+            { name: 'auto-fetch', url: 'http://localhost:9999/v1', models: [], concurrency: 1 },
+        ], { worker: 'auto-fetch', workerModel: 'mock-model', utility: 'auto-fetch', utilityModel: 'mock-model' });
+        await waitForConfig(page, c =>
+            c.providers && c.providers.length === 1 && c.worker_provider === idByName['auto-fetch']
+        );
+        await page.goto('/');
+        await page.waitForSelector('.card', { timeout: 10000 });
+    });
+
+    test('should auto-fetch models before testing the connection', async ({ page }) => {
+        // Record the browser-level request order to prove fetch-models runs
+        // before test-connection when the model list is empty.
+        const requestOrder: string[] = [];
+        page.on('request', req => {
+            if (req.url().includes('/api/config/fetch-models')) requestOrder.push('fetch-models');
+            if (req.url().includes('/api/config/test-connection')) requestOrder.push('test-connection');
+        });
+
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+
+        const card = page.locator('.provider-card').first();
+        if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
+            await card.locator('.provider-card-header').click();
+        }
+        await expect(card.locator('.provider-details')).toBeVisible({ timeout: 5000 });
+
+        // The model list starts empty (no rows).
+        await expect(card.locator('.model-row')).toHaveCount(0);
+
+        // Press Test Connection without ever clicking Fetch Models.
+        await card.locator('.btn-test').click();
+
+        // The mock LLM serves both endpoints, so the test must succeed.
+        await expect(card.locator('.test-result.test-success')).toBeVisible({ timeout: 15000 });
+        await expect(card.locator('.test-result.test-success')).toContainText('Connection successful!');
+
+        // The model list was populated by the automatic fetch (mock LLM
+        // returns three models) — no separate Fetch Models click happened.
+        await expect(card.locator('.model-row')).toHaveCount(3, { timeout: 5000 });
+
+        // Fetch models must have run before the connection test.
+        expect(requestOrder.indexOf('fetch-models')).toBeGreaterThanOrEqual(0);
+        expect(requestOrder.indexOf('fetch-models')).toBeLessThan(requestOrder.indexOf('test-connection'));
+
+        // Close the modal (discard any unsaved state just in case)
+        await page.click('button:has-text("Cancel")');
+        const discardBtn = page.getByRole('button', { name: 'Discard' });
+        if (await discardBtn.isVisible().catch(() => false)) {
+            await discardBtn.click();
+        }
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+    });
+
+    test('should not re-fetch when the model list is already populated', async ({ page }) => {
+        // Re-seed with a populated model list (the "fetch already ran" state).
+        await apiPutConfig(page, {
+            providers: [{ name: 'pre-populated', url: 'http://localhost:9999/v1', models: [{ name: 'model-x' }], concurrency: 1 }],
+        });
+        const config = await apiGetConfig(page);
+        const id = String(config?.providers?.find((p: any) => p.name === 'pre-populated')?.id ?? '');
+        await apiPutConfig(page, {
+            worker_provider: id, worker_model: 'model-x',
+            utility_provider: id, utility_model: 'model-x',
+        });
+        await waitForConfig(page, c => c.providers && c.worker_provider === id);
+        await page.goto('/');
+        await page.waitForSelector('.card', { timeout: 10000 });
+
+        const requestOrder: string[] = [];
+        page.on('request', req => {
+            if (req.url().includes('/api/config/fetch-models')) requestOrder.push('fetch-models');
+            if (req.url().includes('/api/config/test-connection')) requestOrder.push('test-connection');
+        });
+
+        await page.click('.icon-btn[aria-label="Settings"]');
+        await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+
+        const card = page.locator('.provider-card').first();
+        if (!await card.locator('.provider-details').isVisible().catch(() => false)) {
+            await card.locator('.provider-card-header').click();
+        }
+        await expect(card.locator('.provider-details')).toBeVisible({ timeout: 5000 });
+
+        // One model row exists from the seed.
+        await expect(card.locator('.model-row')).toHaveCount(1);
+
+        await card.locator('.btn-test').click();
+
+        // The test succeeds (mock LLM serves /v1/chat/completions) and uses the
+        // existing model — the list is untouched (still exactly one row).
+        await expect(card.locator('.test-result.test-success')).toBeVisible({ timeout: 15000 });
+        await expect(card.locator('.model-row')).toHaveCount(1);
+
+        // No fetch-models request at all.
+        expect(requestOrder).toEqual(['test-connection']);
+
+        await page.click('button:has-text("Cancel")');
+        const discardBtn = page.getByRole('button', { name: 'Discard' });
+        if (await discardBtn.isVisible().catch(() => false)) {
+            await discardBtn.click();
+        }
+        await expect(page.locator('.modal')).not.toBeVisible({ timeout: 5000 });
+    });
+});
+
 // ─── Add Provider Scroll Tests ─────────────────────────────────────────────
 
 test.describe.serial('Add provider scroll', () => {

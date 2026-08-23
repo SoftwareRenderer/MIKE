@@ -215,6 +215,10 @@
                 p.testResult = { success: true, message: 'Agent provider — binary checked at runtime' };
             } else {
                 if (!p.url.trim()) { p.testingConnection = false; return; }
+
+                if (p.models.length === 0) {
+                    await fetchModelsForProvider(idx);
+                }
                 const defaultModelName = p.models.find(m => m.name)?.name || '';
                 const apiKey = p.api_key || '';
                 const result = await testConnectionApi(p.url.trim(), defaultModelName, apiKey);
