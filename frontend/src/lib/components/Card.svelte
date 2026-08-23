@@ -410,7 +410,7 @@
         }
         // Use task model if set, otherwise fall back to the configured Worker model
         const worker = resolveWorker(cfg);
-        const activeModel = task.model_name || (worker.provider && worker.modelName ? worker.modelName : providers[0]?.models.length > 0 ? getModelName(providers[0].models[0]) : null);
+        const activeModel = task.model_name || (worker.provider && worker.modelName ? worker.modelName : (providers[0]?.models?.length ?? 0) > 0 ? getModelName(providers[0].models[0]) : null);
         if (!activeModel) return { text: null, provider: null, model: null, color: '' };
         // Find matching provider by URL
         const provider = providers.find(p => p.url === task.llama_server_url);

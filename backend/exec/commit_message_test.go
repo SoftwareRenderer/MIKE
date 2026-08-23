@@ -7,6 +7,12 @@ import (
 	"kanban/backend/types"
 )
 
+// stubAgentLister implements config.AgentProviderLister with a fixed set of
+// registry-discovered agent providers.
+type stubAgentLister struct{ providers []types.Provider }
+
+func (s stubAgentLister) ToProviders() []types.Provider { return s.providers }
+
 // --- utilityTarget Tests ---
 
 func TestUtilityTarget_UsesConfiguredUtilityProvider(t *testing.T) {
@@ -74,11 +80,12 @@ func TestUtilityTarget_FallsBackToTaskWhenUnset(t *testing.T) {
 func TestUtilityTarget_AgentProvider(t *testing.T) {
 	e := newTestExecutor(t)
 
-	providers := []types.Provider{
+	// Agent providers are registry-derived (enabled agent extensions), not
+	// persisted config rows — wire the registry, not the provider list.
+	e.configStore.SetAgentRegistry(stubAgentLister{providers: []types.Provider{
 		{Name: "pi", Kind: "agent", URL: "agent://pi"},
-	}
+	}})
 	if err := e.configStore.UpdateConfig(&types.Config{
-		Providers:       providers,
 		UtilityProvider: "pi",
 		UtilityModel:    "pi",
 	}); err != nil {

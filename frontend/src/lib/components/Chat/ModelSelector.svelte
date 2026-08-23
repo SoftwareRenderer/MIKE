@@ -62,7 +62,8 @@
     );
 
     let activeProviders = $derived(
-        providers.filter(p => p.models.length > 0)
+        // models may be null on agents from older servers — treat as empty.
+        providers.filter(p => (p.models?.length ?? 0) > 0)
     );
 
     let hasAgentProvider = $derived(
@@ -186,7 +187,7 @@
         selectedProviderUrl = provider.url;
         providerDropdownOpen = false;
         let modelToSelect: { name: string; effort: string } | null = null;
-        if (provider.models.length > 0) {
+        if ((provider.models?.length ?? 0) > 0) {
             modelToSelect = resolveModelInfo(provider.models[0]);
         }
         if (modelToSelect) {
@@ -201,7 +202,7 @@
         providerDropdownOpen = false;
         modelDropdownOpen = false;
         // If agent has static models, select one immediately
-        if (agentProvider.models.length > 0) {
+        if ((agentProvider.models?.length ?? 0) > 0) {
             onSelect(providerRef(agentProvider), getModelName(agentProvider.models[0]), agentProvider.url);
         } else {
             // No static models — call onSelect with placeholder so parent updates selectedUrl.

@@ -5,14 +5,18 @@
 
     let { agentName = '' } = $props();
 
-    let agentConfig = $derived(
+    let agentExt = $derived(
         extensionManager.state.extensions
-            .find(e => e.name === agentName && e.type === 'agent' && e.enabled)?.manifest.capabilities?.agent
+            .find(e => e.name === agentName && e.type === 'agent') || null
     );
+    // Config only counts while the extension is enabled (the card only renders
+    // then anyway, since agent providers are registry-derived).
+    let agentConfig = $derived(agentExt?.enabled ? agentExt.manifest.capabilities?.agent : undefined);
 
     let description = $derived(agentConfig?.description || '');
     let setupInfo = $derived(agentConfig?.setup_info || '');
     let installed = $derived(!!agentConfig);
+    let agentDisplayName = $derived(agentExt?.manifest.display_name || '');
 
     let descriptionHtml = $derived.by(() => {
         if (!description) return '';
@@ -38,6 +42,10 @@
                 {@html setupHtml}
             </div>
         {/if}
+        <p class="agent-managed-note">
+            This provider is supplied by the <strong>{agentDisplayName || agentName}</strong> extension. To remove it,
+            disable or uninstall the extension in Settings → Extensions.
+        </p>
     </div>
 {:else}
     <div class="agent-info-section agent-info-missing">
@@ -54,6 +62,15 @@
         padding: 12px;
         background: var(--color-surface-2);
         border-radius: var(--radius-md);
+    }
+    .agent-managed-note {
+        margin: 8px 0 0;
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+    }
+    .agent-managed-note :global(strong) {
+        color: var(--color-text-primary);
+        font-weight: 600;
     }
     .agent-info-missing {
         display: flex;

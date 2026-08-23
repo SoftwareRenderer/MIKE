@@ -348,6 +348,8 @@ func (cs *ConfigStore) ResolveProviderByURL(serverURL string) *types.Provider {
 
 // ResolveProvider returns a copy of the provider for a reference: the stable
 // integer ID (as a string) for LLM providers, or the name for agent providers.
+// Agent providers are registry-derived and not persisted, so name references
+// also fall back to the agent registry (enabled agent extensions).
 func (cs *ConfigStore) ResolveProvider(ref string) *types.Provider {
 	if ref == "" {
 		return nil
@@ -369,6 +371,12 @@ func (cs *ConfigStore) ResolveProvider(ref string) *types.Provider {
 	for i := range cfg.Providers {
 		if cfg.Providers[i].Name == ref {
 			p := cfg.Providers[i]
+			return &p
+		}
+	}
+	for _, ap := range cs.agentProviders() {
+		if ap.Name == ref {
+			p := ap
 			return &p
 		}
 	}

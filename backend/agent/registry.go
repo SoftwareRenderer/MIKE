@@ -107,6 +107,7 @@ func (r *AgentRegistry) ToProviders() []types.Provider {
 			Kind:        types.ProviderKindAgent,
 			URL:         fmt.Sprintf("agent://%s", ext.Name),
 			Concurrency: 1, // agents are single-concurrency by default
+			Models: []types.ModelConfig{},
 		}
 		providers = append(providers, provider)
 	}

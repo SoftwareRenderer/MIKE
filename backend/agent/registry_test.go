@@ -199,6 +199,10 @@ func TestRegistry_ToProviders(t *testing.T) {
 	if p.Concurrency != 1 {
 		t.Errorf("Concurrency = %d, want 1", p.Concurrency)
 	}
+	// Models must be non-nil so the config API serializes [] (not null).
+	if p.Models == nil {
+		t.Errorf("Models = nil, want non-nil empty slice")
+	}
 }
 
 // TestRegistry_Reload tests that reload picks up changes.

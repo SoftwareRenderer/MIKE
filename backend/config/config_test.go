@@ -189,18 +189,41 @@ func TestGetAgentProvider(t *testing.T) {
 		t.Errorf("expected nil, got %v", p)
 	}
 
+	// Persisted agent:// rows are pruned (registry-derived) — a persisted
+	// non-agent:// agent-kind provider is still found.
 	cfg := &types.Config{
 		Providers: []types.Provider{
 			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
 			{Name: "my-agent", Kind: "agent", URL: "agent://my-agent", Concurrency: 1},
+			{Name: "claude-https", Kind: "claude", URL: "https://api.claude.com/v1", Concurrency: 1},
 		},
 	}
 	if err := cs.UpdateConfig(cfg); err != nil {
 		t.Fatalf("update config: %v", err)
 	}
 
-	if p := cs.GetAgentProvider(); p == nil || p.Name != "my-agent" {
-		t.Errorf("expected my-agent, got %v", p)
+	if p := cs.GetAgentProvider(); p == nil || p.Name != "claude-https" {
+		t.Errorf("expected persisted agent-kind provider claude-https, got %v", p)
+	}
+
+	// A registry agent is returned when no persisted agent-kind row exists,
+	// and persisted rows take precedence over the registry.
+	cs.SetAgentRegistry(&mockAgentLister{
+		providers: []types.Provider{
+			{Name: "pi", Kind: "agent", DisplayName: "Pi Coding Agent", URL: "agent://pi", Concurrency: 1},
+		},
+	})
+	if p := cs.GetAgentProvider(); p == nil || p.Name != "claude-https" {
+		t.Errorf("expected persisted provider to win over registry, got %v", p)
+	}
+
+	// Remove the persisted agent-kind row — the registry agent is returned.
+	cfg.Providers = cfg.Providers[:1]
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	if p := cs.GetAgentProvider(); p == nil || p.Name != "pi" {
+		t.Errorf("expected registry agent pi, got %v", p)
 	}
 }
 
@@ -272,9 +295,177 @@ func TestBuildConfigResponseMergesAgentProviders(t *testing.T) {
 			}
 			found = true
 		}
+		// Every provider in the response must have a non-nil Models slice so
+		// the JSON is "models": [] (not null).
+		if p.Models == nil {
+			t.Errorf("provider %s: Models = nil, want non-nil empty slice", p.URL)
+		}
 	}
 	if !found {
 		t.Error("agent://pi provider not found in response")
+	}
+
+	// A persisted LLM provider with a nil models list (legacy row) must also
+	// come back non-nil.
+	seedLegacyProviderRows(t, cs, []types.Provider{
+		{ID: 7, Name: "legacy", Kind: "llm", URL: "http://legacy:8080/v1", Concurrency: 1},
+	})
+	readCfg, err = cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	resp = cs.buildConfigResponse(readCfg)
+	for _, p := range resp.Providers {
+		if p.URL == "http://legacy:8080/v1" && p.Models == nil {
+			t.Error("legacy provider: Models = nil, want non-nil empty slice")
+		}
+	}
+}
+
+// seedLegacyProviderRows writes raw provider JSON directly to the config
+// store, simulating a pre-fix database that persisted agent:// rows.
+func seedLegacyProviderRows(t *testing.T, cs *ConfigStore, providers []types.Provider) {
+	t.Helper()
+	raw, err := json.Marshal(providers)
+	if err != nil {
+		t.Fatalf("marshal providers: %v", err)
+	}
+	if err := cs.store.SetConfigValue("providers", string(raw)); err != nil {
+		t.Fatalf("seed providers: %v", err)
+	}
+}
+
+func TestGetConfigPrunesOrphanAgentProviders(t *testing.T) {
+	cs := testConfigStore(t)
+
+	// Legacy DB: an agent:// row persisted alongside LLM providers and a
+	// non-agent:// agent-kind provider.
+	seedLegacyProviderRows(t, cs, []types.Provider{
+		{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
+		{Name: "pi", Kind: "agent", URL: "agent://pi", Concurrency: 1},
+		{Name: "claude-https", Kind: "claude", URL: "https://api.claude.com/v1", Concurrency: 1},
+	})
+
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if len(cfg.Providers) != 2 {
+		t.Fatalf("expected 2 providers after pruning, got %d: %v", len(cfg.Providers), cfg.Providers)
+	}
+	for _, p := range cfg.Providers {
+		if strings.HasPrefix(p.URL, "agent://") {
+			t.Errorf("agent:// provider %q was not pruned", p.URL)
+		}
+	}
+}
+
+func TestUpdateConfigNeverPersistsAgentProviders(t *testing.T) {
+	cs := testConfigStore(t)
+
+	cfg := &types.Config{
+		Providers: []types.Provider{
+			{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
+			{Name: "pi", Kind: "agent", URL: "agent://pi", Concurrency: 1, DisplayName: "Pi Coding Agent"},
+		},
+	}
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if len(read.Providers) != 1 || read.Providers[0].URL != "http://localhost:8080/v1" {
+		t.Fatalf("expected only the LLM provider to persist, got %v", read.Providers)
+	}
+
+	// The raw DB value must not contain the agent row either.
+	raw, err := cs.store.GetConfigValue("providers")
+	if err != nil {
+		t.Fatalf("get raw providers: %v", err)
+	}
+	if strings.Contains(raw, "agent://") {
+		t.Errorf("agent:// row persisted to database: %s", raw)
+	}
+}
+
+func TestBuildConfigResponseExactAgentSet(t *testing.T) {
+	cs := testConfigStore(t)
+
+	// Legacy orphan agent row in the DB (agent extension no longer enabled).
+	seedLegacyProviderRows(t, cs, []types.Provider{
+		{Name: "llm", Kind: "llm", URL: "http://localhost:8080/v1", Concurrency: 1},
+		{Name: "orphan", Kind: "agent", URL: "agent://orphan", Concurrency: 1},
+	})
+
+	// Registry provides only 'pi'.
+	cs.SetAgentRegistry(&mockAgentLister{
+		providers: []types.Provider{
+			{Name: "pi", Kind: "agent", DisplayName: "Pi Coding Agent", URL: "agent://pi", Concurrency: 1},
+		},
+	})
+
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	resp := cs.buildConfigResponse(cfg)
+
+	urls := make([]string, 0, len(resp.Providers))
+	for _, p := range resp.Providers {
+		urls = append(urls, p.URL)
+	}
+	if len(resp.Providers) != 2 {
+		t.Fatalf("expected 2 providers (LLM + registry agent), got %d: %v", len(resp.Providers), urls)
+	}
+	for _, u := range urls {
+		if u == "agent://orphan" {
+			t.Error("orphaned agent provider present in response")
+		}
+	}
+}
+
+func TestHandleConfigPutDropsAgentProviders(t *testing.T) {
+	cs := testConfigStore(t)
+
+	body, _ := json.Marshal(map[string]any{
+		"providers": []map[string]any{
+			{"name": "llm", "kind": "llm", "url": "http://localhost:8080/v1", "models": []any{map[string]any{"name": "model-a"}}, "concurrency": 1},
+			// Agent rows carry no models; the client sends an empty list (Provider.UnmarshalJSON
+			// requires the field to be present).
+			{"name": "pi", "kind": "agent", "url": "agent://pi", "models": []any{}, "concurrency": 1, "display_name": "Pi Coding Agent"},
+		},
+		"worker_provider":  "llm",
+		"worker_model":     "model-a",
+		"utility_provider": "llm",
+		"utility_model":    "model-a",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(string(body)))
+	w := httptest.NewRecorder()
+	cs.HandleConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Providers []types.Provider `json:"providers"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(resp.Providers) != 1 || resp.Providers[0].URL != "http://localhost:8080/v1" {
+		t.Fatalf("expected only the LLM provider in response, got %v", resp.Providers)
+	}
+
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if len(read.Providers) != 1 {
+		t.Fatalf("expected only the LLM provider persisted, got %v", read.Providers)
 	}
 }
 

@@ -1,11 +1,10 @@
 <script lang="ts">
     
     import { tick } from 'svelte';
-    import type { Config, Provider, Extension } from '$lib/types';
-    import { isAgentProvider, AGENT_URL_PREFIX } from '$lib/types';
+    import type { Config, Provider } from '$lib/types';
+    import { isAgentProvider } from '$lib/types';
     import { getModelName, getProviderDisplayName } from '$lib/utils/providers';
     import { updateConfig, getConfig, fetchModels as fetchModelsApi, testConnection as testConnectionApi } from '$lib/api';
-    import { listExtensions } from '$lib/api/extensions';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import BaseModal from './BaseModal.svelte';
@@ -133,8 +132,8 @@
 
     function buildProviders(cfg: Config | null): ProviderDraft[] {
         return (cfg?.providers || []).map(p => {
-            // Detect agent provider by kind field, agent:// prefix, or legacy sentinel URL
-            const isAgent = p.kind === 'agent' || p.url.startsWith(AGENT_URL_PREFIX);
+            // Detect agent providers (kind field or agent:// URL prefix)
+            const isAgent = isAgentProvider(p);
             const draft: ProviderDraft = {
                 uid: isAgent ? (p.name || p.url) : String(p.id ?? `new-${Date.now()}-${Math.random()}`),
                 id: p.id || 0,
@@ -200,21 +199,6 @@
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
         hasChanges = false;
-        loadAvailableAgents();
-    });
-
-    // Close agent menu when clicking outside
-    $effect(() => {
-        if (!agentMenuOpen) return;
-        function handleClick(e: MouseEvent) {
-            if (agentMenuBtn && agentMenuBtn.contains(e.target as Node)) return;
-            const menu = document.querySelector('.agent-menu');
-            if (menu && menu.contains(e.target as Node)) return;
-            agentMenuOpen = false;
-            agentMenuRect = null;
-        }
-        document.addEventListener('mousedown', handleClick);
-        return () => document.removeEventListener('mousedown', handleClick);
     });
 
     function toggleProvider(idx: number) {
@@ -253,19 +237,14 @@
     /**
      * After a new provider card is appended, scroll the card's input area into the modal's visible area
      */
-    async function revealNewProvider(index: number, kind: 'llm' | 'agent') {
+    async function revealNewProvider(index: number) {
         await tick();
         await new Promise(r => setTimeout(r, PROVIDER_CARD_SLIDE_SETTLE_MS));
-        if (kind === 'llm') {
-            // Target the URL input
-            const urlInput = document.getElementById(`provider-url-${index}`);
-            if (!urlInput) return;
-            urlInput.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-            urlInput.focus({ preventScroll: true });
-        } else {
-            // Agent cards carry no inputs — reveal the card itself.
-            document.querySelector(`.provider-card[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        }
+        // Target the URL input
+        const urlInput = document.getElementById(`provider-url-${index}`);
+        if (!urlInput) return;
+        urlInput.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        urlInput.focus({ preventScroll: true });
     }
 
     function addProvider() {
@@ -292,78 +271,7 @@
             testResult: null,
         });
         markDirty();
-        void revealNewProvider(providers.length - 1, 'llm');
-    }
-
-    let agentMenuOpen = $state(false);
-    let agentMenuBtn: HTMLButtonElement | null = $state(null);
-    let agentMenuRect = $state<{ top: number; left: number } | null>(null);
-    let availableAgents = $state<Extension[]>([]);
-    let agentsLoading = $state(false);
-    let agentsLoaded = $state(false); // tracks whether fetch has been attempted (guards against re-fetch on empty result)
-
-    async function loadAvailableAgents() {
-        if (agentsLoading || agentsLoaded) return;
-        agentsLoading = true;
-        try {
-            const all = await listExtensions();
-            availableAgents = all.filter(e => e.type === 'agent' && e.enabled);
-        } catch {
-            availableAgents = [];
-        } finally {
-            agentsLoaded = true;
-            agentsLoading = false;
-        }
-    }
-
-    function toggleAgentMenu(e: MouseEvent) {
-        e.stopPropagation();
-        if (agentMenuOpen) {
-            agentMenuOpen = false;
-            agentMenuRect = null;
-        } else {
-            if (agentMenuBtn) {
-                const r = agentMenuBtn.getBoundingClientRect();
-                agentMenuRect = { top: r.bottom + 4, left: r.left };
-            }
-            agentMenuOpen = true;
-            loadAvailableAgents();
-        }
-    }
-
-    function addAgent(ext: Extension) {
-        // Check if this specific agent is already added
-        if (providers.some(p => p.url === AGENT_URL_PREFIX + ext.name)) {
-            return;
-        }
-        agentMenuOpen = false;
-        agentMenuRect = null;
-        providers.push({
-            uid: `agent-${ext.name}`,
-            id: 0,
-            name: ext.name,
-            display_name: ext.manifest.display_name || ext.name,
-            kind: 'agent',
-            url: AGENT_URL_PREFIX + ext.name,
-            agent_config_dir: ext.manifest.capabilities?.agent?.sandbox_mount?.host_path || '',
-            api_key: '',
-            models: [],
-            concurrency: 1,
-            max_requests_per_second: 0,
-            input_price: 0,
-            output_price: 0,
-            cache_read_price: 0,
-            cache_write_price: 0,
-            power_consumption_w: 0,
-            electricity_cost_per_kwh: 0,
-            fetchingModels: false,
-            fetchError: '',
-            expanded: true,
-            testingConnection: false,
-            testResult: null,
-        });
-        markDirty();
-        void revealNewProvider(providers.length - 1, 'agent');
+        void revealNewProvider(providers.length - 1);
     }
 
     function removeProvider(idx: number) {
@@ -572,7 +480,9 @@
         loading = true;
         error = '';
         try {
-            const filteredProviders = providers.filter(p => p.kind === 'agent' || p.url.trim());
+            // Agent providers are registry-derived (installed+enabled agent
+            // extensions) and are never persisted — exclude them from the payload.
+            const filteredProviders = providers.filter(p => p.kind !== 'agent' && p.url.trim());
             const savedProviders: Provider[] = filteredProviders.map((p) => {
                     const trimmedKey = p.api_key?.trim() || '';
                     // Masked keys are all bullets — don't send them. Only send real values.
@@ -793,35 +703,8 @@
                 <div class="section-header">
                     <h3 class="section-label">Providers</h3>
                     <div class="section-actions">
-                        <button type="button" class="btn-small btn-agent" onclick={toggleAgentMenu} bind:this={agentMenuBtn} title="Add a coding agent" class:open={agentMenuOpen}>
-                            + Add Agent
-                            <svg class="chevron" width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        </button>
                         <button type="button" class="btn-small" onclick={addProvider} title="Add a new LLM provider">+ Add Provider</button>
                     </div>
-                    <!-- Agent selection dropdown -->
-                    {#if agentMenuOpen && agentMenuRect}
-                        <div class="agent-menu" style="position:fixed;top:{agentMenuRect.top}px;left:{agentMenuRect.left}px;z-index:10001" onclick={(e) => e.stopPropagation()} onkeydown={(e) => { if (e.key === 'Escape') agentMenuOpen = false; }} role="menu" tabindex="-1">
-                            {#if agentsLoading}
-                                <div class="agent-menu-item agent-menu-loading">Loading agents...</div>
-                            {:else}
-                                {#if availableAgents.filter(ext => !providers.some(p => p.url === AGENT_URL_PREFIX + ext.name)).length === 0}
-                                    <div class="agent-menu-item agent-menu-empty">No agents available</div>
-                                {:else}
-                                    {#each availableAgents.filter(ext => !providers.some(p => p.url === AGENT_URL_PREFIX + ext.name)) as ext}
-                                        <button type="button" class="agent-menu-item" onclick={() => addAgent(ext)}>
-                                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                                                <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
-                                                <circle cx="6" cy="9" r="1" fill="currentColor"/>
-                                                <circle cx="10" cy="9" r="1" fill="currentColor"/>
-                                            </svg>
-                                            {ext.manifest.display_name || ext.name}
-                                        </button>
-                                    {/each}
-                                {/if}
-                            {/if}
-                        </div>
-                    {/if}
                 </div>
                 <div class="providers-list">
                     {#each providers as p, i (p.uid)}
@@ -1068,55 +951,6 @@
         display: flex;
         gap: 8px;
     }
-    .btn-agent {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        line-height: 1;
-        color: var(--color-status-purple);
-        border-color: var(--color-status-purple-subtle);
-    }
-    .btn-agent:hover {
-        background: var(--color-status-purple-faint);
-    }
-    .btn-agent .chevron {
-        transition: transform 0.15s ease;
-        flex-shrink: 0;
-    }
-    .btn-agent.open .chevron {
-        transform: rotate(180deg);
-    }
-
-    /* Agent selection dropdown */
-    .agent-menu {
-        min-width: 200px;
-        background: var(--color-surface-1, #1e1e2e);
-        border: 1px solid var(--color-border, #333);
-        border-radius: var(--radius-md, 8px);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-        padding: 4px;
-    }
-    .agent-menu-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        width: 100%;
-        padding: 8px 10px;
-        border-radius: var(--radius-sm, 4px);
-        border: none;
-        background: none;
-        color: var(--color-status-purple);
-        font-size: 0.8125rem;
-        font-family: inherit;
-        font-weight: 500;
-        cursor: pointer;
-        text-align: left;
-        transition: background 0.1s ease;
-    }
-    .agent-menu-item:hover {
-        background: rgba(163, 113, 247, 0.08);
-    }
-
     /* Field labels */
     .field-label {
         display: flex;
