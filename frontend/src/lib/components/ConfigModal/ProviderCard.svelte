@@ -202,7 +202,7 @@
                     <div class="option-row">
                         <div class="option-label-group">
                             <label class="option-label" for={`concurrency-${index}`}>Concurrency</label>
-                            <span class="help-icon" title="Maximum simultaneous requests to this provider.">
+                            <span class="help-icon" title="Max tasks running concurrently on this provider; also caps in-flight LLM requests to this number.">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                                     <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/>
                                     <text x="8" y="12" text-anchor="middle" fill="currentColor" font-size="0.75rem" font-weight="600">?</text>

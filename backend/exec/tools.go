@@ -781,7 +781,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		return "", fmt.Errorf("failed to create thread: %w", err)
 	}
 	newTask.CurrentThreadID = defaultThreadID
-	_ = te.store.UpdateTask(newTask)
+	_ = te.storeTask(newTask, newTask.ProjectID)
 
 	// Store the prompt as the first user message
 	if err := te.store.CreateTaskMessage(&types.TaskMessage{

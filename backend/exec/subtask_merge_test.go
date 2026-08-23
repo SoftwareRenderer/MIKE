@@ -809,6 +809,7 @@ func setupExecutorWithGitForSubtask(t *testing.T) (*TaskExecutor, string, string
 		appStreamMgr: appStreamMgr,
 		worktreeMgr:  worktreeMgr,
 		gate:         NewConcurrencyGate(),
+		taskGate:     NewConcurrencyGate(),
 		tasks:        make(map[string]*executionState),
 	}
 
