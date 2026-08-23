@@ -169,6 +169,8 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	// Stop executor if running
 	if task.ExecutionState == "running" {
 		_ = s.executor.StopTask(taskID)
+		task.ExecutionState = "idle"
+		task.Output = ""
 	}
 	// Save worktree state and switch to target thread's branch.
 	// Uses labeled stash push + list search to save worktree as a commit hash per-thread.

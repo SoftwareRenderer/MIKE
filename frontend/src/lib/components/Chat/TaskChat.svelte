@@ -167,13 +167,19 @@
     // Resume/Restart conditions must look past them.
     let lastNonErrorEntry = $derived([...entries].reverse().find(e => e.role !== 'error'));
 
+    // Paused: the task was stopped while in progress (stays in the In
+    // Progress column). The ReviewBar shows a Resume button over the input.
+    let isPaused = $derived(taskExecutionState === 'paused');
+
     // Show "Restart Task" button when task is in_progress, stalled (no active LLM, not queued),
     // has at least one assistant response (was actually started before),
     // and the last message is from the user (agent hasn't responded yet).
-    // Hidden during summarization so the ChatForm (with spinner) stays visible.
+    // Hidden while paused (the Resume bar replaces it) and during summarization
+    // so the ChatForm (with spinner) stays visible.
     let showRestartButton = $derived(
         taskStatus === 'in_progress' &&
         !isLoading &&
+        !isPaused &&
         !isSummarizing &&
         queuePosition === 0 &&
         lastNonErrorEntry !== undefined &&
@@ -1417,6 +1423,7 @@
         <div class="chat-form-wrapper" style="padding-bottom: {keyboardOffset}px;" bind:this={chatFormRef}>
         <ReviewBar
             {taskStatus}
+            {taskExecutionState}
             {showResumeButton}
             {showRestartButton}
             {isStarting}

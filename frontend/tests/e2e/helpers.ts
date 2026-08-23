@@ -131,6 +131,20 @@ export async function getTaskData(page: Page, projectId: string, taskId: string)
   }, { pid: projectId, tid: taskId });
 }
 
+/** Poll the task row (server truth) until the predicate holds. */
+export async function waitForTaskState(
+  page: Page,
+  projectId: string,
+  taskId: string,
+  predicate: (t: any) => boolean,
+  timeout = 15000,
+): Promise<void> {
+  await expect(async () => {
+    const task = await getTaskData(page, projectId, taskId);
+    expect(predicate(task)).toBe(true);
+  }).toPass({ timeout });
+}
+
 // --- Chat form readiness helpers ---
 
 /**

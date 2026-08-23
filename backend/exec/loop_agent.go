@@ -229,12 +229,8 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 				runner.Close()
 				te.failTask(task, projectID, "Agent failed to start (timeout)", "agent_startup_timeout")
 			} else {
-				task.ExecutionState = "idle"
-				task.Status = "review"
-				task.Output = "Stopped by user"
-				te.storeTask(task, projectID)
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Task stopped by user"}})
-				te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+				// Stopped by user during agent startup
+				te.handleCancelledTask(task.ID, projectID)
 				return
 			}
 		}
@@ -309,13 +305,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 		case <-ctx.Done():
 			log.Printf("[agent] task=%s context cancelled", task.ID)
 			runner.Close()
-			task.ExecutionState = "idle"
-			task.Status = "review"
-			task.Output = "Stopped by user"
-			te.storeTask(task, projectID)
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Task stopped by user"}})
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.sendAndPersistError(task.ID, "Task stopped", "stopped")
+			te.handleCancelledTask(task.ID, projectID)
 			return
 
 		case event, ok := <-runner.EventChan():

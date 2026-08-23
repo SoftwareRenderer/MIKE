@@ -1269,13 +1269,19 @@ func (te *TaskExecutor) StartTask(projectID, taskID string, autostarted bool) er
 		})
 	}
 
-	// If the last message is already from the assistant, just update status without re-triggering the LLM
+	// update status without re-triggering the LLM
 	if len(existingMsgs) > 0 && existingMsgs[len(existingMsgs)-1].Role == "assistant" {
 		log.Printf("[start] task=%s last message is from assistant, skipping LLM call", taskID)
 		execSetup.cancel()
 		te.taskMu.Lock()
 		delete(te.tasks, taskID)
 		te.taskMu.Unlock()
+		if fresh, err := te.store.GetTask(projectID, taskID); err == nil {
+			fresh.ExecutionState = "idle"
+			fresh.UpdatedAt = time.Now().UTC()
+			_ = te.storeTask(fresh, projectID)
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, fresh)
+		}
 		return nil
 	}
 
@@ -1287,21 +1293,31 @@ func (te *TaskExecutor) StartTask(projectID, taskID string, autostarted bool) er
 	go te.executeTask(execSetup)
 	return nil
 }
+
+// StopTask cancels the task's live executor and transitions the task row out of its in-flight state
 func (te *TaskExecutor) StopTask(taskID string) error {
 	te.taskMu.Lock()
-	defer te.taskMu.Unlock()
 	state, ok := te.tasks[taskID]
-	if !ok {
-		return fmt.Errorf("task not running")
+	if ok {
+		// Close agent runner if it's still alive (kept after completion for compaction).
+		if state.agentRunner != nil && !state.runnerClosed {
+			state.agentRunner.Close()
+			state.runnerClosed = true
+		}
+		state.taskStatus = ""
+		state.cancel()
+		delete(te.tasks, taskID)
 	}
-	// Close agent runner if it's still alive (kept after completion for compaction).
-	if state.agentRunner != nil && !state.runnerClosed {
-		state.agentRunner.Close()
-		state.runnerClosed = true
+	te.taskMu.Unlock()
+
+	task, err := te.store.GetTaskByTaskID(taskID)
+	if err != nil {
+		return err
 	}
-	state.taskStatus = ""
-	state.cancel()
-	delete(te.tasks, taskID)
+	if applyStopTransition(task) {
+		te.persistStopTransition(task)
+	}
+	te.sendStopStatusEvent(task.ProjectID, taskID, task.ExecutionState)
 	return nil
 }
 
@@ -1322,15 +1338,52 @@ func (te *TaskExecutor) StopProjectTasks(projectID string) int {
 			delete(te.tasks, task.ID)
 			stopped++
 			log.Printf("[stop-project-tasks] task=%s project=%s stopped (settings change)", task.ID, projectID)
-			// Reset only the running task to idle; preserve its column (status)
-			task.ExecutionState = "idle"
 			te.taskMu.Unlock()
-			_ = te.storeTask(&task, projectID)
+			// Reset only in-flight tasks (in_progress → paused); preserve the column.
+			if applyStopTransition(&task) {
+				te.persistStopTransition(&task)
+			}
+			te.sendStopStatusEvent(projectID, task.ID, task.ExecutionState)
 		} else {
 			te.taskMu.Unlock()
 		}
 	}
 	return stopped
+}
+
+// RecoverStaleTasks transitions every in-flight task row to its post-stop state at server startup
+func (te *TaskExecutor) RecoverStaleTasks() int {
+	inFlight, err := te.store.GetInFlightTasks()
+	if err != nil {
+		log.Printf("[recover] list in-flight tasks failed: %v", err)
+		return 0
+	}
+	recovered := 0
+	for _, task := range inFlight {
+		oldState := task.ExecutionState
+		if !applyStopTransition(&task) {
+			continue
+		}
+		te.taskMu.Lock()
+		// A task may have been restarted before this recovery ran (autostart
+		// from a sibling chain); never clobber a live executor's state.
+		_, activelyRunning := te.tasks[task.ID]
+		te.taskMu.Unlock()
+		if activelyRunning {
+			continue
+		}
+		// Atomic compare-and-set: a task autostarted (sibling chain) between the
+		// scan and this write keeps its live in-flight state.
+		if !te.persistStopTransition(&task) {
+			continue
+		}
+		log.Printf("[recover] task=%s stale %s/%s -> %s/%s", task.ID, task.Status, oldState, task.Status, task.ExecutionState)
+		recovered++
+	}
+	if recovered > 0 {
+		log.Printf("[recover] %d stale in-flight task(s) recovered", recovered)
+	}
+	return recovered
 }
 
 // HasRunningTasks returns true if any task in the given project has an active

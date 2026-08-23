@@ -2361,8 +2361,10 @@ func TestAutoStartNextSibling_StartsParentWhenAllChildrenDone(t *testing.T) {
 	}
 
 	p, _ := te.store.GetTaskByTaskID(parentID)
-	if p.Status != "in_progress" || p.ExecutionState != "running" {
-		t.Errorf("parent should be running after all children done: status=%q state=%q", p.Status, p.ExecutionState)
+	// The parent's seeded conversation ends in an assistant message, so
+	// StartTask skips the LLM call and settles into idle (not a stale running).
+	if p.Status != "in_progress" || p.ExecutionState != "idle" {
+		t.Errorf("parent should be started-but-idle after all children done: status=%q state=%q", p.Status, p.ExecutionState)
 	}
 	if !p.Autostarted {
 		t.Error("parent should be marked autostarted when started by the chain")
@@ -2413,8 +2415,10 @@ func TestAutoStartNextSibling_ReviewBlocksChainThenUnblocks(t *testing.T) {
 		t.Fatal("P must not start while its subtree is blocked on review")
 	}
 	c2, _ := te.store.GetTaskByTaskID(c2ID)
-	if c2.ExecutionState != "running" {
-		t.Fatalf("C2 (G's other branch) should have started via bubble-up, state=%q", c2.ExecutionState)
+	// C2's seeded conversation ends in an assistant message, so the bubble-up
+	// start settles into idle (autostarted) instead of running.
+	if c2.Status != "in_progress" || c2.ExecutionState != "idle" || !c2.Autostarted {
+		t.Fatalf("C2 (G's other branch) should have started via bubble-up: status=%q state=%q autostarted=%v", c2.Status, c2.ExecutionState, c2.Autostarted)
 	}
 
 	// 2) R1 moved to Done → C1 starts.
@@ -2426,8 +2430,9 @@ func TestAutoStartNextSibling_ReviewBlocksChainThenUnblocks(t *testing.T) {
 		t.Fatalf("AutoStartNextSibling (r1 done) failed: %v", err)
 	}
 	c1, _ = te.store.GetTaskByTaskID(c1ID)
-	if c1.ExecutionState != "running" || !c1.Autostarted {
-		t.Fatalf("C1 should start (autostarted) once R1 is done: state=%q autostarted=%v", c1.ExecutionState, c1.Autostarted)
+	// Seeded conversation ends in an assistant message → idle (autostarted), not running.
+	if c1.Status != "in_progress" || c1.ExecutionState != "idle" || !c1.Autostarted {
+		t.Fatalf("C1 should start (autostarted) once R1 is done: status=%q state=%q autostarted=%v", c1.Status, c1.ExecutionState, c1.Autostarted)
 	}
 	p, _ = te.store.GetTaskByTaskID(pID)
 	if p.ExecutionState == "running" {
@@ -2443,8 +2448,9 @@ func TestAutoStartNextSibling_ReviewBlocksChainThenUnblocks(t *testing.T) {
 		t.Fatalf("AutoStartNextSibling (c1 done) failed: %v", err)
 	}
 	p, _ = te.store.GetTaskByTaskID(pID)
-	if p.ExecutionState != "running" || !p.Autostarted {
-		t.Fatalf("P should start (autostarted) once C1 is done: state=%q autostarted=%v", p.ExecutionState, p.Autostarted)
+	// Seeded conversation ends in an assistant message → idle (autostarted), not running.
+	if p.Status != "in_progress" || p.ExecutionState != "idle" || !p.Autostarted {
+		t.Fatalf("P should start (autostarted) once C1 is done: status=%q state=%q autostarted=%v", p.Status, p.ExecutionState, p.Autostarted)
 	}
 
 	// 4) C2 done and P done → G starts (root runs last).
@@ -2460,8 +2466,9 @@ func TestAutoStartNextSibling_ReviewBlocksChainThenUnblocks(t *testing.T) {
 		t.Fatalf("AutoStartNextSibling (p done) failed: %v", err)
 	}
 	g, _ := te.store.GetTaskByTaskID(gID)
-	if g.ExecutionState != "running" || !g.Autostarted {
-		t.Fatalf("G should start (autostarted) once all children are done: state=%q autostarted=%v", g.ExecutionState, g.Autostarted)
+	// Seeded conversation ends in an assistant message → idle (autostarted), not running.
+	if g.Status != "in_progress" || g.ExecutionState != "idle" || !g.Autostarted {
+		t.Fatalf("G should start (autostarted) once all children are done: status=%q state=%q autostarted=%v", g.Status, g.ExecutionState, g.Autostarted)
 	}
 }
 
