@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/svelte';
 
 // Mock raw asset imports and the icon component (not available in jsdom)
@@ -10,6 +10,20 @@ vi.mock('$lib/components/Icon.svelte', () => ({ default: () => '' }));
 vi.mock('$lib/stores', () => ({
     appStore: { config: null },
 }));
+
+// Polyfill matchMedia for useIsMobile (desktop: never matches)
+beforeAll(() => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+    }));
+});
 
 import TaskHeader from '$lib/components/CardDetail/TaskHeader.svelte';
 import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
