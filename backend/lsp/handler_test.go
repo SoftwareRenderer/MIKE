@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"kanban/backend/types"
 )
 
 // mockRegistry is a test double for lspRegistry. It resolves .go files to a
@@ -102,6 +104,10 @@ func (m *mockProcessManager) SendToServer(process *LSPProcess, msg json.RawMessa
 
 func (m *mockProcessManager) ServerMessageCh() <-chan json.RawMessage {
 	return m.messageCh
+}
+
+func (m *mockProcessManager) SandboxMemory(workspacePath, filePath string) *types.SandboxMemoryStats {
+	return &types.SandboxMemoryStats{Running: true, CurrentMB: 42, LimitMB: 256, PeakMB: 64, OOMKills: 1}
 }
 
 func (m *mockProcessManager) Subscribe(process *LSPProcess, clientID uint64) chan []byte {
@@ -1111,4 +1117,64 @@ func TestWebSocketOrigin_AcceptsSameOrigin(t *testing.T) {
 		t.Fatalf("expected same-origin WebSocket handshake to succeed: %v", err)
 	}
 	defer conn.CloseNow()
+}
+
+// ─── HandleSandboxMemory (GET /api/lsp/memory) ──────────────────────────────
+
+func TestHandleSandboxMemory_MethodNotAllowed(t *testing.T) {
+	handler := NewLSPHandler(newTestRegistry(), newMockProcessManager())
+	defer handler.Close()
+
+	w := httptest.NewRecorder()
+	handler.HandleSandboxMemory(w, httptest.NewRequest(http.MethodPost, "/api/lsp/memory?workspace=/tmp/ws&file=/tmp/ws/main.go", nil))
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleSandboxMemory_MissingParams(t *testing.T) {
+	handler := NewLSPHandler(newTestRegistry(), newMockProcessManager())
+	defer handler.Close()
+
+	for _, path := range []string{
+		"/api/lsp/memory",
+		"/api/lsp/memory?workspace=/tmp/ws",
+		"/api/lsp/memory?file=/tmp/ws/main.go",
+	} {
+		w := httptest.NewRecorder()
+		handler.HandleSandboxMemory(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want %d", path, w.Code, http.StatusBadRequest)
+		}
+	}
+}
+
+func TestHandleSandboxMemory_WorkspaceRejected(t *testing.T) {
+	handler := NewLSPHandler(newTestRegistry(), newMockProcessManager())
+	defer handler.Close()
+	handler.SetWorkspaceValidator(func(ws string) bool { return ws == "/tmp/allowed" })
+
+	w := httptest.NewRecorder()
+	handler.HandleSandboxMemory(w, httptest.NewRequest(http.MethodGet, "/api/lsp/memory?workspace=/etc&file=/etc/passwd", nil))
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+}
+
+func TestHandleSandboxMemory_OK(t *testing.T) {
+	handler := NewLSPHandler(newTestRegistry(), newMockProcessManager())
+	defer handler.Close()
+
+	w := httptest.NewRecorder()
+	handler.HandleSandboxMemory(w, httptest.NewRequest(http.MethodGet, "/api/lsp/memory?workspace=/tmp/ws&file=/tmp/ws/main.go", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var stats types.SandboxMemoryStats
+	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
+		t.Fatalf("unmarshal: %v (body: %s)", err, w.Body.String())
+	}
+	if !stats.Running || stats.CurrentMB != 42 || stats.LimitMB != 256 || stats.PeakMB != 64 || stats.OOMKills != 1 {
+		t.Errorf("stats = %+v, want mock values", stats)
+	}
 }

@@ -80,11 +80,42 @@ describe('SandboxPanel memory section', () => {
         expect(container.querySelector('.memory-bar')).toBeNull();
     });
 
-    it('shows the not-running state', () => {
+    it('shows the not-running state with an empty bar when the limit is known', () => {
         const { container } = renderPanel(stats({ running: false, memory_current_mb: 0 }));
         const value = container.querySelector('.memory-value');
         expect(value?.textContent).toContain('Not running');
-        expect(container.querySelector('.memory-bar')).toBeNull();
+        const fill = container.querySelector('.memory-bar-fill') as HTMLElement;
+        expect(fill).not.toBeNull();
+        expect(fill.style.width).toBe('0%');
+        expect(fill.classList.contains('warn')).toBe(false);
+        // No peak reported yet → no tick.
+        expect(container.querySelector('.memory-bar-peak')).toBeNull();
+    });
+
+    it('renders a peak tick at the peak position with a tooltip', () => {
+        const { container } = renderPanel(stats({ memory_current_mb: 412, memory_peak_mb: 500, memory_limit_mb: 1024 }));
+        const tick = container.querySelector('.memory-bar-peak') as HTMLElement;
+        expect(tick).not.toBeNull();
+        expect(tick.style.left).toBe('49%');
+        expect(tick.title).toBe('Peak 500 MB');
+    });
+
+    it('does not render a peak tick when the peak is unknown', () => {
+        const { container } = renderPanel(stats());
+        expect(container.querySelector('.memory-bar-peak')).toBeNull();
+    });
+
+    it('keeps the peak tick visible when not running', () => {
+        const { container } = renderPanel(stats({ running: false, memory_current_mb: 0, memory_peak_mb: 800 }));
+        const tick = container.querySelector('.memory-bar-peak') as HTMLElement;
+        expect(tick).not.toBeNull();
+        expect(tick.style.left).toBe('78%');
+    });
+
+    it('clamps the peak tick to 100% when the peak reaches the limit', () => {
+        const { container } = renderPanel(stats({ memory_peak_mb: 2048, memory_limit_mb: 1024 }));
+        const tick = container.querySelector('.memory-bar-peak') as HTMLElement;
+        expect(tick?.style.left).toBe('100%');
     });
 
     it('shows the peak when known', () => {

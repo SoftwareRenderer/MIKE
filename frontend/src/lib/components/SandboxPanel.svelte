@@ -4,7 +4,7 @@
     import { getProject } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
-    import { isNearMemoryLimit } from '$lib/utils/memory-stats';
+    import { isNearMemoryLimit, formatSandboxMemory } from '$lib/utils/memory-stats';
 import BaseModal from './BaseModal.svelte';
 
     let { task, stats, onClose }: {
@@ -16,6 +16,12 @@ import BaseModal from './BaseModal.svelte';
     function memoryPct(s: SandboxMemoryStats): number {
         if (!s.running || s.memory_limit_mb <= 0 || s.memory_current_mb <= 0) return 0;
         return Math.min(100, Math.round((s.memory_current_mb / s.memory_limit_mb) * 100));
+    }
+
+    // Position of the peak tick on the bar, clamped to the track.
+    function peakPct(s: SandboxMemoryStats): number {
+        if (s.memory_limit_mb <= 0 || s.memory_peak_mb <= 0) return 0;
+        return Math.min(100, Math.round((s.memory_peak_mb / s.memory_limit_mb) * 100));
     }
 
     let project = $state<Project | null>(null);
@@ -54,19 +60,15 @@ Sandbox Isolation is enabled for this project
                 <div class="memory-section">
                     <div class="memory-row">
                         <span class="memory-label">Memory Usage</span>
-                        <span class="memory-value">
-                            {#if stats.running}
-                                {stats.memory_limit_mb > 0
-                                    ? `${stats.memory_current_mb} / ${stats.memory_limit_mb} MB`
-                                    : `${stats.memory_current_mb} MB (no limit)`}
-                            {:else}
-                                Not running
-                            {/if}
-                        </span>
+                        <span class="memory-value">{formatSandboxMemory(stats)}</span>
                     </div>
-                    {#if stats.running && stats.memory_limit_mb > 0}
+                    {#if stats.memory_limit_mb > 0}
+                        <!-- Stays visible when not running: empty track + peak tick -->
                         <div class="memory-bar">
                             <div class="memory-bar-fill" class:warn={isNearMemoryLimit(stats)} style="width: {memoryPct(stats)}%"></div>
+                            {#if stats.memory_peak_mb > 0}
+                                <div class="memory-bar-peak" style="left: {peakPct(stats)}%" title={`Peak ${stats.memory_peak_mb} MB`}></div>
+                            {/if}
                         </div>
                     {/if}
                     {#if stats.memory_peak_mb > 0}
@@ -239,21 +241,33 @@ Sandbox Isolation is enabled for this project
     }
 
     .memory-bar {
+        position: relative;
         height: 6px;
         border-radius: 3px;
         background: var(--color-surface-3);
-        overflow: hidden;
     }
 
     .memory-bar-fill {
         height: 100%;
         border-radius: 3px;
-        background: var(--color-primary);
+        background: var(--color-accent);
         transition: width 0.3s ease;
     }
 
     .memory-bar-fill.warn {
         background: var(--color-status-red);
+    }
+
+    /* Red tick at the historical peak (drawn over the fill). */
+    .memory-bar-peak {
+        position: absolute;
+        top: -3px;
+        bottom: -3px;
+        width: 2px;
+        margin-left: -1px;
+        border-radius: 1px;
+        background: var(--color-status-red);
+        transition: left 0.3s ease;
     }
 
     .memory-peak {

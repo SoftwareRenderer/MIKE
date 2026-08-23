@@ -634,3 +634,67 @@ func TestStorageDeleteAll(t *testing.T) {
 		t.Fatalf("ext2 storage should be untouched, got %+v", other)
 	}
 }
+
+func TestUpdateMemoryLimit_PersistsAndSyncsConfig(t *testing.T) {
+	es := testStore(t)
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, es)
+
+	ext := makeTestExt("ext-mem", "ext-mem", ExtensionTypeLSP)
+	ext.Config["other"] = "keep-me"
+	if err := es.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// No sandbox is running — UpdateMemoryLimit must persist and sync config;
+	// the live-apply path is a no-op.
+	if err := sm.UpdateMemoryLimit("ext-mem", 512); err != nil {
+		t.Fatalf("UpdateMemoryLimit(512) = %v", err)
+	}
+	got, err := es.GetByID("ext-mem")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.SandboxConfig.MemoryLimit != 512 {
+		t.Errorf("SandboxConfig.MemoryLimit = %d, want 512", got.SandboxConfig.MemoryLimit)
+	}
+	// JSON round-trip: numbers come back as float64.
+	if ml, ok := got.Config["memory_limit"]; !ok || ml != float64(512) {
+		t.Errorf("Config[memory_limit] = %v, want 512", got.Config["memory_limit"])
+	}
+	if got.Config["other"] != "keep-me" {
+		t.Errorf("Config[other] = %v, want keep-me (unrelated keys preserved)", got.Config["other"])
+	}
+
+	// 0 clears the limit (run unlimited).
+	if err := sm.UpdateMemoryLimit("ext-mem", 0); err != nil {
+		t.Fatalf("UpdateMemoryLimit(0) = %v", err)
+	}
+	got, err = es.GetByID("ext-mem")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.SandboxConfig.MemoryLimit != 0 {
+		t.Errorf("SandboxConfig.MemoryLimit = %d, want 0 (cleared)", got.SandboxConfig.MemoryLimit)
+	}
+	if ml, ok := got.Config["memory_limit"]; !ok || ml != float64(0) {
+		t.Errorf("Config[memory_limit] = %v, want 0", got.Config["memory_limit"])
+	}
+
+	// Negative input clamps to 0.
+	if err := sm.UpdateMemoryLimit("ext-mem", -64); err != nil {
+		t.Fatalf("UpdateMemoryLimit(-64) = %v", err)
+	}
+	got, err = es.GetByID("ext-mem")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.SandboxConfig.MemoryLimit != 0 {
+		t.Errorf("SandboxConfig.MemoryLimit = %d, want 0 (negative clamped)", got.SandboxConfig.MemoryLimit)
+	}
+
+	// Unknown extension is an error.
+	if err := sm.UpdateMemoryLimit("no-such-ext", 100); err == nil {
+		t.Error("UpdateMemoryLimit(no-such-ext) = nil, want error")
+	}
+}

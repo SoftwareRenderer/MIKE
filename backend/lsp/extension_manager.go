@@ -152,6 +152,34 @@ func NewExtensionLSPManager(extStore *extensions.ExtensionStore, extSandbox *ext
 	}
 }
 
+// SandboxMemory returns the live memory usage of the sandbox running the
+// language server for the given workspace and file. The file is resolved to
+// a language via the extension registry (same lookup order as
+// handleSubscription). Returns zero stats (Running: false) when no extension
+// handles the file or there is no LSP client for the workspace/language pair.
+func (m *ExtensionLSPManager) SandboxMemory(workspacePath, filePath string) *types.SandboxMemoryStats {
+	cfg := m.GetRegistry().Lookup(filePath)
+	if cfg == nil {
+		cfg = m.GetRegistry().Lookup(workspacePath)
+	}
+	if cfg == nil {
+		return &types.SandboxMemoryStats{}
+	}
+
+	m.mu.Lock()
+	sc, ok := m.clients[processKey(workspacePath, cfg.Language)]
+	extensionID := ""
+	if ok {
+		extensionID = sc.extensionID
+	}
+	m.mu.Unlock()
+
+	if !ok {
+		return &types.SandboxMemoryStats{}
+	}
+	return m.extSandbox.GetMemoryStats(extensionID)
+}
+
 // GetMountPath returns the container mount path for a given host workspace path.
 // Returns the host path if no mapping is found.
 func (m *ExtensionLSPManager) GetMountPath(workspacePath string) string {
@@ -835,6 +863,10 @@ func (m *ExtensionLSPManager) lookupExtensionByFile(filePath string) (*extension
 
 	ext := filepath.Ext(filePath)
 	base := filepath.Base(filePath)
+	shortExt := ""
+	if len(ext) > 1 {
+		shortExt = ext[1:]
+	}
 
 	for _, extItem := range extensions {
 		if !extItem.Enabled {
@@ -846,7 +878,7 @@ func (m *ExtensionLSPManager) lookupExtensionByFile(filePath string) (*extension
 		}
 		// Check file extensions
 		for _, extn := range lspCfg.Extensions {
-			if extn == ext || strings.TrimPrefix(extn, ".") == ext[1:] {
+			if extn == ext || strings.TrimPrefix(extn, ".") == shortExt {
 				return &extItem, nil
 			}
 		}
@@ -929,6 +961,10 @@ func (r *ExtensionRegistry) Lookup(fileOrPath string) *ServerConfig {
 	// Extract file extension and basename
 	ext := filepath.Ext(fileOrPath)
 	base := filepath.Base(fileOrPath)
+	shortExt := ""
+	if len(ext) > 1 {
+		shortExt = ext[1:]
+	}
 
 	for _, extItem := range extensions {
 		if !extItem.Enabled {
@@ -940,7 +976,7 @@ func (r *ExtensionRegistry) Lookup(fileOrPath string) *ServerConfig {
 		}
 		// Check file extensions
 		for _, extn := range lspCfg.Extensions {
-			if extn == ext || extn == ext[1:] {
+			if extn == ext || extn == shortExt {
 				return r.toServerConfig(&extItem)
 			}
 		}
