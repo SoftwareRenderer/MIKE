@@ -463,7 +463,7 @@
                         title={entry.path}
                     >
                         {#if entry.isDir}
-                            <Icon src={folderIcon} color="#6E7681" width={14} height={14} class="file-icon" />
+                            <Icon src={folderIcon} color="currentColor" width={14} height={14} class="file-icon folder-icon" />
                         {:else}
                             <Icon src={fileIcon} color="#6E7681" width={14} height={14} class="file-icon" />
                         {/if}
@@ -621,6 +621,9 @@
     .file-icon {
         flex-shrink: 0;
         opacity: 0.7;
+    }
+    .file-icon.folder-icon {
+        opacity: 1;
     }
 
     .file-name {
