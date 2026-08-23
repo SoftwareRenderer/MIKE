@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MEMORY_WARNING_RATIO, isNearMemoryLimit, isSandboxMemoryWarning, formatSandboxMemory } from '$lib/utils/memory-stats';
+import { MEMORY_WARNING_RATIO, isNearMemoryLimit, isMemoryLimitReached, isSandboxMemoryWarning, formatSandboxMemory } from '$lib/utils/memory-stats';
 import type { SandboxMemoryStats } from '$lib/types';
 
 function stats(overrides: Partial<SandboxMemoryStats> = {}): SandboxMemoryStats {
@@ -44,6 +44,37 @@ describe('isNearMemoryLimit', () => {
     });
 });
 
+describe('isMemoryLimitReached', () => {
+    it('is false for null/undefined', () => {
+        expect(isMemoryLimitReached(null)).toBe(false);
+        expect(isMemoryLimitReached(undefined)).toBe(false);
+    });
+
+    it('is false when there is no enforced limit (0)', () => {
+        expect(isMemoryLimitReached(stats({ memory_limit_mb: 0, memory_peak_mb: 999999 }))).toBe(false);
+    });
+
+    it('is false when the peak is unknown (0)', () => {
+        expect(isMemoryLimitReached(stats({ memory_peak_mb: 0 }))).toBe(false);
+    });
+
+    it('is false just below the limit', () => {
+        expect(isMemoryLimitReached(stats({ memory_peak_mb: 1023, memory_limit_mb: 1024 }))).toBe(false);
+    });
+
+    it('is true when the peak reached the limit', () => {
+        expect(isMemoryLimitReached(stats({ memory_peak_mb: 1024, memory_limit_mb: 1024 }))).toBe(true);
+    });
+
+    it('is true when the peak exceeds the limit', () => {
+        expect(isMemoryLimitReached(stats({ memory_peak_mb: 2048, memory_limit_mb: 1024 }))).toBe(true);
+    });
+
+    it('is true while not running (peak persists for the most recent idle stats)', () => {
+        expect(isMemoryLimitReached(stats({ running: false, memory_current_mb: 0, memory_peak_mb: 1024, memory_limit_mb: 1024 }))).toBe(true);
+    });
+});
+
 describe('isSandboxMemoryWarning', () => {
     it('is false for null/undefined', () => {
         expect(isSandboxMemoryWarning(null)).toBe(false);
@@ -65,6 +96,18 @@ describe('isSandboxMemoryWarning', () => {
 
     it('is true on OOM kills while not running (most recent stats after the task went idle)', () => {
         expect(isSandboxMemoryWarning(stats({ running: false, memory_current_mb: 0, oom_kills: 1 }))).toBe(true);
+    });
+
+    it('is true when the peak reached the limit even at low usage (persistent)', () => {
+        expect(isSandboxMemoryWarning(stats({ memory_current_mb: 10, memory_peak_mb: 1024, memory_limit_mb: 1024 }))).toBe(true);
+    });
+
+    it('is true when the peak reached the limit while not running (most recent idle stats)', () => {
+        expect(isSandboxMemoryWarning(stats({ running: false, memory_current_mb: 0, memory_peak_mb: 1024, memory_limit_mb: 1024 }))).toBe(true);
+    });
+
+    it('is false when the peak is just below the limit and nothing else triggers', () => {
+        expect(isSandboxMemoryWarning(stats({ memory_current_mb: 100, memory_peak_mb: 1023, memory_limit_mb: 1024 }))).toBe(false);
     });
 });
 
