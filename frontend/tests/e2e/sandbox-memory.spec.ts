@@ -214,5 +214,18 @@ test.describe.serial('Sandbox Memory Tracking', () => {
     await expect(page.locator('.memory-value')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('.memory-value')).toContainText(`/ ${MEMORY_LIMIT_MB} MB`);
     await expect(page.locator('.oom-warning')).toBeVisible();
+
+    // Peak-reached condition (cgroup memory.peak, kernels 5.19+): after the
+    // OOM the most recent sample carries a peak at/above the limit, so the
+    // dot is also lit via the peak condition — independently of the OOM
+    // counter — and the tooltip names it. `.memory-peak` renders only when
+    // peak data exists; older kernels (peak 0) skip the assertion.
+    const peakEl = page.locator('.memory-peak');
+    if (await peakEl.isVisible()) {
+      const peakMB = parseInt((await peakEl.innerText()).replace(/[^0-9]/g, ''), 10);
+      expect(peakMB).toBeGreaterThanOrEqual(MEMORY_LIMIT_MB);
+      const title = (await page.locator('.sandbox-btn').getAttribute('title')) || '';
+      expect(title).toContain('peak reached limit');
+    }
   });
 });
