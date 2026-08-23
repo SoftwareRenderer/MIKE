@@ -38,11 +38,12 @@ test.describe('Task header path tooltip (mobile)', () => {
       expect(fullPath, 'path label must carry the full path in its title').toBeTruthy();
 
       const tooltip = page.locator('.path-tooltip');
+      const tipText = tooltip.locator('.path-tooltip-text');
 
       // --- Tap the path → tooltip with the full path, clamped in the viewport ---
       await pathLabel.click();
       await expect(tooltip).toBeVisible();
-      await expect(tooltip).toHaveText(fullPath!);
+      await expect(tipText).toHaveText(fullPath!);
       await expect(async () => {
         const box = (await tooltip.boundingBox())!;
         const labelBox = (await pathLabel.boundingBox())!;
@@ -63,8 +64,16 @@ test.describe('Task header path tooltip (mobile)', () => {
       await page.locator('.task-detail-page .header-main .badge').first().click();
       await expect(tooltip).toHaveCount(0);
 
-      // --- Auto-hide after ~2.5 s ---
+      // --- Copy button → full path on the clipboard, "Copied" confirmation,
+      //     tooltip stays open and then auto-hides (timer re-armed on copy) ---
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
       await pathLabel.click();
+      await expect(tooltip).toBeVisible();
+      const copyBtn = tooltip.locator('.path-tooltip-copy');
+      await copyBtn.click();
+      await expect(copyBtn).toContainText('Copied', { timeout: 5000 });
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(fullPath);
+      // Still open after the confirmation, then the re-armed auto-hide fires.
       await expect(tooltip).toBeVisible();
       await expect(tooltip).toHaveCount(0, { timeout: 4000 });
 

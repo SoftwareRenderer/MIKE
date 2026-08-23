@@ -71,10 +71,13 @@
     const isMobileCtx = useIsMobile();
     let pathTip = $state<{ top: number; left: number } | null>(null);
     let pathTipTimer: ReturnType<typeof setTimeout> | null = null;
+    let pathCopied = $state(false);
+    let pathCopiedTimer: ReturnType<typeof setTimeout> | null = null;
     let pathSpanEl = $state<HTMLSpanElement | null>(null);
     let pathTipEl = $state<HTMLDivElement | null>(null);
 
     const PATH_TIP_VISIBLE_MS = 2500;
+    const PATH_TIP_COPIED_MS = 1500;
     const PATH_TIP_MARGIN = 8;
 
     function clearPathTip() {
@@ -82,17 +85,27 @@
             clearTimeout(pathTipTimer);
             pathTipTimer = null;
         }
+        if (pathCopiedTimer) {
+            clearTimeout(pathCopiedTimer);
+            pathCopiedTimer = null;
+        }
         document.removeEventListener('pointerdown', handleOutsidePointerDown, true);
         window.removeEventListener('resize', handlePathTipViewportChange);
         window.removeEventListener('orientationchange', handlePathTipViewportChange);
         pathTip = null;
+        pathCopied = false;
     }
 
     function handleOutsidePointerDown(e: PointerEvent) {
         // pointerdown fires before the span's click — ignore taps on the
-        // label itself so re-tapping toggles the tooltip off (via the click
-        // handler) instead of close-then-reopen.
-        if (pathSpanEl && e.target instanceof Node && pathSpanEl.contains(e.target)) return;
+        // label itself (so re-tapping toggles the tooltip off via the click
+        // handler instead of close-then-reopen) and taps inside the tooltip
+        // (so the copy button's tap lands on the button, not the dismiss
+        // handler).
+        if (e.target instanceof Node) {
+            if (pathSpanEl && pathSpanEl.contains(e.target)) return;
+            if (pathTipEl && pathTipEl.contains(e.target)) return;
+        }
         clearPathTip();
     }
 
@@ -134,6 +147,36 @@
                 tip.style.left = `${PATH_TIP_MARGIN}px`;
             }
         });
+    }
+
+    // Copy the full path to the clipboard and confirm briefly. The tooltip
+    // is re-armed for another PATH_TIP_VISIBLE_MS so the confirmation stays
+    // on screen; a failed copy is swallowed (the tooltip stays open for a
+    // retry).
+    async function handleCopyPath() {
+        if (!fullPath) return;
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(fullPath);
+            } else {
+                // Fallback for non-secure contexts without the async API.
+                const ta = document.createElement('textarea');
+                ta.value = fullPath;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                ta.remove();
+            }
+            pathCopied = true;
+            if (pathCopiedTimer) clearTimeout(pathCopiedTimer);
+            pathCopiedTimer = setTimeout(() => { pathCopied = false; }, PATH_TIP_COPIED_MS);
+            if (pathTipTimer) clearTimeout(pathTipTimer);
+            pathTipTimer = setTimeout(clearPathTip, PATH_TIP_VISIBLE_MS);
+        } catch {
+            // Clipboard unavailable/denied — leave the tooltip open to retry.
+        }
     }
 
     // Release tooltip listeners when the header unmounts (task view closed).
@@ -196,7 +239,30 @@
 {/if}
 
 {#if pathTip}
-    <div id="task-header-path-tooltip" class="path-tooltip" role="tooltip" bind:this={pathTipEl} style:top="{pathTip.top}px" style:left="{pathTip.left}px">{fullPath}</div>
+    <div id="task-header-path-tooltip" class="path-tooltip" role="tooltip" bind:this={pathTipEl} style:top="{pathTip.top}px" style:left="{pathTip.left}px">
+        <span class="path-tooltip-text">{fullPath}</span>
+        <button
+            type="button"
+            class="path-tooltip-copy"
+            class:copied={pathCopied}
+            title={pathCopied ? 'Copied' : 'Copy path'}
+            aria-label={pathCopied ? 'Path copied' : 'Copy path'}
+            onclick={handleCopyPath}
+        >
+            {#if pathCopied}
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M3 8.5l3 3 7-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>Copied</span>
+            {:else}
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                    <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" stroke="currentColor" stroke-width="1.3"/>
+                </svg>
+                <span>Copy</span>
+            {/if}
+        </button>
+    </div>
 {/if}
 
 <style>
@@ -318,8 +384,40 @@
         font-size: 0.75rem;
         line-height: 1.4;
         color: var(--color-text-primary);
-        word-break: break-all;
-        white-space: normal;
+        display: flex;
+        align-items: center;
+        gap: 8px;
         pointer-events: none;
+    }
+    .path-tooltip-text {
+        flex: 1;
+        min-width: 0;
+        word-break: break-all;
+    }
+    .path-tooltip-copy {
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+        padding: 2px 8px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-2);
+        color: var(--color-text-secondary);
+        font-family: inherit;
+        font-size: 0.6875rem;
+        line-height: 1.5;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background 0.1s ease, color 0.1s ease;
+    }
+    .path-tooltip-copy:hover {
+        border-color: var(--color-text-tertiary);
+        color: var(--color-text-primary);
+    }
+    .path-tooltip-copy.copied {
+        background: var(--color-surface-2);
+        color: var(--color-status-green);
     }
 </style>
