@@ -513,50 +513,40 @@ func (s *Server) broadcastTaskDiff(taskID string) {
 	s.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeDiffChanged, Data: manifest})
 }
 
-// getWorktreeMutex returns a per-task mutex for serializing git operations.
-// Creates a new mutex per task on first access. The mutex is never cleaned up
-// (bounded by number of tasks, negligible memory overhead).
-func (s *Server) getWorktreeMutex(taskID string) *sync.Mutex {
-	s.worktreeMuxMu.RLock()
-	if mu, ok := s.worktreeMux[taskID]; ok {
-		s.worktreeMuxMu.RUnlock()
-		return mu
+// getOrCreateMutex returns a per-key mutex, creating it on first access.
+// Uses double-checked locking: fast path under the read lock, slow path under
+// the write lock. Mutexes are never cleaned up (bounded by key count,
+// negligible memory overhead).
+func getOrCreateMutex(mu *sync.RWMutex, m map[string]*sync.Mutex, key string) *sync.Mutex {
+	mu.RLock()
+	if existing, ok := m[key]; ok {
+		mu.RUnlock()
+		return existing
 	}
-	s.worktreeMuxMu.RUnlock()
+	mu.RUnlock()
 
-	s.worktreeMuxMu.Lock()
+	mu.Lock()
 	// Double-check after acquiring write lock
-	if mu, ok := s.worktreeMux[taskID]; ok {
-		s.worktreeMuxMu.Unlock()
-		return mu
+	if existing, ok := m[key]; ok {
+		mu.Unlock()
+		return existing
 	}
-	mu := &sync.Mutex{}
-	s.worktreeMux[taskID] = mu
-	s.worktreeMuxMu.Unlock()
-	return mu
+	created := &sync.Mutex{}
+	m[key] = created
+	mu.Unlock()
+	return created
+}
+
+// getWorktreeMutex returns a per-task mutex for serializing git operations.
+func (s *Server) getWorktreeMutex(taskID string) *sync.Mutex {
+	return getOrCreateMutex(&s.worktreeMuxMu, s.worktreeMux, taskID)
 }
 
 // getProjectMutex returns a per-project mutex for serializing project-level git
 // operations (stash, checkout, pull, push) that touch shared state like
-// .git/refs/stash. Creates a new mutex per project on first access.
+// .git/refs/stash.
 func (s *Server) getProjectMutex(projectID string) *sync.Mutex {
-	s.projectMuxMu.RLock()
-	if mu, ok := s.projectMux[projectID]; ok {
-		s.projectMuxMu.RUnlock()
-		return mu
-	}
-	s.projectMuxMu.RUnlock()
-
-	s.projectMuxMu.Lock()
-	// Double-check after acquiring write lock
-	if mu, ok := s.projectMux[projectID]; ok {
-		s.projectMuxMu.Unlock()
-		return mu
-	}
-	mu := &sync.Mutex{}
-	s.projectMux[projectID] = mu
-	s.projectMuxMu.Unlock()
-	return mu
+	return getOrCreateMutex(&s.projectMuxMu, s.projectMux, projectID)
 }
 
 // generateCheckpointLabelForFork generates a short label for the checkpoint message

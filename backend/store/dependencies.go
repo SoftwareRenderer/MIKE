@@ -12,7 +12,7 @@ func (s *Store) CreateDependency(d *types.TaskDependency) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
 		`INSERT INTO task_dependencies (id, parent_task_id, child_task_id, auto_start, created_at) VALUES (?, ?, ?, ?, ?)`,
-		d.ID, d.ParentTaskID, d.ChildTaskID, b2i(d.AutoStart), d.CreatedAt.Format(time.RFC3339),
+		d.ID, d.ParentTaskID, d.ChildTaskID, B2I(d.AutoStart), d.CreatedAt.Format(time.RFC3339),
 	)
 	return err
 }

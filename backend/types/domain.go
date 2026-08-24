@@ -280,24 +280,6 @@ type GitLogResponse struct {
 	HasMore       bool        `json:"has_more,omitempty"`   // true if more commits available beyond this batch
 }
 
-// GitBranch represents a git branch.
-type GitBranch struct {
-	Name      string `json:"name"`
-	Hash      string `json:"hash"`
-	IsCurrent bool   `json:"is_current"`
-}
-
-// GitStatus represents the working tree status.
-type GitStatus struct {
-	Branch    string   `json:"branch"`
-	Hash      string   `json:"hash"`
-	Clean     bool     `json:"clean"`
-	Added     []string `json:"added"`
-	Modified  []string `json:"modified"`
-	Deleted   []string `json:"deleted"`
-	Untracked []string `json:"untracked"`
-}
-
 // TaskMessage represents a chat message for a task.
 type TaskMessage struct {
 	ID               string    `json:"id"`

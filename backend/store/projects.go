@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"kanban/backend/types"
@@ -43,7 +44,7 @@ func (s *Store) CreateProject(p *types.Project) error {
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO projects (id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, sandbox_forward_ports, sandbox_mounts, sandbox_envs, sandbox_capabilities, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), b2i(p.SandboxEnabled), b2i(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), memoryLimit, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
+		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), B2I(p.SandboxEnabled), B2I(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), memoryLimit, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -69,8 +70,8 @@ func (s *Store) queryProject(id string) (*types.Project, error) {
 		return nil, err
 	}
 	p.OriginBranch = originBranch.String
-	p.SandboxEnabled = i2b(sandboxEnabled)
-	p.SandboxNetworkIsolation = i2b(sandboxNetworkIsolation)
+	p.SandboxEnabled = I2B(sandboxEnabled)
+	p.SandboxNetworkIsolation = I2B(sandboxNetworkIsolation)
 	p.SandboxImage = sandboxImage.String
 	p.SandboxDockerfilePath = sandboxDockerfilePath.String
 	if forwardPortsJSON.Valid && forwardPortsJSON.String != "" {
@@ -109,8 +110,8 @@ func (s *Store) ListProjects() ([]types.Project, error) {
 			return nil, err
 		}
 		p.OriginBranch = originBranch.String
-		p.SandboxEnabled = i2b(sandboxEnabled)
-		p.SandboxNetworkIsolation = i2b(sandboxNetworkIsolation)
+		p.SandboxEnabled = I2B(sandboxEnabled)
+		p.SandboxNetworkIsolation = I2B(sandboxNetworkIsolation)
 		p.SandboxImage = sandboxImage.String
 		p.SandboxDockerfilePath = sandboxDockerfilePath.String
 		if forwardPortsJSON.Valid && forwardPortsJSON.String != "" {
@@ -145,118 +146,82 @@ func (s *Store) UpdateProject(id string, name string) (*types.Project, error) {
 	return p, err
 }
 
-// UpdateProjectOriginBranch updates the origin branch for a project.
-func (s *Store) UpdateProjectOriginBranch(id string, branch string) error {
+// updateProjectColumn updates a single projects column and bumps updated_at.
+// The column name comes from internal call sites only (never user input).
+func (s *Store) updateProjectColumn(id, column string, value any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE projects SET origin_branch = ?, updated_at = ? WHERE id = ?`, branch, now.Format(time.RFC3339), id)
+	_, err := s.db.Exec("UPDATE projects SET "+column+" = ?, updated_at = ? WHERE id = ?", value, now.Format(time.RFC3339), id)
 	return err
+}
+
+// marshalColumnJSON serializes a list value for a JSON column, returning ""
+// for empty or nil values (the legacy empty-column convention).
+func marshalColumnJSON(v any) string {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Map {
+		if rv.IsNil() || rv.Len() == 0 {
+			return ""
+		}
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// UpdateProjectOriginBranch updates the origin branch for a project.
+func (s *Store) UpdateProjectOriginBranch(id string, branch string) error {
+	return s.updateProjectColumn(id, "origin_branch", branch)
 }
 
 // UpdateProjectSandboxEnabled updates the sandbox_enabled flag for a project.
 func (s *Store) UpdateProjectSandboxEnabled(id string, enabled bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE projects SET sandbox_enabled = ?, updated_at = ? WHERE id = ?`, b2i(enabled), now.Format(time.RFC3339), id)
-	return err
+	return s.updateProjectColumn(id, "sandbox_enabled", B2I(enabled))
 }
 
 // UpdateProjectSandboxNetworkIsolation updates the sandbox_network_isolation flag for a project.
 func (s *Store) UpdateProjectSandboxNetworkIsolation(id string, enabled bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE projects SET sandbox_network_isolation = ?, updated_at = ? WHERE id = ?`, b2i(enabled), now.Format(time.RFC3339), id)
-	return err
+	return s.updateProjectColumn(id, "sandbox_network_isolation", B2I(enabled))
 }
 
 // UpdateProjectSandboxImage updates the sandbox_image for a project.
+// An empty image resets the column to NULL (project-level image unset).
 func (s *Store) UpdateProjectSandboxImage(id string, image string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE projects SET sandbox_image = ?, updated_at = ? WHERE id = ?`, ptrStr(image), now.Format(time.RFC3339), id)
-	return err
+	return s.updateProjectColumn(id, "sandbox_image", ptrStr(image))
 }
 
 // UpdateProjectSandboxDockerfilePath updates the sandbox_dockerfile_path for a project.
+// An empty path resets the column to NULL (Dockerfile build unset).
 func (s *Store) UpdateProjectSandboxDockerfilePath(id string, path string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE projects SET sandbox_dockerfile_path = ?, updated_at = ? WHERE id = ?`, ptrStr(path), now.Format(time.RFC3339), id)
-	return err
+	return s.updateProjectColumn(id, "sandbox_dockerfile_path", ptrStr(path))
 }
 
 // UpdateProjectSandboxMemoryLimit updates the sandbox_memory_limit for a project.
 func (s *Store) UpdateProjectSandboxMemoryLimit(id string, limit int) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE projects SET sandbox_memory_limit = ?, updated_at = ? WHERE id = ?`, limit, now.Format(time.RFC3339), id)
-	return err
+	return s.updateProjectColumn(id, "sandbox_memory_limit", limit)
 }
 
 // UpdateProjectSandboxForwardPorts updates the sandbox_forward_ports for a project.
 func (s *Store) UpdateProjectSandboxForwardPorts(id string, ports []types.PortForward) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	portsJSON := ""
-	if len(ports) > 0 {
-		if b, err := json.Marshal(ports); err == nil {
-			portsJSON = string(b)
-		}
-	}
-	_, err := s.db.Exec(`UPDATE projects SET sandbox_forward_ports = ?, updated_at = ? WHERE id = ?`, portsJSON, now.Format(time.RFC3339), id)
-	return err
+	return s.updateProjectColumn(id, "sandbox_forward_ports", marshalColumnJSON(ports))
 }
 
 // UpdateProjectSandboxMounts updates the sandbox_mounts for a project.
 func (s *Store) UpdateProjectSandboxMounts(id string, mounts []types.SandboxMount) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	mountsJSON := ""
-	if len(mounts) > 0 {
-		if b, err := json.Marshal(mounts); err == nil {
-			mountsJSON = string(b)
-		}
-	}
-	_, err := s.db.Exec(`UPDATE projects SET sandbox_mounts = ?, updated_at = ? WHERE id = ?`, mountsJSON, now.Format(time.RFC3339), id)
-	return err
+	return s.updateProjectColumn(id, "sandbox_mounts", marshalColumnJSON(mounts))
 }
 
 // UpdateProjectSandboxEnvs updates the sandbox_envs for a project.
 func (s *Store) UpdateProjectSandboxEnvs(id string, envs []types.SandboxEnv) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	envsJSON := ""
-	if len(envs) > 0 {
-		if b, err := json.Marshal(envs); err == nil {
-			envsJSON = string(b)
-		}
-	}
-	_, err := s.db.Exec(`UPDATE projects SET sandbox_envs = ?, updated_at = ? WHERE id = ?`, envsJSON, now.Format(time.RFC3339), id)
-	return err
+	return s.updateProjectColumn(id, "sandbox_envs", marshalColumnJSON(envs))
 }
 
 // UpdateProjectSandboxCapabilities updates the sandbox_capabilities for a project.
 func (s *Store) UpdateProjectSandboxCapabilities(id string, capabilities []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	capsJSON := ""
-	if len(capabilities) > 0 {
-		if b, err := json.Marshal(capabilities); err == nil {
-			capsJSON = string(b)
-		}
-	}
-	_, err := s.db.Exec(`UPDATE projects SET sandbox_capabilities = ?, updated_at = ? WHERE id = ?`, capsJSON, now.Format(time.RFC3339), id)
-	return err
+	return s.updateProjectColumn(id, "sandbox_capabilities", marshalColumnJSON(capabilities))
 }
 
 // DeleteProject explicitly deletes all data related to a project,

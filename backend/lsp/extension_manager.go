@@ -114,30 +114,28 @@ func translateURIs(val any, workspacePath string, projectMounts map[string]strin
 	}
 }
 
-// translateURIsToContainer translates file URIs from host paths to container paths.
-func translateURIsToContainer(msg json.RawMessage, workspacePath string, projectMounts map[string]string) json.RawMessage {
+// translateURIsMsg translates file URIs in a JSON message, returning the
+// original message unchanged if it is not valid JSON or re-marshal fails.
+func translateURIsMsg(msg json.RawMessage, workspacePath string, projectMounts map[string]string, toContainer bool) json.RawMessage {
 	var data any
 	if err := json.Unmarshal(msg, &data); err != nil {
 		return msg
 	}
-	translated := translateURIs(data, workspacePath, projectMounts, true)
+	translated := translateURIs(data, workspacePath, projectMounts, toContainer)
 	if b, err := json.Marshal(translated); err == nil {
 		return b
 	}
 	return msg
 }
 
+// translateURIsToContainer translates file URIs from host paths to container paths.
+func translateURIsToContainer(msg json.RawMessage, workspacePath string, projectMounts map[string]string) json.RawMessage {
+	return translateURIsMsg(msg, workspacePath, projectMounts, true)
+}
+
 // translateURIsToHost translates file URIs from container paths back to host paths.
 func translateURIsToHost(msg json.RawMessage, workspacePath string, projectMounts map[string]string) json.RawMessage {
-	var data any
-	if err := json.Unmarshal(msg, &data); err != nil {
-		return msg
-	}
-	translated := translateURIs(data, workspacePath, projectMounts, false)
-	if b, err := json.Marshal(translated); err == nil {
-		return b
-	}
-	return msg
+	return translateURIsMsg(msg, workspacePath, projectMounts, false)
 }
 
 // NewExtensionLSPManager creates a new ExtensionLSPManager.

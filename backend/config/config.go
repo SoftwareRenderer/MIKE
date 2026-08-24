@@ -590,28 +590,27 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// parseBoolPtr parses a string to a *bool. Returns nil pointer if the string is empty.
-func parseBoolPtr(s string) (*bool, error) {
+// parsePtr parses a string to a *T using parse. Returns a nil pointer if the
+// string is empty (field absent from the request).
+func parsePtr[T any](s string, parse func(string) (T, error)) (*T, error) {
 	if s == "" {
 		return nil, nil
 	}
-	v, err := strconv.ParseBool(s)
+	v, err := parse(s)
 	if err != nil {
 		return nil, err
 	}
 	return &v, nil
 }
 
+// parseBoolPtr parses a string to a *bool. Returns nil pointer if the string is empty.
+func parseBoolPtr(s string) (*bool, error) {
+	return parsePtr(s, strconv.ParseBool)
+}
+
 // parseIntPtr parses a string to a *int. Returns nil pointer if the string is empty.
 func parseIntPtr(s string) (*int, error) {
-	if s == "" {
-		return nil, nil
-	}
-	v, err := strconv.Atoi(s)
-	if err != nil {
-		return nil, err
-	}
-	return &v, nil
+	return parsePtr(s, strconv.Atoi)
 }
 
 // AutoSummarizeThreshold returns the configured auto-summarization threshold as a

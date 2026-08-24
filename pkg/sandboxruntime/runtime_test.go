@@ -306,9 +306,9 @@ func TestValidateDockerfilePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateDockerfilePath(tt.path)
+			err := ValidateDockerfilePath(tt.path)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateDockerfilePath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
+				t.Errorf("ValidateDockerfilePath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
 			}
 		})
 	}

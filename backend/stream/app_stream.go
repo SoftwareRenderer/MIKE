@@ -381,6 +381,9 @@ func (asm *AppStreamManager) hasProjectSubscribers(projectID string) bool {
 	return false
 }
 
+// hasTaskSubscribers reports whether any client holds a task subscription.
+// No production caller: TestTaskEventDelivery uses it as the observable for
+// sendTaskPayload's subscription gating.
 func (asm *AppStreamManager) hasTaskSubscribers(projectID, taskID string) bool {
 	asm.mu.RLock()
 	defer asm.mu.RUnlock()

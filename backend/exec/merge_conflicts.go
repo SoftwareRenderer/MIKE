@@ -184,7 +184,7 @@ func (te *TaskExecutor) tryResolveMergeConflicts(dir, taskID, targetBranch, task
 	// No conflicted files found — try git merge --continue (git may have auto-resolved)
 	if len(conflictedFiles) == 0 {
 		log.Printf("[merge] task=%s no conflicted files found, trying merge --continue", taskID)
-		continueErr := runGitDir(dir, append(git.GitAuthorFlags(), "merge", "--continue")...)
+		continueErr := te.gitRun(dir, append(git.GitAuthorFlags(), "merge", "--continue")...)
 		if continueErr == nil {
 			log.Printf("[merge] task=%s merge auto-resolved via --continue", taskID)
 			te.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
@@ -193,7 +193,7 @@ func (te *TaskExecutor) tryResolveMergeConflicts(dir, taskID, targetBranch, task
 		// --continue also failed — include diagnostics in error
 		statusOutput := getMergeStatusOutput(dir)
 		log.Printf("[merge] task=%s merge --continue failed: %v. Status: %s", taskID, continueErr, statusOutput)
-		_ = runGitDir(dir, "merge", "--abort")
+		_ = te.gitRun(dir, "merge", "--abort")
 		return fmt.Errorf("merge conflict but no conflicted files found (status: %s)", statusOutput)
 	}
 
@@ -204,7 +204,7 @@ func (te *TaskExecutor) tryResolveMergeConflicts(dir, taskID, targetBranch, task
 	te.logSystemMessage(taskID, task.CurrentThreadID, "error",
 		fmt.Sprintf("Merge conflict detected in: %s", strings.Join(conflictedFiles, ", ")))
 
-	_ = runGitDir(dir, "merge", "--abort")
+	_ = te.gitRun(dir, "merge", "--abort")
 	return fmt.Errorf("merge conflict in %d file(s): %s", len(conflictedFiles), strings.Join(conflictedFiles, ", "))
 }
 
@@ -290,14 +290,6 @@ func (te *TaskExecutor) persistAndBroadcastMergeMessage(taskID, threadID, conten
 			"created_at": time.Now().UTC().Format(time.RFC3339),
 		}})
 	}
-}
-
-// runGitDir runs a git command in the given directory with author flags.
-func runGitDir(dir string, args ...string) error {
-	cmd := osexec.Command("git", args...)
-	cmd.Dir = dir
-	_, err := cmd.CombinedOutput()
-	return err
 }
 
 // commitConflictResolution stages resolved conflicted files, commits the

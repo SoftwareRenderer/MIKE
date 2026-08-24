@@ -47,15 +47,15 @@ func TestFailureTracker_SuccessResets(t *testing.T) {
 	var ft failureTracker
 	sig := "read_file:{\"path\":\"foo.txt\"}"
 
-	ft.recordTurn(failResults(sig))
-	ft.recordTurn(failResults(sig))
-	if ft.count() != 2 {
-		t.Errorf("before success: count = %d, want 2", ft.count())
+	if got := ft.recordTurn(failResults(sig)); got != 1 {
+		t.Errorf("first failure: count = %d, want 1", got)
+	}
+	if got := ft.recordTurn(failResults(sig)); got != 2 {
+		t.Errorf("second failure: count = %d, want 2", got)
 	}
 
-	ft.recordTurn(okResults(sig))
-	if ft.count() != 0 {
-		t.Errorf("after success: count = %d, want 0", ft.count())
+	if got := ft.recordTurn(okResults(sig)); got != 0 {
+		t.Errorf("after success: count = %d, want 0", got)
 	}
 
 	// Fail again — should restart from 1
@@ -69,10 +69,11 @@ func TestFailureTracker_DifferentCallResets(t *testing.T) {
 	sigA := "read_file:{\"path\":\"foo.txt\"}"
 	sigB := "read_file:{\"path\":\"bar.txt\"}"
 
-	ft.recordTurn(failResults(sigA))
-	ft.recordTurn(failResults(sigA))
-	if ft.count() != 2 {
-		t.Errorf("before different: count = %d, want 2", ft.count())
+	if got := ft.recordTurn(failResults(sigA)); got != 1 {
+		t.Errorf("first failure: count = %d, want 1", got)
+	}
+	if got := ft.recordTurn(failResults(sigA)); got != 2 {
+		t.Errorf("second failure: count = %d, want 2", got)
 	}
 
 	// Different tool call fails — resets to 1
@@ -90,16 +91,16 @@ func TestFailureTracker_TextOnlyResets(t *testing.T) {
 	var ft failureTracker
 	sig := "read_file:{\"path\":\"foo.txt\"}"
 
-	ft.recordTurn(failResults(sig))
-	ft.recordTurn(failResults(sig))
-	if ft.count() != 2 {
-		t.Errorf("before text: count = %d, want 2", ft.count())
+	if got := ft.recordTurn(failResults(sig)); got != 1 {
+		t.Errorf("first failure: count = %d, want 1", got)
+	}
+	if got := ft.recordTurn(failResults(sig)); got != 2 {
+		t.Errorf("second failure: count = %d, want 2", got)
 	}
 
 	// Text-only response (empty results) resets counter
-	ft.recordTurn(nil)
-	if ft.count() != 0 {
-		t.Errorf("after text-only: count = %d, want 0", ft.count())
+	if got := ft.recordTurn(nil); got != 0 {
+		t.Errorf("after text-only: count = %d, want 0", got)
 	}
 }
 
@@ -123,15 +124,13 @@ func TestFailureTracker_MixedSuccessFailureResets(t *testing.T) {
 	sigA := "read_file:{\"path\":\"foo.txt\"}"
 	sigB := "write_file:{\"path\":\"bar.txt\"}"
 
-	ft.recordTurn(failResults(sigA))
-	if ft.count() != 1 {
-		t.Errorf("before mixed: count = %d, want 1", ft.count())
+	if got := ft.recordTurn(failResults(sigA)); got != 1 {
+		t.Errorf("before mixed: count = %d, want 1", got)
 	}
 
 	// Mixed: one success + one failure — resets because a success occurred
-	ft.recordTurn(mixedResults([]string{sigA, sigB}))
-	if ft.count() != 0 {
-		t.Errorf("after mixed (has success): count = %d, want 0", ft.count())
+	if got := ft.recordTurn(mixedResults([]string{sigA, sigB})); got != 0 {
+		t.Errorf("after mixed (has success): count = %d, want 0", got)
 	}
 }
 
@@ -140,15 +139,16 @@ func TestFailureTracker_ReachesMax(t *testing.T) {
 	sig := "read_file:{\"path\":\"foo.txt\"}"
 	maxFailures := 3
 
+	var last int
 	for i := 1; i <= maxFailures; i++ {
-		count := ft.recordTurn(failResults(sig))
-		if count != i {
-			t.Errorf("turn %d: count = %d, want %d", i, count, i)
+		last = ft.recordTurn(failResults(sig))
+		if last != i {
+			t.Errorf("turn %d: count = %d, want %d", i, last, i)
 		}
 	}
 
-	if ft.count() != maxFailures {
-		t.Errorf("final count = %d, want %d", ft.count(), maxFailures)
+	if last != maxFailures {
+		t.Errorf("final count = %d, want %d", last, maxFailures)
 	}
 }
 
@@ -183,8 +183,8 @@ func TestFailureTracker_ResetClearsState(t *testing.T) {
 	ft.failCount = 5
 
 	ft.reset()
-	if ft.count() != 0 {
-		t.Errorf("after reset: count = %d, want 0", ft.count())
+	if ft.failCount != 0 {
+		t.Errorf("after reset: failCount = %d, want 0", ft.failCount)
 	}
 	if ft.lastFailureSig != "" {
 		t.Errorf("after reset: lastFailureSig = %q, want empty", ft.lastFailureSig)

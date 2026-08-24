@@ -117,16 +117,6 @@ func (f *Frame) ErrorMsg() string {
 	return string(f.Payload)
 }
 
-// Validate checks that the frame type is known.
-func (f *Frame) Validate() error {
-	switch f.Type {
-	case TypeRequest, TypeResult, TypeChunk, TypeError, TypeNotification:
-		return nil
-	default:
-		return fmt.Errorf("unknown frame type %d (MsgID=%d)", f.Type, f.MsgID)
-	}
-}
-
 // String returns a debug string for the frame.
 func (f *Frame) String() string {
 	size := len(f.Payload)

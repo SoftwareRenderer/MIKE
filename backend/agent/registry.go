@@ -107,7 +107,7 @@ func (r *AgentRegistry) ToProviders() []types.Provider {
 			Kind:        types.ProviderKindAgent,
 			URL:         fmt.Sprintf("agent://%s", ext.Name),
 			Concurrency: 1, // agents are single-concurrency by default
-			Models: []types.ModelConfig{},
+			Models:      []types.ModelConfig{},
 		}
 		providers = append(providers, provider)
 	}
@@ -185,22 +185,26 @@ func (r *AgentRegistry) GetAgentSandbox(agentName string) *types.AgentSandbox {
 	return &sb
 }
 
-// parseMountArray parses a JSON array of mount objects from extension config.
-func parseMountArray(v any) ([]types.SandboxMount, error) {
-	switch src := v.(type) {
-	case []any:
-		var mounts []types.SandboxMount
-		for _, item := range src {
-			m, err := parseMountObject(item)
-			if err != nil {
-				return nil, err
-			}
-			mounts = append(mounts, m)
-		}
-		return mounts, nil
-	default:
+// parseObjectArray parses a JSON array of objects from extension config
+func parseObjectArray[T any](v any, parse func(any) (T, error)) ([]T, error) {
+	src, ok := v.([]any)
+	if !ok {
 		return nil, fmt.Errorf("expected array, got %T", v)
 	}
+	items := make([]T, 0, len(src))
+	for _, item := range src {
+		parsed, err := parse(item)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, parsed)
+	}
+	return items, nil
+}
+
+// parseMountArray parses a JSON array of mount objects from extension config.
+func parseMountArray(v any) ([]types.SandboxMount, error) {
+	return parseObjectArray(v, parseMountObject)
 }
 
 func parseMountObject(v any) (types.SandboxMount, error) {
@@ -219,20 +223,7 @@ func parseMountObject(v any) (types.SandboxMount, error) {
 
 // parseEnvArray parses a JSON array of env objects from extension config.
 func parseEnvArray(v any) ([]types.SandboxEnv, error) {
-	switch src := v.(type) {
-	case []any:
-		var envs []types.SandboxEnv
-		for _, item := range src {
-			e, err := parseEnvObject(item)
-			if err != nil {
-				return nil, err
-			}
-			envs = append(envs, e)
-		}
-		return envs, nil
-	default:
-		return nil, fmt.Errorf("expected array, got %T", v)
-	}
+	return parseObjectArray(v, parseEnvObject)
 }
 
 func parseEnvObject(v any) (types.SandboxEnv, error) {

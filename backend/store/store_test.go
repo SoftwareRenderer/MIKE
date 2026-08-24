@@ -26,14 +26,14 @@ func testStore(t *testing.T) *Store {
 func newTask(id, projectID string) *types.Task {
 	now := time.Now().UTC()
 	return &types.Task{
-		ID:          id,
-		ProjectID:   projectID,
-		Title:       id,
-		Prompt:      "test prompt",
-		Status:      "backlog",
+		ID:             id,
+		ProjectID:      projectID,
+		Title:          id,
+		Prompt:         "test prompt",
+		Status:         "backlog",
 		ExecutionState: "idle",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 }
 
