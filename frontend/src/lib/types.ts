@@ -552,6 +552,7 @@ export interface RegistryEntry {
     display_name: string;
     description: string;
     author: string;
+    featured?: boolean;
     homepage?: string;
     license_url?: string;
     image?: string;
