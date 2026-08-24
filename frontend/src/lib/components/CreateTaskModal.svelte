@@ -11,7 +11,7 @@
     });
     import type { Config, Provider, Task } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId } from '$lib/api';
+    import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId, startTask } from '$lib/api';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
@@ -25,10 +25,23 @@
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { MODE_DESCRIPTIONS } from '$lib/constants/modes';
 
-    let { projectId, onClose, onTaskCreated, parentId, currentBranch, onOptimisticTaskCreated, onReplaceOptimisticTask }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; currentBranch?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void } = $props();
+    let { projectId, onClose, onTaskCreated, parentId, currentBranch, onOptimisticTaskCreated, onReplaceOptimisticTask, initialPrompt = '', lineTask = false, onOpenTask = null }: { projectId: string | undefined; onClose: () => void; onTaskCreated?: () => void; parentId?: string; currentBranch?: string; onOptimisticTaskCreated?: (task: Task) => void; onReplaceOptimisticTask?: (optimisticId: string, realTask: Task) => void; initialPrompt?: string; lineTask?: boolean; onOpenTask?: ((task: Task) => void) | null } = $props();
 
-    let prompt = $state('');
+    // One-time initialization from the prop (e.g. gutter line-selection prefill)
+    const initialPromptValue = () => initialPrompt;
+    let prompt = $state(initialPromptValue());
+    // Interactive floating modal
+    let lastInitialPrompt = $state(initialPrompt);
+    $effect(() => {
+        if (initialPrompt && initialPrompt !== lastInitialPrompt) {
+            lastInitialPrompt = initialPrompt;
+            prompt = initialPrompt;
+            promptTextarea?.setSelectionRange(0, 0);
+        }
+    });
     let autoCommit = $state(false);
+    // Line-task variant: start the task immediately after creating it.
+    let autoStart = $state(true);
 
     let operatingMode = $state('act'); // "act", "plan", or "explore"
     let modeChangedByUser = $state(false);
@@ -295,7 +308,10 @@
     onMount(async () => {
         // Queue after BaseModal's focus-trap microtask (queued from its onMount, which
         // runs before ours) so the textarea wins initial focus over the close button.
-        queueMicrotask(() => promptTextarea?.focus());
+        queueMicrotask(() => {
+            promptTextarea?.focus();
+            if (prompt) promptTextarea?.setSelectionRange(0, 0);
+        });
         // Fetch parent task title and defaults if creating a subtask
         if (parentId && projectId) {
             try {
@@ -335,7 +351,28 @@
         }
     }
 
+    /** Replace the optimistic board card with the real server task. */
+    function replaceOptimisticTask(id: string, realTask: Task) {
+        const idx = appStore.board?.tasks.findIndex(t => t.id === id) ?? -1;
+        if (idx !== -1 && appStore.board) {
+            const updated = [...appStore.board.tasks];
+            updated[idx] = realTask;
+            appStore.board = { ...appStore.board, tasks: updated };
+        }
+        // Also replace in App's tasks array
+        onReplaceOptimisticTask?.(id, realTask);
+    }
+
+    /** Auto-start (line-task variant) — fire-and-forget with a failure toast. */
+    function startTaskIfEnabled(taskProjectId: string, taskId: string) {
+        if (!lineTask || !autoStart) return;
+        startTask(taskProjectId, taskId).catch(() => {
+            dialogStore.showToast('Task created, but auto-start failed.', 'error');
+        });
+    }
+
     async function handleSubmit() {
+        const lineTaskFlow = lineTask;
         if (!projectId || !prompt.trim()) return;
         loading = true;
         error = '';
@@ -363,9 +400,16 @@
         // Include optimistic ID in taskData so getQueuedTaskIds() can find it
         const taskDataWithId = { ...taskData, id, title: (taskData.prompt as string)?.slice(0, 80) || '' };
         const optimisticTask = { ...taskDataWithId, title: (taskData.prompt as string)?.slice(0, 80) || '', status: 'backlog', created_at: new Date().toISOString(), queued: true } as any;
+
+        const queueStartIfEnabled = async () => {
+            if (lineTaskFlow && autoStart) {
+                await enqueueAction({ type: 'startTask', params: { projectId, taskId: id } });
+            }
+        };
         if (isOfflineNow) {
             const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
             (optimisticTask as any).actionId = queued.id;
+            await queueStartIfEnabled();
         }
         appStore.board = { ...appStore.board!, tasks: [...(appStore.board!.tasks || []), optimisticTask] };
         onOptimisticTaskCreated?.(optimisticTask);
@@ -374,27 +418,44 @@
         onClose();
         loading = false;
 
-        // Fire-and-forget: try to create the task on the server in the background.
-        // If online, replace the optimistic task with the real one.
-        // If offline, createTask() returns the queued result (no-op since already queued above).
-        if (!isOfflineNow) {
-            createTask(projectId, taskData).then((realTask) => {
-                // Replace optimistic task with real one in appStore
-                const idx = appStore.board?.tasks.findIndex(t => t.id === id) ?? -1;
-                if (idx !== -1 && appStore.board) {
-                    const updated = [...appStore.board.tasks];
-                    updated[idx] = realTask;
-                    appStore.board = { ...appStore.board, tasks: updated };
-                }
-                // Also replace in App's tasks array
-                onReplaceOptimisticTask?.(id, realTask);
-            }).catch(async () => {
-                // Server unreachable — queue the action as fallback
+        if (isOfflineNow) {
+            if (lineTaskFlow) {
+                dialogStore.showToast('Offline — task creation and start are queued; it will run when you are back online.');
+            }
+            return;
+        }
+
+        if (lineTaskFlow) {
+            // The line-task variant needs the real ID to open the floating task
+            try {
+                const realTask = await createTask(projectId, taskData);
+                replaceOptimisticTask(id, realTask);
+                startTaskIfEnabled(projectId, realTask.id);
+                onOpenTask?.(realTask);
+            } catch {
+                // Server unreachable — queue create + start as fallback
                 setOfflineStatus(true);
                 const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
                 (optimisticTask as any).actionId = queued.id;
-            });
+                await queueStartIfEnabled();
+                dialogStore.showToast('Offline — task creation and start are queued; it will run when you are back online.');
+            }
+            return;
         }
+
+        // Fire-and-forget: try to create the task on the server in the background.
+        // If online, replace the optimistic task with the real one.
+        // If offline, createTask() returns the queued result (no-op since already queued above).
+        createTask(projectId, taskData).then((realTask) => {
+            replaceOptimisticTask(id, realTask);
+            startTaskIfEnabled(projectId, realTask.id);
+        }).catch(async () => {
+            // Server unreachable — queue the action as fallback
+            setOfflineStatus(true);
+            const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
+            (optimisticTask as any).actionId = queued.id;
+            await queueStartIfEnabled();
+        });
     }
 
     /**
@@ -427,12 +488,18 @@
 
 {#snippet footer()}
     <button type="button" class="btn-secondary" onclick={handleCancel} title="Cancel">Cancel</button>
-    <button type="button" class="btn-primary" disabled={!canSubmit} onclick={handleSubmit} title={`Create the task${submitHintLabel ? ` (${submitHintLabel})` : ''}`}>
+    {#if lineTask}
+        <span class="auto-start-option" role="button" tabindex="-1" title="Start the task immediately after creating it" onclick={() => { autoStart = !autoStart; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); autoStart = !autoStart; } }}>
+            <span class="auto-start-label">Auto start</span>
+            <ToggleSwitch bind:checked={autoStart} ariaLabel="Auto start after creating" />
+        </span>
+    {/if}
+    <button type="button" class="btn-primary" disabled={!canSubmit} onclick={() => handleSubmit()} title={`Create the task${submitHintLabel ? ` (${submitHintLabel})` : ''}`}>
         {loading ? 'Creating...' : 'Create Task'}{#if submitHintLabel && !hintsHidden}<kbd class="key-hint">{submitHintLabel}</kbd>{/if}
     </button>
 {/snippet}
 
-<BaseModal title={parentId ? 'Create Subtask' : 'Create Task'} width="480px" footer={footer} onClose={closeModal} onBeforeClose={requestClose} closeOnOverlayClick={false}>
+<BaseModal title={parentId ? 'Create Subtask' : 'Create Task'} width="480px" footer={footer} onClose={closeModal} onBeforeClose={requestClose} closeOnOverlayClick={false} floating={lineTask}>
     {#if parentId}
         <div class="parent-label">Subtask of: <strong>{parentTitle || 'Parent task'}</strong></div>
     {/if}
@@ -582,6 +649,17 @@
         color: rgba(255, 255, 255, 0.85);
         border-color: rgba(255, 255, 255, 0.3);
         background: rgba(255, 255, 255, 0.1);
+    }
+    .auto-start-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        user-select: none;
     }
     label {
         display: flex;

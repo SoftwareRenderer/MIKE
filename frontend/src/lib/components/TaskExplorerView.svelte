@@ -14,7 +14,9 @@
     import ResizeHandle from './ResizeHandle.svelte';
     import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles, loadEditorTabs, saveEditorTabs, clearEditorDraft, clearEditorHistory } from '$lib/storage';
     import type { LSPSymbol } from '$lib/utils/lsp-symbols';
-    import { appStore, dialogStore } from '$lib/stores';
+    import { buildLineSelectionPrompt } from '$lib/utils/line-selection';
+    import { appStore, dialogStore, uiStore } from '$lib/stores';
+    import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips
@@ -73,6 +75,13 @@
         onChangesOpen(false);
     }
 
+    // Gutter line selection in the file editor → Create Task modal prefilled with the selected lines
+    function handleLinesSelected(sel: { relativePath: string; startLine: number; lines: string[] }) {
+        uiStore.createTaskLineSelection = { prompt: buildLineSelectionPrompt(sel) };
+        uiStore.creatingChildOf = taskId;
+        uiStore.showCreateTask = true;
+    }
+
     // Find in files panel state
     let showFind = $state(false);
     function toggleFind() {
@@ -123,10 +132,15 @@
                 openFiles = saved.openFiles.filter(f => isPathSafe(f.path));
                 activeFilePath = saved.openFiles.find(f => f.path === saved.activeFilePath && isPathSafe(f.path))?.path || '';
                 pinnedFiles = new Set(saved.pinnedFiles.filter(p => openFiles.some(f => f.path === p)));
+                scrollTops = saved.scrollTops ?? {};
+                fileListScroll = saved.fileListScroll ?? 0;
                 onUpdateFile(activeFilePath || null);
             }
         }).catch(() => {});
     });
+
+    let scrollTops: Record<string, number> = {};
+    let fileListScroll = 0;
     let editorFocused = $state(false);
     let editorSaving = $state(false);
 
@@ -152,6 +166,8 @@
             openFiles: toPlainOpenFiles(openFiles),
             activeFilePath,
             pinnedFiles: [...pinnedFiles],
+            scrollTops,
+            fileListScroll,
         }).catch(() => {});
     });
 
@@ -405,6 +421,8 @@
     // Handle Escape key
     function handleKeydown(e: KeyboardEvent) {
         if (e.key === 'Escape') {
+            // A modal (e.g. the floating line-task modal) owns Escape while open
+            if (isAnyModalOpen()) return;
             if (showFind) {
                 showFind = false;
             } else if (showChanges) {
@@ -497,15 +515,18 @@
             activeTab = 'editor';
         }
         window.addEventListener('keydown', handleKeydown);
-        window.addEventListener('open-file', (e: any) => {
-            const { path, line } = e.detail;
-            handleFileSelected(path, line);
-        });
+        window.addEventListener('open-file', handleOpenFile);
     });
+
+    /** open-file dispatch (diff view / search results) */
+    function handleOpenFile(e: Event) {
+        const { path, line } = (e as CustomEvent).detail;
+        handleFileSelected(path, line);
+    }
 
     onDestroy(() => {
         window.removeEventListener('keydown', handleKeydown);
-        window.removeEventListener('open-file', () => {});
+        window.removeEventListener('open-file', handleOpenFile);
     });
 </script>
 
@@ -689,6 +710,7 @@
                             onToggleFullscreen={toggleEditorFullscreen}
                             mobileFullscreen={editorFullscreen}
                             pendingFsEvent={pendingFsEvent}
+                            onLinesSelected={handleLinesSelected}
                         />
                     {:else}
                         <div class="file-editor-placeholder">
