@@ -33,6 +33,15 @@ const TEST_PASSWORD = 'test-password-1234';
 // Point the test servers at a local registry fixture so e2e registry tests are
 // deterministic and never depend on the hosted online registry.
 const TEST_REGISTRY_URL = 'file://' + path.join(__dirname, 'registry-fixture.json');
+// Local (unpublished) extension fixtures seeded into the repo extensions dir
+// for the Browse e2e specs. In a fresh checkout `extensions/` is empty, so
+// specs that need local extensions would fail; seeding from committed fixtures
+// keeps the suite hermetic. Only MISSING entries are created — pre-existing
+// dev installs are never touched — and teardown removes exactly what setup
+// created (tracked in SEEDED_EXTENSIONS_FILE so an interrupted run's leftovers
+// are cleaned by the next run's stale-state cleanup).
+const LOCAL_EXT_FIXTURES_DIR = path.join(__dirname, 'fixtures', 'local-extensions');
+const SEEDED_EXTENSIONS_FILE = '/tmp/kanban-test-seeded-extensions.json';
 
 let mockServer: ReturnType<typeof spawn> | null = null;
 let kanbanServer: ReturnType<typeof spawn> | null = null;
@@ -40,6 +49,7 @@ let kanbanServerIsolated: ReturnType<typeof spawn> | null = null;
 
 async function setup(): Promise<void> {
     ensureTestRepo();
+    seedLocalExtensions();
     await killKanbanServer();
 
     console.log('[global-setup] Starting test kanban server...');
@@ -207,6 +217,9 @@ async function teardown(): Promise<void> {
         console.error(`[teardown] port ${port} stopped`);
     }
 
+    // Remove local extension fixtures this (or an interrupted previous) setup created.
+    removeSeededLocalExtensions();
+
     // Clean up orphaned sandbox containers
     try {
         const containers = execSync('sudo podman --runtime runsc ps --filter name=kanban-sandbox -q 2>/dev/null || true').toString().trim();
@@ -248,6 +261,62 @@ async function teardown(): Promise<void> {
     try { fs.unlinkSync(STORAGE_STATE_FILE_ISOLATED); } catch { /* ignore */ }
     try { fs.unlinkSync('/tmp/kanban-test-auth.json'); } catch { /* ignore */ }
     try { fs.unlinkSync('/tmp/kanban-test-auth.json.isolated'); } catch { /* ignore */ }
+}
+
+// --- Local extension seeding ---
+
+function readSeededExtensions(): string[] {
+    try {
+        return JSON.parse(fs.readFileSync(SEEDED_EXTENSIONS_FILE, 'utf-8')) as string[];
+    } catch {
+        return [];
+    }
+}
+
+function writeSeededExtensions(list: string[]): void {
+    try {
+        fs.writeFileSync(SEEDED_EXTENSIONS_FILE, JSON.stringify(list));
+    } catch { /* ignore */ }
+}
+
+/** Copy committed local-extension fixtures into the repo extensions dir, but
+ *  only where the extension is not already present (dev installs win). */
+function seedLocalExtensions(): void {
+    let authors: string[];
+    try {
+        authors = fs.readdirSync(LOCAL_EXT_FIXTURES_DIR);
+    } catch {
+        return; // no fixtures dir — nothing to seed
+    }
+    const created = readSeededExtensions();
+    for (const author of authors) {
+        const fixtureAuthor = path.join(LOCAL_EXT_FIXTURES_DIR, author);
+        if (!fs.statSync(fixtureAuthor).isDirectory()) continue;
+        for (const name of fs.readdirSync(fixtureAuthor)) {
+            const src = path.join(fixtureAuthor, name);
+            if (!fs.statSync(src).isDirectory()) continue;
+            const dest = path.join(PROJECT_ROOT, 'extensions', author, name);
+            if (fs.existsSync(dest)) continue; // pre-existing dev install wins
+            fs.cpSync(src, dest, { recursive: true });
+            created.push(dest);
+            console.log(`[global-setup] Seeded local extension fixture: ${author}/${name}`);
+        }
+    }
+    writeSeededExtensions(created);
+}
+
+/** Remove exactly the extension dirs a (possibly previous) setup created. */
+function removeSeededLocalExtensions(): void {
+    for (const dir of readSeededExtensions()) {
+        try {
+            fs.rmSync(dir, { recursive: true, force: true });
+            // Drop the now-empty author dir if setup created it too.
+            fs.rmdirSync(path.dirname(dir));
+        } catch { /* not empty or already gone — leave it */ }
+    }
+    try {
+        fs.unlinkSync(SEEDED_EXTENSIONS_FILE);
+    } catch { /* ignore */ }
 }
 
 // --- Helpers ---
@@ -292,6 +361,8 @@ function killPort(port: number): void {
 }
 
 function cleanupStaleState(keepLockFile: boolean): void {
+    // Leftover seeded fixtures from an interrupted run.
+    removeSeededLocalExtensions();
     if (!keepLockFile) {
         try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
     }

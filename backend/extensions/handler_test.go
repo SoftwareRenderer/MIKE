@@ -702,6 +702,7 @@ func TestHandleLocalExtensions(t *testing.T) {
 		"description": "Preview markdown",
 		"author": "SoftwareRenderer",
 		"version": "1.0.0",
+		"featured": true,
 		"capabilities": {"ui": {"injection_points": ["task-card"]}}
 	}`)
 	// A malformed manifest should be skipped, not fail the scan.
@@ -742,6 +743,10 @@ func TestHandleLocalExtensions(t *testing.T) {
 	if result[0].LocalPath != want0 {
 		t.Errorf("result[0].LocalPath = %q, want %q", result[0].LocalPath, want0)
 	}
+	// The featured flag is carried from the manifest into the local entry.
+	if !result[0].Featured {
+		t.Errorf("result[0].Featured = false, want true (manifest has featured: true)")
+	}
 
 	if result[1].Name != "svelte-language-server" || result[1].Type != ExtensionTypeLSP {
 		t.Errorf("result[1] = %+v, want svelte-language-server/lsp", result[1])
@@ -754,6 +759,9 @@ func TestHandleLocalExtensions(t *testing.T) {
 	}
 	if result[1].Capabilities == nil || result[1].Capabilities.GetLSP() == nil {
 		t.Error("result[1].Capabilities.GetLSP() = nil, want LSP config")
+	}
+	if result[1].Featured {
+		t.Errorf("result[1].Featured = true, want false (manifest has no featured flag)")
 	}
 }
 

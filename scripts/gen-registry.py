@@ -8,7 +8,8 @@ within the repo that holds the extension (`subdir`). On install the server clone
 the repo, checks out exactly `commit`, verifies `git rev-parse HEAD` matches, and
 only then installs the `subdir` content into `./extensions/<author>/<name>`. The
 full capability config stays in each manifest; the registry only carries what the
-Browse UI renders.
+Browse UI renders — including `featured: true`, which pins the entry to the top
+of the Browse list (above non-featured registry entries) until it is installed.
 
 Usage:
     python3 scripts/gen-registry.py            # regenerate registry.json
@@ -153,6 +154,11 @@ def build_entry(ext_type, name, manifest_path, repo, commit):
     for field in ('homepage', 'license_url'):
         if manifest.get(field):
             entry[field] = manifest[field]
+
+    # Optional: featured extensions pin to the top of the Browse list until
+    # installed. Only emitted when the manifest sets it.
+    if manifest.get('featured'):
+        entry['featured'] = True
 
     # Git-pinned source fields.
     entry['repo'] = repo

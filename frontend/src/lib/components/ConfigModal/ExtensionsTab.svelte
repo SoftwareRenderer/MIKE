@@ -6,6 +6,7 @@
     import { dialogStore } from '$lib/stores';
     import { isDangerousPermission, requiresInstallReview, sortPermissions } from '$lib/utils/extension-permissions';
     import { effectiveConfigFields, initialEditConfig } from '$lib/utils/extension-config';
+    import { orderBrowseEntries } from '$lib/composables/use-browse-order';
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
 
@@ -538,32 +539,32 @@
         );
     });
 
-    // Identity keys of local (filesystem-only) extensions that are not in the
-    // registry, matched by author/name so a local fork of a published extension
-    // (different author namespace) is not hidden by a name-only collision.
-    let unpublishedKeys = $derived.by(() => {
+    // Local (filesystem-only) extensions not present in the registry, matched
+    // by author/name so a local fork of a published extension (different
+    // author namespace) is not hidden by a name-only collision.
+    let unpublished = $derived.by(() => {
         const registryKeys = new Set(registryEntries.map(e => identityKey(e.author, e.name)));
-        return new Set(localExtensions
-            .filter(ext => !registryKeys.has(identityKey(ext.author, ext.name)))
-            .map(e => identityKey(e.author, e.name)));
+        return localExtensions.filter(ext => !registryKeys.has(identityKey(ext.author, ext.name)));
     });
+
+    // Identity keys of the unpublished extensions (template lookup).
+    let unpublishedKeys = $derived(new Set(unpublished.map(e => identityKey(e.author, e.name))));
+
+    // Identity keys of installed extensions (template lookup + browse pinning).
+    let installedKeys = $derived(new Set(extensions.map(e => identityKey(e.author, e.name))));
 
     // Combined list for the browse view: unpublished (filesystem-only, not in
-    // the registry) extensions at the top, then registry entries.
-    let browseList = $derived.by(() => {
-        const registryKeys = new Set(registryEntries.map(e => identityKey(e.author, e.name)));
-        const unpublished = localExtensions.filter(ext => !registryKeys.has(identityKey(ext.author, ext.name)));
-        
-        const combined = [...unpublished, ...registryEntries];
-
-        if (!searchQuery) return combined;
-        const q = searchQuery.toLowerCase();
-        return combined.filter(entry =>
-            entry.name.toLowerCase().includes(q) ||
-            entry.display_name.toLowerCase().includes(q) ||
-            entry.description.toLowerCase().includes(q)
-        );
-    });
+    // the registry) extensions at the top, then featured (not yet installed)
+    // registry entries, then the remaining registry entries. See
+    // orderBrowseEntries in $lib/composables/use-browse-order.
+    let browseList = $derived.by(() =>
+        orderBrowseEntries(
+            unpublished,
+            registryEntries,
+            entry => installedKeys.has(identityKey(entry.author, entry.name)),
+            searchQuery,
+        )
+    );
 
     // Initialize on mount
     $effect(() => {
@@ -1134,6 +1135,7 @@
                     {#each browseList as entry}
                         {@const regCapKeys = getRegistryCapabilityKeys(entry)}
                         {@const isUnpublished = unpublishedKeys.has(identityKey(entry.author, entry.name))}
+                        {@const isInstalled = installedKeys.has(identityKey(entry.author, entry.name))}
                         <div class="extension-card registry-card" class:unpublished-card={isUnpublished}>
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'}>
@@ -1142,6 +1144,9 @@
                                 <div class="ext-info">
                                     <div class="ext-name-row">
                                         <span class="ext-name">{entry.display_name || entry.name}</span>
+                                        {#if entry.featured}
+                                            <span class="featured-badge" title={isInstalled ? 'Featured extension' : 'Featured extension — pinned to the top of the Browse list until installed'}>Featured</span>
+                                        {/if}
                                         {#if isUnpublished}
                                             <button
                                                 class="unpublished-badge"
@@ -1172,7 +1177,7 @@
                                     </span>
                                 </div>
                                 <div class="ext-action">
-                                    {#if extensions.some(e => identityKey(e.author, e.name) === identityKey(entry.author, entry.name))}
+                                    {#if isInstalled}
                                         <span class="installed-badge">Installed</span>
                                     {:else}
                                         <button class="btn btn-primary btn-small" onclick={() => handleInstall(entry, isUnpublished)} disabled={installing.has(entry.name)}>
@@ -1592,6 +1597,20 @@
         background: var(--color-status-yellow);
         color: #111;
         border: 1px solid #111;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .featured-badge {
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        padding: 0.12rem 0.5rem;
+        border-radius: 4px;
+        background: var(--color-accent);
+        color: #fff;
+        border: 1px solid var(--color-accent);
         white-space: nowrap;
         flex-shrink: 0;
     }

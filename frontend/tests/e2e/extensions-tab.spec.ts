@@ -1,10 +1,53 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 test.describe.configure({ mode: 'parallel' });
 
 // ============================================================
 // Extensions Tab
 // ============================================================
+
+// Compute the Browse view's segments from the (fixture-pinned) APIs:
+//  1. unpublished — present in the local extensions dir but absent from the
+//     registry index (API order); must render first.
+//  2. featured — registry entries with featured: true that are not yet
+//     installed; must render second (pinned to the top of the registry
+//     section).
+//  3. rest — the remaining registry entries in API order.
+// Also returns the card counts the DOM must reach before ordering assertions
+// are safe (local + registry entries load asynchronously, so the rendered
+// card set can be transiently partial).
+async function getBrowseSegments(page: Page) {
+  return page.evaluate(async () => {
+    const localRes = await fetch('/api/extensions/local');
+    const regRes = await fetch('/api/extensions/registry');
+    const instRes = await fetch('/api/extensions');
+    const local = localRes.ok ? ((await localRes.json()) as any[]) : [];
+    const registry = regRes.ok ? ((await regRes.json()) as any[]) : [];
+    const installed = instRes.ok ? ((await instRes.json()) as any[]) : [];
+    const key = (e: any) => `${e.author}/${e.name}`;
+    const displayName = (e: any) => e.display_name || e.name;
+    const registryKeys = new Set(registry.map(key));
+    const installedKeys = new Set(installed.map(key));
+    const unpublished = local
+      .filter((e: any) => !registryKeys.has(key(e)))
+      .map(displayName);
+    const featuredEntries = registry.filter(
+      (e: any) => e.featured === true && !installedKeys.has(key(e)),
+    );
+    const featured = featuredEntries.map(displayName);
+    const featuredKeys = new Set(featuredEntries.map(key));
+    const rest = registry
+      .filter((e: any) => !featuredKeys.has(key(e)))
+      .map(displayName);
+    return {
+      unpublished,
+      featured,
+      rest,
+      localCount: unpublished.length,
+      registryCount: registry.length,
+    };
+  });
+}
 
 test.describe('Extensions Tab', () => {
   test.beforeEach(async ({ page }) => {
@@ -43,7 +86,7 @@ test.describe('Extensions Tab', () => {
     expect(installedTab).toContain(String(actualCount));
     if (actualCount === 0) {
       // Verify empty state when truly no extensions installed
-      await expect(page.locator('.extensions-empty, .ext-empty-state')).toBeVisible({ timeout: 3000 });
+      await expect(page.locator('.empty-state')).toBeVisible({ timeout: 3000 });
     }
   });
 
@@ -56,8 +99,8 @@ test.describe('Extensions Tab', () => {
     await page.click('text=Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
-    // Click Browse Registry tab
-    await page.click('text=Browse Registry');
+    // Click Browse tab
+    await page.click('.view-tab:has-text("Browse")');
 
     // Should show registry URL input or browse view
     await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
@@ -88,59 +131,85 @@ test.describe('Extensions Tab', () => {
     await expect(page.locator('button:has-text("Check for Updates")')).toBeVisible({ timeout: 15000 });
   });
 
-  test('should show unpublished extensions at the top of Browse Registry', async ({ page }) => {
+  test('should order Browse as local, then featured, then remaining registry extensions', async ({ page }) => {
     // Open settings modal
     await page.click('.icon-btn[aria-label="Settings"]');
     await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
     await page.click('text=Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
-    // Compute unpublished extensions from the API: present in the local
-    // extensions dir but absent from the registry index.
-    const unpublished = await page.evaluate(async () => {
-      const localRes = await fetch('/api/extensions/local');
-      const regRes = await fetch('/api/extensions/registry');
-      if (!localRes.ok || !regRes.ok) return [];
-      const local = (await localRes.json()) as any[];
-      const registry = (await regRes.json()) as any[];
-      const registryNames = new Set(registry.map((e: any) => e.name));
-      return local
-        .filter((e: any) => !registryNames.has(e.name))
-        .map((e: any) => e.display_name || e.name);
-    });
+    const segments = await getBrowseSegments(page);
 
-    // The test is only meaningful when there is at least one unpublished extension.
-    expect(unpublished.length).toBeGreaterThan(0);
+    // The test is only meaningful with at least one unpublished extension
+    // (the e2e servers seed local-extension fixtures in global-setup).
+    expect(segments.unpublished.length).toBeGreaterThan(0);
+    expect(segments.featured.length).toBeGreaterThan(0);
+    expect(segments.rest.length).toBeGreaterThan(0);
 
-    // Switch to Browse Registry
-    await page.click('text=Browse Registry');
+    // Switch to Browse
+    await page.click('.view-tab:has-text("Browse")');
     await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
 
-    // Wait for cards to render
-    await expect(page.locator('.registry-card').first()).toBeVisible({ timeout: 10000 });
+    // Wait for the FULL list to render: registry and local entries load
+    // asynchronously, so the card set can be transiently partial. The total
+    // comes from the API segments above, not the DOM.
+    await expect(page.locator('.registry-card')).toHaveCount(
+      segments.unpublished.length + segments.featured.length + segments.rest.length,
+      { timeout: 10000 },
+    );
 
-    // The first cards (in API order) must be exactly the unpublished extensions.
+    // The full card order must be exactly: local, featured, rest.
     const cardNames = await page
       .locator('.registry-card .ext-name')
       .evaluateAll((els) => els.map((e) => (e.textContent || '').trim()));
-    expect(cardNames.slice(0, unpublished.length)).toEqual(unpublished);
-
-    // The unpublished svelte-language-server should appear before the published
-    // TypeScript server (the only entry in the registry fixture).
-    const svelteIdx = cardNames.indexOf('Svelte Language Server');
-    const tsIdx = cardNames.indexOf('TypeScript/JavaScript Language Server');
-    expect(svelteIdx).toBeGreaterThanOrEqual(0);
-    expect(tsIdx).toBeGreaterThan(svelteIdx);
+    expect(cardNames).toEqual([
+      ...segments.unpublished,
+      ...segments.featured,
+      ...segments.rest,
+    ]);
 
     // Local cards should carry the prominent unpublished styling + badge.
     const unpublishedCards = page.locator('.registry-card.unpublished-card');
-    await expect(unpublishedCards).toHaveCount(unpublished.length);
+    await expect(unpublishedCards).toHaveCount(segments.unpublished.length);
     await expect(unpublishedCards.first().locator('.unpublished-badge')).toHaveText('Local');
 
     // The published (registry) card must not be styled as unpublished.
     const tsCard = page.locator('.registry-card', { hasText: 'TypeScript/JavaScript Language Server' });
     await expect(tsCard).not.toHaveClass(/unpublished-card/);
     await expect(tsCard.locator('.unpublished-badge')).toHaveCount(0);
+  });
+
+  test('should pin a featured (not installed) registry extension to the top of the registry section with a Featured badge', async ({ page }) => {
+    // Open settings modal
+    await page.click('.icon-btn[aria-label="Settings"]');
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
+    await page.click('text=Extensions');
+    await page.waitForSelector('.extensions-tab', { timeout: 5000 });
+
+    const { featured, localCount, registryCount } = await getBrowseSegments(page);
+    expect(featured.length).toBeGreaterThan(0);
+
+    // Switch to Browse
+    await page.click('.view-tab:has-text("Browse")');
+    await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
+
+    // Wait for the fully-rendered list (local + registry entries).
+    await expect(page.locator('.registry-card')).toHaveCount(localCount + registryCount, {
+      timeout: 10000,
+    });
+
+    // The featured entry renders above every non-featured registry entry:
+    // it is the first registry card after the local (unpublished) block.
+    const featuredCard = page.locator('.registry-card').nth(localCount);
+    await expect(featuredCard.locator('.ext-name')).toHaveText(featured[0]);
+    await expect(featuredCard.locator('.featured-badge')).toHaveText('Featured');
+
+    // No other card carries the Featured badge (non-featured registry
+    // entries and local cards do not).
+    await expect(page.locator('.registry-card .featured-badge')).toHaveCount(featured.length);
+
+    // The featured entry is not installed, so it still offers Install.
+    await expect(featuredCard.locator('button:has-text("Install")')).toBeVisible();
   });
 
   test('should install a local extension via the install-local endpoint', async ({ page }) => {
@@ -161,7 +230,7 @@ test.describe('Extensions Tab', () => {
     await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
     await page.click('text=Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
-    await page.click('text=Browse Registry');
+    await page.click('.view-tab:has-text("Browse")');
     await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
 
     // Click Install on a local (unpublished) card.
@@ -180,8 +249,8 @@ test.describe('Extensions Tab', () => {
     await page.click('text=Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
-    // Go to Browse Registry and install the local "Light Mode" extension.
-    await page.click('text=Browse Registry');
+    // Go to Browse and install the local "Light Mode" extension.
+    await page.click('.view-tab:has-text("Browse")');
     await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
     const lightCard = page.locator('.registry-card', { hasText: 'Light Mode' });
     await expect(lightCard).toBeVisible({ timeout: 10000 });
@@ -224,8 +293,8 @@ test.describe('Extensions Tab', () => {
     await page.click('text=Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
-    // Switch to Browse Registry view
-    await page.click('text=Browse Registry');
+    // Switch to Browse view
+    await page.click('.view-tab:has-text("Browse")');
     await expect(page.locator('.browse-view')).toBeVisible({ timeout: 5000 });
 
     // Wait for registry cards to load
