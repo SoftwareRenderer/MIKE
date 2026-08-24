@@ -380,11 +380,11 @@ func (c *Client) ReadFile(ctx context.Context, path string) (string, int64, erro
 	return string(content), int64(size), nil
 }
 
-// WriteFile writes content to a file in the sandbox.
-// Returns the number of bytes written.
-func (c *Client) WriteFile(ctx context.Context, path, content string) (int64, error) {
-	params, _ := json.Marshal(protocol.WriteParams{Path: path, Content: content})
-	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodWrite, params)
+// sendUint64 sends a request and returns the uint64 in its Result payload.
+// op names the operation for error messages (e.g. "write", "edit").
+func (c *Client) sendUint64(ctx context.Context, op string, method uint8, params any) (int64, error) {
+	payload, _ := json.Marshal(params)
+	frame := protocol.NewRequest(c.nextMsgID(), method, payload)
 
 	final, _, err := c.waitForCtx(ctx, frame, 0)
 	if err != nil {
@@ -396,30 +396,21 @@ func (c *Client) WriteFile(ctx context.Context, path, content string) (int64, er
 
 	size, err := protocol.Uint64Result(final.Payload)
 	if err != nil {
-		return 0, fmt.Errorf("parse write result: %w", err)
+		return 0, fmt.Errorf("parse %s result: %w", op, err)
 	}
 	return int64(size), nil
+}
+
+// WriteFile writes content to a file in the sandbox.
+// Returns the number of bytes written.
+func (c *Client) WriteFile(ctx context.Context, path, content string) (int64, error) {
+	return c.sendUint64(ctx, "write", protocol.MethodWrite, protocol.WriteParams{Path: path, Content: content})
 }
 
 // EditFile applies text replacements to a file in the sandbox.
 // Returns the number of bytes written.
 func (c *Client) EditFile(ctx context.Context, path string, edits []protocol.Edit) (int64, error) {
-	params, _ := json.Marshal(protocol.EditParams{Path: path, Edits: edits})
-	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodEdit, params)
-
-	final, _, err := c.waitForCtx(ctx, frame, 0)
-	if err != nil {
-		return 0, err
-	}
-	if final.Type == protocol.TypeError {
-		return 0, errors.New(final.ErrorMsg())
-	}
-
-	size, err := protocol.Uint64Result(final.Payload)
-	if err != nil {
-		return 0, fmt.Errorf("parse edit result: %w", err)
-	}
-	return int64(size), nil
+	return c.sendUint64(ctx, "edit", protocol.MethodEdit, protocol.EditParams{Path: path, Edits: edits})
 }
 
 // Output returns an io.Reader that yields bash output as it arrives.

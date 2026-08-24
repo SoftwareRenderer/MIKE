@@ -168,26 +168,3 @@ func TestGenerateSelfSignedCert(t *testing.T) {
 		t.Errorf("expected key file permissions 0600, got %o", info.Mode().Perm())
 	}
 }
-
-// -- helpers to save/restore TLS env vars (for backward compat tests) --
-
-var _savedTLS = make(map[string]string)
-
-func _clearTLS() {
-	for _, env := range []string{"MIKE_TLS", "MIKE_TLS_CERT", "MIKE_TLS_KEY"} {
-		if v := os.Getenv(env); v != "" {
-			_savedTLS[env] = v
-		}
-		os.Unsetenv(env)
-	}
-}
-
-func _restoreTLS() {
-	for _, env := range []string{"MIKE_TLS", "MIKE_TLS_CERT", "MIKE_TLS_KEY"} {
-		os.Unsetenv(env)
-		if v, ok := _savedTLS[env]; ok {
-			os.Setenv(env, v)
-		}
-	}
-	_savedTLS = make(map[string]string)
-}

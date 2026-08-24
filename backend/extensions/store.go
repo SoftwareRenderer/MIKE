@@ -202,7 +202,7 @@ func (es *ExtensionStore) getBy(column, value string) (*Extension, error) {
 	ext.Type = extType
 	ext.InstallSource = installSource
 	ext.ImageRef = imageRef.String
-	ext.Enabled = i2b(enabled)
+	ext.Enabled = store.I2B(enabled)
 	ext.InstalledAt = installedAt
 	ext.BuiltAt = builtAt
 	ext.Repo = repo
@@ -259,7 +259,7 @@ func (es *ExtensionStore) GetByAuthorName(author, name string) (*Extension, erro
 	ext.Type = extType
 	ext.InstallSource = installSource
 	ext.ImageRef = imageRef.String
-	ext.Enabled = i2b(enabled)
+	ext.Enabled = store.I2B(enabled)
 	ext.InstalledAt = installedAt
 	ext.BuiltAt = builtAt
 	ext.Repo = repo
@@ -334,7 +334,7 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 
 	_, err = es.db.Exec(
 		`INSERT INTO extensions (id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ext.ID, ext.Name, ext.Author, ext.Version, ext.Type, string(manifestJSON), string(configJSON), string(containerConfigJSON), string(sandboxConfigJSON), ext.InstallSource, ext.ImageRef, b2i(ext.Enabled), ext.InstalledAt, ext.BuiltAt, ext.Repo, ext.Commit, ext.Subdir,
+		ext.ID, ext.Name, ext.Author, ext.Version, ext.Type, string(manifestJSON), string(configJSON), string(containerConfigJSON), string(sandboxConfigJSON), ext.InstallSource, ext.ImageRef, store.B2I(ext.Enabled), ext.InstalledAt, ext.BuiltAt, ext.Repo, ext.Commit, ext.Subdir,
 	)
 	if err != nil {
 		return fmt.Errorf("insert extension: %w", err)
@@ -403,7 +403,7 @@ func (es *ExtensionStore) Delete(id string) error {
 func (es *ExtensionStore) SetEnabled(id string, enabled bool) error {
 	result, err := es.db.Exec(
 		`UPDATE extensions SET enabled = ? WHERE id = ?`,
-		b2i(enabled), id,
+		store.B2I(enabled), id,
 	)
 	if err != nil {
 		return fmt.Errorf("set enabled: %w", err)
@@ -544,7 +544,7 @@ func scanExtension(s scanner) (*Extension, error) {
 	ext.Type = extType
 	ext.InstallSource = installSource
 	ext.ImageRef = imageRef.String
-	ext.Enabled = i2b(enabled)
+	ext.Enabled = store.I2B(enabled)
 	ext.InstalledAt = installedAt
 	ext.BuiltAt = builtAt
 	ext.Repo = repo
@@ -577,19 +577,6 @@ func scanExtension(s scanner) (*Extension, error) {
 	}
 
 	return &ext, nil
-}
-
-// b2i converts bool to int (0 or 1).
-func b2i(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// i2b converts int (0 or 1) to bool.
-func i2b(i int) bool {
-	return i != 0
 }
 
 // scanner is the common interface for sql.Row and sql.Rows.

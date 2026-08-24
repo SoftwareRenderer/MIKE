@@ -450,43 +450,37 @@ func (cs *ConfigStore) GetUtility() (providerName, model string) {
 	return cfg.UtilityProvider, cfg.UtilityModel
 }
 
-// GetProviderConcurrency returns the concurrency limit for the provider matching the given server URL.
-// Returns 1 (default minimum) if no matching provider is found or concurrency is not set.
-func (cs *ConfigStore) GetProviderConcurrency(serverURL string) int {
+// providerInt returns the matching provider's value from get, or def if the
+// provider is not found (matched by server URL, ignoring a trailing slash) or
+// the value is invalid (< 1). If GetConfig fails, def is returned.
+func (cs *ConfigStore) providerInt(serverURL string, get func(p types.Provider) int, def int) int {
 	cfg, err := cs.GetConfig()
 	if err != nil {
-		return 1
+		return def
 	}
 	serverURL = strings.TrimRight(serverURL, "/")
 	for _, provider := range cfg.Providers {
 		if strings.TrimRight(provider.URL, "/") == serverURL {
-			if provider.Concurrency < 1 {
-				return 1
+			if v := get(provider); v >= 1 {
+				return v
 			}
-			return provider.Concurrency
+			return def
 		}
 	}
-	return 1
+	return def
+}
+
+// GetProviderConcurrency returns the concurrency limit for the provider matching the given server URL.
+// Returns 1 (default minimum) if no matching provider is found or concurrency is not set.
+func (cs *ConfigStore) GetProviderConcurrency(serverURL string) int {
+	return cs.providerInt(serverURL, func(p types.Provider) int { return p.Concurrency }, 1)
 }
 
 // GetProviderMaxRequestsPerSecond returns the max new-request-start rate (requests/second)
 // for the provider matching the given server URL. Returns 0 (unlimited) if the provider
 // is not found or the value is unset/invalid.
 func (cs *ConfigStore) GetProviderMaxRequestsPerSecond(serverURL string) int {
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		return 0
-	}
-	serverURL = strings.TrimRight(serverURL, "/")
-	for _, provider := range cfg.Providers {
-		if strings.TrimRight(provider.URL, "/") == serverURL {
-			if provider.MaxRequestsPerSecond < 1 {
-				return 0
-			}
-			return provider.MaxRequestsPerSecond
-		}
-	}
-	return 0
+	return cs.providerInt(serverURL, func(p types.Provider) int { return p.MaxRequestsPerSecond }, 0)
 }
 
 // IsAgentProvider returns true if the provider matching the given server URL is an agent (non-LLM kind).

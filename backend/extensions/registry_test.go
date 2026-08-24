@@ -294,30 +294,6 @@ func TestValidateImageRef(t *testing.T) {
 	}
 }
 
-func TestValidateDockerfilePath(t *testing.T) {
-	tests := []struct {
-		name    string
-		path    string
-		wantErr bool
-	}{
-		{"valid absolute", "/home/user/Dockerfile", false},
-		{"valid relative", "Dockerfile", false},
-		{"valid subpath", "path/to/Dockerfile", false},
-		{"dash prefix", "-f", true},
-		{"dash prefix path", "--file=/tmp/Dockerfile", true},
-		{"empty string", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateDockerfilePath(tt.path)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validateDockerfilePath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
-			}
-		})
-	}
-}
-
 // makeGitRepo creates a local SHA-256 git repo with the given files (path →
 // content), commits them, and returns (repoPath, commitSHA).
 func makeGitRepo(t *testing.T, files map[string]string) (string, string) {

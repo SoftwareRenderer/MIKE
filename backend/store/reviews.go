@@ -13,7 +13,7 @@ func (s *Store) CreateReviewComment(c *types.ReviewComment) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
 		`INSERT INTO review_comments (id, task_id, file_path, line_num, comment, resolved, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.TaskID, c.FilePath, c.LineNum, c.Comment, b2i(c.Resolved), c.CreatedAt.Format(time.RFC3339), c.UpdatedAt.Format(time.RFC3339),
+		c.ID, c.TaskID, c.FilePath, c.LineNum, c.Comment, B2I(c.Resolved), c.CreatedAt.Format(time.RFC3339), c.UpdatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -54,7 +54,7 @@ func (s *Store) UpdateReviewComment(id string, comment *string, resolved *bool) 
 	}
 	if resolved != nil {
 		query += `, resolved = ?`
-		args = append(args, b2i(*resolved))
+		args = append(args, B2I(*resolved))
 	}
 	query += ` WHERE id = ?`
 	args = append(args, id)

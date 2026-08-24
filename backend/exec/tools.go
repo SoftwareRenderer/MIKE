@@ -1144,17 +1144,10 @@ func (te *TaskExecutor) handleLSPRename(ctx context.Context, args map[string]any
 		if err := write(ctx, rel, newContent); err != nil {
 			return "", fmt.Errorf("write %s: %w", rel, err)
 		}
-		fileSummary = append(fileSummary, fmt.Sprintf("%s (%d edit%s)", rel, len(edits[uri]), plural(len(edits[uri]))))
+		fileSummary = append(fileSummary, fmt.Sprintf("%s (%d edit%s)", rel, len(edits[uri]), git.PluralS(len(edits[uri]))))
 	}
 
 	return fmt.Sprintf("Renamed %q to %q in %d file(s): %s", symbol, newName, len(uris), strings.Join(fileSummary, ", ")), nil
-}
-
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }
 
 // findSymbolInText searches file content for an identifier and returns its LSP position

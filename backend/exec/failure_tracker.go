@@ -56,11 +56,6 @@ func (t *failureTracker) recordTurn(results []turnResult) int {
 	return t.failCount
 }
 
-// count returns the current consecutive failure count.
-func (t *failureTracker) count() int {
-	return t.failCount
-}
-
 // reset clears all tracked state.
 func (t *failureTracker) reset() {
 	t.lastFailureSig = ""

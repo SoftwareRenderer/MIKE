@@ -22,9 +22,9 @@ func (s *Store) CreateTask(t *types.Task) error {
 	_, err := s.db.Exec(
 		`INSERT INTO tasks (id, project_id, title, prompt, status, column_order, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, assigned_ports, session_cost)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.ProjectID, t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, b2i(t.HasMergeConflict),
-		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, b2i(t.AutoCommit), b2i(t.AutoMerge), b2i(t.SubtasksAutoMerge), t.OperatingMode,
-		ptrStr(t.ParentTaskID), b2i(t.Autostarted), b2i(t.TitleGenerating), b2i(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), assignedPortsJSON, t.SessionCost,
+		t.ID, t.ProjectID, t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, B2I(t.HasMergeConflict),
+		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode,
+		ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.Summarizing), ptrStr(t.CurrentThreadID), t.CreatedAt.Format(time.RFC3339), t.UpdatedAt.Format(time.RFC3339), assignedPortsJSON, t.SessionCost,
 	)
 	return err
 }
@@ -140,20 +140,26 @@ func (s *Store) UpdateTask(t *types.Task) error {
 	}
 	_, err := s.db.Exec(
 		`UPDATE tasks SET title = ?, prompt = ?, status = ?, column_order = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, execution_state = ?, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, summarizing = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ?`,
-		t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, b2i(t.HasMergeConflict),
-		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, b2i(t.AutoCommit), b2i(t.AutoMerge), b2i(t.SubtasksAutoMerge), t.OperatingMode, ptrStr(t.ParentTaskID), b2i(t.Autostarted), b2i(t.TitleGenerating), b2i(t.Summarizing), ptrStr(t.CurrentThreadID), assignedPortsJSON, t.SessionCost, now.Format(time.RFC3339), t.ID,
+		t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, B2I(t.HasMergeConflict),
+		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode, ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.Summarizing), ptrStr(t.CurrentThreadID), assignedPortsJSON, t.SessionCost, now.Format(time.RFC3339), t.ID,
 	)
+	return err
+}
+
+// updateTaskColumn updates a single tasks column, scoped to the task's project.
+// The column name comes from internal call sites only (never user input).
+func (s *Store) updateTaskColumn(taskID, projectID, column string, value any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	_, err := s.db.Exec("UPDATE tasks SET "+column+" = ?, updated_at = ? WHERE id = ? AND project_id = ?",
+		value, now.Format(time.RFC3339), taskID, projectID)
 	return err
 }
 
 // UpdateTaskExecutionState updates only the execution_state of a task.
 func (s *Store) UpdateTaskExecutionState(taskID, projectID, executionState string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE tasks SET execution_state = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
-		executionState, now.Format(time.RFC3339), taskID, projectID)
-	return err
+	return s.updateTaskColumn(taskID, projectID, "execution_state", executionState)
 }
 
 // TransitionInFlightTask atomically moves an in-flight task (running /
@@ -230,12 +236,7 @@ func (s *Store) ClearTaskBranch(taskID, projectID string) error {
 // SetTaskBranch unconditionally sets the branch of a task. Used by
 // recoverMissingBranch to update a stale branch reference.
 func (s *Store) SetTaskBranch(taskID, projectID, branch string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	_, err := s.db.Exec(`UPDATE tasks SET branch = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
-		branch, now.Format(time.RFC3339), taskID, projectID)
-	return err
+	return s.updateTaskColumn(taskID, projectID, "branch", branch)
 }
 
 // SetTaskMergeConflict sets or clears the merge conflict flag on a task.
@@ -244,7 +245,7 @@ func (s *Store) SetTaskMergeConflict(taskID, projectID string, hasConflict bool)
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`UPDATE tasks SET has_merge_conflict = ?, updated_at = ? WHERE id = ? AND project_id = ?`,
-		b2i(hasConflict), now.Format(time.RFC3339), taskID, projectID)
+		B2I(hasConflict), now.Format(time.RFC3339), taskID, projectID)
 	return err
 }
 
@@ -256,44 +257,35 @@ func (s *Store) DeleteTask(projectID, taskID string) error {
 	return err
 }
 
-// GetAllTaskIDs returns all task IDs across all projects.
-func (s *Store) GetAllTaskIDs() ([]string, error) {
+// queryTaskStrings runs a single-column string query against tasks and
+// collects all rows.
+func (s *Store) queryTaskStrings(query string) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(`SELECT id FROM tasks`)
+	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	ids := []string{}
+	values := []string{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var v string
+		if err := rows.Scan(&v); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		values = append(values, v)
 	}
-	return ids, rows.Err()
+	return values, rows.Err()
+}
+
+// GetAllTaskIDs returns all task IDs across all projects.
+func (s *Store) GetAllTaskIDs() ([]string, error) {
+	return s.queryTaskStrings(`SELECT id FROM tasks`)
 }
 
 // GetAllTaskBranches returns all non-empty branch names referenced by tasks.
 func (s *Store) GetAllTaskBranches() ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	rows, err := s.db.Query(`SELECT DISTINCT branch FROM tasks WHERE branch != ''`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	branches := []string{}
-	for rows.Next() {
-		var branch string
-		if err := rows.Scan(&branch); err != nil {
-			return nil, err
-		}
-		branches = append(branches, branch)
-	}
-	return branches, rows.Err()
+	return s.queryTaskStrings(`SELECT DISTINCT branch FROM tasks WHERE branch != ''`)
 }
 
 // ReorderTasks bulk-updates column_order for tasks in a project.
@@ -360,22 +352,24 @@ func (s *Store) GetAllDescendants(taskID string) ([]types.Task, error) {
 	return descendants, nil
 }
 
+// clearStaleFlag sets a 0/1 tasks flag column to 0 for all tasks where it is 1.
+// Called on server startup to clear flags left by crashed/restarted goroutines.
+func (s *Store) clearStaleFlag(column string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("UPDATE tasks SET "+column+" = 0, updated_at = ? WHERE "+column+" = 1",
+		time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
 // ClearStaleTitleGenerating sets title_generating to false for all tasks.
 // Called on server startup to clear flags left by crashed/restarted title generation goroutines.
 func (s *Store) ClearStaleTitleGenerating() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err := s.db.Exec(`UPDATE tasks SET title_generating = 0, updated_at = ? WHERE title_generating = 1`,
-		time.Now().UTC().Format(time.RFC3339))
-	return err
+	return s.clearStaleFlag("title_generating")
 }
 
 // ClearStaleSummarizing sets summarizing to false for all tasks.
 // Called on server startup to clear flags left by crashed/restarted summarization.
 func (s *Store) ClearStaleSummarizing() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err := s.db.Exec(`UPDATE tasks SET summarizing = 0, updated_at = ? WHERE summarizing = 1`,
-		time.Now().UTC().Format(time.RFC3339))
-	return err
+	return s.clearStaleFlag("summarizing")
 }

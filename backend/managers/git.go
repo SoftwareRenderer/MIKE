@@ -583,8 +583,9 @@ func gitErrorSummary(out []byte) string {
 	return s
 }
 
-// HandlePull pulls from remote.
-func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request) {
+// handleGitRemote runs a project-level remote git command (pull/push),
+// serialized by the per-project mutex. op must be "pull" or "push".
+func (h *GitHandler) handleGitRemote(w http.ResponseWriter, r *http.Request, op string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -601,44 +602,25 @@ func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 	}
-	c := exec.Command("git", "-C", project.Path, "pull")
+	c := exec.Command("git", "-C", project.Path, op)
 	// Never block on an interactive credential prompt.
 	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := c.CombinedOutput(); err != nil {
-		log.Printf("git pull failed: %v: %s", err, out)
-		httputil.JSONError(w, http.StatusInternalServerError, "git pull failed: "+gitErrorSummary(out))
+		log.Printf("git %s failed: %v: %s", op, err, out)
+		httputil.JSONError(w, http.StatusInternalServerError, "git "+op+" failed: "+gitErrorSummary(out))
 		return
 	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "pulled"})
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": op + "ed"})
+}
+
+// HandlePull pulls from remote.
+func (h *GitHandler) HandlePull(w http.ResponseWriter, r *http.Request) {
+	h.handleGitRemote(w, r, "pull")
 }
 
 // HandlePush pushes to remote.
 func (h *GitHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	projectID := r.PathValue("projectID")
-	project, err := h.store.GetProject(projectID)
-	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
-		return
-	}
-	// Acquire per-project mutex to serialize project-level git operations.
-	if h.getProjectMutex != nil {
-		mu := h.getProjectMutex(projectID)
-		mu.Lock()
-		defer mu.Unlock()
-	}
-	c := exec.Command("git", "-C", project.Path, "push")
-	// Never block on an interactive credential prompt.
-	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if out, err := c.CombinedOutput(); err != nil {
-		log.Printf("git push failed: %v: %s", err, out)
-		httputil.JSONError(w, http.StatusInternalServerError, "git push failed: "+gitErrorSummary(out))
-		return
-	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "pushed"})
+	h.handleGitRemote(w, r, "push")
 }
 
 // HandleTaskCommits returns the commit log for a task's worktree branch.
