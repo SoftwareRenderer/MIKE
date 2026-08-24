@@ -222,7 +222,6 @@ export interface Config {
     default_auto_summarize_threshold?: number; // percent of context window, 1-100
     hide_model_badge?: boolean; // hide the model badge on task cards
     encryption_enabled?: boolean;
-    registry_url?: string;
     keyboard_shortcuts?: KeyboardShortcuts;
 }
 
@@ -399,7 +398,6 @@ export type StreamEventType =
     | 'diff_changed'
     | 'build_progress'
     | 'sandbox_stats'
-    | 'port_conflict'
     | 'prompt_progress'
     | 'hint';
 

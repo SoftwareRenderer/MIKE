@@ -633,24 +633,24 @@ func createParentWithSubtask(t *testing.T, s *store.Store, projectID string) (st
 	return parent.ID, child.ID
 }
 
-// TestHandleStartWithSubtasks_MarksSubtaskAutostarted verifies that starting a
+// TestHandleStart_MarksSubtaskAutostarted verifies that starting a
 // parent task with subtasks marks the selected subtask autostarted=true, so its
 // ask_question calls are auto-answered from parent context.
-func TestHandleStartWithSubtasks_MarksSubtaskAutostarted(t *testing.T) {
+func TestHandleStart_MarksSubtaskAutostarted(t *testing.T) {
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	parentID, childID := createParentWithSubtask(t, s, projID)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStartWithSubtasks)
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStart)
 	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projID+"/tasks/"+parentID+"/start", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Fatalf("HandleStartWithSubtasks status = %d, body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("HandleStart status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 
-	child, err := s.GetTaskByTaskID(childID)
+	child, err := s.GetTaskByID(childID)
 	if err != nil {
 		t.Fatalf("get child: %v", err)
 	}
@@ -703,22 +703,22 @@ func postToMux(t *testing.T, mux *http.ServeMux, path string, body any) *httptes
 	return rr
 }
 
-// TestHandleStartWithSubtasks_MovesParentToInProgress verifies that starting a
+// TestHandleStart_MovesParentToInProgress verifies that starting a
 // backlog parent via POST /start moves the parent itself to In Progress
 // (started-but-pending) while the deepest subtask starts running.
-func TestHandleStartWithSubtasks_MovesParentToInProgress(t *testing.T) {
+func TestHandleStart_MovesParentToInProgress(t *testing.T) {
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "par-mip", "Parent", "backlog", "idle", "", "thread-par-mip", false)
 	createChainTask(t, s, projID, "child-mip", "Child", "backlog", "idle", "par-mip", "thread-child-mip", true)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStartWithSubtasks)
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStart)
 	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-mip/start", nil)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("HandleStartWithSubtasks status = %d, body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("HandleStart status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 
-	parent, _ := s.GetTaskByTaskID("par-mip")
+	parent, _ := s.GetTaskByID("par-mip")
 	if parent.Status != "in_progress" {
 		t.Errorf("parent should move to In Progress (started-but-pending), got %q", parent.Status)
 	}
@@ -726,7 +726,7 @@ func TestHandleStartWithSubtasks_MovesParentToInProgress(t *testing.T) {
 		t.Errorf("parent should stay pending (not running), got %q", parent.ExecutionState)
 	}
 
-	child, _ := s.GetTaskByTaskID("child-mip")
+	child, _ := s.GetTaskByID("child-mip")
 	// The seeded child's conversation already ends in an assistant message, so
 	// StartTask skips the LLM call and settles into idle (not a stale running).
 	if child.Status != "in_progress" || child.ExecutionState != "idle" {
@@ -737,22 +737,22 @@ func TestHandleStartWithSubtasks_MovesParentToInProgress(t *testing.T) {
 	}
 }
 
-// TestHandleStartWithSubtasks_AllChildrenDoneStartsOwnExecution verifies that
+// TestHandleStart_AllChildrenDoneStartsOwnExecution verifies that
 // starting a parent whose subtasks are all done starts the parent's own
 // execution.
-func TestHandleStartWithSubtasks_AllChildrenDoneStartsOwnExecution(t *testing.T) {
+func TestHandleStart_AllChildrenDoneStartsOwnExecution(t *testing.T) {
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "par-ad", "Parent", "backlog", "idle", "", "thread-par-ad", true)
 	createChainTask(t, s, projID, "child-ad", "Child", "done", "completed", "par-ad", "", false)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStartWithSubtasks)
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStart)
 	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-ad/start", nil)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("HandleStartWithSubtasks status = %d, body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("HandleStart status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 
-	parent, _ := s.GetTaskByTaskID("par-ad")
+	parent, _ := s.GetTaskByID("par-ad")
 	// The seeded parent's conversation already ends in an assistant message, so
 	// StartTask skips the LLM call and settles into idle (not a stale running).
 	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
@@ -763,26 +763,26 @@ func TestHandleStartWithSubtasks_AllChildrenDoneStartsOwnExecution(t *testing.T)
 	}
 }
 
-// TestHandleStartWithSubtasks_BlockedChildrenStayPending verifies that starting
+// TestHandleStart_BlockedChildrenStayPending verifies that starting
 // a parent whose subtask is in Review does not start anything — the parent
 // stays started-but-pending until the child is moved to Done.
-func TestHandleStartWithSubtasks_BlockedChildrenStayPending(t *testing.T) {
+func TestHandleStart_BlockedChildrenStayPending(t *testing.T) {
 	h, s, projID := newTaskHandlerWithExecutor(t)
 	createChainTask(t, s, projID, "par-blk", "Parent", "backlog", "idle", "", "thread-par-blk", false)
 	createChainTask(t, s, projID, "child-blk", "Child", "review", "idle", "par-blk", "", false)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStartWithSubtasks)
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/start", h.HandleStart)
 	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-blk/start", nil)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("HandleStartWithSubtasks status = %d, body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("HandleStart status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 
-	parent, _ := s.GetTaskByTaskID("par-blk")
+	parent, _ := s.GetTaskByID("par-blk")
 	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
 		t.Errorf("parent should be started-but-pending: status=%q state=%q", parent.Status, parent.ExecutionState)
 	}
-	child, _ := s.GetTaskByTaskID("child-blk")
+	child, _ := s.GetTaskByID("child-blk")
 	if child.Status != "review" {
 		t.Errorf("child should stay in review, got %q", child.Status)
 	}
@@ -804,11 +804,11 @@ func TestHandleStartSubtask_WithChildren_StartsDeepestSubtask(t *testing.T) {
 		t.Fatalf("HandleStartSubtask status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 
-	mid, _ := s.GetTaskByTaskID("mid-nsp")
+	mid, _ := s.GetTaskByID("mid-nsp")
 	if mid.Status != "in_progress" || mid.ExecutionState != "idle" {
 		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
 	}
-	leaf, _ := s.GetTaskByTaskID("leaf-nsp")
+	leaf, _ := s.GetTaskByID("leaf-nsp")
 	// The seeded leaf's conversation already ends in an assistant message, so
 	// StartTask skips the LLM call and settles into idle (not a stale running).
 	if leaf.Status != "in_progress" || leaf.ExecutionState != "idle" {
@@ -835,11 +835,11 @@ func TestHandleMove_SubtaskWithChildren_StartsDeepestSubtask(t *testing.T) {
 		t.Fatalf("HandleMove status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 
-	mid, _ := s.GetTaskByTaskID("mid-msc")
+	mid, _ := s.GetTaskByID("mid-msc")
 	if mid.Status != "in_progress" || mid.ExecutionState != "idle" {
 		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
 	}
-	leaf, _ := s.GetTaskByTaskID("leaf-msc")
+	leaf, _ := s.GetTaskByID("leaf-msc")
 	// The seeded leaf's conversation already ends in an assistant message, so
 	// StartTask skips the LLM call and settles into idle (not a stale running).
 	if leaf.Status != "in_progress" || leaf.ExecutionState != "idle" {
@@ -862,7 +862,7 @@ func TestHandleMove_ParentAllChildrenDone_StartsOwnExecution(t *testing.T) {
 		t.Fatalf("HandleMove status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 
-	parent, _ := s.GetTaskByTaskID("par-mad")
+	parent, _ := s.GetTaskByID("par-mad")
 	// The seeded parent's conversation already ends in an assistant message, so
 	// StartTask skips the LLM call and settles into idle (not a stale running).
 	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
@@ -887,19 +887,19 @@ func TestHandleMove_ParentWithGatedChildren_KeepsThemInPlace(t *testing.T) {
 		t.Fatalf("HandleMove status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 
-	parent, _ := s.GetTaskByTaskID("par-gate")
+	parent, _ := s.GetTaskByID("par-gate")
 	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
 		t.Errorf("parent should stay started-but-pending: status=%q state=%q", parent.Status, parent.ExecutionState)
 	}
-	backlog, _ := s.GetTaskByTaskID("child-gate-backlog")
+	backlog, _ := s.GetTaskByID("child-gate-backlog")
 	if backlog.Status != "in_progress" {
 		t.Errorf("backlog child should follow parent to In Progress: status=%q", backlog.Status)
 	}
-	review, _ := s.GetTaskByTaskID("child-gate-review")
+	review, _ := s.GetTaskByID("child-gate-review")
 	if review.Status != "review" {
 		t.Errorf("review child must not be dragged into In Progress: status=%q", review.Status)
 	}
-	done, _ := s.GetTaskByTaskID("child-gate-done")
+	done, _ := s.GetTaskByID("child-gate-done")
 	if done.Status != "done" {
 		t.Errorf("done child must not be dragged into In Progress: status=%q", done.Status)
 	}

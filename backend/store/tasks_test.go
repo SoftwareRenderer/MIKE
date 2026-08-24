@@ -53,7 +53,7 @@ func TestTaskAutostartedPersistence(t *testing.T) {
 	if err := s.UpdateTask(got); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
-	got2, err := s.GetTaskByTaskID("task-default")
+	got2, err := s.GetTaskByID("task-default")
 	if err != nil {
 		t.Fatalf("get task by ID: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestGetTaskNotFound(t *testing.T) {
 	}
 }
 
-func TestGetTaskByTaskID(t *testing.T) {
+func TestGetTaskByID(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -96,7 +96,7 @@ func TestGetTaskByTaskID(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	got, err := s.GetTaskByTaskID("task-1")
+	got, err := s.GetTaskByID("task-1")
 	if err != nil {
 		t.Fatalf("get task by ID: %v", err)
 	}

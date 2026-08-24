@@ -4,21 +4,20 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"io"
 )
 
 // Method identifiers.
 const (
-	MethodRead       uint8 = 0x01
-	MethodWrite      uint8 = 0x02
-	MethodEdit       uint8 = 0x03
-	MethodBash       uint8 = 0x04
-	MethodShellOpen  uint8 = 0x05
-	MethodShellIO    uint8 = 0x06
+	MethodRead        uint8 = 0x01
+	MethodWrite       uint8 = 0x02
+	MethodEdit        uint8 = 0x03
+	MethodBash        uint8 = 0x04
+	MethodShellOpen   uint8 = 0x05
+	MethodShellIO     uint8 = 0x06
 	MethodShellResize uint8 = 0x07
-	MethodShellClose uint8 = 0x08
-	MethodBashCancel uint8 = 0x09
-	MethodLSP        uint8 = 0x0A
+	MethodShellClose  uint8 = 0x08
+	MethodBashCancel  uint8 = 0x09
+	MethodLSP         uint8 = 0x0A
 )
 
 func methodString(m uint8) string {
@@ -55,23 +54,7 @@ type Request struct {
 	Params []byte // raw JSON payload
 }
 
-// ReadRequest reads and parses a Request from a Request frame.
-// Returns the parsed request or an error if the frame is not a valid request.
-func ReadRequest(r io.Reader) (*Request, error) {
-	frame, err := ReadFrame(r)
-	if err != nil {
-		return nil, err
-	}
-	if frame.Type != TypeRequest {
-		return nil, fmt.Errorf("expected Request frame, got %s", messageTypeString(frame.Type))
-	}
-	req, err := ParseRequest(frame)
-	if err != nil {
-		return nil, fmt.Errorf("MsgID %d: %w", frame.MsgID, err)
-	}
-	return req, nil
-}
-
+// ParseRequest parses a Request from a Request frame.
 func ParseRequest(frame *Frame) (*Request, error) {
 	if len(frame.Payload) < 6 {
 		return nil, fmt.Errorf("request payload too short (%d bytes)", len(frame.Payload))
@@ -117,15 +100,6 @@ func NewRequest(msgID uint32, method uint8, paramsJSON []byte) *Frame {
 	copy(payload[6:], paramsJSON)
 
 	return &Frame{MsgID: msgID, Type: TypeRequest, Payload: payload}
-}
-
-// ReadParams unmarshals the request params into v.
-// If params is empty, v is left at its zero value.
-func (r *Request) ReadParams(v any) error {
-	if len(r.Params) == 0 {
-		return nil
-	}
-	return json.Unmarshal(r.Params, v)
 }
 
 // MethodString returns the human-readable method name.

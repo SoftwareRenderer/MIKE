@@ -103,7 +103,6 @@ func TestExecuteTask_PreservesSessionCostAcrossRun(t *testing.T) {
 		project:        proj,
 		projectID:      proj.ID,
 		worktreePath:   t.TempDir(),
-		projectPath:    proj.Path,
 		serverURL:      server.URL,
 		modelName:      "test-model",
 		ctx:            ctx,
@@ -142,7 +141,7 @@ func TestExecuteTask_PreservesSessionCostAcrossRun(t *testing.T) {
 		t.Fatalf("timed out waiting for executor to finish")
 	}
 
-	got, err := s.GetTaskByTaskID(taskID)
+	got, err := s.GetTaskByID(taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -152,7 +151,7 @@ func TestExecuteTask_PreservesSessionCostAcrossRun(t *testing.T) {
 
 	// The same task, started again (e.g. after a provider/model change restart),
 	// must still accumulate on top of the preserved cost.
-	task2, _ := s.GetTaskByTaskID(taskID)
+	task2, _ := s.GetTaskByID(taskID)
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
 	done2 := make(chan struct{})
@@ -168,7 +167,6 @@ func TestExecuteTask_PreservesSessionCostAcrossRun(t *testing.T) {
 		project:        proj,
 		projectID:      proj.ID,
 		worktreePath:   t.TempDir(),
-		projectPath:    proj.Path,
 		serverURL:      server2.URL,
 		modelName:      "test-model",
 		ctx:            ctx2,
@@ -204,7 +202,7 @@ func TestExecuteTask_PreservesSessionCostAcrossRun(t *testing.T) {
 		t.Fatalf("timed out waiting for executor to finish (second run)")
 	}
 
-	got2, err := s.GetTaskByTaskID(taskID)
+	got2, err := s.GetTaskByID(taskID)
 	if err != nil {
 		t.Fatalf("get task after second run: %v", err)
 	}

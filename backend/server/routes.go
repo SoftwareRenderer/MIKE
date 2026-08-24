@@ -80,7 +80,6 @@ func (s *Server) setupRoutes() {
 
 	// Global utilities
 	s.mux.HandleFunc("/api/home", s.handleHome)
-	s.mux.HandleFunc("/api/gc", s.handleGC)
 	s.mux.HandleFunc("/api/fs/read", s.handleFSRead)
 	s.mux.HandleFunc("/api/fs/write", s.handleFSWrite)
 	s.mux.HandleFunc("/api/fs/init-git", s.handleFSInitGit)
@@ -94,8 +93,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/projects/clone", s.projectHandler.HandleClone)
 	s.mux.HandleFunc("GET /api/projects/counts", s.projectHandler.HandleCounts)
 	s.mux.HandleFunc("/api/projects/{projectID}", s.projectHandler.HandleByID)
-	s.mux.HandleFunc("/api/projects/{projectID}/board", s.boardHandler.HandleGetBoard)
-	s.mux.HandleFunc("/api/projects/{projectID}/board/reorder", s.boardHandler.HandleReorder)
+	s.mux.HandleFunc("/api/projects/{projectID}/board", s.boardHandler.HandleBoard)
 	s.mux.HandleFunc("/api/projects/{projectID}/stats", s.projectHandler.HandleStats)
 	s.mux.HandleFunc("/api/projects/{projectID}/sandbox/build", s.projectHandler.HandleSandboxBuild)
 	s.mux.HandleFunc("/api/projects/{projectID}/terminal", s.terminalMgr.HandleProjectTerminal)
@@ -107,9 +105,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}", s.taskHandler.HandleByID)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/move", s.taskHandler.HandleMove)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/init", s.taskHandler.HandleInit)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/start", s.taskHandler.HandleStartWithSubtasks)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/start", s.taskHandler.HandleStart)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/start-subtask", s.taskHandler.HandleStartSubtask)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/stop", s.taskHandler.HandleStopWithCascade)
+	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/stop", s.taskHandler.HandleStop)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/retry", s.executor.HandleRetry)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/resume", s.executor.HandleResume)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/send", s.executor.HandleSend)
@@ -145,7 +143,7 @@ func (s *Server) setupRoutes() {
 
 	// Git operations
 	s.mux.HandleFunc("/api/projects/{projectID}/git/log", s.gitHandler.HandleLog)
-	s.mux.HandleFunc("/api/projects/{projectID}/git/branch", s.gitHandler.HandleCurrentBranch)
+	s.mux.HandleFunc("/api/projects/{projectID}/git/branch", s.gitHandler.HandleBranch)
 	s.mux.HandleFunc("/api/projects/{projectID}/git/branches", s.gitHandler.HandleBranches)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/git/diff", s.gitHandler.HandleDiff)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/git/diff/file", s.gitHandler.HandleProjectDiffFile)

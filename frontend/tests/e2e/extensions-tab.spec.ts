@@ -207,14 +207,14 @@ test.describe('Extensions Tab', () => {
   });
 
   test('should show capability badges in Browse Registry view', async ({ page }) => {
-    // Navigate and check registry URL is configured
+    // Navigate; skip if the (fixture-pinned) registry is unreachable
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
-    const config = await page.evaluate(async () => {
-      const res = await fetch('/api/config');
-      return res.json();
+    const registryOk = await page.evaluate(async () => {
+      const res = await fetch('/api/extensions/registry');
+      return res.ok;
     });
-    if (!config.registry_url) {
+    if (!registryOk) {
       test.skip();
     }
 
@@ -253,14 +253,13 @@ test.describe('Registry URL Config', () => {
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
-  test('should have default registry URL', async ({ page }) => {
-    const config = await page.evaluate(async () => {
-      const res = await fetch('/api/config');
+  test('should serve the default registry index', async ({ page }) => {
+    const index = await page.evaluate(async () => {
+      const res = await fetch('/api/extensions/registry');
+      if (!res.ok) return null;
       return res.json();
     });
-
-    expect(config.registry_url).toBeDefined();
-    expect(typeof config.registry_url).toBe('string');
+    expect(Array.isArray(index)).toBe(true);
   });
 });
 
@@ -276,22 +275,14 @@ test.describe('TypeScript Language Server Extension', () => {
 
   test('should list typescript-language-server in registry', async ({ page }) => {
     // Fetch registry via API
-    const config = await page.evaluate(async () => {
-      const res = await fetch('/api/config');
+    const index = await page.evaluate(async () => {
+      const res = await fetch('/api/extensions/registry');
+      if (!res.ok) return null;
       return res.json();
     });
-
-    const registryUrl = config.registry_url;
-    if (!registryUrl) {
+    if (!Array.isArray(index)) {
       test.skip();
     }
-
-    const index = await page.evaluate(async (url) => {
-      const res = await fetch(`/api/extensions/registry?url=${encodeURIComponent(url)}`);
-      return res.json();
-    }, registryUrl);
-
-    expect(Array.isArray(index)).toBe(true);
 
     const tsEntry = index.find((entry: any) => entry.name === 'typescript-language-server');
     expect(tsEntry).toBeDefined();
@@ -300,20 +291,14 @@ test.describe('TypeScript Language Server Extension', () => {
   });
 
   test('should have correct registry entry fields for typescript-language-server', async ({ page }) => {
-    const config = await page.evaluate(async () => {
-      const res = await fetch('/api/config');
+    const index = await page.evaluate(async () => {
+      const res = await fetch('/api/extensions/registry');
+      if (!res.ok) return null;
       return res.json();
     });
-
-    const registryUrl = config.registry_url;
-    if (!registryUrl) {
+    if (!Array.isArray(index)) {
       test.skip();
     }
-
-    const index = await page.evaluate(async (url) => {
-      const res = await fetch(`/api/extensions/registry?url=${encodeURIComponent(url)}`);
-      return res.json();
-    }, registryUrl);
 
     const tsEntry = index.find((entry: any) => entry.name === 'typescript-language-server');
     expect(tsEntry).toBeDefined();

@@ -391,7 +391,6 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 type configResponse struct {
 	WorkspaceDir                  string                   `json:"workspace_dir"`
 	DatabasePath                  string                   `json:"database_path"`
-	RegistryURL                   string                   `json:"registry_url"`
 	Version                       string                   `json:"version"`
 	Providers                     []types.Provider         `json:"providers"`
 	WorkerProvider                string                   `json:"worker_provider"`
@@ -451,7 +450,6 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 	return configResponse{
 		WorkspaceDir:                  cfg.WorkspaceDir,
 		DatabasePath:                  cfg.DatabasePath,
-		RegistryURL:                   cfg.RegistryURL,
 		Version:                       cs.version,
 		Providers:                     providers,
 		WorkerProvider:                cfg.WorkerProvider,

@@ -242,7 +242,7 @@ func (te *TaskExecutor) automatedAnswers(ctx context.Context, subtask *types.Tas
 	if subtask.ParentTaskID == "" {
 		return nil, errors.New("task has no parent; cannot auto-answer")
 	}
-	parent, err := te.store.GetTaskByTaskID(subtask.ParentTaskID)
+	parent, err := te.store.GetTaskByID(subtask.ParentTaskID)
 	if err != nil {
 		return nil, fmt.Errorf("get parent task: %w", err)
 	}
@@ -573,12 +573,12 @@ Return ONLY the subtask ID (e.g. "frost-amber-quartz"), nothing else.`,
 	return deepest[0].ID
 }
 
-// StartSubtaskWithParent starts the executor for the specified subtask,
+// StartSubtask starts the executor for the specified subtask,
 // inheriting the parent's LLM config and ensuring the parent's branch. It does
 // not move the parent or its siblings — the caller places the chain.
 // autostarted records whether this start came from autonomous sibling continuation.
-func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string, autostarted bool) error {
-	subtask, err := te.store.GetTaskByTaskID(subtaskID)
+func (te *TaskExecutor) StartSubtask(projectID, subtaskID string, autostarted bool) error {
+	subtask, err := te.store.GetTaskByID(subtaskID)
 	if err != nil {
 		return fmt.Errorf("get subtask: %w", err)
 	}
@@ -586,7 +586,7 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string, auto
 		return fmt.Errorf("task has no parent")
 	}
 
-	parent, err := te.store.GetTaskByTaskID(subtask.ParentTaskID)
+	parent, err := te.store.GetTaskByID(subtask.ParentTaskID)
 	if err != nil {
 		return fmt.Errorf("get parent: %w", err)
 	}
@@ -611,7 +611,7 @@ func (te *TaskExecutor) StartSubtaskWithParent(projectID, subtaskID string, auto
 		if err := te.EnsureParentBranch(projectID, parent); err != nil {
 			return fmt.Errorf("ensure parent branch: %w", err)
 		}
-		parent, _ = te.store.GetTaskByTaskID(subtask.ParentTaskID)
+		parent, _ = te.store.GetTaskByID(subtask.ParentTaskID)
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, parent)
 	} else {
 		// Parent has a branch — sync it if the worktree's actual branch differs.
@@ -679,7 +679,7 @@ func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task)
 		return fmt.Errorf("set parent branch: %w", err)
 	}
 	if !set {
-		latest, err := te.store.GetTaskByTaskID(parent.ID)
+		latest, err := te.store.GetTaskByID(parent.ID)
 		if err != nil {
 			return fmt.Errorf("reload parent task: %w", err)
 		}
@@ -700,7 +700,7 @@ func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task)
 	}
 
 	// Refresh updatedAt; adopt another caller's branch name if they won the race.
-	latest, _ := te.store.GetTaskByTaskID(parent.ID)
+	latest, _ := te.store.GetTaskByID(parent.ID)
 	if latest.Branch != "" && latest.Branch != branchName {
 		branchName = latest.Branch
 	}
@@ -723,7 +723,7 @@ func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task)
 // in review/failed halts that branch, while the scheduler bubbles up so the
 // ancestor's other branches can still progress.
 func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTaskID string) error {
-	parent, err := te.store.GetTaskByTaskID(parentTaskID)
+	parent, err := te.store.GetTaskByID(parentTaskID)
 	if err != nil {
 		return fmt.Errorf("get parent task: %w", err)
 	}
@@ -768,14 +768,14 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 		}
 
 		// Reload to avoid stale state — prepareTaskExecution has its own guard.
-		selected, err := te.store.GetTaskByTaskID(selectedID)
+		selected, err := te.store.GetTaskByID(selectedID)
 		if err != nil || !te.IsStartableNow(*selected) {
 			log.Printf("[auto-start] task=%s selected sibling %s no longer startable, skipping", finishedTaskID, selectedID)
 			return nil
 		}
 
 		log.Printf("[auto-start] task=%s finished, starting next sibling %s (parent=%s)", finishedTaskID, selectedID, parentTaskID)
-		return te.StartSubtaskWithParent(projectID, selectedID, true)
+		return te.StartSubtask(projectID, selectedID, true)
 	}
 
 	// No pending siblings.
@@ -786,7 +786,7 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 			if err := te.StartTask(projectID, parent.ID, true); err != nil {
 				log.Printf("[auto-start] task=%s failed to start parent %s: %v", finishedTaskID, parent.ID, err)
 			} else {
-				started, _ := te.store.GetTaskByTaskID(parent.ID)
+				started, _ := te.store.GetTaskByID(parent.ID)
 				if started != nil {
 					te.appStreamMgr.BroadcastTaskUpdated(projectID, started)
 				}
@@ -809,7 +809,7 @@ func (te *TaskExecutor) autoStartAncestorSiblings(projectID string, parent *type
 	if parent.ParentTaskID == "" {
 		return nil // root parent, no more levels
 	}
-	grandparent, err := te.store.GetTaskByTaskID(parent.ParentTaskID)
+	grandparent, err := te.store.GetTaskByID(parent.ParentTaskID)
 	if err != nil {
 		return nil
 	}
@@ -825,7 +825,7 @@ func (te *TaskExecutor) autoStartAncestorSiblings(projectID string, parent *type
 // This enables the terminal and file explorer before the task is started.
 // It is idempotent — calling it on an already-initialized task is a no-op.
 func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) {
-	task, err := te.store.GetTaskByTaskID(taskID)
+	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -844,7 +844,7 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 	}
 	if !set {
 		// Another caller won the race — reload to get their branch name
-		task, err = te.store.GetTaskByTaskID(taskID)
+		task, err = te.store.GetTaskByID(taskID)
 		if err != nil {
 			return nil, err
 		}
@@ -857,7 +857,7 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 
 	// If this is a child task, ensure the parent has a branch first.
 	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		parent, err := te.store.GetTaskByID(task.ParentTaskID)
 		if err == nil && parent.Branch == "" {
 			if err := te.EnsureParentBranch(projectID, parent); err != nil {
 				return nil, fmt.Errorf("ensure parent branch: %w", err)
@@ -868,7 +868,7 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 	// If this is a child task, branch from the parent's actual worktree branch.
 	sourceBranch := ""
 	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		parent, err := te.store.GetTaskByID(task.ParentTaskID)
 		if err == nil {
 			if parentWtPath, wtErr := te.worktreeMgr.WorktreePath(parent.ID); wtErr == nil {
 				if _, statErr := os.Stat(parentWtPath); statErr == nil {
@@ -927,7 +927,6 @@ type taskExecSetup struct {
 	project               *types.Project
 	projectID             string
 	worktreePath          string
-	projectPath           string
 	serverURL             string
 	modelName             string
 	ctx                   context.Context
@@ -951,7 +950,7 @@ type taskExecSetup struct {
 // creation, branch watching, status updates, and sandbox configuration.
 // Returns nil if the task is already actively running (caller should check execSetup == nil).
 func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideServerURL, overrideModelName string, updateStatus bool) (*taskExecSetup, error) {
-	task, err := te.store.GetTaskByTaskID(taskID)
+	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -989,7 +988,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	// The parent's branch is the merge target for subtask auto-merge.
 	// If the parent hasn't started yet (no branch), create one now.
 	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		parent, err := te.store.GetTaskByID(task.ParentTaskID)
 		if err == nil && parent.Branch == "" {
 			if err := te.EnsureParentBranch(projectID, parent); err != nil {
 				return nil, fmt.Errorf("ensure parent branch: %w", err)
@@ -1001,7 +1000,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	// The stored parent.Branch may be stale (e.g., set before collision resolution).
 	sourceBranch := ""
 	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		parent, err := te.store.GetTaskByID(task.ParentTaskID)
 		if err == nil {
 			// Prefer the parent's worktree branch if it exists.
 			if parentWtPath, wtErr := te.worktreeMgr.WorktreePath(parent.ID); wtErr == nil {
@@ -1126,7 +1125,6 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		project:               project,
 		projectID:             projectID,
 		worktreePath:          worktreePath,
-		projectPath:           project.Path,
 		serverURL:             serverURL,
 		modelName:             modelName,
 		ctx:                   ctx,
@@ -1159,7 +1157,7 @@ func (te *TaskExecutor) getAgentRunner(ctx context.Context, projectID, taskID st
 	}
 	te.taskMu.Unlock()
 
-	task, err := te.store.GetTaskByTaskID(taskID)
+	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -1310,7 +1308,7 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 	}
 	te.taskMu.Unlock()
 
-	task, err := te.store.GetTaskByTaskID(taskID)
+	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		return err
 	}
@@ -1454,7 +1452,7 @@ func (te *TaskExecutor) ForwardUserMessage(projectID, taskID string, um stream.U
 	te.taskMu.Unlock()
 	// Block lazy-start while summarization is in progress to prevent
 	// concurrent LLM calls. Message is already in DB from HandleSend.
-	if task, _ := te.store.GetTaskByTaskID(taskID); task != nil && task.Summarizing {
+	if task, _ := te.store.GetTaskByID(taskID); task != nil && task.Summarizing {
 		log.Printf("[user-msg] task=%s blocking lazy-start: summarization in progress", taskID)
 		te.blockedMessages.mu.Lock()
 		te.blockedMessages.tasks[taskID] = struct{}{}
@@ -1512,7 +1510,7 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	}
 	te.taskMu.Unlock()
 
-	task, err := te.store.GetTaskByTaskID(taskID)
+	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		log.Printf("[lazy-start] task=%s get error: %v", taskID, err)
 		return
@@ -1575,7 +1573,7 @@ func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMs
 	te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", commitMsg, "--allow-empty")...)
 
 	if autoMerge {
-		task, _ := te.store.GetTaskByTaskID(taskID)
+		task, _ := te.store.GetTaskByID(taskID)
 		if err := te.MergeBranch(projectID, taskID, task); err != nil {
 			log.Printf("[auto-commit] task=%s merge failed: %v", taskID, err)
 			return err
@@ -1690,7 +1688,7 @@ func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, task
 // For root tasks, the target is the task's base_ref (if set), otherwise the project's origin branch.
 func (te *TaskExecutor) ResolveMergeTarget(projectID string, task *types.Task) string {
 	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		parent, err := te.store.GetTaskByID(task.ParentTaskID)
 		if err == nil && parent.Branch != "" {
 			return parent.Branch
 		}
@@ -1737,7 +1735,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 			taskBranch = recovered
 		}
 		// If still missing, skip the merge.
-		if taskBranch == "" || te.branchExists(projectID, taskBranch) == false {
+		if taskBranch == "" || !te.branchExists(projectID, taskBranch) {
 			log.Printf("[merge] task=%s branch %q is not a valid commit, skipping merge: %v", taskID, taskBranch, err)
 			return nil
 		}
@@ -1749,7 +1747,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 	var targetBranch string
 	var mergeInWorktree string // non-empty: run merge in this worktree path
 	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByTaskID(task.ParentTaskID)
+		parent, err := te.store.GetTaskByID(task.ParentTaskID)
 		if err != nil {
 			log.Printf("[merge] task=%s parent_task_id=%s not found: %v, aborting merge", taskID, task.ParentTaskID, err)
 			te.logSystemMessage(taskID, task.CurrentThreadID, "error",
@@ -1766,7 +1764,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 					fmt.Sprintf("Error: could not create branch for parent task %q — merge aborted: %v", parent.Title, err))
 				return fmt.Errorf("create parent branch: %w", err)
 			}
-			parent, _ = te.store.GetTaskByTaskID(task.ParentTaskID)
+			parent, _ = te.store.GetTaskByID(task.ParentTaskID)
 		}
 		// Ensure parent has a worktree to merge into.
 		parentWorktreePath, wtErr := te.worktreeMgr.WorktreePath(parent.ID)
@@ -1852,7 +1850,7 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 		return fmt.Errorf("sync target into task: %w", syncErr)
 	}
 	// If sync has a merge conflict, skip the final merge.
-	task, _ = te.store.GetTaskByTaskID(taskID)
+	task, _ = te.store.GetTaskByID(taskID)
 	if task.HasMergeConflict {
 		log.Printf("[merge] task=%s sync has merge conflict, skipping final merge", taskID)
 		return nil
@@ -2009,7 +2007,7 @@ func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, task
 	mergeOut, mergeErr := te.worktreeMgr.GitRunInDirOutput(dir, "merge", taskBranch, "--no-edit")
 	if mergeErr != nil {
 		// Merge conflict — detect, set flag for LLM resolution, then abort
-		task, _ := te.store.GetTaskByTaskID(taskID)
+		task, _ := te.store.GetTaskByID(taskID)
 		if resolveErr := te.tryResolveMergeConflicts(dir, taskID, targetBranch, taskBranch, task); resolveErr != nil {
 			if errors.Is(resolveErr, ErrNotAMergeConflict) {
 				// Not a conflict — git merge failed for another reason (hook, lock, etc.)
@@ -2030,7 +2028,7 @@ func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, task
 		}
 	} else {
 		log.Printf("[merge] task=%s merged %s into %s successfully", taskID, taskBranch, targetBranch)
-		task, _ := te.store.GetTaskByTaskID(taskID)
+		task, _ := te.store.GetTaskByID(taskID)
 		te.logMergeComplete(taskID, task.CurrentThreadID, taskBranch, targetBranch)
 	}
 	return nil

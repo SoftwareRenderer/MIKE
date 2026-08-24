@@ -17,7 +17,6 @@
         onOpenTerminal,
         onShowStats,
         onShowConfig,
-        hasPortConflict = false,
         hasReview = false,
     }: {
         currentProject: Project;
@@ -29,7 +28,6 @@
         onOpenTerminal: () => void;
         onShowStats: () => void;
         onShowConfig: () => void;
-        hasPortConflict?: boolean;
         hasReview?: boolean;
     } = $props();
 
@@ -55,7 +53,7 @@
             <span class="review-dot" aria-hidden="true"></span>
         {/if}
     </button>
-    <button class="icon-btn sandbox-config-btn" class:port-conflict={hasPortConflict} onclick={onOpenSandboxConfig} aria-label="Sandbox configuration" title="Sandbox configuration">
+    <button class="icon-btn sandbox-config-btn" onclick={onOpenSandboxConfig} aria-label="Sandbox configuration" title="Sandbox configuration">
         {#if currentProject.sandbox_enabled}
             <Icon src={shieldIcon} width={14} height={14} />
         {:else}
@@ -185,12 +183,6 @@
     }
     .icon-btn.sandbox-config-btn {
         color: var(--color-primary);
-    }
-
-    .icon-btn.sandbox-config-btn.port-conflict {
-        outline: 2px solid var(--color-status-yellow);
-        outline-offset: 1px;
-        border-radius: var(--radius-sm);
     }
     .hamburger {
         display: flex;

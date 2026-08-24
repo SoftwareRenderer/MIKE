@@ -29,7 +29,7 @@ func makeCloneSource(t *testing.T, path string, commits int) {
 	}
 }
 
-func TestCloneWithProgress(t *testing.T) {
+func TestClone(t *testing.T) {
 	tmp := t.TempDir()
 	srcDir := filepath.Join(tmp, "source")
 	makeCloneSource(t, srcDir, 20)
@@ -43,11 +43,11 @@ func TestCloneWithProgress(t *testing.T) {
 	}
 
 	var events []int
-	out, err := CloneWithProgress(src, dst, func(pct int) {
+	out, err := Clone(src, dst, func(pct int) {
 		events = append(events, pct)
 	})
 	if err != nil {
-		t.Fatalf("CloneWithProgress: %v (output: %s)", err, out)
+		t.Fatalf("Clone: %v (output: %s)", err, out)
 	}
 	if !IsGitRepo(dst) {
 		t.Fatal("clone target is not a git repository")
@@ -68,7 +68,7 @@ func TestCloneWithProgress(t *testing.T) {
 	}
 }
 
-func TestCloneWithProgress_NilCallback(t *testing.T) {
+func TestClone_NilCallback(t *testing.T) {
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "source")
 	makeCloneSource(t, src, 3)
@@ -77,19 +77,19 @@ func TestCloneWithProgress_NilCallback(t *testing.T) {
 		t.Fatalf("mkdir workspace: %v", err)
 	}
 
-	if _, err := CloneWithProgress(src, dst, nil); err != nil {
-		t.Fatalf("CloneWithProgress with nil callback: %v", err)
+	if _, err := Clone(src, dst, nil); err != nil {
+		t.Fatalf("Clone with nil callback: %v", err)
 	}
 	if !IsGitRepo(dst) {
 		t.Fatal("clone target is not a git repository")
 	}
 }
 
-func TestCloneWithProgress_Error(t *testing.T) {
+func TestClone_Error(t *testing.T) {
 	tmp := t.TempDir()
 	missing := filepath.Join(tmp, "does-not-exist")
 
-	out, err := CloneWithProgress(missing, filepath.Join(tmp, "dst"), nil)
+	out, err := Clone(missing, filepath.Join(tmp, "dst"), nil)
 	if err == nil {
 		t.Fatal("expected error cloning a missing source")
 	}

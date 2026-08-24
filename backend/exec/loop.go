@@ -464,7 +464,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		}
 
 		// Check for model/provider changes before each LLM call.
-		if updatedTask, err := te.store.GetTaskByTaskID(setup.task.ID); err == nil {
+		if updatedTask, err := te.store.GetTaskByID(setup.task.ID); err == nil {
 			newURL := updatedTask.LlamaServerURL
 			newModel := updatedTask.ModelName
 			curURL, curModel := lc.mc.get()
@@ -513,7 +513,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					}
 					// Create new container with updated mode
 					var assignedPorts []types.AssignedPort
-					assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, kanban_sandbox.SandboxOpts{
+					assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{
 						BaseImage:        imageToUse,
 						NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
 						MemoryLimit:      setup.sandboxOpts.MemoryLimit,
@@ -565,12 +565,11 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					if te.lspMgr != nil && te.lspMgr.GetRegistry().HasAnyLSPToolCallsExtension() {
 						tools = append(tools, llama.GetLSPToolDefinitions()...)
 					}
-					// Broadcast assigned ports if any changed
+					// Persist + broadcast assigned ports if any changed (carried on the task object)
 					if len(assignedPorts) > 0 {
 						setup.task.AssignedPorts = assignedPorts
 						te.persistTask(setup)
 						te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: setup.task.ID, Ports: assignedPorts}})
 					}
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": fmt.Sprintf("Sandbox recreated for mode change (%s)", newOperatingMode)}})
 				}
@@ -590,7 +589,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					log.Printf("[sandbox-config] setup.task=%s failed to stop old sandbox: %v", setup.task.ID, err)
 				}
 				var assignedPorts []types.AssignedPort
-				assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, kanban_sandbox.SandboxOpts{
+				assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{
 					BaseImage:        imageToUse,
 					NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
 					MemoryLimit:      setup.sandboxOpts.MemoryLimit,
@@ -627,11 +626,11 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(newAgentClient)
 				state.agentSandboxHash = newHash
 				te.taskMu.Unlock()
+				// Persist + broadcast assigned ports if any changed (carried on the task object)
 				if len(assignedPorts) > 0 {
 					setup.task.AssignedPorts = assignedPorts
 					te.persistTask(setup)
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: setup.task.ID, Ports: assignedPorts}})
 				}
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox recreated for extension config change"}})
 			}
@@ -1086,7 +1085,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				}
 				// Inject LSP diagnostic hint into LLM context if found.
 				if lspHint != "" {
-					task, _ := te.store.GetTaskByTaskID(setup.task.ID)
+					task, _ := te.store.GetTaskByID(setup.task.ID)
 					if task != nil {
 						msgID := uuid.New().String()
 						_ = te.store.CreateTaskMessage(&types.TaskMessage{
@@ -1261,9 +1260,9 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					}
 
 					// No merge conflict — normal auto-commit path
-					commitMsg := te.GenerateCommitMessageForTask(setup.ctx, setup.task.ID, setup.task)
+					commitMsg := te.GenerateCommitMessage(setup.ctx, setup.task)
 					mergeErr := te.CommitAndMerge(setup.projectID, setup.task.ID, setup.worktreePath, commitMsg, setup.task.AutoMerge)
-					setup.task, _ = te.store.GetTaskByTaskID(setup.task.ID)
+					setup.task, _ = te.store.GetTaskByID(setup.task.ID)
 					if setup.task.HasMergeConflict {
 						conflictedFiles := GetResolvedConflictedFiles(setup.worktreePath)
 						prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
@@ -1683,7 +1682,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 // sendAndPersistError sends an error via WebSocket and persists it.
 func (te *TaskExecutor) sendAndPersistError(taskID, message, code string) {
-	task, _ := te.store.GetTaskByTaskID(taskID)
+	task, _ := te.store.GetTaskByID(taskID)
 	errMsg := &types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, Role: "error",
 		Content: fmt.Sprintf("[%s] %s", code, message), CreatedAt: time.Now(),
@@ -1706,7 +1705,7 @@ func (te *TaskExecutor) sendAndPersistError(taskID, message, code string) {
 // Returns the synced messages and the (possibly updated) task.
 func (te *TaskExecutor) syncMessagesFromDB(task *types.Task, worktreePath, projectName string, sandboxEnabled bool) ([]types.ChatMessage, *types.Task) {
 	// Reload task from DB to pick up thread changes (e.g., fork cleanup switched active thread).
-	if updatedTask, err := te.store.GetTaskByTaskID(task.ID); err == nil && updatedTask != nil {
+	if updatedTask, err := te.store.GetTaskByID(task.ID); err == nil && updatedTask != nil {
 		task = updatedTask
 	}
 	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)

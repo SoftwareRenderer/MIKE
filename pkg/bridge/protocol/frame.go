@@ -2,17 +2,16 @@ package protocol
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 )
 
 // Message types.
 const (
-	TypeRequest    uint8 = 0x01
-	TypeResult     uint8 = 0x02
-	TypeChunk      uint8 = 0x03
-	TypeError      uint8 = 0x04
+	TypeRequest      uint8 = 0x01
+	TypeResult       uint8 = 0x02
+	TypeChunk        uint8 = 0x03
+	TypeError        uint8 = 0x04
 	TypeNotification uint8 = 0x05
 )
 
@@ -40,8 +39,8 @@ func messageTypeString(t uint8) string {
 
 // Frame is a single protocol message.
 type Frame struct {
-	MsgID  uint32
-	Type   uint8
+	MsgID   uint32
+	Type    uint8
 	Payload []byte
 }
 
@@ -137,8 +136,3 @@ func (f *Frame) String() string {
 	return fmt.Sprintf("Frame{MsgID:%d Type:%s Payload:%dB %q}",
 		f.MsgID, messageTypeString(f.Type), len(f.Payload), string(f.Payload[:size]))
 }
-
-var (
-	// ErrInvalidFrame is returned when a frame cannot be parsed.
-	ErrInvalidFrame = errors.New("invalid frame")
-)

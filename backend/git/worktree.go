@@ -166,9 +166,9 @@ func NewWorktreeManager(store *store.Store, configStore *config.ConfigStore) *Wo
 	return &WorktreeManager{store: store, configStore: configStore}
 }
 
-// GetTaskByTaskID retrieves a task by its ID.
-func (wm *WorktreeManager) GetTaskByTaskID(taskID string) (*types.Task, error) {
-	return wm.store.GetTaskByTaskID(taskID)
+// GetTaskByID retrieves a task by its globally-unique ID (without project ID).
+func (wm *WorktreeManager) GetTaskByID(taskID string) (*types.Task, error) {
+	return wm.store.GetTaskByID(taskID)
 }
 
 // getProjectWorktreeMu returns a per-project mutex for serializing worktree creation.
@@ -197,7 +197,7 @@ func (wm *WorktreeManager) GetProjectMergeMu(projectID string) *sync.Mutex {
 // WorktreePath returns the filesystem path for a task's worktree.
 // Path format: worktreesDir/projectID/taskID
 func (wm *WorktreeManager) WorktreePath(taskID string) (string, error) {
-	task, err := wm.store.GetTaskByTaskID(taskID)
+	task, err := wm.store.GetTaskByID(taskID)
 	if err != nil {
 		return "", err
 	}
@@ -2265,7 +2265,7 @@ func (wm *WorktreeManager) GetLatestStashHash(taskID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	task, err := wm.store.GetTaskByTaskID(taskID)
+	task, err := wm.store.GetTaskByID(taskID)
 	if err != nil {
 		return "", nil
 	}
@@ -2300,7 +2300,7 @@ func (wm *WorktreeManager) GetStashByCheckpointIndex(taskID string, checkpointId
 	if err != nil {
 		return "", err
 	}
-	task, err := wm.store.GetTaskByTaskID(taskID)
+	task, err := wm.store.GetTaskByID(taskID)
 	if err != nil {
 		return "", nil
 	}

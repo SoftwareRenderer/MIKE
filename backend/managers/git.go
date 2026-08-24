@@ -295,8 +295,8 @@ func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, branches)
 }
 
-// HandleCurrentBranch returns the current branch name for a project.
-func (h *GitHandler) HandleCurrentBranch(w http.ResponseWriter, r *http.Request) {
+// HandleBranch returns the current branch name for a project.
+func (h *GitHandler) HandleBranch(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
@@ -1064,7 +1064,7 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 	if f, ok := taskDiff.Tracked[filePath]; ok {
 		// If full=1 and file was truncated, recompute diff without truncation
 		if fullFile && f.Truncated {
-			task, err := h.store.GetTaskByTaskID(taskID)
+			task, err := h.store.GetTaskByID(taskID)
 			if err == nil && h.worktreeMgr != nil {
 				baseRef, _ := h.worktreeMgr.ResolveDiffBaseline(taskID, task.BaseRef, task.Branch, "")
 				if fullDiff, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, "", true); err == nil {
