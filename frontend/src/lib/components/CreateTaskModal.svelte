@@ -30,8 +30,9 @@
     // One-time initialization from the prop (e.g. gutter line-selection prefill)
     const initialPromptValue = () => initialPrompt;
     let prompt = $state(initialPromptValue());
-    // Interactive floating modal
-    let lastInitialPrompt = $state(initialPrompt);
+    // Captures the INITIAL prefill via closure (see above) — the $effect
+    // compares the live prop against it to detect a NEW line selection.
+    let lastInitialPrompt = $state(initialPromptValue());
     $effect(() => {
         if (initialPrompt && initialPrompt !== lastInitialPrompt) {
             lastInitialPrompt = initialPrompt;
