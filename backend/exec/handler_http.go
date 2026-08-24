@@ -196,7 +196,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 		log.Printf("[summarize] task=%s cancelling in-progress summarization", taskID)
 		te.cancelSummarize(taskID, projectID)
 		task.Summarizing = false
-		_ = te.storeTask(task, projectID)
+		_ = te.store.SetTaskSummarizing(taskID, false)
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		httputil.JSONResponse(w, http.StatusOK, map[string]any{"status": "cancelled"})
 		return
@@ -204,7 +204,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 
 	// Set summarizing flag so the UI survives refresh and ForwardUserMessage blocks lazy-start.
 	task.Summarizing = true
-	_ = te.storeTask(task, projectID)
+	_ = te.store.SetTaskSummarizing(taskID, true)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
 	// If task is actively running, send request to the execution loop
@@ -215,7 +215,12 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 	if state != nil {
 		defer func() {
 			task.Summarizing = false
-			_ = te.storeTask(task, projectID)
+			_ = te.store.SetTaskSummarizing(taskID, false)
+			// Broadcast the freshest row
+			if fresh, err := te.store.GetTask(projectID, taskID); err == nil && fresh != nil {
+				fresh.Summarizing = false
+				task = fresh
+			}
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		}()
 		// Create a cancellable context for this summarize request.
@@ -281,10 +286,19 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 			te.dbSummarizeCancel.mu.Lock()
 			delete(te.dbSummarizeCancel.tasks, taskID)
 			te.dbSummarizeCancel.mu.Unlock()
-			task.Summarizing = false
-			_ = te.storeTask(task, projectID)
-			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 		}()
+
+		// Clear the summarizing flag and broadcast the task
+		clearFlag := func() {
+			task.Summarizing = false
+			_ = te.store.SetTaskSummarizing(taskID, false)
+			// Broadcast the freshest row
+			if fresh, err := te.store.GetTask(projectID, taskID); err == nil && fresh != nil {
+				fresh.Summarizing = false
+				task = fresh
+			}
+			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
+		}
 
 		taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
 		project, _ := te.store.GetProject(projectID)
@@ -302,6 +316,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 		sumResult, err := te.summarizeContext(ctx, messages, serverURL, modelName, previousSummary)
 		if err != nil {
 			log.Printf("[summarize] task=%s manual summarization failed: %v", taskID, err)
+			clearFlag()
 			return
 		}
 
@@ -346,6 +361,8 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 		// Fix timestamps of messages sent during the summarization window
 		// so they sort after the summary in the database.
 		_ = te.store.FixPostSummaryTimestamps(taskID, task.CurrentThreadID, summaryAnchor, summaryCreatedAt)
+
+		clearFlag()
 
 		// Only start executor if there are blocked messages for this task.
 		te.blockedMessages.mu.Lock()
