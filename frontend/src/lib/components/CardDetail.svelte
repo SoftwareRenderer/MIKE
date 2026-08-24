@@ -741,7 +741,8 @@
      * Used after thread switch or task change to ensure a clean slate.
      * For done tasks, uses branch_tip to show the diff of committed changes. */
     async function loadDiff() {
-        if (!task || task.status === 'backlog') return;
+        // A backlog task has no worktree unless it was sent back from active
+        if (!task || (task.status === 'backlog' && !worktreeExists)) return;
         if (diffLoading) {
             // A load is in progress; a newer thread switch/task change supersedes it.
             diffReloadQueued = true;
@@ -783,7 +784,7 @@
     }
 
     async function loadCommits() {
-        if (!task || task.status === 'backlog') return;
+        if (!task || (task.status === 'backlog' && !worktreeExists)) return;
         try {
             const result = await getTaskCommits(task.project_id, task.id);
             commits = result.commits || [];
@@ -795,7 +796,7 @@
     }
 
     async function handleExpandDiff(path?: string) {
-        if (!task || task.status === 'backlog') return;
+        if (!task || (task.status === 'backlog' && !worktreeExists)) return;
         try {
             // If a specific file path is provided, fetch only that file's full diff
             if (path) {
@@ -1022,12 +1023,14 @@
                                     onToggleFullscreen={toggleDiffFullscreen}
                                     isFullscreen={diffFullscreen}
                                 />
-                            {/if}
-                            {#if DiffViewerComponent}
-                                {@const DiffViewer = DiffViewerComponent}
-                                <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? 'Merged' : hasMergedSubtasks ? 'Merged from Subtasks' : 'Committed in task'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                                {#if DiffViewerComponent}
+                                    {@const DiffViewer = DiffViewerComponent}
+                                    <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? 'Merged' : hasMergedSubtasks ? 'Merged from Subtasks' : 'Committed in task'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                                {:else}
+                                    <div class="diff-viewer-loading">Loading diff viewer...</div>
+                                {/if}
                             {:else}
-                                <div class="diff-viewer-loading">Loading diff viewer...</div>
+                                <div class="diff-viewer-empty">No changes yet</div>
                             {/if}
                         {/if}
 
@@ -1140,6 +1143,15 @@
         z-index: 5;
     }
     .diff-viewer-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 48px 24px;
+        color: var(--color-text-tertiary);
+        font-size: 0.8125rem;
+        flex: 1;
+    }
+    .diff-viewer-empty {
         display: flex;
         align-items: center;
         justify-content: center;
