@@ -352,25 +352,30 @@ func formatToolResult(name, toolCallID string, status string, toolResults map[st
 	return "which was " + status
 }
 
+// sandboxableTools are the tools that can run inside a sandbox.
+var sandboxableTools = map[string]struct{}{
+	"read_file": {}, "write_file": {}, "edit_file": {}, "bash": {},
+}
+
+// lspTools are the tools that run inside an LSP extension sandbox.
+// These are always sandboxed regardless of the project's sandbox setting.
+var lspTools = map[string]struct{}{
+	"lsp_references": {}, "lsp_definition": {}, "lsp_hover": {}, "lsp_rename": {},
+}
+
+func inToolSet(name string, set map[string]struct{}) bool {
+	_, ok := set[name]
+	return ok
+}
+
 // isSandboxableTool returns true if the tool can run inside a sandbox.
 func isSandboxableTool(name string) bool {
-	switch name {
-	case "read_file", "write_file", "edit_file", "bash":
-		return true
-	default:
-		return false
-	}
+	return inToolSet(name, sandboxableTools)
 }
 
 // isLSPTool returns true for tools that run inside an LSP extension sandbox.
-// These are always sandboxed regardless of the project's sandbox setting.
 func isLSPTool(name string) bool {
-	switch name {
-	case "lsp_references", "lsp_definition", "lsp_hover", "lsp_rename":
-		return true
-	default:
-		return false
-	}
+	return inToolSet(name, lspTools)
 }
 
 // createCheckpoint checks for file changes after tool calls and creates a git stash snapshot.

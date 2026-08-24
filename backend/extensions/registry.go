@@ -147,18 +147,6 @@ func (rc *RegistryClient) FetchDockerfile(url string) (string, error) {
 	return string(data), nil
 }
 
-// validateDockerfilePath rejects paths that start with a dash,
-// preventing them from being interpreted as podman flags.
-func validateDockerfilePath(path string) error {
-	if path == "" {
-		return fmt.Errorf("dockerfile path must not be empty")
-	}
-	if strings.HasPrefix(path, "-") {
-		return fmt.Errorf("dockerfile path must not start with a dash: %q", path)
-	}
-	return nil
-}
-
 // PullImage pulls an OCI image via podman.
 func (rc *RegistryClient) PullImage(imageRef string) error {
 	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
@@ -177,7 +165,7 @@ func (rc *RegistryClient) BuildImage(dockerfilePath, imageRef string) error {
 	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
 		return err
 	}
-	if err := validateDockerfilePath(dockerfilePath); err != nil {
+	if err := sandboxruntime.ValidateDockerfilePath(dockerfilePath); err != nil {
 		return err
 	}
 	cmd := exec.Command("podman", "build", "-t", imageRef, "-f", dockerfilePath, ".")
@@ -428,7 +416,7 @@ func (rc *RegistryClient) StreamBuildOutput(ctx context.Context, dockerfilePath,
 	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
 		return err
 	}
-	if err := validateDockerfilePath(dockerfilePath); err != nil {
+	if err := sandboxruntime.ValidateDockerfilePath(dockerfilePath); err != nil {
 		return err
 	}
 	cmd := exec.CommandContext(ctx, "podman", "build", "-t", imageRef, "-f", dockerfilePath, ".")

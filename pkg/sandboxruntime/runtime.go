@@ -83,9 +83,9 @@ func (r *Runtime) ValidateImageRef(image string) error {
 	return ValidateImageRef(image)
 }
 
-// validateDockerfilePath rejects paths that start with a dash,
+// ValidateDockerfilePath rejects paths that start with a dash,
 // preventing them from being interpreted as podman flags.
-func validateDockerfilePath(path string) error {
+func ValidateDockerfilePath(path string) error {
 	if path == "" {
 		return fmt.Errorf("dockerfile path must not be empty")
 	}
@@ -293,7 +293,7 @@ func (r *Runtime) BuildImage(imageName, dockerfilePath string, onProgress func(l
 	if err := r.ValidateImageRef(imageName); err != nil {
 		return err
 	}
-	if err := validateDockerfilePath(dockerfilePath); err != nil {
+	if err := ValidateDockerfilePath(dockerfilePath); err != nil {
 		return err
 	}
 	content, err := os.ReadFile(dockerfilePath)

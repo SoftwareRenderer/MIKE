@@ -216,13 +216,19 @@ func ParseShellCloseParams(frame *Frame) (ShellCloseParams, error) {
 	return ShellCloseParams{SessionID: binary.BigEndian.Uint32(data[0:4])}, nil
 }
 
-func NewShellCloseRequest(msgID uint32, sessionID uint32) *Frame {
-	payload := make([]byte, 2+4+4) // method + reserved + jsonLen + sessionID
-	payload[0] = MethodShellClose
+// newBinaryRequest builds a request frame carrying a single uint32 param.
+// Payload layout: [method:1][reserved:1][jsonLen:4=4][value:4]
+func newBinaryRequest(msgID uint32, method uint8, value uint32) *Frame {
+	payload := make([]byte, 2+4+4) // method + reserved + jsonLen + value
+	payload[0] = method
 	binary.BigEndian.PutUint32(payload[2:6], uint32(4))
-	binary.BigEndian.PutUint32(payload[6:10], sessionID)
+	binary.BigEndian.PutUint32(payload[6:10], value)
 
 	return &Frame{MsgID: msgID, Type: TypeRequest, Payload: payload}
+}
+
+func NewShellCloseRequest(msgID uint32, sessionID uint32) *Frame {
+	return newBinaryRequest(msgID, MethodShellClose, sessionID)
 }
 
 // BashCancelParams holds the target message ID for a bash cancel request.
@@ -249,10 +255,5 @@ func ParseBashCancelParams(frame *Frame) (BashCancelParams, error) {
 }
 
 func NewBashCancelRequest(msgID uint32, targetMsgID uint32) *Frame {
-	payload := make([]byte, 2+4+4) // method + reserved + jsonLen + targetMsgID
-	payload[0] = MethodBashCancel
-	binary.BigEndian.PutUint32(payload[2:6], uint32(4))
-	binary.BigEndian.PutUint32(payload[6:10], targetMsgID)
-
-	return &Frame{MsgID: msgID, Type: TypeRequest, Payload: payload}
+	return newBinaryRequest(msgID, MethodBashCancel, targetMsgID)
 }

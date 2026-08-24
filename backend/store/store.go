@@ -402,16 +402,16 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-// b2i converts bool to int (0 or 1).
-func b2i(b bool) int {
+// B2I converts a bool to an integer (0 or 1) for storage.
+func B2I(b bool) int {
 	if b {
 		return 1
 	}
 	return 0
 }
 
-// i2b converts int (0 or 1) to bool.
-func i2b(i int) bool {
+// I2B converts an integer (0 or 1) from storage to a bool.
+func I2B(i int) bool {
 	return i != 0
 }
 
@@ -456,14 +456,14 @@ func scanTask(s scanner, t *types.Task) error {
 	if err != nil {
 		return err
 	}
-	t.AutoCommit = i2b(autoCommit)
-	t.AutoMerge = i2b(autoMerge)
-	t.SubtasksAutoMerge = i2b(subtasksAutoMerge)
-	t.HasMergeConflict = i2b(hasMergeConflict)
+	t.AutoCommit = I2B(autoCommit)
+	t.AutoMerge = I2B(autoMerge)
+	t.SubtasksAutoMerge = I2B(subtasksAutoMerge)
+	t.HasMergeConflict = I2B(hasMergeConflict)
 	t.ParentTaskID = parentTaskID.String
-	t.Autostarted = i2b(autostarted)
-	t.TitleGenerating = i2b(titleGenerating)
-	t.Summarizing = i2b(summarizing)
+	t.Autostarted = I2B(autostarted)
+	t.TitleGenerating = I2B(titleGenerating)
+	t.Summarizing = I2B(summarizing)
 	t.CurrentThreadID = currentThreadID.String
 	t.ReasoningEffort = reasoningEffort.String
 	t.BaseRef = baseRef.String
@@ -506,7 +506,7 @@ func scanTaskDependency(s scanner, d *types.TaskDependency) error {
 	if err != nil {
 		return err
 	}
-	d.AutoStart = i2b(autoStart)
+	d.AutoStart = I2B(autoStart)
 	d.CreatedAt = scanTime(createdAt)
 	return nil
 }
@@ -519,7 +519,7 @@ func scanReviewComment(s scanner, c *types.ReviewComment) error {
 	if err != nil {
 		return err
 	}
-	c.Resolved = i2b(resolved)
+	c.Resolved = I2B(resolved)
 	c.CreatedAt = scanTime(createdAt)
 	c.UpdatedAt = scanTime(updatedAt)
 	return nil

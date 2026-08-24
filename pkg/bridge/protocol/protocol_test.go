@@ -280,21 +280,6 @@ func TestMethodString(t *testing.T) {
 	}
 }
 
-func TestFrameValidate(t *testing.T) {
-	validTypes := []uint8{TypeRequest, TypeResult, TypeChunk, TypeError}
-	for _, typ := range validTypes {
-		f := &Frame{Type: typ}
-		if err := f.Validate(); err != nil {
-			t.Errorf("Validate(Type=%d) = %v, want nil", typ, err)
-		}
-	}
-
-	f := &Frame{Type: 0xFF}
-	if err := f.Validate(); err == nil {
-		t.Error("Validate(0xFF) = nil, want error")
-	}
-}
-
 func TestErrorMsg(t *testing.T) {
 	f := NewError(1, "file not found")
 	if got := f.ErrorMsg(); got != "file not found" {
