@@ -372,14 +372,14 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 	// Signal the UI that summarization is in progress
 	origTask := task
 	task.Summarizing = true
-	te.storeTask(task, projectID)
+	_ = te.store.SetTaskSummarizing(taskID, true)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 
 	clearFlag := func() {
 		// Clear on the caller's reference too (task may have been reloaded below).
 		origTask.Summarizing = false
 		task.Summarizing = false
-		te.storeTask(task, projectID)
+		_ = te.store.SetTaskSummarizing(taskID, false)
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 	}
 
