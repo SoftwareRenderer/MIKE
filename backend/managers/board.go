@@ -29,8 +29,8 @@ func NewBoardHandler(store *store.Store, boardStreamMgr *stream.AppStreamManager
 	return &BoardHandler{store: store, boardStreamMgr: boardStreamMgr, configStore: configStore, sandboxMgr: sandboxMgr}
 }
 
-// HandleGetBoard returns the board (all tasks) for a project.
-func (h *BoardHandler) HandleGetBoard(w http.ResponseWriter, r *http.Request) {
+// HandleBoard returns the board (all tasks) for a project.
+func (h *BoardHandler) HandleBoard(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 
 	if _, err := h.store.GetProject(projectID); err != nil {

@@ -120,7 +120,7 @@ func TestHandleCreateTask_Basic(t *testing.T) {
 
 	// Verify task was created in store
 	childID := resp["task_id"]
-	child, err := te.store.GetTaskByTaskID(childID)
+	child, err := te.store.GetTaskByID(childID)
 	if err != nil {
 		t.Fatalf("get created task: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 	level2ID := resp2["task_id"]
 
 	// Verify nesting
-	level2, err := te.store.GetTaskByTaskID(level2ID)
+	level2, err := te.store.GetTaskByID(level2ID)
 	if err != nil {
 		t.Fatalf("get level 2 task: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestHandleCreateTask_CreatesPromptMessage(t *testing.T) {
 	childID := resp["task_id"]
 
 	// Verify prompt message was created
-	task, _ := te.store.GetTaskByTaskID(childID)
+	task, _ := te.store.GetTaskByID(childID)
 	messages, err := te.store.GetTaskMessages(childID, task.CurrentThreadID)
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
@@ -650,7 +650,7 @@ func TestHandleCreateTask_UsesConfigDefaultsForAutoMerge(t *testing.T) {
 
 	var resp map[string]string
 	json.Unmarshal([]byte(result), &resp)
-	task, err := te.store.GetTaskByTaskID(resp["task_id"])
+	task, err := te.store.GetTaskByID(resp["task_id"])
 	if err != nil {
 		t.Fatalf("get created task: %v", err)
 	}
@@ -688,7 +688,7 @@ func TestHandleCreateTask_SubtaskInheritsSubtasksAutoMergeAsAutoMerge(t *testing
 
 	var resp map[string]string
 	json.Unmarshal([]byte(result), &resp)
-	child, err := te.store.GetTaskByTaskID(resp["task_id"])
+	child, err := te.store.GetTaskByID(resp["task_id"])
 	if err != nil {
 		t.Fatalf("get created task: %v", err)
 	}
@@ -722,7 +722,7 @@ func TestHandleCreateTask_NoConfigDefaults_UsesZeroValues(t *testing.T) {
 
 	var resp map[string]string
 	json.Unmarshal([]byte(result), &resp)
-	task, err := te.store.GetTaskByTaskID(resp["task_id"])
+	task, err := te.store.GetTaskByID(resp["task_id"])
 	if err != nil {
 		t.Fatalf("get created task: %v", err)
 	}

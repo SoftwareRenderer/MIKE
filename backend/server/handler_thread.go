@@ -496,7 +496,7 @@ func (s *Server) getLastCommitHashInThread(threadID string) string {
 // TaskDiff (diff string + untracked array) so the frontend gets staged status
 // and per-file hashes in the WebSocket update.
 func (s *Server) broadcastTaskDiff(taskID string) {
-	task, _ := s.store.GetTaskByTaskID(taskID)
+	task, _ := s.store.GetTaskByID(taskID)
 	if task == nil {
 		return
 	}
@@ -562,7 +562,7 @@ func (s *Server) getProjectMutex(projectID string) *sync.Mutex {
 // generateCheckpointLabelForFork generates a short label for the checkpoint message
 // at the fork point and sends it to the frontend via WebSocket.
 func (s *Server) generateCheckpointLabelForFork(ctx context.Context, taskID, projectID, fromMessageID string) {
-	task, err := s.store.GetTaskByTaskID(taskID)
+	task, err := s.store.GetTaskByID(taskID)
 	if err != nil {
 		return
 	}

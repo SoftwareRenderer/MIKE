@@ -60,10 +60,10 @@ type PersistEntry struct {
 	ProviderName     string  `json:"provider_name,omitempty"`
 	PromptTokens     int     `json:"prompt_tokens,omitempty"`
 	PredictedTokens  int     `json:"predicted_tokens,omitempty"`
-	PromptMs         int64   `json:"prompt_ms,omitempty"`         // prompt processing time (ms)
-	PredictedMs      int64   `json:"predicted_ms,omitempty"`      // generation time (ms)
+	PromptMs         int64   `json:"prompt_ms,omitempty"`    // prompt processing time (ms)
+	PredictedMs      int64   `json:"predicted_ms,omitempty"` // generation time (ms)
 	Duration         int64   `json:"duration,omitempty"`
-	Cost             float64 `json:"cost,omitempty"` // per-message cost from usage.cost.total
+	Cost             float64 `json:"cost,omitempty"`             // per-message cost from usage.cost.total
 	ToolCallsJSON    string  `json:"tool_calls_json,omitempty"`  // JSON of tool call data (role=tool_call)
 	ToolResultJSON   string  `json:"tool_result_json,omitempty"` // JSON of tool result data (role=tool_call)
 }
@@ -77,21 +77,20 @@ const (
 	EventTypeStatus       = "status"
 	EventTypeStats        = "stats"
 	EventTypeError        = "error"
-	EventTypeModels        = "models"
+	EventTypeModels       = "models"
 	EventTypePersist      = "persist"
 	EventTypeTurnComplete = "turn_complete"
 )
 
 // Command type constants (passed to EncodeCommand).
 const (
-	CommandPrompt             = "prompt"
-	CommandCompact            = "compact"
-	CommandStats              = "stats"
-	CommandGetState           = "get_state"
-	CommandGetAvailableModels = "get_available_models"
-	CommandSetModel           = "set_model"
-	CommandSwitchSession      = "switch_session"
-	CommandAbort              = "abort"
+	CommandPrompt        = "prompt"
+	CommandCompact       = "compact"
+	CommandStats         = "stats"
+	CommandGetState      = "get_state"
+	CommandSetModel      = "set_model"
+	CommandSwitchSession = "switch_session"
+	CommandAbort         = "abort"
 )
 
 // SubprocessConfig describes the agent process to spawn.

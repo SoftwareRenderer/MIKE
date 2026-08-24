@@ -52,7 +52,7 @@ func handleEdit(h *handler, conn net.Conn, req *protocol.Request) error {
 		idx := strings.Index(content, e.OldText)
 		if idx == -1 {
 			// Show context around where it might be expected.
-			return fmt.Errorf("edits[%d].oldText not found in file. Ensure it matches exactly (whitespace, indentation). Got %d lines in file.", i, len(strings.Split(content, "\n")))
+			return fmt.Errorf("edits[%d].oldText not found in file. Ensure it matches exactly (whitespace, indentation). Got %d lines in file", i, len(strings.Split(content, "\n")))
 		}
 		// Check for duplicate matches
 		secondIdx := strings.Index(content[idx+1:], e.OldText)

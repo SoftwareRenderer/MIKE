@@ -36,8 +36,8 @@ func (s *Store) GetTask(projectID, taskID string) (*types.Task, error) {
 	return s.queryTask(projectID, taskID)
 }
 
-// GetTaskByTaskID retrieves a task by its ID alone (without project ID).
-func (s *Store) GetTaskByTaskID(taskID string) (*types.Task, error) {
+// GetTaskByID retrieves a task by its ID alone (without project ID).
+func (s *Store) GetTaskByID(taskID string) (*types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	row := s.db.QueryRow(

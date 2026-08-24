@@ -175,7 +175,7 @@ func TestStopRunningTaskMidStream(t *testing.T) {
 // worktree/HTTP plumbing that the lightweight test executor lacks.
 func startExecTaskExisting(t *testing.T, te *TaskExecutor, proj *types.Project, taskID, serverURL string) *taskExecSetup {
 	t.Helper()
-	task, err := te.store.GetTaskByTaskID(taskID)
+	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -187,7 +187,6 @@ func startExecTaskExisting(t *testing.T, te *TaskExecutor, proj *types.Project, 
 		project:        proj,
 		projectID:      proj.ID,
 		worktreePath:   t.TempDir(),
-		projectPath:    proj.Path,
 		serverURL:      serverURL,
 		modelName:      task.ModelName,
 		ctx:            ctx,
@@ -267,7 +266,7 @@ func TestStopDoesNotClobberMovedTask(t *testing.T) {
 
 	// User moves the task to Done (HandleMove does this: status done +
 	// execution_state completed, then stops the executor).
-	fresh, _ := s.GetTaskByTaskID("stop-clobber-1")
+	fresh, _ := s.GetTaskByID("stop-clobber-1")
 	fresh.Status = "done"
 	fresh.ExecutionState = "completed"
 	if err := s.UpdateTask(fresh); err != nil {
@@ -284,7 +283,7 @@ func TestStopDoesNotClobberMovedTask(t *testing.T) {
 		return st == "done" && es == "completed"
 	})
 	time.Sleep(500 * time.Millisecond) // give a (buggy) late write a chance to clobber
-	final, err := s.GetTaskByTaskID("stop-clobber-1")
+	final, err := s.GetTaskByID("stop-clobber-1")
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}

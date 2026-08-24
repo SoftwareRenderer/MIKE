@@ -37,7 +37,7 @@ func TestEnsureParentBranch_CreatesBranchWhenParentNotStarted(t *testing.T) {
 	te.store.CreateTask(parent)
 
 	// Verify parent has no branch
-	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ := te.store.GetTaskByID(parentID)
 	if parentFromDB.Branch != "" {
 		t.Fatalf("parent should have no branch initially, got %q", parentFromDB.Branch)
 	}
@@ -49,7 +49,7 @@ func TestEnsureParentBranch_CreatesBranchWhenParentNotStarted(t *testing.T) {
 	}
 
 	// Verify parent now has a branch set
-	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ = te.store.GetTaskByID(parentID)
 	if parentFromDB.Branch == "" {
 		t.Fatal("parent should have a branch after ensureParentBranch")
 	}
@@ -94,7 +94,7 @@ func TestEnsureParentBranch_Idempotent(t *testing.T) {
 	firstBranch := parent.Branch
 
 	// Reload parent from DB
-	parent, _ = te.store.GetTaskByTaskID(parentID)
+	parent, _ = te.store.GetTaskByID(parentID)
 
 	// Second call — should be no-op
 	err = te.EnsureParentBranch(projectID, parent)
@@ -155,7 +155,7 @@ func TestPrepareTaskExecution_SubtaskCreatesParentBranch(t *testing.T) {
 	}()
 
 	// Verify parent's branch was created
-	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ := te.store.GetTaskByID(parentID)
 	if parentFromDB.Branch == "" {
 		t.Fatal("parent branch should be created when subtask is prepared")
 	}
@@ -671,20 +671,20 @@ func TestMergeBranch_SubtaskNeverMergesIntoOrigin(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "no fallback work")
 
 	// Verify parent has no branch before merge
-	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ := te.store.GetTaskByID(parentID)
 	if parentFromDB.Branch != "" {
 		t.Fatalf("parent should have no branch initially, got %q", parentFromDB.Branch)
 	}
 
 	// Merge — should create parent branch on demand, NOT fall back to origin
-	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
 	err := te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 	if err != nil {
 		t.Fatalf("MergeBranch failed: %v", err)
 	}
 
 	// Verify parent now has a branch (created on demand)
-	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ = te.store.GetTaskByID(parentID)
 	if parentFromDB.Branch == "" {
 		t.Fatal("parent should have a branch after merge (created on demand)")
 	}
@@ -757,7 +757,7 @@ func TestAutoStartNextSibling_ParentBranchExists(t *testing.T) {
 	}()
 
 	// Verify parent branch exists
-	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ := te.store.GetTaskByID(parentID)
 	if parentFromDB.Branch == "" {
 		t.Fatal("parent branch should exist after subtask preparation")
 	}
@@ -865,7 +865,7 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 		te.StopTask(subtaskID)
 	}()
 
-	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ := te.store.GetTaskByID(parentID)
 	if parentFromDB.Branch == "" {
 		t.Fatal("parent branch should be created")
 	}
@@ -877,7 +877,7 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 	runGitInDir(t, setup.worktreePath, "commit", "-m", "subtask work")
 
 	// Step 3: Merge subtask into parent branch
-	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
 	err = te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 	if err != nil {
 		t.Fatalf("MergeBranch (subtask → parent) failed: %v", err)
@@ -921,7 +921,7 @@ func TestSubtaskMergeFullFlow(t *testing.T) {
 	runGitInDir(t, parentSetup.worktreePath, "commit", "-m", "parent work")
 
 	// Step 6: Merge parent into origin (master)
-	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ = te.store.GetTaskByID(parentID)
 	err = te.MergeBranch(projectID, parentID, parentFromDB)
 	if err != nil {
 		t.Fatalf("MergeBranch (parent → origin) failed: %v", err)
@@ -996,7 +996,7 @@ func TestMergeBranch_ConflictDetection(t *testing.T) {
 		te.StopTask(subtaskID)
 	}()
 
-	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ := te.store.GetTaskByID(parentID)
 	if parentFromDB.Branch == "" {
 		t.Fatal("parent branch should exist")
 	}
@@ -1017,7 +1017,7 @@ func TestMergeBranch_ConflictDetection(t *testing.T) {
 	// Try to merge — the sync-merge (target→task) will conflict.
 	// With the new sync-merge feature, LLM resolution failure enters
 	// merge_conflict state for interactive resolution (not an error).
-	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
 	err = te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 
 	// Sync-merge enters merge_conflict state — MergeBranch returns nil
@@ -1028,7 +1028,7 @@ func TestMergeBranch_ConflictDetection(t *testing.T) {
 	}
 
 	// Verify task is in merge_conflict state
-	subtaskFromDB, _ = te.store.GetTaskByTaskID(subtaskID)
+	subtaskFromDB, _ = te.store.GetTaskByID(subtaskID)
 	if !subtaskFromDB.HasMergeConflict {
 		t.Fatalf("expected has_merge_conflict=true, got false")
 	}
@@ -1094,7 +1094,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	}()
 
 	// Verify parent is still in backlog
-	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ := te.store.GetTaskByID(parentID)
 	if parentFromDB.Status != "backlog" {
 		t.Errorf("parent should stay in backlog, got status %q", parentFromDB.Status)
 	}
@@ -1103,7 +1103,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	}
 
 	// Simulate subtask1 completing (move to review)
-	subtask1, _ := te.store.GetTaskByTaskID(subtask1ID)
+	subtask1, _ := te.store.GetTaskByID(subtask1ID)
 	subtask1.Status = "review"
 	subtask1.ExecutionState = "idle"
 	te.store.UpdateTask(subtask1)
@@ -1127,7 +1127,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	}
 
 	// Verify subtask2 is NOT running in DB
-	subtask2, _ := te.store.GetTaskByTaskID(subtask2ID)
+	subtask2, _ := te.store.GetTaskByID(subtask2ID)
 	if subtask2.ExecutionState == "running" {
 		t.Error("subtask2 should NOT be running — sibling should not auto-start when parent is in backlog")
 	}
@@ -1139,7 +1139,7 @@ func TestAutoStartNextSibling_ParentInBacklog(t *testing.T) {
 	}
 
 	// Verify parent is STILL in backlog
-	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ = te.store.GetTaskByID(parentID)
 	if parentFromDB.Status != "backlog" {
 		t.Errorf("parent should still be in backlog, got %q", parentFromDB.Status)
 	}
@@ -1199,13 +1199,13 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 	}()
 
 	// Verify parent is in in_progress
-	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ := te.store.GetTaskByID(parentID)
 	if parentFromDB.Status != "in_progress" {
 		t.Errorf("parent should be in_progress, got status %q", parentFromDB.Status)
 	}
 
 	// Simulate subtask1 completing (move to review)
-	subtask1, _ := te.store.GetTaskByTaskID(subtask1ID)
+	subtask1, _ := te.store.GetTaskByID(subtask1ID)
 	subtask1.Status = "review"
 	subtask1.ExecutionState = "idle"
 	te.store.UpdateTask(subtask1)
@@ -1232,7 +1232,7 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 	}
 
 	// Verify subtask2 is running in DB
-	subtask2, _ := te.store.GetTaskByTaskID(subtask2ID)
+	subtask2, _ := te.store.GetTaskByID(subtask2ID)
 	if subtask2.ExecutionState != "running" {
 		t.Errorf("subtask2 should be running, got execution_state %q", subtask2.ExecutionState)
 	}
@@ -1245,7 +1245,7 @@ func TestAutoStartNextSibling_ParentInProgress(t *testing.T) {
 	}
 
 	// Verify parent is still in in_progress
-	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ = te.store.GetTaskByID(parentID)
 	if parentFromDB.Status != "in_progress" {
 		t.Errorf("parent should still be in_progress, got %q", parentFromDB.Status)
 	}
@@ -1283,7 +1283,7 @@ func TestStartTaskUserInitiatedNotAutostarted(t *testing.T) {
 	defer te.StopTask(taskID)
 
 	// Verify the flag is persisted as false for a user-initiated start.
-	got, err := te.store.GetTaskByTaskID(taskID)
+	got, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -1292,10 +1292,10 @@ func TestStartTaskUserInitiatedNotAutostarted(t *testing.T) {
 	}
 }
 
-// TestStartSubtaskWithParent_InheritsModelConfig verifies that when a subtask
+// TestStartSubtask_InheritsModelConfig verifies that when a subtask
 // doesn't have its own LLM config, it inherits from the parent. This ensures
 // subtasks created by plan-mode decomposition can start without explicit model settings.
-func TestStartSubtaskWithParent_InheritsModelConfig(t *testing.T) {
+func TestStartSubtask_InheritsModelConfig(t *testing.T) {
 	te, _, projectID := setupExecutorWithGitForSubtask(t)
 
 	// Create parent with model config
@@ -1329,7 +1329,7 @@ func TestStartSubtaskWithParent_InheritsModelConfig(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Verify subtask has no model config
-	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
 	if subtaskFromDB.LlamaServerURL != "" {
 		t.Fatalf("subtask should have no LlamaServerURL initially, got %q", subtaskFromDB.LlamaServerURL)
 	}
@@ -1337,14 +1337,14 @@ func TestStartSubtaskWithParent_InheritsModelConfig(t *testing.T) {
 		t.Fatalf("subtask should have no ModelName initially, got %q", subtaskFromDB.ModelName)
 	}
 
-	// StartSubtaskWithParent should inherit model config from parent
-	err := te.StartSubtaskWithParent(projectID, subtaskID, false)
+	// StartSubtask should inherit model config from parent
+	err := te.StartSubtask(projectID, subtaskID, false)
 	if err != nil {
-		t.Fatalf("StartSubtaskWithParent failed: %v", err)
+		t.Fatalf("StartSubtask failed: %v", err)
 	}
 
 	// Verify subtask now has inherited model config
-	subtaskFromDB, _ = te.store.GetTaskByTaskID(subtaskID)
+	subtaskFromDB, _ = te.store.GetTaskByID(subtaskID)
 	if subtaskFromDB.LlamaServerURL != "http://localhost:8080" {
 		t.Errorf("subtask should inherit LlamaServerURL from parent, got %q", subtaskFromDB.LlamaServerURL)
 	}
@@ -1414,7 +1414,7 @@ func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
 	}()
 
 	// Simulate subtask completing (move to done — last and only subtask)
-	subtask, _ = te.store.GetTaskByTaskID(subtaskID)
+	subtask, _ = te.store.GetTaskByID(subtaskID)
 	subtask.Status = "done"
 	subtask.ExecutionState = "completed"
 	te.store.UpdateTask(subtask)
@@ -1430,7 +1430,7 @@ func TestAutoStartNextSibling_AllDoneParentStaysInBacklog(t *testing.T) {
 	}
 
 	// Verify parent is STILL in backlog (NOT auto-started)
-	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ := te.store.GetTaskByID(parentID)
 	if parentFromDB.Status != "backlog" {
 		t.Errorf("parent should stay in backlog after all children done, got status %q", parentFromDB.Status)
 	}
@@ -1487,7 +1487,7 @@ func TestMergeBranch_CommitAndDonePath(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "subtask work")
 
 	// Merge subtask
-	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
 	err := te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 	if err != nil {
 		t.Fatalf("MergeBranch failed: %v", err)
@@ -1563,7 +1563,7 @@ func TestMergeBranch_ParentBranchCreatedOnDemand(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "on demand work")
 
 	// Verify parent has no branch
-	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ := te.store.GetTaskByID(parentID)
 	if parentFromDB.Branch != "" {
 		t.Fatalf("parent should have no branch initially, got %q", parentFromDB.Branch)
 	}
@@ -1575,13 +1575,13 @@ func TestMergeBranch_ParentBranchCreatedOnDemand(t *testing.T) {
 	}
 
 	// Verify parent now has a branch
-	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ = te.store.GetTaskByID(parentID)
 	if parentFromDB.Branch == "" {
 		t.Fatal("parent should have a branch after EnsureParentBranch")
 	}
 
 	// Merge subtask — should go to parent's branch, not master
-	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
 	err = te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 	if err != nil {
 		t.Fatalf("MergeBranch failed: %v", err)
@@ -1645,11 +1645,11 @@ func TestMergeBranch_ParentDiffStatsAfterSubtaskMerge(t *testing.T) {
 
 	// Parent branch + worktree are auto-created (parent never started — no
 	// base_ref/base_commit recorded).
-	parentFromDB, _ := te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ := te.store.GetTaskByID(parentID)
 	if err := te.EnsureParentBranch(projectID, parentFromDB); err != nil {
 		t.Fatalf("EnsureParentBranch failed: %v", err)
 	}
-	parentFromDB, _ = te.store.GetTaskByTaskID(parentID)
+	parentFromDB, _ = te.store.GetTaskByID(parentID)
 	if parentFromDB.Branch == "" {
 		t.Fatal("parent should have a branch after EnsureParentBranch")
 	}
@@ -1660,7 +1660,7 @@ func TestMergeBranch_ParentDiffStatsAfterSubtaskMerge(t *testing.T) {
 	}
 
 	// Merge the subtask into the parent branch.
-	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
 	if err := te.MergeBranch(projectID, subtaskID, subtaskFromDB); err != nil {
 		t.Fatalf("MergeBranch failed: %v", err)
 	}
@@ -1855,7 +1855,7 @@ func TestSubtaskManualStart_MergeDiagnostic(t *testing.T) {
 	te.store.CreateTask(subtask)
 
 	// Verify initial state
-	parentBefore, _ := te.store.GetTaskByTaskID(parentID)
+	parentBefore, _ := te.store.GetTaskByID(parentID)
 	if parentBefore.Branch != "" {
 		t.Fatalf("parent should have no branch initially, got %q", parentBefore.Branch)
 	}
@@ -1871,7 +1871,7 @@ func TestSubtaskManualStart_MergeDiagnostic(t *testing.T) {
 	}()
 
 	// Step 2: Verify parent branch was created
-	parentAfter, _ := te.store.GetTaskByTaskID(parentID)
+	parentAfter, _ := te.store.GetTaskByID(parentID)
 	if parentAfter.Branch == "" {
 		t.Fatal("parent branch should be created after subtask preparation")
 	}
@@ -1893,7 +1893,7 @@ func TestSubtaskManualStart_MergeDiagnostic(t *testing.T) {
 	t.Logf("Parent worktree: %s", parentWtPath)
 
 	// Step 4: Verify subtask worktree and branch
-	subtaskAfter, _ := te.store.GetTaskByTaskID(subtaskID)
+	subtaskAfter, _ := te.store.GetTaskByID(subtaskID)
 	if subtaskAfter.Branch == "" {
 		t.Fatal("subtask should have a branch")
 	}
@@ -1923,7 +1923,7 @@ func TestSubtaskManualStart_MergeDiagnostic(t *testing.T) {
 	parentTipBefore := getGitRevParse(t, repoDir, parentAfter.Branch)
 
 	// Step 6: Merge subtask into parent
-	subtaskForMerge, _ := te.store.GetTaskByTaskID(subtaskID)
+	subtaskForMerge, _ := te.store.GetTaskByID(subtaskID)
 	err = te.MergeBranch(projectID, subtaskID, subtaskForMerge)
 	if err != nil {
 		t.Fatalf("MergeBranch failed: %v", err)
@@ -1988,7 +1988,7 @@ func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
 
 	// Simulate the move handler pattern:
 	// 1. Load task (branch="")
-	staleTask, _ := te.store.GetTaskByTaskID(subtaskID)
+	staleTask, _ := te.store.GetTaskByID(subtaskID)
 	if staleTask.Branch != "" {
 		t.Fatalf("subtask should have no branch initially, got %q", staleTask.Branch)
 	}
@@ -2011,7 +2011,7 @@ func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
 	}()
 
 	// 4. Verify branch is set in DB (not just in memory)
-	taskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	taskFromDB, _ := te.store.GetTaskByID(subtaskID)
 	if taskFromDB.Branch == "" {
 		t.Fatal("branch should be set in DB after prepareTaskExecution")
 	}
@@ -2020,7 +2020,7 @@ func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
 	// 5. Simulate the fixed handler: reload task before UpdateTask.
 	// The handler reloads to pick up the branch set by prepareTaskExecution,
 	// avoiding the stale object bug where UpdateTask would overwrite branch.
-	reloaded, err := te.store.GetTaskByTaskID(subtaskID)
+	reloaded, err := te.store.GetTaskByID(subtaskID)
 	if err != nil {
 		t.Fatalf("reload failed: %v", err)
 	}
@@ -2030,7 +2030,7 @@ func TestPrepareTaskExecution_BranchPersists(t *testing.T) {
 	}
 
 	// 6. Verify branch is STILL set in DB after the reload-and-update pattern
-	taskFromDB, _ = te.store.GetTaskByTaskID(subtaskID)
+	taskFromDB, _ = te.store.GetTaskByID(subtaskID)
 	if taskFromDB.Branch == "" {
 		t.Fatal("branch should NOT be cleared by reload-and-update")
 	}
@@ -2141,7 +2141,7 @@ func TestMergeBranch_RecoverMissingBranch(t *testing.T) {
 	}
 
 	// Verify the task's branch was updated in DB.
-	reloaded, _ := te.store.GetTaskByTaskID(parentID)
+	reloaded, _ := te.store.GetTaskByID(parentID)
 	if reloaded.Branch != oldBranch {
 		t.Fatalf("branch should be updated to old branch: expected %q, got %q", oldBranch, reloaded.Branch)
 	}
@@ -2224,8 +2224,8 @@ func TestFindDeepestStartableSubtasks_DeepestFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	c1, _ := te.store.GetTaskByTaskID(c1ID)
-	c2, _ := te.store.GetTaskByTaskID(c2ID)
+	c1, _ := te.store.GetTaskByID(c1ID)
+	c2, _ := te.store.GetTaskByID(c2ID)
 
 	// Deepest startable subtasks: G1 and G2 (C2, a shallower startable leaf,
 	// waits for C1's subtree).
@@ -2239,13 +2239,13 @@ func TestFindDeepestStartableSubtasks_DeepestFirst(t *testing.T) {
 
 	// Once C1's children are done, C1 itself becomes startable at its level.
 	for _, id := range []string{g1ID, g2ID} {
-		tk, _ := te.store.GetTaskByTaskID(id)
+		tk, _ := te.store.GetTaskByID(id)
 		tk.Status = "done"
 		tk.ExecutionState = "completed"
 		te.store.UpdateTask(tk)
 	}
-	c1, _ = te.store.GetTaskByTaskID(c1ID)
-	c2, _ = te.store.GetTaskByTaskID(c2ID)
+	c1, _ = te.store.GetTaskByID(c1ID)
+	c2, _ = te.store.GetTaskByID(c2ID)
 	deepest = te.FindDeepestStartableSubtasks([]types.Task{*c1, *c2})
 	if len(deepest) != 2 || !containsTaskID(deepest, c1ID) || !containsTaskID(deepest, c2ID) {
 		t.Fatalf("deepest = %v, want [c1 c2]", idsOf(deepest))
@@ -2268,7 +2268,7 @@ func TestFindDeepestStartableSubtasks_SkipsReviewBlocked(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	c1, _ := te.store.GetTaskByTaskID(c1ID)
+	c1, _ := te.store.GetTaskByID(c1ID)
 
 	// C1 has a child in review — neither C1 nor R1 is startable.
 	deepest := te.FindDeepestStartableSubtasks([]types.Task{*c1})
@@ -2280,7 +2280,7 @@ func TestFindDeepestStartableSubtasks_SkipsReviewBlocked(t *testing.T) {
 	if err := te.store.CreateTask(&types.Task{ID: r2ID, ProjectID: projectID, Title: "R2", Prompt: "r2", Status: "in_progress", ExecutionState: "idle", ParentTaskID: c1ID}); err != nil {
 		t.Fatal(err)
 	}
-	c1, _ = te.store.GetTaskByTaskID(c1ID)
+	c1, _ = te.store.GetTaskByID(c1ID)
 	deepest = te.FindDeepestStartableSubtasks([]types.Task{*c1})
 	if len(deepest) != 1 || !containsTaskID(deepest, r2ID) {
 		t.Fatalf("deepest = %v, want [r2]", idsOf(deepest))
@@ -2316,7 +2316,7 @@ func TestAllChildrenDone(t *testing.T) {
 	}
 
 	// One child in review — not done.
-	tk, _ := te.store.GetTaskByTaskID("cd-2")
+	tk, _ := te.store.GetTaskByID("cd-2")
 	tk.Status = "review"
 	tk.ExecutionState = "idle"
 	te.store.UpdateTask(tk)
@@ -2360,7 +2360,7 @@ func TestAutoStartNextSibling_StartsParentWhenAllChildrenDone(t *testing.T) {
 		t.Fatalf("AutoStartNextSibling failed: %v", err)
 	}
 
-	p, _ := te.store.GetTaskByTaskID(parentID)
+	p, _ := te.store.GetTaskByID(parentID)
 	// The parent's seeded conversation ends in an assistant message, so
 	// StartTask skips the LLM call and settles into idle (not a stale running).
 	if p.Status != "in_progress" || p.ExecutionState != "idle" {
@@ -2396,7 +2396,7 @@ func TestAutoStartNextSibling_ReviewBlocksChainThenUnblocks(t *testing.T) {
 	}
 
 	// R1 finishes without auto-merge → Review (human gate).
-	r1, _ := te.store.GetTaskByTaskID(r1ID)
+	r1, _ := te.store.GetTaskByID(r1ID)
 	r1.Status = "review"
 	r1.ExecutionState = "idle"
 	te.store.UpdateTask(r1)
@@ -2406,15 +2406,15 @@ func TestAutoStartNextSibling_ReviewBlocksChainThenUnblocks(t *testing.T) {
 	if err := te.AutoStartNextSibling(projectID, r1ID, c1ID); err != nil {
 		t.Fatalf("AutoStartNextSibling (review) failed: %v", err)
 	}
-	c1, _ := te.store.GetTaskByTaskID(c1ID)
+	c1, _ := te.store.GetTaskByID(c1ID)
 	if c1.ExecutionState == "running" {
 		t.Fatal("C1 must not start while its child R1 is in review")
 	}
-	p, _ := te.store.GetTaskByTaskID(pID)
+	p, _ := te.store.GetTaskByID(pID)
 	if p.ExecutionState == "running" {
 		t.Fatal("P must not start while its subtree is blocked on review")
 	}
-	c2, _ := te.store.GetTaskByTaskID(c2ID)
+	c2, _ := te.store.GetTaskByID(c2ID)
 	// C2's seeded conversation ends in an assistant message, so the bubble-up
 	// start settles into idle (autostarted) instead of running.
 	if c2.Status != "in_progress" || c2.ExecutionState != "idle" || !c2.Autostarted {
@@ -2422,50 +2422,50 @@ func TestAutoStartNextSibling_ReviewBlocksChainThenUnblocks(t *testing.T) {
 	}
 
 	// 2) R1 moved to Done → C1 starts.
-	r1, _ = te.store.GetTaskByTaskID(r1ID)
+	r1, _ = te.store.GetTaskByID(r1ID)
 	r1.Status = "done"
 	r1.ExecutionState = "completed"
 	te.store.UpdateTask(r1)
 	if err := te.AutoStartNextSibling(projectID, r1ID, c1ID); err != nil {
 		t.Fatalf("AutoStartNextSibling (r1 done) failed: %v", err)
 	}
-	c1, _ = te.store.GetTaskByTaskID(c1ID)
+	c1, _ = te.store.GetTaskByID(c1ID)
 	// Seeded conversation ends in an assistant message → idle (autostarted), not running.
 	if c1.Status != "in_progress" || c1.ExecutionState != "idle" || !c1.Autostarted {
 		t.Fatalf("C1 should start (autostarted) once R1 is done: status=%q state=%q autostarted=%v", c1.Status, c1.ExecutionState, c1.Autostarted)
 	}
-	p, _ = te.store.GetTaskByTaskID(pID)
+	p, _ = te.store.GetTaskByID(pID)
 	if p.ExecutionState == "running" {
 		t.Fatal("P must not start while C1 is still running")
 	}
 
 	// 3) C1 done → P starts.
-	c1, _ = te.store.GetTaskByTaskID(c1ID)
+	c1, _ = te.store.GetTaskByID(c1ID)
 	c1.Status = "done"
 	c1.ExecutionState = "completed"
 	te.store.UpdateTask(c1)
 	if err := te.AutoStartNextSibling(projectID, c1ID, pID); err != nil {
 		t.Fatalf("AutoStartNextSibling (c1 done) failed: %v", err)
 	}
-	p, _ = te.store.GetTaskByTaskID(pID)
+	p, _ = te.store.GetTaskByID(pID)
 	// Seeded conversation ends in an assistant message → idle (autostarted), not running.
 	if p.Status != "in_progress" || p.ExecutionState != "idle" || !p.Autostarted {
 		t.Fatalf("P should start (autostarted) once C1 is done: status=%q state=%q autostarted=%v", p.Status, p.ExecutionState, p.Autostarted)
 	}
 
 	// 4) C2 done and P done → G starts (root runs last).
-	c2, _ = te.store.GetTaskByTaskID(c2ID)
+	c2, _ = te.store.GetTaskByID(c2ID)
 	c2.Status = "done"
 	c2.ExecutionState = "completed"
 	te.store.UpdateTask(c2)
-	p, _ = te.store.GetTaskByTaskID(pID)
+	p, _ = te.store.GetTaskByID(pID)
 	p.Status = "done"
 	p.ExecutionState = "completed"
 	te.store.UpdateTask(p)
 	if err := te.AutoStartNextSibling(projectID, pID, gID); err != nil {
 		t.Fatalf("AutoStartNextSibling (p done) failed: %v", err)
 	}
-	g, _ := te.store.GetTaskByTaskID(gID)
+	g, _ := te.store.GetTaskByID(gID)
 	// Seeded conversation ends in an assistant message → idle (autostarted), not running.
 	if g.Status != "in_progress" || g.ExecutionState != "idle" || !g.Autostarted {
 		t.Fatalf("G should start (autostarted) once all children are done: status=%q state=%q autostarted=%v", g.Status, g.ExecutionState, g.Autostarted)

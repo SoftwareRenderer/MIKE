@@ -127,7 +127,7 @@ func TestCreateAndStop(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-sandbox-task"
 
-	_, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestExec(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-task"
 
-	_, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestExecNotAllowed(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-restricted-task"
 
-	_, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestExecWithInput(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-exec-input-task"
 
-	_, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestCreateWithoutGVisor(t *testing.T) {
 		available: false,
 	}
 
-	_, err := sm.Create("task-1", t.TempDir(), "test-proj", "", SandboxOpts{})
+	_, err := sm.Create("task-1", t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{})
 	if err == nil {
 		t.Fatal("expected error when gVisor is unavailable")
 	}
@@ -380,7 +380,7 @@ func TestCreate_RejectsInvalidImageRef(t *testing.T) {
 	}
 
 	for _, img := range invalidImages {
-		_, err := sm.Create("test-invalid-image", t.TempDir(), "test-proj", "", SandboxOpts{
+		_, err := sm.Create("test-invalid-image", t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{
 			BaseImage: img,
 		})
 		if err == nil {
@@ -400,7 +400,7 @@ func TestCreate_ValidImageRefPassesValidation(t *testing.T) {
 	}
 
 	// A valid image ref should pass validation and reach the gVisor check.
-	_, err := sm.Create("test-valid-image", t.TempDir(), "test-proj", "", SandboxOpts{
+	_, err := sm.Create("test-valid-image", t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{
 		BaseImage: "docker.io/library/ubuntu:latest",
 	})
 	if err == nil {
@@ -559,19 +559,6 @@ func TestImageReady(t *testing.T) {
 	_ = sm.ImageReady("")
 }
 
-func TestPullImage(t *testing.T) {
-	sm := NewSandboxManager()
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping image test")
-	}
-
-	// Pulling an already-available image should succeed (no-op or fast)
-	err := sm.PullImage("alpine:latest")
-	if err != nil {
-		t.Fatalf("pull alpine:latest: %v", err)
-	}
-}
-
 func TestBuildImage(t *testing.T) {
 	sm := NewSandboxManager()
 	if !sm.IsAvailable() {
@@ -700,7 +687,7 @@ func TestBinaryAvailable(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-binary-available-task"
 
-	_, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -736,7 +723,7 @@ func TestStartProcess(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-startprocess-task"
 
-	_, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -807,7 +794,7 @@ func TestCreateWithMemoryLimit(t *testing.T) {
 	taskID := "test-memory-task"
 
 	// Create with 512MB memory limit
-	_, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{MemoryLimit: 512})
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{MemoryLimit: 512})
 	if err != nil {
 		t.Fatalf("create sandbox with memory limit: %v", err)
 	}
@@ -867,7 +854,7 @@ func TestMemoryLimitEnforced(t *testing.T) {
 	taskID := "test-mem-enforced"
 
 	// 128MB limit; the memhog below allocates ~512MB.
-	if _, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{MemoryLimit: 128}); err != nil {
+	if _, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{MemoryLimit: 128}); err != nil {
 		t.Fatalf("create sandbox with memory limit: %v", err)
 	}
 	t.Cleanup(func() {
@@ -917,7 +904,7 @@ func TestGetMemoryStats(t *testing.T) {
 	// The limit sits far above the ~200MB hog so the cgroup OOM killer can't
 	// truncate the allocation before the usage assertion below (the container
 	// baseline varies with host load).
-	if _, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{MemoryLimit: 512}); err != nil {
+	if _, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{MemoryLimit: 512}); err != nil {
 		t.Fatalf("create sandbox with memory limit: %v", err)
 	}
 	t.Cleanup(func() {
@@ -979,7 +966,7 @@ func TestCreateWithCapabilities(t *testing.T) {
 	taskID := "test-capabilities-task"
 
 	// Create with custom capabilities
-	_, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{
 		Capabilities: []string{"CAP_NET_RAW", "CAP_CHOWN"},
 	})
 	if err != nil {
@@ -1019,8 +1006,7 @@ func TestExecProject_FullConfig(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	projectID := "test-execproj-fullcfg"
-	projectName := "test-execproj"
+	project := &types.Project{ID: "test-execproj-fullcfg", Name: "test-execproj", Path: dir}
 
 	// Custom mount to verify full config is passed through
 	mountDir := filepath.Join(dir, "custom-mount")
@@ -1033,12 +1019,12 @@ func TestExecProject_FullConfig(t *testing.T) {
 	}
 
 	// ExecProject should create the container with full config
-	output, err := sm.ExecProject(projectID, dir, projectName, "echo $TEST_SANDBOX_VAR", SandboxOpts{MemoryLimit: 512, SandboxMounts: sandboxMounts, SandboxEnvs: sandboxEnvs})
+	output, err := sm.ExecProject(project, "echo $TEST_SANDBOX_VAR", SandboxOpts{MemoryLimit: 512, SandboxMounts: sandboxMounts, SandboxEnvs: sandboxEnvs})
 	if err != nil {
 		t.Fatalf("ExecProject: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = sm.Stop("proj:" + projectID)
+		_ = sm.Stop("proj:" + project.ID)
 	})
 
 	// Verify the env var was set (full config was used)
@@ -1047,7 +1033,7 @@ func TestExecProject_FullConfig(t *testing.T) {
 	}
 
 	// Verify the custom mount is accessible
-	output2, err := sm.ExecProject(projectID, dir, projectName, "ls /mnt/custom", SandboxOpts{MemoryLimit: 512, SandboxMounts: sandboxMounts, SandboxEnvs: sandboxEnvs})
+	output2, err := sm.ExecProject(project, "ls /mnt/custom", SandboxOpts{MemoryLimit: 512, SandboxMounts: sandboxMounts, SandboxEnvs: sandboxEnvs})
 	if err != nil {
 		t.Fatalf("ExecProject second call: %v", err)
 	}
@@ -1065,20 +1051,19 @@ func TestExecProjectWithInput_FullConfig(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	projectID := "test-execproj-input-fullcfg"
-	projectName := "test-execproj-input"
+	project := &types.Project{ID: "test-execproj-input-fullcfg", Name: "test-execproj-input", Path: dir}
 
 	sandboxEnvs := []types.SandboxEnv{
 		{Key: "INPUT_TEST_VAR", Value: "works"},
 	}
 
 	// ExecProjectWithInput should create the container with full config
-	output, err := sm.ExecProjectWithInput(projectID, dir, projectName, "cat && echo $INPUT_TEST_VAR", []byte("stdin-data\n"), SandboxOpts{MemoryLimit: 256, SandboxEnvs: sandboxEnvs})
+	output, err := sm.ExecProjectWithInput(project, "cat && echo $INPUT_TEST_VAR", []byte("stdin-data\n"), SandboxOpts{MemoryLimit: 256, SandboxEnvs: sandboxEnvs})
 	if err != nil {
 		t.Fatalf("ExecProjectWithInput: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = sm.Stop("proj:" + projectID)
+		_ = sm.Stop("proj:" + project.ID)
 	})
 
 	// Verify both stdin data and env var are present
@@ -1102,14 +1087,14 @@ func TestExecTask_FullConfig(t *testing.T) {
 
 	dir := t.TempDir()
 	taskID := "test-exectask-fullcfg"
-	projectName := "test-exectask"
+	project := &types.Project{Name: "test-exectask"}
 
 	sandboxEnvs := []types.SandboxEnv{
 		{Key: "TASK_TEST_VAR", Value: "task-value"},
 	}
 
 	// ExecTask should create the container with full config
-	output, err := sm.ExecTask(taskID, dir, projectName, "", "echo $TASK_TEST_VAR", SandboxOpts{MemoryLimit: 128, SandboxEnvs: sandboxEnvs})
+	output, err := sm.ExecTask(taskID, dir, project, "echo $TASK_TEST_VAR", SandboxOpts{MemoryLimit: 128, SandboxEnvs: sandboxEnvs})
 	if err != nil {
 		t.Fatalf("ExecTask: %v", err)
 	}
@@ -1119,40 +1104,6 @@ func TestExecTask_FullConfig(t *testing.T) {
 
 	if !strings.Contains(output, "task-value") {
 		t.Fatalf("expected env var TASK_TEST_VAR=task-value in output, got: %q", output)
-	}
-}
-
-func TestExecTaskWithInput_FullConfig(t *testing.T) {
-	agentPath := findAgentBinary(t)
-	os.Setenv("MIKE_AGENT_PATH", agentPath)
-	defer os.Unsetenv("MIKE_AGENT_PATH")
-
-	sm := NewSandboxManager()
-	if !sm.IsAvailable() {
-		t.Skip("gVisor not available, skipping integration test")
-	}
-
-	dir := t.TempDir()
-	taskID := "test-exectask-input-fullcfg"
-	projectName := "test-exectask-input"
-
-	sandboxEnvs := []types.SandboxEnv{
-		{Key: "TASK_INPUT_VAR", Value: "input-value"},
-	}
-
-	output, err := sm.ExecTaskWithInput(taskID, dir, projectName, "", "cat && echo $TASK_INPUT_VAR", []byte("task-input\n"), SandboxOpts{MemoryLimit: 128, SandboxEnvs: sandboxEnvs})
-	if err != nil {
-		t.Fatalf("ExecTaskWithInput: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sm.Stop(taskID)
-	})
-
-	if !strings.Contains(output, "task-input") {
-		t.Fatalf("expected stdin data in output, got: %q", output)
-	}
-	if !strings.Contains(output, "input-value") {
-		t.Fatalf("expected env var in output, got: %q", output)
 	}
 }
 
@@ -1167,32 +1118,31 @@ func TestEnsureProjectContainer_RecreatesWhenStopped(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	projectID := "test-recreate-proj"
-	projectName := "test-recreate"
+	project := &types.Project{ID: "test-recreate-proj", Name: "test-recreate", Path: dir}
 
 	sandboxEnvs := []types.SandboxEnv{
 		{Key: "RECREATE_VAR", Value: "v1"},
 	}
 
 	// First call creates the container
-	_, err := sm.ExecProject(projectID, dir, projectName, "echo ok", SandboxOpts{SandboxEnvs: sandboxEnvs})
+	_, err := sm.ExecProject(project, "echo ok", SandboxOpts{SandboxEnvs: sandboxEnvs})
 	if err != nil {
 		t.Fatalf("first ExecProject: %v", err)
 	}
 
 	// Stop the container
-	_ = sm.Stop("proj:" + projectID)
+	_ = sm.Stop("proj:" + project.ID)
 
 	// Second call should recreate it with new config
 	sandboxEnvs2 := []types.SandboxEnv{
 		{Key: "RECREATE_VAR", Value: "v2"},
 	}
-	output, err := sm.ExecProject(projectID, dir, projectName, "echo $RECREATE_VAR", SandboxOpts{SandboxEnvs: sandboxEnvs2})
+	output, err := sm.ExecProject(project, "echo $RECREATE_VAR", SandboxOpts{SandboxEnvs: sandboxEnvs2})
 	if err != nil {
 		t.Fatalf("second ExecProject (recreate): %v", err)
 	}
 	t.Cleanup(func() {
-		_ = sm.Stop("proj:" + projectID)
+		_ = sm.Stop("proj:" + project.ID)
 	})
 
 	if !strings.Contains(output, "v2") {
@@ -1211,7 +1161,7 @@ func TestEnsureProjectContainer_RecreatesWhenMountStale(t *testing.T) {
 	}
 
 	projectID := "test-stale-mount-proj"
-	projectName := "test-stale-mount"
+	project := &types.Project{ID: projectID, Name: "test-stale-mount"}
 	taskID := "proj:" + projectID
 	t.Cleanup(func() {
 		_ = sm.Stop(taskID)
@@ -1220,8 +1170,9 @@ func TestEnsureProjectContainer_RecreatesWhenMountStale(t *testing.T) {
 	// Create the project container at dir1, then "move" the project to dir2.
 	dir1 := t.TempDir()
 	dir2 := t.TempDir()
+	project.Path = dir1
 
-	if err := sm.ensureProjectContainer(taskID, dir1, projectName, projectID, SandboxOpts{}); err != nil {
+	if err := sm.ensureProjectContainer(taskID, project, SandboxOpts{}); err != nil {
 		t.Fatalf("initial ensureProjectContainer: %v", err)
 	}
 
@@ -1229,7 +1180,7 @@ func TestEnsureProjectContainer_RecreatesWhenMountStale(t *testing.T) {
 	sm.mu.Lock()
 	containerName := sm.active[taskID]
 	sm.mu.Unlock()
-	mountPath := "/home/sandbox/" + projectName
+	mountPath := "/home/sandbox/" + project.Name
 	source, err := sm.rt.GetContainerMountSource(containerName, mountPath)
 	if err != nil {
 		t.Fatalf("GetContainerMountSource: %v", err)
@@ -1240,7 +1191,8 @@ func TestEnsureProjectContainer_RecreatesWhenMountStale(t *testing.T) {
 
 	// ensureProjectContainer with the new path must recreate the container
 	// (the old one is still running) so its mount points at dir2.
-	if err := sm.ensureProjectContainer(taskID, dir2, projectName, projectID, SandboxOpts{}); err != nil {
+	project.Path = dir2
+	if err := sm.ensureProjectContainer(taskID, project, SandboxOpts{}); err != nil {
 		t.Fatalf("ensureProjectContainer after move: %v", err)
 	}
 
@@ -1280,7 +1232,7 @@ func TestCreate_CustomMountCreatesHostDir(t *testing.T) {
 		t.Fatal("host path should not exist before Create")
 	}
 
-	_, err := sm.Create(taskID, baseDir, "test-proj", "", SandboxOpts{SandboxMounts: sandboxMounts})
+	_, err := sm.Create(taskID, baseDir, &types.Project{Name: "test-proj"}, SandboxOpts{SandboxMounts: sandboxMounts})
 	if err != nil {
 		t.Fatalf("create sandbox with custom mount: %v", err)
 	}
@@ -1313,7 +1265,7 @@ func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 	taskID := "test-plan-task"
 
 	// Create with plan mode (read-only mount)
-	_, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{PlanMode: true})
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{PlanMode: true})
 	if err != nil {
 		t.Fatalf("create sandbox with plan mode: %v", err)
 	}

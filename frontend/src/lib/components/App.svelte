@@ -240,7 +240,6 @@
 let scrollToColumn = $state<string | null>(null); // column to scroll to on mobile after task delete
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
-    let portConflict = $state<{ project_id: string; ports: number[] } | null>(null);
     let currentBranch = $state('');
     let urlFileId = $state(new URLSearchParams(location.search).get('file') || '');
     let mobileMenuOpen = $state(false);
@@ -513,9 +512,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 stopCountdown();
                 countdownSeconds = 0;
             },
-            onPortConflict: (project_id, conflicted_ports) => {
-                portConflict = { project_id, ports: conflicted_ports };
-            },
             onProjectPorts: (ports) => {
                 appStore.projectTerminalPorts = ports;
             },
@@ -567,7 +563,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             const projs = await getProjects();
             projects = projs || [];
             appStore.projects = projects;
-            portConflict = null; // Clear stale port conflict on reload
             if (projects.length > 0) {
                 // Check URL for project param to restore previous project
                 const urlParams = new URLSearchParams(location.search);
@@ -740,7 +735,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 stopCountdown();
                 countdownSeconds = 0;
             },
-            onPortConflict: () => {},
             onExtensionChange: () => {
                 extensionManager.loadExtensions().catch(() => {});
             },
@@ -1156,14 +1150,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
 
     function openSandboxConfig(p: Project) {
-        // Clear port conflict when opening modal (user will see/fix it in modal)
-        portConflict = null;
         uiStore.showSandboxConfig = true;
     }
 
     async function handleSandboxSaved() {
         uiStore.showSandboxConfig = false;
-        portConflict = null; // Clear port conflict on successful save
         // Refresh projects list to pick up changes
         try {
             const projs = await getProjects();
@@ -1263,7 +1254,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 currentProject={currentProject}
                 {currentBranch}
                 isMobile={isMobileCtx.isMobile}
-                hasPortConflict={portConflict?.project_id === currentProject?.id}
                 {hasReview}
                 onOpenMenu={() => mobileMenuOpen = true}
                 onOpenSandboxConfig={() => currentProject && openSandboxConfig(currentProject)}

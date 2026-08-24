@@ -476,13 +476,3 @@ func sanitizeManifestURLs(m *ExtensionManifest) {
 	m.Homepage = sanitizeURL(m.Homepage)
 	m.LicenseURL = sanitizeURL(m.LicenseURL)
 }
-
-// sanitizeRegistryEntryURLs validates and sanitizes all URL fields in a registry entry.
-// Mutates the entry in place, clearing any disallowed URLs.
-func sanitizeRegistryEntryURLs(e *RegistryEntry) {
-	if e == nil {
-		return
-	}
-	e.Homepage = sanitizeURL(e.Homepage)
-	e.LicenseURL = sanitizeURL(e.LicenseURL)
-}

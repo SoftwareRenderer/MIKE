@@ -120,7 +120,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		task.ID = types.GenerateTaskID()
 		// Ensure uniqueness
 		for {
-			if _, err := h.store.GetTaskByTaskID(task.ID); err != nil {
+			if _, err := h.store.GetTaskByID(task.ID); err != nil {
 				break // unique
 			}
 			task.ID = types.GenerateTaskID()
@@ -532,7 +532,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			selectedID := h.SelectSubtaskToStart(task, children)
 			if selectedID != "" {
 				log.Printf("[move] task=%s has subtasks, starting subtask %s", taskID, selectedID)
-				if err := h.StartSubtaskWithParent(projectID, selectedID, true); err != nil {
+				if err := h.StartSubtask(projectID, selectedID, true); err != nil {
 					log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
 					// Keep task in in_progress (user's explicit action); record error for visibility
 					task.ExecutionState = "idle"
@@ -544,7 +544,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 				// All subtasks done — start this task's own execution.
 				var err error
 				if task.ParentTaskID != "" {
-					err = h.StartSubtaskWithParent(projectID, taskID, false)
+					err = h.StartSubtask(projectID, taskID, false)
 				} else {
 					err = h.executor.StartTask(projectID, taskID, false)
 				}
@@ -560,7 +560,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			// else: subtasks still finishing (review/failed) — stay started-but-pending
 		} else if task.ParentTaskID != "" {
 			// Leaf subtask: subtask-aware start (branch from parent, inherit model config)
-			if err := h.StartSubtaskWithParent(projectID, taskID, false); err != nil {
+			if err := h.StartSubtask(projectID, taskID, false); err != nil {
 				log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
 				task.ExecutionState = "idle"
 				task.Status = originalStatus
@@ -696,7 +696,7 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 			break // avoid infinite loop on circular references
 		}
 		visited[currentID] = struct{}{}
-		ancestor, err := h.store.GetTaskByTaskID(currentID)
+		ancestor, err := h.store.GetTaskByID(currentID)
 		if err != nil {
 			break // ancestor not found, stop walking
 		}
@@ -732,12 +732,6 @@ func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabl
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, d)
 		}
 	}
-}
-
-// generateCommitMessage builds a commit message from task title, summary, and model.
-// Generates one via LLM from conversation + diff.
-func (h *TaskHandler) generateCommitMessage(ctx context.Context, taskID string, task *types.Task) string {
-	return h.executor.GenerateCommitMessageForTask(ctx, taskID, task)
 }
 
 // resolveGitAuthor returns the effective git author name/email.
@@ -794,7 +788,7 @@ func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	commitMsg := h.generateCommitMessage(r.Context(), taskID, task)
+	commitMsg := h.executor.GenerateCommitMessage(r.Context(), task)
 
 	// Resolve effective git author: env var override, then project git config, then defaults
 	authorName, authorEmail := resolveGitAuthor(projectID, h.store)
@@ -890,7 +884,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	if worktreeExists {
 		commitMsg := body.CommitMessage
 		if commitMsg == "" {
-			commitMsg = h.generateCommitMessage(r.Context(), taskID, task)
+			commitMsg = h.executor.GenerateCommitMessage(r.Context(), task)
 		}
 		// Refresh staged files from the working tree so post-staging manual
 		// edits are included in the commit; unstaged files stay out.
@@ -914,7 +908,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	// Normally this is done during task start (ensureParentBranch), but if the user
 	// commits a subtask without starting it, the parent branch may not exist yet.
 	if task.ParentTaskID != "" {
-		parent, pErr := h.store.GetTaskByTaskID(task.ParentTaskID)
+		parent, pErr := h.store.GetTaskByID(task.ParentTaskID)
 		if pErr == nil && parent.Branch == "" {
 			log.Printf("[commit-and-done] task=%s parent %s has no branch, creating it", taskID, task.ParentTaskID)
 			if err := h.executor.EnsureParentBranch(projectID, parent); err != nil {
@@ -1067,7 +1061,7 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 		_ = h.executor.StopTask(taskID)
 		h.executor.StopSandbox(taskID)
 	}
-	task, taskErr := h.store.GetTaskByTaskID(taskID)
+	task, taskErr := h.store.GetTaskByID(taskID)
 	if h.worktreeMgr != nil && taskErr == nil {
 		if task.Branch != "" {
 			h.boardStreamMgr.UnwatchWorktree(taskID)
@@ -1092,7 +1086,7 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 		projectID = task.ProjectID
 		_ = h.store.DeleteTask(task.ProjectID, taskID)
 	} else {
-		task, taskErr = h.store.GetTaskByTaskID(taskID)
+		task, taskErr = h.store.GetTaskByID(taskID)
 		if taskErr == nil {
 			projectID = task.ProjectID
 			_ = h.store.DeleteTask(task.ProjectID, taskID)
@@ -1260,10 +1254,10 @@ func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleStartWithSubtasks is the HTTP handler for starting a task.
+// HandleStart is the HTTP handler for starting a task.
 // If the task has incomplete subtasks, it uses the LLM to pick one and starts it.
 // If the task has no subtasks, it starts normally.
-func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Request) {
+func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
@@ -1304,7 +1298,7 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 			log.Printf("[start-parent] task=%s selected subtask %s to start", taskID, selectedID)
 			// Autostarted: ask_question is auto-answered from parent context
 			// instead of stopping for a human.
-			if err := h.StartSubtaskWithParent(projectID, selectedID, true); err != nil {
+			if err := h.StartSubtask(projectID, selectedID, true); err != nil {
 				log.Printf("[start-parent] task=%s error: %v", taskID, err)
 				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -1350,9 +1344,9 @@ func (h *TaskHandler) HandleStartWithSubtasks(w http.ResponseWriter, r *http.Req
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// HandleStopWithCascade is the HTTP handler for stopping a task.
+// HandleStop is the HTTP handler for stopping a task.
 // If the task has running descendants, it stops them all.
-func (h *TaskHandler) HandleStopWithCascade(w http.ResponseWriter, r *http.Request) {
+func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
@@ -1414,7 +1408,7 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 		selectedID := h.SelectSubtaskToStart(task, children)
 		if selectedID != "" {
 			log.Printf("[start-subtask] task=%s has subtasks, starting subtask %s", taskID, selectedID)
-			if err := h.StartSubtaskWithParent(projectID, selectedID, true); err != nil {
+			if err := h.StartSubtask(projectID, selectedID, true); err != nil {
 				log.Printf("[start-subtask] task=%s error: %v", taskID, err)
 				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
 				return
@@ -1454,13 +1448,13 @@ func (h *TaskHandler) SelectSubtaskToStart(parent *types.Task, subtasks []types.
 	return h.executor.SelectSubtaskToStart(parent, subtasks)
 }
 
-// StartSubtaskWithParent delegates to the executor.
+// StartSubtask delegates to the executor.
 // The autostarted flag records whether the subtask runs autonomously on behalf
 // of its parent (no human present to answer ask_question): true when started via
-// HandleStartWithSubtasks or AutoStartNextSibling, false only when the user
+// HandleStart or AutoStartNextSibling, false only when the user
 // explicitly starts a single subtask (HandleStartSubtask).
-func (h *TaskHandler) StartSubtaskWithParent(projectID, subtaskID string, autostarted bool) error {
-	return h.executor.StartSubtaskWithParent(projectID, subtaskID, autostarted)
+func (h *TaskHandler) StartSubtask(projectID, subtaskID string, autostarted bool) error {
+	return h.executor.StartSubtask(projectID, subtaskID, autostarted)
 }
 
 // StopTaskAndDescendants stops a task and all its in-flight descendants.

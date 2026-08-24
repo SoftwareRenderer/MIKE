@@ -636,7 +636,7 @@ func (asm *AppStreamManager) BroadcastProjectPorts(projectID string, ports []typ
 // This triggers the frontend to reload extensions and refresh UI injection slots.
 func (asm *AppStreamManager) BroadcastExtensionChange() {
 	msg, _ := json.Marshal(map[string]any{
-		"type": "extension_change",
+		"type": string(types.WSTypeExtensionChange),
 	})
 	asm.BroadcastAll(msg)
 }

@@ -456,7 +456,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	duration := time.Since(startTime)
 	log.Printf("[agent] task=%s completed stopReason=%s duration=%s", task.ID, stopReason, duration)
 
-	task, _ = te.store.GetTaskByTaskID(task.ID)
+	task, _ = te.store.GetTaskByID(task.ID)
 	if task.ExecutionState == "running" {
 		task.ExecutionState = "failed"
 		task.Status = "review"
@@ -534,9 +534,9 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			task.ExecutionState = "idle"
 			_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
 		}
-		commitMsg := te.GenerateCommitMessageForTask(context.Background(), task.ID, task)
+		commitMsg := te.GenerateCommitMessage(context.Background(), task)
 		mergeErr := te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
-		task, _ = te.store.GetTaskByTaskID(task.ID)
+		task, _ = te.store.GetTaskByID(task.ID)
 		if task.HasMergeConflict {
 			conflictedFiles := GetConflictedFiles(worktreePath)
 			prompt, _ := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
@@ -839,9 +839,6 @@ func toStreamEvent(event pkgagent.Event, sandbox bool, runner *agent.AgentRunner
 			"output":  event.ToolResult.Output,
 			"sandbox": sandbox,
 		}}
-
-	case pkgagent.EventTypeModels:
-		return types.StreamEvent{Type: types.WSTypeModels, Data: map[string]any{"models": event.RawData["models"]}}
 
 	case pkgagent.EventTypeStatus:
 		state := "running"

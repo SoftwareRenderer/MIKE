@@ -406,7 +406,7 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 		}
 
 		// Serialize stash operations per project (stash is repo-wide)
-		task, _ := te.store.GetTaskByTaskID(taskID)
+		task, _ := te.store.GetTaskByID(taskID)
 		projectID := ""
 		if task != nil {
 			projectID = task.ProjectID
@@ -473,7 +473,7 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 // GenerateCheckpointLabel generates a short 5-word label for a git stash checkpoint.
 // Falls back to the task title on any error.
 func (te *TaskExecutor) GenerateCheckpointLabel(ctx context.Context, taskID, diffStat, turnText string) string {
-	task, err := te.store.GetTaskByTaskID(taskID)
+	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		return "file changes"
 	}
@@ -502,13 +502,10 @@ func (te *TaskExecutor) GenerateCheckpointLabel(ctx context.Context, taskID, dif
 	return label
 }
 
-// GenerateCommitMessage uses the LLM to generate a descriptive commit label from git diff stat
-// and pre-formatted conversation turn text. Falls back to "{title}\n\nAssisted-by: {model}" on any error.
-func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, taskID, turnText string) string {
-	task, err := te.store.GetTaskByTaskID(taskID)
-	if err != nil {
-		return "file changes"
-	}
+// generateCommitMessageLLM uses the LLM to generate a descriptive commit message
+// from pre-formatted conversation turn text. Falls back to
+// "{title}\n\nAssisted-by: {model}" on any error.
+func (te *TaskExecutor) generateCommitMessageLLM(ctx context.Context, task *types.Task, turnText string) string {
 	serverURL, modelName, _ := te.utilityTarget(task)
 	if serverURL == "" || modelName == "" {
 		return "file changes"
@@ -520,14 +517,14 @@ func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, taskID, turnT
 	maxTokens := 128
 	_, label, err := te.ChatCompletion(ctx, serverURL, modelName, labelMessages, &ChatCompletionOpts{MaxTokens: &maxTokens, ReasoningEffort: "off"})
 	if err != nil {
-		log.Printf("[checkpoint-label] task=%s LLM call failed: %v", taskID, err)
+		log.Printf("[commit-message] task=%s LLM call failed: %v", task.ID, err)
 		return fallback
 	}
 	label = strings.TrimSpace(label)
 	if label == "" {
 		return fallback
 	}
-	log.Printf("[checkpoint-label] task=%s generated: %q", taskID, label)
+	log.Printf("[commit-message] task=%s generated: %q", task.ID, label)
 	return label
 }
 
@@ -646,15 +643,15 @@ func buildCommitMessageWithAssistedBy(body string, models []string) string {
 	return body + trailer
 }
 
-// GenerateCommitMessageForTask builds a full commit message from task title, summary, and model.
+// GenerateCommitMessage builds a full commit message from task title, summary, and model.
 // Generates one via LLM from conversation + diff. This is the single source of truth for commit
 // message generation across all commit paths (auto-commit, manual commit-and-done).
 // If multiple models contributed to the task, each gets its own Assisted-by line.
-func (te *TaskExecutor) GenerateCommitMessageForTask(ctx context.Context, taskID string, task *types.Task) string {
-	taskMsgs, _ := te.store.GetTaskMessages(taskID, task.CurrentThreadID)
+func (te *TaskExecutor) GenerateCommitMessage(ctx context.Context, task *types.Task) string {
+	taskMsgs, _ := te.store.GetTaskMessages(task.ID, task.CurrentThreadID)
 	conversation := BuildConversationFromTaskMessages(taskMsgs)
-	commitMsg := te.GenerateCommitMessage(ctx, taskID, FormatConversationTurns(ExtractCommitContext(conversation)))
-	// GenerateCommitMessage returns "file changes" as a generic fallback when LLM is unavailable.
+	commitMsg := te.generateCommitMessageLLM(ctx, task, FormatConversationTurns(ExtractCommitContext(conversation)))
+	// generateCommitMessageLLM returns "file changes" as a generic fallback when LLM is unavailable.
 	// Use the task title instead for a more useful commit message.
 	if commitMsg == "file changes" && task.Title != "" {
 		commitMsg = task.Title
@@ -763,18 +760,6 @@ func (te *TaskExecutor) StreamCommitMessage(w SSEFlusher, taskID string, task *t
 func hasRequestReview(m *types.ChatMessage) bool {
 	for _, tc := range m.ToolCalls {
 		if tc.Function.Name == "request_review" {
-			return true
-		}
-	}
-	return false
-}
-
-// hasStateChangingTool checks if an assistant message has a state-changing tool call
-// (edit_file, write_file, bash) that modifies the codebase.
-func hasStateChangingTool(m *types.ChatMessage) bool {
-	for _, tc := range m.ToolCalls {
-		switch tc.Function.Name {
-		case "edit_file", "write_file", "bash":
 			return true
 		}
 	}

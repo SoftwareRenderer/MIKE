@@ -68,31 +68,6 @@ func LoadDisabled() *Config {
 	return nil
 }
 
-// Load reads TLS configuration from environment variables.
-//
-// TLS is enabled by default with auto-generated self-signed certificates.
-//
-// Priority:
-//  1. MIKE_TLS_CERT + MIKE_TLS_KEY — use user-provided cert/key files
-//  2. Default — auto-generate a self-signed cert in dataDir/tls/
-//  3. MIKE_TLS=0 — explicitly disable TLS (plain HTTP)
-//
-// Returns nil only when TLS is explicitly disabled (MIKE_TLS=0).
-//
-// Deprecated: Use LoadWithCert() or LoadDisabled() with explicit parameters.
-// This wrapper is kept for backward compatibility.
-func Load(dataDir string) (*Config, error) {
-	// Explicitly disable TLS
-	if os.Getenv("MIKE_TLS") == "0" {
-		return nil, nil
-	}
-
-	certFile := os.Getenv("MIKE_TLS_CERT")
-	keyFile := os.Getenv("MIKE_TLS_KEY")
-
-	return LoadWithCert(dataDir, certFile, keyFile)
-}
-
 // generateSelfSignedCert creates a self-signed ECDSA certificate valid for localhost.
 func generateSelfSignedCert(certPath, keyPath string) error {
 	// Generate ECDSA private key
@@ -120,7 +95,7 @@ func generateSelfSignedCert(certPath, keyPath string) error {
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 
-		DNSNames:  []string{"localhost"},
+		DNSNames:    []string{"localhost"},
 		IPAddresses: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
 	}
 

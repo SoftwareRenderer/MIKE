@@ -177,9 +177,6 @@ func doneDiffResponseFromTaskDiff(d *git.TaskDiff) doneDiffResponse {
 		}
 		untracked[i] = entry
 	}
-	if untracked == nil {
-		untracked = []git.UntrackedFile{}
-	}
 	return doneDiffResponse{
 		Diff:              d.Diff,
 		Untracked:         untracked,

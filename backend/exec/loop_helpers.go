@@ -130,7 +130,7 @@ func (te *TaskExecutor) persistStopTransition(task *types.Task) bool {
 
 // handleCancelledTask applies the stop transition
 func (te *TaskExecutor) handleCancelledTask(taskID, projectID string) {
-	fresh, err := te.store.GetTaskByTaskID(taskID)
+	fresh, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		return
 	}
@@ -251,7 +251,7 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 // fires on working-tree changes). Returns nil when the task has no visible changes
 // or its worktree/branch cannot be resolved.
 func (te *TaskExecutor) computeTaskDiffStats(projectID, taskID string) *stream.DiffStatsEvent {
-	task, err := te.store.GetTaskByTaskID(taskID)
+	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		return nil
 	}
@@ -404,7 +404,7 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 	summaryMsgID := uuid.New().String()
 	summaryCreatedAt := time.Now().UTC()
 	// Anchor: reload task to get UpdatedAt (set when Summarizing flag was set).
-	if updated, err := te.store.GetTaskByTaskID(taskID); err == nil && updated != nil {
+	if updated, err := te.store.GetTaskByID(taskID); err == nil && updated != nil {
 		task = updated
 	}
 	summaryAnchor := task.UpdatedAt
@@ -552,7 +552,6 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 	projectID := setup.projectID
 	projectName := setup.project.Name
 	worktreePath := setup.worktreePath
-	projectPath := setup.projectPath
 	sandboxOpts := setup.sandboxOpts
 	sandboxDockerfilePath := setup.sandboxDockerfilePath
 
@@ -592,7 +591,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 	if !te.sandboxMgr.ContainerIsRunning(task.ID) {
 		agentSandbox := te.agentRegistry.GetAnyAgentSandbox()
 		var createErr error
-		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, projectName, projectPath, kanban_sandbox.SandboxOpts{
+		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, setup.project, kanban_sandbox.SandboxOpts{
 			BaseImage:        imageToUse,
 			NetworkIsolation: sandboxOpts.NetworkIsolation,
 			MemoryLimit:      sandboxOpts.MemoryLimit,
@@ -608,12 +607,11 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Cli
 			return "", nil, nil, fmt.Errorf("failed to create sandbox: %w", createErr)
 		}
 		log.Printf("[sandbox] task=%s sandbox created with image %s", task.ID, imageToUse)
-		// Store and broadcast assigned ports
+		// Store and broadcast assigned ports (carried on the task object)
 		if len(assignedPorts) > 0 {
 			task.AssignedPorts = assignedPorts
 			te.storeTask(task, setup.projectID)
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: task.ID, Ports: assignedPorts}})
 		}
 		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Sandbox container started"}})
 	} else {

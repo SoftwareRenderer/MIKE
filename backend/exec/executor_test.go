@@ -222,7 +222,7 @@ func TestInitTask_CreatesWorktree(t *testing.T) {
 	}
 
 	// Verify task status is unchanged (init should NOT move to in_progress)
-	reloaded, _ := te.store.GetTaskByTaskID(taskID)
+	reloaded, _ := te.store.GetTaskByID(taskID)
 	if reloaded.Status != "backlog" {
 		t.Errorf("Status should remain backlog after init, got %q", reloaded.Status)
 	}
@@ -836,7 +836,7 @@ func TestInitTask_ClearsOrphanedBranchOnWorktreeFailure(t *testing.T) {
 	}
 
 	// Branch should be cleared (not orphaned in DB)
-	reloaded, _ := te.store.GetTaskByTaskID(taskID)
+	reloaded, _ := te.store.GetTaskByID(taskID)
 	if reloaded.Branch != "" {
 		t.Fatalf("branch should be cleared after worktree failure, got %q", reloaded.Branch)
 	}

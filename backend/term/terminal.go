@@ -135,7 +135,7 @@ type sandboxOps interface {
 	BuildImage(projectName, dockerfilePath string) error
 	BuildImageWithProgress(projectName, dockerfilePath string, onProgress func(line string)) error
 	PullImageWithProgress(image string, onProgress func(line string)) error
-	StartShellWithCreate(taskID, worktreePath, projectName, projectPath, projectID string, opts sandbox.SandboxOpts) (*sandbox.ShellProcess, []types.AssignedPort, error)
+	StartShell(taskID, worktreePath string, project *types.Project, opts sandbox.SandboxOpts) (*sandbox.ShellProcess, []types.AssignedPort, error)
 	Stop(taskID string) error
 	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
 }
@@ -218,32 +218,14 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 
 	// Check if sandbox is enabled for this project
 	sandboxEnabled := false
-	networkIsolation := false
-	baseImage := ""
-	sandboxDockerfilePath := ""
-	memoryLimit := 0
-	projectName := ""
-	projectPath := ""
-	var forwardPorts []types.PortForward
-	var sandboxMounts []types.SandboxMount
-	var sandboxEnvs []types.SandboxEnv
-	var capabilities []string
+	var proj *types.Project
 	if projectID != "" {
-		proj, err := tm.store.GetProject(projectID)
+		var err error
+		proj, err = tm.store.GetProject(projectID)
 		if err != nil {
 			return nil, fmt.Errorf("get project for sandbox check: %w", err)
 		}
 		sandboxEnabled = proj.SandboxEnabled
-		networkIsolation = proj.SandboxNetworkIsolation
-		baseImage = proj.SandboxImage
-		sandboxDockerfilePath = proj.SandboxDockerfilePath
-		memoryLimit = proj.SandboxMemoryLimit
-		projectName = proj.Name
-		projectPath = proj.Path
-		forwardPorts = proj.ForwardPorts
-		sandboxMounts = proj.SandboxMounts
-		sandboxEnvs = proj.SandboxEnvs
-		capabilities = proj.SandboxCapabilities
 	}
 
 	var sess *taskTerminal
@@ -257,15 +239,15 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		}
 		// Determine image: Dockerfile build takes precedence over pre-built image
 		imageToUse := ""
-		if sandboxDockerfilePath != "" {
-			imageToUse = sandbox.ProjectImageName(projectName)
-			if !tm.sandboxMgr.ImageReadyForProject(projectName) {
-				if err := tm.sandboxMgr.BuildImage(projectName, sandboxDockerfilePath); err != nil {
+		if proj.SandboxDockerfilePath != "" {
+			imageToUse = sandbox.ProjectImageName(proj.Name)
+			if !tm.sandboxMgr.ImageReadyForProject(proj.Name) {
+				if err := tm.sandboxMgr.BuildImage(proj.Name, proj.SandboxDockerfilePath); err != nil {
 					return nil, fmt.Errorf("build sandbox image: %w", err)
 				}
 			}
 		} else {
-			imageToUse = baseImage
+			imageToUse = proj.SandboxImage
 			if imageToUse == "" {
 				imageToUse = sandbox.BaseImage
 			}
@@ -278,20 +260,20 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		// Task executor also creates the container, but the terminal may be opened before
 		// the task starts (or the task was never started), so we create it here as needed.
 		// Only mount .git/ for task-level containers (not project-level terminals)
-		shellProjectPath := ""
-		if !strings.HasPrefix(taskID, "proj:") {
-			shellProjectPath = projectPath
+		shellProject := proj
+		if strings.HasPrefix(taskID, "proj:") {
+			shellProject = &types.Project{ID: proj.ID, Name: proj.Name}
 		}
-		shell, assignedPorts, err := tm.sandboxMgr.StartShellWithCreate(taskID, worktreePath, projectName, shellProjectPath, projectID, sandbox.SandboxOpts{
+		shell, assignedPorts, err := tm.sandboxMgr.StartShell(taskID, worktreePath, shellProject, sandbox.SandboxOpts{
 			BaseImage:        imageToUse,
-			NetworkIsolation: networkIsolation,
-			MemoryLimit:      memoryLimit,
-			ForwardPorts:     forwardPorts,
+			NetworkIsolation: proj.SandboxNetworkIsolation,
+			MemoryLimit:      proj.SandboxMemoryLimit,
+			ForwardPorts:     proj.ForwardPorts,
 			AgentSandbox:     agentSandbox,
 			SkillsDir:        prompts.SkillsDir(),
-			SandboxMounts:    sandboxMounts,
-			SandboxEnvs:      sandboxEnvs,
-			Capabilities:     capabilities,
+			SandboxMounts:    proj.SandboxMounts,
+			SandboxEnvs:      proj.SandboxEnvs,
+			Capabilities:     proj.SandboxCapabilities,
 		})
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)

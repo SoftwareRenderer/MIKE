@@ -559,7 +559,7 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 			independentCount := 0
 			nestedCount := 0
 			for _, id := range createdIDs {
-				t, err := te.store.GetTaskByTaskID(id)
+				t, err := te.store.GetTaskByID(id)
 				if err != nil {
 					continue
 				}
@@ -709,7 +709,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 	var parentTask *types.Task
 	if actualParentID != "" {
 		var err error
-		parentTask, err = te.store.GetTaskByTaskID(actualParentID)
+		parentTask, err = te.store.GetTaskByID(actualParentID)
 		if err != nil {
 			return "", fmt.Errorf("parent task %s not found", actualParentID)
 		}
@@ -723,7 +723,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 	newTaskID := types.GenerateTaskID()
 	// Ensure uniqueness (unlikely collision, but guard against it)
 	for {
-		if _, err := te.store.GetTaskByTaskID(newTaskID); err != nil {
+		if _, err := te.store.GetTaskByID(newTaskID); err != nil {
 			break // unique
 		}
 		newTaskID = types.GenerateTaskID()
@@ -915,7 +915,7 @@ func (te *TaskExecutor) handleEditTask(args map[string]any, currentTask *types.T
 		return "", errors.New("at least one of title, prompt, or parent_task_id must be provided")
 	}
 
-	target, err := te.store.GetTaskByTaskID(taskID)
+	target, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		return "", fmt.Errorf("task %s not found", taskID)
 	}
@@ -933,7 +933,7 @@ func (te *TaskExecutor) handleEditTask(args map[string]any, currentTask *types.T
 	// If changing parent, validate the parent exists and is also backlog
 	if hasParent {
 		if parentTaskID != "" {
-			parent, err := te.store.GetTaskByTaskID(parentTaskID)
+			parent, err := te.store.GetTaskByID(parentTaskID)
 			if err != nil {
 				return "", fmt.Errorf("parent task %s not found", parentTaskID)
 			}

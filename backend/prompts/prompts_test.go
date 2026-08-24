@@ -416,7 +416,7 @@ func TestRenderSummarizePrompt(t *testing.T) {
 
 	// Without a previous summary: no summary section in the user message.
 	data.PreviousSummary = ""
-	systemPrompt, userPrompt, err = RenderSummarizePrompt(data)
+	_, userPrompt, err = RenderSummarizePrompt(data)
 	if err != nil {
 		t.Fatalf("render prompt (no previous summary): %v", err)
 	}

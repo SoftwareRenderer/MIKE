@@ -133,7 +133,6 @@ func runExecTask(t *testing.T, te *TaskExecutor, proj *types.Project, taskID, se
 		project:        proj,
 		projectID:      proj.ID,
 		worktreePath:   t.TempDir(),
-		projectPath:    proj.Path,
 		serverURL:      serverURL,
 		modelName:      "test-model",
 		ctx:            ctx,
@@ -166,7 +165,7 @@ func waitTaskState(t *testing.T, s *store.Store, taskID string, match func(statu
 	var task *types.Task
 	for time.Now().Before(deadline) {
 		var err error
-		task, err = s.GetTaskByTaskID(taskID)
+		task, err = s.GetTaskByID(taskID)
 		if err == nil && task != nil && match(task.Status, task.ExecutionState) {
 			return task
 		}

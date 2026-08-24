@@ -8,7 +8,6 @@ type WSMessageType string
 const (
 	WSTypeToken              WSMessageType = "token"
 	WSTypeReasoning          WSMessageType = "reasoning"
-	WSTypeReasoningEnd       WSMessageType = "reasoning_end"
 	WSTypeToolCall           WSMessageType = "tool_call"
 	WSTypeToolProgress       WSMessageType = "tool_progress"
 	WSTypeToolOutput         WSMessageType = "tool_output"
@@ -26,11 +25,9 @@ const (
 	WSTypeMergeResolution    WSMessageType = "merge_resolution"
 	WSTypeBuildProgress      WSMessageType = "build_progress"
 	WSTypeSandboxStats       WSMessageType = "sandbox_stats"
-	WSTypePorts              WSMessageType = "ports"
 	WSTypePromptProgress     WSMessageType = "prompt_progress"
 	WSTypeHint               WSMessageType = "hint"
 	WSTypeExtensionChange    WSMessageType = "extension_change"
-	WSTypeModels             WSMessageType = "models"
 )
 
 // StreamEvent carries a typed payload to broadcast.
@@ -43,73 +40,6 @@ type StreamEvent struct {
 type WSMessage struct {
 	Type string          `json:"type"`
 	Data json.RawMessage `json:"data"`
-}
-
-// StreamTokenEvent is an individual text token from the AI.
-type StreamTokenEvent struct {
-	Text string `json:"text"`
-}
-
-// StreamReasoningEvent is reasoning/thinking content.
-type StreamReasoningEvent struct {
-	Text string `json:"text"`
-}
-
-// StreamReasoningEndEvent marks the end of a reasoning block.
-type StreamReasoningEndEvent struct {
-	Summary string `json:"summary"`
-}
-
-// StreamToolCallEvent is an AI tool invocation request.
-type StreamToolCallEvent struct {
-	ToolID          string         `json:"tool_id"`
-	ToolName        string         `json:"tool_name"`
-	ToolDisplayName string         `json:"tool_display_name"`
-	Args            map[string]any `json:"args"`
-}
-
-// StreamToolResultEvent is the result of a tool invocation.
-type StreamToolResultEvent struct {
-	ToolID   string `json:"tool_id"`
-	Success  bool   `json:"success"`
-	Output   string `json:"output"`
-	Duration int64  `json:"duration"`
-}
-
-// StreamStatusEvent is a task status/activity update.
-type StreamStatusEvent struct {
-	State    string `json:"state"`
-	Activity string `json:"activity"`
-}
-
-// StreamQueueEvent is a queue position update.
-type StreamQueueEvent struct {
-	Position      int `json:"position"`
-	EstimatedWait int `json:"estimated_wait_seconds"`
-}
-
-// StreamCompleteEvent is sent when task execution finishes.
-type StreamCompleteEvent struct {
-	State   string `json:"state"`
-	Summary string `json:"summary"`
-	Tokens  struct {
-		Prompt    int `json:"prompt"`
-		Completed int `json:"completed"`
-		Total     int `json:"total"`
-	} `json:"tokens"`
-	Duration int64 `json:"duration"`
-}
-
-// StreamErrorEvent is sent on errors during execution.
-type StreamErrorEvent struct {
-	Message string `json:"message"`
-	Code    string `json:"code"`
-}
-
-// StreamPortsEvent carries assigned port mappings for a running task.
-type StreamPortsEvent struct {
-	TaskID string         `json:"task_id"`
-	Ports  []AssignedPort `json:"ports"`
 }
 
 // TerminalMessage is the envelope for terminal WebSocket frames.

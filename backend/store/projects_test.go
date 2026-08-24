@@ -172,7 +172,7 @@ func TestProjectCreatedAtUpdatedAt(t *testing.T) {
 	}
 }
 
-func TestDeleteProjectWithData(t *testing.T) {
+func TestDeleteProject(t *testing.T) {
 	s := testStore(t)
 
 	// Create two projects
@@ -236,7 +236,7 @@ func TestDeleteProjectWithData(t *testing.T) {
 	}
 
 	// --- Delete proj-1 ---
-	if err := s.DeleteProjectWithData("proj-1"); err != nil {
+	if err := s.DeleteProject("proj-1"); err != nil {
 		t.Fatalf("delete project with data: %v", err)
 	}
 

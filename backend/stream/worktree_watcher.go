@@ -419,7 +419,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 		ww.mu.Unlock()
 	}()
 
-	task, err := ww.worktreeMgr.GetTaskByTaskID(taskID)
+	task, err := ww.worktreeMgr.GetTaskByID(taskID)
 	headRef := ""
 	if err == nil && task.Status == "done" {
 		headRef = task.BranchTip

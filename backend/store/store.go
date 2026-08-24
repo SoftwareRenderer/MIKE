@@ -416,14 +416,6 @@ func i2b(i int) bool {
 }
 
 // ptrStr returns a pointer to a string, or nil if empty.
-// boolInt converts a bool to a 1/0 int for SQLite storage.
-func boolInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
 func ptrStr(s string) *string {
 	if s == "" {
 		return nil

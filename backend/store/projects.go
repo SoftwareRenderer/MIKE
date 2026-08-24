@@ -259,11 +259,11 @@ func (s *Store) UpdateProjectSandboxCapabilities(id string, capabilities []strin
 	return err
 }
 
-// DeleteProjectWithData explicitly deletes all data related to a project,
+// DeleteProject explicitly deletes all data related to a project,
 // including tasks, messages, threads, dependencies, reviews, home agent messages,
 // and token stats. This is the primary cleanup mechanism — CASCADE constraints
 // serve as a safety net.
-func (s *Store) DeleteProjectWithData(id string) error {
+func (s *Store) DeleteProject(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

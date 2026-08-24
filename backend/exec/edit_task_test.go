@@ -43,7 +43,7 @@ func TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False(t *testing.
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByTaskID("target-nest-1")
+	updated, err := te.store.GetTaskByID("target-nest-1")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestHandleEditTask_NestingInheritsSubtasksAutoMergeTrue(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByTaskID("target-nest-2")
+	updated, err := te.store.GetTaskByID("target-nest-2")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestHandleEditTask_UnnestResetsToConfigDefaults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByTaskID("target-unnest-3")
+	updated, err := te.store.GetTaskByID("target-unnest-3")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestHandleEditTask_UnchangedParentDoesNotClobberAutoMerge(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByTaskID("target-same-4")
+	updated, err := te.store.GetTaskByID("target-same-4")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestHandleEditTask_UnnestWhenAlreadyIndependent(t *testing.T) {
 	createProject(t, te.store, "proj-ind-5", "proj-ind-5")
 	editTaskTarget(t, te.store, "proj-ind-5", "target-ind-5", true, true, true, "")
 
-	current, err := te.store.GetTaskByTaskID("target-ind-5")
+	current, err := te.store.GetTaskByID("target-ind-5")
 	if err != nil {
 		t.Fatalf("get current task: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestHandleEditTask_UnnestWhenAlreadyIndependent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByTaskID("target-ind-5")
+	updated, err := te.store.GetTaskByID("target-ind-5")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestHandleEditTask_TitleOnlyEditKeepsAutoMerge(t *testing.T) {
 	createProject(t, te.store, "proj-title-6", "proj-title-6")
 	editTaskTarget(t, te.store, "proj-title-6", "target-title-6", true, true, true, "")
 
-	current, err := te.store.GetTaskByTaskID("target-title-6")
+	current, err := te.store.GetTaskByID("target-title-6")
 	if err != nil {
 		t.Fatalf("get current task: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestHandleEditTask_TitleOnlyEditKeepsAutoMerge(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByTaskID("target-title-6")
+	updated, err := te.store.GetTaskByID("target-title-6")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestHandleEditTask_NonBacklogParentRejected(t *testing.T) {
 		t.Fatal("expected error for non-backlog parent")
 	}
 
-	updated, err := te.store.GetTaskByTaskID("target-nb-7")
+	updated, err := te.store.GetTaskByID("target-nb-7")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}

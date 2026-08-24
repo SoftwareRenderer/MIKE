@@ -309,29 +309,6 @@ func (r *AgentRunner) SessionFile() string {
 	return r.sessionFile
 }
 
-// SetSessionFile sets the session file path (used when restoring from task metadata).
-func (r *AgentRunner) SetSessionFile(sessionFile string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.sessionFile = sessionFile
-}
-
-// SendCommand sends a high-level command to the agent.
-func (r *AgentRunner) SendCommand(ctx context.Context, cmd string, data []byte) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return fmt.Errorf("agent runner closed")
-	}
-
-	bytes := r.adapter.EncodeCommand(ctx, cmd, data)
-	if bytes == nil {
-		return fmt.Errorf("adapter EncodeCommand returned nil")
-	}
-	_, err := r.stdin.Write(bytes)
-	return err
-}
-
 // ModelName returns the agent model name discovered via get_state.
 func (r *AgentRunner) ModelName() string {
 	r.mu.Lock()

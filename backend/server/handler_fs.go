@@ -387,9 +387,9 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		var err error
 		if taskID != "" {
 			// Use task sandbox (creates container on demand)
-			output, err = s.sandboxMgr.ExecTask(taskID, worktreePath, project.Name, project.Path, "ls -pA "+shellQuote(sandboxPath), opts)
+			output, err = s.sandboxMgr.ExecTask(taskID, worktreePath, project, "ls -pA "+shellQuote(sandboxPath), opts)
 		} else {
-			output, err = s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "ls -pA "+shellQuote(sandboxPath), opts)
+			output, err = s.sandboxMgr.ExecProject(project, "ls -pA "+shellQuote(sandboxPath), opts)
 		}
 		if err != nil {
 			JSONError(w, http.StatusNotFound, err.Error())
@@ -919,7 +919,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		opts := s.fsSandboxConfig(project)
 
 		// Check if already a git repo
-		_, gitErr := s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, "git -C "+shellQuote(sandboxPath)+" rev-parse --git-dir 2>/dev/null", opts)
+		_, gitErr := s.sandboxMgr.ExecProject(project, "git -C "+shellQuote(sandboxPath)+" rev-parse --git-dir 2>/dev/null", opts)
 		if gitErr == nil {
 			JSONError(w, http.StatusBadRequest, "path is already a git repository")
 			return
@@ -942,7 +942,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		// git init + create README + add + commit in single command
 		// Use -c flags to override the commit author identity (if configured in git package)
 		flagCmd := gitAuthorFlagCmd()
-		_, err := s.sandboxMgr.ExecProjectWithInput(project.ID, project.Path, project.Name,
+		_, err := s.sandboxMgr.ExecProjectWithInput(project,
 			"git -C "+shellQuote(sandboxPath)+" init && "+
 				"base64 -d > "+shellQuote(filepath.Join(sandboxPath, "README.md"))+" && "+
 				"git -C "+shellQuote(sandboxPath)+" add README.md && "+
@@ -1077,9 +1077,9 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		var execErr error
 		if taskID != "" {
 			// Use task sandbox (creates container on demand)
-			output, execErr = s.sandboxMgr.ExecTask(taskID, worktreePath, project.Name, project.Path, cmd, opts)
+			output, execErr = s.sandboxMgr.ExecTask(taskID, worktreePath, project, cmd, opts)
 		} else {
-			output, execErr = s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, cmd, opts)
+			output, execErr = s.sandboxMgr.ExecProject(project, cmd, opts)
 		}
 		if execErr != nil {
 			JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create directory: %v", execErr))
@@ -1102,9 +1102,9 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 			var checkErr error
 			checkCmd := "test -d " + shellQuote(sandboxPath) + " && echo EXISTS"
 			if taskID != "" {
-				checkOut, checkErr = s.sandboxMgr.ExecTask(taskID, worktreePath, project.Name, project.Path, checkCmd, opts)
+				checkOut, checkErr = s.sandboxMgr.ExecTask(taskID, worktreePath, project, checkCmd, opts)
 			} else {
-				checkOut, checkErr = s.sandboxMgr.ExecProject(project.ID, project.Path, project.Name, checkCmd, opts)
+				checkOut, checkErr = s.sandboxMgr.ExecProject(project, checkCmd, opts)
 			}
 			if checkErr == nil && strings.TrimSpace(checkOut) == "EXISTS" {
 				// Directory exists despite weird output — treat as success
