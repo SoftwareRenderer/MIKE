@@ -77,6 +77,9 @@ class GitLineMarker extends GutterMarker {
     toDOM(): HTMLElement {
         const el = document.createElement('div');
         el.style.cssText = 'display:flex;align-items:center;gap:4px;height:100%';
+        // data-line lets gutter interactions (e.g. line-selection for task
+        // creation) resolve the exact document line without coordinate math.
+        el.dataset.line = String(this.lineNum);
 
         // Overlay of indicators (positioned on top of each other)
         const overlay = document.createElement('span');
@@ -139,6 +142,7 @@ class PlainLineMarker extends GutterMarker {
     toDOM(): HTMLElement {
         const el = document.createElement('div');
         el.style.cssText = 'display:flex;align-items:center;gap:4px;height:100%';
+        el.dataset.line = String(this.lineNum);
         const spacer = document.createElement('span');
         spacer.style.cssText = 'width:10px;flex-shrink:0';
         const num = document.createElement('span');
