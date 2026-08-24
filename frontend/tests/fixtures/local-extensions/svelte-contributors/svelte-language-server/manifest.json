@@ -1,0 +1,14 @@
+{
+    "display_name": "Svelte Language Server",
+    "description": "Svelte language server providing completions, hover, and diagnostics for .svelte files.",
+    "author": "Svelte Contributors",
+    "version": "0.1.0",
+    "capabilities": {
+        "lsp": {
+            "command": "svelte-language-server",
+            "args": ["--stdio"],
+            "extensions": ["svelte"],
+            "language": "svelte"
+        }
+    }
+}

@@ -1,0 +1,8 @@
+/* Minimal light theme for the e2e test servers.
+   The e2e suite only needs this file to exist so the CSS extension's
+   <link> resolves; it is not a complete theme. */
+:root {
+    --color-surface-0: #ffffff;
+    --color-surface-1: #f6f8fa;
+    --color-text-0: #1f2328;
+}

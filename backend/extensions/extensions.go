@@ -52,9 +52,10 @@ type Extension struct {
 
 // ExtensionManifest defines the metadata and capabilities of an extension.
 type ExtensionManifest struct {
-	DisplayName  string        `json:"display_name"`
-	Description  string        `json:"description"`
-	Author       string        `json:"author"`
+	DisplayName string `json:"display_name"`
+	Description string `json:"description"`
+	Author      string `json:"author"`
+	Featured     bool          `json:"featured,omitempty"`
 	Homepage     string        `json:"homepage,omitempty"`
 	LicenseURL   string        `json:"license_url,omitempty"`
 	Version      string        `json:"version"`
@@ -373,12 +374,13 @@ type RegistryIndex []RegistryEntry
 
 // RegistryEntry describes a single extension available in the registry.
 type RegistryEntry struct {
-	Name          string        `json:"name"`
-	Version       string        `json:"version"`
-	Type          string        `json:"type"`
-	DisplayName   string        `json:"display_name"`
-	Description   string        `json:"description"`
-	Author        string        `json:"author"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Type        string `json:"type"`
+	DisplayName string `json:"display_name"`
+	Description string `json:"description"`
+	Author      string `json:"author"`
+	Featured      bool          `json:"featured,omitempty"`
 	Homepage      string        `json:"homepage,omitempty"`
 	LicenseURL    string        `json:"license_url,omitempty"`
 	Image         string        `json:"image,omitempty"`          // OCI image reference

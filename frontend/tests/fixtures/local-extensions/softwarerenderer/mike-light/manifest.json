@@ -1,0 +1,11 @@
+{
+    "display_name": "Light Mode",
+    "description": "Light color scheme for the Kanban UI.",
+    "author": "SoftwareRenderer",
+    "version": "1.0.0",
+    "capabilities": {
+        "css": {
+            "css_url": "styles.css"
+        }
+    }
+}

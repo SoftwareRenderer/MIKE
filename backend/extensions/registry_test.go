@@ -84,6 +84,44 @@ func TestFetchIndex_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestFetchIndex_FeaturedFlag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[
+			{"name": "featured-ext", "version": "1.0.0", "type": "ui", "display_name": "Featured Ext", "description": "d", "author": "a", "featured": true},
+			{"name": "plain-ext", "version": "1.0.0", "type": "ui", "display_name": "Plain Ext", "description": "d", "author": "a"}
+		]`))
+	}))
+	defer server.Close()
+
+	rc := NewRegistryClient()
+	got, err := rc.FetchIndex(server.URL)
+	if err != nil {
+		t.Fatalf("FetchIndex: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("index length = %d, want 2", len(got))
+	}
+	if !got[0].Featured {
+		t.Errorf("got[0].Featured = false, want true (featured: true)")
+	}
+	if got[1].Featured {
+		t.Errorf("got[1].Featured = true, want false (field absent)")
+	}
+
+	// Round-trip: featured is emitted for true entries and omitted otherwise.
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"featured":true`) {
+		t.Errorf("marshaled index missing \"featured\":true, got %s", data)
+	}
+	if strings.Count(string(data), `"featured"`) != 1 {
+		t.Errorf("expected exactly one \"featured\" field (omitempty), got %s", data)
+	}
+}
+
 func TestFetchDockerfile(t *testing.T) {
 	expected := `FROM ubuntu:latest
 RUN apt-get update && apt-get install -y gopls

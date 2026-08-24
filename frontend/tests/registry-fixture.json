@@ -1,5 +1,27 @@
 [
     {
+        "name": "featured-demo",
+        "version": "1.0.0",
+        "type": "ui",
+        "display_name": "Featured Demo",
+        "description": "Featured registry entry for the Browse ordering tests. It pins to the top of the registry section until installed; the fake commit makes it uninstallable so no test can ever install it.",
+        "author": "Test",
+        "featured": true,
+        "repo": "https://github.com/SoftwareRenderer/MIKE-extensions",
+        "commit": "not-a-real-commit-for-tests",
+        "subdir": "ui/featured-demo",
+        "capabilities": {
+            "ui": {
+                "injection_points": [
+                    "taskCard"
+                ],
+                "permissions": [
+                    "createTask.description.insertText"
+                ]
+            }
+        }
+    },
+    {
         "name": "typescript-language-server",
         "version": "1.0.0",
         "type": "lsp",
