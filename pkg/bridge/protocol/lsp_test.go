@@ -91,7 +91,7 @@ func TestLSPParams_RawMessage(t *testing.T) {
 	}
 }
 
-func TestReadRequest_LSP(t *testing.T) {
+func TestParseRequest_LSP(t *testing.T) {
 	rawJSON := json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
 	frame := NewRequest(100, MethodLSP, rawJSON)
 
@@ -102,9 +102,13 @@ func TestReadRequest_LSP(t *testing.T) {
 	}
 
 	// Read back
-	req, err := ReadRequest(&buf)
+	f, err := ReadFrame(&buf)
 	if err != nil {
-		t.Fatalf("ReadRequest: %v", err)
+		t.Fatalf("ReadFrame: %v", err)
+	}
+	req, err := ParseRequest(f)
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
 	}
 	if req.MsgID != 100 {
 		t.Errorf("MsgID = %d, want 100", req.MsgID)

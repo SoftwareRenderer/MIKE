@@ -135,39 +135,6 @@ func NewUint64Result(n uint64) []byte {
 	return payload
 }
 
-// JSONParams is a helper for unmarshaling JSON request params.
-type JSONParams map[string]json.RawMessage
-
-// GetString extracts a string value by key.
-func (p JSONParams) GetString(key string) (string, bool) {
-	if v, ok := p[key]; ok {
-		var s string
-		if err := json.Unmarshal(v, &s); err == nil {
-			return s, true
-		}
-	}
-	return "", false
-}
-
-// GetInt64 extracts an int64 value by key.
-func (p JSONParams) GetInt64(key string) (int64, bool) {
-	if v, ok := p[key]; ok {
-		var n float64
-		if err := json.Unmarshal(v, &n); err == nil {
-			return int64(n), true
-		}
-	}
-	return 0, false
-}
-
-// GetRaw extracts the raw JSON bytes by key.
-func (p JSONParams) GetRaw(key string) ([]byte, bool) {
-	if v, ok := p[key]; ok {
-		return []byte(v), true
-	}
-	return nil, false
-}
-
 // Edit represents a single text replacement.
 type Edit struct {
 	OldText string `json:"oldText"`
@@ -206,7 +173,7 @@ type ShellOpenParams struct {
 
 // LSPParams holds the parsed parameters for an LSP request.
 type LSPParams struct {
-	Raw     json.RawMessage `json:"raw"`              // raw JSON-RPC message
+	Raw     json.RawMessage `json:"raw"`               // raw JSON-RPC message
 	Command string          `json:"command,omitempty"` // LSP server command (first request only)
 	Args    []string        `json:"args,omitempty"`    // LSP server args (first request only)
 }

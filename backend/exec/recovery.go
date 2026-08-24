@@ -22,7 +22,7 @@ type bridgeSandboxManager interface {
 	// Stop tears down the task's sandbox container, agent process, and client.
 	Stop(taskID string) error
 	// Create provisions a fresh sandbox container and agent for the task.
-	Create(taskID, worktreePath, projectName, projectPath string, opts kanban_sandbox.SandboxOpts) ([]types.AssignedPort, error)
+	Create(taskID, worktreePath string, project *types.Project, opts kanban_sandbox.SandboxOpts) ([]types.AssignedPort, error)
 }
 
 // maxBridgeRecoveryAttempts bounds consecutive recovery attempts per task.
@@ -69,7 +69,7 @@ func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *ta
 	} else {
 		log.Printf("[bridge-recovery] task=%s container not running, creating sandbox from scratch", setup.task.ID)
 	}
-	if _, createErr := mgr.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, kanban_sandbox.SandboxOpts{
+	if _, createErr := mgr.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{
 		BaseImage:        imageToUse,
 		NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
 		MemoryLimit:      setup.sandboxOpts.MemoryLimit,

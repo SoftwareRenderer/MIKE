@@ -181,12 +181,12 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 	return client, nil
 }
 
-// Create creates a gVisor sandbox container for a task.
+// Create creates a gVisor sandbox container for a task
 //
 // Filesystem Mounts:
-//   - Worktree: Bind-mounted at /home/sandbox/<projectName>. Mode is read-only (ro) if planMode is true,
+//   - Worktree: Bind-mounted at /home/sandbox/<project.Name>. Mode is read-only (ro) if planMode is true,
 //     otherwise read-write (rw).
-//   - Git Metadata: If projectPath is non-empty and .git/ exists, it is mounted read-only at the
+//   - Git Metadata: If project.Path is non-empty and .git/ exists, it is mounted read-only at the
 //     same absolute path to allow git to resolve refs, objects, and worktree metadata.
 //   - Agent Sandbox: If opts.AgentSandbox is provided, its mounts and envs are applied
 //     (default: /root/.config/agent) and HOME is set to /root.
@@ -206,9 +206,11 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 // Returns:
 //   - (assignedPorts, nil) on success, where assignedPorts lists the host→container mappings.
 //   - (nil, error) on failure.
-func (sm *SandboxManager) Create(taskID, worktreePath, projectName, projectPath string, opts SandboxOpts) ([]types.AssignedPort, error) {
+func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Project, opts SandboxOpts) ([]types.AssignedPort, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	projectName, projectPath := project.Name, project.Path
 
 	// Validate image ref before any resource allocation to prevent argument
 	// injection (e.g. leading dash being interpreted as a podman flag).
@@ -547,30 +549,21 @@ type ShellProcess struct {
 	Ptmx *os.File
 }
 
-// StartShell starts an interactive shell inside the task's sandbox container.
-// The container must already exist (created by Create). Returns a ShellProcess
-// with the PTY master file descriptor for I/O relay.
-// The caller is responsible for calling Close() when done.
-// Returns (*ShellProcess, assignedPorts, error).
-func (sm *SandboxManager) StartShell(taskID string) (*ShellProcess, []types.AssignedPort, error) {
-	return sm.startShell(taskID, false, "", "", "", "", SandboxOpts{})
-}
-
-// StartShellWithCreate starts an interactive shell, creating the sandbox container
+// StartShell starts an interactive shell, creating the sandbox container
 // if it doesn't already exist. Used for project-level terminals where there's no
 // task lifecycle to manage the container. The caller is responsible for calling
 // Close() on the ShellProcess and Stop() on the container when done.
 // Returns (*ShellProcess, assignedPorts, error).
-func (sm *SandboxManager) StartShellWithCreate(taskID, worktreePath, projectName, projectPath, projectID string, opts SandboxOpts) (*ShellProcess, []types.AssignedPort, error) {
-	return sm.startShell(taskID, true, worktreePath, projectName, projectPath, projectID, opts)
+func (sm *SandboxManager) StartShell(taskID, worktreePath string, project *types.Project, opts SandboxOpts) (*ShellProcess, []types.AssignedPort, error) {
+	return sm.startShell(taskID, worktreePath, project, opts)
 }
 
 // ExecProject runs a command inside the project's sandbox container,
 // creating it on demand if it doesn't exist. Returns the combined stdout/stderr.
 // This is for project-level filesystem operations (read, write, search, etc.).
-func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, command string, opts SandboxOpts) (string, error) {
-	taskID := "proj:" + projectID
-	if err := sm.ensureProjectContainer(taskID, projectPath, projectName, projectID, opts); err != nil {
+func (sm *SandboxManager) ExecProject(project *types.Project, command string, opts SandboxOpts) (string, error) {
+	taskID := "proj:" + project.ID
+	if err := sm.ensureProjectContainer(taskID, project, opts); err != nil {
 		return "", err
 	}
 	return sm.Exec(taskID, command, nil)
@@ -579,10 +572,10 @@ func (sm *SandboxManager) ExecProject(projectID, projectPath, projectName, comma
 // ensureProjectContainer ensures the project-level sandbox container exists and is running.
 // Creates it if missing, or recreates it if stopped/crashed.
 // Uses ContainerIsRunning which has a TTL cache to avoid repeated podman inspect calls.
-func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectName, projectID string, opts SandboxOpts) error {
+func (sm *SandboxManager) ensureProjectContainer(taskID string, project *types.Project, opts SandboxOpts) error {
 	if !sm.ContainerIsRunning(taskID) {
 		_ = sm.Stop(taskID) // clean up stale entry if any
-		if _, err := sm.Create(taskID, projectPath, projectName, "", opts); err != nil {
+		if _, err := sm.Create(taskID, project.Path, project, opts); err != nil {
 			return fmt.Errorf("create sandbox container: %w", err)
 		}
 		return nil
@@ -593,11 +586,11 @@ func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectNam
 	// container only when the mounted host path still matches the current
 	// project path; otherwise stop and recreate it so the file browser and other
 	// FS operations reflect the project's current location.
-	absWorktree, err := filepath.Abs(projectPath)
+	absWorktree, err := filepath.Abs(project.Path)
 	if err != nil {
 		return fmt.Errorf("resolve project path: %w", err)
 	}
-	mountPath := "/home/sandbox/" + projectName
+	mountPath := "/home/sandbox/" + project.Name
 	sm.mu.Lock()
 	containerName := sm.active[taskID]
 	sm.mu.Unlock()
@@ -605,13 +598,13 @@ func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectNam
 	if err != nil {
 		// If we can't inspect the container, assume it's stale and recreate it
 		// rather than risk serving a stale mount.
-		log.Printf("[sandbox] project=%s cannot inspect mount source (recreating): %v", projectID, err)
+		log.Printf("[sandbox] project=%s cannot inspect mount source (recreating): %v", project.ID, err)
 		source = ""
 	}
 	if filepath.Clean(source) != filepath.Clean(absWorktree) {
-		log.Printf("[sandbox] project=%s mount source %q != worktree %q (recreating stale container)", projectID, source, absWorktree)
+		log.Printf("[sandbox] project=%s mount source %q != worktree %q (recreating stale container)", project.ID, source, absWorktree)
 		_ = sm.Stop(taskID)
-		if _, err := sm.Create(taskID, projectPath, projectName, "", opts); err != nil {
+		if _, err := sm.Create(taskID, project.Path, project, opts); err != nil {
 			return fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
@@ -620,9 +613,9 @@ func (sm *SandboxManager) ensureProjectContainer(taskID, projectPath, projectNam
 
 // ExecProjectWithInput runs a command inside the project's sandbox container
 // with stdin input, creating the container on demand if needed.
-func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, projectName, command string, stdin []byte, opts SandboxOpts) (string, error) {
-	taskID := "proj:" + projectID
-	if err := sm.ensureProjectContainer(taskID, projectPath, projectName, projectID, opts); err != nil {
+func (sm *SandboxManager) ExecProjectWithInput(project *types.Project, command string, stdin []byte, opts SandboxOpts) (string, error) {
+	taskID := "proj:" + project.ID
+	if err := sm.ensureProjectContainer(taskID, project, opts); err != nil {
 		return "", err
 	}
 	return sm.ExecWithInput(taskID, command, stdin, nil)
@@ -631,33 +624,19 @@ func (sm *SandboxManager) ExecProjectWithInput(projectID, projectPath, projectNa
 // ExecTask runs a command inside a task's sandbox container,
 // creating it on demand if it doesn't exist. Returns the combined stdout/stderr.
 // This is for task-level filesystem operations (read, write, etc.) in the diff view editor.
-func (sm *SandboxManager) ExecTask(taskID, worktreePath, projectName, projectPath, command string, opts SandboxOpts) (string, error) {
+func (sm *SandboxManager) ExecTask(taskID, worktreePath string, project *types.Project, command string, opts SandboxOpts) (string, error) {
 	sm.mu.Lock()
 	_, exists := sm.active[taskID]
 	sm.mu.Unlock()
 	if !exists {
-		if _, err := sm.Create(taskID, worktreePath, projectName, projectPath, opts); err != nil {
+		if _, err := sm.Create(taskID, worktreePath, project, opts); err != nil {
 			return "", fmt.Errorf("create sandbox container: %w", err)
 		}
 	}
 	return sm.Exec(taskID, command, nil)
 }
 
-// ExecTaskWithInput runs a command inside a task's sandbox container
-// with stdin input, creating the container on demand if needed.
-func (sm *SandboxManager) ExecTaskWithInput(taskID, worktreePath, projectName, projectPath, command string, stdin []byte, opts SandboxOpts) (string, error) {
-	sm.mu.Lock()
-	_, exists := sm.active[taskID]
-	sm.mu.Unlock()
-	if !exists {
-		if _, err := sm.Create(taskID, worktreePath, projectName, projectPath, opts); err != nil {
-			return "", fmt.Errorf("create sandbox container: %w", err)
-		}
-	}
-	return sm.ExecWithInput(taskID, command, stdin, nil)
-}
-
-func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktreePath, projectName, projectPath, projectID string, opts SandboxOpts) (*ShellProcess, []types.AssignedPort, error) {
+func (sm *SandboxManager) startShell(taskID, worktreePath string, project *types.Project, opts SandboxOpts) (*ShellProcess, []types.AssignedPort, error) {
 	sm.mu.Lock()
 	containerName, ok := sm.active[taskID]
 	mountPath := sm.mountPaths[taskID]
@@ -665,12 +644,12 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 
 	var assignedPorts []types.AssignedPort
 	if !ok {
-		if !createIfMissing || worktreePath == "" {
+		if worktreePath == "" {
 			return nil, nil, fmt.Errorf("no sandbox container for %s", taskID)
 		}
 		// Create container on demand
 		var err error
-		assignedPorts, err = sm.Create(taskID, worktreePath, projectName, projectPath, opts)
+		assignedPorts, err = sm.Create(taskID, worktreePath, project, opts)
 		if err != nil {
 			return nil, nil, fmt.Errorf("create sandbox container: %w", err)
 		}
@@ -683,7 +662,7 @@ func (sm *SandboxManager) startShell(taskID string, createIfMissing bool, worktr
 		log.Printf("[sandbox] task=%s container %s not running, recreating", taskID, containerName)
 		_ = sm.Stop(taskID)
 		var err error
-		assignedPorts, err = sm.Create(taskID, worktreePath, projectName, projectPath, opts)
+		assignedPorts, err = sm.Create(taskID, worktreePath, project, opts)
 		if err != nil {
 			return nil, nil, fmt.Errorf("recreate sandbox container: %w", err)
 		}
@@ -1022,11 +1001,6 @@ func (sm *SandboxManager) ImageReady(image string) bool {
 	}
 	_, err := sm.podmanExec("image", "exists", image)
 	return err == nil
-}
-
-// PullImage downloads a container image. Blocks until the pull completes.
-func (sm *SandboxManager) PullImage(image string) error {
-	return sm.PullImageWithProgress(image, nil)
 }
 
 // PullImageWithProgress downloads a container image, streaming progress lines via onProgress.

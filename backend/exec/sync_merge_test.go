@@ -45,7 +45,7 @@ func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
 	}
 
 	// Task state should be unchanged
-	taskFromDB, _ := te.store.GetTaskByTaskID(taskID)
+	taskFromDB, _ := te.store.GetTaskByID(taskID)
 	if taskFromDB.ExecutionState != "" && taskFromDB.ExecutionState != "idle" {
 		t.Errorf("execution state should be idle, got %q", taskFromDB.ExecutionState)
 	}
@@ -148,7 +148,7 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 	}
 
 	// Verify task is in merge_conflict state
-	taskFromDB, _ := te.store.GetTaskByTaskID(taskID)
+	taskFromDB, _ := te.store.GetTaskByID(taskID)
 	if !taskFromDB.HasMergeConflict {
 		t.Fatalf("expected has_merge_conflict=true, got false")
 	}
@@ -268,7 +268,7 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	runGitInDir(t, parentWtPath, "commit", "-m", "parent new file")
 
 	// Reload child task
-	child, _ = te.store.GetTaskByTaskID(childID)
+	child, _ = te.store.GetTaskByID(childID)
 
 	// Sync parent into child — should merge cleanly
 	err := te.syncTargetIntoTask(projectID, childID, "task/parent-branch", "task/child-branch", child)
@@ -282,5 +282,3 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 		t.Fatalf("parent_new.txt should exist in child worktree after sync: %v", err)
 	}
 }
-
-

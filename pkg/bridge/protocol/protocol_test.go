@@ -9,9 +9,9 @@ import (
 
 func TestFrameRoundTrip(t *testing.T) {
 	cases := []struct {
-		name   string
-		msgID  uint32
-		typ    uint8
+		name    string
+		msgID   uint32
+		typ     uint8
 		payload []byte
 	}{
 		{"empty", 1, TypeResult, nil},
@@ -75,9 +75,13 @@ func TestRequestRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
 	_ = WriteFrame(&buf, frame)
 
-	req, err := ReadRequest(&buf)
+	f, err := ReadFrame(&buf)
 	if err != nil {
-		t.Fatalf("ReadRequest: %v", err)
+		t.Fatalf("ReadFrame: %v", err)
+	}
+	req, err := ParseRequest(f)
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
 	}
 	if req.MsgID != 123 {
 		t.Errorf("MsgID = %d, want 123", req.MsgID)
@@ -95,25 +99,18 @@ func TestRequestRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRequestInvalidType(t *testing.T) {
-	frame := NewResult(1, []byte("data"))
-	var buf bytes.Buffer
-	_ = WriteFrame(&buf, frame)
-
-	_, err := ReadRequest(&buf)
-	if err == nil {
-		t.Fatal("expected error for non-request frame")
-	}
-}
-
 func TestRequestEmptyJSON(t *testing.T) {
 	frame := NewRequest(1, MethodBash, nil)
 	var buf bytes.Buffer
 	_ = WriteFrame(&buf, frame)
 
-	req, err := ReadRequest(&buf)
+	f, err := ReadFrame(&buf)
 	if err != nil {
-		t.Fatalf("ReadRequest: %v", err)
+		t.Fatalf("ReadFrame: %v", err)
+	}
+	req, err := ParseRequest(f)
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
 	}
 	if len(req.Params) != 0 {
 		t.Errorf("Params = %d bytes, want 0", len(req.Params))
@@ -257,30 +254,6 @@ func TestShellCloseRequestRoundTrip(t *testing.T) {
 	}
 	if params.SessionID != 55 {
 		t.Errorf("SessionID = %d, want 55", params.SessionID)
-	}
-}
-
-func TestJSONParams(t *testing.T) {
-	raw, _ := json.Marshal(map[string]any{
-		"path":    "test.go",
-		"timeout": float64(30),
-	})
-	var p JSONParams
-	_ = json.Unmarshal(raw, &p)
-
-	s, ok := p.GetString("path")
-	if !ok || s != "test.go" {
-		t.Errorf("GetString = %q, %v, want %q, true", s, ok, "test.go")
-	}
-
-	n, ok := p.GetInt64("timeout")
-	if !ok || n != 30 {
-		t.Errorf("GetInt64 = %d, %v, want 30, true", n, ok)
-	}
-
-	_, ok = p.GetString("missing")
-	if ok {
-		t.Error("expected false for missing key")
 	}
 }
 

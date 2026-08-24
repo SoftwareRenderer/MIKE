@@ -254,7 +254,7 @@ func (te *TaskExecutor) logMergeFailed(taskID, threadID, errorMsg string) {
 		log.Printf("[merge-msg] task=%s failed to log message: %v", taskID, err)
 		return
 	}
-	task, _ := te.store.GetTaskByTaskID(taskID)
+	task, _ := te.store.GetTaskByID(taskID)
 	if task != nil && te.appStreamMgr != nil {
 		te.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]any{
 			"id":         msgID,
@@ -281,7 +281,7 @@ func (te *TaskExecutor) persistAndBroadcastMergeMessage(taskID, threadID, conten
 		return
 	}
 	// Broadcast to task stream clients for real-time display
-	task, _ := te.store.GetTaskByTaskID(taskID)
+	task, _ := te.store.GetTaskByID(taskID)
 	if task != nil && te.appStreamMgr != nil {
 		te.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeMergeResolution, Data: map[string]any{
 			"id":         msgID,
@@ -365,6 +365,6 @@ func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath
 		log.Printf("[merge] task=%s merge skipped (auto_merge=false)", taskID)
 	}
 
-	updatedTask, _ = te.store.GetTaskByTaskID(taskID)
+	updatedTask, _ = te.store.GetTaskByID(taskID)
 	return commitOK, updatedTask
 }

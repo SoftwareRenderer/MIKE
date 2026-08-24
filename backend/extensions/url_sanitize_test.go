@@ -82,35 +82,3 @@ func TestSanitizeManifestURLs_Nil(t *testing.T) {
 	// Should not panic on nil
 	sanitizeManifestURLs(nil)
 }
-
-func TestSanitizeRegistryEntryURLs(t *testing.T) {
-	tests := []struct {
-		name           string
-		homepage       string
-		licenseURL     string
-		wantHomepage   string
-		wantLicenseURL string
-	}{
-		{"both valid", "https://example.com", "https://license.com", "https://example.com", "https://license.com"},
-		{"homepage javascript", "javascript:alert(1)", "https://license.com", "", "https://license.com"},
-		{"license file url", "https://example.com", "file:///etc/passwd", "https://example.com", ""},
-		{"both malicious", "javascript:alert(1)", "data:text/html,evil", "", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			e := &RegistryEntry{
-				Name:       "test",
-				Homepage:   tt.homepage,
-				LicenseURL: tt.licenseURL,
-			}
-			sanitizeRegistryEntryURLs(e)
-			if e.Homepage != tt.wantHomepage {
-				t.Errorf("Homepage = %q, want %q", e.Homepage, tt.wantHomepage)
-			}
-			if e.LicenseURL != tt.wantLicenseURL {
-				t.Errorf("LicenseURL = %q, want %q", e.LicenseURL, tt.wantLicenseURL)
-			}
-		})
-	}
-}

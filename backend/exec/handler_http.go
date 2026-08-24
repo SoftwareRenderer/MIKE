@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"kanban/backend/httputil"
@@ -14,45 +13,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-func (te *TaskExecutor) HandleStart(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("projectID")
-	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	log.Printf("[start] task=%s project=%s", taskID, projectID)
-	if err := te.StartTask(projectID, taskID, false); err != nil {
-		log.Printf("[start] task=%s error: %v", taskID, err)
-		if strings.Contains(err.Error(), "already running") {
-			httputil.JSONError(w, http.StatusConflict, err.Error())
-		} else {
-			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
-		}
-		return
-	}
-	log.Printf("[start] task=%s started", taskID)
-	task, _ := te.store.GetTask(projectID, taskID)
-	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-	httputil.JSONResponse(w, http.StatusOK, task)
-}
-
-func (te *TaskExecutor) HandleStop(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("projectID")
-	taskID := r.PathValue("taskID")
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if err := te.StopTask(taskID); err != nil {
-		httputil.JSONError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	task, _ := te.store.GetTask(projectID, taskID)
-	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-	httputil.JSONResponse(w, http.StatusOK, task)
-}
 
 func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")

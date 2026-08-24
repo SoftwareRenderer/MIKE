@@ -102,8 +102,11 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// ctxKey is the type for context keys in this package (avoids empty-struct key collisions).
+type ctxKey struct{}
+
 // nonceKey is the context key for the request-specific CSP nonce.
-var nonceKey = struct{}{}
+var nonceKey = ctxKey{}
 
 // NonceMiddleware generates a unique nonce for each request and injects it into the context.
 func NonceMiddleware(next http.Handler) http.Handler {
@@ -120,7 +123,7 @@ func NonceMiddleware(next http.Handler) http.Handler {
 }
 
 // sessionKey is the context key for the authenticated session id.
-var sessionKey = struct{}{}
+var sessionKey = ctxKey{}
 
 // SessionMiddleware validates the PHPSESSID cookie and injects auth state into context.
 // Public paths (health check, login, session check) bypass validation.

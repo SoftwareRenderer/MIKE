@@ -102,7 +102,7 @@ func TestDoneTaskInitialStats_SkippedWhenKnown(t *testing.T) {
 	base := revParse(t, repoDir, "HEAD")
 	tip := commitInWorktree(t, wm, "task-1", "a.txt", "alpha\n")
 	markDone(t, s, task, base, tip)
-	fresh, err := s.GetTaskByTaskID("task-1")
+	fresh, err := s.GetTaskByID("task-1")
 	if err != nil {
 		t.Fatalf("reload task: %v", err)
 	}

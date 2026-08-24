@@ -403,7 +403,7 @@ func TestHandleLoopDetected_IdeationModeSuppressesHints(t *testing.T) {
 		t.Errorf("expected loopStreak=0 in explore mode, got %d", detector.loopStreak)
 	}
 	// Task should still be running
-	taskAfter, _ := e.store.GetTaskByTaskID(task.ID)
+	taskAfter, _ := e.store.GetTaskByID(task.ID)
 	if taskAfter.ExecutionState == "failed" {
 		t.Error("task should not be in failed state in explore mode")
 	}
@@ -1716,11 +1716,11 @@ func TestStopProjectTasks(t *testing.T) {
 	}
 
 	// Verify task statuses were reset to idle
-	t1, _ := te.store.GetTaskByTaskID(task1.ID)
+	t1, _ := te.store.GetTaskByID(task1.ID)
 	if t1.ExecutionState != "idle" {
 		t.Errorf("expected task1 execution_state='idle', got %q", t1.ExecutionState)
 	}
-	t2, _ := te.store.GetTaskByTaskID(task2.ID)
+	t2, _ := te.store.GetTaskByID(task2.ID)
 	if t2.ExecutionState != "idle" {
 		t.Errorf("expected task2 execution_state='idle', got %q", t2.ExecutionState)
 	}
@@ -1771,13 +1771,13 @@ func TestStopProjectTasks_DoesNotAffectNonRunningTasks(t *testing.T) {
 	}
 
 	// Verify running task was stopped and reset to idle
-	runningTaskAfter, _ := te.store.GetTaskByTaskID(runningTask.ID)
+	runningTaskAfter, _ := te.store.GetTaskByID(runningTask.ID)
 	if runningTaskAfter.ExecutionState != "idle" {
 		t.Errorf("expected running task execution_state='idle', got %q", runningTaskAfter.ExecutionState)
 	}
 
 	// Verify review task was NOT modified
-	reviewTaskAfter, _ := te.store.GetTaskByTaskID(reviewTask.ID)
+	reviewTaskAfter, _ := te.store.GetTaskByID(reviewTask.ID)
 	if reviewTaskAfter.Status != "review" {
 		t.Errorf("expected review task status='review', got %q", reviewTaskAfter.Status)
 	}
@@ -2753,7 +2753,7 @@ func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
 	}
 
 	// Verify task was marked as failed
-	taskAfter, _ := te.store.GetTaskByTaskID(task.ID)
+	taskAfter, _ := te.store.GetTaskByID(task.ID)
 	if taskAfter.ExecutionState != "failed" {
 		t.Errorf("expected execution_state='failed', got %q", taskAfter.ExecutionState)
 	}
@@ -2803,7 +2803,7 @@ func TestLoopDetector_ResetClearsStreak(t *testing.T) {
 		}
 	}
 	// Task should still be running (not failed from the old streak)
-	taskAfter, _ := te.store.GetTaskByTaskID(task.ID)
+	taskAfter, _ := te.store.GetTaskByID(task.ID)
 	if taskAfter.ExecutionState == "failed" {
 		t.Error("task should not be failed — reset cleared the old streak")
 	}

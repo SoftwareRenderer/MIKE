@@ -132,7 +132,7 @@ func (f *fakeSandboxMgr) Stop(taskID string) error {
 	return nil
 }
 
-func (f *fakeSandboxMgr) Create(taskID, worktreePath, projectName, projectPath string, opts kanban_sandbox.SandboxOpts) ([]types.AssignedPort, error) {
+func (f *fakeSandboxMgr) Create(taskID, worktreePath string, project *types.Project, opts kanban_sandbox.SandboxOpts) ([]types.AssignedPort, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createCalls++
@@ -159,7 +159,6 @@ func recoveryTestSetup(taskID string) (*taskExecSetup, *executionState) {
 		task:         &types.Task{ID: taskID, OperatingMode: "full_access"},
 		project:      &types.Project{Name: "test-proj"},
 		worktreePath: "/tmp/worktree",
-		projectPath:  "",
 		ctx:          context.Background(),
 	}
 	return setup, &executionState{}
@@ -185,7 +184,7 @@ func TestRecoverBridgeForTask_Tier1ClientReconnect(t *testing.T) {
 	setup, state := recoveryTestSetup("task-tier1")
 
 	// Initial sandbox (like setupSandbox): Create then GetClient.
-	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, kanban_sandbox.SandboxOpts{}); err != nil {
+	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	initialCreateCalls := f.createCalls
@@ -238,7 +237,7 @@ func TestRecoverBridgeForTask_Tier2RecreateRunningContainer(t *testing.T) {
 	setup, state := recoveryTestSetup("task-tier2")
 
 	// Initial sandbox (like setupSandbox): Create then GetClient.
-	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, kanban_sandbox.SandboxOpts{}); err != nil {
+	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	initialCreateCalls := f.createCalls
@@ -289,7 +288,7 @@ func TestRecoverBridgeForTask_CreatesSandboxFromScratchWhenStopped(t *testing.T)
 	setup, state := recoveryTestSetup("task-stopped")
 
 	// Initial sandbox (like setupSandbox): Create then GetClient.
-	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project.Name, setup.projectPath, kanban_sandbox.SandboxOpts{}); err != nil {
+	if _, err := f.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	initialCreateCalls := f.createCalls

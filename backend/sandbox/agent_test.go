@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"testing"
+
+	"kanban/backend/types"
 )
 
 func TestAgentClient(t *testing.T) {
@@ -19,7 +21,7 @@ func TestAgentClient(t *testing.T) {
 	dir := t.TempDir()
 	taskID := "test-agent-client"
 
-	_, err := sm.Create(taskID, dir, "test-proj", "", SandboxOpts{})
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}

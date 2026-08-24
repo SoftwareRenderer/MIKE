@@ -20,7 +20,7 @@ type SandboxStatsSource interface {
 
 // TaskStatusLookup looks up a task by ID. Satisfied by *store.Store.
 type TaskStatusLookup interface {
-	GetTaskByTaskID(taskID string) (*types.Task, error)
+	GetTaskByID(taskID string) (*types.Task, error)
 }
 
 // SandboxStatsBroadcaster sends task-scoped events. Satisfied by *AppStreamManager.
@@ -97,7 +97,7 @@ func (s *SandboxStatsSampler) Stop() {
 // TickOnce samples all running tasks once and pushes changed values.
 func (s *SandboxStatsSampler) TickOnce() {
 	for _, taskID := range s.source.ActiveTaskIDs() {
-		task, err := s.tasks.GetTaskByTaskID(taskID)
+		task, err := s.tasks.GetTaskByID(taskID)
 		if err != nil || task == nil {
 			continue // project-level "proj:..." containers or unknown tasks
 		}

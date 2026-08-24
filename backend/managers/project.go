@@ -252,7 +252,7 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 
 	sendEvent(map[string]any{"type": "status", "message": "Cloning " + req.GitUrl + " into " + targetPath + "..."})
 
-	out, err := git.CloneWithProgress(req.GitUrl, targetPath, func(percent int) {
+	out, err := git.Clone(req.GitUrl, targetPath, func(percent int) {
 		sendEvent(map[string]any{"type": "progress", "percent": percent})
 	})
 	if err != nil {
@@ -620,7 +620,7 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 				_ = os.RemoveAll(filepath.Join(worktreesDir, id))
 			}
 		}
-		if err := h.store.DeleteProjectWithData(id); err != nil {
+		if err := h.store.DeleteProject(id); err != nil {
 			httputil.JSONError(w, http.StatusInternalServerError, "failed to delete project")
 			return
 		}

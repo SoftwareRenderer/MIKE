@@ -51,20 +51,6 @@ func (s *Server) handleReloadPrompts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleGC(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	removed, err := s.executor.WorktreeMgr().GarbageCollect(false)
-	if err != nil {
-		log.Printf("gc manual trigger error: %v", err)
-		JSONError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	JSONResponse(w, http.StatusOK, map[string]any{"removed": removed})
-}
-
 // safeNotFoundError returns a generic not-found message without leaking the path.
 func safeNotFoundError() string {
 	return "file not found"

@@ -23,7 +23,7 @@ func (f *fakeStatsSource) GetMemoryStats(taskID string) *types.SandboxMemoryStat
 
 type fakeTaskLookup map[string]*types.Task
 
-func (f fakeTaskLookup) GetTaskByTaskID(taskID string) (*types.Task, error) {
+func (f fakeTaskLookup) GetTaskByID(taskID string) (*types.Task, error) {
 	if t, ok := f[taskID]; ok {
 		return t, nil
 	}

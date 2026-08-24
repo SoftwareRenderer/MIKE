@@ -146,16 +146,14 @@ type Provider struct {
 	APIKey                *string       `json:"api_key,omitempty"` // nil=preserve, ""=clear, value=set; encrypted in DB, masked in API responses
 	Models                []ModelConfig `json:"models"`
 	Concurrency           int           `json:"concurrency"`
-	MaxRequestsPerSecond  int           `json:"max_requests_per_second"`     // 0 = unlimited; max new LLM request starts per second
-	AgentConfigDir        string        `json:"agent_config_dir,omitempty"`  // optional host path override for the agent config dir; empty means use extension default
-	AgentDescription      string        `json:"agent_description,omitempty"` // agent description text (from manifest); empty for LLM providers
-	AgentSetupInfo        string        `json:"agent_setup_info,omitempty"`  // agent setup instructions (from manifest); empty for LLM providers
-	InputPrice            float64       `json:"input_price"`                 // USD per 1M input (non-cached) tokens
-	OutputPrice           float64       `json:"output_price"`                // USD per 1M output tokens
-	CacheReadPrice        float64       `json:"cache_read_price"`            // USD per 1M cache-read tokens
-	CacheWritePrice       float64       `json:"cache_write_price"`           // USD per 1M cache-write tokens (overrides input_price when set)
-	PowerConsumptionW     float64       `json:"power_consumption_w"`         // Watts
-	ElectricityCostPerKwh float64       `json:"electricity_cost_per_kwh"`    // USD per kWh
+	MaxRequestsPerSecond  int           `json:"max_requests_per_second"`    // 0 = unlimited; max new LLM request starts per second
+	AgentConfigDir        string        `json:"agent_config_dir,omitempty"` // optional host path override for the agent config dir; empty means use extension default
+	InputPrice            float64       `json:"input_price"`                // USD per 1M input (non-cached) tokens
+	OutputPrice           float64       `json:"output_price"`               // USD per 1M output tokens
+	CacheReadPrice        float64       `json:"cache_read_price"`           // USD per 1M cache-read tokens
+	CacheWritePrice       float64       `json:"cache_write_price"`          // USD per 1M cache-write tokens (overrides input_price when set)
+	PowerConsumptionW     float64       `json:"power_consumption_w"`        // Watts
+	ElectricityCostPerKwh float64       `json:"electricity_cost_per_kwh"`   // USD per kWh
 }
 
 // IsAgent returns true if this provider is any coding agent (not a standard LLM).

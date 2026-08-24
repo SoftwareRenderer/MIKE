@@ -141,7 +141,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	s.terminalMgr = term.NewTerminalManager(store, cfgStore, s.sandboxMgr, nil) // agentRegistry wired after creation
 	// Wire port assignment callback → store + WebSocket broadcast
 	s.terminalMgr.SetOnPortsAssigned(func(taskID, projectID string, ports []types.AssignedPort) {
-		task, err := store.GetTaskByTaskID(taskID)
+		task, err := store.GetTaskByID(taskID)
 		if err != nil {
 			log.Printf("[terminal] failed to get task %s for port assignment: %v", taskID, err)
 			return
@@ -149,7 +149,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		task.AssignedPorts = ports
 		_ = store.UpdateTask(task)
 		s.appStreamMgr.BroadcastTaskUpdated(projectID, task)
-		s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypePorts, Data: types.StreamPortsEvent{TaskID: taskID, Ports: ports}})
 	})
 	// Wire project-level terminal port assignment callback → WebSocket broadcast
 	s.terminalMgr.SetOnProjectPortsAssigned(func(projectID string, ports []types.AssignedPort) {

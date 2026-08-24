@@ -377,7 +377,7 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 	_ = te.store.SetTaskMergeConflict(taskID, projectID, false)
 
 	// --- Attempt final merge (task branch into master) ---
-	task, _ = te.store.GetTaskByTaskID(taskID)
+	task, _ = te.store.GetTaskByID(taskID)
 	if task.HasMergeConflict {
 		t.Fatal("task should not have merge conflict after resolution")
 	}
@@ -534,7 +534,7 @@ func TestMergeConflictResolution_NoConflictedFilesAutoContinues(t *testing.T) {
 	}
 
 	// Verify no merge conflict flag
-	task, _ = te.store.GetTaskByTaskID(taskID)
+	task, _ = te.store.GetTaskByID(taskID)
 	if task.HasMergeConflict {
 		t.Error("should not have merge conflict flag for clean merge")
 	}
@@ -714,7 +714,7 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	_ = te.store.SetTaskMergeConflict(subtaskID, projectID, false)
 
 	// --- Merge subtask into parent branch ---
-	subtaskFromDB, _ := te.store.GetTaskByTaskID(subtaskID)
+	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
 	err := te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 	if err != nil {
 		t.Fatalf("MergeBranch failed: %v", err)

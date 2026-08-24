@@ -132,57 +132,6 @@ func TestLoadDisabled(t *testing.T) {
 	}
 }
 
-func TestLoad_BackwardCompat_EnvVars(t *testing.T) {
-	_clearTLS()
-	defer _restoreTLS()
-
-	t.Run("MIKE_TLS=0 disables TLS", func(t *testing.T) {
-		os.Setenv("MIKE_TLS", "0")
-		defer os.Unsetenv("MIKE_TLS")
-		cfg, err := Load(t.TempDir())
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cfg != nil {
-			t.Fatalf("expected nil config when MIKE_TLS=0, got %+v", cfg)
-		}
-	})
-
-	t.Run("MIKE_TLS_CERT+KEY uses provided certs", func(t *testing.T) {
-		dir := t.TempDir()
-		certPath := filepath.Join(dir, "cert.pem")
-		keyPath := filepath.Join(dir, "key.pem")
-		os.WriteFile(certPath, []byte("dummy-cert"), 0o644)
-		os.WriteFile(keyPath, []byte("dummy-key"), 0o600)
-
-		os.Setenv("MIKE_TLS_CERT", certPath)
-		os.Setenv("MIKE_TLS_KEY", keyPath)
-		defer func() {
-			os.Unsetenv("MIKE_TLS_CERT")
-			os.Unsetenv("MIKE_TLS_KEY")
-		}()
-
-		cfg, err := Load(t.TempDir())
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cfg.CertFile != certPath {
-			t.Errorf("expected cert file %s, got %s", certPath, cfg.CertFile)
-		}
-	})
-
-	t.Run("default auto-generates", func(t *testing.T) {
-		dataDir := t.TempDir()
-		cfg, err := Load(dataDir)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cfg == nil {
-			t.Fatal("expected non-nil config (TLS enabled by default)")
-		}
-	})
-}
-
 func TestGenerateSelfSignedCert(t *testing.T) {
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "cert.pem")

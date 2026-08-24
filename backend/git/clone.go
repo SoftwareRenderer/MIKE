@@ -16,14 +16,14 @@ import (
 // "Counting objects" and "Resolving deltas" phases report no percent.
 var cloneProgressRe = regexp.MustCompile(`Receiving objects:\s+(\d{1,3})%`)
 
-// CloneWithProgress runs `git clone --progress src dst` and invokes
+// Clone runs `git clone --progress src dst` and invokes
 // onProgress with the "Receiving objects" percentage (0-100) every time it
 // strictly increases. onProgress may be nil. The --progress flag forces
 // progress output even though stderr is not a terminal.
 //
 // It returns the git process' stderr output (progress + diagnostics, useful
 // for error messages) and the process error, if any.
-func CloneWithProgress(src, dst string, onProgress func(percent int)) (string, error) {
+func Clone(src, dst string, onProgress func(percent int)) (string, error) {
 	// `git clone` is silent on stdout — stderr carries both progress and
 	// errors, so discarding stdout is safe.
 	cmd := exec.Command("git", "clone", "--progress", src, dst)

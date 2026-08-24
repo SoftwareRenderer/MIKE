@@ -95,7 +95,7 @@ func (m *mockSandbox) BuildImageWithProgress(string, string, func(string)) error
 }
 func (m *mockSandbox) PullImageWithProgress(string, func(string)) error { return nil }
 
-func (m *mockSandbox) StartShellWithCreate(taskID, worktreePath, projectName, projectPath, projectID string, opts sandbox.SandboxOpts) (*sandbox.ShellProcess, []types.AssignedPort, error) {
+func (m *mockSandbox) StartShell(taskID, worktreePath string, project *types.Project, opts sandbox.SandboxOpts) (*sandbox.ShellProcess, []types.AssignedPort, error) {
 	if m.startShellErr != nil {
 		return nil, nil, m.startShellErr
 	}

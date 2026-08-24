@@ -144,7 +144,6 @@ func summarizeIdleSetup(t *testing.T, projID, projName, taskID string, serverURL
 		project:        proj,
 		projectID:      proj.ID,
 		worktreePath:   t.TempDir(),
-		projectPath:    proj.Path,
 		serverURL:      serverURL,
 		modelName:      "test-model",
 		ctx:            ctx,
@@ -207,7 +206,7 @@ func TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage(t *testing.T)
 		t.Fatalf("timed out waiting for first LLM request")
 	}
 	waitFor(t, 10*time.Second, "task to reach review/idle after first response", func() bool {
-		got, err := te.store.GetTaskByTaskID(taskID)
+		got, err := te.store.GetTaskByID(taskID)
 		return err == nil && got != nil && got.Status == "review" && got.ExecutionState == "idle"
 	})
 
@@ -233,7 +232,7 @@ func TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage(t *testing.T)
 	}
 
 	// Task must still be review/idle.
-	got, err := te.store.GetTaskByTaskID(taskID)
+	got, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -290,7 +289,7 @@ func TestExecuteTask_ManualSummarize_StartsWithQueuedMessage(t *testing.T) {
 		t.Fatalf("timed out waiting for first LLM request")
 	}
 	waitFor(t, 10*time.Second, "task to reach review/idle after first response", func() bool {
-		got, err := te.store.GetTaskByTaskID(taskID)
+		got, err := te.store.GetTaskByID(taskID)
 		return err == nil && got != nil && got.Status == "review" && got.ExecutionState == "idle"
 	})
 

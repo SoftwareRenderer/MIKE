@@ -4,13 +4,6 @@ import (
 	"kanban/backend/types"
 )
 
-// CreateTaskArgs holds the parsed arguments for the create_task tool.
-type CreateTaskArgs struct {
-	Title        string `json:"title"`
-	Prompt       string `json:"prompt"`
-	ParentTaskID string `json:"parent_task_id,omitempty"` // optional: for nested subtasks
-}
-
 // toolDisplayNames maps tool names to their UI display names.
 var toolDisplayNames = map[string]string{
 	"read_file":      "Read",
