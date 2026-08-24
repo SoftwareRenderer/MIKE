@@ -955,6 +955,15 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		return nil, err
 	}
 
+	if task.Summarizing {
+		te.dbSummarizeCancel.mu.Lock()
+		_, inFlight := te.dbSummarizeCancel.tasks[taskID]
+		te.dbSummarizeCancel.mu.Unlock()
+		if !inFlight {
+			task.Summarizing = false
+		}
+	}
+
 	// Reset stale running state (executor crashed/server restarted)
 	if task.ExecutionState == "running" {
 		te.taskMu.Lock()
