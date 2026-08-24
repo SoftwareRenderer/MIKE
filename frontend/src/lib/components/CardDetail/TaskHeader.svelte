@@ -20,6 +20,8 @@
         onOpenTerminal,
         onOpenExplorer,
         onDelete,
+        onOpenTask,
+        floating = false,
         task,
     }: {
         workspaceDir: string | undefined;
@@ -27,9 +29,14 @@
         sandboxEnabled: boolean | undefined;
         badge: { text: string; color: string };
         onClose: (status?: string) => void;
-        onOpenTerminal: () => void;
-        onOpenExplorer: () => void;
+        // Not used in floating mode (the floating header has no such buttons).
+        onOpenTerminal?: () => void;
+        onOpenExplorer?: () => void;
         onDelete: () => Promise<void>;
+        /** Floating task view: navigate to the full task view. */
+        onOpenTask?: () => void;
+        /** Floating task view — simplified header: Close (X), Delete, Open task. */
+        floating?: boolean;
         task: Task;
     } = $props();
 
@@ -188,13 +195,17 @@
 
 <div class="header">
     <div class="header-left">
-        <button class="btn-back" onclick={() => onClose(task.status)} aria-label="Back to board (Esc)" title="Back to board (Esc)">
+        <button class="btn-back" onclick={() => onClose(task.status)} aria-label={floating ? 'Close (Esc)' : 'Back to board (Esc)'} title={floating ? 'Close (Esc)' : 'Back to board (Esc)'}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                {#if floating}
+                    <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                {:else}
+                    <path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                {/if}
             </svg>
         </button>
         <div class="header-main">
-            {#if sandboxEnabled !== undefined}
+            {#if !floating && sandboxEnabled !== undefined}
                 {#if sandboxEnabled}
                     <button class="icon-btn sandbox-btn" onclick={() => { showSandboxPanel = true; }} title={sandboxTitle} aria-label={sandboxTitle}>
                         <Icon src={shieldIcon} width={14} height={14} />
@@ -217,23 +228,32 @@
         </div>
     </div>
     <div class="header-actions">
-        <button class="icon-btn" onclick={onOpenExplorer} aria-label="Open explorer" title="Open explorer">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M2 3h4l1.5 2H13l1.5 2.5V13a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
-            </svg>
-        </button>
-        <button class="icon-btn" onclick={onOpenTerminal} aria-label="Open terminal" title={terminalButtonTitle}>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-                <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-        </button>
+        {#if !floating}
+            <button class="icon-btn" onclick={() => onOpenExplorer?.()} aria-label="Open explorer" title="Open explorer">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M2 3h4l1.5 2H13l1.5 2.5V13a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                </svg>
+            </button>
+            <button class="icon-btn" onclick={() => onOpenTerminal?.()} aria-label="Open terminal" title={terminalButtonTitle}>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                    <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
+        {/if}
         <button class="icon-btn" onclick={onDelete} aria-label="Delete task" title="Delete task">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                 <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
         </button>
+        {#if floating}
+            <button class="icon-btn" onclick={onOpenTask} aria-label="Open task" title="Open task">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M6.5 6.5L2 2M2 2h4M2 2v4M9.5 9.5L14 14M14 14h-4M14 14v-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
+        {/if}
     </div>
 </div>
 

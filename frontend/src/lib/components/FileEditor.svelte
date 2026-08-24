@@ -3,7 +3,7 @@
     import { ensureCsrfToken } from '$lib/api';
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, clearEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { EditorView } from 'codemirror';
-    import { EditorState, Compartment, StateField, StateEffect } from '@codemirror/state';
+    import { EditorState, Compartment, StateField, StateEffect, RangeSet, Range, type Extension } from '@codemirror/state';
     import { keymap } from '@codemirror/view';
     import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
@@ -23,13 +23,14 @@
         return () => uiInjector.teardownSlot(INJECTION_POINTS.FILE_EDITOR, anchorEl);
     });
     import { highlightSelectionMatches } from '@codemirror/search';
-    import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip } from '@codemirror/view';
+    import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip, gutterLineClass, GutterMarker, Decoration, ViewPlugin, type ViewUpdate, type DecorationSet } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax, lightTheme, lightSyntax, isLightTheme } from '$lib/utils/codemirror-theme';
     import { stickyScroll, updateHeadersEffect, sectionHeadersField, type SectionHeader } from '$lib/utils/sticky-scroll';
     import { keepViewportParsed } from '$lib/utils/keep-viewport-parsed';
     import { closeHoverOnScroll } from '$lib/utils/close-hover-on-scroll';
     import { requestLSPSymbols, flattenSymbols, type LSPSymbol } from '$lib/utils/lsp-symbols';
+    import { resolveGutterClickRange, toProjectRelative } from '$lib/utils/line-selection';
     import CustomSearchPanel from './CustomSearchPanel.svelte';
     import EditorFooter from './EditorFooter.svelte';
     import { mount, unmount } from 'svelte';
@@ -73,6 +74,9 @@
         mobileFullscreen,
         isMobile,
         pendingFsEvent = null,
+        onLinesSelected = null,
+        initialScrollTop = 0,
+        onScrollTop = () => {},
     }: {
         projectId: string;
         projectPath?: string;
@@ -92,6 +96,14 @@
         onToggleFullscreen?: () => void;
         mobileFullscreen?: boolean;
         isMobile?: boolean;
+        /** Explorer-mode only: invoked with the gutter line selection so the
+         *  caller can open a Create Task modal prefilled with the lines. */
+        onLinesSelected?: ((sel: { relativePath: string; startLine: number; lines: string[] }) => void) | null;
+        /** Restored editor scroll offset (applied after creation unless a
+         *  targetLine jump takes priority). */
+        initialScrollTop?: number;
+        /** Called (throttled) with the scroller's current scrollTop. */
+        onScrollTop?: (top: number) => void;
     } = $props();
 
     const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
@@ -344,6 +356,32 @@
         } as any,
     ]);
 
+    // ---- Scroll tracking (persistence for the explorer) ----
+    let scrollTrackView: EditorView | null = null;
+    let scrollReportTimer: ReturnType<typeof setTimeout> | null = null;
+    function handleScrollTopEvent() {
+        if (!scrollTrackView) return;
+        if (scrollReportTimer) clearTimeout(scrollReportTimer);
+        scrollReportTimer = setTimeout(() => {
+            scrollReportTimer = null;
+            if (scrollTrackView) onScrollTop?.(scrollTrackView.scrollDOM.scrollTop);
+        }, 200);
+    }
+
+    function destroyView() {
+        if (scrollTrackView) {
+            scrollTrackView.scrollDOM.removeEventListener('scroll', handleScrollTopEvent);
+            if (scrollReportTimer) onScrollTop?.(scrollTrackView.scrollDOM.scrollTop);
+            scrollTrackView = null;
+        }
+        if (scrollReportTimer) {
+            clearTimeout(scrollReportTimer);
+            scrollReportTimer = null;
+        }
+        view?.destroy();
+        view = null;
+    }
+
     function createEditor() {
         if (!editorEl || editorCreating) return;
         editorCreating = true;
@@ -399,6 +437,7 @@
             crosshairCursor(),
             highlightActiveLine(),
             highlightSelectionMatches({ style: true } as any),
+            ...(mode === 'explorer' && onLinesSelected ? lineSelectionExtensions() : []),
             searchKeymapOverride,
             keymap.of([
                 indentWithTab,
@@ -550,11 +589,21 @@
             }, true);
         }
 
+        // Track scroll position for persistence
+        scrollTrackView = view;
+        view.scrollDOM.addEventListener('scroll', handleScrollTopEvent, { passive: true });
+
         // Extract symbols after a short delay
         setTimeout(extractSymbols, 500);
-        // Jump to target line if set (from diff view click)
+        // Jump to target line if set
         if (targetLine >= 1) {
             requestAnimationFrame(() => jumpToLine(targetLine));
+        } else if (initialScrollTop > 0) {
+            requestAnimationFrame(() => {
+                const scroller = view?.scrollDOM;
+                if (!scroller) return;
+                scroller.scrollTop = Math.min(initialScrollTop, Math.max(0, scroller.scrollHeight - scroller.clientHeight));
+            });
         }
     }
 
@@ -567,8 +616,7 @@
             content = '';
             baselineContent = '';
             gutterMarkers = null;
-            view?.destroy();
-            view = null;
+            destroyView();
             return;
         }
         loading = true;
@@ -584,8 +632,7 @@
         lspReady = false;
         lspError = '';
         lspWorkspace = '';
-        view?.destroy();
-        view = null;
+        destroyView();
         editorReady = false;
         editorCreating = false;
         content = '';
@@ -598,6 +645,8 @@
         cursorCol = 1;
         historyBase = '';
         historyDeltas = [];
+        // The file is about to change
+        if (view) dispatchLineSel(view, null);
 
         try {
             const taskParam = taskId ? `&task=${encodeURIComponent(taskId)}` : '';
@@ -822,6 +871,151 @@
         }
         // Persist preference
         saveAppSetting('editor-word-wrap', enabled).catch(() => {});
+    }
+
+    // ---- Gutter line selection (explorer mode → create task) ----
+    interface GutterLineSel { start: number; end: number; }
+    const lineSelEffect = StateEffect.define<GutterLineSel | null>();
+    const lineSelField = StateField.define<GutterLineSel | null>({
+        create: () => null,
+        update(value, tr) {
+            for (const e of tr.effects) {
+                if (e.is(lineSelEffect)) value = e.value;
+            }
+            return value;
+        },
+    });
+    class LineSelGutterMarker extends GutterMarker {
+        constructor() { super(); this.elementClass = 'cm-lineSelGutter'; }
+        eq(other: GutterMarker): boolean { return other instanceof LineSelGutterMarker; }
+    }
+    const lineSelGutterMarker = new LineSelGutterMarker();
+
+    function highlightedLineRange(view: EditorView): { start: number; end: number } | null {
+        const sel = view.state.selection.main;
+        const start = view.state.doc.lineAt(Math.min(sel.from, sel.to)).number;
+        const end = view.state.doc.lineAt(Math.max(sel.from, sel.to)).number;
+        return end > start ? { start, end } : null;
+    }
+
+    function dispatchLineSel(target: EditorView, sel: GutterLineSel | null) {
+        target.dispatch({ effects: lineSelEffect.of(sel) });
+    }
+
+    /** Document line under a mouse event over the gutter. */
+    function gutterLineAt(target: EditorView, event: MouseEvent): number | null {
+        const el = event.target instanceof Element ? event.target : null;
+        const marker = el?.closest?.('[data-line]');
+        if (marker instanceof HTMLElement && marker.dataset.line) {
+            const n = parseInt(marker.dataset.line, 10);
+            if (!isNaN(n) && n >= 1 && n <= target.state.doc.lines) return n;
+        }
+        // Fallback (gutter padding / empty area): map the event's Y into the
+        // content column so line wrapping and scroll offset are handled.
+        const content = target.contentDOM.getBoundingClientRect();
+        if (content.width <= 0) return null;
+        const pos = target.posAtCoords({ x: content.left + 1, y: event.clientY }, false);
+        if (pos == null) return null;
+        return target.state.doc.lineAt(pos).number;
+    }
+
+    function emitLineSelection(target: EditorView, range: { start: number; end: number }) {
+        const doc = target.state.doc;
+        const lines: string[] = [];
+        for (let ln = range.start; ln <= range.end; ln++) lines.push(doc.line(ln).text);
+        onLinesSelected?.({
+            relativePath: toProjectRelative(filePath, projectPath || ''),
+            startLine: range.start,
+            lines,
+        });
+    }
+
+    /** Build the line-selection extensions (field, highlights, mouse handlers).
+     *  Only active in explorer mode with an onLinesSelected callback. */
+    function lineSelectionExtensions(): Extension[] {
+        const lineSelDecorations = ViewPlugin.fromClass(
+            class {
+                decorations: DecorationSet;
+                constructor(view: EditorView) {
+                    this.decorations = lineSelDecorationSet(view.state);
+                }
+                update(u: ViewUpdate) {
+                    const changed = u.docChanged
+                        || u.state.field(lineSelField, false) !== u.startState.field(lineSelField, false);
+                    if (changed) this.decorations = lineSelDecorationSet(u.state);
+                }
+            },
+            { decorations: v => v.decorations },
+        );
+        return [
+            lineSelField,
+            gutterLineClass.compute([lineSelField], (state) => {
+                const sel = state.field(lineSelField, false);
+                if (!sel) return RangeSet.empty;
+                const doc = state.doc;
+                const start = Math.max(1, Math.min(sel.start, doc.lines));
+                const end = Math.max(start, Math.min(sel.end, doc.lines));
+                const from = doc.line(start).from;
+                const to = end >= doc.lines ? doc.length : doc.line(end + 1).from;
+                return RangeSet.of(lineSelGutterMarker.range(from, to));
+            }),
+            lineSelDecorations,
+            // Native listeners on view.dom — CM6's EditorView.domEventHandlers only
+            // attaches to contentDOM, which gutter mousedowns never bubble through.
+            ViewPlugin.fromClass(
+                class {
+                    v: EditorView;
+                    constructor(view: EditorView) {
+                        this.v = view;
+                        view.dom.addEventListener('mousedown', this.onMousedown);
+                        view.dom.addEventListener('keydown', this.onKeydown);
+                    }
+                    destroy() {
+                        this.v.dom.removeEventListener('mousedown', this.onMousedown);
+                        this.v.dom.removeEventListener('keydown', this.onKeydown);
+                    }
+                    onMousedown = (event: MouseEvent) => {
+                        if (event.button !== 0) return;
+                        const el = event.target instanceof Element ? event.target : null;
+                        if (el?.closest('.cm-gitGutter')) {
+                            const line = gutterLineAt(this.v, event);
+                            if (line == null) return;
+                            // A click inside the editor's multi-line text
+                            // selection selects the whole highlighted range;
+                            // anything else selects just the clicked line.
+                            const range = resolveGutterClickRange(line, highlightedLineRange(this.v));
+                            dispatchLineSel(this.v, range);
+                            emitLineSelection(this.v, range);
+                            event.preventDefault();
+                            this.v.focus();
+                            return;
+                        }
+                        // Clicking in the editor text clears an active selection.
+                        if (this.v.state.field(lineSelField, false)) dispatchLineSel(this.v, null);
+                    };
+                    onKeydown = (event: KeyboardEvent) => {
+                        if (event.key === 'Escape' && this.v.state.field(lineSelField, false)) {
+                            dispatchLineSel(this.v, null);
+                            event.preventDefault();
+                        }
+                    };
+                },
+            ),
+        ];
+    }
+
+    function lineSelDecorationSet(state: EditorState): DecorationSet {
+        const sel = state.field(lineSelField, false);
+        if (!sel) return Decoration.none;
+        const doc = state.doc;
+        const start = Math.max(1, Math.min(sel.start, doc.lines));
+        const end = Math.max(start, Math.min(sel.end, doc.lines));
+        const marks: Range<Decoration>[] = [];
+        for (let ln = start; ln <= end; ln++) {
+            const line = doc.line(ln);
+            marks.push(Decoration.line({ class: 'cm-lineSel' }).range(line.from));
+        }
+        return Decoration.set(marks);
     }
 
     // ---- Diff-mode chrome: header back button, unsaved-changes confirm, keyboard ----
@@ -1138,14 +1332,14 @@
         lspTransport?.release();
         lspTransport = null;
         lspClient = null;
-        view?.destroy();
+        destroyView();
         window.removeEventListener('jump-to-line', handleJumpToLine);
         window.removeEventListener('editor-save-request', handleSaveRequest);
     });
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions — role="application" makes this an interactive landmark for the diff-mode keyboard handler -->
-<div class="file-editor" role="application" tabindex="-1" class:has-file={!!filePath} class:active={mode === 'diff' ? true : active} class:diff={mode === 'diff'} onkeydown={mode === 'diff' ? handleKeyDown : undefined}>
+<div class="file-editor" role="application" tabindex="-1" class:has-file={!!filePath} class:active={mode === 'diff' ? true : active} class:diff={mode === 'diff'} class:line-sel={mode === 'explorer' && !!onLinesSelected} onkeydown={mode === 'diff' ? handleKeyDown : undefined}>
     {#if mode === 'diff'}
         <!-- Diff-mode header -->
         <div class="editor-header">
@@ -1257,6 +1451,32 @@
     }
     .file-editor.active {
         display: flex;
+    }
+
+    /* Gutter line selection is enabled — the line numbers are a control */
+    .line-sel :global(.cm-gutter.cm-gitGutter) {
+        cursor: pointer;
+    }
+
+    /* Hover: the line number is replaced by a yellow chat bubble
+       ("create a task from these lines"). The number is the last span of the
+       gutter cell's [data-line] row (git-gutter.ts). */
+    .line-sel :global(.cm-gutter.cm-gitGutter .cm-gutterElement) {
+        position: relative;
+    }
+    .line-sel :global(.cm-gutter.cm-gitGutter .cm-gutterElement:hover [data-line] > span:last-child) {
+        visibility: hidden;
+    }
+    .line-sel :global(.cm-gutter.cm-gitGutter .cm-gutterElement:hover::after) {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 14px;
+        height: 14px;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23E8A400' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 10a1.33 1.33 0 0 1-1.33 1.33H4.67l-2.67 2.67V3.33A1.33 1.33 0 0 1 3.33 2h9.34A1.33 1.33 0 0 1 14 3.33z'/%3E%3C/svg%3E") center / contain no-repeat;
     }
 
     .editor-content {

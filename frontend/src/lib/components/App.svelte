@@ -484,7 +484,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     sandboxStatsStore.set(task_id, event.data as SandboxMemoryStats);
                     return;
                 }
-                if (appStore.selectedTask && appStore.selectedTask.id === task_id) {
+                // Dispatch to the task's TaskChat
+                const floatingId = uiStore.floatingTask?.taskId;
+                if ((appStore.selectedTask && appStore.selectedTask.id === task_id) ||
+                    (floatingId && floatingId === task_id)) {
                     taskEventContext.set({ task_id, ...event });
                 }
             },
@@ -1174,6 +1177,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             console.error('Failed to refresh projects:', e);
         }
     }
+
+    // Opening a FULL task view replaces the floating task view (if any).
+    $effect(() => {
+        if (uiStore.showCardDetail && appStore.selectedTask) uiStore.floatingTask = null;
+    });
 </script>
 
 <!-- Login gate -->
@@ -1342,13 +1350,50 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         {/if}
     </main>
 
+    <!-- Editor: Floating task view (Chat only) -->
+    {#if uiStore.floatingTask}
+        {@const floatingTaskData = tasks.find((t) => t.id === uiStore.floatingTask!.taskId) ?? uiStore.floatingTask!.task}
+        {#if floatingTaskData}
+            <CardDetail
+                task={floatingTaskData}
+                tasks={tasks}
+                projectPath={currentProject?.path}
+                projectName={currentProject?.name}
+                workspaceDir={cfg?.workspace_dir}
+                sandboxEnabled={currentProject?.sandbox_enabled}
+                fsEventQueue={fsEventQueue}
+                activeTab="chat"
+                floating
+                onClose={() => { uiStore.floatingTask = null; }}
+                onSelectTask={(t: Task) => { uiStore.floatingTask = { projectId: currentProject?.id as string, taskId: t.id, task: t }; }}
+                onRefreshBoard={() => refreshBoard()}
+                onOpenTask={() => {
+                    // Navigate to the full task view and a new history entry
+                    const ft = uiStore.floatingTask;
+                    if (!ft) return;
+                    uiStore.floatingTask = null;
+                    const task = tasks.find((t) => t.id === ft.taskId) ?? ft.task;
+                    appStore.selectedTask = task;
+                    uiStore.showCardDetail = true;
+                    updateUrl({ project: ft.projectId, task: ft.taskId, view: null, file: null }, false, true);
+                }}
+            />
+        {/if}
+    {/if}
+
     <!-- Modals -->
     {#if uiStore.showCreateTask}
         <CreateTaskModal
             projectId={currentProject?.id}
             parentId={uiStore.creatingChildOf ?? undefined}
             currentBranch={currentBranch}
-            onClose={() => { uiStore.showCreateTask = false; uiStore.creatingChildOf = null; }}
+            initialPrompt={uiStore.createTaskLineSelection?.prompt}
+            lineTask={!!uiStore.createTaskLineSelection}
+            onOpenTask={(task: Task) => {
+                // Floating task view over the current view
+                uiStore.floatingTask = { projectId: currentProject?.id as string, taskId: task.id, task };
+            }}
+            onClose={() => { uiStore.showCreateTask = false; uiStore.creatingChildOf = null; uiStore.createTaskLineSelection = null; }}
             onTaskCreated={() => { uiStore.creatingChildOf = null; }} // board stream pushes update
             onOptimisticTaskCreated={(task: Task) => { tasks = [...tasks, task]; }}
             onReplaceOptimisticTask={(optimisticId: string, realTask: Task) => { tasks = tasks.map(t => t.id === optimisticId ? realTask : t); }}
