@@ -127,7 +127,7 @@ func (s *Store) UpdateTaskSessionCost(taskID string, cost float64) error {
 	return err
 }
 
-// UpdateTask updates all fields of a task.
+// UpdateTask updates all fields of a task
 func (s *Store) UpdateTask(t *types.Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -139,9 +139,9 @@ func (s *Store) UpdateTask(t *types.Task) error {
 		}
 	}
 	_, err := s.db.Exec(
-		`UPDATE tasks SET title = ?, prompt = ?, status = ?, column_order = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, execution_state = ?, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, summarizing = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE tasks SET title = ?, prompt = ?, status = ?, column_order = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, execution_state = ?, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ?`,
 		t.Title, t.Prompt, t.Status, t.ColumnOrder, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, B2I(t.HasMergeConflict),
-		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode, ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), B2I(t.Summarizing), ptrStr(t.CurrentThreadID), assignedPortsJSON, t.SessionCost, now.Format(time.RFC3339), t.ID,
+		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode, ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), ptrStr(t.CurrentThreadID), assignedPortsJSON, t.SessionCost, now.Format(time.RFC3339), t.ID,
 	)
 	return err
 }
@@ -372,4 +372,17 @@ func (s *Store) ClearStaleTitleGenerating() error {
 // Called on server startup to clear flags left by crashed/restarted summarization.
 func (s *Store) ClearStaleSummarizing() error {
 	return s.clearStaleFlag("summarizing")
+}
+
+// SetTaskSummarizing updates ONLY the summarizing flag (and updated_at) in a
+// single targeted statement. The flag is transition-owned — never written by
+// the full-row UpdateTask — so concurrent full-row writes from stale task
+// copies cannot resurrect a flag that was already cleared (which would leave
+// the UI summarization spinner spinning forever).
+func (s *Store) SetTaskSummarizing(taskID string, summarizing bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE tasks SET summarizing = ?, updated_at = ? WHERE id = ?`,
+		B2I(summarizing), time.Now().UTC().Format(time.RFC3339), taskID)
+	return err
 }

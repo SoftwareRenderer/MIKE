@@ -673,3 +673,104 @@ func TestTaskSessionCost(t *testing.T) {
 		t.Fatalf("expected default session_cost 0, got %f", got3.SessionCost)
 	}
 }
+
+// TestSetTaskSummarizing verifies the dedicated flag transition: the flag
+// round-trips and updated_at is bumped (used as the summary anchor).
+func TestSetTaskSummarizing(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-sum", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := newTask("task-sum", "proj-sum")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := s.SetTaskSummarizing("task-sum", true); err != nil {
+		t.Fatalf("set summarizing: %v", err)
+	}
+	got, err := s.GetTaskByID("task-sum")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if !got.Summarizing {
+		t.Error("Summarizing should be true after SetTaskSummarizing(true)")
+	}
+	before := got.UpdatedAt
+	time.Sleep(1100 * time.Millisecond) // stored timestamps have second precision
+	if err := s.SetTaskSummarizing("task-sum", false); err != nil {
+		t.Fatalf("clear summarizing: %v", err)
+	}
+	got, err = s.GetTaskByID("task-sum")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.Summarizing {
+		t.Error("Summarizing should be false after SetTaskSummarizing(false)")
+	}
+	if !got.UpdatedAt.After(before) {
+		t.Errorf("updated_at should be bumped by SetTaskSummarizing (was %s, now %s)", before, got.UpdatedAt)
+	}
+}
+
+// TestUpdateTask_DoesNotTouchSummarizingFlag is the regression test for the
+// stuck-summarization-spinner bug: a full-row write from a task copy loaded
+// while the flag was set must not resurrect the flag after it was cleared.
+func TestUpdateTask_DoesNotTouchSummarizingFlag(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-sum-stale", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := newTask("task-stale", "proj-sum-stale")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// In-progress summarization: flag set in the DB, and a concurrent writer
+	// (e.g. HandleSend / HandleByID / an executor persist) loads the row.
+	if err := s.SetTaskSummarizing("task-stale", true); err != nil {
+		t.Fatalf("set summarizing: %v", err)
+	}
+	stale, err := s.GetTaskByID("task-stale")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if !stale.Summarizing {
+		t.Fatal("precondition: loaded copy should have Summarizing=true")
+	}
+
+	// Summarization completes: the flag is cleared via the dedicated update.
+	if err := s.SetTaskSummarizing("task-stale", false); err != nil {
+		t.Fatalf("clear summarizing: %v", err)
+	}
+
+	// The stale full-row write lands afterwards — it must not resurrect the
+	// flag even though the in-memory copy still says true.
+	if err := s.UpdateTask(stale); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	got, err := s.GetTaskByID("task-stale")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.Summarizing {
+		t.Error("full-row UpdateTask must not resurrect a cleared summarizing flag")
+	}
+
+	// Other fields on the same write must still be applied.
+	stale.Title = "renamed"
+	if err := s.UpdateTask(stale); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	got, err = s.GetTaskByID("task-stale")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.Title != "renamed" {
+		t.Errorf("expected title rename to be applied, got %q", got.Title)
+	}
+	if got.Summarizing {
+		t.Error("full-row UpdateTask must not resurrect a cleared summarizing flag (after field change)")
+	}
+}
