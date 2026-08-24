@@ -188,7 +188,9 @@
     });
 
     // ---- Scroll persistence (editor + file list) ----
+    // svelte-ignore non_reactive_update — identity-stable on purpose (EditorTabs prop churn)
     let scrollTops: Record<string, number> = {};
+    // svelte-ignore non_reactive_update — same as scrollTops
     let fileListScroll = 0;
     let tabSaveTimer: ReturnType<typeof setTimeout> | null = null;
     // Reactive: the file-list scroll $effect must re-run when the element binds.
