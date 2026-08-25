@@ -1586,6 +1586,11 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 
 	log.Printf("[lazy-start] task=%s starting executor", taskID)
 
+	// Signal the executor (re)started so clients arm the "Awaiting LLM" indicator
+	if !te.configStore.IsAgentProvider(execSetup.serverURL) {
+		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Starting task execution"}})
+	}
+
 	go te.executeTask(execSetup)
 }
 

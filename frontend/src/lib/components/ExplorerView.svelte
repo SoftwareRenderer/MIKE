@@ -16,7 +16,9 @@
     import ResizeHandle from './ResizeHandle.svelte';
     import { loadExplorerLayout, saveExplorerLayout, loadUnsavedFiles, saveUnsavedFiles, loadEditorTabs, saveEditorTabs, clearEditorDraft, clearEditorHistory } from '$lib/storage';
     import type { LSPSymbol } from '$lib/utils/lsp-symbols';
-    import { appStore, dialogStore } from '$lib/stores';
+    import { buildLineSelectionPrompt } from '$lib/utils/line-selection';
+    import { appStore, dialogStore, uiStore } from '$lib/stores';
+    import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips
@@ -62,6 +64,13 @@
     function handleEditFromChanges(path: string, line?: number) {
         handleFileSelected(path, line);
         onChangesOpen(false);
+    }
+
+    // Gutter line selection in the file editor
+    function handleLinesSelected(sel: { relativePath: string; startLine: number; lines: string[] }) {
+        uiStore.createTaskLineSelection = { prompt: buildLineSelectionPrompt(sel) };
+        uiStore.creatingChildOf = null;
+        uiStore.showCreateTask = true;
     }
 
     // Find in files panel state
@@ -150,7 +159,10 @@
         unsavedFiles = new Set();
         // Restore persisted tabs for this project
         loadEditorTabs(projectId).then((saved) => {
-            if (saved && saved.openFiles.length > 0) {
+            if (!saved) return;
+            scrollTops = saved.scrollTops ?? {};
+            fileListScroll = saved.fileListScroll ?? 0;
+            if (saved.openFiles.length > 0) {
                 openFiles = saved.openFiles;
                 activeFilePath = saved.activeFilePath;
                 pinnedFiles = new Set(saved.pinnedFiles);
@@ -175,17 +187,79 @@
         saveUnsavedFiles(projectId, [...unsavedFiles]).catch(() => {});
     });
 
-    // Persist editor tabs to IndexedDB
+    // ---- Scroll persistence (editor + file list) ----
+    // svelte-ignore non_reactive_update — identity-stable on purpose (EditorTabs prop churn)
+    let scrollTops: Record<string, number> = {};
+    // svelte-ignore non_reactive_update — same as scrollTops
+    let fileListScroll = 0;
+    let tabSaveTimer: ReturnType<typeof setTimeout> | null = null;
+    // Reactive: the file-list scroll $effect must re-run when the element binds.
+    let fileBrowserEl = $state<HTMLDivElement | null>(null);
+
+    function buildTabState() {
+        return {
+            openFiles: toPlainOpenFiles(openFiles),
+            activeFilePath,
+            pinnedFiles: [...pinnedFiles],
+            scrollTops,
+            fileListScroll,
+        };
+    }
+
+    function queueTabSave() {
+        if (tabSaveTimer) return;
+        tabSaveTimer = setTimeout(() => {
+            tabSaveTimer = null;
+            saveEditorTabs(projectId, buildTabState()).catch(() => {});
+        }, 300);
+    }
+
+    function handleEditorScrollTop(path: string, top: number) {
+        scrollTops[path] = top;
+        queueTabSave();
+    }
+
+    // Persist editor tabs (incl. scroll positions) to IndexedDB
     $effect(() => {
         openFiles;
         activeFilePath;
         pinnedFiles;
-        saveEditorTabs(projectId, {
-            openFiles: toPlainOpenFiles(openFiles),
-            activeFilePath,
-            pinnedFiles: [...pinnedFiles],
-        }).catch(() => {});
+        queueTabSave();
     });
+
+    // File-list scroll
+    let fileListScrollArmed = true;
+    $effect(() => {
+        const el = fileBrowserEl;
+        if (!el) return;
+        el.addEventListener('scroll', handleFileListScrollEvent, true);
+        if (!fileListScrollArmed) {
+            return () => el.removeEventListener('scroll', handleFileListScrollEvent, true);
+        }
+        fileListScrollArmed = false;
+        let attempts = 0;
+        const timer = setInterval(() => {
+            attempts++;
+            const list = el.querySelector<HTMLElement>('.file-browser-list');
+            if (list && fileListScroll > 0 && list.scrollHeight > list.clientHeight) {
+                clearInterval(timer);
+                list.scrollTop = Math.min(fileListScroll, list.scrollHeight - list.clientHeight);
+            } else if (attempts >= 20) {
+                clearInterval(timer);
+            }
+        }, 100);
+        return () => {
+            clearInterval(timer);
+            el.removeEventListener('scroll', handleFileListScrollEvent, true);
+        };
+    });
+
+    function handleFileListScrollEvent() {
+        const list = fileBrowserEl?.querySelector<HTMLElement>('.file-browser-list');
+        if (!list) return;
+        fileListScroll = list.scrollTop;
+        queueTabSave();
+    }
 
     /** Convert openFiles array to plain objects (avoid Svelte 5 proxy issues). */
     function toPlainOpenFiles(files: OpenFile[]): OpenFile[] {
@@ -498,6 +572,8 @@
     // Handle Ctrl+Shift+F — toggle find panel
     function handleKeydown(e: KeyboardEvent) {
         if (e.key === 'Escape') {
+            // A modal (e.g. the floating line-task modal) owns Escape while open
+            if (isAnyModalOpen()) return;
             if (showFind) {
                 showFind = false;
             } else if (showChanges) {
@@ -584,15 +660,24 @@
             activeTab = 'editor';
         }
         window.addEventListener('keydown', handleKeydown);
-        window.addEventListener('open-file', (e: any) => {
-            const { path, line } = e.detail;
-            handleFileSelected(path, line);
-        });
+        window.addEventListener('open-file', handleOpenFile);
     });
+
+    /** open-file dispatch (diff view / search results) */
+    function handleOpenFile(e: Event) {
+        const { path, line } = (e as CustomEvent).detail;
+        handleFileSelected(path, line);
+    }
 
     onDestroy(() => {
         window.removeEventListener('keydown', handleKeydown);
-        window.removeEventListener('open-file', () => {});
+        window.removeEventListener('open-file', handleOpenFile);
+        // Flush a pending (throttled) tab+scroll save.
+        if (tabSaveTimer) {
+            clearTimeout(tabSaveTimer);
+            tabSaveTimer = null;
+            saveEditorTabs(projectId, buildTabState()).catch(() => {});
+        }
     });
 </script>
 
@@ -750,7 +835,7 @@
                 {:else}
                     <div class="explorer-split-container">
                         <!-- Top: File browser -->
-                        <div class="explorer-file-browser" class:mobile={isMobileCtx.isMobile} style:height={isMobileCtx.isMobile ? undefined : splitRatio * 100 + '%'}>
+                        <div class="explorer-file-browser" class:mobile={isMobileCtx.isMobile} style:height={isMobileCtx.isMobile ? undefined : splitRatio * 100 + '%'} bind:this={fileBrowserEl}>
                             <BranchFileBrowser
                                 projectId={projectId}
                                 projectPath={projectPath}
@@ -838,6 +923,9 @@
                             onToggleFullscreen={toggleEditorFullscreen}
                             mobileFullscreen={editorFullscreen}
                             pendingFsEvent={pendingFsEvent}
+                            onLinesSelected={handleLinesSelected}
+                            scrollTops={scrollTops}
+                            onScrollTop={handleEditorScrollTop}
                         />
                     {:else}
                         <div class="file-editor-placeholder">

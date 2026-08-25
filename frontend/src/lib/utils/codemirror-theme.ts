@@ -47,6 +47,12 @@ export const darkTheme = EditorView.theme({
         color: '#8B949E',
         background: 'rgba(255,255,255,0.06)',
     },
+    // Gutter line selection (click/drag line numbers to create a task)
+    '.cm-lineSelGutter': {
+        background: 'rgba(88,166,255,0.28)',
+        color: '#C9D1D9',
+    },
+    '.cm-lineSel': { backgroundColor: 'rgba(88,166,255,0.14)' },
     '.cm-matchingBracket': { backgroundColor: 'rgba(88,166,255,0.3)' },
     '.cm-cursor': { borderLeftColor: '#C9D1D9' },
     '.cm-dropCursor': { borderLeftColor: '#C9D1D9' },
@@ -195,6 +201,12 @@ export const lightTheme = EditorView.theme({
         color: '#6E7781',
         background: 'rgba(0,0,0,0.06)',
     },
+    // Gutter line selection (click/drag line numbers to create a task)
+    '.cm-lineSelGutter': {
+        background: 'rgba(9,105,218,0.25)',
+        color: '#24292F',
+    },
+    '.cm-lineSel': { backgroundColor: 'rgba(9,105,218,0.12)' },
     '.cm-matchingBracket': { backgroundColor: 'rgba(9,105,218,0.2)' },
     '.cm-cursor': { borderLeftColor: '#24292F' },
     '.cm-dropCursor': { borderLeftColor: '#24292F' },

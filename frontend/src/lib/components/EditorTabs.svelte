@@ -10,7 +10,8 @@
     }
 
     let { projectId, projectPath, taskId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
-        onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen, pendingFsEvent = null }: {
+        onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen, pendingFsEvent = null,
+        onLinesSelected = null, scrollTops, onScrollTop }: {
         projectId: string;
         projectPath?: string;
         taskId?: string;
@@ -29,6 +30,12 @@
         saving?: boolean;
         onToggleFullscreen?: () => void;
         mobileFullscreen?: boolean;
+        /** Gutter line selection (explorer-mode FileEditor only). */
+        onLinesSelected?: ((sel: { relativePath: string; startLine: number; lines: string[] }) => void) | null;
+        /** Persisted per-file editor scroll offsets (full path → scrollTop). */
+        scrollTops?: Record<string, number>;
+        /** Report a file's scroller offset (throttled upstream). */
+        onScrollTop?: (path: string, top: number) => void;
     } = $props();
 
     const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
@@ -163,6 +170,9 @@
                     onHasChanges={(path: string, hasChanges: boolean) => handleHasChanges(path, hasChanges)}
                     onClose={() => onCloseTab(file.path)}
                     pendingFsEvent={pendingFsEvent}
+                    onLinesSelected={onLinesSelected}
+                    initialScrollTop={scrollTops?.[file.path] ?? 0}
+                    onScrollTop={(top: number) => onScrollTop?.(file.path, top)}
                 />
             {/each}
         {/if}

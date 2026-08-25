@@ -51,7 +51,9 @@
     import MultiSelectBar from './MultiSelectBar.svelte';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
 
-    let { task, tasks, projectPath, projectName, workspaceDir, sandboxEnabled, fsEventQueue, onClose, onSelectTask, onRefreshBoard, onOpenTerminal, onOpenExplorer, activeTab: activeTabProp = 'chat', onActiveTabChange }: { task: Task; tasks?: Task[]; projectPath?: string; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; fsEventQueue?: { op: 'create' | 'delete'; path: string }[]; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; onOpenTerminal?: () => void; onOpenExplorer?: () => void; activeTab?: 'context' | 'chat' | 'diff' | 'checkpoint'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff' | 'checkpoint') => void } = $props();
+    let { task, tasks, projectPath, projectName, workspaceDir, sandboxEnabled, fsEventQueue, onClose, onSelectTask, onRefreshBoard, onOpenTerminal, onOpenExplorer, onOpenTask, activeTab: activeTabProp = 'chat', onActiveTabChange, floating = false }: { task: Task; tasks?: Task[]; projectPath?: string; projectName?: string; workspaceDir?: string; sandboxEnabled?: boolean; fsEventQueue?: { op: 'create' | 'delete'; path: string }[]; onClose: (status?: string) => void; onSelectTask?: (task: Task) => void; onRefreshBoard?: () => void; onOpenTerminal?: () => void; onOpenExplorer?: () => void; onOpenTask?: () => void; activeTab?: 'context' | 'chat' | 'diff' | 'checkpoint'; onActiveTabChange?: (tab: 'context' | 'chat' | 'diff' | 'checkpoint') => void; /** Floating task view: narrow mobile-style window (Chat only) fixed at
+     *  bottom-right over the current view — no navigation, app stays behind. */
+    floating?: boolean } = $props();
 
     let allTasks = $derived(tasks || appStore.board?.tasks || []);
 
@@ -274,7 +276,7 @@
      * (all accumulated changes up to and including this checkpoint).
      * Toggles closed if the same checkpoint is clicked again. */
     async function handleViewChanges(commitHash: string, checkpointIndex?: number) {
-        if (isMobileCtx.isMobile) { activeTab = 'checkpoint'; onActiveTabChange?.('checkpoint'); }
+        if (mobile) { activeTab = 'checkpoint'; onActiveTabChange?.('checkpoint'); }
         // Toggle: if same checkpoint is already open, close it
         if (checkpointDiffOpen && checkpointDiffHash === commitHash) {
             closeCheckpointDiff();
@@ -313,7 +315,7 @@
     function closeCheckpointDiff() {
         checkpointDiffOpen = false;
         checkpointDiffHash = '';
-        if (isMobileCtx.isMobile && activeTab === 'checkpoint') {
+        if (mobile && activeTab === 'checkpoint') {
             activeTab = 'diff';
             onActiveTabChange?.('diff');
         }
@@ -380,6 +382,8 @@
         activeTab = activeTabProp;
     });
     const isMobileCtx = useIsMobile();
+    // Floating mode reuses the mobile single-column layout.
+    const mobile = $derived(floating || isMobileCtx.isMobile);
 
     // Subtask hierarchy (extracted composable)
     let hierarchy = useSubtaskHierarchy(() => allTasks, expandedTasksContext, () => task.parent_task_id);
@@ -544,6 +548,9 @@
 
         function handleKey(e: KeyboardEvent) {
             if (e.key === 'Escape') {
+                // A floating task view owns Escape while it's open — a background
+                // full task view must not close at the same time.
+                if (!floating && uiStore.floatingTask) return;
                 // Don't close when user is typing in an input/textarea
                 const tag = (document.activeElement as HTMLElement)?.tagName.toLowerCase();
                 if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
@@ -597,7 +604,7 @@
                 const active = document.activeElement;
                 if (active instanceof HTMLElement && isEditableTarget(active)) return;
                 if (isBlocked()) return;
-                if (isMobileCtx.isMobile && activeTab !== 'context') return;
+                if (mobile && activeTab !== 'context') return;
                 if (!detailEl) return;
                 const chatCol = detailEl.querySelector<HTMLElement>('.column-chat');
                 if (active instanceof HTMLElement && chatCol?.contains(active)) {
@@ -639,7 +646,7 @@
                     metaKey: e.metaKey,
                     shiftKey: e.shiftKey,
                     defaultPrevented: e.defaultPrevented,
-                    isMobile: isMobileCtx.isMobile,
+                    isMobile: mobile,
                     blocked: isBlocked(),
                     editingFile: !!editingFile,
                     diffFullscreen,
@@ -734,7 +741,8 @@
      * Used after thread switch or task change to ensure a clean slate.
      * For done tasks, uses branch_tip to show the diff of committed changes. */
     async function loadDiff() {
-        if (!task || task.status === 'backlog') return;
+        // A backlog task has no worktree unless it was sent back from active
+        if (!task || (task.status === 'backlog' && !worktreeExists)) return;
         if (diffLoading) {
             // A load is in progress; a newer thread switch/task change supersedes it.
             diffReloadQueued = true;
@@ -776,7 +784,7 @@
     }
 
     async function loadCommits() {
-        if (!task || task.status === 'backlog') return;
+        if (!task || (task.status === 'backlog' && !worktreeExists)) return;
         try {
             const result = await getTaskCommits(task.project_id, task.id);
             commits = result.commits || [];
@@ -788,7 +796,7 @@
     }
 
     async function handleExpandDiff(path?: string) {
-        if (!task || task.status === 'backlog') return;
+        if (!task || (task.status === 'backlog' && !worktreeExists)) return;
         try {
             // If a specific file path is provided, fetch only that file's full diff
             if (path) {
@@ -865,7 +873,7 @@
 
 </script>
 
-    <div class="task-detail-page" class:fullscreen={editorFullscreen || diffFullscreen} class:chat-fullscreen={chatFullscreen} bind:this={detailEl} tabindex="-1" aria-label="Task detail">
+    <div class="task-detail-page" class:floating={floating} class:fullscreen={editorFullscreen || diffFullscreen} class:chat-fullscreen={chatFullscreen} bind:this={detailEl} tabindex="-1" aria-label="Task detail">
         <!-- Header -->
         <TaskHeader
             {workspaceDir}
@@ -874,18 +882,23 @@
             {badge}
             {task}
             {onClose}
-            onOpenTerminal={() => onOpenTerminal?.()}
-            onOpenExplorer={onOpenExplorer || (() => {})}
+            onOpenTerminal={onOpenTerminal}
+            onOpenExplorer={onOpenExplorer}
+            onOpenTask={onOpenTask}
+            {floating}
             onDelete={handleDelete}
         />
 
-        <!-- Mobile Tab Bar (always rendered, visibility controlled by CSS media query) -->
+        <!-- Mobile Tab Bar (visibility controlled by CSS media query; omitted in
+             the floating view — it is chat-only, no column switching) -->
+        {#if !floating}
         <MobileTabBar activeTab={activeTab} showCheckpointTab={checkpointDiffOpen} onTabChange={(tab: 'context' | 'chat' | 'diff' | 'checkpoint') => { activeTab = tab; onActiveTabChange?.(tab); }} />
+        {/if}
 
         <!-- 3-Column Layout -->
         <div bind:this={columnsRef} class="columns"  role="region" aria-label="Task detail panels">
             <!-- Column 1: Board Overview -->
-            <div class="column column-context" tabindex="-1" class:hidden={isMobileCtx.isMobile && activeTab !== 'context'} style:width={boardWidth}>
+            <div class="column column-context" tabindex="-1" class:hidden={floating || (mobile && activeTab !== 'context')} style:width={boardWidth}>
                 <BoardOverview
                     sections={overviewSections}
                     {allTasks}
@@ -911,7 +924,7 @@
             </div>
 
             <!-- Resize handle: Board ↔ Chat -->
-            {#if !isMobileCtx.isMobile}
+            {#if !mobile}
                 <ResizeHandle
                     ariaLabel="Resize board and agent panels"
                     onDragStart={handleBoardDragStart}
@@ -921,7 +934,7 @@
             {/if}
 
             <!-- Column 2: Chat / Agent Interface -->
-            <div class="column column-chat" class:hidden={isMobileCtx.isMobile && activeTab !== 'chat'} style:width={chatWidth}>
+            <div class="column column-chat" class:hidden={mobile && activeTab !== 'chat'} style:width={chatWidth}>
                 <div style="flex:1;min-height:0">
                     {#key task.id}
                         <TaskChat
@@ -959,7 +972,7 @@
             </div>
 
             <!-- Resize handle: Chat ↔ Diff -->
-            {#if !isMobileCtx.isMobile}
+            {#if !mobile}
                 <ResizeHandle
                     ariaLabel="Resize agent and changes panels"
                     onDragStart={handleChatDragStart}
@@ -969,7 +982,7 @@
             {/if}
 
             <!-- Column 3: Working Changes (Diff) with Checkpoint overlay -->
-            <div class="column column-diff" tabindex="-1" class:hidden={isMobileCtx.isMobile && activeTab !== 'diff' && activeTab !== 'checkpoint'} style:width={diffWidth}>
+            <div class="column column-diff" tabindex="-1" class:hidden={floating || (mobile && (activeTab !== 'diff' && activeTab !== 'checkpoint'))} style:width={diffWidth}>
                 <div class="diff-content">
                     {#if editingFile}
                         <!-- Inline file editor (lazy-loaded) -->
@@ -989,7 +1002,7 @@
                                 onClose={closeDiffEditor}
                                 onToggleFullscreen={toggleEditorFullscreen}
                                 mobileFullscreen={editorFullscreen}
-                                isMobile={isMobileCtx.isMobile}
+                                isMobile={mobile}
                             />
                         {:else}
                             <div class="diff-editor-loading">Loading editor...</div>
@@ -1010,12 +1023,14 @@
                                     onToggleFullscreen={toggleDiffFullscreen}
                                     isFullscreen={diffFullscreen}
                                 />
-                            {/if}
-                            {#if DiffViewerComponent}
-                                {@const DiffViewer = DiffViewerComponent}
-                                <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? 'Merged' : hasMergedSubtasks ? 'Merged from Subtasks' : 'Committed in task'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                                {#if DiffViewerComponent}
+                                    {@const DiffViewer = DiffViewerComponent}
+                                    <DiffViewer committedFiles={committedFiles} stagedFiles={stagedFiles} unstagedFiles={unstagedFiles} stagedUntracked={stagedUntracked} unstagedUntracked={unstagedUntracked} loading={diffLoading} mergedLabel={isDoneTask ? 'Merged' : hasMergedSubtasks ? 'Merged from Subtasks' : 'Committed in task'} onExpandFile={handleExpandDiff} onExpandUntracked={loadUntrackedFile} onLineClick={handleDiffLineClick} onStageFile={handleStageFile} onStageAll={handleStageAll} onUnstageAll={handleUnstageAll} />
+                                {:else}
+                                    <div class="diff-viewer-loading">Loading diff viewer...</div>
+                                {/if}
                             {:else}
-                                <div class="diff-viewer-loading">Loading diff viewer...</div>
+                                <div class="diff-viewer-empty">No changes yet</div>
                             {/if}
                         {/if}
 
@@ -1050,6 +1065,43 @@
         flex-direction: column;
         overflow: hidden;
         height: 100%;
+    }
+    /* Floating task view: narrow mobile-style window over the current view.
+       bottom: 44px sits above the editor footer (≈28px) + gap. */
+    .task-detail-page.floating {
+        position: fixed;
+        top: auto;
+        right: 16px;
+        bottom: 44px;
+        width: 480px;
+        height: 72vh;
+        max-width: calc(100vw - 32px);
+        z-index: 900;
+        flex: none;
+        background: var(--color-surface-1);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    }
+    @media (max-width: 768px) {
+        .task-detail-page.floating {
+            inset: 0;
+            width: 100vw;
+            max-width: none;
+            height: 100dvh;
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
+        }
+    }
+    /* Chat-only: the visible column must fill the window. Its inline width is
+       a 3-column share (e.g. 35%) — a flex item with an explicit width does
+       not stretch, and the ≤768px media query below doesn't apply on desktop. */
+    .task-detail-page.floating .column:not(.hidden) {
+        flex: 0 0 100% !important;
+        width: 100% !important;
+        min-width: 0;
+        border-right: none;
     }
     .columns {
         display: flex;
@@ -1091,6 +1143,15 @@
         z-index: 5;
     }
     .diff-viewer-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 48px 24px;
+        color: var(--color-text-tertiary);
+        font-size: 0.8125rem;
+        flex: 1;
+    }
+    .diff-viewer-empty {
         display: flex;
         align-items: center;
         justify-content: center;

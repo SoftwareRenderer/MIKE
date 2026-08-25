@@ -9,6 +9,7 @@
         zIndex = 1000,
         trapFocus = true,
         closeOnOverlayClick = true,
+        floating = false,
         onBeforeClose,
         onClose,
         header,
@@ -25,6 +26,8 @@
         zIndex?: number;
         trapFocus?: boolean;
         closeOnOverlayClick?: boolean;
+        /* Non-modal floating window */
+        floating?: boolean;
         onBeforeClose?: () => boolean | Promise<boolean>;
         onClose: () => void | Promise<void>;
         header?: Snippet<[ { title: string } ]>;
@@ -45,15 +48,34 @@
 
     onMount(() => {
         triggerEl = document.activeElement as HTMLElement;
-        if (modalEl && trapFocus) {
+        if (modalEl && trapFocus && !floating) {
             focusTrap = createFocusTrap(modalEl, handleClose);
             queueMicrotask(() => focusTrap?.focusFirst());
+        } else if (modalEl && floating) {
+            // Focus the first focusable unless the content already took focus
+            // (e.g. CreateTaskModal focuses its textarea in a microtask).
+            queueMicrotask(() => {
+                if (modalEl && !modalEl.contains(document.activeElement)) focusFirstIn(modalEl);
+            });
+            window.addEventListener('keydown', handleFloatingKeydown);
         }
     });
 
     onDestroy(() => {
         focusTrap?.destroy();
+        if (floating) window.removeEventListener('keydown', handleFloatingKeydown);
     });
+
+    function focusFirstIn(el: HTMLElement) {
+        el.querySelector<HTMLElement>('[autofocus], input, textarea, select, button:not([disabled])')?.focus();
+    }
+
+    /** Floating (non-modal) mode: Escape closes only while focus is inside the
+     *  modal — otherwise Escape belongs to the app behind (e.g. clearing a
+     *  gutter line selection in the editor). */
+    function handleFloatingKeydown(e: KeyboardEvent) {
+        if (e.key === 'Escape' && modalEl && modalEl.contains(document.activeElement)) handleClose();
+    }
 
     async function handleClose() {
         if (closed) return;
@@ -73,7 +95,7 @@
     }
 </script>
 
-<div class="overlay" style="z-index: {zIndex}" onclick={handleOverlayClick} role="presentation">
+<div class="overlay" class:overlay-floating={floating} style="z-index: {zIndex}" onclick={handleOverlayClick} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions — modal container stops click propagation, not an activation target -->
     <div
         class={modalClasses}
@@ -81,7 +103,7 @@
         onclick={(e) => e.stopPropagation()}
         bind:this={modalEl}
         role="dialog"
-        aria-modal="true"
+        aria-modal={floating ? undefined : 'true'}
         aria-labelledby={header ? undefined : 'modal-title'}
         tabindex="-1"
     >
@@ -120,6 +142,15 @@
         align-items: center;
         justify-content: center;
         z-index: 1000;
+    }
+    /* Floating (non-modal) variant: no dim, clicks pass through to the app. */
+    .overlay-floating {
+        background: transparent;
+        pointer-events: none;
+    }
+    .overlay-floating .modal {
+        pointer-events: auto;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
     }
     .modal {
         background: var(--color-surface-1);
