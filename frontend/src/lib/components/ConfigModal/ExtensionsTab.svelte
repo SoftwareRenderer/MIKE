@@ -1150,7 +1150,7 @@
                                     <div class="ext-name-row">
                                         <span class="ext-name">{entry.display_name || entry.name}</span>
                                         {#if entry.featured}
-                                            <span class="featured-badge" title={isInstalled ? 'Featured extension' : 'Featured extension — pinned to the top of the Browse list until installed'}>Featured</span>
+                                            <span class="featured-badge">Featured</span>
                                         {/if}
                                         {#if isUnpublished}
                                             <button
