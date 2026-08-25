@@ -688,6 +688,8 @@ export interface EditorTabState {
     openFiles: EditorTabFile[];
     activeFilePath: string;
     pinnedFiles: string[];
+    scrollTops?: Record<string, number>;
+    fileListScroll?: number;
 }
 
 /** Load persisted editor tab state for a project. Returns `null` if none exists. */

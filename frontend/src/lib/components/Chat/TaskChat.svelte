@@ -949,6 +949,10 @@
             }
             const updated = await commitAndDone(projectId, taskId, confirmedMessage);
             mergeTaskIntoBoard(updated);
+
+            if (updated?.status === 'in_progress') {
+                stream.state.awaitingResponse = true;
+            }
             // Reload history to show any system messages from merge conflict resolution
             await loadHistory();
         } catch (e) {
