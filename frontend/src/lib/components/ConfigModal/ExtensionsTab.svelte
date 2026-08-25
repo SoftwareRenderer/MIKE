@@ -1165,7 +1165,7 @@
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
                                                 {#each regCapKeys as regCapKey}
                                                     {@const regCapInfo = CAPABILITY_DESCRIPTIONS[regCapKey]}
-                                                    <button class="cap-badge" class:cap-lsp={regCapKey === 'lsp'} class:cap-ui={regCapKey === 'ui'} class:cap-css={regCapKey === 'css'} class:cap-agent={regCapKey === 'agent'} class:cap-network={regCapKey === 'network'} aria-label="{regCapInfo.label} capability for {entry.display_name || entry.name}. {regCapInfo.description}" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>
+                                                    <button class="cap-badge" class:cap-lsp={regCapKey === 'lsp'} class:cap-ui={regCapKey === 'ui'} class:cap-css={regCapKey === 'css'} class:cap-agent={regCapKey === 'agent'} class:cap-network={regCapKey === 'network'} class:cap-llm={regCapKey === 'llm'} aria-label="{regCapInfo.label} capability for {entry.display_name || entry.name}. {regCapInfo.description}" onclick={() => { selectedExtension = { name: entry.name, manifest: { display_name: entry.display_name, description: entry.description, capabilities: getRegistryCapabilities(entry) }, type: entry.type } as Extension; showCapabilitiesModal = true; }}>
                                                         {regCapInfo.label}
                                                     </button>
                                                 {/each}
@@ -1706,8 +1706,8 @@
     }
 
     .ext-llm {
-        background: var(--color-status-red-bg);
-        color: var(--color-status-red);
+        background: var(--color-text-inverse);
+        color: var(--color-text-secondary);
     }
 
     .ext-info {
@@ -1868,9 +1868,9 @@
     }
 
     .cap-llm {
-        background: var(--color-status-red-bg);
-        color: var(--color-status-red);
-        border-color: rgba(248, 81, 73, 0.3);
+        background: var(--color-text-inverse);
+        color: var(--color-text-secondary);
+        border-color: rgba(222, 222, 222, 0.3);
     }
 
     /* Capabilities modal */
