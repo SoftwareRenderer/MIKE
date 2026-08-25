@@ -3,7 +3,7 @@
     import { ensureCsrfToken } from '$lib/api';
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, clearEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { EditorView } from 'codemirror';
-    import { EditorState, Compartment, StateField, StateEffect, RangeSet, Range, type Extension } from '@codemirror/state';
+    import { EditorState, Transaction, Compartment, StateField, StateEffect, RangeSet, Range, type Extension } from '@codemirror/state';
     import { keymap } from '@codemirror/view';
     import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
@@ -13,6 +13,7 @@
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
+    import { isExtensionContentSet } from '$lib/extensions/handlers/editor';
     let extAnchorEl = $state<HTMLDivElement | null>(null);
     $effect(() => {
         const _v = uiInjector.getPointVersion(INJECTION_POINTS.FILE_EDITOR);
@@ -513,12 +514,10 @@
                     hasChanges = content !== savedContent;
                     lineCount = update.state.doc.lines;
                     charCount = update.state.doc.length;
-                    // Notify THIS file's file-editor extensions (e.g. a
-                    // markdown preview) that the document changed. Scoped to
-                    // this editor's anchor so a change in one open file never
-                    // renders into another file's preview. Generic — the host
-                    // forwards the text without interpreting it.
-                    uiInjector.forwardEvent(INJECTION_POINTS.FILE_EDITOR, 'editor.contentChange', { content }, extAnchorEl);
+                    // Notify file-editor extensions
+                    if (!isExtensionContentSet(update.transactions.map(tr => tr.annotation(Transaction.userEvent)))) {
+                        uiInjector.forwardEvent(INJECTION_POINTS.FILE_EDITOR, 'editor.contentChange', { content }, extAnchorEl);
+                    }
                     // Capture delta for undo/redo history persistence.
                     // Only capture user edits (not programmatic changes during restore).
                     if (!(view as any).__restoring) {

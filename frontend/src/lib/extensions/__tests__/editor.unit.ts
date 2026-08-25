@@ -5,12 +5,13 @@ import {
     CAP_EDITOR_REMOVE_FOOTER_BUTTON,
     CAP_EDITOR_FOOTER_CLICK,
     CAP_EDITOR_GET_CONTENT,
+    CAP_EDITOR_SET_CONTENT,
     CAP_EDITOR_SET_OVERLAY,
     CAP_EDITOR_CONTENT_CHANGE,
     CAP_EDITOR_SAVE,
 } from '../capabilities';
 import { computeGrants, SUPPORTED_CAPABILITIES } from '../capabilities';
-import { cleanupFooterButtons } from '../handlers/editor';
+import { cleanupFooterButtons, CONTENT_SET_USER_EVENT, isExtensionContentSet } from '../handlers/editor';
 import type { HostRequest } from '../types';
 
 function makeFakeIframe() {
@@ -254,6 +255,68 @@ describe('editor.getContent and editor.setOverlay', () => {
     it('editor.contentChange is a grantable event capability', () => {
         expect(SUPPORTED_CAPABILITIES[CAP_EDITOR_CONTENT_CHANGE].kind).toBe('event');
         expect(computeGrants([CAP_EDITOR_CONTENT_CHANGE])).toContain(CAP_EDITOR_CONTENT_CHANGE);
+    });
+});
+
+describe('editor.setContent and isExtensionContentSet', () => {
+    let root: HTMLElement, anchor: HTMLElement;
+    beforeEach(() => { ({ root, anchor } = buildEditorDom()); });
+    afterEach(() => cleanupFooterButtons('ext-md'));
+
+    it('dispatches the replacement with the CONTENT_SET_USER_EVENT marker', async () => {
+        const wrapper = root.querySelector('.editor-wrapper') as HTMLElement;
+        const cm = document.createElement('div');
+        cm.className = 'cm-editor';
+        const dispatch = vi.fn();
+        (cm as any).__view = {
+            state: { doc: { toString: () => 'old text' } },
+            dispatch,
+        };
+        wrapper.appendChild(cm);
+
+        const { channel, contentWindow } = makeChannel([CAP_EDITOR_SET_CONTENT], anchor);
+        channel.start();
+        send(channel, contentWindow, { type: 'call', id: 'sc1', cap: CAP_EDITOR_SET_CONTENT, args: { content: 'new text' } });
+        await flush();
+
+        expect(dispatch).toHaveBeenCalledTimes(1);
+        const spec = dispatch.mock.calls[0][0];
+        expect(spec.userEvent).toBe(CONTENT_SET_USER_EVENT);
+        expect(spec.changes).toEqual({ from: 0, to: 8, insert: 'new text' });
+        channel.destroy();
+    });
+
+    it('is a no-op when the content is unchanged', async () => {
+        const wrapper = root.querySelector('.editor-wrapper') as HTMLElement;
+        const cm = document.createElement('div');
+        cm.className = 'cm-editor';
+        const dispatch = vi.fn();
+        (cm as any).__view = {
+            state: { doc: { toString: () => 'same' } },
+            dispatch,
+        };
+        wrapper.appendChild(cm);
+
+        const { channel, contentWindow } = makeChannel([CAP_EDITOR_SET_CONTENT], anchor);
+        channel.start();
+        send(channel, contentWindow, { type: 'call', id: 'sc2', cap: CAP_EDITOR_SET_CONTENT, args: { content: 'same' } });
+        await flush();
+        expect(dispatch).not.toHaveBeenCalled();
+        channel.destroy();
+    });
+
+    it('recognizes an update made solely of extension setContent transactions', () => {
+        // A single push (the normal case from the handler).
+        expect(isExtensionContentSet([CONTENT_SET_USER_EVENT])).toBe(true);
+        // A batched multi-transaction dispatch where every transaction is a push.
+        expect(isExtensionContentSet([CONTENT_SET_USER_EVENT, CONTENT_SET_USER_EVENT])).toBe(true);
+    });
+
+    it('does NOT recognize user input, external edits, or mixed updates', () => {
+        expect(isExtensionContentSet(['input.delete'])).toBe(false);
+        expect(isExtensionContentSet([undefined])).toBe(false);
+        expect(isExtensionContentSet(['input.delete', CONTENT_SET_USER_EVENT])).toBe(false);
+        expect(isExtensionContentSet([])).toBe(false);
     });
 });
 
