@@ -22,6 +22,7 @@ import (
 	"kanban/backend/extensions"
 	"kanban/backend/git"
 	"kanban/backend/httputil"
+	"kanban/backend/llmadapter"
 	"kanban/backend/lsp"
 	"kanban/backend/managers"
 	"kanban/backend/sandbox"
@@ -50,6 +51,7 @@ type Server struct {
 	sandboxStatsSampler *stream.SandboxStatsSampler
 	agentRegistry       *agent.AgentRegistry
 	extStore            *extensions.ExtensionStore
+	llmAdapter          *llmadapter.Adapter // provider request adaptation (llm extensions)
 	extSandboxMgr       *extensions.ExtensionSandboxManager
 	extHandler          *extensions.ExtensionHandler
 	extLSPMgr           *lsp.ExtensionLSPManager
@@ -173,7 +175,24 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	s.extSandboxMgr = extensions.NewExtensionSandboxManager(extRegistry, s.extStore)
 	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
 
+	// Provider request adapter — enabled `llm` extensions map MIKE's requests
+	// to provider-specific formats. Mappings come from each extension's
+	// mappings file and are re-collected on every extension change below.
+	extCfg := &extensions.ExtensionConfig{RegistryURL: cfg.RegistryURL}
+	s.llmAdapter = llmadapter.NewAdapter()
+	refreshLLMAdapters := func() {
+		ms, err := extensions.CollectLLMMappings(s.extStore, extCfg.ExtensionsDirOrDefault())
+		if err != nil {
+			log.Printf("[server] collect llm mappings: %v", err)
+			return
+		}
+		s.llmAdapter.SetMappings(ms)
+	}
+	refreshLLMAdapters()
+	cfgStore.SetLLMAdapter(s.llmAdapter)
+
 	s.executor = kanbanexec.NewTaskExecutor(store, cfgStore, s.appStreamMgr, worktreeMgr, s.sandboxMgr, agentRegistry, s.extLSPMgr, commitQueue)
+	s.executor.SetLLMAdapter(s.llmAdapter)
 	s.executor.RecoverStaleTasks()
 	// Wire agent registry to terminal manager (created earlier before agentRegistry was available)
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
@@ -187,9 +206,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 
 	// Bootstrap built-in extensions
 	// (Removed built-in bootstrapping to decouple extensions from core)
-	s.extHandler = extensions.NewExtensionHandler(s.extStore, s.extSandboxMgr, extRegistry, &extensions.ExtensionConfig{
-		RegistryURL: cfg.RegistryURL,
-	})
+	s.extHandler = extensions.NewExtensionHandler(s.extStore, s.extSandboxMgr, extRegistry, extCfg)
 
 	// LSP handler for language server WebSocket bridging
 	// Use extension-based registry and manager for dynamic LSP discovery
@@ -224,6 +241,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	// Wire extension change callback → reload agent registry + broadcast to all clients
 	s.extHandler.SetOnExtensionChanged(func() {
 		agentRegistry.Reload()
+		refreshLLMAdapters()
 		s.appStreamMgr.BroadcastExtensionChange()
 	})
 	// Wire extension update callback → broadcast LSP reset to frontend

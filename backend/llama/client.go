@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"kanban/backend/llmadapter"
 	"kanban/backend/types"
 )
 
@@ -94,6 +95,28 @@ type LlamaClient struct {
 	apiKey          string
 	httpClient      *http.Client
 	readIdleTimeout time.Duration // 0 means default 30s
+	adapter         *llmadapter.Adapter
+}
+
+// SetAdapter configures provider-dependent request adaptation (llm
+// extensions). Matching mappings are applied AFTER the standard request fields
+// are set, so they can rewrite or remove them. Nil = no adaptation.
+func (c *LlamaClient) SetAdapter(a *llmadapter.Adapter) {
+	c.adapter = a
+}
+
+// applyAdapter applies the matched provider mapping to reqBody (in place) and
+// returns the resolved headers to add. Nil when no mapping matches.
+func (c *LlamaClient) applyAdapter(reqBody map[string]any) map[string]string {
+	if c.adapter == nil {
+		return nil
+	}
+	headers, match, ok := c.adapter.Adapt(c.baseURL, c.modelName, c.reasoningEffort, reqBody)
+	if !ok {
+		return nil
+	}
+	log.Printf("[llama] request adapted for provider %s (mapping %s)", c.baseURL, match)
+	return headers
 }
 
 // NewLlamaClient creates a new LlamaClient.
@@ -198,6 +221,7 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		reqBody["tool_choice"] = "none"
 	}
 	applyReasoningParams(reqBody, c.reasoningEffort)
+	adapterHeaders := c.applyAdapter(reqBody)
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -210,6 +234,9 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	}
 	req.Header.Set("Content-Type", "application/json")
 	c.setAuthHeader(req)
+	for k, v := range adapterHeaders {
+		req.Header.Set(k, v)
+	}
 
 	callStart := time.Now()
 	resp, err := c.httpClient.Do(req)
@@ -351,6 +378,7 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 		reqBody["max_tokens"] = maxTokens
 	}
 	applyReasoningParams(reqBody, c.reasoningEffort)
+	adapterHeaders := c.applyAdapter(reqBody)
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
@@ -363,6 +391,9 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 	}
 	req.Header.Set("Content-Type", "application/json")
 	c.setAuthHeader(req)
+	for k, v := range adapterHeaders {
+		req.Header.Set(k, v)
+	}
 
 	callStart := time.Now()
 	resp, err := c.httpClient.Do(req)

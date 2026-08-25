@@ -29,7 +29,8 @@ type TestConnectionResponse struct {
 
 // TestConnection sends a minimal chat request to the LLM server and returns the result.
 func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionResponse {
-	url := strings.TrimRight(req.LlamaServerURL, "/") + "/chat/completions"
+	baseURL := strings.TrimRight(req.LlamaServerURL, "/")
+	url := baseURL + "/chat/completions"
 
 	model := req.ModelName
 	if model == "" {
@@ -39,6 +40,12 @@ func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionR
 		"model":      model,
 		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
 		"max_tokens": 1,
+	}
+	var adapterHeaders map[string]string
+	if cs.llmAdapter != nil {
+		if headers, _, ok := cs.llmAdapter.Adapt(baseURL, model, "", reqBody); ok {
+			adapterHeaders = headers
+		}
 	}
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
@@ -53,6 +60,9 @@ func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionR
 	httpReq.Header.Set("Content-Type", "application/json")
 	if req.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	}
+	for k, v := range adapterHeaders {
+		httpReq.Header.Set(k, v)
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -144,7 +154,8 @@ type FetchModelsResponse struct {
 
 // FetchModels calls GET {url}/v1/models on an OpenAI-compatible endpoint and returns model metadata.
 func (cs *ConfigStore) FetchModels(req FetchModelsRequest) FetchModelsResponse {
-	url := strings.TrimRight(req.LlamaServerURL, "/") + "/models"
+	baseURL := strings.TrimRight(req.LlamaServerURL, "/")
+	url := baseURL + "/models"
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	httpReq, err := http.NewRequest("GET", url, nil)
@@ -153,6 +164,14 @@ func (cs *ConfigStore) FetchModels(req FetchModelsRequest) FetchModelsResponse {
 	}
 	if req.APIKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	}
+	// Provider adaptation (headers only — /models has no request body).
+	if cs.llmAdapter != nil {
+		if headers, _, ok := cs.llmAdapter.Adapt(baseURL, "", "", map[string]any{}); ok {
+			for k, v := range headers {
+				httpReq.Header.Set(k, v)
+			}
+		}
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {

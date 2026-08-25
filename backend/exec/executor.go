@@ -20,6 +20,7 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/llama"
+	"kanban/backend/llmadapter"
 	"kanban/backend/lsp"
 	"kanban/backend/prompts"
 	sandboxmgr "kanban/backend/sandbox"
@@ -43,6 +44,7 @@ type TaskExecutor struct {
 	gate          *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
 	taskGate      *ConcurrencyGate // per-provider running-task limit
 	taskMu        sync.Mutex
+	llmAdapter    *llmadapter.Adapter // provider request adaptation (llm extensions); nil = none
 	tasks         map[string]*executionState
 	// Per-task mutexes to serialize worktree access across executors and merges.
 	worktreeMu sync.Map // taskID -> *sync.Mutex
@@ -61,6 +63,21 @@ type TaskExecutor struct {
 // AgentRegistry returns the agent registry used by this executor.
 func (te *TaskExecutor) AgentRegistry() *agent.AgentRegistry {
 	return te.agentRegistry
+}
+
+// SetLLMAdapter wires the provider request adapter (from enabled `llm`
+// extensions). New LlamaClients created by this executor then adapt their
+// requests to provider-specific formats. Nil = no adaptation.
+func (te *TaskExecutor) SetLLMAdapter(a *llmadapter.Adapter) {
+	te.llmAdapter = a
+}
+
+// newLlamaClient creates a LlamaClient with the provider request adapter
+// attached.
+func (te *TaskExecutor) newLlamaClient(serverURL, modelName, reasoningEffort, apiKey string) *llama.LlamaClient {
+	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
+	client.SetAdapter(te.llmAdapter)
+	return client
 }
 
 type summarizeRequest struct {
@@ -379,7 +396,7 @@ func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName
 		}
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
-	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
+	client := te.newLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
 	var usage *types.ChatUsage
 	var text string
 	err := te.RunWithGate(ctx, serverURL, func() error {
@@ -395,7 +412,7 @@ func (te *TaskExecutor) ChatCompletion(ctx context.Context, serverURL, modelName
 // is fully transparent. Uses the same provider concurrency limits as ChatCompletion.
 func (te *TaskExecutor) StreamCompletion(ctx context.Context, serverURL, modelName string, messages []types.ChatMessage, cb types.StreamCallback, onProgress types.PromptProgressCallback) (*types.ChatUsage, error) {
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
-	client := llama.NewLlamaClient(serverURL, modelName, "off", apiKey)
+	client := te.newLlamaClient(serverURL, modelName, "off", apiKey)
 	var usage *types.ChatUsage
 	err := te.RunWithGate(ctx, serverURL, func() error {
 		var err error

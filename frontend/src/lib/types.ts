@@ -427,7 +427,7 @@ export type TaskEventData = { task_id: string; type: string; data: any };
 
 // ─── Extension types ───
 
-export type ExtensionType = 'lsp' | 'ui' | 'css' | 'agent';
+export type ExtensionType = 'lsp' | 'ui' | 'css' | 'agent' | 'llm';
 
 export interface ExtensionManifest {
     display_name: string;
@@ -447,6 +447,11 @@ export interface ExtensionCapabilities {
     css?: CSSExtensionConfig;
     agent?: AgentExtensionConfig;
     network?: NetworkExtensionConfig;
+    llm?: LLMExtensionConfig;
+}
+
+export interface LLMExtensionConfig {
+    mappings_file?: string; // provider mappings file in the extension dir (default "mappings.json")
 }
 
 export interface NetworkExtensionConfig {
