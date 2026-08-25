@@ -126,7 +126,7 @@
         },
         llm: {
             label: 'LLM',
-            description: 'Adapts MIKE\u2019s OpenAI-compatible LLM requests to provider-specific formats (body fields and headers) depending on the provider URL.',
+            description: 'Modifies the OpenAI-compatible LLM request format to fit provider-specific structure, depending on the provider URL.',
         },
     };
 
