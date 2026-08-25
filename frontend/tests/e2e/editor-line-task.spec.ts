@@ -12,7 +12,7 @@ import { csrfFetch, createTaskViaApi, navigateToTask } from './helpers';
 // come from the editor's own text selection — clicking a line number inside a
 // multi-line highlighted range selects the whole range (gutter drag and
 // shift+click are gone). Hovering a line number replaces it with a yellow
-// chat-bubble icon. A single Create button (plus the auto-start toggle,
+// chat-bubble icon (with a "Create a task from these lines" tooltip). A single Create button (plus the auto-start toggle,
 // default on) creates the task and opens a FLOATING TASK VIEW (Chat only,
 // mobile-style, fixed bottom-right above the editor footer, with Close / Delete
 // / Open task buttons) — no navigation, explorer stays behind. "Open task"
@@ -185,7 +185,8 @@ test.describe('Editor gutter line selection → Create Task', () => {
     await page.mouse.up();
   }
 
-  /** Assert the gutter hover affordance on line n: number hidden, bubble shown. */
+  /** Assert the gutter hover affordance on line n: number hidden, bubble shown,
+   *  and the native "create task" tooltip present. */
   async function expectGutterHoverBubble(page: Page, n: number) {
     const cell = gutterLine(page, n);
     await cell.hover();
@@ -195,8 +196,9 @@ test.describe('Editor gutter line selection → Create Task', () => {
         return num ? getComputedStyle(num).visibility === 'hidden' : false;
       })(),
       bubble: getComputedStyle(el, '::after').backgroundImage.includes('svg'),
+      title: el.querySelector('[data-line]')?.getAttribute('title') ?? null,
     }));
-    expect(hover).toEqual({ numHidden: true, bubble: true });
+    expect(hover).toEqual({ numHidden: true, bubble: true, title: 'Create a task from these lines' });
   }
 
   async function expectLineTaskModal(page: Page, prompt: string) {

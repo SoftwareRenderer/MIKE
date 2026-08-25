@@ -1,5 +1,48 @@
-import { describe, it, expect } from 'vitest';
-import { scrollbarMarkerRect, hasVerticalScrollbar } from '../git-gutter';
+import { describe, it, expect, afterEach } from 'vitest';
+import { EditorView } from '@codemirror/view';
+import { EditorState } from '@codemirror/state';
+import { gitGutter, scrollbarMarkerRect, hasVerticalScrollbar } from '../git-gutter';
+
+/** Mount a minimal editor with the git gutter in jsdom and return its gutter rows.
+ *  (Extensions must go into EditorState.create — the EditorView config takes no
+ *  `extensions` option and would silently ignore them.) */
+function mountGutterEditor(options?: { title?: string }): {
+    rows: HTMLElement[];
+    cleanup: () => void;
+} {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const { extension } = gitGutter(options);
+    const view = new EditorView({
+        state: EditorState.create({ doc: 'a\nb\nc', extensions: [extension] }),
+        parent,
+    });
+    const rows = [...parent.querySelectorAll<HTMLElement>('.cm-gutter.cm-gitGutter [data-line]')];
+    return { rows, cleanup: () => { view.destroy(); parent.remove(); } };
+}
+
+describe('gitGutter title option (gutter hover tooltip)', () => {
+    let cleanup: (() => void) | null = null;
+    afterEach(() => { cleanup?.(); cleanup = null; });
+
+    it('stamps the tooltip title on every gutter row when title is set', () => {
+        const mounted = mountGutterEditor({ title: 'Create a task from these lines' });
+        cleanup = mounted.cleanup;
+        expect(mounted.rows.length).toBeGreaterThan(0);
+        for (const row of mounted.rows) {
+            expect(row.getAttribute('title')).toBe('Create a task from these lines');
+        }
+    });
+
+    it('leaves gutter rows without a title when no title is given', () => {
+        const mounted = mountGutterEditor();
+        cleanup = mounted.cleanup;
+        expect(mounted.rows.length).toBeGreaterThan(0);
+        for (const row of mounted.rows) {
+            expect(row.hasAttribute('title')).toBe(false);
+        }
+    });
+});
 
 describe('scrollbarMarkerRect (fallback: 1 doc line = 1 visual row)', () => {
     it('positions the first line at the top band center', () => {

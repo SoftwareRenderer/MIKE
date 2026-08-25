@@ -67,11 +67,13 @@ interface IndicatorDef {
 class GitLineMarker extends GutterMarker {
     readonly lineNum: number;
     readonly indicators: IndicatorDef[];
+    readonly title: string;
 
-    constructor(lineNum: number, indicators: IndicatorDef[]) {
+    constructor(lineNum: number, indicators: IndicatorDef[], title = '') {
         super();
         this.lineNum = lineNum;
         this.indicators = indicators;
+        this.title = title;
     }
 
     toDOM(): HTMLElement {
@@ -80,6 +82,7 @@ class GitLineMarker extends GutterMarker {
         // data-line lets gutter interactions (e.g. line-selection for task
         // creation) resolve the exact document line without coordinate math.
         el.dataset.line = String(this.lineNum);
+        if (this.title) el.title = this.title;
 
         // Overlay of indicators (positioned on top of each other)
         const overlay = document.createElement('span');
@@ -133,16 +136,19 @@ class GitLineMarker extends GutterMarker {
 /** Plain line number marker (no colored stripe). */
 class PlainLineMarker extends GutterMarker {
     readonly lineNum: number;
+    readonly title: string;
 
-    constructor(lineNum: number) {
+    constructor(lineNum: number, title = '') {
         super();
         this.lineNum = lineNum;
+        this.title = title;
     }
 
     toDOM(): HTMLElement {
         const el = document.createElement('div');
         el.style.cssText = 'display:flex;align-items:center;gap:4px;height:100%';
         el.dataset.line = String(this.lineNum);
+        if (this.title) el.title = this.title;
         const spacer = document.createElement('span');
         spacer.style.cssText = 'width:10px;flex-shrink:0';
         const num = document.createElement('span');
@@ -180,15 +186,19 @@ export interface GitGutterState {
  * - Blue for modified lines
  *
  * Usage:
- *   const { extension, state } = gitGutter();
+ *   const { extension, state } = gitGutter({ title: 'Create a task from these lines' });
  *   // ... create editor with extension ...
  *   state.initialMarkers = serverMarkers; // from /api/fs/read response
  *   state.baselineContent = fileContent;  // content from disk
  *   // After save (re-fetch file):
  *   state.initialMarkers = newMarkers;
  *   state.baselineContent = newContent;
+ *
+ * @param options.title - Native hover tooltip stamped on every gutter row
+ *   (e.g. the line-selection "create task" affordance). Empty = no tooltip.
  */
-export function gitGutter() {
+export function gitGutter(options?: { title?: string }) {
+    const title = options?.title ?? '';
     const state: GitGutterState = { initialMarkers: null, baselineContent: '', current: '', map: new Map(), mapVersion: 0 };
 
     const gutterDef = gutter({
@@ -226,9 +236,9 @@ export function gitGutter() {
                         indicators.push({ color: colorMap[t], shape: 'stripe', pattern });
                     }
                 }
-                return new GitLineMarker(ln, indicators);
+                return new GitLineMarker(ln, indicators, title);
             }
-            return new PlainLineMarker(ln);
+            return new PlainLineMarker(ln, title);
         },
     });
 

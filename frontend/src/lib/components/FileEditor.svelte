@@ -389,7 +389,11 @@
         const langSupport = getLanguageSupport(filePath);
         // Use base content so delta replay starts from the saved state.
         const initialDoc = historyBase || content;
-        const gitGutterExt = gitGutter();
+        // Hover tooltip on the gutter rows
+        const gutterTitle = mode === 'explorer' && onLinesSelected
+            ? (taskId ? 'Create a subtask from selected lines' : 'Create a task from selected lines')
+            : undefined;
+        const gitGutterExt = gitGutter(gutterTitle ? { title: gutterTitle } : undefined);
         gitGutterState = gitGutterExt.state;
         // Explorer mode uses server-precomputed gutter markers; diff mode computes
         // the gutter vs the baseline ref (initialMarkers stays null).
