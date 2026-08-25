@@ -33,6 +33,33 @@ export const CAP_EDITOR_CONTENT_CHANGE = 'editor.contentChange';
 export const CAP_EDITOR_JUMP_TO_LINE = 'editor.jumpToLine';
 export const CAP_EDITOR_SAVE = 'editor.save';
 
+/**
+ * `userEvent` marker for the transaction dispatched by `editor.setContent`
+ * (below). The FileEditor's updateListener uses it to recognize an
+ * extension's own push and NOT echo it back as editor.contentChange — see
+ * {@link isExtensionContentSet}.
+ */
+export const CONTENT_SET_USER_EVENT = 'setContent';
+
+/**
+ * True when EVERY transaction in a CodeMirror update was dispatched by an
+ * extension's editor.setContent capability — i.e. the document change is an
+ * extension's own push.
+ *
+ * Such updates must not be forwarded as editor.contentChange: the extension
+ * already knows the text it sent, and a delayed echo of a superseded push
+ * would be misread as an external change (a WYSIWYG extension would rewrite
+ * its whole document from the stale text, dropping fresh keystrokes and
+ * yanking the caret to the top of the file).
+ *
+ * Accepts the structural `userEvent` shape so this stays unit-testable
+ * without a real CodeMirror view. The FileEditor's call site is
+ * `update.transactions.map(tr => tr.annotation(Transaction.userEvent))`.
+ */
+export function isExtensionContentSet(userEvents: readonly (string | undefined)[]): boolean {
+    return userEvents.length > 0 && userEvents.every(e => e === CONTENT_SET_USER_EVENT);
+}
+
 // Buttons created by extensions, keyed `${extensionId}:${buttonId}`. Because a
 // point (e.g. `fileEditor`) can be mounted in many instances at once (one open
 // file each), the value tracks one cleanup per anchor instance — so each open
@@ -154,8 +181,11 @@ function getContent(ctx: HostContext): { content: string } {
  * Replace the entire editor document text. Used by WYSIWYG-style extensions
  * (e.g. a rich-text markdown preview) to push edits made in an overlay back
  * into the code editor. The change flows through the editor's normal
- * `updateListener`, so the editor's `contentChange` event fires back to the
- * extension with the new text — extensions must guard against that echo.
+ * `updateListener` (dirty tracking, drafts, history persistence all apply),
+ * but it is dispatched with the {@link CONTENT_SET_USER_EVENT} marker so the
+ * editor does NOT echo it back as `contentChange` — the extension already
+ * knows the text it sent, and a delayed echo of a superseded push would be
+ * misread as an external change (see {@link isExtensionContentSet}).
  */
 function setContent(ctx: HostContext, args: { content: string }): void {
     const root = editorRoot(ctx);
@@ -167,7 +197,7 @@ function setContent(ctx: HostContext, args: { content: string }): void {
     if (current === args.content) return; // no-op
     view.dispatch({
         changes: { from: 0, to: current.length, insert: args.content },
-        userEvent: 'setContent',
+        userEvent: CONTENT_SET_USER_EVENT,
     });
 }
 
