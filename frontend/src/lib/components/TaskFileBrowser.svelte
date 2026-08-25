@@ -132,6 +132,7 @@
     let loading = $state(true);
     let error = $state('');
     let firstLoadComplete = $state(false);
+    let dirNotFoundRetries = 0;
 
     // Initialize currentPath once props are available
     $effect(() => {
@@ -158,11 +159,18 @@
         error = '';
         currentPath = path;
         onPathChange(path);
+        let retrying = false;
         try {
             const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}&files=1&project=${encodeURIComponent(projectId)}&task=${encodeURIComponent(taskId)}`);
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to read directory');
+                const msg = err.error || 'Failed to read directory';
+                if (msg === 'directory not found' && dirNotFoundRetries < 20) {
+                    dirNotFoundRetries++;
+                    setTimeout(() => loadDir(path), 250);
+                    retrying = true;
+                }
+                throw new Error(msg);
             }
             const data = await res.json();
             entries = (data.entries || [])
@@ -181,12 +189,15 @@
                 const parentPath = currentPath.split('/').slice(0, -1).join('/');
                 entries = [{ name: '..', isDir: true, path: parentPath }, ...entries];
             }
+            dirNotFoundRetries = 0;
             firstLoadComplete = true;
         } catch (e) {
-            error = String(e);
-            entries = [];
+            if (!retrying) {
+                error = String(e);
+                entries = [];
+            }
         } finally {
-            loading = false;
+            if (!retrying) loading = false;
         }
     }
 

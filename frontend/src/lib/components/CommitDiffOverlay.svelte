@@ -1003,6 +1003,7 @@ import { slide } from 'svelte/transition';
         min-width: 0;
         padding: 0 8px;
         white-space: pre;
+        tab-size: 4;
         color: var(--color-text-secondary);
         display: flex;
         align-items: center;
@@ -1015,6 +1016,7 @@ import { slide } from 'svelte/transition';
     }
     .diff-row .diff-text {
         white-space: pre;
+        tab-size: 4;
         flex: 1;
     }
     .diff-row-added {
