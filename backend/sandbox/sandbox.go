@@ -277,6 +277,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		"--security-opt", "label=disable",
 		"--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges",
+		"--entrypoint", "",
 		"--workdir", mountPath,
 	}
 	// Add back any explicitly requested capabilities
