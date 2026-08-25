@@ -15,6 +15,7 @@ const (
 	ExtensionTypeUI    = "ui"
 	ExtensionTypeCSS   = "css"
 	ExtensionTypeAgent = "agent"
+	ExtensionTypeLLM   = "llm"
 )
 
 // maxExtensionValueBytes caps the size of a single storage value (KiB).
@@ -52,9 +53,9 @@ type Extension struct {
 
 // ExtensionManifest defines the metadata and capabilities of an extension.
 type ExtensionManifest struct {
-	DisplayName string `json:"display_name"`
-	Description string `json:"description"`
-	Author      string `json:"author"`
+	DisplayName  string        `json:"display_name"`
+	Description  string        `json:"description"`
+	Author       string        `json:"author"`
 	Featured     bool          `json:"featured,omitempty"`
 	Homepage     string        `json:"homepage,omitempty"`
 	LicenseURL   string        `json:"license_url,omitempty"`
@@ -71,6 +72,7 @@ type Capabilities struct {
 	CSS     *CSSConfig     `json:"css,omitempty"`
 	Agent   *AgentConfig   `json:"agent,omitempty"`
 	Network *NetworkConfig `json:"network,omitempty"` // server-side network capability
+	LLM     *LLMConfig     `json:"llm,omitempty"`     // provider request adaptation
 }
 
 // GetLSP returns the LSP capability, or nil if not present.
@@ -111,6 +113,22 @@ func (c *Capabilities) GetNetwork() *NetworkConfig {
 		return nil
 	}
 	return c.Network
+}
+
+// GetLLM returns the LLM capability, or nil if not present.
+func (c *Capabilities) GetLLM() *LLMConfig {
+	if c == nil {
+		return nil
+	}
+	return c.LLM
+}
+
+// LLMConfig defines the request-adaptation capability: the extension ships
+// provider mappings (in a separate file in the extension's directory,
+// MappingsFile, default "mappings.json") that translate MIKE's
+// OpenAI-compatible LLM requests to provider-specific formats.
+type LLMConfig struct {
+	MappingsFile string `json:"mappings_file,omitempty"`
 }
 
 // NetworkConfig defines server-side network settings for external API access.
@@ -374,12 +392,12 @@ type RegistryIndex []RegistryEntry
 
 // RegistryEntry describes a single extension available in the registry.
 type RegistryEntry struct {
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Type        string `json:"type"`
-	DisplayName string `json:"display_name"`
-	Description string `json:"description"`
-	Author      string `json:"author"`
+	Name          string        `json:"name"`
+	Version       string        `json:"version"`
+	Type          string        `json:"type"`
+	DisplayName   string        `json:"display_name"`
+	Description   string        `json:"description"`
+	Author        string        `json:"author"`
 	Featured      bool          `json:"featured,omitempty"`
 	Homepage      string        `json:"homepage,omitempty"`
 	LicenseURL    string        `json:"license_url,omitempty"`
@@ -433,6 +451,16 @@ func (e *Extension) IsAgent() bool {
 // HasAgentConfig returns true if this extension has agent configuration.
 func (e *Extension) HasAgentConfig() bool {
 	return e.IsAgent() && e.Manifest.Capabilities.GetAgent() != nil
+}
+
+// IsLLM returns true if this extension is an LLM request-adapter extension.
+func (e *Extension) IsLLM() bool {
+	return e.Type == ExtensionTypeLLM
+}
+
+// HasLLMConfig returns true if this extension has LLM capability configuration.
+func (e *Extension) HasLLMConfig() bool {
+	return e.IsLLM() && e.Manifest.Capabilities.GetLLM() != nil
 }
 
 // IsRegistryInstalled returns true if this extension was installed from a registry.

@@ -124,6 +124,10 @@
             label: 'Agent',
             description: 'Adds an AI coding agent as a provider option.',
         },
+        llm: {
+            label: 'LLM',
+            description: 'Adapts MIKE\u2019s OpenAI-compatible LLM requests to provider-specific formats (body fields and headers) depending on the provider URL.',
+        },
     };
 
     // Human-readable explanations for sandboxed UI extension permissions.
@@ -214,6 +218,7 @@
         if (caps.css) keys.push('css');
         if (caps.agent) keys.push('agent');
         if (caps.network) keys.push('network');
+        if (caps.llm) keys.push('llm');
         return keys;
     }
 
@@ -224,7 +229,7 @@
         if (entry.capabilities && Object.keys(entry.capabilities).length > 0) {
             return Object.keys(entry.capabilities).filter(k => !!CAPABILITY_DESCRIPTIONS[k]);
         }
-        const capMap: Record<string, string> = { lsp: 'lsp', ui: 'ui', css: 'css', agent: 'agent' };
+        const capMap: Record<string, string> = { lsp: 'lsp', ui: 'ui', css: 'css', agent: 'agent', llm: 'llm' };
         const k = capMap[entry.type];
         return k ? [k] : [];
     }
@@ -700,8 +705,8 @@
                         {@const isLocal = ext.install_source === 'local'}
                         <div class="extension-card" class:disabled={!ext.enabled} class:unpublished-card={isLocal}>
                             <div class="card-header">
-                                <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'} class:ext-agent={ext.type === 'agent'}>
-                                    {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : ext.type === 'agent' ? 'AGENT' : 'UI'}
+                                <div class="ext-icon" class:ext-lsp={ext.type === 'lsp'} class:ext-ui={ext.type === 'ui'} class:ext-css={ext.type === 'css'} class:ext-agent={ext.type === 'agent'} class:ext-llm={ext.type === 'llm'}>
+                                    {ext.type === 'lsp' ? 'LSP' : ext.type === 'css' ? 'CSS' : ext.type === 'agent' ? 'AGENT' : ext.type === 'llm' ? 'LLM' : 'UI'}
                                 </div>
                                 <div class="ext-info">
                                     <div class="ext-name-row">
@@ -718,7 +723,7 @@
                                         {#if getCapabilityKeys(ext).length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
                                                 {#each getCapabilityKeys(ext) as capKey}
-                                                    <button class="cap-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} aria-label="{CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey} capability for {ext.manifest.display_name || ext.name}. Click to learn more" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>
+                                                    <button class="cap-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} class:cap-llm={capKey === 'llm'} aria-label="{CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey} capability for {ext.manifest.display_name || ext.name}. Click to learn more" onclick={() => { selectedExtension = ext; showCapabilitiesModal = true; }}>
                                                         {CAPABILITY_DESCRIPTIONS[capKey]?.label || capKey}
                                                     </button>
                                                 {/each}
@@ -958,8 +963,8 @@
         <BaseModal title="Extension Capabilities" width="520px" footer={capsFooter} onClose={() => { showCapabilitiesModal = false; selectedExtension = null; }}>
             <div class="caps-modal-body">
                 <div class="caps-ext-header">
-                    <div class="caps-ext-icon" class:ext-lsp={selectedExtension.type === 'lsp'} class:ext-ui={selectedExtension.type === 'ui'} class:ext-css={selectedExtension.type === 'css'} class:ext-agent={selectedExtension.type === 'agent'} aria-hidden="true">
-                        {selectedExtension.type === 'lsp' ? 'LSP' : selectedExtension.type === 'css' ? 'CSS' : selectedExtension.type === 'agent' ? 'AGENT' : 'UI'}
+                    <div class="caps-ext-icon" class:ext-lsp={selectedExtension.type === 'lsp'} class:ext-ui={selectedExtension.type === 'ui'} class:ext-css={selectedExtension.type === 'css'} class:ext-agent={selectedExtension.type === 'agent'} class:ext-llm={selectedExtension.type === 'llm'} aria-hidden="true">
+                        {selectedExtension.type === 'lsp' ? 'LSP' : selectedExtension.type === 'css' ? 'CSS' : selectedExtension.type === 'agent' ? 'AGENT' : selectedExtension.type === 'llm' ? 'LLM' : 'UI'}
                     </div>
                     <div class="caps-ext-info">
                         <h3 class="caps-ext-name">{selectedExtension.manifest.display_name || selectedExtension.name}</h3>
@@ -976,7 +981,7 @@
                         {#if info}
                             <div class="cap-detail" role="listitem">
                                 <div class="cap-detail-header">
-                                    <span class="cap-detail-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'}>
+                                    <span class="cap-detail-badge" class:cap-lsp={capKey === 'lsp'} class:cap-ui={capKey === 'ui'} class:cap-css={capKey === 'css'} class:cap-agent={capKey === 'agent'} class:cap-network={capKey === 'network'} class:cap-llm={capKey === 'llm'}>
                                         {info.label}
                                     </span>
                                 </div>
@@ -1138,8 +1143,8 @@
                         {@const isInstalled = installedKeys.has(identityKey(entry.author, entry.name))}
                         <div class="extension-card registry-card" class:unpublished-card={isUnpublished}>
                             <div class="card-header">
-                                <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'}>
-                                    {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : entry.type === 'agent' ? 'AGENT' : 'UI'}
+                                <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'} class:ext-llm={entry.type === 'llm'}>
+                                    {entry.type === 'lsp' ? 'LSP' : entry.type === 'css' ? 'CSS' : entry.type === 'agent' ? 'AGENT' : entry.type === 'llm' ? 'LLM' : 'UI'}
                                 </div>
                                 <div class="ext-info">
                                     <div class="ext-name-row">
@@ -1700,6 +1705,11 @@
         color: var(--color-status-purple);
     }
 
+    .ext-llm {
+        background: var(--color-status-red-bg);
+        color: var(--color-status-red);
+    }
+
     .ext-info {
         flex: 1;
         min-width: 0;
@@ -1855,6 +1865,12 @@
         background: rgba(236, 72, 153, 0.15);
         color: #ec4899;
         border-color: rgba(236, 72, 153, 0.3);
+    }
+
+    .cap-llm {
+        background: var(--color-status-red-bg);
+        color: var(--color-status-red);
+        border-color: rgba(248, 81, 73, 0.3);
     }
 
     /* Capabilities modal */
