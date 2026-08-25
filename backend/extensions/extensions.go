@@ -56,7 +56,6 @@ type ExtensionManifest struct {
 	DisplayName  string        `json:"display_name"`
 	Description  string        `json:"description"`
 	Author       string        `json:"author"`
-	Featured     bool          `json:"featured,omitempty"`
 	Homepage     string        `json:"homepage,omitempty"`
 	LicenseURL   string        `json:"license_url,omitempty"`
 	Version      string        `json:"version"`
