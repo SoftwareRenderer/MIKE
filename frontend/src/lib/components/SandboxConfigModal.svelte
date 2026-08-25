@@ -1173,10 +1173,10 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <div class="config-info">
                     <div class="config-text">
                         <span class="config-label">Image Name</span>
-                        <span class="config-desc">Docker image for sandbox containers</span>
+                        <span class="config-desc">Fully-qualified image name for sandbox containers</span>
                     </div>
                 </div>
-                <input type="text" class="image-input" bind:value={sandboxImage} placeholder="ubuntu:latest" disabled={isLocked} aria-label="Sandbox image name" />
+                <input type="text" class="image-input" bind:value={sandboxImage} placeholder="docker.io/ubuntu:latest" disabled={isLocked} aria-label="Sandbox image name" />
             </div>
             {:else}
             <!-- Dockerfile section -->
