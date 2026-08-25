@@ -11,6 +11,7 @@ import (
 
 	"kanban/backend/crypto"
 	"kanban/backend/httputil"
+	"kanban/backend/llmadapter"
 	"kanban/backend/store"
 	"kanban/backend/types"
 )
@@ -44,6 +45,12 @@ type ConfigStore struct {
 	version              string
 	agentRegistry        AgentProviderLister // optional — set via SetAgentRegistry
 	workspaceDirOverride string              // set at startup via --worktrees-dir / MIKE_WORKTREES_DIR
+	llmAdapter           *llmadapter.Adapter // optional — set via SetLLMAdapter
+}
+
+// SetLLMAdapter helps map outgoing LLM API requests to the provider's expected format
+func (cs *ConfigStore) SetLLMAdapter(a *llmadapter.Adapter) {
+	cs.llmAdapter = a
 }
 
 // SetWorkspaceDirOverride sets the worktrees directory.

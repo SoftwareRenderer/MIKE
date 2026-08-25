@@ -156,7 +156,7 @@ func (te *TaskExecutor) applyModelSwitch(mc *modelConfig, task *types.Task, proj
 		reasoningEffort = te.configStore.GetModelReasoningEffort(modelName)
 	}
 	apiKey := te.configStore.GetProviderAPIKey(serverURL)
-	client := llama.NewLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
+	client := te.newLlamaClient(serverURL, modelName, reasoningEffort, apiKey)
 	providerName := te.configStore.GetProviderIDByURL(serverURL)
 
 	var contextWindow *int

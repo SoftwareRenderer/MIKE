@@ -397,7 +397,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		reasoningEffort = te.configStore.GetModelReasoningEffort(setup.modelName)
 	}
 	apiKey := te.configStore.GetProviderAPIKey(setup.serverURL)
-	client := llama.NewLlamaClient(setup.serverURL, setup.modelName, reasoningEffort, apiKey)
+	client := te.newLlamaClient(setup.serverURL, setup.modelName, reasoningEffort, apiKey)
 	// Select tools based on operating mode
 	var tools []types.ChatTool
 	if setup.task.IsPlanMode() {

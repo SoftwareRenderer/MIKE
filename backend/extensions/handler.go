@@ -430,7 +430,7 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 }
 
 // inferExtensionType returns the extension type implied by its capabilities,
-// in priority order (lsp > ui > css > agent). Returns "" when no capability
+// in priority order (lsp > ui > css > agent > llm). Returns "" when no capability
 // maps to a type.
 func inferExtensionType(caps *Capabilities) string {
 	if caps == nil {
@@ -445,6 +445,8 @@ func inferExtensionType(caps *Capabilities) string {
 		return ExtensionTypeCSS
 	case caps.Agent != nil:
 		return ExtensionTypeAgent
+	case caps.LLM != nil:
+		return ExtensionTypeLLM
 	}
 	return ""
 }
@@ -1477,7 +1479,7 @@ func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]Extens
 		if ext.Author != "" && ext.Author != "local" {
 			resp.LocalPath = filepath.Join(root, ext.Author, ext.Name)
 		} else {
-			resp.LocalPath = filepath.Join(root, ext.Name)
+			resp.LocalPath = extensionDir(root, ext.Author, ext.Name)
 		}
 	}
 	return resp
