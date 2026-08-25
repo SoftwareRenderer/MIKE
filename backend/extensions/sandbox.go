@@ -159,6 +159,7 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		"--security-opt", "label=disable",
 		"--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges",
+		"--entrypoint", "",
 		"--network", "none",
 	}
 

@@ -562,6 +562,18 @@ func TestBuildExtensionCreateArgs_EntrypointAndImage(t *testing.T) {
 	}
 }
 
+func TestBuildExtensionCreateArgs_ClearsImageEntrypoint(t *testing.T) {
+	// Images that ship an ENTRYPOINT (e.g. alpine/git -> ["git"]) would
+	// otherwise treat the keep-alive command as a subcommand and exit
+	// immediately. An empty --entrypoint tells podman to clear it.
+	ext := &Extension{ID: "ext-entrypoint-clear-test"}
+	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-entrypoint-clear-test", "docker.io/alpine/git:latest", nil)
+
+	if !hasArgPair(args, "--entrypoint", "") {
+		t.Errorf(`args missing --entrypoint "" (must clear the image entrypoint): %v`, args)
+	}
+}
+
 func TestBuildExtensionCreateArgs_MemoryLimit(t *testing.T) {
 	t.Run("zero limit omits the memory flag", func(t *testing.T) {
 		// Default (unset) sandbox config = 0 = no limit.
