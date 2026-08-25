@@ -11,8 +11,13 @@ import { csrfFetch, createTaskViaApi, navigateToTask } from './helpers';
 // first. Multi-line ranges
 // come from the editor's own text selection — clicking a line number inside a
 // multi-line highlighted range selects the whole range (gutter drag and
-// shift+click are gone). Hovering a line number replaces it with a yellow
-// chat-bubble icon (with a "Create a task from these lines" tooltip). A single Create button (plus the auto-start toggle,
+// shift+click are gone). Hovering a line number replaces it with a centered yellow
+// chat-bubble icon (with a "Create a task from selected lines" tooltip).
+// Hovering a gutter line inside a multi-line editor text selection
+// live-previews the range (before any click): the inner lines (exclusive of
+// the endpoints) show a centered vertical connector instead of their
+// numbers, the hovered line shows the chat bubble. Clicking confirms the
+// range — the connector stays on the confirmed selection. A single Create button (plus the auto-start toggle,
 // default on) creates the task and opens a FLOATING TASK VIEW (Chat only,
 // mobile-style, fixed bottom-right above the editor footer, with Close / Delete
 // / Open task buttons) — no navigation, explorer stays behind. "Open task"
@@ -198,7 +203,23 @@ test.describe('Editor gutter line selection → Create Task', () => {
       bubble: getComputedStyle(el, '::after').backgroundImage.includes('svg'),
       title: el.querySelector('[data-line]')?.getAttribute('title') ?? null,
     }));
-    expect(hover).toEqual({ numHidden: true, bubble: true, title: 'Create a task from these lines' });
+    expect(hover).toEqual({ numHidden: true, bubble: true, title: 'Create a task from selected lines' });
+  }
+
+  /** Gutter row states for lines n: number hidden? connector shown? hover bubble? */
+  async function gutterStates(page: Page, lines: number[]) {
+    return page.evaluate((ns) => {
+      const rows = [...document.querySelectorAll('.cm-gutter.cm-gitGutter .cm-gutterElement')];
+      return ns.map((n) => {
+        const el = rows[n - 1];
+        const num = el.querySelector('[data-line] > span:last-child');
+        return {
+          numHidden: num ? getComputedStyle(num).visibility === 'hidden' : null,
+          connector: getComputedStyle(el, '::before').content !== 'none',
+          bubble: getComputedStyle(el, '::after').backgroundImage.includes('svg'),
+        };
+      });
+    }, lines);
   }
 
   async function expectLineTaskModal(page: Page, prompt: string) {
@@ -263,6 +284,56 @@ test.describe('Editor gutter line selection → Create Task', () => {
     // Click a line number INSIDE the highlighted range (line 6, the last one)
     await clickGutterLine(page, 6);
     await expectLineTaskModal(page, refFor(5, 6));
+    await dismissTaskModal(page);
+  });
+
+  test('hovering a gutter line inside a text selection previews the range with a centered connector', async ({ page }) => {
+    await openProjectExplorer(page);
+    await openLinesFile(page);
+    // Highlight lines 4–7 in the editor, then HOVER the middle line number (5) — no click
+    await dragEditorText(page, 4, 7);
+    const cell = gutterLine(page, 5);
+    await cell.hover();
+    // The connector must only render in the git gutter — gutterLineClass
+    // applies the class in every gutter, so the CSS is scoped to cm-gitGutter
+    // (regression: a duplicate line appeared in the fold gutter).
+    const connectorInOtherGutter = await page.evaluate(() => {
+      for (const g of document.querySelectorAll('.cm-gutter')) {
+        if (g.classList.contains('cm-gitGutter')) continue;
+        for (const el of g.querySelectorAll<HTMLElement>('.cm-gutterElement')) {
+          if (getComputedStyle(el, '::before').content !== 'none') return true;
+        }
+      }
+      return false;
+    });
+    expect(connectorInOtherGutter).toBe(false);
+    // numbers; hovered line 5 shows the chat bubble (its connector yields);
+    // inner line 6 shows the centered vertical connector.
+    expect(await gutterStates(page, [4, 5, 6, 7])).toEqual([
+      { numHidden: false, connector: false, bubble: false },
+      { numHidden: true, connector: false, bubble: true },
+      { numHidden: true, connector: true, bubble: false },
+      { numHidden: false, connector: false, bubble: false },
+    ]);
+    // Moving the mouse away clears the preview
+    await page.mouse.move(5, 5);
+    expect(await gutterStates(page, [4, 5, 6, 7])).toEqual([
+      { numHidden: false, connector: false, bubble: false },
+      { numHidden: false, connector: false, bubble: false },
+      { numHidden: false, connector: false, bubble: false },
+      { numHidden: false, connector: false, bubble: false },
+    ]);
+    // Clicking confirms the range — the modal opens with the full 4–7
+    // reference and the confirmed selection keeps the connector behind it
+    await clickGutterLine(page, 5);
+    await expectLineTaskModal(page, refFor(4, 7));
+    await page.mouse.move(5, 5); // park the mouse so no hover state interferes
+    expect(await gutterStates(page, [4, 5, 6, 7])).toEqual([
+      { numHidden: false, connector: false, bubble: false },
+      { numHidden: true, connector: true, bubble: false },
+      { numHidden: true, connector: true, bubble: false },
+      { numHidden: false, connector: false, bubble: false },
+    ]);
     await dismissTaskModal(page);
   });
 

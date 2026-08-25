@@ -186,7 +186,7 @@ export interface GitGutterState {
  * - Blue for modified lines
  *
  * Usage:
- *   const { extension, state } = gitGutter({ title: 'Create a task from these lines' });
+ *   const { extension, state } = gitGutter({ title: 'Create a task from selected lines' });
  *   // ... create editor with extension ...
  *   state.initialMarkers = serverMarkers; // from /api/fs/read response
  *   state.baselineContent = fileContent;  // content from disk

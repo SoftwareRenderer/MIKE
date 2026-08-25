@@ -26,11 +26,11 @@ describe('gitGutter title option (gutter hover tooltip)', () => {
     afterEach(() => { cleanup?.(); cleanup = null; });
 
     it('stamps the tooltip title on every gutter row when title is set', () => {
-        const mounted = mountGutterEditor({ title: 'Create a task from these lines' });
+        const mounted = mountGutterEditor({ title: 'Create a task from selected lines' });
         cleanup = mounted.cleanup;
         expect(mounted.rows.length).toBeGreaterThan(0);
         for (const row of mounted.rows) {
-            expect(row.getAttribute('title')).toBe('Create a task from these lines');
+            expect(row.getAttribute('title')).toBe('Create a task from selected lines');
         }
     });
 
