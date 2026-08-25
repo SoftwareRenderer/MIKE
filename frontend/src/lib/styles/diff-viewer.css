@@ -259,6 +259,7 @@
 }
 .diff-text {
     white-space: pre;
+    tab-size: 4;
 }
 /* Ensure syntax-highlighted spans render correctly */
 .diff-text > span {
