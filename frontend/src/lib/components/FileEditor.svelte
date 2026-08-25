@@ -888,11 +888,31 @@
             return value;
         },
     });
+    // hover preview: while the mouse is over a gutter line inside a
+    // multi-line editor text selection, that range is previewed in the gutter
+    const hoverSelEffect = StateEffect.define<GutterLineSel | null>();
+    const hoverSelField = StateField.define<GutterLineSel | null>({
+        create: () => null,
+        update(value, tr) {
+            for (const e of tr.effects) {
+                if (e.is(hoverSelEffect)) value = e.value;
+            }
+            return value;
+        },
+    });
     class LineSelGutterMarker extends GutterMarker {
-        constructor() { super(); this.elementClass = 'cm-lineSelGutter'; }
-        eq(other: GutterMarker): boolean { return other instanceof LineSelGutterMarker; }
+        readonly elementClass: string;
+        constructor(elementClass: string) {
+            super();
+            this.elementClass = elementClass;
+        }
+        eq(other: GutterMarker): boolean {
+            return other instanceof LineSelGutterMarker && other.elementClass === this.elementClass;
+        }
     }
-    const lineSelGutterMarker = new LineSelGutterMarker();
+
+    const lineSelGutterMarker = new LineSelGutterMarker('cm-lineSelGutter');
+    const lineSelInnerGutterMarker = new LineSelGutterMarker('cm-lineSelGutterInner');
 
     function highlightedLineRange(view: EditorView): { start: number; end: number } | null {
         const sel = view.state.selection.main;
@@ -952,15 +972,21 @@
         );
         return [
             lineSelField,
-            gutterLineClass.compute([lineSelField], (state) => {
-                const sel = state.field(lineSelField, false);
+            hoverSelField,
+            gutterLineClass.compute([lineSelField, hoverSelField], (state) => {
+                // The hover preview takes precedence over the confirmed selection
+                const sel = state.field(hoverSelField, false) ?? state.field(lineSelField, false);
                 if (!sel) return RangeSet.empty;
                 const doc = state.doc;
                 const start = Math.max(1, Math.min(sel.start, doc.lines));
                 const end = Math.max(start, Math.min(sel.end, doc.lines));
-                const from = doc.line(start).from;
-                const to = end >= doc.lines ? doc.length : doc.line(end + 1).from;
-                return RangeSet.of(lineSelGutterMarker.range(from, to));
+                // gutterLineClass only collects markers at each line's start position
+                const ranges: Range<GutterMarker>[] = [];
+                for (let ln = start; ln <= end; ln++) {
+                    ranges.push(lineSelGutterMarker.range(doc.line(ln).from));
+                    if (ln > start && ln < end) ranges.push(lineSelInnerGutterMarker.range(doc.line(ln).from));
+                }
+                return RangeSet.of(ranges);
             }),
             lineSelDecorations,
             // Native listeners on view.dom — CM6's EditorView.domEventHandlers only
@@ -972,11 +998,49 @@
                         this.v = view;
                         view.dom.addEventListener('mousedown', this.onMousedown);
                         view.dom.addEventListener('keydown', this.onKeydown);
+                        view.dom.addEventListener('mouseover', this.onMouseOver);
+                        view.dom.addEventListener('mouseout', this.onMouseOut);
                     }
                     destroy() {
                         this.v.dom.removeEventListener('mousedown', this.onMousedown);
                         this.v.dom.removeEventListener('keydown', this.onKeydown);
+                        this.v.dom.removeEventListener('mouseover', this.onMouseOver);
+                        this.v.dom.removeEventListener('mouseout', this.onMouseOut);
                     }
+                    /** The preview snapshots the text selection at hover time —
+                     *  invalidate it when the selection, doc, or viewport
+                     *  changes under a stationary cursor. */
+                    update(u: ViewUpdate) {
+                        if (
+                            (u.docChanged || u.selectionSet || u.viewportChanged) &&
+                            this.v.state.field(hoverSelField, false)
+                        ) {
+                            this.v.dispatch({ effects: hoverSelEffect.of(null) });
+                        }
+                    }
+                    /** Hover preview: a gutter line inside the editor's
+                     *  multi-line text selection previews the whole range
+                     *  (the same range a click would select); anything else
+                     *  clears the preview. */
+                    onMouseOver = (event: MouseEvent) => {
+                        const el = event.target instanceof Element ? event.target : null;
+                        if (!el?.closest('.cm-gitGutter')) return;
+                        const line = gutterLineAt(this.v, event);
+                        const range = line == null ? null : resolveGutterClickRange(line, highlightedLineRange(this.v));
+                        this.dispatchHover(range && range.end > range.start ? range : null);
+                    };
+                    onMouseOut = (event: MouseEvent) => {
+                        const el = event.target instanceof Element ? event.target : null;
+                        if (!el?.closest('.cm-gitGutter')) return;
+                        const to = event.relatedTarget instanceof Element ? event.relatedTarget : null;
+                        if (to?.closest('.cm-gitGutter')) return; // still inside the gutter
+                        this.dispatchHover(null);
+                    };
+                    dispatchHover = (range: GutterLineSel | null) => {
+                        const cur = this.v.state.field(hoverSelField, false);
+                        if (cur === range || (cur && range && cur.start === range.start && cur.end === range.end)) return;
+                        this.v.dispatch({ effects: hoverSelEffect.of(range) });
+                    };
                     onMousedown = (event: MouseEvent) => {
                         if (event.button !== 0) return;
                         const el = event.target instanceof Element ? event.target : null;
@@ -1462,12 +1526,18 @@
     }
 
     /* Hover: the line number is replaced by a yellow chat bubble
-       ("create a task from these lines"). The number is the last span of the
+       ("create a task from selected lines"). The number is the last span of the
        gutter cell's [data-line] row (git-gutter.ts). */
     .line-sel :global(.cm-gutter.cm-gitGutter .cm-gutterElement) {
         position: relative;
     }
     .line-sel :global(.cm-gutter.cm-gitGutter .cm-gutterElement:hover [data-line] > span:last-child) {
+        visibility: hidden;
+    }
+    /* Inner lines of a multi-line selection: the number is replaced by the
+       centered vertical connector (styled per-theme in codemirror-theme.ts;
+       it yields to the hover bubble via its own :hover rule). */
+    .line-sel :global(.cm-gutter.cm-gitGutter .cm-gutterElement.cm-lineSelGutterInner [data-line] > span:last-child) {
         visibility: hidden;
     }
     .line-sel :global(.cm-gutter.cm-gitGutter .cm-gutterElement:hover::after) {

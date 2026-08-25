@@ -52,6 +52,25 @@ export const darkTheme = EditorView.theme({
         background: 'rgba(88,166,255,0.28)',
         color: '#C9D1D9',
     },
+    // Inner lines of a multi-line selection: a horizontally centered vertical
+    // connector replaces the (hidden) line number; on hover it yields to the
+    // chat bubble (FileEditor.svelte line-sel CSS). Scoped to the git gutter
+    // — gutterLineClass applies the class in EVERY gutter (e.g. the fold
+    // gutter would render a duplicate line).
+    '.cm-gutter.cm-gitGutter .cm-gutterElement.cm-lineSelGutterInner': { position: 'relative' },
+    '.cm-gutter.cm-gitGutter .cm-gutterElement.cm-lineSelGutterInner::before': {
+        content: '""',
+        position: 'absolute',
+        left: '50%',
+        top: '0',
+        bottom: '0',
+        width: '2px',
+        transform: 'translateX(-50%)',
+        background: '#58A6FF',
+    },
+    '.cm-gutter.cm-gitGutter .cm-gutterElement.cm-lineSelGutterInner:hover::before': {
+        content: 'none',
+    },
     '.cm-lineSel': { backgroundColor: 'rgba(88,166,255,0.14)' },
     '.cm-matchingBracket': { backgroundColor: 'rgba(88,166,255,0.3)' },
     '.cm-cursor': { borderLeftColor: '#C9D1D9' },
@@ -205,6 +224,25 @@ export const lightTheme = EditorView.theme({
     '.cm-lineSelGutter': {
         background: 'rgba(9,105,218,0.25)',
         color: '#24292F',
+    },
+    // Inner lines of a multi-line selection: a horizontally centered vertical
+    // connector replaces the (hidden) line number; on hover it yields to the
+    // chat bubble (FileEditor.svelte line-sel CSS). Scoped to the git gutter
+    // — gutterLineClass applies the class in EVERY gutter (e.g. the fold
+    // gutter would render a duplicate line).
+    '.cm-gutter.cm-gitGutter .cm-gutterElement.cm-lineSelGutterInner': { position: 'relative' },
+    '.cm-gutter.cm-gitGutter .cm-gutterElement.cm-lineSelGutterInner::before': {
+        content: '""',
+        position: 'absolute',
+        left: '50%',
+        top: '0',
+        bottom: '0',
+        width: '2px',
+        transform: 'translateX(-50%)',
+        background: '#0969DA',
+    },
+    '.cm-gutter.cm-gitGutter .cm-gutterElement.cm-lineSelGutterInner:hover::before': {
+        content: 'none',
     },
     '.cm-lineSel': { backgroundColor: 'rgba(9,105,218,0.12)' },
     '.cm-matchingBracket': { backgroundColor: 'rgba(9,105,218,0.2)' },
