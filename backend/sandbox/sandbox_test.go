@@ -349,6 +349,47 @@ func TestCleanupStaleContainers_NoneExist(t *testing.T) {
 	sm.cleanupStaleContainers()
 }
 
+func TestCreate_OverridesImageEntrypoint(t *testing.T) {
+	agentPath := findAgentBinary(t)
+	os.Setenv("MIKE_AGENT_PATH", agentPath)
+	defer os.Unsetenv("MIKE_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+	if !sm.ImageReady("docker.io/alpine/git") {
+		t.Skip("docker.io/alpine/git image not available locally")
+	}
+
+	// alpine/git ships ENTRYPOINT ["git"]; without clearing it in the create
+	// args, PID 1 would be `git /bin/sh -c ...` and exit within milliseconds
+	// ("git: '/bin/sh' is not a git command"), taking any exec'd shell with it.
+	dir := t.TempDir()
+	taskID := "test-entrypoint-task"
+
+	_, err := sm.Create(taskID, dir, &types.Project{Name: "test-proj"}, SandboxOpts{
+		BaseImage: "docker.io/alpine/git",
+	})
+	if err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sm.Stop(taskID)
+	})
+
+	// Give PID 1 time to crash if the image entrypoint was not cleared.
+	time.Sleep(1500 * time.Millisecond)
+
+	running, err := sm.rt.IsRunning(ContainerNamePrefix + "-" + taskID)
+	if err != nil {
+		t.Fatalf("inspect container state: %v", err)
+	}
+	if !running {
+		t.Error("container is not running after Create with alpine/git image — image entrypoint not cleared")
+	}
+}
+
 func TestCreateWithoutGVisor(t *testing.T) {
 	// Simulate unavailable gVisor by creating a manager and forcing unavailable
 	sm := &SandboxManager{
