@@ -290,7 +290,14 @@
             line: s.line,
             endLine: i + 1 < sorted.length ? sorted[i + 1].line - 1 : s.endLine,
         }));
-        view.dispatch({ effects: updateHeadersEffect.of(headers) });
+        // Only dispatch when the headers actually change — avoids churn on cursor moves.
+        const prev = (view.state.field(sectionHeadersField, false) || []);
+        if (
+            prev.length !== headers.length ||
+            prev.some((h, i) => h.line !== headers[i].line || h.endLine !== headers[i].endLine)
+        ) {
+            view.dispatch({ effects: updateHeadersEffect.of(headers) });
+        }
     }
 
     function openSearchPanel() {
