@@ -171,6 +171,15 @@ In the Task View (`CardDetail.svelte`) the three columns `[Board][Chat][Diff]` a
 - Left/Right cycle Board→Chat→Diff→Board. Plain arrows in any editable focus (incl. the chat input) keep native text behavior; **Ctrl+Alt+Left/Right** switches columns from any focus (except while editing a file). Up/Down dispatch on the focused column (overview cards / page-scroll chat / diff file headers).
 - **Tests:** `composables/__tests__/task-detail-column-nav.unit.ts`, e2e `task-view-column-nav.spec.ts`.
 
+### Reconnection Refresh
+When the WebSocket drops and reconnects, the current view (board, task view) updates automatically:
+- `onConnected(true)` in `App.svelte` runs `silentRefresh()` if `initialLoadComplete` is true.
+- Project re-subscription forces the server to re-send `task_diff_stats`, refreshing the diff panel.
+- `TaskChat` subscribes to the `wsConnection` store and reloads history on reconnect. Turns completed while offline aren't replayed (buffer cleared at turn end), so DB reload is required.
+- Browser `online`/`offline` events complement the WS backoff: `offline` queues writes immediately; `online` flushes the queue and calls `reconnectNow()` to skip backoff.
+- Board refresh on `visibilitychange` handles phone-sleep cases.
+- **Tests:** e2e `reconnect-refresh.spec.ts`. Since `page.route` doesn't intercept WebSockets in Playwright, the spec wraps the `WebSocket` constructor via `addInitScript` and uses `serverApi()` to advance state.
+
 ## Extensions
 
 Types: `lsp` (language servers in gVisor sandboxes), `ui` (frontend injection), `agent` (AI agents as subprocesses via WASM adapters).

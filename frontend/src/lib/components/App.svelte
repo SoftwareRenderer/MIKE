@@ -3,6 +3,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { get } from 'svelte/store';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
+    import { wsConnection } from '$lib/stores/connection';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
@@ -493,6 +494,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             },
             onConnected: (connected) => {
                 wsConnected = connected;
+                wsConnection.set(connected);
                 setOfflineStatus(!connected);
                 if (!connected) {
                     lastSyncedAt = Date.now();
@@ -598,6 +600,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         } catch (e) {
             console.error('Failed to load:', e);
         }
+        // Mark initial load as done. Reconnects now trigger silentRefresh()
+        // to pick up changes that occurred while offline.
+        initialLoadComplete = true;
     }
 
     // Initialize context providers
@@ -681,6 +686,20 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
     window.addEventListener('visibilitychange', handleVisibilityChange);
 
+    // Browser network signals. 'offline' queues writes immediately;
+    // 'online' flushes the queue and skips the reconnect backoff.
+    function handleBrowserOffline() {
+        setOfflineStatus(true);
+    }
+    function handleBrowserOnline() {
+        setOfflineStatus(false);
+        if (appStream && !wsConnected) {
+            appStream.reconnectNow();
+        }
+    }
+    window.addEventListener('online', handleBrowserOnline);
+    window.addEventListener('offline', handleBrowserOffline);
+
     onDestroy(() => {
         stopCountdown();
         if (visibilityRetryTimer) {
@@ -688,6 +707,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             visibilityRetryTimer = null;
         }
         window.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('online', handleBrowserOnline);
+        window.removeEventListener('offline', handleBrowserOffline);
         disconnectBoardStream();
         if (appStream) {
             appStream.close();
@@ -714,6 +735,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onTaskEvent: () => {},
             onConnected: (connected) => {
                 wsConnected = connected;
+                wsConnection.set(connected);
                 setOfflineStatus(!connected);
                 if (!connected) {
                     // Record the disconnect time so the stale banner counts from now
@@ -743,8 +765,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             },
         });
         setAppStreamRef(appStream);
-        await loadAppData();
-        initialLoadComplete = true; // mark initial data load as done
+        await loadAppData(); // sets initialLoadComplete on completion
         isLoadingAuth = false; // hide loading screen after data is loaded
 
         // Load installed extensions for LSP discovery
