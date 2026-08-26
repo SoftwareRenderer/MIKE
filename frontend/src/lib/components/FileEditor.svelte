@@ -269,7 +269,7 @@
     async function extractSymbols() {
         if (!view) return;
         // Try LSP first, fall back to Lezer tree analysis
-        let symbols = await requestLSPSymbols(lspClient, filePath);
+        let symbols = await requestLSPSymbols(lspClient, lspFilePath);
         if (!symbols || symbols.length === 0) {
             const visibleKinds = new Set(['function', 'method', 'class', 'struct', 'enum', 'interface', 'type', 'namespace', 'package', 'module', 'file', 'property', 'field', 'constructor', 'constant', 'event', 'heading']);
             symbols = getLanguageTreeFromView(view, filePath).filter(s => visibleKinds.has(s.kind));
