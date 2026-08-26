@@ -245,6 +245,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
 	defaultAutoSummarizeThresholdRaw, _ := cs.store.GetConfigValue("default_auto_summarize_threshold")
 	hideModelBadgeRaw, _ := cs.store.GetConfigValue("hide_model_badge")
+	runSiblingsParallelRaw, _ := cs.store.GetConfigValue("run_siblings_parallel")
 	keyboardShortcutsRaw, _ := cs.store.GetConfigValue("keyboard_shortcuts")
 
 	cfg := &types.Config{
@@ -287,6 +288,9 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseBoolPtr(hideModelBadgeRaw); err == nil && v != nil {
 		cfg.HideModelBadge = v
+	}
+	if v, err := parseBoolPtr(runSiblingsParallelRaw); err == nil && v != nil {
+		cfg.RunSiblingsParallel = v
 	}
 	cfg.KeyboardShortcuts = normalizeKeyboardShortcuts(cfg.KeyboardShortcuts)
 	return cfg, nil
@@ -382,6 +386,11 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
+	if c.RunSiblingsParallel != nil {
+		if err := cs.store.SetConfigValue("run_siblings_parallel", fmt.Sprintf("%t", *c.RunSiblingsParallel)); err != nil {
+			return err
+		}
+	}
 	if c.KeyboardShortcuts != nil {
 		ksJSON, err := json.Marshal(c.KeyboardShortcuts)
 		if err != nil {
@@ -411,6 +420,7 @@ type configResponse struct {
 	DefaultMaxFailedTurns         *int                     `json:"default_max_failed_turns,omitempty"`
 	DefaultAutoSummarizeThreshold *int                     `json:"default_auto_summarize_threshold,omitempty"`
 	HideModelBadge                *bool                    `json:"hide_model_badge,omitempty"`
+	RunSiblingsParallel           *bool                    `json:"run_siblings_parallel,omitempty"`
 	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 	EncryptionEnabled             bool                     `json:"encryption_enabled"`
 }
@@ -470,6 +480,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		DefaultMaxFailedTurns:         cfg.DefaultMaxFailedTurns,
 		DefaultAutoSummarizeThreshold: cfg.DefaultAutoSummarizeThreshold,
 		HideModelBadge:                cfg.HideModelBadge,
+		RunSiblingsParallel:           cfg.RunSiblingsParallel,
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
 		EncryptionEnabled:             crypto.IsEnabled(),
 	}
@@ -578,6 +589,11 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 				current.HideModelBadge = &v
 			}
 		}
+		if rps, ok := updates["run_siblings_parallel"]; ok {
+			if v, ok := rps.(bool); ok {
+				current.RunSiblingsParallel = &v
+			}
+		}
 		if ksRaw, ok := updates["keyboard_shortcuts"]; ok {
 			if ksJSON, err := json.Marshal(ksRaw); err == nil {
 				ks := &types.KeyboardShortcuts{}
@@ -633,6 +649,17 @@ func (cs *ConfigStore) AutoSummarizeThreshold() int {
 		return 90
 	}
 	return v
+}
+
+// GetRunSiblingsParallel returns whether a parent's startable subtasks should run in
+// parallel (all at once) rather than one at a time. Returns false (sequential)
+// when the value is unset or invalid.
+func (cs *ConfigStore) GetRunSiblingsParallel() bool {
+	raw, _ := cs.store.GetConfigValue("run_siblings_parallel")
+	if v, err := parseBoolPtr(raw); err == nil && v != nil {
+		return *v
+	}
+	return false
 }
 
 // GetProviderAPIKey looks up and returns the decrypted API key for a provider by URL.

@@ -221,6 +221,7 @@ export interface Config {
     default_max_failed_turns?: number;
     default_auto_summarize_threshold?: number; // percent of context window, 1-100
     hide_model_badge?: boolean; // hide the model badge on task cards
+    run_siblings_parallel?: boolean; // start all of a parent's subtasks at once (default off)
     encryption_enabled?: boolean;
     keyboard_shortcuts?: KeyboardShortcuts;
 }

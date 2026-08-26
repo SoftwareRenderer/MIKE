@@ -763,6 +763,13 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 		if c.ID == finishedTaskID {
 			continue
 		}
+		// Skip a sibling that already has a live executor (running, or queued
+		// as "Pending" in_progress+idle in parallel mode) — restarting it would
+		// cancel its slot and drop its queue position. No-op in sequential mode,
+		// where siblings are never pre-started.
+		if te.hasLiveExecutor(c.ID) {
+			continue
+		}
 		if isIncompleteForStart(c) {
 			pending = append(pending, c)
 		}
@@ -1427,6 +1434,17 @@ func (te *TaskExecutor) HasRunningTasks(projectID string) bool {
 		}
 	}
 	return false
+}
+
+// hasLiveExecutor reports whether the task currently has an active executor —
+// either running or blocked waiting for a concurrency slot (queued as
+// "Pending" in_progress+idle). Used by the autostart chain to avoid restarting
+// a sibling that was already started in parallel mode.
+func (te *TaskExecutor) hasLiveExecutor(taskID string) bool {
+	te.taskMu.Lock()
+	defer te.taskMu.Unlock()
+	_, ok := te.tasks[taskID]
+	return ok
 }
 
 // ForwardUserMessage forwards a user message to the running executor or lazy-starts one.
