@@ -27,7 +27,7 @@
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip, gutterLineClass, GutterMarker, Decoration, ViewPlugin, type ViewUpdate, type DecorationSet } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax, lightTheme, lightSyntax, isLightTheme } from '$lib/utils/codemirror-theme';
-    import { stickyScroll, updateHeadersEffect, sectionHeadersField, type SectionHeader } from '$lib/utils/sticky-scroll';
+    import { stickyScroll, updateHeadersEffect, sectionHeadersField, buildSectionHeaders, findLoopScopes, type SectionHeader } from '$lib/utils/sticky-scroll';
     import { keepViewportParsed } from '$lib/utils/keep-viewport-parsed';
     import { closeHoverOnScroll } from '$lib/utils/close-hover-on-scroll';
     import { requestLSPSymbols, flattenSymbols, type LSPSymbol } from '$lib/utils/lsp-symbols';
@@ -281,20 +281,17 @@
             symbols = getLanguageTreeFromView(view, filePath).filter(s => visibleKinds.has(s.kind));
         }
         onSymbolsUpdate(symbols);
-        // Update sticky scroll headers (flatten for sticky scroll)
+        // Sticky-scroll headers: declaration scopes
         const flat = flattenSymbols(symbols);
-        const sorted = flat
+        const declarations = flat
             .filter((s) => s.kind === 'function' || s.kind === 'class' || s.kind === 'method' || s.kind === 'struct' || s.kind === 'enum' || s.kind === 'interface')
-            .sort((a, b) => a.line - b.line);
-        const headers: SectionHeader[] = sorted.map((s, i) => ({
-            line: s.line,
-            endLine: i + 1 < sorted.length ? sorted[i + 1].line - 1 : s.endLine,
-        }));
+            .map((s) => ({ line: s.line, endLine: s.endLine }));
+        const headers: SectionHeader[] = buildSectionHeaders(declarations, findLoopScopes(view));
         // Only dispatch when the headers actually change — avoids churn on cursor moves.
         const prev = (view.state.field(sectionHeadersField, false) || []);
         if (
             prev.length !== headers.length ||
-            prev.some((h, i) => h.line !== headers[i].line || h.endLine !== headers[i].endLine)
+            prev.some((h, i) => h.line !== headers[i].line || h.endLine !== headers[i].endLine || h.depth !== headers[i].depth)
         ) {
             view.dispatch({ effects: updateHeadersEffect.of(headers) });
         }

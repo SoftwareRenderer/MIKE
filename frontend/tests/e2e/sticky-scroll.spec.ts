@@ -368,4 +368,59 @@ test.describe.serial('CodeMirror sticky scroll section header', () => {
       }
     }
   });
+
+  test('stacks the function header above the loop header while scrolling inside a loop', async ({ page }) => {
+    const uniqueId = Date.now();
+    const file = `sticky-loop-${uniqueId}.js`;
+    const absFile = join(worktreeDir, file);
+    // A function whose body is a long for-loop (long enough to exceed the
+    // viewport), so the top of the viewport lands inside the loop and BOTH
+    // bars should stick (function above loop).
+    const lines: string[] = [];
+    lines.push('// sticky loop fixture'); // 1
+    lines.push(''); // 2
+    lines.push('function loopContainer() {'); // 3
+    lines.push('  for (let i = 0; i < 1000; i++) {'); // 4
+    for (let i = 1; i <= 90; i++) lines.push(`    const z${i} = i * ${i};`); // 5..94
+    lines.push('  }'); // 95
+    lines.push('}'); // 96
+    writeFileSync(absFile, lines.join('\n') + '\n');
+
+    try {
+      await openFileInEditor(page, worktreeDir, projectId, taskId, file);
+
+      // Scroll deep into the loop body so the top of the viewport is inside it.
+      await scrollEditorToLine(page, 50);
+
+      // Wait for at least two stacked bars to render.
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const container = document.querySelector('.cm-sticky-scroll');
+              return container ? container.querySelectorAll('.cm-sticky-scroll-row').length : 0;
+            }),
+          { timeout: 10000 },
+        )
+        .toBeGreaterThanOrEqual(2);
+
+      // The function header must be the top (outermost) bar and the loop below it.
+      const rows = await page.evaluate(() => {
+        const container = document.querySelector('.cm-sticky-scroll');
+        if (!container) return [];
+        return Array.from(container.querySelectorAll('.cm-sticky-scroll-row')).map(
+          (r) => r.textContent || '',
+        );
+      });
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+      expect(rows[0]).toContain('function loopContainer');
+      expect(rows[1]).toContain('for (let i');
+    } finally {
+      try {
+        rmSync(absFile, { force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+  });
 });
