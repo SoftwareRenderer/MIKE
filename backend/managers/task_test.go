@@ -1032,3 +1032,54 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 			task.Status, task.ExecutionState, task.Branch)
 	}
 }
+
+// createParallelTestParent makes an in_progress parent with 3 backlog leaf
+// subtasks, returning the parent. Used by the subtasksToStart tests.
+func createParallelTestParent(t *testing.T, s *store.Store, projID, parentID string) *types.Task {
+	t.Helper()
+	parent := &types.Task{ID: parentID, ProjectID: projID, Title: "Parent", Prompt: "parent prompt", Status: "in_progress"}
+	if err := s.CreateTask(parent); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{parentID + "-a", parentID + "-b", parentID + "-c"} {
+		if err := s.CreateTask(&types.Task{ID: id, ProjectID: projID, Title: "sub", Prompt: "sub prompt", Status: "backlog", ParentTaskID: parent.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return parent
+}
+
+// Sequential (default) mode: subtasksToStart returns a single subtask ID — the
+// deepest one (LLM tie-break falls back to the first when no LLM is configured).
+func TestSubtasksToStart_Sequential(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	parent := createParallelTestParent(t, s, projID, "st-seq-parent")
+	children, err := s.GetChildren(parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids := h.subtasksToStart(parent, children)
+	if len(ids) != 1 {
+		t.Fatalf("expected 1 subtask in sequential mode, got %d: %v", len(ids), ids)
+	}
+}
+
+// Parallel mode: subtasksToStart returns every currently startable (deepest)
+// subtask so they all start at once.
+func TestSubtasksToStart_Parallel(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	parent := createParallelTestParent(t, s, projID, "st-par-parent")
+
+	if err := s.SetConfigValue("run_siblings_parallel", "true"); err != nil {
+		t.Fatal(err)
+	}
+	children, err := s.GetChildren(parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := h.subtasksToStart(parent, children)
+	if len(ids) != 3 {
+		t.Fatalf("expected 3 subtasks in parallel mode, got %d: %v", len(ids), ids)
+	}
+}
