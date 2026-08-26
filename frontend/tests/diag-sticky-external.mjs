@@ -1,25 +1,17 @@
-// Diagnostic: verify that sticky-scroll section headers are RE-EXTRACTED after
-// an external (on-disk) file change is reconciled into the file editor.
+// Diagnostic: verify that sticky-scroll headers are re-extracted after
+// an external file change is reconciled in the editor.
 //
-// Scenario (project-mode explorer, no task/LLM needed):
-//   1. Open sample.js (4 functions, 104 lines, gamma FIRST) in the editor.
-//      At the top of the file the sticky bar shows `function gamma() {`.
-//   2. Rewrite the file on disk: prepend 5 comment lines + rename gamma ->
-//      gamma_renamed (declaration moves 1 -> 6).
-//   3. fs_event -> checkExternalChange() -> applyDiskContent() replaces the
-//      doc WITHOUT setting a selection. The fix schedules the same debounced
-//      re-extraction the selection path uses; verify via state that survives
-//      this headless env's frozen CM viewport (IntersectionObserver quirk):
-//        a) symbol outline (fed by onSymbolsUpdate) now lists gamma_renamed;
-//        b) the sticky plugin's currentHeader flips from the stale
-//           {line:1, endLine:26} to null — topLine 1 is above the new first
-//           header (line 6); the stale line-1 header would still match and
-//           keep the old `function gamma() {` on the bar.
-//      Bonus: when CM's viewport does track scroll, the sticky bar itself
-//      shows `function gamma_renamed() {`.
+// Scenario:
+//   1. Open sample.js. Sticky bar shows `function gamma() {`.
+//   2. Rewrite file on disk: prepend 5 lines and rename gamma -> gamma_renamed.
+//   3. Editor reconciles content. Verify headers were re-extracted:
+//        a) Symbol outline now lists gamma_renamed.
+//        b) Sticky plugin header flips from stale {line:1} to null (as line 1
+//           is now a comment, not a header).
+//      Bonus: The sticky bar itself should show `function gamma_renamed() {`
+//      when scrolling to it.
 //
-// Run: make run (dev server, port 3000, DANGER_ZONE=1) then:
-//      node frontend/tests/diag-sticky-external.mjs
+// Run: make run then: node frontend/tests/diag-sticky-external.mjs
 import http from 'node:http';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
