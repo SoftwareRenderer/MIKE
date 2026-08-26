@@ -210,6 +210,12 @@
     function applyDiskContent(newContent: string, diskContent: string) {
         if (view) {
             view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: newContent } });
+            // A pure doc-change dispatch does not set the selection, so the
+            // sticky-scroll symbols (line numbers from the old doc) would never
+            // be re-extracted — schedule the same debounced re-extraction the
+            // selection path uses (shared timer key, so it can't double-fire).
+            clearTimeout((view as any)._symbolTimer);
+            (view as any)._symbolTimer = setTimeout(extractSymbols, 300);
         }
         content = newContent;
         savedContent = diskContent;
