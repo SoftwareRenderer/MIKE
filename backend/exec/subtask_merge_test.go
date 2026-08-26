@@ -2479,3 +2479,64 @@ func idsOf(tasks []types.Task) []string {
 	}
 	return out
 }
+
+// hasLiveExecutor must reflect the presence of an active executor for a task
+// (either running or blocked waiting for a concurrency slot).
+func TestHasLiveExecutor(t *testing.T) {
+	te, _, _, _ := setupExecutorWithGit(t)
+
+	if te.hasLiveExecutor("nope") {
+		t.Fatal("expected no live executor for unknown task")
+	}
+	te.taskMu.Lock()
+	te.tasks["live-task"] = &executionState{}
+	te.taskMu.Unlock()
+	if !te.hasLiveExecutor("live-task") {
+		t.Fatal("expected live executor for present task")
+	}
+	te.taskMu.Lock()
+	delete(te.tasks, "live-task")
+	te.taskMu.Unlock()
+	if te.hasLiveExecutor("live-task") {
+		t.Fatal("expected no live executor after removal")
+	}
+}
+
+// In parallel mode a sibling that was already started shows as in_progress+idle
+// but still holds a live executor (queued for a slot). AutoStartNextSibling must
+// NOT restart such a sibling — it would cancel and requeue it, dropping its
+// position. This test proves the hasLiveExecutor guard skips them.
+func TestAutoStartNextSibling_SkipsLiveExecutorSiblings(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+
+	parentID := "psl-parent"
+	// Parent in_progress, no LLM configured (so a hypothetical restart would
+	// fall back to the first sibling without any network call).
+	parent := &types.Task{ID: parentID, ProjectID: projectID, Title: "P", Prompt: "p", Status: "in_progress", ExecutionState: "idle"}
+	te.store.CreateTask(parent)
+
+	a := &types.Task{ID: "psl-a", ProjectID: projectID, Title: "A", Prompt: "a", Status: "review", ExecutionState: "idle", ParentTaskID: parentID}
+	b := &types.Task{ID: "psl-b", ProjectID: projectID, Title: "B", Prompt: "b", Status: "in_progress", ExecutionState: "idle", ParentTaskID: parentID}
+	c := &types.Task{ID: "psl-c", ProjectID: projectID, Title: "C", Prompt: "c", Status: "in_progress", ExecutionState: "idle", ParentTaskID: parentID}
+	te.store.CreateTask(a)
+	te.store.CreateTask(b)
+	te.store.CreateTask(c)
+
+	// Simulate B and C having been started (queued) — they hold live executors.
+	te.taskMu.Lock()
+	te.tasks[b.ID] = &executionState{}
+	te.tasks[c.ID] = &executionState{}
+	te.taskMu.Unlock()
+
+	// A finished: continue the chain. B and C must NOT be restarted.
+	if err := te.AutoStartNextSibling(projectID, a.ID, parentID); err != nil {
+		t.Fatalf("AutoStartNextSibling: %v", err)
+	}
+
+	for _, id := range []string{b.ID, c.ID} {
+		db, _ := te.store.GetTaskByID(id)
+		if db.ExecutionState != "idle" {
+			t.Fatalf("sibling %s was restarted (exec state %q); expected it to stay idle", id, db.ExecutionState)
+		}
+	}
+}

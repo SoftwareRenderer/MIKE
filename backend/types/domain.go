@@ -88,8 +88,11 @@ type Config struct {
 	DefaultMaxFailedTurns         *int       `json:"default_max_failed_turns,omitempty"`
 	DefaultAutoSummarizeThreshold *int       `json:"default_auto_summarize_threshold,omitempty"`
 	// HideModelBadge hides the model badge on board task cards. Nil = visible (default).
-	HideModelBadge    *bool              `json:"hide_model_badge,omitempty"`
-	KeyboardShortcuts *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
+	HideModelBadge *bool `json:"hide_model_badge,omitempty"`
+	// RunSiblingsParallel starts all of a parent's startable subtasks at once
+	// (instead of one at a time). Nil = off (sequential, the default).
+	RunSiblingsParallel *bool              `json:"run_siblings_parallel,omitempty"`
+	KeyboardShortcuts   *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 }
 
 // KeyboardShortcuts holds user-customizable keyboard shortcut bindings.
