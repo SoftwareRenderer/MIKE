@@ -234,6 +234,139 @@ func TestSetRuleVariants(t *testing.T) {
 	}
 }
 
+func TestSetValueTable(t *testing.T) {
+	a := NewAdapter()
+	a.SetMappings([]Mapping{{Match: "https://a", Body: BodyRules{Set: map[string]SetRule{
+		"thinking.type": {From: "reasoning_effort", Value: map[string]any{
+			"none": "disabled", "off": "disabled", "*": "enabled",
+		}},
+		"enable_thinking": {From: "reasoning_effort", Value: map[string]any{
+			"none": false, "off": false, "*": true,
+		}},
+	}}}})
+
+	cases := []struct {
+		effort   string
+		thinking string
+		enable   bool
+	}{
+		// "low" stands in for any thinking level (all take the "*" fallback);
+		// "default"/"" likewise. "none"/"off" hit the explicit keys.
+		{"low", "enabled", true},
+		{"default", "enabled", true},
+		{"", "enabled", true},
+		{"none", "disabled", false},
+		{"off", "disabled", false},
+	}
+	for _, c := range cases {
+		body := map[string]any{}
+		if _, _, ok := a.Adapt("https://a", "m", c.effort, body); !ok {
+			t.Fatalf("expected match for effort %q", c.effort)
+		}
+		thinking, _ := body["thinking"].(map[string]any)
+		if thinking == nil || thinking["type"] != c.thinking {
+			t.Errorf("effort %q: thinking = %#v, want {type: %s}", c.effort, body["thinking"], c.thinking)
+		}
+		if body["enable_thinking"] != c.enable {
+			t.Errorf("effort %q: enable_thinking = %#v, want %v", c.effort, body["enable_thinking"], c.enable)
+		}
+	}
+}
+
+func TestSetValueTableNoMatch(t *testing.T) {
+	// No key matches and there is no "*" fallback: nothing is written.
+	a := NewAdapter()
+	a.SetMappings([]Mapping{{Match: "https://a", Body: BodyRules{Set: map[string]SetRule{
+		"x": {From: "reasoning_effort", Value: map[string]any{"low": "yes"}},
+	}}}})
+	body := map[string]any{}
+	if _, _, ok := a.Adapt("https://a", "m", "high", body); !ok {
+		t.Fatal("expected match")
+	}
+	if _, exists := body["x"]; exists {
+		t.Errorf("x = %#v, want absent", body["x"])
+	}
+}
+
+func TestSetValueTableEmptyEffortKey(t *testing.T) {
+	// "" is a legitimate key: an explicit entry beats the "*" fallback.
+	a := NewAdapter()
+	a.SetMappings([]Mapping{{Match: "https://a", Body: BodyRules{Set: map[string]SetRule{
+		"x": {From: "reasoning_effort", Value: map[string]any{"": "blank", "*": "fallback"}},
+	}}}})
+	body := map[string]any{}
+	if _, _, ok := a.Adapt("https://a", "m", "", body); !ok {
+		t.Fatal("expected match")
+	}
+	if body["x"] != "blank" {
+		t.Errorf("x = %v, want blank (empty-effort key)", body["x"])
+	}
+}
+
+func TestSetValueTableWithoutFrom(t *testing.T) {
+	// A table without a resolvable variable never applies.
+	a := NewAdapter()
+	a.SetMappings([]Mapping{{Match: "https://a", Body: BodyRules{Set: map[string]SetRule{
+		"never": {Value: map[string]any{"*": "x"}},
+	}}}})
+	body := map[string]any{}
+	if _, _, ok := a.Adapt("https://a", "m", "low", body); !ok {
+		t.Fatal("expected match")
+	}
+	if _, exists := body["never"]; exists {
+		t.Errorf("never should not be set without a resolvable gate variable: %#v", body["never"])
+	}
+}
+
+func TestSetValueTableWithWhenGate(t *testing.T) {
+	// The when-gate and the table lookup both key on the same "from" variable.
+	a := NewAdapter()
+	a.SetMappings([]Mapping{{Match: "https://a", Body: BodyRules{Set: map[string]SetRule{
+		"x": {From: "reasoning_effort", When: []string{"low", "medium"}, Value: map[string]any{
+			"low": "hit", "*": "miss",
+		}},
+	}}}})
+	for effort, want := range map[string]string{"low": "hit", "medium": "miss"} {
+		body := map[string]any{}
+		if _, _, ok := a.Adapt("https://a", "m", effort, body); !ok {
+			t.Fatalf("expected match for effort %q", effort)
+		}
+		if body["x"] != want {
+			t.Errorf("effort %q: x = %v, want %q", effort, body["x"], want)
+		}
+	}
+	// The when-gate rejects everything else.
+	body := map[string]any{}
+	if _, _, ok := a.Adapt("https://a", "m", "high", body); !ok {
+		t.Fatal("expected match")
+	}
+	if _, exists := body["x"]; exists {
+		t.Errorf("x = %#v, want absent (when-gate rejects effort=high)", body["x"])
+	}
+}
+
+func TestSetValueTableTemplates(t *testing.T) {
+	a := NewAdapter()
+	a.SetMappings([]Mapping{{Match: "https://a", Body: BodyRules{Set: map[string]SetRule{
+		"x": {From: "reasoning_effort", Value: map[string]any{"low": "{{model}}", "*": "{{unknown_var}}"}},
+	}}}})
+	body := map[string]any{}
+	if _, _, ok := a.Adapt("https://a", "gpt-x", "low", body); !ok {
+		t.Fatal("expected match")
+	}
+	if body["x"] != "gpt-x" {
+		t.Errorf("x = %v, want gpt-x (template-resolved)", body["x"])
+	}
+	// Unresolved template in the selected value disables the rule.
+	body = map[string]any{}
+	if _, _, ok := a.Adapt("https://a", "gpt-x", "high", body); !ok {
+		t.Fatal("expected match")
+	}
+	if _, exists := body["x"]; exists {
+		t.Errorf("x should be absent when the selected value is unresolved: %#v", body["x"])
+	}
+}
+
 func TestSetRulesMergeIntoOneParent(t *testing.T) {
 	a := NewAdapter()
 	a.SetMappings([]Mapping{{Match: "https://a", Body: BodyRules{Set: map[string]SetRule{
@@ -261,7 +394,8 @@ func TestMappingsFromJSON(t *testing.T) {
 	      "set": {
 	        "reasoning.effort": {"value": "{{reasoning_effort}}", "when": ["low", "medium", "high"]},
 	        "reasoning.enabled": {"from": "reasoning_effort", "value": true, "when": ["", "default"]},
-	        "static.path": "plain-string-shorthand"
+	        "static.path": "plain-string-shorthand",
+	        "thinking.type": {"from": "reasoning_effort", "value": {"none": "disabled", "off": "disabled", "*": "enabled"}}
 	      }
 	    }
 	  }
@@ -277,8 +411,8 @@ func TestMappingsFromJSON(t *testing.T) {
 	if m.Match != "https://openrouter.ai" {
 		t.Errorf("match = %q", m.Match)
 	}
-	if len(m.Body.Set) != 3 {
-		t.Fatalf("set rules = %d, want 3", len(m.Body.Set))
+	if len(m.Body.Set) != 4 {
+		t.Fatalf("set rules = %d, want 4", len(m.Body.Set))
 	}
 	if v, ok := m.Body.Set["static.path"].Value.(string); !ok || v != "plain-string-shorthand" {
 		t.Errorf("shorthand rule = %#v", m.Body.Set["static.path"])
@@ -288,6 +422,10 @@ func TestMappingsFromJSON(t *testing.T) {
 	}
 	if len(m.Body.Set["reasoning.effort"].When) != 3 {
 		t.Errorf("when = %v", m.Body.Set["reasoning.effort"].When)
+	}
+	table, ok := m.Body.Set["thinking.type"].Value.(map[string]any)
+	if m.Body.Set["thinking.type"].From != "reasoning_effort" || !ok || len(table) != 3 || table["*"] != "enabled" || table["none"] != "disabled" {
+		t.Errorf("table value rule = %#v", m.Body.Set["thinking.type"])
 	}
 	if _, err := MappingsFromJSON([]byte(`{"not":"an array"}`)); err == nil {
 		t.Error("expected error for non-array doc")
