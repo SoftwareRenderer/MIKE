@@ -1,9 +1,12 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
+import { EditorState, type Extension } from '@codemirror/state';
+import { javascript } from '@codemirror/lang-javascript';
 import {
+    buildSectionHeaders,
     findLineElement,
-    findStickyHeader,
+    findLoopScopes,
+    findStickyStack,
     getHeaderLineHtml,
     sectionHeadersField,
     stickyScroll,
@@ -58,13 +61,7 @@ describe('findLineElement', () => {
     });
 });
 
-describe('findStickyHeader', () => {
-    const headers: SectionHeader[] = [
-        { line: 10, endLine: 20 },
-        { line: 21, endLine: 31 },
-        { line: 32, endLine: 120 },
-    ];
-
+describe('findStickyStack', () => {
     // Fake view: the top visible line is resolved from the document position
     // at the viewport top — so it is exact regardless of (wrapped) line heights.
     function fakeView(topLineNumber: number) {
@@ -74,55 +71,197 @@ describe('findStickyHeader', () => {
         } as any;
     }
 
-    it('resolves the section by the document line at the viewport top', () => {
-        expect(findStickyHeader(fakeView(15), headers)?.line).toBe(10);
-        expect(findStickyHeader(fakeView(25), headers)?.line).toBe(21);
-        expect(findStickyHeader(fakeView(99), headers)?.line).toBe(32);
-    });
-
-    it('returns undefined for empty headers or positions beyond the last section', () => {
-        expect(findStickyHeader(fakeView(5), [])).toBeUndefined();
-        expect(findStickyHeader(fakeView(5), headers)).toBeUndefined();
-        expect(findStickyHeader(fakeView(120), headers)).toBeUndefined();
-    });
-
-    it('binary search matches the original linear scan across all positions', () => {
-        // Reference linear implementation mirroring the pre-refactor algorithm.
-        function linear(view: any, hs: SectionHeader[]): SectionHeader | undefined {
-            const topLine = view.state.doc.lineAt(view.viewport.from).number;
-            let result: SectionHeader | undefined;
-            for (const header of hs) {
-                if (header.line <= topLine && topLine < header.endLine - 3) {
-                    result = header;
-                } else if (header.line > topLine) {
-                    break;
-                }
-            }
-            return result;
-        }
-
-        const sections: SectionHeader[] = [
-            { line: 3, endLine: 8 },
-            { line: 9, endLine: 16 },
-            { line: 17, endLine: 29 },
-            { line: 30, endLine: 44 },
-            { line: 45, endLine: 60 },
+    it('returns the chain of enclosing scopes outermost → innermost', () => {
+        const headers: SectionHeader[] = [
+            { line: 1, endLine: 20, depth: 0 }, // class Foo
+            { line: 2, endLine: 15, depth: 1 }, // method bar
+            { line: 3, endLine: 8, depth: 2 },  // for loop
         ];
-        for (let topLine = 1; topLine <= 65; topLine++) {
-            const view = fakeView(topLine);
-            expect(findStickyHeader(view, sections)).toEqual(linear(view, sections));
+        expect(findStickyStack(fakeView(4), headers).map((h) => h.line)).toEqual([1, 2, 3]);
+    });
+
+    it('shows the function header above the loop header (stacked)', () => {
+        const headers: SectionHeader[] = [
+            { line: 1, endLine: 12, depth: 0 }, // function foo
+            { line: 2, endLine: 9, depth: 1 },  // for loop
+        ];
+        const stack = findStickyStack(fakeView(4), headers);
+        expect(stack.map((h) => h.line)).toEqual([1, 2]); // function bar above loop bar
+    });
+
+    it('returns [] when the top line is above any header', () => {
+        const headers: SectionHeader[] = [{ line: 5, endLine: 10, depth: 0 }];
+        expect(findStickyStack(fakeView(1), headers)).toEqual([]);
+    });
+
+    it('returns [] for empty headers or positions beyond the last section', () => {
+        const headers: SectionHeader[] = [{ line: 5, endLine: 10, depth: 0 }];
+        expect(findStickyStack(fakeView(5), [])).toEqual([]);
+        // topLine beyond the last section's end → nothing pins.
+        expect(findStickyStack(fakeView(11), headers)).toEqual([]);
+    });
+
+    it('detaches a flat section within the margin before the next header', () => {
+        const sections: SectionHeader[] = [
+            { line: 10, endLine: 24, depth: 0 }, // detach margin 3 → sticks while topLine < 21
+            { line: 25, endLine: 40, depth: 0 },
+        ];
+        expect(findStickyStack(fakeView(20), sections).map((h) => h.line)).toEqual([10]); // within margin
+        expect(findStickyStack(fakeView(21), sections)).toEqual([]); // in the gap
+        expect(findStickyStack(fakeView(24), sections)).toEqual([]);
+        expect(findStickyStack(fakeView(25), sections).map((h) => h.line)).toEqual([25]); // next section pins
+    });
+
+    it('detaches only the innermost bar near its end, keeping ancestors', () => {
+        const headers: SectionHeader[] = [
+            { line: 1, endLine: 20, depth: 0 }, // function foo
+            { line: 2, endLine: 5, depth: 1 },  // for loop (ends line 5)
+        ];
+        // topLine 4 is within the detach margin (endLine 5 − 3 = 2 → detach when >= 2),
+        // so the loop bar yields but the enclosing function remains.
+        expect(findStickyStack(fakeView(4), headers).map((h) => h.line)).toEqual([1]);
+    });
+
+    it('caps the stack at MAX_STICKY_DEPTH (outermost dropped)', () => {
+        const headers: SectionHeader[] = [
+            { line: 1, endLine: 100, depth: 0 }, // class
+            { line: 2, endLine: 90, depth: 1 },  // fn
+            { line: 3, endLine: 80, depth: 2 },  // loop
+            { line: 4, endLine: 70, depth: 3 },  // loop
+            { line: 5, endLine: 60, depth: 4 },  // loop
+            { line: 6, endLine: 50, depth: 5 },  // loop
+        ];
+        const stack = findStickyStack(fakeView(20), headers);
+        expect(stack.length).toBe(4);
+        expect(stack[0].line).toBe(3); // innermost 4 kept, outermost 1 & 2 dropped
+        expect(stack[3].line).toBe(6);
+    });
+
+    it('handles the function → loop → nested loop case', () => {
+        const headers: SectionHeader[] = [
+            { line: 1, endLine: 30, depth: 0 }, // function
+            { line: 2, endLine: 20, depth: 1 },  // outer loop
+            { line: 3, endLine: 10, depth: 2 },  // inner loop
+        ];
+        const stack = findStickyStack(fakeView(5), headers);
+        expect(stack.map((h) => h.line)).toEqual([1, 2, 3]);
+        // When the inner loop ends, the stack reduces to the outer scopes.
+        expect(findStickyStack(fakeView(15), headers).map((h) => h.line)).toEqual([1, 2]);
+        expect(findStickyStack(fakeView(25), headers).map((h) => h.line)).toEqual([1]);
+    });
+});
+
+describe('buildSectionHeaders', () => {
+    it('merges declarations and loops with containment depth and full endLine', () => {
+        const headers = buildSectionHeaders(
+            [
+                { line: 1, endLine: 20 }, // function foo (full body)
+                { line: 6, endLine: 15 }, // method inside foo
+            ],
+            [
+                { line: 2, endLine: 5 },  // for loop inside foo, before method
+                { line: 7, endLine: 9 },  // loop inside method
+            ],
+        );
+        expect(headers).toEqual([
+            { line: 1, endLine: 20, depth: 0 }, // foo
+            { line: 2, endLine: 5, depth: 1 },  // loop
+            { line: 6, endLine: 15, depth: 1 }, // method (sibling of loop)
+            { line: 7, endLine: 9, depth: 2 },  // nested loop
+        ]);
+    });
+
+    it('does not truncate a parent to its first child (keeps full body range)', () => {
+        const headers = buildSectionHeaders(
+            [{ line: 1, endLine: 30 }], // function spans 1..30
+            [{ line: 2, endLine: 5 }],  // loop early in the body
+        );
+        expect(headers[0].endLine).toBe(30); // NOT truncated to 1
+    });
+});
+
+describe('findLoopScopes', () => {
+    function loopView(code: string, language: () => Extension) {
+        const parent = document.createElement('div');
+        document.body.appendChild(parent);
+        const view = new EditorView({
+            state: EditorState.create({ doc: code, extensions: [language()] }),
+            parent,
+        });
+        return { view, parent };
+    }
+
+    afterEach(() => {
+        document.body.querySelectorAll('div').forEach((d) => d.remove());
+    });
+
+    it('finds for/while/do loops in JavaScript', () => {
+        const { view, parent } = loopView(
+            'function f() {\n' +
+            '  for (let i = 0; i < 3; i++) { x(); }\n' +
+            '  while (a) { y(); }\n' +
+            '  do { z(); } while (b);\n' +
+            '  for (const k in o) {}\n' +
+            '}',
+            javascript,
+        );
+        try {
+            const scopes = findLoopScopes(view);
+            expect(scopes).toEqual([
+                { line: 2, endLine: 2 },
+                { line: 3, endLine: 3 },
+                { line: 4, endLine: 4 },
+                { line: 5, endLine: 5 },
+            ]);
+        } finally {
+            view.destroy();
+            parent.remove();
         }
     });
 
-    it('detaches (returns undefined) within the margin before the next header', () => {
-        const sections: SectionHeader[] = [
-            { line: 10, endLine: 24 }, // detach margin 3 → sticks while topLine < 21
-            { line: 25, endLine: 40 },
-        ];
-        expect(findStickyHeader(fakeView(20), sections)?.line).toBe(10); // within margin
-        expect(findStickyHeader(fakeView(21), sections)).toBeUndefined(); // in the gap
-        expect(findStickyHeader(fakeView(24), sections)).toBeUndefined();
-        expect(findStickyHeader(fakeView(25), sections)?.line).toBe(25); // next section pins
+    it('returns the full loop body extent (multi-line)', () => {
+        const { view, parent } = loopView(
+            'function f() {\n' +
+            '  for (let i = 0; i < 3; i++) {\n' +
+            '    console.log(i);\n' +
+            '  }\n' +
+            '}',
+            javascript,
+        );
+        try {
+            const scopes = findLoopScopes(view);
+            expect(scopes).toEqual([{ line: 2, endLine: 4 }]);
+        } finally {
+            view.destroy();
+            parent.remove();
+        }
+    });
+
+    it('does not record loop sub-clauses (ForSpec/ForInSpec) as separate scopes', () => {
+        const { view, parent } = loopView(
+            'function f() {\n' +
+            '  for (let i = 0; i < 3; i++) {}\n' +
+            '  for (const k in o) {}\n' +
+            '}',
+            javascript,
+        );
+        try {
+            // Only two statement-level loops, not 4 (no ForSpec/ForInSpec dupes).
+            expect(findLoopScopes(view)).toHaveLength(2);
+        } finally {
+            view.destroy();
+            parent.remove();
+        }
+    });
+
+    it('returns [] when there are no loops', () => {
+        const { view, parent } = loopView('function f() { return 1 + 1; }', javascript);
+        try {
+            expect(findLoopScopes(view)).toEqual([]);
+        } finally {
+            view.destroy();
+            parent.remove();
+        }
     });
 });
 
@@ -145,7 +284,7 @@ describe('getHeaderLineHtml', () => {
             domAtPos: () => ({ node: gap, offset: 0 }),
         } as any;
         try {
-            const html = getHeaderLineHtml(view, { line: 1, endLine: 2 });
+            const html = getHeaderLineHtml(view, { line: 1, endLine: 2, depth: 0 });
             expect(html).toBe('func Foo(x int) {}');
             expect(html).not.toContain('cm-line');
             expect(html).not.toContain('somethingElse');
@@ -164,7 +303,7 @@ describe('getHeaderLineHtml', () => {
             domAtPos: () => ({ node: line, offset: 0 }),
         } as any;
         try {
-            const html = getHeaderLineHtml(view, { line: 1, endLine: 2 });
+            const html = getHeaderLineHtml(view, { line: 1, endLine: 2, depth: 0 });
             expect(html).toContain('class="ͼo"');
             expect(html).toContain('func');
             // The wrapper element itself must not be part of the header HTML.
@@ -179,7 +318,7 @@ describe('getHeaderLineHtml', () => {
             state: { doc: { line: () => ({ text: '\tfunc Bar() {}', from: 0 }) } },
             domAtPos: () => null,
         } as any;
-        const html = getHeaderLineHtml(view, { line: 1, endLine: 2 });
+        const html = getHeaderLineHtml(view, { line: 1, endLine: 2, depth: 0 });
         expect(html.startsWith('\tfunc Bar() {}')).toBe(true);
     });
 });
@@ -235,7 +374,7 @@ describe('stickyScroll (real EditorView in jsdom)', () => {
     it('shows the sticky bar with the header line text', async () => {
         mount();
         await flush();
-        setHeaders([{ line: 1, endLine: 6 }]);
+        setHeaders([{ line: 1, endLine: 6, depth: 0 }]);
         await flush();
 
         const b = bar();
@@ -247,7 +386,7 @@ describe('stickyScroll (real EditorView in jsdom)', () => {
     it('re-renders when the header line is edited in place (same line number)', async () => {
         mount();
         await flush();
-        setHeaders([{ line: 1, endLine: 6 }]);
+        setHeaders([{ line: 1, endLine: 6, depth: 0 }]);
         await flush();
 
         const b = bar()!;
@@ -267,7 +406,7 @@ describe('stickyScroll (real EditorView in jsdom)', () => {
     it('does not re-render when an unrelated line changes (render cache hit)', async () => {
         mount();
         await flush();
-        setHeaders([{ line: 1, endLine: 6 }]);
+        setHeaders([{ line: 1, endLine: 6, depth: 0 }]);
         await flush();
 
         const b = bar()!;
@@ -287,7 +426,7 @@ describe('stickyScroll (real EditorView in jsdom)', () => {
         await flush();
         // line 0 sits below the document (doc.line(0) would throw RangeError
         // in getHeaderLineHtml); line 999 sits beyond the last line.
-        setHeaders([{ line: 0, endLine: 10 }, { line: 999, endLine: 999 }]);
+        setHeaders([{ line: 0, endLine: 10, depth: 0 }, { line: 999, endLine: 999, depth: 0 }]);
         await flush();
 
         const b = bar();

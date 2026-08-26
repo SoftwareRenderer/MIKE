@@ -1,10 +1,103 @@
 import { ViewPlugin, ViewUpdate, EditorView } from '@codemirror/view';
 import { StateEffect, StateField } from '@codemirror/state';
+import { syntaxTree } from '@codemirror/language';
+
+/**
+ * Loop-scope node matcher (statement/expression level). Matches the loop nodes
+ * emitted by the Lezer grammars we bundle:
+ *   JS/TS:      ForStatement, WhileStatement, DoStatement
+ *   Go:         ForStatement
+ *   Python:     ForStatement, WhileStatement
+ *   C/C++:      ForStatement, WhileStatement, DoStatement, ForRangeLoop
+ *   Rust:       ForExpression, WhileExpression, LoopExpression
+ *   PHP:        ForStatement, WhileStatement, DoStatement, ForeachStatement
+ * Sub-clause/spec nodes (ForClause, RangeClause, ForSpec, ForInSpec, ...) are
+ * children of these statement nodes and deliberately do NOT match, so we record
+ * exactly one scope per loop without duplicates.
+ */
+const LOOP_NODE_RE = /^(For|While|Do|Loop)[A-Za-z]*(Statement|Expression|Loop)$/;
+
+/** A raw scope range (declaration or loop) before nesting depth is assigned. */
+export interface ScopeRange {
+    line: number;
+    endLine: number;
+}
+
+/**
+ * Collect loop statement ranges (for/while/do-while/for-each) from the editor's
+ * Lezer syntax tree. LSP document symbols do not report loops, so this is the
+ * source for loop sticky headers. Returns ranges sorted by start line.
+ */
+export function findLoopScopes(view: EditorView): ScopeRange[] {
+    const scopes: ScopeRange[] = [];
+    try {
+        const doc = view.state.doc;
+        const tree = syntaxTree(view.state);
+        tree.iterate({
+            enter(node) {
+                if (LOOP_NODE_RE.test(node.type.name)) {
+                    scopes.push({
+                        line: doc.lineAt(node.from).number,
+                        endLine: doc.lineAt(node.to).number,
+                    });
+                }
+            },
+        });
+    } catch {
+        // Ignore parse errors — no loop scopes is a safe fallback.
+    }
+    return scopes;
+}
 
 /** Section header for sticky scroll. */
 export interface SectionHeader {
     line: number,
     endLine: number; // last line in section
+    depth: number;   // nesting level (0 = top-level)
+}
+
+/**
+ * Detach the innermost bar a few lines early so it doesn't cover the next header.
+ */
+const HEADER_DETACH_MARGIN = 3;
+
+/** Maximum number of sticky bars stacked at once (outermost → innermost). */
+export const MAX_STICKY_DEPTH = 4;
+
+/**
+ * Merge declaration scopes and loop scopes into a sorted, depth-annotated
+ * sticky-header list.
+ *
+ * Every scope keeps its FULL body range (endLine = its own closing line, not
+ * truncated to the next sibling). Overlapping ranges are resolved by sorting
+ * start ascending and end descending, so an outer scope always precedes the
+ * inner scopes it contains. `depth` records the containment nesting level.
+ */
+export function buildSectionHeaders(
+    declarations: ScopeRange[],
+    loops: ScopeRange[],
+): SectionHeader[] {
+    const combined: ScopeRange[] = [...declarations, ...loops];
+    combined.sort((a, b) => a.line - b.line || b.endLine - a.endLine);
+
+    const headers: SectionHeader[] = [];
+    const stack: SectionHeader[] = []; // ancestor path, innermost last
+
+    for (const scope of combined) {
+        // Drop ancestors that no longer contain this scope.
+        while (stack.length && stack[stack.length - 1].endLine < scope.endLine) {
+            stack.pop();
+        }
+        const header: SectionHeader = {
+            line: scope.line,
+            endLine: scope.endLine,
+            depth: stack.length,
+        };
+        stack.push(header);
+        headers.push(header);
+    }
+
+    return headers;
 }
 
 /** Effect to update section headers from the parent component. */
@@ -22,44 +115,53 @@ export const sectionHeadersField = StateField.define<SectionHeader[]>({
 });
 
 /**
- * Detach a few lines early so the bar doesn't cover the next header.
+ * Compute the sticky-bar stack at the current scroll position.
+ *
+ * Returns the ordered chain of scopes enclosing the top-of-viewport line,
+ * outermost → innermost (e.g. `[class Foo, function bar, for (...) ]`).
+ *
+ * The innermost bar detaches a few lines before its scope ends so it never
+ * covers the next sibling header; enclosing scopes stay pinned while active.
+ * The stack is capped at MAX_STICKY_DEPTH bars (outermost dropped first).
+ *
+ * `headers` must be sorted by `line` (see buildSectionHeaders).
  */
-const HEADER_DETACH_MARGIN = 3;
-
-/**
- * Find the header to pin at the current scroll position.
- * `headers` must be sorted by `line`. Sections don't overlap, so the pinned
- * header is the last one starting at/above the top line (binary search), then
- * dropped if it ends too soon.
- */
-export function findStickyHeader(
+export function findStickyStack(
     view: EditorView,
     headers: SectionHeader[],
-): SectionHeader | undefined {
-    if (headers.length === 0) return undefined;
+): SectionHeader[] {
+    if (headers.length === 0) return [];
 
     const topLine = view.state.doc.lineAt(view.viewport.from).number;
 
-    // Rightmost header whose start is at or above the viewport top.
-    let lo = 0;
-    let hi = headers.length - 1;
-    let candidate: SectionHeader | undefined;
-    while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (headers[mid].line <= topLine) {
-            candidate = headers[mid];
-            lo = mid + 1;
-        } else {
-            hi = mid - 1;
+    // Innermost scope containing the top line = the one with the greatest start
+    // line that still spans the top line.
+    let innermost: SectionHeader | null = null;
+    for (const h of headers) {
+        if (h.line <= topLine && topLine <= h.endLine) {
+            innermost = h;
+        }
+    }
+    if (!innermost) return [];
+
+    // Collect enclosing ancestors (contain the innermost's full range).
+    const ancestors: SectionHeader[] = [];
+    for (const h of headers) {
+        if (h.line < innermost.line && h.endLine >= innermost.endLine) {
+            ancestors.push(h);
         }
     }
 
-    if (!candidate) return undefined;
+    // The innermost bar detaches a few lines early so it doesn't cover the
+    // next header; enclosing scopes stay pinned while they remain active.
+    const detachInnermost = topLine >= innermost.endLine - HEADER_DETACH_MARGIN;
+    let stack = detachInnermost ? ancestors : [...ancestors, innermost];
 
-    // Stop pinning a few lines early so the next header isn't covered.
-    if (topLine < candidate.endLine - HEADER_DETACH_MARGIN) return candidate;
-
-    return undefined;
+    // Keep the innermost MAX_STICKY_DEPTH bars (drop outermost if exceeded).
+    if (stack.length > MAX_STICKY_DEPTH) {
+        stack = stack.slice(stack.length - MAX_STICKY_DEPTH);
+    }
+    return stack;
 }
 
 /** Get gutter width in pixels. */
@@ -120,19 +222,23 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Sticky scroll plugin: pins the current section header to the top.
- * Headers come in via `updateHeadersEffect`.
+ * Sticky scroll plugin: pins the stack of enclosing scope headers (e.g.
+ * class → function → loop) to the top of the editor. Headers come in via
+ * `updateHeadersEffect`; one `.cm-sticky-scroll-row` is rendered per scope,
+ * outermost first.
  *
  * Performance: scroll is batched per frame, `update()` ignores cursor-only
- * moves, header lookup is a binary search, and widths are cached.
+ * moves, re-renders are skipped while the pinned stack is unchanged, and
+ * widths are cached (re-measured via ResizeObserver).
  */
 export function stickyScroll() {
     return ViewPlugin.fromClass(
         class StickyScroll {
             element: HTMLElement;
-            currentHeader: SectionHeader | null = null;
-            // Cache the rendered line's text to detect in-place edits (e.g. renames).
-            renderedLineText = '';
+            currentStack: SectionHeader[] = [];
+            // Cache a signature of the rendered stack (line + text per row) to
+            // detect in-place edits (e.g. renames) and skip unchanged scrolls.
+            renderedSignature = '';
 
             // Cached geometry (re-measured via ResizeObserver, not per render).
             private gutterWidth = 0;
@@ -188,7 +294,7 @@ export function stickyScroll() {
             private onResize(view: EditorView) {
                 this.measureWidths(view);
                 // Keep the overlay aligned even if only geometry changed.
-                if (this.currentHeader && this.element.style.display !== 'none') {
+                if (this.currentStack.length > 0 && this.element.style.display !== 'none') {
                     this.position();
                 }
             }
@@ -221,17 +327,6 @@ export function stickyScroll() {
                 }
             }
 
-            /** Whether the overlay content needs re-rendering for this header. */
-            private shouldRender(header: SectionHeader, lineText: string): boolean {
-                // Compare to the last rendered header to skip unchanged scrolls.
-                return (
-                    !this.currentHeader ||
-                    this.currentHeader.line !== header.line ||
-                    this.currentHeader.endLine !== header.endLine ||
-                    this.renderedLineText !== lineText
-                );
-            }
-
             updateSticky(view: EditorView) {
                 const headers = view.state.field(sectionHeadersField, false) || [];
                 if (headers.length === 0) {
@@ -247,23 +342,38 @@ export function stickyScroll() {
                     return;
                 }
 
-                const header = findStickyHeader(view, validHeaders);
+                const stack = findStickyStack(view, validHeaders);
 
-                if (header) {
-                    const lineText = view.state.doc.line(header.line).text;
-                    if (this.shouldRender(header, lineText)) {
-                        this.currentHeader = header;
-                        this.renderedLineText = lineText;
-                        this.element.innerHTML = getHeaderLineHtml(view, header);
-                        this.measureWidths(view);
-                        this.position();
-                        this.element.style.display = 'block';
+                if (stack.length > 0) {
+                    // Signature = each row's line + text; re-render only when the
+                    // pinned set or any header line's content actually changed.
+                    const signature = stack
+                        .map((h) => `${h.line}\u0000${view.state.doc.line(h.line).text}`)
+                        .join('\u0001');
+                    if (signature !== this.renderedSignature) {
+                        this.renderedSignature = signature;
+                        this.currentStack = stack;
+                        this.renderStack(view, stack);
                     }
-                } else if (this.currentHeader) {
-                    this.currentHeader = null;
-                    this.renderedLineText = '';
+                } else if (this.currentStack.length > 0) {
+                    this.currentStack = [];
+                    this.renderedSignature = '';
                     this.hide();
                 }
+            }
+
+            /** Render one bar per enclosing scope (outermost → innermost). */
+            private renderStack(view: EditorView, stack: SectionHeader[]) {
+                this.element.innerHTML = '';
+                for (const header of stack) {
+                    const row = document.createElement('div');
+                    row.className = 'cm-sticky-scroll-row';
+                    row.innerHTML = getHeaderLineHtml(view, header);
+                    this.element.appendChild(row);
+                }
+                this.measureWidths(view);
+                this.position();
+                this.element.style.display = 'block';
             }
 
             hide() {
