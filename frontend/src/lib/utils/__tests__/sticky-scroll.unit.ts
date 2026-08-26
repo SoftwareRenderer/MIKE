@@ -1,5 +1,15 @@
-import { describe, it, expect } from 'vitest';
-import { findLineElement, findStickyHeader, getHeaderLineHtml, type SectionHeader } from '../sticky-scroll';
+import { describe, it, expect, afterEach } from 'vitest';
+import { EditorView } from '@codemirror/view';
+import { EditorState } from '@codemirror/state';
+import {
+    findLineElement,
+    findStickyHeader,
+    getHeaderLineHtml,
+    sectionHeadersField,
+    stickyScroll,
+    updateHeadersEffect,
+    type SectionHeader,
+} from '../sticky-scroll';
 
 describe('findLineElement', () => {
     it('returns the nearest ancestor with the exact cm-line class', () => {
@@ -135,5 +145,116 @@ describe('getHeaderLineHtml', () => {
         } as any;
         const html = getHeaderLineHtml(view, { line: 1, endLine: 2 });
         expect(html.startsWith('\tfunc Bar() {}')).toBe(true);
+    });
+});
+
+describe('stickyScroll (real EditorView in jsdom)', () => {
+    // Two function-like sections; section 1 spans lines 1–6, so the detach
+    // margin (topLine < endLine − 3) lets the bar stick at the doc top.
+    const DOC = [
+        'function foo() {',
+        '  const a = 1;',
+        '  const b = 2;',
+        '  const c = 3;',
+        '  return a + b + c;',
+        '}',
+        'function bar() {',
+        '  return 42;',
+        '',
+    ].join('\n');
+
+    let parent: HTMLDivElement | undefined;
+    let view: EditorView | undefined;
+
+    /** Mount a minimal editor with the sticky-scroll plugin (git-gutter pattern). */
+    function mount() {
+        parent = document.createElement('div');
+        document.body.appendChild(parent);
+        view = new EditorView({
+            state: EditorState.create({
+                doc: DOC,
+                extensions: [sectionHeadersField, stickyScroll()],
+            }),
+            parent,
+        });
+    }
+
+    // Let any async re-renders settle (the bar insertion itself is synchronous
+    // here — the parent is attached before the EditorView is constructed).
+    const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    const bar = () => view!.dom.querySelector('.cm-sticky-scroll') as HTMLElement | null;
+
+    function setHeaders(headers: SectionHeader[]) {
+        view!.dispatch({ effects: updateHeadersEffect.of(headers) });
+    }
+
+    afterEach(() => {
+        view?.destroy();
+        view = undefined;
+        parent?.remove();
+        parent = undefined;
+    });
+
+    it('shows the sticky bar with the header line text', async () => {
+        mount();
+        await flush();
+        setHeaders([{ line: 1, endLine: 6 }]);
+        await flush();
+
+        const b = bar();
+        expect(b).toBeTruthy();
+        expect(b!.style.display).not.toBe('none');
+        expect(b!.textContent).toContain('function foo');
+    });
+
+    it('re-renders when the header line is edited in place (same line number)', async () => {
+        mount();
+        await flush();
+        setHeaders([{ line: 1, endLine: 6 }]);
+        await flush();
+
+        const b = bar()!;
+        expect(b.textContent).toContain('function foo');
+
+        // Rename the function identifier on the header line — line number is
+        // unchanged, so the old (line-number-only) comparison missed this.
+        const line1 = view!.state.doc.line(1);
+        const from = line1.from + line1.text.indexOf('foo');
+        view!.dispatch({ changes: { from, to: from + 3, insert: 'baz' } });
+        await flush();
+
+        expect(b.textContent).toContain('function baz');
+        expect(b.textContent).not.toContain('foo');
+    });
+
+    it('does not re-render when an unrelated line changes (render cache hit)', async () => {
+        mount();
+        await flush();
+        setHeaders([{ line: 1, endLine: 6 }]);
+        await flush();
+
+        const b = bar()!;
+        const before = b.innerHTML;
+
+        // Edit line 8 (inside the second function, not the header line).
+        const line8 = view!.state.doc.line(8);
+        const at = line8.from + line8.text.indexOf('42');
+        view!.dispatch({ changes: { from: at, to: at + 2, insert: '7' } });
+        await flush();
+
+        expect(b.innerHTML).toBe(before);
+    });
+
+    it('ignores headers whose line is outside the document (no RangeError)', async () => {
+        mount();
+        await flush();
+        // line 0 sits below the document (doc.line(0) would throw RangeError
+        // in getHeaderLineHtml); line 999 sits beyond the last line.
+        setHeaders([{ line: 0, endLine: 10 }, { line: 999, endLine: 999 }]);
+        await flush();
+
+        const b = bar();
+        expect(b === null || (b.style.display === 'none' && b.innerHTML === '')).toBe(true);
     });
 });

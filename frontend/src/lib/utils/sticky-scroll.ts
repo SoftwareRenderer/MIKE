@@ -22,6 +22,12 @@ export const sectionHeadersField = StateField.define<SectionHeader[]>({
 });
 
 /**
+ * The bar detaches this many lines before the end of the current section, so
+ * it does not cover the upcoming section header as you scroll toward it.
+ */
+const HEADER_DETACH_MARGIN = 3;
+
+/**
  * Find the section header that should be sticky at the current scroll position
  */
 export function findStickyHeader(
@@ -34,7 +40,7 @@ export function findStickyHeader(
 
     let result: SectionHeader | undefined;
     for (const header of headers) {
-        if (header.line <= topLine && topLine < header.endLine - 3) {
+        if (header.line <= topLine && topLine < header.endLine - HEADER_DETACH_MARGIN) {
             result = header;
         } else if (header.line > topLine) {
             break;
@@ -126,6 +132,12 @@ export function stickyScroll() {
         class {
             element: HTMLElement;
             currentHeader: SectionHeader | null = null;
+            // Cache of what the bar last rendered: the header line number and
+            // its plain text at render time. updateSticky() re-renders when
+            // either (or the header's endLine) changes, so an in-place edit of
+            // the header line (e.g. a rename — same line number) is picked up.
+            renderedLine = 0;
+            renderedLineText = '';
 
             constructor(view: EditorView) {
                 this.element = document.createElement('div');
@@ -178,19 +190,48 @@ export function stickyScroll() {
                     return;
                 }
 
-                const header = findStickyHeader(view, headers);
+                // Drop headers whose line is outside the document —
+                // getHeaderLineHtml calls doc.line(n), which throws RangeError
+                // for out-of-range n (e.g. a malformed LSP symbol with line: 0)
+                // and would otherwise crash the scroll/view update handler.
+                const lineCount = view.state.doc.lines;
+                const validHeaders = headers.filter((h) => h.line >= 1 && h.line <= lineCount);
+                if (validHeaders.length === 0) {
+                    this.hide();
+                    return;
+                }
 
-                if (header && (!this.currentHeader || header.line !== this.currentHeader.line)) {
-                    this.currentHeader = header;
-                    const html = getHeaderLineHtml(view, header);
-                    this.element.innerHTML = html;
-                    const gutterW = getGutterWidth(view.dom);
-                    const scrollbarW = getScrollbarWidth(view.dom);
-                    this.element.style.left = gutterW + 'px';
-                    this.element.style.width = `calc(100% - ${gutterW}px - ${scrollbarW}px)`;
-                    this.element.style.display = 'block';
-                } else if (!header && this.currentHeader) {
+                const header = findStickyHeader(view, validHeaders);
+
+                if (header) {
+                    // Re-render when the sticky section changed, its extent
+                    // changed, or the header line's own text changed (in-place
+                    // edit at the same line number). The DOM clone inside
+                    // getHeaderLineHtml picks up fresh syntax highlighting.
+                    const lineText = view.state.doc.line(header.line).text;
+                    if (
+                        this.renderedLine !== header.line ||
+                        !this.currentHeader ||
+                        this.currentHeader.endLine !== header.endLine ||
+                        this.renderedLineText !== lineText
+                    ) {
+                        this.currentHeader = header;
+                        this.renderedLine = header.line;
+                        this.renderedLineText = lineText;
+                        const html = getHeaderLineHtml(view, header);
+                        this.element.innerHTML = html;
+                        const gutterW = getGutterWidth(view.dom);
+                        const scrollbarW = getScrollbarWidth(view.dom);
+                        this.element.style.left = gutterW + 'px';
+                        this.element.style.width = `calc(100% - ${gutterW}px - ${scrollbarW}px)`;
+                        this.element.style.display = 'block';
+                    }
+                } else if (this.currentHeader) {
+                    // Reset the render cache so re-entering this section later
+                    // (same line, same text) re-renders instead of staying hidden.
                     this.currentHeader = null;
+                    this.renderedLine = 0;
+                    this.renderedLineText = '';
                     this.hide();
                 }
             }
