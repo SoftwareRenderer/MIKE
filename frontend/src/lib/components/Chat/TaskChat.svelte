@@ -19,6 +19,7 @@
     import { resolveWorker, getModelName } from '$lib/utils/providers';
     import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
+    import { wsConnection } from '$lib/stores/connection';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import ChatForm from './ChatForm.svelte';
@@ -1296,12 +1297,9 @@
                 try {
                     const task = await getTask(projectId, taskId);
                     if (task.status !== 'in_progress') {
-                        // Drop stale streaming entries (temp IDs would duplicate DB entries)
-                        stream.state.entries = stream.state.entries.filter(
-                            e => !e.isStreaming && !(e.toolCalls?.some(tc => tc.isPending))
-                        );
-                        stream.resetStreaming();
-                        markNotStreaming();
+                        // The turn finished while the tab was hidden — drop
+                        // stale streaming state and reload from the DB.
+                        dropStaleStreamingState();
                         await loadHistory();
                     }
                 } catch {
@@ -1326,6 +1324,7 @@
         // The card falls back to execution_state === 'running' for the authoritative state.
         markNotStreaming();
         unsubQueue?.();
+        unsubWsConn?.();
         window.removeEventListener('beforeunload', handleBeforeUnload);
         // Flush pending draft save on navigation/component destroy
         if (draftSaveTimer) {
@@ -1366,6 +1365,43 @@
             }
         });
     });
+
+    // Reconcile chat state on WebSocket reconnect. Turns completed while
+    // offline aren't replayed, so we reload history. Running tasks replay
+    // their in-flight turn; loadHistory merges them without clobbering.
+    let unsubWsConn: (() => void) | null = null;
+    onMount(() => {
+        let wasDisconnected = false;
+        unsubWsConn = wsConnection.subscribe((connected) => {
+            if (connected && wasDisconnected) {
+                void handleWsReconnect();
+            }
+            wasDisconnected = !connected;
+        });
+    });
+
+    // Drop stale streaming entries and reset streaming UI. Turns finished
+    // while offline aren't replayed by the server, so the DB is the source
+    // of truth. Streaming entries (temp IDs) would duplicate DB entries.
+    function dropStaleStreamingState() {
+        stream.state.entries = stream.state.entries.filter(
+            e => !e.isStreaming && !(e.toolCalls?.some(tc => tc.isPending))
+        );
+        stream.resetStreaming();
+        markNotStreaming();
+    }
+
+    async function handleWsReconnect() {
+        try {
+            const task = await getTask(projectId, taskId);
+            if (task.status !== 'in_progress') {
+                dropStaleStreamingState();
+            }
+            await loadHistory();
+        } catch {
+            // Task may have been deleted — ignore (same as handleTabVisibility)
+        }
+    }
 </script>
 
 <div class="task-chat">
