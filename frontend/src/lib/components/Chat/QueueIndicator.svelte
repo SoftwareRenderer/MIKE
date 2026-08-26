@@ -42,6 +42,7 @@
         align-items: center;
         gap: 8px;
         padding: 10px 16px;
+        background: transparent;
         color: var(--color-text-secondary);
         font-size: 0.8rem;
     }
