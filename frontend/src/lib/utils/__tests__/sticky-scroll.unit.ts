@@ -85,6 +85,45 @@ describe('findStickyHeader', () => {
         expect(findStickyHeader(fakeView(5), headers)).toBeUndefined();
         expect(findStickyHeader(fakeView(120), headers)).toBeUndefined();
     });
+
+    it('binary search matches the original linear scan across all positions', () => {
+        // Reference linear implementation mirroring the pre-refactor algorithm.
+        function linear(view: any, hs: SectionHeader[]): SectionHeader | undefined {
+            const topLine = view.state.doc.lineAt(view.viewport.from).number;
+            let result: SectionHeader | undefined;
+            for (const header of hs) {
+                if (header.line <= topLine && topLine < header.endLine - 3) {
+                    result = header;
+                } else if (header.line > topLine) {
+                    break;
+                }
+            }
+            return result;
+        }
+
+        const sections: SectionHeader[] = [
+            { line: 3, endLine: 8 },
+            { line: 9, endLine: 16 },
+            { line: 17, endLine: 29 },
+            { line: 30, endLine: 44 },
+            { line: 45, endLine: 60 },
+        ];
+        for (let topLine = 1; topLine <= 65; topLine++) {
+            const view = fakeView(topLine);
+            expect(findStickyHeader(view, sections)).toEqual(linear(view, sections));
+        }
+    });
+
+    it('detaches (returns undefined) within the margin before the next header', () => {
+        const sections: SectionHeader[] = [
+            { line: 10, endLine: 24 }, // detach margin 3 → sticks while topLine < 21
+            { line: 25, endLine: 40 },
+        ];
+        expect(findStickyHeader(fakeView(20), sections)?.line).toBe(10); // within margin
+        expect(findStickyHeader(fakeView(21), sections)).toBeUndefined(); // in the gap
+        expect(findStickyHeader(fakeView(24), sections)).toBeUndefined();
+        expect(findStickyHeader(fakeView(25), sections)?.line).toBe(25); // next section pins
+    });
 });
 
 describe('getHeaderLineHtml', () => {

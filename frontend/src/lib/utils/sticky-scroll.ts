@@ -22,12 +22,16 @@ export const sectionHeadersField = StateField.define<SectionHeader[]>({
 });
 
 /**
- * The bar detaches few lines before the end of a section to avoid
- * covering the next section header.
+ * Detach a few lines early so the bar doesn't cover the next header.
  */
 const HEADER_DETACH_MARGIN = 3;
 
-/** Find the section header that should be sticky at the current scroll position. */
+/**
+ * Find the header to pin at the current scroll position.
+ * `headers` must be sorted by `line`. Sections don't overlap, so the pinned
+ * header is the last one starting at/above the top line (binary search), then
+ * dropped if it ends too soon.
+ */
 export function findStickyHeader(
     view: EditorView,
     headers: SectionHeader[],
@@ -36,16 +40,26 @@ export function findStickyHeader(
 
     const topLine = view.state.doc.lineAt(view.viewport.from).number;
 
-    let result: SectionHeader | undefined;
-    for (const header of headers) {
-        if (header.line <= topLine && topLine < header.endLine - HEADER_DETACH_MARGIN) {
-            result = header;
-        } else if (header.line > topLine) {
-            break;
+    // Rightmost header whose start is at or above the viewport top.
+    let lo = 0;
+    let hi = headers.length - 1;
+    let candidate: SectionHeader | undefined;
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (headers[mid].line <= topLine) {
+            candidate = headers[mid];
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
         }
     }
 
-    return result;
+    if (!candidate) return undefined;
+
+    // Stop pinning a few lines early so the next header isn't covered.
+    if (topLine < candidate.endLine - HEADER_DETACH_MARGIN) return candidate;
+
+    return undefined;
 }
 
 /** Get gutter width in pixels. */
@@ -106,62 +120,116 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Sticky scroll ViewPlugin.
+ * Sticky scroll plugin: pins the current section header to the top.
+ * Headers come in via `updateHeadersEffect`.
  *
- * Headers are provided via `updateHeadersEffect`.
- * The current section header sticks to the top until scrolling into the next section.
+ * Performance: scroll is batched per frame, `update()` ignores cursor-only
+ * moves, header lookup is a binary search, and widths are cached.
  */
 export function stickyScroll() {
     return ViewPlugin.fromClass(
-        class {
+        class StickyScroll {
             element: HTMLElement;
             currentHeader: SectionHeader | null = null;
-            // Cache rendered content to detect in-place edits (e.g. renames).
-            renderedLine = 0;
+            // Cache the rendered line's text to detect in-place edits (e.g. renames).
             renderedLineText = '';
 
+            // Cached geometry (re-measured via ResizeObserver, not per render).
+            private gutterWidth = 0;
+            private scrollbarWidth = 0;
+
+            private view: EditorView;
+            private scrollHandler: (() => void) | null = null;
+            private frame: number | null = null;
+            private resizeObserver: ResizeObserver | null = null;
+
             constructor(view: EditorView) {
+                this.view = view;
                 this.element = document.createElement('div');
                 this.element.className = 'cm-sticky-scroll';
                 this.element.setAttribute('aria-hidden', 'true');
 
-                const insert = () => {
-                    if (view.dom.parentElement && !this.element.parentElement) {
-                        view.dom.appendChild(this.element);
-                        this.setupScrollListener(view);
-                        this.updateSticky(view);
-                    }
-                };
-
+                // view.dom is the editor root (positioned relatively by
+                // CodeMirror), so an absolute child at top:0 stays pinned.
                 if (view.dom.parentElement) {
-                    insert();
-                } else {
-                    const observer = new MutationObserver(() => {
-                        if (view.dom.parentElement) {
-                            observer.disconnect();
-                            insert();
-                        }
-                    });
-                    observer.observe(document.body, { childList: true, subtree: true });
-                    setTimeout(() => observer.disconnect(), 500);
+                    this.insert(view);
                 }
             }
 
-            setupScrollListener(view: EditorView) {
-                const scroller = view.dom.querySelector('.cm-scroller') as HTMLElement | null;
-                if (!scroller) return;
+            /** Attach the bar + listeners once the editor is in the DOM. */
+            private insert(view: EditorView) {
+                if (this.element.parentElement) return;
+                view.dom.appendChild(this.element);
 
-                const onScroll = () => {
-                    this.updateSticky(view);
-                };
+                const scroller = view.scrollDOM;
+                if (scroller) {
+                    this.scrollHandler = () => this.scheduleScrollUpdate();
+                    scroller.addEventListener('scroll', this.scrollHandler, { passive: true });
+                }
 
-                scroller.addEventListener('scroll', onScroll, { passive: true });
-                (this as any)._scrollHandler = onScroll;
-                (this as any)._scroller = scroller;
+                this.measureWidths(view);
+                if (typeof ResizeObserver !== 'undefined') {
+                    this.resizeObserver = new ResizeObserver(() => this.onResize(view));
+                    this.resizeObserver.observe(view.dom);
+                }
+
+                this.updateSticky(view);
+            }
+
+            /** Coalesce high-frequency scroll events into one update per frame. */
+            private scheduleScrollUpdate() {
+                if (this.frame !== null) return;
+                this.frame = requestAnimationFrame(() => {
+                    this.frame = null;
+                    this.updateSticky(this.view);
+                });
+            }
+
+            private onResize(view: EditorView) {
+                this.measureWidths(view);
+                // Keep the overlay aligned even if only geometry changed.
+                if (this.currentHeader && this.element.style.display !== 'none') {
+                    this.position();
+                }
+            }
+
+            private measureWidths(view: EditorView) {
+                this.gutterWidth = getGutterWidth(view.dom);
+                this.scrollbarWidth = getScrollbarWidth(view.dom);
+            }
+
+            /** Apply cached gutter/scrollbar offsets to the overlay. */
+            private position() {
+                this.element.style.left = this.gutterWidth + 'px';
+                this.element.style.width = `calc(100% - ${this.gutterWidth}px - ${this.scrollbarWidth}px)`;
             }
 
             update(update: ViewUpdate) {
-                this.updateSticky(update.view);
+                // If the view was created detached from the DOM, insert the bar
+                // on the first update. insert() recomputes, so we're done here.
+                if (!this.element.parentElement && update.view.dom.parentElement) {
+                    this.insert(update.view);
+                    return;
+                }
+
+                // Only recompute on edits, scrolls, or new headers — skip cursor moves.
+                const headersChanged = update.transactions.some((tr) =>
+                    tr.effects.some((e) => e.is(updateHeadersEffect)),
+                );
+                if (update.docChanged || update.viewportChanged || headersChanged) {
+                    this.updateSticky(update.view);
+                }
+            }
+
+            /** Whether the overlay content needs re-rendering for this header. */
+            private shouldRender(header: SectionHeader, lineText: string): boolean {
+                // Compare to the last rendered header to skip unchanged scrolls.
+                return (
+                    !this.currentHeader ||
+                    this.currentHeader.line !== header.line ||
+                    this.currentHeader.endLine !== header.endLine ||
+                    this.renderedLineText !== lineText
+                );
             }
 
             updateSticky(view: EditorView) {
@@ -183,26 +251,16 @@ export function stickyScroll() {
 
                 if (header) {
                     const lineText = view.state.doc.line(header.line).text;
-                    if (
-                        this.renderedLine !== header.line ||
-                        !this.currentHeader ||
-                        this.currentHeader.endLine !== header.endLine ||
-                        this.renderedLineText !== lineText
-                    ) {
+                    if (this.shouldRender(header, lineText)) {
                         this.currentHeader = header;
-                        this.renderedLine = header.line;
                         this.renderedLineText = lineText;
-                        const html = getHeaderLineHtml(view, header);
-                        this.element.innerHTML = html;
-                        const gutterW = getGutterWidth(view.dom);
-                        const scrollbarW = getScrollbarWidth(view.dom);
-                        this.element.style.left = gutterW + 'px';
-                        this.element.style.width = `calc(100% - ${gutterW}px - ${scrollbarW}px)`;
+                        this.element.innerHTML = getHeaderLineHtml(view, header);
+                        this.measureWidths(view);
+                        this.position();
                         this.element.style.display = 'block';
                     }
                 } else if (this.currentHeader) {
                     this.currentHeader = null;
-                    this.renderedLine = 0;
                     this.renderedLineText = '';
                     this.hide();
                 }
@@ -213,11 +271,17 @@ export function stickyScroll() {
             }
 
             destroy() {
-                const scroller = (this as any)._scroller as HTMLElement | null;
-                const handler = (this as any)._scrollHandler as (() => void) | null;
-                if (scroller && handler) {
-                    scroller.removeEventListener('scroll', handler);
+                if (this.frame !== null) {
+                    cancelAnimationFrame(this.frame);
+                    this.frame = null;
                 }
+                const scroller = this.view.scrollDOM;
+                if (scroller && this.scrollHandler) {
+                    scroller.removeEventListener('scroll', this.scrollHandler);
+                }
+                this.scrollHandler = null;
+                this.resizeObserver?.disconnect();
+                this.resizeObserver = null;
                 this.element.remove();
             }
         },
