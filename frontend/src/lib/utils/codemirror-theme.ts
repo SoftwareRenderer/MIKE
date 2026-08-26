@@ -159,15 +159,22 @@ export const darkTheme = EditorView.theme({
         display: 'none',
         backgroundColor: 'rgba(30, 30, 46, 0.95)',
         borderBottom: '1px solid var(--color-border)',
+        pointerEvents: 'none',
+        overflow: 'hidden',
+    },
+    '.cm-sticky-scroll-row': {
         padding: '2px 10px 2px 6px',
         fontFamily: 'var(--font-mono)',
         fontSize: '14px',
         lineHeight: '1.5',
         color: '#C9D1D9',
-        pointerEvents: 'none',
+        whiteSpace: 'pre',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
-        whiteSpace: 'pre',
+        borderBottom: '1px solid rgba(128, 128, 128, 0.28)',
+    },
+    '.cm-sticky-scroll-row:last-child': {
+        borderBottom: 'none',
     },
 });
 
@@ -332,15 +339,22 @@ export const lightTheme = EditorView.theme({
         display: 'none',
         backgroundColor: 'rgba(255, 255, 255, 0.95)',
         borderBottom: '1px solid var(--color-border)',
+        pointerEvents: 'none',
+        overflow: 'hidden',
+    },
+    '.cm-sticky-scroll-row': {
         padding: '2px 10px 2px 6px',
         fontFamily: 'var(--font-mono)',
         fontSize: '14px',
         lineHeight: '1.5',
         color: '#24292F',
-        pointerEvents: 'none',
+        whiteSpace: 'pre',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
-        whiteSpace: 'pre',
+        borderBottom: '1px solid rgba(128, 128, 128, 0.28)',
+    },
+    '.cm-sticky-scroll-row:last-child': {
+        borderBottom: 'none',
     },
 });
 
