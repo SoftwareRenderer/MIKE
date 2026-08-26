@@ -1,6 +1,7 @@
 import { expect, Page, Locator } from '@playwright/test';
 import { execSync } from 'child_process';
-import { existsSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
+import http from 'node:http';
 
 /**
  * Find a provider by its reference string: the stable integer ID (as a string)
@@ -103,6 +104,59 @@ export async function waitForConfig(page: Page, predicate: (config: any) => bool
     const config = await apiGetConfig(page);
     expect(predicate(config)).toBe(true);
   }).toPass({ timeout });
+}
+
+// --- Node-side server API helper (works while the browser context is offline) ---
+
+/**
+ * Make a server API request from the Node test process.
+ *
+ * Uses the session cookie + CSRF token from /tmp/kanban-test-auth.json.
+ * This allows advancing server state (creating tasks, etc.) while the
+ * browser WebSocket is down or the page is mid-reload.
+ *
+ * @param base  Server origin: http://localhost:3000 or http://localhost:3001
+ */
+export async function serverApi(
+  base: string,
+  path: string,
+  options: { method?: string; body?: Record<string, any> } = {},
+): Promise<{ ok: boolean; status: number; data: any }> {
+  const port = new URL(base).port;
+  const authFile = port === '3001' ? '/tmp/kanban-test-auth.json.isolated' : '/tmp/kanban-test-auth.json';
+  const auth = JSON.parse(readFileSync(authFile, 'utf-8'));
+  const cookie = auth.cookies?.[0]?.value ?? '';
+  const csrfToken = auth.csrfToken ?? '';
+  const method = options.method ?? 'GET';
+  const body = options.body ? JSON.stringify(options.body) : undefined;
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: 'localhost',
+        port: Number(port),
+        path,
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `PHPSESSID=${cookie}`,
+          ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+        },
+      },
+      (res) => {
+        let raw = '';
+        res.on('data', (chunk: Buffer) => raw += chunk);
+        res.on('end', () => {
+          let data: any = null;
+          try { data = JSON.parse(raw); } catch { data = raw; }
+          const status = res.statusCode ?? 0;
+          resolve({ ok: status >= 200 && status < 300, status, data });
+        });
+      },
+    );
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
 }
 
 // --- Project & Task API helpers ---
