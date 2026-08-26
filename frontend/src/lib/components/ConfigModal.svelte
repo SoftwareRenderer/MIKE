@@ -46,6 +46,7 @@
     let defaultOperatingMode = $state('act');
     let defaultMaxFailedTurns = $state(3);
     let defaultAutoSummarizeThreshold = $state(90);
+    let runSiblingsParallel = $state(false);
     // Keyboard shortcut bindings (undefined = default, "" = disabled).
     // The Save payload always sends BOTH bindings (absent = reset to default).
     let keyboardCreateTask = $state<string | undefined>(undefined);
@@ -189,6 +190,7 @@
         defaultOperatingMode = config?.default_operating_mode ?? 'act';
         defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
         defaultAutoSummarizeThreshold = config?.default_auto_summarize_threshold ?? 90;
+        runSiblingsParallel = config?.run_siblings_parallel ?? false;
         keyboardCreateTask = config?.keyboard_shortcuts?.create_task;
         keyboardCreateTaskSubmit = config?.keyboard_shortcuts?.create_task_submit;
         keyboardOpenTerminal = config?.keyboard_shortcuts?.open_terminal;
@@ -540,6 +542,7 @@
                 default_operating_mode: defaultOperatingMode,
                 default_max_failed_turns: defaultMaxFailedTurns,
                 default_auto_summarize_threshold: defaultAutoSummarizeThreshold,
+                run_siblings_parallel: runSiblingsParallel,
                 hide_model_badge: hideModelBadge,
                 keyboard_shortcuts: { create_task: keyboardCreateTask, create_task_submit: keyboardCreateTaskSubmit, open_terminal: keyboardOpenTerminal, start_task: keyboardStartTask, toggle_fullscreen: keyboardToggleFullscreen, hide_hints: keyboardHideHints },
             } as Config);
@@ -763,6 +766,7 @@
                 bind:defaultSubtasksAutoMerge
                 bind:defaultMaxFailedTurns
                 bind:defaultAutoSummarizeThreshold
+                bind:runSiblingsParallel
                 originBranch={appStore.selectedProject?.origin_branch || 'main'}
                 onDirty={markDirty}
             />
