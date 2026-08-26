@@ -9,6 +9,7 @@
         defaultSubtasksAutoMerge = $bindable(true),
         defaultMaxFailedTurns = $bindable(3),
         defaultAutoSummarizeThreshold = $bindable(90),
+        runSiblingsParallel = $bindable(false),
         originBranch,
         onDirty,
     }: {
@@ -17,6 +18,7 @@
         defaultSubtasksAutoMerge?: boolean;
         defaultMaxFailedTurns?: number;
         defaultAutoSummarizeThreshold?: number;
+        runSiblingsParallel?: boolean;
         originBranch: string;
         onDirty?: () => void;
     } = $props();
@@ -61,6 +63,14 @@
             <input id="default-summarize-threshold" type="number" bind:value={defaultAutoSummarizeThreshold} min="1" max="100" class="option-input" onchange={() => onDirty?.()} />
             <span class="percent-suffix">%</span>
         </div>
+    </div>
+
+    <div class="toggle-field">
+        <div class="toggle-label-group">
+            <span id="toggle-run-parallel-label" class="toggle-label">Run siblings in parallel</span>
+            <span id="toggle-run-parallel-desc" class="toggle-desc">Start all of a parent's subtasks at once instead of one at a time</span>
+        </div>
+        <ToggleSwitch bind:checked={runSiblingsParallel} ariaLabel="Run siblings in parallel" ariaDescribedby="toggle-run-parallel-desc" onChange={() => onDirty?.()} />
     </div>
 
     <div class="toggle-field">
