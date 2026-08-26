@@ -85,13 +85,18 @@ func (b *BodyRules) UnmarshalJSON(data []byte) error {
 
 // SetRule describes how to set one JSON body path.
 type SetRule struct {
-	// From is the template variable the When gate applies to
-	// (e.g. "reasoning_effort"). Empty = the first placeholder in Value, if any.
+	// From is the variable the "when" gate and table lookups key on
+	// (e.g. "reasoning_effort"). Empty = the first placeholder in a string
+	// value; a table value requires an explicit "from".
 	From string `json:"from,omitempty"`
-	// Value is the value to set. Strings are template-resolved; other JSON
-	// values (number, bool, object, array) pass through unchanged.
+	// Value is what gets written to the path:
+	//   - a string: template-resolved at request time;
+	//   - any other scalar (number, bool, ...): set verbatim;
+	//   - a map: a lookup table keyed by the resolved "from" value, with an
+	//     optional "*" fallback entry. The rule is skipped when the variable
+	//     cannot be resolved, or when neither the key nor "*" matches.
 	Value any `json:"value,omitempty"`
-	// When, if non-empty, applies the rule only when the resolved value of From
+	// When, if non-empty, applies the rule only when the resolved "from" value
 	// is one of these entries ("" is a legitimate entry). A when-gated rule
 	// with no resolvable variable never applies.
 	When []string `json:"when,omitempty"`
@@ -200,11 +205,19 @@ func applyBody(rules BodyRules, body map[string]any, vars map[string]string) {
 }
 
 func (r SetRule) resolve(vars map[string]string) (any, bool) {
+	table, isTable := r.Value.(map[string]any)
+	if len(r.When) == 0 && !isTable {
+		return resolvedValue(r.Value, vars)
+	}
+	from := r.From
+	if from == "" {
+		from = firstPlaceholder(r.placeholderString())
+	}
+	if isTable && from == "" {
+		// A lookup table needs a variable to look up by: skip the rule.
+		return nil, false
+	}
 	if len(r.When) > 0 {
-		from := r.From
-		if from == "" {
-			from = firstPlaceholder(r.placeholderString())
-		}
 		if from == "" {
 			// When-gated but no variable to gate on: never apply.
 			return nil, false
@@ -221,7 +234,23 @@ func (r SetRule) resolve(vars map[string]string) (any, bool) {
 			return nil, false
 		}
 	}
-	switch tv := r.Value.(type) {
+	if isTable {
+		v := vars[from]
+		val, ok := table[v]
+		if !ok {
+			val, ok = table["*"]
+		}
+		if !ok {
+			return nil, false
+		}
+		return resolvedValue(val, vars)
+	}
+	return resolvedValue(r.Value, vars)
+}
+
+// resolvedValue resolves templates in strings; other types are used as-is.
+func resolvedValue(val any, vars map[string]string) (any, bool) {
+	switch tv := val.(type) {
 	case string:
 		res := resolveTemplate(tv, vars)
 		if strings.Contains(res, "{{") {
@@ -233,6 +262,8 @@ func (r SetRule) resolve(vars map[string]string) (any, bool) {
 	}
 }
 
+// placeholderString returns the rule's value if it is a string ("" otherwise,
+// e.g. for table values).
 func (r SetRule) placeholderString() string {
 	s, _ := r.Value.(string)
 	return s
