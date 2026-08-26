@@ -12,7 +12,7 @@ import {
 } from '../sticky-scroll';
 
 describe('findLineElement', () => {
-    it('returns the nearest ancestor with the exact cm-line class', () => {
+    it('returns the nearest ancestor with the .cm-line class', () => {
         const content = document.createElement('div');
         content.className = 'cm-content cm-lineWrapping';
         const line = document.createElement('div');
@@ -30,19 +30,16 @@ describe('findLineElement', () => {
         }
     });
 
-    it('does NOT match the content element carrying cm-lineWrapping (wrap-on false positive)', () => {
+    it('does NOT match .cm-lineWrapping (avoids false positives)', () => {
         const content = document.createElement('div');
         content.className = 'cm-content cm-lineWrapping';
-        // Simulate a culled-line (gap) node inside the content element —
-        // what view.domAtPos lands on when the header line is above the viewport.
+        // Simulate a gap node (common when header is above viewport).
         const gap = document.createElement('div');
         gap.className = 'cm-gap';
         gap.style.height = '100px';
         content.appendChild(gap);
         document.body.appendChild(content);
         try {
-            // Old behavior: includes('cm-line') matched cm-lineWrapping here,
-            // so the entire content element was cloned into the sticky header.
             expect(findLineElement(gap)).toBeNull();
         } finally {
             content.remove();
