@@ -529,16 +529,19 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			// Task with subtasks: start the deepest startable one; this task
 			// stays started-but-pending until all children are done.
 			h.moveAllDescendantsToInProgress(taskID)
-			selectedID := h.SelectSubtaskToStart(task, children)
-			if selectedID != "" {
-				log.Printf("[move] task=%s has subtasks, starting subtask %s", taskID, selectedID)
-				if err := h.StartSubtask(projectID, selectedID, true); err != nil {
-					log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
-					// Keep task in in_progress (user's explicit action); record error for visibility
+			// Task with subtasks: start the deepest startable one (or all of
+			// them when "run siblings in parallel" is enabled). This task stays
+			// started-but-pending until all children are done.
+			toStart := h.subtasksToStart(task, children)
+			if len(toStart) > 0 {
+				if _, anyStarted, err := h.startSubtaskIDs(projectID, taskID, "[move]", toStart); anyStarted {
+					log.Printf("[move] task=%s started %d subtask(s): %v", taskID, len(toStart), toStart)
+					started = true
+				} else if err != nil {
+					// All subtask starts failed — keep task in_progress (user's
+					// explicit action); record error for visibility.
 					task.ExecutionState = "idle"
 					task.Output = err.Error()
-				} else {
-					started = true
 				}
 			} else if exec.ChildrenAllDone(children) {
 				// All subtasks done — start this task's own execution.
@@ -1292,23 +1295,17 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 		}
 		// Move all incomplete descendants (children, grandchildren, etc.) to in_progress.
 		h.moveAllDescendantsToInProgress(taskID)
-		// Task has subtasks — start the deepest startable one (LLM picks when several).
-		selectedID := h.SelectSubtaskToStart(task, children)
-		if selectedID != "" {
-			log.Printf("[start-parent] task=%s selected subtask %s to start", taskID, selectedID)
-			// Autostarted: ask_question is auto-answered from parent context
-			// instead of stopping for a human.
-			if err := h.StartSubtask(projectID, selectedID, true); err != nil {
-				log.Printf("[start-parent] task=%s error: %v", taskID, err)
-				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		// Task has subtasks — start the deepest startable one (LLM picks when
+		// several), or all of them when "run siblings in parallel" is enabled.
+		toStart := h.subtasksToStart(task, children)
+		if len(toStart) > 0 {
+			lastID, anyStarted, firstErr := h.startSubtaskIDs(projectID, taskID, "[start-parent]", toStart)
+			if !anyStarted {
+				httputil.JSONError(w, http.StatusInternalServerError, firstErr.Error())
 				return
 			}
-			startedTask, _ := h.store.GetTask(projectID, selectedID)
-			if startedTask != nil {
-				h.refreshTaskPorts(startedTask)
-				h.boardStreamMgr.BroadcastTaskUpdated(projectID, startedTask)
-			}
-			httputil.JSONResponse(w, http.StatusOK, startedTask)
+			log.Printf("[start-parent] task=%s started %d subtask(s): %v", taskID, len(toStart), toStart)
+			h.respondWithStartedTask(w, projectID, lastID)
 			return
 		}
 		// No startable subtask: start its own execution only if all children
@@ -1405,20 +1402,15 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 	children, _ := h.store.GetChildren(taskID)
 	if len(children) > 0 {
 		h.moveAllDescendantsToInProgress(taskID)
-		selectedID := h.SelectSubtaskToStart(task, children)
-		if selectedID != "" {
-			log.Printf("[start-subtask] task=%s has subtasks, starting subtask %s", taskID, selectedID)
-			if err := h.StartSubtask(projectID, selectedID, true); err != nil {
-				log.Printf("[start-subtask] task=%s error: %v", taskID, err)
-				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		toStart := h.subtasksToStart(task, children)
+		if len(toStart) > 0 {
+			lastID, anyStarted, firstErr := h.startSubtaskIDs(projectID, taskID, "[start-subtask]", toStart)
+			if !anyStarted {
+				httputil.JSONError(w, http.StatusInternalServerError, firstErr.Error())
 				return
 			}
-			startedTask, _ := h.store.GetTask(projectID, selectedID)
-			if startedTask != nil {
-				h.refreshTaskPorts(startedTask)
-				h.boardStreamMgr.BroadcastTaskUpdated(projectID, startedTask)
-			}
-			httputil.JSONResponse(w, http.StatusOK, startedTask)
+			log.Printf("[start-subtask] task=%s has subtasks, started %d: %v", taskID, len(toStart), toStart)
+			h.respondWithStartedTask(w, projectID, lastID)
 			return
 		}
 		if !exec.ChildrenAllDone(children) {
@@ -1443,7 +1435,65 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
+// subtasksToStart returns the subtask IDs to start for a parent task. When
+// "run siblings in parallel" is enabled it returns every currently startable
+// (deepest) subtask so they all kick off at once; otherwise it returns the
+// single subtask picked by the existing depth/LLM heuristic. The per-provider
+// concurrency gate still caps how many actually run — the rest queue as
+// "Pending".
+func (h *TaskHandler) subtasksToStart(parent *types.Task, subtasks []types.Task) []string {
+	if h.configStore != nil && h.configStore.GetRunSiblingsParallel() {
+		deepest := h.executor.FindDeepestStartableSubtasks(subtasks)
+		ids := make([]string, 0, len(deepest))
+		for _, d := range deepest {
+			ids = append(ids, d.ID)
+		}
+		return ids
+	}
+	if id := h.SelectSubtaskToStart(parent, subtasks); id != "" {
+		return []string{id}
+	}
+	return nil
+}
+
+// startSubtaskIDs starts each subtask as an autostarted execution (no human
+// present to answer ask_question). Per-start failures are logged but not
+// fatal, so one error doesn't block the other parallel siblings. Returns the
+// last requested ID, whether any start succeeded, and the first error (nil if
+// every start succeeded).
+func (h *TaskHandler) startSubtaskIDs(projectID, taskID, logPrefix string, ids []string) (lastID string, anyStarted bool, firstErr error) {
+	for _, id := range ids {
+		if err := h.StartSubtask(projectID, id, true); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			log.Printf("%s task=%s error starting %s: %v", logPrefix, taskID, id, err)
+		} else {
+			anyStarted = true
+		}
+	}
+	if len(ids) > 0 {
+		lastID = ids[len(ids)-1]
+	}
+	return lastID, anyStarted, firstErr
+}
+
+// respondWithStartedTask loads the just-started task, refreshes its dev ports,
+// broadcasts the update to the board, and returns it as a 200 JSON response.
+func (h *TaskHandler) respondWithStartedTask(w http.ResponseWriter, projectID, taskID string) {
+	startedTask, _ := h.store.GetTask(projectID, taskID)
+	if startedTask != nil {
+		h.refreshTaskPorts(startedTask)
+		h.boardStreamMgr.BroadcastTaskUpdated(projectID, startedTask)
+	}
+	httputil.JSONResponse(w, http.StatusOK, startedTask)
+}
+
 // SelectSubtaskToStart delegates to the executor's subtask selection logic.
+//
+// Start paths should prefer subtasksToStart, which honors the "run siblings in
+// parallel" setting (it returns every startable subtask when that is on).
+// Use this directly only when a single pick is genuinely wanted.
 func (h *TaskHandler) SelectSubtaskToStart(parent *types.Task, subtasks []types.Task) string {
 	return h.executor.SelectSubtaskToStart(parent, subtasks)
 }

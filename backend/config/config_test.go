@@ -131,6 +131,85 @@ func TestHideModelBadge_OmittedWhenNil(t *testing.T) {
 	}
 }
 
+func TestRunSiblingsParallel_UnsetDefault(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if cfg.RunSiblingsParallel != nil {
+		t.Fatalf("expected nil RunSiblingsParallel when unset, got %v", *cfg.RunSiblingsParallel)
+	}
+	if got := cs.GetRunSiblingsParallel(); got != false {
+		t.Fatalf("expected GetRunSiblingsParallel false when unset, got %v", got)
+	}
+}
+
+func TestRunSiblingsParallel_RoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.RunSiblingsParallel = ptrBool(true)
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.RunSiblingsParallel == nil || !*read.RunSiblingsParallel {
+		t.Fatalf("expected run_siblings_parallel=true after update, got %v", read.RunSiblingsParallel)
+	}
+	if got := cs.GetRunSiblingsParallel(); got != true {
+		t.Fatalf("expected GetRunSiblingsParallel true after update, got %v", got)
+	}
+}
+
+// An explicit false must round-trip as present (non-nil), not collapse to unset.
+func TestRunSiblingsParallel_FalseRoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	cfg.RunSiblingsParallel = ptrBool(true)
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	cfg.RunSiblingsParallel = ptrBool(false)
+	if err := cs.UpdateConfig(cfg); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+	read, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if read.RunSiblingsParallel == nil || *read.RunSiblingsParallel {
+		t.Fatalf("expected run_siblings_parallel=false (present), got %v", read.RunSiblingsParallel)
+	}
+	if got := cs.GetRunSiblingsParallel(); got != false {
+		t.Fatalf("expected GetRunSiblingsParallel false after update, got %v", got)
+	}
+}
+
+// A nil RunSiblingsParallel must be omitted from the /api/config JSON.
+func TestRunSiblingsParallel_OmittedWhenNil(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	b, err := json.Marshal(cs.buildConfigResponse(cfg))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "run_siblings_parallel") {
+		t.Fatalf("expected run_siblings_parallel omitted from response when nil, got %s", b)
+	}
+}
+
 func TestGetConfigRespectsWorkspaceDirOverride(t *testing.T) {
 	cs := testConfigStore(t)
 	overrideDir := t.TempDir()
