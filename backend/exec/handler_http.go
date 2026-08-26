@@ -126,15 +126,20 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 	// Broadcast user_message echo to task subscribers
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeUserMessage, Data: echoData})
 
-	// Forward to executor or lazy-start
-	te.ForwardUserMessage(projectID, taskID, stream.UserMessage{
-		Content:         req.Content,
-		ModelName:       req.ModelName,
-		ServerURL:       req.LlamaServerURL,
-		ReasoningEffort: req.ReasoningEffort,
-		Attachments:     req.Attachments,
-		Regenerate:      req.Regenerate,
-	})
+	// Forward to executor or lazy-start. Skip when the message was deduped
+	if isDuplicate {
+		log.Printf("[send] task=%s duplicate user message (%q) not persisted, skipping executor trigger", taskID, req.Content)
+		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "idle", "activity": "Duplicate message ignored"}})
+	} else {
+		te.ForwardUserMessage(projectID, taskID, stream.UserMessage{
+			Content:         req.Content,
+			ModelName:       req.ModelName,
+			ServerURL:       req.LlamaServerURL,
+			ReasoningEffort: req.ReasoningEffort,
+			Attachments:     req.Attachments,
+			Regenerate:      req.Regenerate,
+		})
+	}
 
 	// Return the message
 	result := map[string]any{
