@@ -737,9 +737,6 @@ function extractSvelteSymbols(source: string): Array<{ name: string; kind: strin
  * For markdown, extracts ATX headings as a document outline.
  * For Svelte, extracts components, blocks, and script-level declarations.
  * Returns an array of { name, kind, line, indent } sorted by line number.
- *
- * @deprecated LSP is now the primary symbol source. This is kept as a fallback
- * for languages/files without LSP support.
  */
 export function getLanguageTreeFromView(view: any, path?: string): Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> {
     const symbols: Array<{ name: string; kind: string; line: number; endLine: number; indent: number }> = [];
@@ -805,7 +802,7 @@ export function getLanguageTreeFromView(view: any, path?: string): Array<{ name:
             'TypeItem': 'class',
         };
 
-        // Track parent stack during iteration (name + end position for sticky scroll)
+        // Track parent stack during iteration (name + end position for the outline panel)
         const parentStack: { name: string; to: number }[] = [];
         const rootNodes = new Set(['SourceFile', 'Script', 'Program', 'Document', 'CompilationUnit', 'TranslationUnit', 'Module']);
 

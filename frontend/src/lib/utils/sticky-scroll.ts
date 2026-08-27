@@ -1,52 +1,10 @@
 import { ViewPlugin, ViewUpdate, EditorView } from '@codemirror/view';
 import { StateEffect, StateField } from '@codemirror/state';
-import { syntaxTree } from '@codemirror/language';
 
-/**
- * Loop-scope node matcher (statement/expression level). Matches the loop nodes
- * emitted by the Lezer grammars we bundle:
- *   JS/TS:      ForStatement, WhileStatement, DoStatement
- *   Go:         ForStatement
- *   Python:     ForStatement, WhileStatement
- *   C/C++:      ForStatement, WhileStatement, DoStatement, ForRangeLoop
- *   Rust:       ForExpression, WhileExpression, LoopExpression
- *   PHP:        ForStatement, WhileStatement, DoStatement, ForeachStatement
- * Sub-clause/spec nodes (ForClause, RangeClause, ForSpec, ForInSpec, ...) are
- * children of these statement nodes and deliberately do NOT match, so we record
- * exactly one scope per loop without duplicates.
- */
-const LOOP_NODE_RE = /^(For|While|Do|Loop)[A-Za-z]*(Statement|Expression|Loop)$/;
-
-/** A raw scope range (declaration or loop) before nesting depth is assigned. */
+/** A raw declaration scope range (LSP symbol) before nesting depth is assigned. */
 export interface ScopeRange {
     line: number;
     endLine: number;
-}
-
-/**
- * Collect loop statement ranges (for/while/do-while/for-each) from the editor's
- * Lezer syntax tree. LSP document symbols do not report loops, so this is the
- * source for loop sticky headers. Returns ranges sorted by start line.
- */
-export function findLoopScopes(view: EditorView): ScopeRange[] {
-    const scopes: ScopeRange[] = [];
-    try {
-        const doc = view.state.doc;
-        const tree = syntaxTree(view.state);
-        tree.iterate({
-            enter(node) {
-                if (LOOP_NODE_RE.test(node.type.name)) {
-                    scopes.push({
-                        line: doc.lineAt(node.from).number,
-                        endLine: doc.lineAt(node.to).number,
-                    });
-                }
-            },
-        });
-    } catch {
-        // Ignore parse errors — no loop scopes is a safe fallback.
-    }
-    return scopes;
 }
 
 /** Section header for sticky scroll. */
@@ -65,19 +23,16 @@ const HEADER_DETACH_MARGIN = 3;
 export const MAX_STICKY_DEPTH = 4;
 
 /**
- * Merge declaration scopes and loop scopes into a sorted, depth-annotated
- * sticky-header list.
+ * Turn declaration scopes (LSP document symbols) into a sorted,
+ * depth-annotated sticky-header list.
  *
  * Every scope keeps its FULL body range (endLine = its own closing line, not
  * truncated to the next sibling). Overlapping ranges are resolved by sorting
  * start ascending and end descending, so an outer scope always precedes the
  * inner scopes it contains. `depth` records the containment nesting level.
  */
-export function buildSectionHeaders(
-    declarations: ScopeRange[],
-    loops: ScopeRange[],
-): SectionHeader[] {
-    const combined: ScopeRange[] = [...declarations, ...loops];
+export function buildSectionHeaders(declarations: ScopeRange[]): SectionHeader[] {
+    const combined: ScopeRange[] = [...declarations];
     combined.sort((a, b) => a.line - b.line || b.endLine - a.endLine);
 
     const headers: SectionHeader[] = [];
@@ -115,10 +70,37 @@ export const sectionHeadersField = StateField.define<SectionHeader[]>({
 });
 
 /**
+ * The line number at the top of the visible viewport
+ */
+export function getViewportTopLine(view: EditorView): number {
+    try {
+        const scroller = view.scrollDOM;
+        if (scroller) {
+            const rect = scroller.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                // Probe the gutter first (x = +8), then the content's left
+                // edge; a few pixel rows down to dodge exact boundaries.
+                for (const dx of [8, 0]) {
+                    for (const dy of [2, 8, 16]) {
+                        const pos = view.posAtCoords({ x: rect.left + dx, y: rect.top + dy });
+                        if (pos != null) {
+                            return view.state.doc.lineAt(pos).number;
+                        }
+                    }
+                }
+            }
+        }
+    } catch {
+        /* fall through to the estimate */
+    }
+    return view.state.doc.lineAt(view.viewport.from).number;
+}
+
+/**
  * Compute the sticky-bar stack at the current scroll position.
  *
  * Returns the ordered chain of scopes enclosing the top-of-viewport line,
- * outermost → innermost (e.g. `[class Foo, function bar, for (...) ]`).
+ * outermost → innermost (e.g. `[class Foo, function bar]`).
  *
  * The innermost bar detaches a few lines before its scope ends so it never
  * covers the next sibling header; enclosing scopes stay pinned while active.
@@ -132,7 +114,7 @@ export function findStickyStack(
 ): SectionHeader[] {
     if (headers.length === 0) return [];
 
-    const topLine = view.state.doc.lineAt(view.viewport.from).number;
+    const topLine = getViewportTopLine(view);
 
     // Innermost scope containing the top line = the one with the greatest start
     // line that still spans the top line.
@@ -222,8 +204,8 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Sticky scroll plugin: pins the stack of enclosing scope headers (e.g.
- * class → function → loop) to the top of the editor. Headers come in via
+ * Sticky scroll plugin: pins the stack of enclosing declaration headers
+ * (e.g. class → function) to the top of the editor. Headers come in via
  * `updateHeadersEffect`; one `.cm-sticky-scroll-row` is rendered per scope,
  * outermost first.
  *
