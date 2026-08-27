@@ -373,7 +373,7 @@ export function gitGutter(options?: { title?: string }) {
         }
     );
 
-    // CSS for the scrollbar annotation container and custom editor scrollbar
+    // CSS for the scrollbar annotation container and scroller overflow
     const scrollbarTheme = EditorView.baseTheme({
         '.cm-scrollbarAnnotation': {
             position: 'absolute',
@@ -387,16 +387,6 @@ export function gitGutter(options?: { title?: string }) {
         },
         '.cm-scroller::-webkit-scrollbar': {
             width: '12px',
-        },
-        '.cm-scroller::-webkit-scrollbar-track': {
-            background: 'transparent',
-        },
-        '.cm-scroller::-webkit-scrollbar-thumb': {
-            background: 'var(--color-surface-3)',
-            borderRadius: '6px',
-        },
-        '.cm-scroller::-webkit-scrollbar-thumb:hover': {
-            background: 'var(--color-surface-4)',
         },
     });
 
