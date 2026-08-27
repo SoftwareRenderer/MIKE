@@ -27,7 +27,7 @@
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip, gutterLineClass, GutterMarker, Decoration, ViewPlugin, type ViewUpdate, type DecorationSet } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax, lightTheme, lightSyntax, isLightTheme } from '$lib/utils/codemirror-theme';
-    import { stickyScroll, updateHeadersEffect, sectionHeadersField, buildSectionHeaders, findLoopScopes, type SectionHeader } from '$lib/utils/sticky-scroll';
+    import { stickyScroll, updateHeadersEffect, sectionHeadersField, buildSectionHeaders, type SectionHeader } from '$lib/utils/sticky-scroll';
     import { keepViewportParsed } from '$lib/utils/keep-viewport-parsed';
     import { closeHoverOnScroll } from '$lib/utils/close-hover-on-scroll';
     import { requestLSPSymbols, flattenSymbols, type LSPSymbol } from '$lib/utils/lsp-symbols';
@@ -210,10 +210,6 @@
     function applyDiskContent(newContent: string, diskContent: string) {
         if (view) {
             view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: newContent } });
-            // A pure doc-change dispatch does not set the selection, so the
-            // sticky-scroll symbols (line numbers from the old doc) would never
-            // be re-extracted — schedule the same debounced re-extraction the
-            // selection path uses (shared timer key, so it can't double-fire).
             clearTimeout((view as any)._symbolTimer);
             (view as any)._symbolTimer = setTimeout(extractSymbols, 300);
         }
@@ -239,6 +235,28 @@
     let view: EditorView | null = null;
     // Reactive flag to signal when the editor view is created (for LSP effect dependency)
     let editorReady = $state(false);
+    // Retry state for LSP symbol extraction. Headers are only re-extracted on
+    // load / save / external change, so a single failed request (e.g. gopls
+    // still warming up after a cold sandbox start) must retry with backoff —
+    // otherwise the sticky bar stays empty until the next file event.
+    let lspRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let lspRetryCount = 0;
+    function scheduleLspRetry() {
+        if (lspRetryTimer || lspRetryCount >= 8) return; // ~60 s of retries, then stop
+        lspRetryCount++;
+        const delay = Math.min(1500 * 2 ** (lspRetryCount - 1), 10000);
+        lspRetryTimer = setTimeout(() => {
+            lspRetryTimer = null;
+            extractSymbols();
+        }, delay);
+    }
+    function resetLspRetry() {
+        if (lspRetryTimer) {
+            clearTimeout(lspRetryTimer);
+            lspRetryTimer = null;
+        }
+        lspRetryCount = 0;
+    }
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let searchVisible = $state(false);
     let searchApp: any = null;
@@ -274,19 +292,45 @@
 
     async function extractSymbols() {
         if (!view) return;
-        // Try LSP first, fall back to Lezer tree analysis
-        let symbols = await requestLSPSymbols(lspClient, lspFilePath);
+        // LSP document symbols are the primary source for both the outline panel and the sticky-scroll headers.
+        const lspSymbols = await requestLSPSymbols(lspClient, lspFilePath);
+        if (lspSymbols !== null) resetLspRetry();
+        // Outline panel: LSP symbols, falling back to Lezer tree analysis
+        // when LSP is unavailable for this file or a request just failed —
+        // the panel must still refresh after edits, and a fresh heuristic
+        // beats stale LSP data.
+        let symbols = lspSymbols;
         if (!symbols || symbols.length === 0) {
             const visibleKinds = new Set(['function', 'method', 'class', 'struct', 'enum', 'interface', 'type', 'namespace', 'package', 'module', 'file', 'property', 'field', 'constructor', 'constant', 'event', 'heading']);
             symbols = getLanguageTreeFromView(view, filePath).filter(s => visibleKinds.has(s.kind));
         }
         onSymbolsUpdate(symbols);
-        // Sticky-scroll headers: declaration scopes
-        const flat = flattenSymbols(symbols);
+        if (lspSymbols === null && lspClient) {
+            // LSP is connected but the request failed or timed out
+            if (fileUri) {
+                try {
+                    lspClient.notification('textDocument/didClose', { textDocument: { uri: fileUri } });
+                    lspClient.notification('textDocument/didOpen', {
+                        textDocument: {
+                            uri: fileUri,
+                            languageId: (lspLanguage || 'plaintext').toLowerCase(),
+                            version: 0,
+                            text: view.state.doc.toString(),
+                        },
+                    });
+                } catch {
+                    /* ignore — the retry below covers it */
+                }
+            }
+            scheduleLspRetry();
+            return;
+        }
+
+        const flat = flattenSymbols(lspSymbols ?? []);
         const declarations = flat
             .filter((s) => s.kind === 'function' || s.kind === 'class' || s.kind === 'method' || s.kind === 'struct' || s.kind === 'enum' || s.kind === 'interface')
             .map((s) => ({ line: s.line, endLine: s.endLine }));
-        const headers: SectionHeader[] = buildSectionHeaders(declarations, findLoopScopes(view));
+        const headers: SectionHeader[] = buildSectionHeaders(declarations);
         // Only dispatch when the headers actually change — avoids churn on cursor moves.
         const prev = (view.state.field(sectionHeadersField, false) || []);
         if (
@@ -553,14 +597,12 @@
                     (view as any)._draftTimer = setTimeout(() => setEditorDraft(filePath, content), 200);
                 }
                 if (update.selectionSet) {
-                    // Update cursor position
+                    // Update cursor position (status bar only — symbol
+                    // extraction runs on load, save, and external changes)
                     const pos = update.state.selection.main.head;
                     const line = update.state.doc.lineAt(pos);
                     cursorLine = line.number;
                     cursorCol = pos - line.from + 1;
-                    // Extract symbols on selection change (debounced)
-                    clearTimeout((view as any)._symbolTimer);
-                    (view as any)._symbolTimer = setTimeout(extractSymbols, 300);
                 }
             }),
             EditorState.tabSize.of(4),
@@ -621,6 +663,19 @@
     }
 
     async function loadFile() {
+        resetLspRetry();
+        // Close the current document on the LSP server BEFORE dropping the
+        // client: the sandboxed server outlives this client, and a document
+        // it keeps holding with stale content makes the next didOpen for the
+        // same URI get ignored (gopls re-opens nothing), so documentSymbol
+        // would keep answering from the old text.
+        if (lspClient && fileUri) {
+            try {
+                lspClient.notification('textDocument/didClose', { textDocument: { uri: fileUri } });
+            } catch {
+                /* connection may already be gone */
+            }
+        }
         if (!filePath) {
             lspClient?.disconnect();
             lspClient = null;
@@ -816,6 +871,9 @@
             }
             savedContent = content;
             hasChanges = false;
+            // File changed on disk — re-extract outline symbols and
+            // sticky-scroll headers (line numbers may have shifted).
+            extractSymbols();
             if (mode === 'explorer') {
                 // Update git gutter — disk now matches editor.
                 // The current merged markers (server + delta) represent the diff vs HEAD
@@ -1198,6 +1256,7 @@
         const _editorReady = editorReady;
         const _wsRoot = lspWorkspaceRoot;
         const _projId = projectId;
+        const _lspConnecting = lspConnecting;
         // Read extension state to track it as a dependency
         const _extCount = extensionManager.state.extensions.length;
         // Check LSP availability here (outside async) so effect re-runs when extensions load
@@ -1206,6 +1265,7 @@
         if (!_editorReady || !view || !_projId || !_wsRoot) return;
         // Re-initialize if workspace changed (e.g., project switch with same file path)
         if (lspClient && lspWorkspace === _wsRoot) return;
+        if (_lspConnecting) return;
 
         async function initLSP() {
             // Check if LSP extension is available for this file
@@ -1271,6 +1331,17 @@
                     lspReady = true; // fallback for old backend
                 }
                 lspWorkspace = _wsRoot!; // track which workspace we're connected to
+                // Stale-document guard: the sandboxed LSP server persists
+                // across sessions. A previous client may have left this URI
+                // open with different content (its didClose was lost when its
+                // transport dropped), and gopls ignores a didOpen for a URI it
+                // still considers open. Close it first so the plugin's
+                // didOpen re-opens the document with the current buffer.
+                try {
+                    lspClient.notification('textDocument/didClose', { textDocument: { uri: fileUri } });
+                } catch {
+                    /* server may not have the document */
+                }
                 // Derive language name from file extension
                 const ext = filePath.split('.').pop()?.toLowerCase() || '';
                 const langMap: Record<string, string> = {
@@ -1291,6 +1362,10 @@
                         effects: lspCompartment.reconfigure(lspClient.plugin(fileUri)),
                     });
                 }
+                // LSP just became available — refresh outline symbols and
+                // sticky-scroll headers now, instead of waiting for the next
+                // selection change or edit to trigger extraction.
+                extractSymbols();
             } catch (e) {
                 lspError = String(e);
                 console.warn('[lsp] connection failed:', e);
@@ -1377,6 +1452,13 @@
                     lspReady = true; // fallback for old backend
                 }
                 lspWorkspace = _wsRoot!;
+
+                // Same stale-document guard as the initial connect.
+                try {
+                    newClient.notification('textDocument/didClose', { textDocument: { uri: fileUri } });
+                } catch {
+                    /* server may not have the document */
+                }
 
                 // Re-attach plugin
                 if (_view && newClient) {

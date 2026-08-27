@@ -126,13 +126,15 @@ function buildTree(flat: LSPSymbol[]): LSPSymbol[] {
 export async function requestLSPSymbols(
     lspClient: LSPClient | null,
     filePath: string,
-    timeoutMs: number = 2000,
+    timeoutMs: number = 4000,
 ): Promise<LSPSymbol[] | null> {
     if (!lspClient) return null;
 
     const uri = `file://${filePath}`;
 
     try {
+        // Push pending edits to the server before asking for symbols
+        lspClient.sync?.();
         const result = await Promise.race([
             lspClient.request('textDocument/documentSymbol', {
                 textDocument: { uri },
