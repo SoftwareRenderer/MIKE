@@ -223,6 +223,22 @@ a:hover {
     outline: none;
 }
 
+::-webkit-scrollbar {
+    width: 8px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: rgb(from var(--color-text-tertiary) r g b / 0.4);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-secondary);
+}
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
 /* Screen reader only text */
 .sr-only {
     position: absolute;
