@@ -31,6 +31,8 @@ input[type="number"] {
 }
 
 :root {
+    color-scheme: light dark;
+
     /* Surface palette */
     --color-surface-0: #141414;
     --color-surface-1: #1C1C1C;
@@ -223,9 +225,6 @@ a:hover {
     outline: none;
 }
 
-::-webkit-scrollbar {
-    width: 8px;
-}
 ::-webkit-scrollbar-track {
     background: transparent;
 }
