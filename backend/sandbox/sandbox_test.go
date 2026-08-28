@@ -669,6 +669,30 @@ func TestBuildImage_MissingFile(t *testing.T) {
 	}
 }
 
+// TestBuildPodmanBuildArgs checks that --no-cache appears only when requested
+// and the context directory stays the last argument.
+func TestBuildPodmanBuildArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		noCache bool
+		want    []string
+	}{
+		{"cache used by default", false, []string{"build", "-t", "proj-img", "/tmp/ctx"}},
+		{"no-cache flag added on request", true, []string{"build", "-t", "proj-img", "--no-cache", "/tmp/ctx"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildPodmanBuildArgs("proj-img", "/tmp/ctx", tc.noCache)
+			if strings.Join(got, " ") != strings.Join(tc.want, " ") {
+				t.Fatalf("args = %v, want %v", got, tc.want)
+			}
+			if got[len(got)-1] != "/tmp/ctx" {
+				t.Fatalf("context dir must be last, got %v", got)
+			}
+		})
+	}
+}
+
 func TestBuildImageWithProgress_InvalidImageRef(t *testing.T) {
 	// BuildImageWithProgress must validate the derived image name before
 	// passing it to podman. This catches issues if ProjectImagePrefix is
