@@ -625,6 +625,22 @@ func TestProjectUpdateSandboxMemoryLimit(t *testing.T) {
 	if result["sandbox_memory_limit"].(float64) != 0 {
 		t.Fatalf("expected sandbox_memory_limit 0, got %v", result["sandbox_memory_limit"])
 	}
+
+	// A negative limit is clamped to 0 (no limit) — never persisted as negative.
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_memory_limit": 2048,
+	})
+	if rr = testResponseAuth(t, s, req); rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 setting 2048, got %d: %s", rr.Code, rr.Body.String())
+	}
+	req = testRequest("PUT", "/api/projects/"+projID, map[string]any{
+		"sandbox_memory_limit": -512,
+	})
+	rr = testResponseAuth(t, s, req)
+	result = mustJSON[map[string]any](t, rr.Body)
+	if result["sandbox_memory_limit"].(float64) != 0 {
+		t.Fatalf("expected negative sandbox_memory_limit clamped to 0, got %v", result["sandbox_memory_limit"])
+	}
 }
 
 func TestProjectUpdateSandboxForwardPorts(t *testing.T) {
