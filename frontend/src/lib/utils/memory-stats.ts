@@ -3,6 +3,43 @@ import type { SandboxMemoryStats } from '$lib/types';
 /** Fraction of the memory limit at which the sandbox is considered "close". */
 export const MEMORY_WARNING_RATIO = 0.8;
 
+/** Text used wherever a memory limit is shown read-only but none is enforced. */
+export const NO_MEMORY_LIMIT_LABEL = 'No limit';
+
+/**
+ * Normalizes a memory-limit input (MB) to the canonical form used across the
+ * app: a positive integer of MB, or **0 for unlimited**.
+ *
+ * Blank, non-numeric, zero and negative all collapse to 0 — the same convention
+ * the sandbox layer already speaks (`--memory` omitted at create, cgroup limit
+ * cleared on a running container, `memory_limit_mb: 0` in live stats). Never
+ * returns null: the settings payloads must send an explicit 0, because an
+ * omitted/null field means "don't change the limit" to the server.
+ */
+export function parseMemoryLimitMB(raw: string | number | null | undefined): number {
+    if (raw === null || raw === undefined || raw === '') return 0;
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.floor(n);
+}
+
+/**
+ * The value to bind a memory-limit input to: the MB number, or null (a blank
+ * field) when unlimited. Callers that have a default for an *absent* field
+ * apply it first — e.g. a project created without a limit defaults to 1024 MB,
+ * while a project explicitly saved unlimited reports 0 and renders blank.
+ */
+export function memoryLimitToInput(mb: number | null | undefined): number | null {
+    const parsed = parseMemoryLimitMB(mb);
+    return parsed > 0 ? parsed : null;
+}
+
+/** Read-only rendering of a memory limit: "1024 MB", or "No limit". */
+export function formatMemoryLimitMB(mb: number | null | undefined): string {
+    const parsed = parseMemoryLimitMB(mb);
+    return parsed > 0 ? `${parsed} MB` : NO_MEMORY_LIMIT_LABEL;
+}
+
 /**
  * True when a running container's usage is within MEMORY_WARNING_RATIO of its
  * limit. False when the container is not running, has no known limit (0), or
