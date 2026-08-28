@@ -5,7 +5,8 @@
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
     import { isDangerousPermission, requiresInstallReview, sortPermissions } from '$lib/utils/extension-permissions';
-    import { effectiveConfigFields, initialEditConfig } from '$lib/utils/extension-config';
+    import { effectiveConfigFields, initialEditConfig, HOST_OWNED_LSP_CONFIG_KEY, type ConfigField } from '$lib/utils/extension-config';
+    import { memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { orderBrowseEntries } from '$lib/composables/use-browse-order';
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
@@ -485,6 +486,16 @@
         editLspSettings = { editor_enabled: true, tool_calls_enabled: true };
     }
 
+    // A memory limit input renders blank for "no limit" and parses blank/0/negative back to a numeric 0 (unlimited)
+    function numberFieldValue(field: ConfigField): number | null {
+        const raw = editConfig[field.key] ?? field.default;
+        return field.key === HOST_OWNED_LSP_CONFIG_KEY ? memoryLimitToInput(raw) : raw;
+    }
+
+    function numberFieldInput(key: string, raw: string): number {
+        return key === HOST_OWNED_LSP_CONFIG_KEY ? parseMemoryLimitMB(raw) : Number(raw);
+    }
+
     // Save edit
     async function handleSave() {
         if (!editExtensionId) return;
@@ -881,8 +892,9 @@
                                 <input
                                     id="edit-config-{field.key}"
                                     type="number"
-                                    value={editConfig[field.key] ?? field.default ?? ''}
-                                    oninput={(e) => editConfig[field.key] = Number((e.target as HTMLInputElement).value)}
+                                    value={numberFieldValue(field)}
+                                    placeholder={field.key === HOST_OWNED_LSP_CONFIG_KEY ? 'No limit' : undefined}
+                                    oninput={(e) => editConfig[field.key] = numberFieldInput(field.key, (e.target as HTMLInputElement).value)}
                                     class="config-input"
                                 />
                             {:else if field.type === 'boolean'}
@@ -914,14 +926,15 @@
                     <h4>Sandbox</h4>
                     <div class="config-field">
                         <label class="field-label" for="edit-config-memory_limit">Memory Limit (MB)</label>
-                        <p class="field-desc">Maximum memory for the language server sandbox. 0 = no limit. Applied immediately on save.</p>
+                        <p class="field-desc">Maximum memory for the language server sandbox. Blank = no limit. Applied immediately on save.</p>
                         <input
                             id="edit-config-memory_limit"
                             type="number"
                             min="0"
                             step="1"
-                            value={editConfig.memory_limit ?? 0}
-                            oninput={(e) => editConfig.memory_limit = Math.max(0, Number((e.target as HTMLInputElement).value))}
+                            placeholder="No limit"
+                            value={memoryLimitToInput(editConfig.memory_limit)}
+                            oninput={(e) => editConfig.memory_limit = parseMemoryLimitMB((e.target as HTMLInputElement).value)}
                             class="config-input"
                         />
                     </div>

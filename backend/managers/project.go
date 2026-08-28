@@ -534,7 +534,11 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if req.SandboxMemoryLimit != nil {
-			if updateErr := h.store.UpdateProjectSandboxMemoryLimit(id, *req.SandboxMemoryLimit); updateErr != nil {
+			limit := *req.SandboxMemoryLimit
+			if limit < 0 {
+				limit = 0
+			}
+			if updateErr := h.store.UpdateProjectSandboxMemoryLimit(id, limit); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update sandbox memory limit setting")
 				return
 			}

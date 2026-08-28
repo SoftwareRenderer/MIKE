@@ -4,7 +4,7 @@
     import { getProject } from '$lib/api';
     import Icon from '$lib/components/Icon.svelte';
     import shieldIcon from '$lib/assets/icons/shield.svg?raw';
-    import { isNearMemoryLimit, formatSandboxMemory } from '$lib/utils/memory-stats';
+    import { isNearMemoryLimit, formatSandboxMemory, formatMemoryLimitMB } from '$lib/utils/memory-stats';
 import BaseModal from './BaseModal.svelte';
 
     let { task, stats, onClose }: {
@@ -97,7 +97,7 @@ Sandbox Isolation is enabled for this project
                     <!-- Memory limit -->
                     <div class="setting-row">
                         <span class="setting-label">Memory Limit</span>
-                        <span class="setting-value">{project.sandbox_memory_limit ?? 1024} MB</span>
+                        <span class="setting-value">{formatMemoryLimitMB(project.sandbox_memory_limit ?? 1024)}</span>
                     </div>
 
                     <!-- Image -->
