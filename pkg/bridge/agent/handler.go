@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
+	"syscall"
 
 	"kanban/pkg/bridge/protocol"
 )
@@ -37,6 +38,45 @@ func (h *handler) lockFile(path string) func() {
 type bashProc struct {
 	cmd  *exec.Cmd
 	done chan struct{} // closed when the process exits (normal, killed, or cancelled)
+
+	// reaped is set once cmd.Wait() has returned. Signalling the process group is
+	// only safe while the leader is alive: after the reap its pid (== the pgid) can
+	// be recycled by an unrelated process.
+	reaped atomic.Bool
+
+	// mu guards cmd (cmd.Start() writes cmd.Process while a bash_cancel may be
+	// looking at it) and, with finished, orders the output frames: no Chunk may be
+	// written after the Result frame, because the client drops it.
+	mu       sync.Mutex
+	finished bool
+}
+
+// kill stops the command's whole process group. The command runs with Setpgid, so
+// the group id equals its pid, and the grandchildren go down with it — they are
+// what keeps an inherited stdout open after the command itself is done.
+func (bp *bashProc) kill() {
+	if bp.cmd == nil {
+		return
+	}
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+	if bp.reaped.Load() || bp.cmd.Process == nil {
+		return
+	}
+	if err := syscall.Kill(-bp.cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		// Group already gone (or not permitted) — fall back to the direct child.
+		_ = bp.cmd.Process.Kill()
+	}
+}
+
+// pid returns the command's pid, or 0 before it started.
+func (bp *bashProc) pid() int {
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+	if bp.cmd == nil || bp.cmd.Process == nil {
+		return 0
+	}
+	return bp.cmd.Process.Pid
 }
 
 func newHandler() *handler {
@@ -82,11 +122,9 @@ func (h *handler) close() {
 		s.close()
 		delete(h.sessions, id)
 	}
-	// Kill all tracked bash processes
+	// Kill all tracked bash processes (and their process groups)
 	for id, bp := range h.bashProcs {
-		if bp.cmd != nil && bp.cmd.Process != nil {
-			_ = bp.cmd.Process.Kill()
-		}
+		bp.kill()
 		delete(h.bashProcs, id)
 	}
 	h.mu.Unlock()
@@ -261,10 +299,10 @@ func (h *handler) handleBashCancel(frame *protocol.Frame) {
 		return
 	}
 
-	if bp.cmd != nil && bp.cmd.Process != nil {
-		log.Printf("agent: bash_cancel MsgID=%d killing process pid=%d", params.TargetMsgID, bp.cmd.Process.Pid)
-		_ = bp.cmd.Process.Kill()
+	if pid := bp.pid(); pid > 0 {
+		log.Printf("agent: bash_cancel MsgID=%d killing process group pgid=%d", params.TargetMsgID, pid)
 	}
+	bp.kill()
 	// Signal the done channel so the handleBash goroutine unblocks
 	select {
 	case <-bp.done:
