@@ -50,7 +50,7 @@ describe('Board layout', () => {
         expect(source).toContain('scrollToColumn');
     });
 
-    it('orders tasks by last activity within columns', () => {
+    it('orders tasks by last move, newest first', () => {
         expect(source).toContain('sort');
     });
 });

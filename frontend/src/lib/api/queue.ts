@@ -1,6 +1,6 @@
 import { API_BASE, apiFetch, apiError, ensureCsrfToken, generateId, registerSetOffline } from './helpers';
 import { loadQueue as loadQueueFromStorage, saveQueue as saveQueueToStorage, type QueuedAction as StoredQueuedAction } from '../storage';
-import type { Config, Project, ReorderRequest, Task, TaskMessage, Thread } from '../types';
+import type { Config, Project, Task, TaskMessage, Thread } from '../types';
 
 // Re-export helpers for direct imports
 export { generateId };
@@ -33,8 +33,6 @@ export type ActionType =
     | 'deleteTaskMessage' | 'updateTaskMessage'
     // Threads
     | 'switchTaskThread' | 'forkTaskThread' | 'deleteTaskThread'
-    // Board
-    | 'reorderTasks'
     // Projects
     | 'createProject' | 'updateProject' | 'deleteProject'
     // Git
@@ -275,13 +273,13 @@ export function applyQueuedActionsToBoard(
         switch (action.type) {
             case 'createTask': {
                 const taskData = p.taskData || {};
+                const now = new Date().toISOString();
                 const task: Task = {
                     id: taskData.id || generateId(),
                     project_id: projectId,
                     title: taskData.title || '',
                     prompt: taskData.prompt || '',
                     status: taskData.status || 'backlog',
-                    column_order: taskData.column_order ?? 0,
                     execution_state: taskData.execution_state || 'idle',
                     model_name: taskData.model_name || '',
                     llama_server_url: taskData.llama_server_url || '',
@@ -296,8 +294,10 @@ export function applyQueuedActionsToBoard(
                     summarizing: taskData.summarizing ?? false,
                     current_thread_id: taskData.current_thread_id || undefined,
                     has_merge_conflict: false,
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString(),
+                    created_at: now,
+                    updated_at: now,
+                    // Never moved yet, so the new task starts at the top of its column.
+                    moved_at: now,
                 };
                 result.push(task);
                 optIdMap.set(task.id, task.id);
@@ -314,7 +314,10 @@ export function applyQueuedActionsToBoard(
             case 'moveTask': {
                 const resolvedId = optIdMap.get(taskId) || taskId;
                 const task = result.find(t => t.id === resolvedId);
-                if (task) task.status = p.status;
+                if (task) {
+                    task.status = p.status;
+                    task.moved_at = new Date().toISOString();
+                }
                 break;
             }
 
@@ -368,16 +371,6 @@ export function applyQueuedActionsToBoard(
                 if (p.taskData) {
                     const task = result.find(t => t.id === resolvedId);
                     if (task) Object.assign(task, p.taskData);
-                }
-                break;
-            }
-
-            case 'reorderTasks': {
-                if (p.reorders) {
-                    for (const reorder of p.reorders) {
-                        const task = result.find(t => t.id === reorder.id);
-                        if (task) task.column_order = reorder.column_order;
-                    }
                 }
                 break;
             }
@@ -445,9 +438,6 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             break;
         case 'resumeTask':
             await resumeTaskRaw(p.projectId, taskId);
-            break;
-        case 'reorderTasks':
-            await reorderTasksRaw(p.projectId, p.reorders);
             break;
         case 'createProject':
             await createProjectRaw(p.path, p.sandboxEnabled, p.gitUrl);
@@ -590,16 +580,6 @@ export async function resetProjectStatsRaw(projectId: string, modelName: string,
     if (providerName) params.set('provider_name', providerName);
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/stats?${params}`, { method: 'DELETE' });
     if (!res.ok) throw await apiError(res, 'Failed to reset stats');
-}
-
-// -- Board endpoints --
-async function reorderTasksRaw(projectId: string, reorders: ReorderRequest[]): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/reorder`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reorders),
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to reorder tasks');
 }
 
 // -- Task CRUD endpoints --
@@ -836,7 +816,6 @@ export {
     createProjectRaw,
     updateProjectRaw,
     deleteProjectRaw,
-    reorderTasksRaw,
     createTaskRaw,
     updateTaskRaw,
     deleteTaskRaw,
