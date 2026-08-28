@@ -517,13 +517,19 @@ async function updateProjectRaw(id: string, updates: { name?: string; sandbox_en
     return res.json();
 }
 
-/** Stream build progress via SSE. onLine is called for each progress line. */
-export async function buildSandboxImageStream(id: string, onLine: (line: string) => void): Promise<{ status: string; image: string; project: string }> {
+/** Stream build progress via SSE. onLine is called for each progress line.
+ *  opts.noCache skips the container build layer cache for this build only. */
+export async function buildSandboxImageStream(
+    id: string,
+    onLine: (line: string) => void,
+    opts?: { noCache?: boolean },
+): Promise<{ status: string; image: string; project: string }> {
     const token = await ensureCsrfToken();
     const headers = new Headers();
     if (token) headers.set('X-CSRF-Token', token);
 
-    const res = await fetch(`${API_BASE}/projects/${id}/sandbox/build`, {
+    const url = `${API_BASE}/projects/${id}/sandbox/build${opts?.noCache ? '?no_cache=1' : ''}`;
+    const res = await fetch(url, {
         method: 'POST',
         credentials: 'include',
         headers,

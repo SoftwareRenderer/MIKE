@@ -415,6 +415,37 @@ func TestHandleSandboxBuildRequiresSandboxManager(t *testing.T) {
 	}
 }
 
+// TestBuildWantsNoCache checks that only an explicit truthy ?no_cache value
+// disables the build layer cache; anything else keeps the default cached build.
+func TestBuildWantsNoCache(t *testing.T) {
+	tests := []struct {
+		query string
+		want  bool
+	}{
+		{"", false},
+		{"no_cache=", false},
+		{"no_cache=1", true},
+		{"no_cache=true", true},
+		{"no_cache=TRUE", true},
+		{"no_cache=0", false},
+		{"no_cache=false", false},
+		{"no_cache=maybe", false},
+		{"other=1", false},
+	}
+	for _, tc := range tests {
+		t.Run("query="+tc.query, func(t *testing.T) {
+			u := "/api/projects/p1/sandbox/build"
+			if tc.query != "" {
+				u += "?" + tc.query
+			}
+			req := httptest.NewRequest(http.MethodPost, u, nil)
+			if got := buildWantsNoCache(req); got != tc.want {
+				t.Fatalf("buildWantsNoCache(%q) = %v, want %v", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestApplyPricingBasic(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
