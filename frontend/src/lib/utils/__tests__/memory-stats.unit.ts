@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MEMORY_WARNING_RATIO, isNearMemoryLimit, isMemoryLimitReached, isSandboxMemoryWarning, formatSandboxMemory } from '$lib/utils/memory-stats';
+import { MEMORY_WARNING_RATIO, isNearMemoryLimit, isMemoryLimitReached, isSandboxMemoryWarning, formatSandboxMemory, parseMemoryLimitMB, memoryLimitToInput, formatMemoryLimitMB, NO_MEMORY_LIMIT_LABEL } from '$lib/utils/memory-stats';
 import type { SandboxMemoryStats } from '$lib/types';
 
 function stats(overrides: Partial<SandboxMemoryStats> = {}): SandboxMemoryStats {
@@ -108,6 +108,65 @@ describe('isSandboxMemoryWarning', () => {
 
     it('is false when the peak is just below the limit and nothing else triggers', () => {
         expect(isSandboxMemoryWarning(stats({ memory_current_mb: 100, memory_peak_mb: 1023, memory_limit_mb: 1024 }))).toBe(false);
+    });
+});
+
+describe('parseMemoryLimitMB', () => {
+    it('treats blank and missing as unlimited (0)', () => {
+        expect(parseMemoryLimitMB('')).toBe(0);
+        expect(parseMemoryLimitMB(null)).toBe(0);
+        expect(parseMemoryLimitMB(undefined)).toBe(0);
+        expect(parseMemoryLimitMB('   ')).toBe(0);
+    });
+
+    it('treats non-numeric as unlimited (0)', () => {
+        expect(parseMemoryLimitMB('abc')).toBe(0);
+        expect(parseMemoryLimitMB(NaN)).toBe(0);
+        expect(parseMemoryLimitMB(Infinity)).toBe(0);
+    });
+
+    it('maps 0 to unlimited', () => {
+        expect(parseMemoryLimitMB(0)).toBe(0);
+        expect(parseMemoryLimitMB('0')).toBe(0);
+    });
+
+    it('clamps negatives to unlimited (0)', () => {
+        expect(parseMemoryLimitMB(-512)).toBe(0);
+        expect(parseMemoryLimitMB('-512')).toBe(0);
+    });
+
+    it('keeps a positive limit as an integer number of MB', () => {
+        expect(parseMemoryLimitMB(2048)).toBe(2048);
+        expect(parseMemoryLimitMB('256')).toBe(256);
+        expect(parseMemoryLimitMB(1.9)).toBe(1);
+    });
+
+    it('never returns null — an omitted field must not mean "keep the limit"', () => {
+        expect(parseMemoryLimitMB('')).not.toBeNull();
+    });
+});
+
+describe('memoryLimitToInput', () => {
+    it('blanks the field when unlimited', () => {
+        expect(memoryLimitToInput(0)).toBeNull();
+        expect(memoryLimitToInput(-512)).toBeNull();
+    });
+
+    it('passes a positive limit through', () => {
+        expect(memoryLimitToInput(1024)).toBe(1024);
+    });
+});
+
+describe('formatMemoryLimitMB', () => {
+    it('renders "No limit" for unlimited and missing values', () => {
+        expect(formatMemoryLimitMB(0)).toBe(NO_MEMORY_LIMIT_LABEL);
+        expect(formatMemoryLimitMB(-512)).toBe(NO_MEMORY_LIMIT_LABEL);
+        expect(formatMemoryLimitMB(null)).toBe(NO_MEMORY_LIMIT_LABEL);
+        expect(formatMemoryLimitMB(undefined)).toBe(NO_MEMORY_LIMIT_LABEL);
+    });
+
+    it('renders MB for an enforced limit', () => {
+        expect(formatMemoryLimitMB(512)).toBe('512 MB');
     });
 });
 

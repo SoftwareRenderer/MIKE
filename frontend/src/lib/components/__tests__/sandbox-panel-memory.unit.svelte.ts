@@ -17,6 +17,7 @@ vi.mock('$lib/api', () => ({
 }));
 
 import SandboxPanel from '$lib/components/SandboxPanel.svelte';
+import { getProject } from '$lib/api';
 import type { Task, SandboxMemoryStats } from '$lib/types';
 
 const task = { id: 'task-1', project_id: 'p1', status: 'in_progress', title: 'T' } as unknown as Task;
@@ -39,6 +40,17 @@ function renderPanel(stats: SandboxMemoryStats | null) {
             stats,
             onClose: () => {},
         },
+    });
+}
+
+// The panel fetches the project for its read-only settings list.
+async function memoryRowValue(container: HTMLElement): Promise<string> {
+    return vi.waitFor(async () => {
+        const row = Array.from(container.querySelectorAll('.setting-row'))
+            .find((r) => r.querySelector('.setting-label')?.textContent?.includes('Memory Limit'));
+        const value = row?.querySelector('.setting-value')?.textContent?.trim();
+        if (!value) throw new Error('memory limit row not found');
+        return value;
     });
 }
 
@@ -138,5 +150,23 @@ describe('SandboxPanel memory section', () => {
         const { container } = renderPanel(stats({ running: false, memory_current_mb: 0, oom_kills: 1 }));
         expect(container.querySelector('.oom-warning')).not.toBeNull();
         expect(container.querySelector('.memory-value')?.textContent).toContain('Not running');
+    });
+
+    it('shows the enforced limit in the settings list', async () => {
+        const { container } = renderPanel(stats({ running: false, memory_current_mb: 0 }));
+        expect(await memoryRowValue(container)).toBe('1024 MB');
+    });
+
+    it('shows "No limit" in the settings list when the project saved a blank limit', async () => {
+        vi.mocked(getProject).mockResolvedValueOnce({
+            id: 'p1',
+            name: 'Test Project',
+            sandbox_enabled: true,
+            sandbox_network_isolation: false,
+            sandbox_memory_limit: 0,
+        } as any);
+        const { container } = renderPanel(stats({ running: false, memory_current_mb: 0 }));
+
+        expect(await memoryRowValue(container)).toBe('No limit');
     });
 });
