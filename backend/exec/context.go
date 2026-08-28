@@ -97,15 +97,23 @@ func (te *TaskExecutor) summarizeContext(ctx context.Context, messages []types.C
 	if err != nil {
 		return summarizeResult{}, fmt.Errorf("summarization call failed: %w", err)
 	}
+	// An empty summary must be rejected: buildLLMContext drops all messages
+	// before the summarization entry, so installing one erases the conversation.
+	if strings.TrimSpace(summary) == "" {
+		return summarizeResult{}, fmt.Errorf("summarization produced an empty summary")
+	}
 
-	return summarizeResult{
-		summary:         summary,
-		oldLen:          oldLen,
-		promptTokens:    usage.PromptTokens,
-		predictedTokens: usage.CompletionTokens,
-		promptMs:        usage.PromptMs,
-		predictedMs:     usage.PredictedMs,
-	}, nil
+	res := summarizeResult{
+		summary: summary,
+		oldLen:  oldLen,
+	}
+	if usage != nil {
+		res.promptTokens = usage.PromptTokens
+		res.predictedTokens = usage.CompletionTokens
+		res.promptMs = usage.PromptMs
+		res.predictedMs = usage.PredictedMs
+	}
+	return res, nil
 }
 
 // buildLLMContext filters out summarization messages (summary is in system prompt).
