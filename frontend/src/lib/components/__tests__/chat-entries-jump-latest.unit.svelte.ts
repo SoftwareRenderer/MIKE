@@ -1,135 +1,203 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { render, fireEvent, cleanup, act } from '@testing-library/svelte';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Mock all sub-components that ChatEntries depends on
+vi.mock('$lib/components/Chat/ChatMessage.svelte', () => ({
+    default: () => '<div class="mock-chat-message"></div>',
+}));
+vi.mock('$lib/components/Chat/CheckpointDivider.svelte', () => ({
+    default: () => '<div class="mock-checkpoint-divider"></div>',
+}));
+vi.mock('$lib/components/Chat/QueueIndicator.svelte', () => ({
+    default: () => '<div class="mock-queue-indicator"></div>',
+}));
+vi.mock('$lib/utils/toolArgs', () => ({
+    formatToolArgs: vi.fn(() => ''),
+}));
+// The follow tracker reads its bottom threshold from this module, so stub it here.
+vi.mock('$lib/constants', () => ({
+    SCROLL_BOTTOM_THRESHOLD: 100,
+}));
+
+import ChatEntries from '$lib/components/Chat/ChatEntries.svelte';
+import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const chatEntriesPath = resolve(__dirname, '../Chat/ChatEntries.svelte');
-const source = readFileSync(chatEntriesPath, 'utf-8');
+const source = readFileSync(resolve(__dirname, '../Chat/ChatEntries.svelte'), 'utf-8');
+
+async function flush() {
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+}
+
+/** Fake layout on the mounted container (jsdom has none). scrollTop clamps like a browser. */
+function stubLayout(el: HTMLElement, { scrollHeight = 1000, clientHeight = 300, scrollTop = 0 } = {}) {
+    const layout = { scrollHeight, clientHeight, scrollTop };
+    for (const prop of ['scrollHeight', 'clientHeight'] as const) {
+        Object.defineProperty(el, prop, { configurable: true, get: () => layout[prop] });
+    }
+    Object.defineProperty(el, 'scrollTop', {
+        configurable: true,
+        get: () => layout.scrollTop,
+        set: (v: number) => { layout.scrollTop = Math.max(0, Math.min(v, layout.scrollHeight - layout.clientHeight)); },
+    });
+    return layout;
+}
+
+function makeEntries(n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+        id: `msg-${i}`,
+        role: 'assistant' as const,
+        content: `content ${i}`,
+        isStreaming: false,
+        createdAt: new Date().toISOString(),
+    }));
+}
+
+const baseProps = {
+    entryMetas: [],
+    lastEntryIdx: 0,
+    activeThreadId: 'main',
+    threads: [],
+    awaitingResponse: false,
+    connected: true,
+    queuePosition: 0,
+    queueEstimatedWait: 0,
+    promptProgress: 0,
+    retryCount: 0,
+    retryError: '',
+    isAgentSelected: () => false,
+    taskStatus: 'in_progress',
+    taskExecutionState: '',
+    projectId: 'test-project',
+    taskId: 'test-task',
+    onDismissError: vi.fn(),
+    onRetryConnect: vi.fn(),
+    onThreadSwitch: vi.fn(),
+    onMsgDelete: vi.fn(),
+    onMsgFork: vi.fn(),
+    onMsgSend: vi.fn(),
+    onMsgEdit: vi.fn(),
+    onRegenerate: vi.fn(),
+    onNavigateTask: vi.fn(),
+};
+
+async function mount(count = 3) {
+    const follow = createChatFollow();
+    const entries = makeEntries(count);
+    const { container, ...rest } = render(ChatEntries, {
+        ...baseProps,
+        entries,
+        entryMetas: entries.map(() => ({ cpState: null, cpThread: null, checkpointIndex: -1, isLastUserMessage: false })),
+        lastEntryIdx: entries.length - 1,
+        follow,
+    });
+    await flush();
+    const scroller = container.querySelector('.chat-messages') as HTMLElement;
+    // A real user scroll: gesture first, then the scroll event it produces.
+    const userScrollTo = async (top: number) => {
+        stubLayout(scroller, { scrollHeight: 1000, clientHeight: 300, scrollTop: top });
+        await fireEvent.wheel(scroller, { deltaY: -400 });
+        await fireEvent.scroll(scroller);
+        await flush();
+    };
+    return { follow, container, scroller, userScrollTo, ...rest };
+}
 
 describe('ChatEntries — Jump to latest button', () => {
-    it('imports SCROLL_BOTTOM_THRESHOLD from $lib/constants', () => {
-        expect(source).toContain("SCROLL_BOTTOM_THRESHOLD");
-        expect(source).toContain("from '$lib/constants'");
+    it('shows the button only while the tracker says the user left the bottom', async () => {
+        const { follow, scroller, userScrollTo } = await mount();
+        stubLayout(scroller, { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+
+        // Following the bottom → no button.
+        await fireEvent.scroll(scroller);
+        expect(follow.atBottom).toBe(true);
+        expect(scroller.closest('.chat-messages-wrapper')?.querySelector('.chat-jump-latest')).toBeNull();
+
+        // User scrolls up past the threshold → the button appears.
+        await userScrollTo(200);
+        expect(follow.atBottom).toBe(false);
+        const btn = scroller.closest('.chat-messages-wrapper')?.querySelector('.chat-jump-latest');
+        expect(btn).toBeTruthy();
+        expect(btn?.getAttribute('aria-label')).toMatch(/latest/i);
+        expect(btn?.getAttribute('title')).toBeTruthy();
+
+        // Back near the bottom → button goes away again.
+        stubLayout(scroller, { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+        await fireEvent.scroll(scroller);
+        await flush();
+        expect(scroller.closest('.chat-messages-wrapper')?.querySelector('.chat-jump-latest')).toBeNull();
+        cleanup();
     });
 
-    it('declares a local atBottom reactive state initialized to true', () => {
-        expect(source).toMatch(/atBottom\s*=\s*\$state\s*\(\s*true\s*\)/);
+    it('clicking the button forces a pin to the bottom', async () => {
+        const { follow, scroller, userScrollTo } = await mount();
+        stubLayout(scroller, { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+        await fireEvent.scroll(scroller);
+        await userScrollTo(100);
+        expect(follow.atBottom).toBe(false);
+
+        const btn = scroller.closest('.chat-messages-wrapper')?.querySelector('.chat-jump-latest') as HTMLElement;
+        expect(btn).toBeTruthy();
+        const pinSpy = vi.spyOn(follow, 'pin');
+        await act(async () => { await fireEvent.click(btn); });
+
+        expect(pinSpy).toHaveBeenCalledWith(true);
+        // Clamped to the real bottom: 1000 - 300.
+        expect(scroller.scrollTop).toBe(700);
+        expect(follow.atBottom).toBe(true);
+        cleanup();
     });
 
-    it('computes atBottom in handleCombinedScroll using the scroll element gap', () => {
-        // The handler should check scrollHeight - scrollTop - clientHeight < threshold
-        expect(source).toMatch(/scrollHeight.*scrollTop.*clientHeight|scrollTop.*clientHeight.*scrollHeight/);
-        expect(source).toContain('SCROLL_BOTTOM_THRESHOLD');
+    it('does not render the button when there are no entries', async () => {
+        const { container } = await mount(0);
+        expect(container.querySelector('.chat-jump-latest')).toBeNull();
+        cleanup();
     });
 
-    it('recomputes atBottom in the $effect that runs when entries change', () => {
-        // There should be a $effect that references entries.length and also sets atBottom
-        const effectBlock = source.match(/\$effect\s*\(\s*\(\s*\)\s*=>\s*\{[^}]*entries\.length[^}]*\}/s);
-        expect(effectBlock).toBeTruthy();
-        // The effect should also reference atBottom
-        expect(source).toMatch(/\$effect[^{]*\{[^}]*(entries\.length|computeStickyFromScroll)[^}]*atBottom/s);
+    it('routes scroll events through the shared tracker', async () => {
+        const { follow, scroller } = await mount();
+        const spy = vi.spyOn(follow, 'handleScroll');
+        await fireEvent.scroll(scroller);
+        expect(spy).toHaveBeenCalled();
+        cleanup();
     });
 
-    it('only pins the viewport / hides the jump button when the user is at the bottom', () => {
-        // A user who scrolled up to read must keep their position: the effect must
-        // gate its scroll-to-bottom + atBottom=true on the current scroll position
-        // instead of unconditionally forcing atBottom to true on every entries change.
-        const effectBlock = source.match(/\$effect\s*\(\s*\(\s*\)\s*=>\s*\{[^}]*entries\.length[^}]*\}/s);
-        expect(effectBlock).toBeTruthy();
-        // Extract the entries-change effect block (from its opening to the first
-        // `});`) rather than using the pre-existing capture regex, which stops at
-        // the first `}` and would miss the guarded assignment.
-        const effectStart = source.indexOf('$effect(() => {\n        entries.length');
-        expect(effectStart).toBeGreaterThan(-1);
-        const effectEnd = source.indexOf('});', effectStart);
-        expect(effectEnd).toBeGreaterThan(effectStart);
-        const effectBody = source.slice(effectStart, effectEnd);
-        // The effect must guard on atBottom
-        expect(effectBody).toMatch(/if\s*\(\s*atBottom\s*\)/);
-        // atBottom = true must only appear inside that guard — i.e. after the
-        // guard opens, never unconditionally before it.
-        const guardIdx = effectBody.indexOf('if (atBottom)');
-        const assignIdx = effectBody.indexOf('atBottom = true');
-        expect(guardIdx).toBeGreaterThan(-1);
-        expect(assignIdx).toBeGreaterThan(guardIdx);
+    it('hands the real scroll container to the tracker', async () => {
+        const { follow, scroller } = await mount();
+        expect(follow.el).toBe(scroller);
+        cleanup();
     });
 
-    it('pins the viewport to the bottom when new entries arrive while at the bottom', () => {
-        // When the user is at the bottom, the effect must keep up with new content
-        // by scrolling the chat container to the bottom (immediate + next frame).
-        expect(source).toContain('scrollToBottom()');
-        expect(source).toMatch(/requestAnimationFrame\s*\(\s*\(\s*\)\s*=>\s*scrollToBottom\(\)/);
+    it('wraps the entries in a content element the tracker can observe', async () => {
+        const { container } = await mount();
+        const content = container.querySelector('.chat-content');
+        expect(content).toBeTruthy();
+        expect(container.querySelector('.chat-messages')?.contains(content ?? null)).toBe(true);
+        expect(content?.querySelectorAll('.chat-entry').length).toBe(3);
+        cleanup();
     });
+});
 
-    it('renders a jump-to-latest button with class chat-jump-latest', () => {
-        expect(source).toContain('chat-jump-latest');
-    });
-
-    it('shows the button only when not at bottom and entries exist', () => {
-        // The button should be conditionally rendered: {#if !atBottom && entries.length > 0}
-        expect(source).toMatch(/\{#if\s+!atBottom\s*&&\s*entries\.length\s*>\s*0/);
-    });
-
-    it('the button has aria-label for accessibility', () => {
-        expect(source).toMatch(/aria-label=["'][^"']*latest[^"']*["']/i);
-    });
-
-    it('the button has a title tooltip', () => {
-        expect(source).toMatch(/title=["'][^"']*["']/);
-    });
-
-    it('the button contains a down arrow/chevron SVG', () => {
-        expect(source).toMatch(/<svg[^>]*>.*-chevron.*<\/svg>|<svg[^>]*>.*arrow.*<\/svg>|<svg[^>]*>.*polyline.*<\/svg>|<svg[^>]*>.*path.*<\/svg>/is);
-    });
-
-    it('the button click handler calls scrollToBottom on the chat container', () => {
-        expect(source).toMatch(/handleJumpLatest|jumpLatest|scrollToBottom/);
-        // Should call scrollToBottom() on the real DOM container
-        expect(source).toContain('scrollToBottom()');
-    });
-
-    it('the click handler uses requestAnimationFrame for a second scrollToBottom call', () => {
-        expect(source).toMatch(/requestAnimationFrame.*scrollToBottom|scrollToBottom.*requestAnimationFrame/s);
-    });
-
-    it('the click handler sets atBottom to true after scrolling', () => {
-        expect(source).toMatch(/atBottom\s*=\s*true/);
-    });
-
-    it('the button is positioned absolutely within the chat-messages-wrapper', () => {
-        // CSS should position it absolute, bottom-right
+describe('ChatEntries — Jump to latest styling', () => {
+    it('is positioned absolutely within the chat-messages-wrapper', () => {
         expect(source).toMatch(/\.chat-jump-latest\s*\{[\s\S]*?position:\s*absolute/);
         expect(source).toMatch(/\.chat-jump-latest\s*\{[\s\S]*?bottom:/);
         expect(source).toMatch(/\.chat-jump-latest\s*\{[\s\S]*?right:/);
     });
 
-    it('the button z-index is at or below the sticky header z-index of 5', () => {
-        const zIndexMatch = source.match(/\.chat-jump-latest\s*\{[\s\S]*?z-index:\s*(\d+)/);
-        expect(zIndexMatch).toBeTruthy();
-        if (zIndexMatch) {
-            expect(parseInt(zIndexMatch[1])).toBeLessThanOrEqual(5);
-        }
+    it('stays at or below the sticky header z-index of 5', () => {
+        const m = source.match(/\.chat-jump-latest\s*\{[\s\S]*?z-index:\s*(\d+)/);
+        expect(m).toBeTruthy();
+        expect(parseInt(m![1])).toBeLessThanOrEqual(5);
     });
 
-    it('the button has a minimum touch-friendly size (32px)', () => {
-        const sizeMatch = source.match(/\.chat-jump-latest[^{]*\{[\s\S]*?(min-width|min-height|width|height):\s*(\d+)px/);
-        expect(sizeMatch).toBeTruthy();
-    });
-
-    it('the button has a transition or animation for entrance', () => {
+    it('is touch-friendly and animated, and themed like the rest of the chat', () => {
+        expect(source).toMatch(/\.chat-jump-latest[^{]*\{[\s\S]*?(min-width|min-height|width|height):\s*\d+px/);
         expect(source).toMatch(/\.chat-jump-latest[^{]*\{[\s\S]*?(transition|animation|@keyframes)/);
-    });
-
-    it('the button uses surface-1 background and border styling consistent with chat theme', () => {
         expect(source).toMatch(/\.chat-jump-latest[^{]*\{[\s\S]*?(background|border)/);
-    });
-
-    it('the button has a hover state with accent color', () => {
         expect(source).toMatch(/\.chat-jump-latest.*:hover[\s\S]*?(accent|hover)/);
-    });
-
-    it('calls parent onScroll in the combined scroll handler', () => {
-        expect(source).toContain('onScroll?.()');
     });
 });

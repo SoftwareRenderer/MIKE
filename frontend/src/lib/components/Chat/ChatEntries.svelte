@@ -2,11 +2,11 @@
     import type { Thread, ChatEntry } from '$lib/types';
     import type { EntryMeta } from '$lib/utils/chat-entries';
     import { computeStickyHeader, type StickyUserMessage } from '$lib/utils/chat-sticky-header';
+    import { distanceFromBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
     import QueueIndicator from './QueueIndicator.svelte';
     import { formatToolArgs } from '$lib/utils/toolArgs';
-    import { SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
     import { appStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
 
@@ -28,7 +28,6 @@
         taskExecutionState,
         projectId,
         taskId,
-        onScroll,
         onDismissError,
         onRetryConnect,
         onThreadSwitch,
@@ -42,8 +41,7 @@
         onViewChanges,
         onToggleFullscreen,
         isChatFullscreen,
-        onScrollElChange,
-        entriesReady,
+        follow,
         historyLoading = false,
     }: {
         entries: ChatEntry[];
@@ -63,7 +61,6 @@
         taskExecutionState: string;
         projectId: string;
         taskId: string;
-        onScroll?: () => void;
         onDismissError: (messageId: string) => Promise<void>;
         onRetryConnect: () => void;
         onThreadSwitch: (threadId: string) => Promise<void>;
@@ -77,8 +74,8 @@
         onViewChanges?: (commitHash: string) => void;
         onToggleFullscreen?: () => void;
         isChatFullscreen?: boolean;
-        onScrollElChange?: (el: HTMLElement | null) => void;
-        entriesReady?: boolean;
+        /** Shared follow-the-bottom tracker (created by TaskChat). */
+        follow: ChatFollow;
         historyLoading?: boolean;
     } = $props();
 
@@ -86,20 +83,18 @@
         return /^[a-z0-9]{8}$/.test(id);
     }
 
-    // Scroll element — the real (non-virtualized) chat message container.
-    // Reactive so the parent is notified whenever the mounted container changes.
+    // The real (non-virtualized) message container, and the wrapper whose height
+    // is the conversation height. Reactive so the tracker is re-attached whenever
+    // the mounted elements change.
     let chatScrollEl: HTMLElement | null = $state(null);
+    let chatContentEl: HTMLElement | null = $state(null);
 
     const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
 
-    // Track whether the user is scrolled to the bottom of the chat
-    let atBottom = $state(true);
-
-    // Scroll the chat container to the bottom (real DOM; the browser clamps).
-    function scrollToBottom() {
-        if (!chatScrollEl) return;
-        chatScrollEl.scrollTop = chatScrollEl.scrollHeight;
-    }
+    // Hand both to the shared follow tracker — it watches them for layout changes.
+    $effect(() => {
+        follow.attach(chatScrollEl, chatContentEl);
+    });
 
     // Scroll a specific entry index into view.
     function scrollToItem(index: number, behavior: ScrollBehavior = 'auto') {
@@ -108,27 +103,21 @@
         el?.scrollIntoView({ behavior, block: 'start' });
     }
 
-    // Notify the parent of the (real-DOM) scroll element.
-    $effect(() => {
-        onScrollElChange?.(chatScrollEl);
-    });
-
     // Edit diff expand/collapse overrides — lives here so the state survives
     // entry re-renders (and off-screen content-visibility skips).
     // Keyed by toolId; undefined = use default (auto-expand for trivial diffs).
     let editDiffOverrides = $state<Record<string, boolean>>({});
 
-    // Build/pull progress box DOM refs + at-bottom tracking (keyed by entry id) —
-    // used to auto-scroll the box log while lines stream in, mirroring the
-    // Sandbox config modal's build log behavior.
+    const BUILD_LOG_BOTTOM_PX = 50; // same tolerance as the build log in SandboxConfigModal
+
+    // Build/pull progress boxes: DOM refs + at-bottom tracking, keyed by entry id.
     let buildLogEls = $state<Record<string, HTMLDivElement | undefined>>({});
     let buildLogAtBottom = $state<Record<string, boolean>>({});
 
     function onBuildLogScroll(entryId: string) {
         const el = buildLogEls[entryId];
         if (!el) return;
-        const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-        buildLogAtBottom = { ...buildLogAtBottom, [entryId]: gap < 50 };
+        buildLogAtBottom = { ...buildLogAtBottom, [entryId]: distanceFromBottom(el) < BUILD_LOG_BOTTOM_PX };
     }
 
     // Auto-scroll build boxes to the bottom as new lines arrive, but only when
@@ -201,42 +190,27 @@
         scrollToItem(stickyEntryIdx, 'smooth');
     }
 
-    /** Combined scroll handler: calls parent onScroll + computes sticky header + atBottom. */
+    /** One scroll listener for both jobs: shared follow state + sticky header. */
     function handleCombinedScroll() {
-        onScroll?.();
+        follow.handleScroll();
         computeStickyFromScroll();
-        // Compute atBottom from the scroll element
-        if (chatScrollEl) {
-            const gap = chatScrollEl.scrollHeight - chatScrollEl.scrollTop - chatScrollEl.clientHeight;
-            atBottom = gap < SCROLL_BOTTOM_THRESHOLD;
-        }
     }
 
-    // Recompute sticky header when entries change (e.g. new messages arrive).
-    // If the user is at the bottom, keep the viewport pinned so new content
-    // stays visible; if they scrolled up to read, leave them alone (the jump
-    // button stays visible so they can return to the latest message).
+    // Recompute the sticky header when entries change, and keep the viewport
+    // pinned while the user is following (pin() is a no-op once they scroll up).
     $effect(() => {
         entries.length;
         computeStickyFromScroll();
-        if (atBottom) {
-            // Pin the viewport to the bottom as new content arrives (immediate +
-            // next frame, so growing streaming entries stay in view).
-            scrollToBottom();
-            requestAnimationFrame(() => scrollToBottom());
-            atBottom = true;
-        }
+        follow.pin();
     });
 
-    /** Scroll to the latest message and hide the jump button. */
+    /** Force a pin: the button is explicit intent, even if state says otherwise. */
     function handleJumpLatest() {
-        scrollToBottom();
-        requestAnimationFrame(() => scrollToBottom());
-        atBottom = true;
+        follow.pin(true);
     }
 </script>
 
-<div class="chat-messages-wrapper" style={!entriesReady ? 'opacity: 0;' : ''}>
+<div class="chat-messages-wrapper" style={!follow.ready ? 'opacity: 0;' : ''}>
     {#if entries.length > 0 && computedShowHeader}
         <div class="chat-sticky-header" role="status" aria-live="polite">
             <button class="chat-sticky-bubble" onclick={handleStickyClickInternal} title="Scroll to message" aria-label="Scroll to message">{computedStickyMessage}</button>
@@ -271,6 +245,7 @@
         </div>
     {:else}
         <div class="chat-messages" bind:this={chatScrollEl} role="region" aria-label="Chat messages" tabindex="-1" onscroll={handleCombinedScroll}>
+          <div class="chat-content" bind:this={chatContentEl}>
             {#each entries as entry, entryIdx (entry.id)}
                 {@const meta = entryMetas[entryIdx] as EntryMeta}
                 <div class="chat-entry">
@@ -406,9 +381,10 @@
                 {/if}
                 </div>
             {/each}
+          </div>
         </div>
 
-        {#if !atBottom && entries.length > 0}
+        {#if !follow.atBottom && entries.length > 0}
             <button
                 class="chat-jump-latest"
                 onclick={handleJumpLatest}
@@ -451,6 +427,11 @@
         overflow-y: auto;
         padding: 8px 12px;
         min-height: 0;
+    }
+    /* Wrapper around the entry list: the follow tracker observes its height to
+       catch growth that fires no scroll event. */
+    .chat-content {
+        display: block;
     }
     /* Inset focus ring — the global ring's 2px offset is clipped. */
     .chat-messages:focus-visible {

@@ -19,6 +19,7 @@ vi.mock('$lib/constants', () => ({
 }));
 
 import ChatEntries from '$lib/components/Chat/ChatEntries.svelte';
+import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
 
 const baseProps = {
     entries: [],
@@ -55,7 +56,7 @@ describe('ChatEntries — history loading indicator', () => {
             ...baseProps,
             entries: [],
             historyLoading: true,
-            entriesReady: false,
+            follow: createChatFollow(),
         });
 
         const wrapper = container.querySelector('.chat-messages-wrapper');
@@ -72,7 +73,7 @@ describe('ChatEntries — history loading indicator', () => {
             ...baseProps,
             entries: [],
             historyLoading: false,
-            entriesReady: false,
+            follow: createChatFollow(),
         });
 
         // The empty state should be visible
@@ -100,7 +101,7 @@ describe('ChatEntries — history loading indicator', () => {
             entryMetas: [{ cpState: null, cpThread: null, checkpointIndex: -1, isLastUserMessage: false }],
             lastEntryIdx: 0,
             historyLoading: true,
-            entriesReady: true,
+            follow: createChatFollow(),
         });
 
         // Loading indicator should NOT be present when entries exist
@@ -117,7 +118,7 @@ describe('ChatEntries — history loading indicator', () => {
             ...baseProps,
             entries: [],
             historyLoading: true,
-            entriesReady: false,
+            follow: createChatFollow(),
         });
 
         const loadingIndicator = container.querySelector('.chat-loading');
