@@ -210,6 +210,54 @@ func TestRunSiblingsParallel_OmittedWhenNil(t *testing.T) {
 	}
 }
 
+// Board sort direction: unset means the default (newest move on top).
+func TestSortOldestFirst_UnsetDefault(t *testing.T) {
+	cs := testConfigStore(t)
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if cfg.SortOldestFirst != nil {
+		t.Fatalf("expected nil SortOldestFirst when unset, got %v", *cfg.SortOldestFirst)
+	}
+	b, err := json.Marshal(cs.buildConfigResponse(cfg))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "sort_oldest_first") {
+		t.Fatalf("expected sort_oldest_first omitted from response when nil, got %s", b)
+	}
+}
+
+// Both settings round-trip, including the explicit false (present, not unset).
+func TestSortOldestFirst_RoundTrip(t *testing.T) {
+	cs := testConfigStore(t)
+	for _, want := range []bool{true, false, true} {
+		cfg, err := cs.GetConfig()
+		if err != nil {
+			t.Fatalf("get config: %v", err)
+		}
+		cfg.SortOldestFirst = ptrBool(want)
+		if err := cs.UpdateConfig(cfg); err != nil {
+			t.Fatalf("update config: %v", err)
+		}
+		read, err := cs.GetConfig()
+		if err != nil {
+			t.Fatalf("get config: %v", err)
+		}
+		if read.SortOldestFirst == nil || *read.SortOldestFirst != want {
+			t.Fatalf("expected sort_oldest_first=%t after update, got %v", want, read.SortOldestFirst)
+		}
+		b, err := json.Marshal(cs.buildConfigResponse(read))
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if !strings.Contains(string(b), "\"sort_oldest_first\":"+strconv.FormatBool(want)) {
+			t.Fatalf("expected sort_oldest_first=%t in response, got %s", want, b)
+		}
+	}
+}
+
 func TestGetConfigRespectsWorkspaceDirOverride(t *testing.T) {
 	cs := testConfigStore(t)
 	overrideDir := t.TempDir()

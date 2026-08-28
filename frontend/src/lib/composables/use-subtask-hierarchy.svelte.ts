@@ -1,6 +1,6 @@
 import type { Task } from '$lib/types';
-import { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks } from '$lib/stores';
-import { sortByActivity } from '$lib/utils/sort-tasks';
+import { persistCollapsedTasks, cleanupCollapsedTasks, initExpandedTasks, appStore } from '$lib/stores';
+import { sortByLastMoved } from '$lib/utils/sort-tasks';
 
 /** Composable for subtask hierarchy management.
  * Tracks expanded/collapsed state, consolidation of subtasks under same-column ancestors,
@@ -22,8 +22,10 @@ export function useSubtaskHierarchy(getAllTasks: () => Task[], expandedTasksCont
                 map.get(t.parent_task_id)!.push(t);
             }
         }
-        for (const [, children] of map) {
-            sortByActivity(children);
+        // Same direction as the columns (Settings → Preferences); returns a new array.
+        const sortOldestFirst = appStore.config?.sort_oldest_first === true;
+        for (const [id, children] of map) {
+            map.set(id, sortByLastMoved(children, sortOldestFirst));
         }
         return map;
     });

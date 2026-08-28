@@ -3,8 +3,6 @@ package store
 import (
 	"testing"
 	"time"
-
-	"kanban/backend/types"
 )
 
 func TestCreateAndGetTask(t *testing.T) {
@@ -112,20 +110,14 @@ func TestGetTasksByProject(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	for i := range 3 {
-		task := newTask("task-1", "proj-1")
-		task.ID = "task-1"
-		task.ColumnOrder = 0
-		if i == 1 {
-			task.ID = "task-2"
-			task.ColumnOrder = 2
-		}
-		if i == 2 {
-			task.ID = "task-3"
-			task.ColumnOrder = 1
-		}
+	// Created newest-last in the loop; the board query returns newest created first.
+	base := time.Now().UTC().Truncate(time.Second)
+	for i, id := range []string{"task-1", "task-2", "task-3"} {
+		task := newTask(id, "proj-1")
+		task.CreatedAt = base.Add(time.Duration(i) * time.Second)
+		task.UpdatedAt = task.CreatedAt
 		if err := s.CreateTask(task); err != nil {
-			t.Fatalf("create task %d: %v", i, err)
+			t.Fatalf("create task %s: %v", id, err)
 		}
 	}
 
@@ -136,8 +128,8 @@ func TestGetTasksByProject(t *testing.T) {
 	if len(tasks) != 3 {
 		t.Fatalf("expected 3 tasks, got %d", len(tasks))
 	}
-	// Should be ordered by column_order
-	if tasks[0].ID != "task-1" || tasks[1].ID != "task-3" || tasks[2].ID != "task-2" {
+	// Should be ordered newest created first (rowid DESC keeps equal timestamps stable).
+	if tasks[0].ID != "task-3" || tasks[1].ID != "task-2" || tasks[2].ID != "task-1" {
 		t.Fatalf("unexpected order: %v, %v, %v", tasks[0].ID, tasks[1].ID, tasks[2].ID)
 	}
 }
@@ -218,39 +210,6 @@ func TestDeleteTask(t *testing.T) {
 	_, err := s.GetTask("proj-1", "task-1")
 	if err == nil {
 		t.Fatal("expected error for deleted task")
-	}
-}
-
-func TestReorderTasks(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	for i, id := range []string{"task-1", "task-2", "task-3"} {
-		task := newTask(id, "proj-1")
-		task.ColumnOrder = i
-		if err := s.CreateTask(task); err != nil {
-			t.Fatalf("create task: %v", err)
-		}
-	}
-
-	reorders := []types.ReorderRequest{
-		{ID: "task-1", ColumnOrder: 2},
-		{ID: "task-2", ColumnOrder: 0},
-		{ID: "task-3", ColumnOrder: 1},
-	}
-	if err := s.ReorderTasks("proj-1", reorders); err != nil {
-		t.Fatalf("reorder tasks: %v", err)
-	}
-
-	tasks, err := s.GetTasksByProject("proj-1")
-	if err != nil {
-		t.Fatalf("get tasks: %v", err)
-	}
-	if tasks[0].ID != "task-2" || tasks[1].ID != "task-3" || tasks[2].ID != "task-1" {
-		t.Fatalf("unexpected order after reorder: %v, %v, %v", tasks[0].ID, tasks[1].ID, tasks[2].ID)
 	}
 }
 
@@ -772,5 +731,125 @@ func TestUpdateTask_DoesNotTouchSummarizingFlag(t *testing.T) {
 	}
 	if got.Summarizing {
 		t.Error("full-row UpdateTask must not resurrect a cleared summarizing flag (after field change)")
+	}
+}
+
+// TestCreateTaskSetsMovedAtFromCreated: a new task's position is its creation time.
+func TestCreateTaskSetsMovedAtFromCreated(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	created := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	task := newTask("task-1", "proj-1")
+	task.CreatedAt = created
+	task.UpdatedAt = created
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	got, err := s.GetTask("proj-1", "task-1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if !got.MovedAt.Equal(created) {
+		t.Fatalf("expected moved_at = created_at (%v), got %v", created, got.MovedAt)
+	}
+}
+
+// TestUpdateTaskSameStatusKeepsMovedAt: writes that leave the task in its column must not
+// touch moved_at, even though updated_at keeps advancing.
+func TestUpdateTaskSameStatusKeepsMovedAt(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	past := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	task := newTask("task-1", "proj-1")
+	task.CreatedAt = past
+	task.UpdatedAt = past
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	got, err := s.GetTask("proj-1", "task-1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	got.Title = "renamed"
+	got.Output = "some run output"
+	got.SessionCost = 1.25
+	got.ExecutionState = "running"
+	if err := s.UpdateTask(got); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	after, err := s.GetTask("proj-1", "task-1")
+	if err != nil {
+		t.Fatalf("get task after update: %v", err)
+	}
+	if !after.MovedAt.Equal(past) {
+		t.Errorf("moved_at must not advance without a column change: %v -> %v", past, after.MovedAt)
+	}
+	if !after.UpdatedAt.After(past) {
+		t.Errorf("updated_at should still advance on a plain write, got %v", after.UpdatedAt)
+	}
+	// UpdateTask mirrors the stored value back into the struct (RETURNING).
+	if !got.MovedAt.Equal(past) {
+		t.Errorf("expected in-memory moved_at to mirror the stored value %v, got %v", past, got.MovedAt)
+	}
+}
+
+// TestUpdateTaskColumnChangeBumpsMovedAt: a real move re-ranks the card.
+func TestUpdateTaskColumnChangeBumpsMovedAt(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	past := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	task := newTask("task-1", "proj-1")
+	task.CreatedAt = past
+	task.UpdatedAt = past
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	got, err := s.GetTask("proj-1", "task-1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	got.Status = "review"
+	if err := s.UpdateTask(got); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	after, err := s.GetTask("proj-1", "task-1")
+	if err != nil {
+		t.Fatalf("get task after move: %v", err)
+	}
+	if !after.MovedAt.After(past) {
+		t.Fatalf("expected moved_at to advance on a column change, got %v (was %v)", after.MovedAt, past)
+	}
+	if !got.MovedAt.Equal(after.MovedAt) {
+		t.Errorf("expected in-memory moved_at %v to match stored %v", got.MovedAt, after.MovedAt)
+	}
+
+	// Moving again must advance it once more.
+	after.Status = "done"
+	if err := s.UpdateTask(after); err != nil {
+		t.Fatalf("second update task: %v", err)
+	}
+	second, err := s.GetTask("proj-1", "task-1")
+	if err != nil {
+		t.Fatalf("get task after second move: %v", err)
+	}
+	if second.MovedAt.Before(after.MovedAt) {
+		t.Fatalf("expected moved_at to stay monotonic across moves, got %v then %v", after.MovedAt, second.MovedAt)
 	}
 }

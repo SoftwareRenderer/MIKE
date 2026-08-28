@@ -38,7 +38,6 @@ export {
     buildSandboxImageStream,
     deleteProject,
     getBoard,
-    reorderTasks,
 } from './projects';
 
 // -- Tasks --

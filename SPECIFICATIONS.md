@@ -54,7 +54,7 @@ type Task struct {
     Title                     string    `json:"title"`             // Human-readable title
     Prompt                    string    `json:"prompt"`            // Detailed instructions for the AI
     Status                    string    `json:"status"`            // backlog, in_progress, review, done
-    ColumnOrder               int       `json:"column_order"`      // Position within column (ascending)
+    MovedAt                   time.Time `json:"moved_at"`          // Last column change; the board orders cards by it (newest first)
     SessionID                 string    `json:"session_id"`        // AI session ID (set when task starts)
     Branch                    string    `json:"branch"`            // Git branch name (task/<short-id>)
     Output                    string    `json:"output"`            // Final AI output summary
@@ -97,16 +97,7 @@ type MoveTaskRequest struct {
 }
 ```
 
-### 3.5 Task Reorder Request
-
-```go
-type ReorderRequest struct {
-    ID           string `json:"id"`
-    ColumnOrder  int    `json:"column_order"`
-}
-```
-
-### 3.6 Project
+### 3.5 Project
 
 ```go
 type Project struct {
@@ -122,7 +113,7 @@ Each project has its own independent board (set of tasks). Git worktrees are sha
 
 Projects are listed in alphabetical order (case-insensitive) via `ORDER BY name COLLATE NOCASE`.
 
-### 3.7 Task Dependency
+### 3.6 Task Dependency
 
 ```go
 type TaskDependency struct {
@@ -136,7 +127,7 @@ type TaskDependency struct {
 
 Tasks can be linked in parent-child relationships. When a parent task is moved to Done (manually accepted or via auto-commit), all child tasks with `auto_start=true` are automatically started. Dependencies form a directed acyclic graph (DAG) — circular dependencies are rejected at creation time.
 
-### 3.8 Review Comment
+### 3.7 Review Comment
 
 ```go
 type ReviewComment struct {
@@ -153,7 +144,7 @@ type ReviewComment struct {
 
 Review comments allow line-level feedback on task diffs. Comments are rendered alongside the diff in the UI and can be sent back to the AI as context when a task is rejected and retried.
 
-### 3.9 Home Agent Message
+### 3.8 Home Agent Message
 
 ```go
 type HomeAgentMessage struct {
@@ -167,7 +158,7 @@ type HomeAgentMessage struct {
 
 The home agent is a project-scoped conversational assistant accessible from the sidebar. It can help decompose work into tasks, create and link tasks, and start work on the board. Unlike task-scoped sessions, the home agent does not have its own worktree — it operates on the project's board state via internal API calls.
 
-### 3.10 Git Commit (Response Type)
+### 3.9 Git Commit (Response Type)
 
 ```go
 type GitCommit struct {
@@ -179,7 +170,7 @@ type GitCommit struct {
 }
 ```
 
-### 3.11 Git Branch (Response Type)
+### 3.10 Git Branch (Response Type)
 
 ```go
 type GitBranch struct {
@@ -189,7 +180,7 @@ type GitBranch struct {
 }
 ```
 
-### 3.12 Git Status (Response Type)
+### 3.11 Git Status (Response Type)
 
 ```go
 type GitStatus struct {
@@ -203,11 +194,11 @@ type GitStatus struct {
 }
 ```
 
-### 3.13 Per-Task Configuration
+### 3.12 Per-Task Configuration
 
 Each task carries its own `LlamaServerURL` and `ModelName` fields (see Task struct above). These inherit from the global server configuration when empty, allowing different tasks to use different agents (different llama.cpp endpoints or models) without requiring per-project configuration.
 
-### 3.14 WebSocket Message Types
+### 3.13 WebSocket Message Types
 
 ```go
 // WSMessage - Envelope for all WebSocket frames
@@ -306,7 +297,9 @@ The response excludes hidden entries (names starting with `.`) and files (only d
 | Method | Endpoint                         | Description              | Request Body         | Response                  |
 |--------|----------------------------------|--------------------------|----------------------|---------------------------|
 | GET    | `/api/projects/:id/board`        | Get project board with tasks | —                  | `200 Board`               |
-| PUT    | `/api/projects/:id/tasks/reorder`| Bulk reorder tasks       | `[]ReorderRequest`   | `200 OK`                  |
+
+The board is returned newest-created first (`ORDER BY created_at DESC, rowid DESC`). The UI re-orders
+each column by `moved_at`, newest move first, and this order is what ties fall back to.
 
 ### 4.3 Task CRUD Endpoints (per-project)
 
@@ -733,7 +726,7 @@ All components follow the design patterns and input/presentation features from t
 - Renders column header with title and task count badge (Badge component)
 - Backlog column: shows "+ Add Task" button at the top of the card list (when `onAddTask` is provided)
 - Renders Card components in order
-- Handles drop events to reorder/move tasks
+- Handles drop events to move tasks between columns
 - Visual drop-target highlighting with border animation
 
 **Card.svelte**
@@ -914,7 +907,7 @@ Uses native HTML5 Drag and Drop API (no external library):
 - `draggable="true"` on Card elements
 - `dragstart`: Set data transfer with task ID and source column
 - `dragover`: Prevent default, highlight drop target column
-- `drop`: Call PUT `/api/projects/:id/tasks/reorder` or POST `/api/projects/:id/tasks/:taskId/move`
+- `drop`: Call POST `/api/projects/:id/tasks/:taskId/move`
 
 ### 6.5 Styling
 
@@ -993,7 +986,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     title                        TEXT NOT NULL,
     prompt                       TEXT NOT NULL,
     status                       TEXT NOT NULL DEFAULT 'backlog',
-    column_order                 INTEGER NOT NULL DEFAULT 0,
     session_id                   TEXT,
     branch                       TEXT,
     output                       TEXT,
@@ -1006,6 +998,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     plan_mode                    INTEGER NOT NULL DEFAULT 0,
     created_at                   TEXT NOT NULL,
     updated_at                   TEXT NOT NULL,
+    moved_at                     TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
@@ -1066,7 +1059,7 @@ CREATE INDEX IF NOT EXISTS idx_review_comments_task ON review_comments(task_id);
 CREATE INDEX IF NOT EXISTS idx_home_agent_messages_project ON home_agent_messages(project_id);
 ```
 
-- **Write on**: Every state mutation (create, update, move, delete, reorder)
+- **Write on**: Every state mutation (create, update, move, delete)
 - **Defaults**: Configuration rows inserted on first startup if missing
 
 ### 7.2 Configuration Defaults
@@ -1185,7 +1178,7 @@ Simple regex-based router matching patterns like `/api/projects/{id}/tasks/{task
 - **Broadcaster cleanup**: when a task reaches a terminal state (complete/failed/stopped), the broadcaster entry is removed from the map after broadcasting the final `complete` or `error` event to all connected clients. The ring buffer is discarded at this point — clients reconnecting after task completion will not receive a live stream but can view the final task output via the REST API.
 - **Reconnect buffer-sync**: when a client reconnects to an active task stream, the broadcaster sends the last 100 buffered events (from the ring buffer) before switching to live delivery. The frontend detects a reconnect when the WebSocket is created within 5 seconds of a previous close for the same task, and automatically requests the buffer via a `{"type":"sync","seq":<last_seen_seq>}` message sent immediately after connection. The broadcaster responds with buffered events starting from `seq+1`.
 - Task execution controlled with `context.Context` for cancellation
-- **Board state mutex**: a per-project `sync.RWMutex` protects all board mutations (create, move, reorder, delete). Write locks are acquired for single-task mutations and bulk reorders. Read locks are acquired for board reads. This prevents race conditions during concurrent drag-drop reorders or dependency-triggered auto-starts. The mutex does NOT cover task execution state (`status_state` transitions), which are protected by the per-task execution goroutine's own context.
+- **Board state mutex**: a per-project `sync.RWMutex` protects all board mutations (create, move, delete). Write locks are acquired for single-task mutations. Read locks are acquired for board reads. This prevents race conditions during concurrent drag-drop moves or dependency-triggered auto-starts. The mutex does NOT cover task execution state (`status_state` transitions), which are protected by the per-task execution goroutine's own context.
 
 ### 9.4 Error Handling
 
@@ -1237,7 +1230,6 @@ export async function deleteProject(id: string): Promise<void> { ... }
 
 // -- Board endpoints (scoped to project) --
 export async function getBoard(projectId: string): Promise<Board> { ... }
-export async function reorderTasks(projectId: string, reorders: ReorderRequest[]): Promise<void> { ... }
 
 // -- Task CRUD endpoints (scoped to project) --
 export async function createTask(projectId: string, task: Partial<Task>): Promise<Task> { ... }
@@ -1408,7 +1400,7 @@ cd frontend && npm run dev
 
 | From | To |
 |------|-----|
-| Backlog | In Progress (→ queued or running), Done, (any column for reordering) |
+| Backlog | In Progress (→ queued or running), Done, any column |
 | In Progress | Review (auto on completion), Backlog (manual), any column |
 | Review | Done (accept — preserves worktree for inspection), In Progress (retry), Backlog |
 | Done | Backlog (restore), any column, Delete (purges worktree + conversation history) |

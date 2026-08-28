@@ -5,12 +5,6 @@ type MoveTaskRequest struct {
 	Status string `json:"status"`
 }
 
-// ReorderRequest is the request body for reordering a task.
-type ReorderRequest struct {
-	ID          string `json:"id"`
-	ColumnOrder int    `json:"column_order"`
-}
-
 // CreateProjectRequest is the request body for creating a project.
 type CreateProjectRequest struct {
 	Path                    string         `json:"path"`

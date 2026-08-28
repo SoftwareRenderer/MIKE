@@ -20,159 +20,88 @@ test.describe('Board Layout', () => {
 });
 
 // ============================================================
-// Column Chronological Ordering
+// Column Ordering by Last Move
 // ============================================================
 
-test.describe('Column Chronological Ordering', () => {
+test.describe('Column Ordering by Last Move', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
-  test('should order tasks by last activity with most recent at bottom', async ({ page }) => {
+  async function taskField(page: any, pid: string, tid: string, field: string) {
+    return page.evaluate(async ({ pid, tid, field }: any) => {
+      const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+      const data = await res.json();
+      return data[field];
+    }, { pid, tid, field });
+  }
+
+  function columnCardOrder(page: any, columnIndex: number, ids: string[]) {
+    return page.locator('.column').nth(columnIndex).locator('.card').evaluateAll(
+      (cards: Element[]) => cards.map((c) => c.getAttribute('data-task-id')).filter(Boolean) as string[]
+    ).then((order: string[]) => order.filter((id) => ids.includes(id)));
+  }
+
+  test('should put the most recently moved task on top of its column', async ({ page }) => {
     const projectId = await getProjectId(page);
-    const task1 = await createTaskViaApi(page, projectId, `chrono-order-1-${Date.now()}`);
-    const task2 = await createTaskViaApi(page, projectId, `chrono-order-2-${Date.now()}`);
-    const task3 = await createTaskViaApi(page, projectId, `chrono-order-3-${Date.now()}`);
+    const task1 = await createTaskViaApi(page, projectId, `move-order-1-${Date.now()}`);
+    const task2 = await createTaskViaApi(page, projectId, `move-order-2-${Date.now()}`);
+    const task3 = await createTaskViaApi(page, projectId, `move-order-3-${Date.now()}`);
+    const ids = [task1, task2, task3];
 
-    await page.goto('/');
-    await page.waitForSelector('.card', { timeout: 10000 });
-
-    await expect(async () => {
-      const board = await page.evaluate(async ({ pid }) => {
-        const res = await fetch(`/api/projects/${pid}/board`);
-        return res.json();
-      }, { pid: projectId });
-      const backlogTasks = board.tasks.filter((t: any) => t.status === 'backlog');
-      expect(backlogTasks.length).toBeGreaterThanOrEqual(3);
-    }).toPass({ timeout: 10000 });
-
-    // Move each task to review, waiting for distinct updated_at after each
-    let lastUpdated: string | null = null;
-    for (const tid of [task1, task2, task3]) {
-      // Delay to ensure distinct timestamps (timestamps are in seconds precision)
-      await page.waitForFunction(() => false, {}, { timeout: 1100, polling: 1100 }).catch(() => {});
-      await csrfFetch(page, `/api/projects/${projectId}/tasks/${tid}/move`, {
+    // moved_at has second precision, so pause between moves. Polling for a change instead
+    // would never resolve: moving a task into its current column is a no-op.
+    for (let i = 0; i < ids.length; i++) {
+      if (i > 0) await page.waitForTimeout(1100);
+      await csrfFetch(page, `/api/projects/${projectId}/tasks/${ids[i]}/move`, {
         method: 'POST',
         body: { status: 'review' },
       });
-      // Fetch the new timestamp
-      const newUpdated = await page.evaluate(async ({ pid, tid }) => {
-        const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-        const data = await res.json();
-        return data.updated_at;
-      }, { pid: projectId, tid });
-      // For iterations after the first, verify timestamp changed
-      if (lastUpdated !== null) {
-        await expect(async () => {
-          const task = await page.evaluate(async ({ pid, tid }) => {
-            const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-            return res.json();
-          }, { pid: projectId, tid });
-          expect(task.updated_at).not.toBe(lastUpdated);
-        }).toPass({ timeout: 5000 });
-      }
-      lastUpdated = newUpdated;
     }
 
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
 
+    // task3 moved last, so it sits on top; task1 (moved first) at the bottom.
     await expect(async () => {
-      const board = await page.evaluate(async ({ pid }) => {
-        const res = await fetch(`/api/projects/${pid}/board`);
-        return res.json();
-      }, { pid: projectId });
-      const reviewTasks = board.tasks.filter((t: any) => t.status === 'review');
-      expect(reviewTasks.length).toBeGreaterThanOrEqual(3);
+      const order = await columnCardOrder(page, 2, ids);
+      expect(order).toEqual([task3, task2, task1]);
     }).toPass({ timeout: 10000 });
-
-    // Verify API order: task1 (oldest) first, task3 (newest) last
-    const reviewOrder = await page.evaluate(async ({ pid, ids }) => {
-      const res = await fetch(`/api/projects/${pid}/board`);
-      const board = await res.json();
-      const reviewTasks = board.tasks.filter((t: any) => t.status === 'review');
-      const ordered: string[] = [];
-      for (const task of reviewTasks) {
-        if (ids.includes(task.id)) ordered.push(task.id);
-      }
-      return ordered;
-    }, { pid: projectId, ids: [task1, task2, task3] });
-
-    expect(reviewOrder[0]).toBe(task1);
-    expect(reviewOrder[1]).toBe(task2);
-    expect(reviewOrder[2]).toBe(task3);
-
-    // Verify visual DOM order in the Review column matches
-    const reviewColumn = page.locator('.column').nth(2);
-    const reviewCards = reviewColumn.locator('.card');
-    const domOrder = await reviewCards.evaluateAll(
-      (cards) => cards.map((card) => card.getAttribute('data-task-id')).filter(Boolean) as string[]
-    );
-    const filteredDomOrder = domOrder.filter((id) => [task1, task2, task3].includes(id));
-    expect(filteredDomOrder[0]).toBe(task1);
-    expect(filteredDomOrder[1]).toBe(task2);
-    expect(filteredDomOrder[2]).toBe(task3);
   });
 
-  test('should place a newly-moved task at the bottom of the target column', async ({ page }) => {
+  test('should keep a card in place when it is edited rather than moved', async ({ page }) => {
     const projectId = await getProjectId(page);
-    const existingTask = await createTaskViaApi(page, projectId, `chrono-existing-${Date.now()}`);
-    const newTask = await createTaskViaApi(page, projectId, `chrono-new-${Date.now()}`);
+    const first = await createTaskViaApi(page, projectId, `edit-stable-first-${Date.now()}`);
+    const second = await createTaskViaApi(page, projectId, `edit-stable-second-${Date.now()}`);
+    const ids = [first, second];
 
-    // Move existingTask to done first
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${existingTask}/move`, {
-      method: 'POST',
-      body: { status: 'done' },
-    });
-    // Wait for distinct timestamp
-    await expect(async () => {
-      const task = await page.evaluate(async ({ pid, tid }) => {
-        const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-        return res.json();
-      }, { pid: projectId, tid: existingTask });
-      expect(task.status).toBe('done');
-    }).toPass({ timeout: 5000 });
-
-    // Move newTask to done — it should appear below existingTask
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${newTask}/move`, {
-      method: 'POST',
-      body: { status: 'done' },
-    });
-    // Wait for distinct timestamp
-    await expect(async () => {
-      const task = await page.evaluate(async ({ pid, tid }) => {
-        const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-        return res.json();
-      }, { pid: projectId, tid: newTask });
-      expect(task.status).toBe('done');
-    }).toPass({ timeout: 5000 });
-
+    // Move first, then second — second ends up on top (a same-second tie keeps the server
+    // order, which is also newest-created-first).
+    for (const tid of ids) {
+      await csrfFetch(page, `/api/projects/${projectId}/tasks/${tid}/move`, {
+        method: 'POST',
+        body: { status: 'review' },
+      });
+    }
     await page.goto('/');
     await page.waitForSelector('.card', { timeout: 10000 });
-
     await expect(async () => {
-      const board = await page.evaluate(async ({ pid }) => {
-        const res = await fetch(`/api/projects/${pid}/board`);
-        return res.json();
-      }, { pid: projectId });
-      const doneTasks = board.tasks.filter((t: any) => t.status === 'done');
-      expect(doneTasks.length).toBeGreaterThanOrEqual(2);
+      expect(await columnCardOrder(page, 2, ids)).toEqual([second, first]);
     }).toPass({ timeout: 10000 });
 
-    const doneOrder = await page.evaluate(async ({ pid, ids }) => {
-      const res = await fetch(`/api/projects/${pid}/board`);
-      const board = await res.json();
-      const doneTasks = board.tasks.filter((t: any) => t.status === 'done');
-      const ordered: string[] = [];
-      for (const task of doneTasks) {
-        if (ids.includes(task.id)) ordered.push(task.id);
-      }
-      return ordered;
-    }, { pid: projectId, ids: [existingTask, newTask] });
+    // Editing the bottom card (title + prompt) must not bring it to the top.
+    const beforeMovedAt = await taskField(page, projectId, first, 'moved_at');
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${first}`, {
+      method: 'PUT',
+      body: { title: `edited-${Date.now()}` },
+    });
 
-    expect(doneOrder[0]).toBe(existingTask);
-    expect(doneOrder[1]).toBe(newTask);
+    await expect(async () => {
+      const afterMovedAt = await taskField(page, projectId, first, 'moved_at');
+      expect(afterMovedAt).toBe(beforeMovedAt);
+      expect(await columnCardOrder(page, 2, ids)).toEqual([second, first]);
+    }).toPass({ timeout: 10000 });
   });
 });
 
