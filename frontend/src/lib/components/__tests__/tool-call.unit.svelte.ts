@@ -31,24 +31,28 @@ vi.mock('$lib/types', () => ({
     getToolDisplayName: (displayName: string | undefined, toolName: string) => displayName || toolName.replace('_', ' '),
 }));
 
-vi.mock('$lib/utils/toolArgs', () => ({
-    formatToolArgs: (toolName: string, args: Record<string, unknown> | null, _rawArgs?: string) => {
-        if (!args) return '';
-        if (toolName === 'bash') return `$ ${args.command || ''}`;
-        if (toolName === 'read_file' || toolName === 'write_file') return args.path as string || '';
-        if (toolName === 'edit_file') {
-            const p = args.path as string;
-            const edits = args.edits as Array<{ oldText: string; newText: string }>;
-            const count = edits ? edits.length : 0;
-            return count > 0 ? `${p} (${count} edit${count > 1 ? 's' : ''})` : p || '';
-        }
-        return JSON.stringify(args);
-    },
-    HIDE_ARGS_FOR_TOOLS: new Set(['create_task', 'edit_task', 'view_tasks', 'request_review', 'ask_question']),
-    SANDBOXABLE_TOOLS: new Set(['read_file', 'write_file', 'edit_file', 'bash']),
-    ARGS_MAX_LEN: 50,
-    EDIT_DIFF_MAX_LINES: 20,
-}));
+vi.mock('$lib/utils/toolArgs', async (importOriginal) => {
+    // Keep the real normalizeEdits/EDIT_DIFF_MAX_LINES (toolArgs.ts is a
+    // dependency-free module) — only formatToolArgs is stubbed here.
+    const actual = await importOriginal<typeof import('$lib/utils/toolArgs')>();
+    return {
+        ...actual,
+        formatToolArgs: (toolName: string, args: Record<string, unknown> | null, _rawArgs?: string) => {
+            if (!args) return '';
+            if (toolName === 'bash') return `$ ${args.command || ''}`;
+            if (toolName === 'read_file' || toolName === 'write_file') return (args.path as string) || '';
+            if (toolName === 'edit_file') {
+                const p = args.path as string;
+                const count = actual.normalizeEdits(args.edits).length;
+                return count > 0 ? `${p} (${count} edit${count > 1 ? 's' : ''})` : p || '';
+            }
+            return JSON.stringify(args);
+        },
+        HIDE_ARGS_FOR_TOOLS: new Set(['create_task', 'edit_task', 'view_tasks', 'request_review', 'ask_question']),
+        SANDBOXABLE_TOOLS: new Set(['read_file', 'write_file', 'edit_file', 'bash']),
+        ARGS_MAX_LEN: 50,
+    };
+});
 
 const baseProps = {
     expandedArgs: new Set<string>(),
@@ -211,6 +215,51 @@ describe('ToolCall - edit_file diff toggle', () => {
         const toggle = container.querySelector('.edit-diff-toggle');
         expect(toggle).toBeTruthy();
         expect(toggle?.textContent).toMatch(/\+\d+\s*\/\s*-\d+/);
+    });
+
+    it('renders without throwing when an edit is missing oldText', () => {
+        // Model/adapter args can arrive partial or malformed — the diff must
+        // degrade to an insertion instead of crashing the chat render.
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'edit_file',
+                args: { path: 'src/file.go', edits: [{ newText: 'brand new line' }] },
+                success: true,
+                isPending: false,
+            }),
+        });
+        expect(container.querySelector('.edit-diff-toggle')).toBeTruthy();
+        // Degrades to an insertion pair (buildModifiedSegments is mocked here,
+        // so assert on structure, not text) instead of throwing.
+        expect(container.querySelectorAll('.edit-diff-line').length).toBe(2);
+        expect(container.querySelector('.edit-diff-line.edit-added')).toBeTruthy();
+    });
+
+    it('hides the diff toggle when no edit is renderable', () => {
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'edit_file',
+                args: { path: 'src/file.go', edits: [{ old_text: 'a', new_text: 'b' }, null] },
+                success: true,
+                isPending: false,
+            }),
+        });
+        expect(container.querySelector('.edit-diff-toggle')).toBeFalsy();
+        expect(container.querySelector('.edit-diff')).toBeFalsy();
+    });
+
+    it('renders without throwing when edits is not an array', () => {
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'edit_file',
+                args: { path: 'src/file.go', edits: 'still streaming' },
+                isPending: true,
+            }),
+        });
+        expect(container.querySelector('.edit-diff-toggle')).toBeFalsy();
     });
 });
 

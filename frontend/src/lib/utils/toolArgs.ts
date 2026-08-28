@@ -1,5 +1,35 @@
 /** Shared tool args formatting for chat messages */
 
+/** A renderable edit_file edit pair — both sides guaranteed to be strings. */
+export interface EditDiffEntry {
+    oldText: string;
+    newText: string;
+}
+
+/**
+ * Coerce edit_file `edits` args into string pairs safe to render.
+ *
+ * Args arrive from the model (or an agent adapter), so they can be partial
+ * (a side still streaming), truncated, or malformed (hallucinated key names,
+ * non-object entries). The edit diff renders them straight from the live
+ * stream and from persisted history, so it must never throw: an entry missing
+ * one side renders as a pure insertion/deletion, and an entry with neither
+ * side renderable is dropped.
+ */
+export function normalizeEdits(edits: unknown): EditDiffEntry[] {
+    if (!Array.isArray(edits)) return [];
+    const out: EditDiffEntry[] = [];
+    for (const raw of edits) {
+        if (!raw || typeof raw !== 'object') continue;
+        const entry = raw as Record<string, unknown>;
+        const oldText = typeof entry.oldText === 'string' ? entry.oldText : null;
+        const newText = typeof entry.newText === 'string' ? entry.newText : null;
+        if (oldText === null && newText === null) continue;
+        out.push({ oldText: oldText ?? '', newText: newText ?? '' });
+    }
+    return out;
+}
+
 export function formatToolArgs(toolName: string, args: Record<string, unknown> | null, rawArgs?: string): string {
     if (!args) return '';
     switch (toolName) {
@@ -41,14 +71,14 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
         }
         case 'edit_file': {
             let p = args.path as string;
-            let edits = args.edits as Array<{ oldText: string; newText: string }>;
+            let edits: unknown = args.edits;
             // During streaming, args may be empty but rawArgs has the JSON.
             // Try full parse first, then regex fallback for partial JSON.
             if (!p && rawArgs) {
                 try {
                     const parsed = JSON.parse(rawArgs);
                     p = parsed.path as string;
-                    edits = parsed.edits as Array<{ oldText: string; newText: string }>;
+                    edits = parsed.edits;
                 } catch {
                     // Partial JSON (e.g. "{\"path\":\"src/file.go\",\"edits\":[{\"oldText\":\"hel")
                     const m = rawArgs.match(/"path"\s*:\s*"((?:[^"\\]|\\.)*)/);
@@ -56,7 +86,7 @@ export function formatToolArgs(toolName: string, args: Record<string, unknown> |
                 }
             }
             if (!p) return '';
-            const editCount = edits ? edits.length : 0;
+            const editCount = normalizeEdits(edits).length;
             const pathDisplay = p.startsWith('./') ? p : `./${p}`;
             if (editCount <= 0) return pathDisplay;
             const suffix = editCount === 1 ? '1 edit' : `${editCount} edits`;

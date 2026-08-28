@@ -1,5 +1,49 @@
 import { describe, it, expect } from 'vitest';
-import { formatToolArgs } from '$lib/utils/toolArgs';
+import { formatToolArgs, normalizeEdits } from '$lib/utils/toolArgs';
+
+describe('normalizeEdits', () => {
+    it('passes well-formed edits through', () => {
+        expect(normalizeEdits([{ oldText: 'a', newText: 'b' }])).toEqual([{ oldText: 'a', newText: 'b' }]);
+    });
+
+    it('defaults a missing oldText to empty string (pure insertion)', () => {
+        expect(normalizeEdits([{ newText: 'b' }])).toEqual([{ oldText: '', newText: 'b' }]);
+    });
+
+    it('defaults a missing newText to empty string (pure deletion)', () => {
+        expect(normalizeEdits([{ oldText: 'a' }])).toEqual([{ oldText: 'a', newText: '' }]);
+    });
+
+    it('coerces non-string sides to empty string instead of leaving undefined', () => {
+        const out = normalizeEdits([{ oldText: 42, newText: 'x' }, { oldText: 'y', newText: {} }]);
+        expect(out).toEqual([{ oldText: '', newText: 'x' }, { oldText: 'y', newText: '' }]);
+        for (const e of out) {
+            expect(typeof e.oldText).toBe('string');
+            expect(typeof e.newText).toBe('string');
+        }
+    });
+
+    it('drops entries with no string side at all', () => {
+        expect(normalizeEdits([{ oldText: 42, newText: null }])).toEqual([]);
+    });
+
+    it('drops junk entries alongside valid ones', () => {
+        expect(normalizeEdits([null, undefined, 'nope', 7, [], [{ oldText: 'a', newText: 'b' }], { oldText: 'c', newText: 'd' }]))
+            .toEqual([{ oldText: 'c', newText: 'd' }]);
+    });
+
+    it('drops entries with neither side renderable (e.g. hallucinated keys)', () => {
+        expect(normalizeEdits([{ old_text: 'a', new_text: 'b' }, { oldText: 'a', newText: 'b' }]))
+            .toEqual([{ oldText: 'a', newText: 'b' }]);
+    });
+
+    it('returns [] for non-array input', () => {
+        expect(normalizeEdits(undefined)).toEqual([]);
+        expect(normalizeEdits(null)).toEqual([]);
+        expect(normalizeEdits('oldText')).toEqual([]);
+        expect(normalizeEdits({ oldText: 'a', newText: 'b' })).toEqual([]);
+    });
+});
 
 describe('formatToolArgs - edit_file', () => {
     it('shows path from args when available', () => {
@@ -49,6 +93,19 @@ describe('formatToolArgs - edit_file', () => {
         const args = {};
         const rawArgs = '{"path":"file.go","edits":[{"oldText":"a","newText":"b"},{"oldText":"c","newText":"d"}]}';
         expect(formatToolArgs('edit_file', args, rawArgs)).toBe('./file.go (2 edits)');
+    });
+
+    it('counts an edit whose oldText side is missing (partial streaming args)', () => {
+        expect(formatToolArgs('edit_file', { path: 'file.go', edits: [{ newText: 'b' }] })).toBe('./file.go (1 edit)');
+    });
+
+    it('does not count unrenderable edits', () => {
+        expect(formatToolArgs('edit_file', { path: 'file.go', edits: [{ old_text: 'a' }, null] })).toBe('./file.go');
+    });
+
+    it('does not throw when edits is not an array', () => {
+        expect(formatToolArgs('edit_file', { path: 'file.go', edits: 'nope' })).toBe('./file.go');
+        expect(formatToolArgs('edit_file', { path: 'file.go', edits: {} })).toBe('./file.go');
     });
 });
 
