@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterTopLevelTaskIds } from '$lib/utils/task-utils';
+import { filterTopLevelTaskIds, resolveBoardLandingColumn } from '$lib/utils/task-utils';
 import type { Task } from '$lib/types';
 
 function makeTask(id: string, parentId?: string): Task {
@@ -66,5 +66,42 @@ describe('filterTopLevelTaskIds', () => {
     it('preserves input order of the remaining top-level tasks', () => {
         expect(filterTopLevelTaskIds(['child-2', 'parent', 'child-1'], tasks)).toEqual(['parent']);
         expect(filterTopLevelTaskIds(['unrelated', 'child-1', 'grandchild'], tasks)).toEqual(['unrelated', 'child-1']);
+    });
+});
+
+describe('resolveBoardLandingColumn', () => {
+    /** Board payload with the given statuses (ids are irrelevant to the resolver). */
+    const withStatuses = (...statuses: string[]): Task[] =>
+        statuses.map((status, i) => ({ ...makeTask(`t-${i}`), status } as Task));
+
+    it('lands on Review when a review task exists', () => {
+        expect(resolveBoardLandingColumn(withStatuses('backlog', 'review', 'done'))).toBe('review');
+    });
+
+    it('prefers Review over In Progress when both exist', () => {
+        expect(resolveBoardLandingColumn(withStatuses('in_progress', 'review'))).toBe('review');
+    });
+
+    it('lands on In Progress when nothing is in review', () => {
+        expect(resolveBoardLandingColumn(withStatuses('backlog', 'in_progress', 'done'))).toBe('in_progress');
+    });
+
+    it('lands on Backlog when nothing is in review or in progress', () => {
+        expect(resolveBoardLandingColumn(withStatuses('backlog', 'done'))).toBe('backlog');
+    });
+
+    it('lands on Backlog for a Done-only board', () => {
+        expect(resolveBoardLandingColumn(withStatuses('done', 'done'))).toBe('backlog');
+    });
+
+    it('lands on Backlog for an empty board', () => {
+        expect(resolveBoardLandingColumn([])).toBe('backlog');
+    });
+
+    it('counts consolidated subtasks, not just visible cards', () => {
+        // A subtask in review collapsed into an in-progress parent is still in the payload.
+        const parent = { ...makeTask('parent'), status: 'in_progress' } as Task;
+        const child = { ...makeTask('child', 'parent'), status: 'review' } as Task;
+        expect(resolveBoardLandingColumn([parent, child])).toBe('review');
     });
 });

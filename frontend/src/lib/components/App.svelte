@@ -9,6 +9,7 @@
     import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
     import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
+    import { resolveBoardLandingColumn } from '$lib/utils/task-utils';
     import { getBoardCache, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
@@ -239,6 +240,8 @@
     }
     let cardDetailActiveTab = $state<'context' | 'chat' | 'diff' | 'checkpoint'>('chat');
 let scrollToColumn = $state<string | null>(null); // column to scroll to on mobile after task delete
+    // Mobile: column the board jumps to after switching project, keyed by project id.
+    let boardFocus = $state<{ projectId: string; column: string } | null>(null);
     let fsEventQueue = $state<Array<{ op: 'create' | 'delete'; path: string }>>([]);
     let addProjectError = $state('');
     let currentBranch = $state('');
@@ -957,6 +960,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const wasExplorerViewOpen = showExplorerViewVal;
         const wasTaskExplorerOpen = showTaskExplorerVal;
         const wasProjectSwitch = !!currentProject;
+        const wasDifferentProject = !!currentProject && currentProject.id !== p.id;
         currentProject = p;
         currentBranch = '';
         appStore.selectedProject = p;
@@ -985,6 +989,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             const b = await getBoard(p.id);
             tasks = b.tasks || [];
             appStore.board = b;
+            // Mobile: land the board on the column that has work
+            if (wasDifferentProject && isMobileCtx.isMobile) {
+                boardFocus = { projectId: p.id, column: resolveBoardLandingColumn(tasks) };
+            }
             lastSyncedAt = Date.now();
             // Restore task from URL after board loads (await so task detail renders before return)
             await restoreTaskFromUrl();
@@ -1343,6 +1351,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         projectId={currentProject.id}
                         projectPath={currentProject.path}
                         scrollToColumn={scrollToColumn}
+                        {boardFocus}
                         onAddTask={() => { uiStore.creatingChildOf = null; uiStore.showCreateTask = true; }}
                         onCreateChildTask={(parentId: string) => { uiStore.creatingChildOf = parentId; uiStore.showCreateTask = true; }}
                         onRefreshBoard={() => refreshBoard()}

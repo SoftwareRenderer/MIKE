@@ -19,6 +19,15 @@ export function countWithDescendants(taskId: string, status: string, childrenMap
     return count;
 }
 
+/** Column the mobile board shows after switching projects: the one with the most urgent
+ * work — Review, else In Progress, else Backlog. Tasks hidden inside a collapsed parent
+ * card still count. */
+export function resolveBoardLandingColumn(tasks: Pick<Task, 'status'>[]): 'review' | 'in_progress' | 'backlog' {
+    if (tasks.some(t => t.status === 'review')) return 'review';
+    if (tasks.some(t => t.status === 'in_progress')) return 'in_progress';
+    return 'backlog';
+}
+
 /** Reduce a set of task IDs to those whose parent is NOT also in the set.
  * Descendants are excluded because the server recursively deletes them */
 export function filterTopLevelTaskIds(taskIds: string[], tasks: Task[]): string[] {
