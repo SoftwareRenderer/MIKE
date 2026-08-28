@@ -47,6 +47,7 @@ const toolCallRenameTs = loadFixture('tool_call_rename_ts');
 const toolCallSummarize = loadFixture('tool_call_summarize');
 const textResponseReasoning = loadFixture('text_response_reasoning');
 const toolCallSandboxSleep = loadFixture('tool_call_sandbox_sleep');
+const toolCallBashLong = loadFixture('tool_call_bash_long');
 const toolCallSandboxMemhog = loadFixture('tool_call_sandbox_memhog');
 
 let requestCount = 0;
@@ -147,6 +148,17 @@ function selectResponse(parsed) {
     // Whether the conversation already contains tool results (used by plan-mode
     // routing below and by the tool-result routing further down).
     const hasToolResults = messages.some(m => m.role === 'tool');
+
+    // Bash-card reconnect probe: the long-running bash call keeps the tool in
+    // flight while the spec drops the live WebSocket, so loadHistory() replaces the
+    // streaming entry with the DB-loaded (still pending) one before tool_result
+    // arrives — the exact condition that used to leave the card on "Running".
+    // Follow-up (tool result present): plain text ends the turn.
+    if (hasTools && /bash-reconnect-probe/i.test(lastUserMsg)) {
+        return hasToolResults
+            ? { chunks: toolCallComplete, chunkDelay: 1 }
+            : { chunks: toolCallBashLong, chunkDelay: 1 };
+    }
 
     // Sandbox memory e2e probes (keyword-gated to the probe tasks' prompts).
     // Must stay ABOVE the plan-mode check below: when prompts/skills/ exists,

@@ -2,10 +2,24 @@ import type { StreamEvent, DiffData } from '$lib/types';
 import type { ChatEntry } from '$lib/types';
 import type { ToolCallInfo } from './stream-state.svelte';
 import { StreamState } from './stream-state.svelte';
+import { resolveLiveToolCall, type LiveToolCall } from '$lib/utils/tool-call-lookup';
 
 /** Update context usage from accumulated token counts. */
 function updateContextUsed(s: typeof StreamState.prototype.state) {
     s.contextState = { ...s.contextState, used: s.lastPromptTokens + s.streamTokenCount };
+}
+
+/**
+ * Re-point the `activeToolCalls` ref at a resolved live tool call. Skipped when the
+ * owning entry is unchanged, so the common case doesn't churn the map components
+ * derive from.
+ */
+function pointToolCallRef(s: typeof StreamState.prototype.state, toolId: string, live: LiveToolCall) {
+    const ref = s.activeToolCalls.get(toolId);
+    if (ref && ref.entryId === live.entry.id) return;
+    const next = new Map(s.activeToolCalls);
+    next.set(toolId, { entryId: live.entry.id, toolCall: live.tc });
+    s.activeToolCalls = next;
 }
 
 /** External callbacks the component must provide. */
@@ -110,65 +124,67 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 const data = event.data as { tool_id: string; tool_name: string; tool_display_name?: string; args: Record<string, unknown>; raw_args?: string; raw_args_delta?: string; sandbox?: boolean; path?: string; lines_added?: number; lines_removed?: number };
                 if (!data.tool_id || data.tool_id === '') break;
 
+                // A replay after a history reload, or an auto-answer re-broadcast, can
+                // target a tool call that no longer lives in the current assistant entry
+                // — update it in place instead of duplicating it.
+                const existing = resolveLiveToolCall(s.entries, s.activeToolCalls, data.tool_id);
+                if (existing) {
+                    if (!existing.tc.isPending && existing.tc.result !== undefined) break;
+                    // Mutate the live (proxied) tool call so subscribers are notified.
+                    existing.tc.toolName = data.tool_name;
+                    existing.tc.displayName = data.tool_display_name;
+                    existing.tc.args = data.args || {};
+                    const newRawArgs = data.raw_args_delta ? (existing.tc.raw_args || '') + data.raw_args_delta : data.raw_args;
+                    existing.tc.raw_args = newRawArgs;
+                    existing.tc.sandbox = data.sandbox;
+                    existing.tc.path = data.path;
+                    if (data.lines_added !== undefined) existing.tc.linesAdded = data.lines_added;
+                    if (data.lines_removed !== undefined) existing.tc.linesRemoved = data.lines_removed;
+                    pointToolCallRef(s, data.tool_id, existing);
+                    scheduleScroll();
+                    break;
+                }
+                if (s.processedToolIds.has(data.tool_id)) break;
+
                 let entry = s.currentAssistantId ? s.entries.find(e => e.id === s.currentAssistantId) || null : null;
                 if (!entry) entry = ensureAssistantEntry();
 
                 if (entry.content.trim() === data.tool_name && !entry.reasoningContent) entry.content = '';
                 if (!entry.toolCalls) entry.toolCalls = [];
 
-                const existing = entry.toolCalls.find((tc: ToolCallInfo) => tc.toolId === data.tool_id);
-                if (existing) {
-                    if (!existing.isPending && existing.result !== undefined) break;
-                    // Mutate in-place so activeToolCalls map reference stays valid
-                    existing.toolName = data.tool_name;
-                    existing.displayName = data.tool_display_name;
-                    existing.args = data.args || {};
-                    const newRawArgs = data.raw_args_delta ? (existing.raw_args || '') + data.raw_args_delta : data.raw_args;
-                    existing.raw_args = newRawArgs;
-                    existing.sandbox = data.sandbox;
-                    existing.path = data.path;
-                    if (data.lines_added !== undefined) existing.linesAdded = data.lines_added;
-                    if (data.lines_removed !== undefined) existing.linesRemoved = data.lines_removed;
-                } else if (s.processedToolIds.has(data.tool_id)) {
-                    break;
-                } else {
-                    s.processedToolIds = new Set([...s.processedToolIds, data.tool_id]);
-                    const ci = entry.content.length;
-                    const ri = (entry.reasoningContent || '').length;
-                    const newTc = {
-                        toolId: data.tool_id, toolName: data.tool_name, displayName: data.tool_display_name,
-                        args: data.args || {}, raw_args: data.raw_args, sandbox: data.sandbox, path: data.path,
-                        linesAdded: data.lines_added, linesRemoved: data.lines_removed,
-                        isPending: true, startedAt: Date.now(), contentIndex: ci, reasoningIndex: ri,
-                    };
-                    entry.toolCalls = [...(entry.toolCalls || []), newTc];
-                    entry.isStreaming = true;
-                    const newActive = new Map(s.activeToolCalls);
-                    newActive.set(data.tool_id, { entryId: entry.id, toolCall: newTc });
-                    s.activeToolCalls = newActive;
-                }
+                s.processedToolIds = new Set([...s.processedToolIds, data.tool_id]);
+                const ci = entry.content.length;
+                const ri = (entry.reasoningContent || '').length;
+                const newTc = {
+                    toolId: data.tool_id, toolName: data.tool_name, displayName: data.tool_display_name,
+                    args: data.args || {}, raw_args: data.raw_args, sandbox: data.sandbox, path: data.path,
+                    linesAdded: data.lines_added, linesRemoved: data.lines_removed,
+                    isPending: true, startedAt: Date.now(), contentIndex: ci, reasoningIndex: ri,
+                };
+                entry.toolCalls = [...(entry.toolCalls || []), newTc];
+                entry.isStreaming = true;
+                const newActive = new Map(s.activeToolCalls);
+                newActive.set(data.tool_id, { entryId: entry.id, toolCall: newTc });
+                s.activeToolCalls = newActive;
                 scheduleScroll();
                 break;
             }
             case 'tool_result': {
                 const data = event.data as { tool_id: string; success: boolean; output: string; duration: number; args?: Record<string, unknown>; raw_args?: string; sandbox?: boolean; path?: string; result_truncated?: boolean; original_lines?: number; original_bytes?: number; streamed?: boolean; message_id?: string };
+                // Resolve the live tool call: the ref's entryId may have been invalidated
+                // by a history reload, and then the result would be dropped with the card
+                // left "Running" forever.
+                const found = resolveLiveToolCall(s.entries, s.activeToolCalls, data.tool_id);
                 const ref = s.activeToolCalls.get(data.tool_id);
+                // The ref may point at a detached copy that already received streamed
+                // output — keep it rather than the short preview.
+                if (found && ref && ref.toolCall.result && !found.tc.result) {
+                    found.tc.result = ref.toolCall.result;
+                }
                 const newActive = new Map(s.activeToolCalls);
                 newActive.delete(data.tool_id);
                 s.activeToolCalls = newActive;
-                // Locate via active-call ref, or — for DB-loaded/auto-answered
-                // re-broadcasts — by scanning entries for tool_id.
-                let tc: ToolCallInfo | undefined;
-                if (ref) {
-                    // Mutate via the entries proxy so changes are reactive.
-                    const entry = s.entries.find(e => e.id === ref.entryId);
-                    tc = entry?.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id);
-                } else {
-                    for (const entry of s.entries) {
-                        tc = entry.toolCalls?.find((t: ToolCallInfo) => t.toolId === data.tool_id);
-                        if (tc) break;
-                    }
-                }
+                const tc: ToolCallInfo | undefined = found?.tc;
                 if (tc) {
                     // Keep full streamed content over the preview when present.
                     if (!(data.streamed && tc.result)) {
@@ -195,35 +211,32 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
             }
             case 'tool_progress': {
                 const data = event.data as { tool_id?: string; bytes_written?: number; lines_added?: number; lines_removed?: number; path?: string };
+                // Progress lands on the live tool call — a ref captured before a history
+                // reload points at a detached copy and would swallow it.
+                const applyProgress = (toolId: string, fallback: ToolCallInfo | undefined) => {
+                    const tc = resolveLiveToolCall(s.entries, s.activeToolCalls, toolId)?.tc ?? fallback;
+                    if (!tc) return;
+                    if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
+                    if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
+                    if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
+                    if (data.path !== undefined) tc.path = data.path;
+                };
                 if (data.tool_id) {
-                    const ref = s.activeToolCalls.get(data.tool_id);
-                    if (ref) {
-                        // Direct property mutation via map reference — no array allocation
-                        const tc = ref.toolCall;
-                        if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
-                        if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
-                        if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
-                        if (data.path !== undefined) tc.path = data.path;
-                    }
+                    applyProgress(data.tool_id, s.activeToolCalls.get(data.tool_id)?.toolCall);
                 } else {
-                    // Broadcast: update all active tool calls via direct mutation
-                    for (const ref of s.activeToolCalls.values()) {
-                        const tc = ref.toolCall;
-                        if (data.bytes_written !== undefined) tc.bytesWritten = data.bytes_written;
-                        if (data.lines_added !== undefined) tc.linesAdded = data.lines_added;
-                        if (data.lines_removed !== undefined) tc.linesRemoved = data.lines_removed;
-                        if (data.path !== undefined) tc.path = data.path;
-                    }
+                    // Broadcast: update all active tool calls
+                    for (const [toolId, ref] of s.activeToolCalls) applyProgress(toolId, ref.toolCall);
                 }
                 break;
             }
             case 'tool_output': {
                 const data = event.data as { tool_id: string; text: string };
-                const ref = s.activeToolCalls.get(data.tool_id);
-                if (ref) {
-                    // Direct string concatenation via map reference — no array allocation
-                    const tc = ref.toolCall;
-                    tc.result = (tc.result || '') + data.text;
+                // Stream into the live tool call: after a history reload the ref from
+                // creation time is a detached copy, and the visible card froze.
+                const found = resolveLiveToolCall(s.entries, s.activeToolCalls, data.tool_id);
+                if (found) {
+                    found.tc.result = (found.tc.result || '') + data.text;
+                    pointToolCallRef(s, data.tool_id, found);
                 }
                 scheduleScroll();
                 break;
