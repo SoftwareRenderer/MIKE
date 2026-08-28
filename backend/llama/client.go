@@ -198,7 +198,9 @@ func hasUserMessage(messages []types.ChatMessage) bool {
 }
 
 // ChatStream sends a chat completion request with streaming.
-func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessage, tools []types.ChatTool, cb types.StreamCallback, onProgress types.PromptProgressCallback) (*types.ChatUsage, error) {
+// onUsage (may be nil) gets an in-flight usage snapshot whenever it changes;
+// see types.UsageCallback.
+func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessage, tools []types.ChatTool, cb types.StreamCallback, onProgress types.PromptProgressCallback, onUsage types.UsageCallback) (*types.ChatUsage, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("llama server URL not configured")
 	}
@@ -213,6 +215,9 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		"messages":        toAPIMessages(messages),
 		"stream":          true,
 		"return_progress": true,
+		// Without this, vLLM omits usage from the stream and all token
+		// stats for the turn are lost. llama.cpp accepts it too (additive).
+		"stream_options": map[string]any{"include_usage": true},
 	}
 	if len(tools) > 0 {
 		reqBody["tools"] = tools
@@ -257,6 +262,8 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 	}
 
 	var usage *types.ChatUsage
+	var metrics *types.VllmMetrics
+	var usageChanged bool // usage or timings updated on this frame
 	var firstTokenTime time.Time
 	scanner := bufio.NewScanner(resp.Body)
 	buf := make([]byte, 0, 64*1024)
@@ -293,6 +300,11 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 
 		if cr.Usage != nil {
 			usage = cr.Usage
+			usageChanged = true
+		}
+		// vLLM's equivalent of timings; applied after the stream ends.
+		if cr.Metrics != nil {
+			metrics = cr.Metrics
 		}
 		// Always process Timings (per-frame for llama.cpp) to get intermediate token counts.
 		// Timings.PredictedN gives cumulative completion tokens generated so far.
@@ -308,6 +320,12 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 			usage.PromptTokensDetails.CachedTokens = cr.Timings.CacheN
 			usage.PromptMs = int64(cr.Timings.PromptMs)
 			usage.PredictedMs = int64(cr.Timings.PredictedMs)
+			usageChanged = true
+		}
+		// Hand out a copy: usage is mutated in place across frames.
+		if usageChanged && onUsage != nil && usage != nil {
+			snapshot := *usage
+			onUsage(&snapshot)
 		}
 		// Forward prompt processing progress (from llama.cpp return_progress).
 		// Sent once per frame, before choices, so caller can emit before first token.
@@ -315,11 +333,12 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 			onProgress(*cr.PromptProgress)
 		}
 
-		for _, choice := range cr.Choices {
-			if firstTokenTime.IsZero() && hasContent(choice) {
+		for i := range cr.Choices {
+			normalizeReasoning(&cr.Choices[i])
+			if firstTokenTime.IsZero() && hasContent(cr.Choices[i]) {
 				firstTokenTime = time.Now()
 			}
-			cb(choice)
+			cb(cr.Choices[i])
 		}
 	}
 	readTimer.Stop()
@@ -328,8 +347,17 @@ func (c *LlamaClient) ChatStream(ctx context.Context, messages []types.ChatMessa
 		return usage, context.DeadlineExceeded
 	}
 
-	// Estimate missing timing from wall-clock.
+	// Fill missing timings: provider metrics first, then wall-clock.
 	if usage != nil {
+		// == 0 guards keep timings priority when a server sends both.
+		if metrics != nil {
+			if usage.PromptMs == 0 {
+				usage.PromptMs = int64(metrics.TimeToFirstTokenMs)
+			}
+			if usage.PredictedMs == 0 {
+				usage.PredictedMs = int64(metrics.GenerationTimeMs)
+			}
+		}
 		streamEnd := time.Now()
 		if usage.PromptMs == 0 && !firstTokenTime.IsZero() {
 			usage.PromptMs = firstTokenTime.Sub(callStart).Milliseconds()
@@ -416,9 +444,14 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 		return nil, "", fmt.Errorf("no choices in response")
 	}
 
-	content := result.Choices[0].Message.Content
-	if content == nil {
-		return nil, "", fmt.Errorf("empty content in response")
+	normalizeReasoning(&result.Choices[0])
+
+	// A model that spends its whole budget thinking returns no content (null on
+	// vLLM, "" on llama.cpp). That is a valid completion with real usage, not an
+	// error — callers handle empty text with their own fallbacks.
+	var content string
+	if result.Choices[0].Message.Content != nil {
+		content = strings.TrimSpace(*result.Choices[0].Message.Content)
 	}
 
 	// Extract usage data
@@ -444,6 +477,16 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 	}
 
 	if usage != nil {
+		// Provider metrics beat the wall-clock split below; == 0 keeps timings
+		// priority when a server sends both.
+		if result.Metrics != nil {
+			if usage.PromptMs == 0 {
+				usage.PromptMs = int64(result.Metrics.TimeToFirstTokenMs)
+			}
+			if usage.PredictedMs == 0 {
+				usage.PredictedMs = int64(result.Metrics.GenerationTimeMs)
+			}
+		}
 		// Estimate missing timing from wall-clock (gen ~5x slower per token than prompt).
 		totalDuration := time.Since(callStart).Milliseconds()
 		if usage.PromptMs == 0 && usage.PredictedMs == 0 && totalDuration > 0 {
@@ -458,7 +501,26 @@ func (c *LlamaClient) ChatCompletion(ctx context.Context, messages []types.ChatM
 			usage.PromptTokens, usage.CompletionTokens, usage.PromptTokensDetails.CachedTokens, usage.PromptMs, usage.PredictedMs)
 	}
 
-	return usage, strings.TrimSpace(*content), nil
+	return usage, content, nil
+}
+
+// normalizeReasoning copies the alternate reasoning field (vLLM's "reasoning")
+// into the canonical ReasoningContent. Without it, vLLM reasoning frames look
+// empty: firstTokenTime never gets set, breaking the timing fallback, and the
+// text never reaches the UI. reasoning_content wins when both are present —
+// never concatenate, or servers that send both would double the text.
+func normalizeReasoning(choice *types.ChatChoice) {
+	if choice == nil {
+		return
+	}
+	if (choice.Delta.ReasoningContent == nil || *choice.Delta.ReasoningContent == "") &&
+		choice.Delta.Reasoning != nil && *choice.Delta.Reasoning != "" {
+		choice.Delta.ReasoningContent = choice.Delta.Reasoning
+	}
+	if (choice.Message.ReasoningContent == nil || *choice.Message.ReasoningContent == "") &&
+		choice.Message.Reasoning != nil && *choice.Message.Reasoning != "" {
+		choice.Message.ReasoningContent = choice.Message.Reasoning
+	}
 }
 
 // hasContent reports whether the delta carries output (text, reasoning, or tool calls).

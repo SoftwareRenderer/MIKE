@@ -213,6 +213,9 @@ func (cs *ConfigStore) FetchModels(req FetchModelsRequest) FetchModelsResponse {
 
 // DiscoverContextWindow queries the llama-swap upstream endpoint for a model's
 // context window; nil if the server is not llama-swap or the query fails.
+// llama-swap's own /v1/models omits these fields, so the per-model upstream
+// endpoint is the only source. Covers llama.cpp (meta.n_ctx) and vLLM
+// (max_model_len).
 func (cs *ConfigStore) DiscoverContextWindow(modelName, providerURL string) *int {
 	// Check if this is a llama-swap server
 	baseURL := strings.TrimRight(providerURL, "/")
@@ -261,16 +264,25 @@ func (cs *ConfigStore) DiscoverContextWindow(modelName, providerURL string) *int
 
 	var upstreamResp struct {
 		Data []struct {
-			Meta struct {
-				NContext *int `json:"n_ctx"`
+			MaxModelLen int `json:"max_model_len"` // vLLM
+			Meta        struct {
+				NContext *int `json:"n_ctx"` // llama.cpp
 			} `json:"meta"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &upstreamResp); err != nil {
 		return nil
 	}
-	if len(upstreamResp.Data) > 0 && upstreamResp.Data[0].Meta.NContext != nil {
-		return upstreamResp.Data[0].Meta.NContext
+	if len(upstreamResp.Data) > 0 {
+		m := upstreamResp.Data[0]
+		// n_ctx first: on llama.cpp it is the runtime context (-c flag), which
+		// beats any advertised model maximum.
+		if m.Meta.NContext != nil {
+			return m.Meta.NContext
+		}
+		if m.MaxModelLen > 0 {
+			return &m.MaxModelLen
+		}
 	}
 	return nil
 }
