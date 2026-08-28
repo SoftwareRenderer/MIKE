@@ -416,7 +416,8 @@ func (te *TaskExecutor) StreamCompletion(ctx context.Context, serverURL, modelNa
 	var usage *types.ChatUsage
 	err := te.RunWithGate(ctx, serverURL, func() error {
 		var err error
-		usage, err = client.ChatStream(ctx, messages, nil, cb, onProgress)
+		// onUsage nil: the only caller streams tokens and ignores usage.
+		usage, err = client.ChatStream(ctx, messages, nil, cb, onProgress, nil)
 		return err
 	})
 	return usage, err

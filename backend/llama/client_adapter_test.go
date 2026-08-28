@@ -162,7 +162,7 @@ func TestChatStream_AdapterApplied(t *testing.T) {
 		if choice.Delta.Content != nil {
 			gotContent += *choice.Delta.Content
 		}
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("ChatStream: %v", err)
 	}

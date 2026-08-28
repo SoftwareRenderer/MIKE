@@ -62,15 +62,21 @@ type ChatToolCall struct {
 }
 
 // ChatChoiceDelta is the delta in a streaming response.
+// Reasoning arrives as reasoning_content (llama.cpp, cloud providers) or
+// reasoning (vLLM); the llama client folds the latter into ReasoningContent.
 type ChatChoiceDelta struct {
 	Content          *string        `json:"content"`
 	ReasoningContent *string        `json:"reasoning_content,omitempty"`
+	Reasoning        *string        `json:"reasoning,omitempty"`
 	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
 }
 
 // ChatChoiceMessage is the full message in a non-streaming response.
+// Reasoning follows the same two-name rule as ChatChoiceDelta.
 type ChatChoiceMessage struct {
-	Content *string `json:"content"`
+	Content          *string `json:"content"`
+	ReasoningContent *string `json:"reasoning_content,omitempty"`
+	Reasoning        *string `json:"reasoning,omitempty"`
 }
 
 // ChatChoice is a single choice in the response.
@@ -114,10 +120,22 @@ type PromptProgressData struct {
 
 // ChatResponse is a full streaming response frame.
 type ChatResponse struct {
-	Choices       []ChatChoice       `json:"choices"`
-	Usage         *ChatUsage         `json:"usage,omitempty"`
-	Timings       *ChatTimings       `json:"timings,omitempty"`
+	Choices        []ChatChoice        `json:"choices"`
+	Usage          *ChatUsage          `json:"usage,omitempty"`
+	Timings        *ChatTimings        `json:"timings,omitempty"`
 	PromptProgress *PromptProgressData `json:"prompt_progress,omitempty"`
+	Metrics        *VllmMetrics        `json:"metrics,omitempty"`
+}
+
+// VllmMetrics carries vLLM's server-side timings, sent on the final frame next
+// to usage. vLLM sends no timings block, so this is its only timing source:
+// time_to_first_token_ms is prompt processing, generation_time_ms is generation.
+type VllmMetrics struct {
+	TimeToFirstTokenMs float64 `json:"time_to_first_token_ms"`
+	GenerationTimeMs   float64 `json:"generation_time_ms"`
+	QueueTimeMs        float64 `json:"queue_time_ms"`
+	MeanItlMs          float64 `json:"mean_itl_ms"`
+	TokensPerSecond    float64 `json:"tokens_per_second"`
 }
 
 // StreamCallback is called for each streaming token/tool_call.
@@ -125,3 +143,9 @@ type StreamCallback func(choice ChatChoice)
 
 // PromptProgressCallback is called when the LLM sends prompt processing progress.
 type PromptProgressCallback func(progress PromptProgressData)
+
+// UsageCallback receives a snapshot of accumulated usage during streaming,
+// each time it changes (llama.cpp: per-frame timings; vLLM: the final usage
+// frame). The pointer is a copy, safe to retain. ChatStream's returned usage is
+// only available after the stream ends, which is too late for live stats.
+type UsageCallback func(usage *ChatUsage)

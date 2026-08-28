@@ -784,19 +784,22 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					}
 				}
 			}
-			// Send stats event when predicted token count changes.
-			// LLM client accumulates usage/timings from each SSE frame.
-			if lc.usage != nil {
-				predictedN := lc.usage.CompletionTokens
-				if predictedN != lastPredictedN {
-					lastPredictedN = predictedN
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-						"model_name":       activeModel,
-						"prompt_tokens":    lc.usage.PromptTokens,
-						"predicted_tokens": predictedN,
-						"predicted_ms":     lc.usage.PredictedMs,
-					}})
-				}
+		}
+		// usageCb publishes live token stats. It reads the snapshot, never
+		// lc.usage: that field is only set once ChatStream returns, so mid-stream
+		// it holds nil (first turn) or the previous turn's numbers (later turns).
+		usageCb := func(u *types.ChatUsage) {
+			if u == nil {
+				return
+			}
+			if u.CompletionTokens != lastPredictedN {
+				lastPredictedN = u.CompletionTokens
+				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
+					"model_name":       activeModel,
+					"prompt_tokens":    u.PromptTokens,
+					"predicted_tokens": u.CompletionTokens,
+					"predicted_ms":     u.PredictedMs,
+				}})
 			}
 		}
 		progressCb := func(progress types.PromptProgressData) {
@@ -815,7 +818,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 		lc.callStartTime = time.Now()
 		go func() {
-			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb)
+			lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb, usageCb)
 
 			// Retry on transient errors (skip if cancelled by user message)
 			if streamErr != nil && callCtx.Err() == nil {
@@ -838,7 +841,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					lc.finishReason = ""
 					flusher.reset()
 					lc.callStartTime = time.Now()
-					lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb)
+					lc.usage, streamErr = lc.client.ChatStream(callCtx, llmMessages, tools, tokenCb, progressCb, usageCb)
 					if streamErr == nil {
 						break
 					}
