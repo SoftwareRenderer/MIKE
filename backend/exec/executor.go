@@ -11,6 +11,7 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -208,6 +209,27 @@ func NewTaskExecutor(store *store.Store, configStore *config.ConfigStore, appStr
 func (te *TaskExecutor) GetWorktreeMu(taskID string) *sync.Mutex {
 	mu, _ := te.worktreeMu.LoadOrStore(taskID, &sync.Mutex{})
 	return mu.(*sync.Mutex)
+}
+
+// runToolProtected runs a tool call under the task's worktree lock (which
+// serializes tool writes against subtask merges) and turns a panic into a failed
+// result. The caller must always be able to emit and persist a tool_result — a tool
+// call left without one renders as "Running" forever — and a stranded worktree lock
+// would deadlock every later write for the task.
+func (te *TaskExecutor) runToolProtected(taskID, toolName string, run func() (string, bool)) (result string, success bool) {
+	mu := te.GetWorktreeMu(taskID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[tool] panic while executing %s for task=%s: %v\n%s", toolName, taskID, r, debug.Stack())
+			result = fmt.Sprintf("Error: internal error while running %s: %v", toolName, r)
+			success = false
+		}
+	}()
+
+	return run()
 }
 
 // WorktreeMgr returns the WorktreeManager. Used by server wiring.

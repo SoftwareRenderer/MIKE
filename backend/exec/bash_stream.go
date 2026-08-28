@@ -1,0 +1,219 @@
+package exec
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+)
+
+// Bounds for flushing a finished command's output; mirrors pkg/bridge/agent/bash.go.
+// Output already produced must reach the caller before the tool returns, but a
+// child the command detached keeps the pipe write end open, so real EOF may never
+// come and must not be waited for — that hang is what makes a finished bash call
+// look like it is still running.
+const (
+	bashDrainGrace = 250 * time.Millisecond
+	bashDrainCap   = 2 * time.Second
+
+	defaultBashTimeoutSec = 5
+	maxBashTimeoutSec     = 300
+)
+
+// normalizeBashTimeout clamps a tool-supplied timeout (seconds) to the supported
+// range, defaulting when unset.
+func normalizeBashTimeout(timeout int64) int64 {
+	switch {
+	case timeout <= 0:
+		return defaultBashTimeoutSec
+	case timeout > maxBashTimeoutSec:
+		return maxBashTimeoutSec
+	default:
+		return timeout
+	}
+}
+
+// killProcessGroup SIGKILLs the command's whole process group (commands run with
+// Setpgid, so the group id equals the pid). Killing only the direct child leaves
+// grandchildren running with the inherited stdout still open.
+// Callers must hold them off once the leader is reaped — its pid can be recycled.
+func killProcessGroup(p *os.Process) error {
+	if p == nil {
+		return nil
+	}
+	if err := syscall.Kill(-p.Pid, syscall.SIGKILL); err != nil {
+		// Group already gone (or not permitted) — fall back to the direct child.
+		return p.Kill()
+	}
+	return nil
+}
+
+// streamLineWriter accumulates a command's output and hands each completed line
+// to onLine as it arrives. mu lets one writer serve both the stdout and stderr
+// copiers.
+type streamLineWriter struct {
+	mu     sync.Mutex
+	total  bytes.Buffer
+	onLine func(text string)
+	pend   []byte
+}
+
+func (w *streamLineWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	// Never fails, so always report the full length: a short count would make
+	// io.Copy stop and drop output.
+	w.total.Write(p)
+	w.pend = append(w.pend, p...)
+	if i := bytes.LastIndexByte(w.pend, '\n'); i >= 0 {
+		w.emitLocked(string(w.pend[:i+1]))
+		w.pend = append(w.pend[:0:0], w.pend[i+1:]...)
+	}
+	return len(p), nil
+}
+
+// WriteFrom streams a pipe into the writer until EOF, or until drainCopiers closes
+// the fd (the normal end for a command that detached a child still holding it).
+func (w *streamLineWriter) WriteFrom(r io.Reader) (int64, error) {
+	return io.Copy(w, r)
+}
+
+// String returns everything captured so far.
+func (w *streamLineWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.total.String()
+}
+
+// flush emits a trailing partial line — a command that ends without a newline
+// still gets its last line reported.
+func (w *streamLineWriter) flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.pend) == 0 {
+		return
+	}
+	w.emitLocked(string(w.pend))
+	w.pend = nil
+}
+
+// emitLocked splits a chunk into lines and forwards them (called with mu held, so
+// the lines stay in order). Trailing \r is trimmed to match the sandbox path.
+func (w *streamLineWriter) emitLocked(chunk string) {
+	if w.onLine == nil {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSuffix(chunk, "\n"), "\n") {
+		w.onLine(strings.TrimSuffix(line, "\r") + "\n")
+	}
+}
+
+// drainCopiers waits for the output copiers once the command exited, bounded by
+// bashDrainGrace (normal flush) and bashDrainCap (hard stop). At the grace deadline
+// it closes the read ends, freeing a copier parked on a pipe a detached child still
+// holds open.
+func drainCopiers(copiers <-chan struct{}, readers ...*os.File) {
+	grace := time.NewTimer(bashDrainGrace)
+	defer grace.Stop()
+	hardStop := time.NewTimer(bashDrainCap)
+	defer hardStop.Stop()
+
+	forceEOF := func() {
+		for _, r := range readers {
+			_ = r.Close()
+		}
+	}
+
+	drained := 0
+loop:
+	for drained < len(readers) {
+		select {
+		case <-copiers:
+			drained++
+		case <-grace.C:
+			forceEOF()
+		case <-hardStop.C:
+			forceEOF()
+			break loop
+		}
+	}
+}
+
+// execCommandStream runs a shell command directly (no sandbox) in dir, returns its
+// combined output, and forwards it line by line to onLine (may be nil).
+//
+// timeout is seconds and is enforced: the whole process group is killed when it
+// expires and the error says so. A command that detaches a child returns as soon as
+// the command itself exits — the detached child is left running on purpose.
+func execCommandStream(ctx context.Context, dir, command string, timeout int64, onLine func(text string)) (string, error) {
+	secs := normalizeBashTimeout(timeout)
+	runCtx, cancel := context.WithTimeout(ctx, time.Duration(secs)*time.Second)
+	defer cancel()
+
+	c := exec.CommandContext(runCtx, "bash", "-c", command)
+	c.Dir = dir
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Kill the group, not just bash. The error is swallowed on purpose: exec turns a
+	// Cancel error into the Wait error, hiding the result of a process that had
+	// already exited.
+	c.Cancel = func() error {
+		_ = killProcessGroup(c.Process)
+		return nil
+	}
+
+	// Own the pipe ends. With exec-managed pipes, Wait() blocks on its copy
+	// goroutines for the whole WaitDelay whenever a child survives — owning the fds
+	// keeps the flush to bashDrainGrace.
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		return "", fmt.Errorf("stdout pipe: %w", err)
+	}
+	defer stdoutR.Close()
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		stdoutW.Close()
+		return "", fmt.Errorf("stderr pipe: %w", err)
+	}
+	defer stderrR.Close()
+	c.Stdout = stdoutW
+	c.Stderr = stderrW
+
+	if err := c.Start(); err != nil {
+		stdoutW.Close()
+		stderrW.Close()
+		return "", fmt.Errorf("start command: %w", err)
+	}
+	// The child has its own copies; drop ours or EOF never arrives.
+	stdoutW.Close()
+	stderrW.Close()
+
+	w := &streamLineWriter{onLine: onLine}
+	copiers := make(chan struct{}, 2)
+	copyStream := func(r *os.File) {
+		defer func() { copiers <- struct{}{} }()
+		_, _ = w.WriteFrom(r)
+	}
+	go copyStream(stdoutR)
+	go copyStream(stderrR)
+
+	waitErr := c.Wait() // returns at process exit; the copiers are drained below
+	drainCopiers(copiers, stdoutR, stderrR)
+	w.flush()
+
+	out := w.String()
+	switch {
+	case waitErr == nil:
+		return out, nil
+	case errors.Is(runCtx.Err(), context.DeadlineExceeded):
+		return out, fmt.Errorf("timed out after %ds and was killed — pass a larger timeout (max %ds) if the command needs longer", secs, maxBashTimeoutSec)
+	default:
+		return out, waitErr
+	}
+}
