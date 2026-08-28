@@ -13,7 +13,8 @@
     import editIcon from '$lib/assets/icons/edit.svg?raw';
     import checkCircleIcon from '$lib/assets/icons/check-circle.svg?raw';
     import questionIcon from '$lib/assets/icons/question.svg?raw';
-    import { formatToolArgs, HIDE_ARGS_FOR_TOOLS, SANDBOXABLE_TOOLS, ARGS_MAX_LEN, EDIT_DIFF_MAX_LINES } from '$lib/utils/toolArgs';
+    import { formatToolArgs, normalizeEdits, HIDE_ARGS_FOR_TOOLS, SANDBOXABLE_TOOLS, ARGS_MAX_LEN, EDIT_DIFF_MAX_LINES } from '$lib/utils/toolArgs';
+    import type { EditDiffEntry } from '$lib/utils/toolArgs';
     import { formatElapsed, formatDuration } from '$lib/utils/format-time';
     import { getTaskMessageFull } from '$lib/api';
 
@@ -290,8 +291,7 @@
     interface EditDiffLine { type: 'context' | 'removed' | 'added'; text: string; segments?: InlineDiffSegment[]; }
     interface EditDiffBlock { edits: EditDiffLine[]; separator?: boolean; }
 
-    function formatEditDiff(edits: Array<{ oldText: string; newText: string }> | undefined): EditDiffBlock[] {
-        if (!edits) return [];
+    function formatEditDiff(edits: EditDiffEntry[]): EditDiffBlock[] {
         const blocks: EditDiffBlock[] = [];
         for (const edit of edits) {
             const lines: EditDiffLine[] = [];
@@ -333,13 +333,12 @@
     }
 
     /** Count actual added/removed lines by comparing old/new text positionally. */
-    function countEditChanges(edits: Array<{ oldText: string; newText: string }> | undefined): { added: number; removed: number } {
-        if (!edits) return { added: 0, removed: 0 };
+    function countEditChanges(edits: EditDiffEntry[]): { added: number; removed: number } {
         let added = 0;
         let removed = 0;
         for (const edit of edits) {
-            const oldLines = (edit.oldText || '').split('\n');
-            const newLines = (edit.newText || '').split('\n');
+            const oldLines = edit.oldText.split('\n');
+            const newLines = edit.newText.split('\n');
             const pairCount = Math.min(oldLines.length, newLines.length);
             for (let p = 0; p < pairCount; p++) {
                 if (oldLines[p] !== newLines[p]) { added++; removed++; }
@@ -350,9 +349,15 @@
         return { added, removed };
     }
 
+    // Model/agent args are not trustworthy: an edit may be missing a side
+    // (still streaming, truncated, or hallucinated keys). Normalize once so
+    // every consumer (count + diff) reads string-guaranteed entries and no
+    // renderer can hit `undefined.split()`.
+    let editEntries = $derived<EditDiffEntry[]>(normalizeEdits(tc.args?.edits));
+
     // Edit diff expand/collapse — auto-expand for tiny changes (≤2 lines).
     // State is managed by parent (ChatMessage) to survive virtual list remounts.
-    let _editChanges = $derived(countEditChanges(tc.args?.edits as Array<{ oldText: string; newText: string }> | undefined));
+    let _editChanges = $derived(countEditChanges(editEntries));
     let isEditDiffTrivial = $derived((_editChanges.added + _editChanges.removed) <= 2);
     // Use explicit user override if set, otherwise fall back to trivial auto-expand default
     let editDiffExpanded = $derived(
@@ -360,7 +365,7 @@
     );
     let editLinesAdded = $derived(() => _editChanges.added);
     let editLinesRemoved = $derived(() => _editChanges.removed);
-    let hasEditDiff = $derived(tc.toolName === 'edit_file' && tc.args && tc.args.edits);
+    let hasEditDiff = $derived(tc.toolName === 'edit_file' && editEntries.length > 0);
 
     // Rendered markdown for request_review summary
     let renderedSummaryHtml = $derived(
@@ -456,7 +461,7 @@
             </button>
             {#if editDiffExpanded}
                 <div class="edit-diff" transition:slide={{ duration: 200 }}>
-                    {#each formatEditDiff(tc.args.edits as Array<{ oldText: string; newText: string }>) as block}
+                    {#each formatEditDiff(editEntries) as block}
                         {#each block.edits as line}
                             <div class="edit-diff-line edit-{line.type}">
                                 <span class="edit-diff-sign">{line.type === 'removed' ? '-' : line.type === 'added' ? '+' : ' '}</span>
