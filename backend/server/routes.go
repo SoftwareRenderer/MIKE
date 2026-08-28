@@ -101,7 +101,6 @@ func (s *Server) setupRoutes() {
 	// Tasks
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks", s.taskHandler.HandleList)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/done", s.taskHandler.HandleClearDone)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/reorder", s.boardHandler.HandleReorder)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}", s.taskHandler.HandleByID)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/move", s.taskHandler.HandleMove)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/init", s.taskHandler.HandleInit)

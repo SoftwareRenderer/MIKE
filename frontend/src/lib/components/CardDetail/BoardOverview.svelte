@@ -2,7 +2,8 @@
     import { fade, slide } from 'svelte/transition';
     import type { Task } from '$lib/types';
     import Card from '../Card.svelte';
-    import { sortByActivity } from '$lib/utils/sort-tasks';
+    import { sortByLastMoved } from '$lib/utils/sort-tasks';
+    import { appStore } from '$lib/stores';
     import { countWithDescendants } from '$lib/utils/task-utils';
     import type { MultiSelect } from '$lib/composables/use-multi-select.svelte';
 
@@ -51,6 +52,9 @@
         multiSelect?: MultiSelect | null;
     } = $props();
 
+    /** Card direction from Settings → Preferences: true = least recently moved on top. */
+    const sortOldestFirst = $derived(appStore.config?.sort_oldest_first === true);
+
     // Scroll to current task when task detail opens or task changes.
     // The current task's section is always expanded (handled in template).
     $effect(() => {
@@ -70,7 +74,7 @@
 
 <div class="task-list">
     {#each sections as section (section.id)}
-        {@const sectionTasks = sortByActivity(allTasks.filter(t => t.status === section.id && !consolidatedSubtaskIds.has(t.id)))}
+        {@const sectionTasks = sortByLastMoved(allTasks.filter(t => t.status === section.id && !consolidatedSubtaskIds.has(t.id)), sortOldestFirst)}
         {@const sectionCount = sectionTasks.reduce((sum, t) => sum + countWithDescendants(t.id, section.id, childrenMap), 0)}
         {@const sectionState = sectionDragState.get(section.id) || { isOver: false, isRejected: false }}
         <div

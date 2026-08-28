@@ -9,7 +9,6 @@ function makeTask(id: string, parentId?: string): Task {
         title: id,
         prompt: '',
         status: 'backlog',
-        column_order: 0,
         execution_state: 'idle',
         has_merge_conflict: false,
         max_consecutive_failed_turns: 5,
@@ -21,6 +20,7 @@ function makeTask(id: string, parentId?: string): Task {
         summarizing: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        moved_at: new Date().toISOString(),
         ...(parentId ? { parent_task_id: parentId } : {}),
     };
 }

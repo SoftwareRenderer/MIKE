@@ -8,11 +8,9 @@ import {
     updateProjectRaw,
     deleteProjectRaw,
     resetProjectStatsRaw,
-    reorderTasksRaw,
 } from './queue';
 import { setBoardCache, getBoardCache, boardCacheKey } from '../storage';
 import { markCached } from './cache';
-import type { ReorderRequest } from '../types';
 import { repoNameFromGitUrl } from '../utils/repo-name';
 
 /** Fetch all projects from the server. Falls back to cached copy on failure.
@@ -228,13 +226,4 @@ export async function getBoard(projectId: string): Promise<Board> {
         if (cached) return markCached(cached);
         throw e;
     }
-}
-
-/** Reorder tasks within columns. Queued when offline. */
-export async function reorderTasks(projectId: string, reorders: ReorderRequest[]): Promise<void> {
-    if (getOfflineStatus()) {
-        await enqueueAction({ type: 'reorderTasks', params: { projectId, reorders } });
-        return;
-    }
-    return reorderTasksRaw(projectId, reorders);
 }

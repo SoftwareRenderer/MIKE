@@ -39,7 +39,6 @@ function createMockTask(id: string, status: string = 'backlog'): Task {
         title: `Task ${id}`,
         prompt: '',
         status,
-        column_order: 0,
         execution_state: 'idle',
         has_merge_conflict: false,
         max_consecutive_failed_turns: 0,
@@ -51,6 +50,7 @@ function createMockTask(id: string, status: string = 'backlog'): Task {
         summarizing: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        moved_at: new Date().toISOString(),
     };
 }
 
