@@ -1,4 +1,5 @@
 import type { ChatEntry } from '$lib/types';
+import { findToolCall } from '$lib/utils/tool-call-lookup';
 
 /** Tool call info — matches ChatEntry['toolCalls'][number]. */
 export type ToolCallInfo = NonNullable<ChatEntry['toolCalls']>[number];
@@ -64,6 +65,22 @@ export class StreamState {
         this.state.queuePosition = 0;
         this.state.queueEstimatedWait = 0;
         this.clearRetry();
+    }
+
+    /**
+     * Re-point `activeToolCalls` at the tool calls currently in `entries`, dropping
+     * refs whose tool call is gone. Call after anything that replaces the entry list
+     * (loadHistory): the new entries carry new ids, so refs captured while streaming
+     * are detached and would keep writing into a copy nobody renders.
+     */
+    reconcileActiveToolCalls() {
+        if (this.state.activeToolCalls.size === 0) return;
+        const next = new Map<string, { entryId: string; toolCall: ToolCallInfo }>();
+        for (const toolId of this.state.activeToolCalls.keys()) {
+            const live = findToolCall(this.state.entries, toolId);
+            if (live) next.set(toolId, { entryId: live.entry.id, toolCall: live.tc });
+        }
+        this.state.activeToolCalls = next;
     }
 
     /** Reset streaming state (thread switch). */
