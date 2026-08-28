@@ -10,6 +10,7 @@ test-results
 test-results2
 .worktrees/*
 prompts/skills/
+TODO.md
 
 # Compiled binaries
 kanban
