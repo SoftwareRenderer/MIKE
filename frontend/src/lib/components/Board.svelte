@@ -3,8 +3,8 @@
     import Column from './Column.svelte';
     import MultiSelectBar from './MultiSelectBar.svelte';
     import { tick, onMount } from 'svelte';
-    import { moveTask, reorderTasks, clearDoneTasks, deleteTask, startTask } from '$lib/api';
-    import { sortByActivity } from '$lib/utils/sort-tasks';
+    import { moveTask, clearDoneTasks, deleteTask, startTask } from '$lib/api';
+    import { sortByLastMoved } from '$lib/utils/sort-tasks';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { getExpandedTasksContext } from '$lib/context';
     import { gc } from '$lib/storage';
@@ -136,6 +136,9 @@
     /** Pre-built task lookup map (shared by hasAncestorInProgress and other functions). */
     const taskMap = $derived(new Map(tasks.map(t => [t.id, t])));
 
+    /** Card direction from Settings → Preferences: true = least recently moved on top. */
+    const sortOldestFirst = $derived(appStore.config?.sort_oldest_first === true);
+
     /** Pre-computed column tasks (memoized per column status). */
     const columnTasks = $derived.by(() => {
         const cols: Record<string, Task[]> = { backlog: [], in_progress: [], review: [], done: [] };
@@ -144,9 +147,10 @@
             if (!cols[t.status]) cols[t.status] = [];
             cols[t.status].push(t);
         }
-        // Sort each column chronologically by last activity (oldest first)
+        // Newest move first (top) unless the preference asks for oldest first; stable,
+        // so unrelated edits never re-rank a card
         for (const status of Object.keys(cols)) {
-            cols[status] = sortByActivity(cols[status]);
+            cols[status] = sortByLastMoved(cols[status], sortOldestFirst);
         }
         return cols;
     });

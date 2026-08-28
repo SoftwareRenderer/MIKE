@@ -295,9 +295,6 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		if v, ok := rawBody["status"]; ok {
 			task.Status = v.(string)
 		}
-		if v, ok := rawBody["column_order"]; ok {
-			task.ColumnOrder = int(v.(float64))
-		}
 		if v, ok := rawBody["session_id"]; ok {
 			task.SessionID = v.(string)
 		}

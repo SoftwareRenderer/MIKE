@@ -56,6 +56,7 @@
     let keyboardToggleFullscreen = $state<string | undefined>(undefined);
     let keyboardHideHints = $state(false);
     let hideModelBadge = $state(false);
+    let sortOldestFirst = $state(false);
     let loading = $state(false);
     let error = $state('');
 
@@ -198,6 +199,7 @@
         keyboardToggleFullscreen = config?.keyboard_shortcuts?.toggle_fullscreen;
         keyboardHideHints = config?.keyboard_shortcuts?.hide_hints === true;
         hideModelBadge = config?.hide_model_badge === true;
+        sortOldestFirst = config?.sort_oldest_first === true;
         encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
         hasChanges = false;
@@ -544,6 +546,7 @@
                 default_auto_summarize_threshold: defaultAutoSummarizeThreshold,
                 run_siblings_parallel: runSiblingsParallel,
                 hide_model_badge: hideModelBadge,
+                sort_oldest_first: sortOldestFirst,
                 keyboard_shortcuts: { create_task: keyboardCreateTask, create_task_submit: keyboardCreateTaskSubmit, open_terminal: keyboardOpenTerminal, start_task: keyboardStartTask, toggle_fullscreen: keyboardToggleFullscreen, hide_hints: keyboardHideHints },
             } as Config);
             appStore.config = cfg;
@@ -774,7 +777,7 @@
 
         <!-- Preferences Tab -->
         {#if activeTab === 'preferences'}
-            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:startTaskKey={keyboardStartTask} bind:toggleFullscreenKey={keyboardToggleFullscreen} bind:hideHints={keyboardHideHints} bind:hideModelBadge={hideModelBadge} onDirty={markDirty} />
+            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:startTaskKey={keyboardStartTask} bind:toggleFullscreenKey={keyboardToggleFullscreen} bind:hideHints={keyboardHideHints} bind:hideModelBadge={hideModelBadge} bind:sortOldestFirst={sortOldestFirst} onDirty={markDirty} />
         {/if}
 
         <!-- Extensions Tab -->

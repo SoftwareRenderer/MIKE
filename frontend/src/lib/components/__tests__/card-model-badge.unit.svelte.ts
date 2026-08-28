@@ -94,7 +94,6 @@ function makeTask(overrides: Partial<Task> = {}): Task {
         title: 'Model badge task',
         prompt: 'do something',
         status: 'backlog',
-        column_order: 0,
         execution_state: '',
         has_merge_conflict: false,
         max_consecutive_failed_turns: 0,
@@ -107,6 +106,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
         parent_task_id: '',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        moved_at: new Date().toISOString(),
         ...overrides,
     } as Task;
 }
