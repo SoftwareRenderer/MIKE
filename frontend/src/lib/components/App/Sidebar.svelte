@@ -72,6 +72,12 @@
     const sortedProjects = $derived(
         [...projects].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
     );
+
+    /** Sidebar stats show only what is active: backlog is never shown, and a badge appears only when its count is > 0. */
+    const hasActiveStats = (projectId: string) => {
+        const counts = projectCounts[projectId];
+        return !!counts && (counts.in_progress > 0 || counts.review > 0);
+    };
 </script>
 
 <aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
@@ -118,20 +124,21 @@
                             <span class="clone-progress" role="progressbar" aria-label="Clone progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p.cloneProgress ?? 0}>
                                 <span class="clone-progress-bar" style={`width: ${p.cloneProgress ?? 0}%`}></span>
                             </span>
-                        {:else if (isMobile || !collapsed) && projectCounts[p.id]}
+                        {:else if (isMobile || !collapsed) && hasActiveStats(p.id)}
+                            <!-- Backlog is intentionally not shown; a badge appears only when its count is > 0 -->
                             <span class="project-stats">
-                                <span class="stat-badge" style="color: var(--color-column-backlog)" title="Backlog">
-                                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
-                                    {projectCounts[p.id].backlog}
-                                </span>
-                                <span class="stat-badge" style="color: var(--color-column-in-progress)" title="In Progress">
-                                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
-                                    {projectCounts[p.id].in_progress}
-                                </span>
-                                <span class="stat-badge" style="color: var(--color-column-review)" title="Review">
-                                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
-                                    {projectCounts[p.id].review}
-                                </span>
+                                {#if projectCounts[p.id].in_progress > 0}
+                                    <span class="stat-badge" style="color: var(--color-column-in-progress)" title="In Progress">
+                                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><polygon points="3.5,1.5 3.5,8.5 8.5,5" fill="currentColor"/></svg>
+                                        {projectCounts[p.id].in_progress}
+                                    </span>
+                                {/if}
+                                {#if projectCounts[p.id].review > 0}
+                                    <span class="stat-badge" style="color: var(--color-column-review)" title="Review">
+                                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><circle cx="5" cy="5" r="3.5" stroke="currentColor" stroke-width="1"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>
+                                        {projectCounts[p.id].review}
+                                    </span>
+                                {/if}
                             </span>
                         {/if}
                     </button>
