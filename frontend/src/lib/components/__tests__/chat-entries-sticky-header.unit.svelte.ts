@@ -19,6 +19,7 @@ vi.mock('$lib/constants', () => ({
 }));
 
 import ChatEntries from '$lib/components/Chat/ChatEntries.svelte';
+import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
 
 // Svelte 5 effects flush on the microtask queue; the mount effect also queues
 // a requestAnimationFrame scroll pin — drain both so they can't mutate
@@ -118,7 +119,7 @@ async function renderChat() {
         entries,
         entryMetas: entries.map(makeMeta),
         lastEntryIdx: entries.length - 1,
-        entriesReady: true,
+        follow: createChatFollow(),
     });
     await flush();
     return container;

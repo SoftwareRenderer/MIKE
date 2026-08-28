@@ -19,8 +19,9 @@ vi.mock('$lib/constants', () => ({
 }));
 
 import ChatEntries from '$lib/components/Chat/ChatEntries.svelte';
+import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
 
-// Svelte 5 effects (incl. the onScrollElChange notifier) flush on the
+// Svelte 5 effects (incl. the follow-tracker attach) flush on the
 // microtask queue, so give them a tick after render.
 async function flush() {
     for (let i = 0; i < 6; i++) await Promise.resolve();
@@ -75,7 +76,7 @@ describe('ChatEntries — direct (non-virtualized) rendering', () => {
             entries,
             entryMetas: entries.map(makeMeta),
             lastEntryIdx: entries.length - 1,
-            entriesReady: true,
+            follow: createChatFollow(),
         });
         await flush();
 
@@ -90,23 +91,21 @@ describe('ChatEntries — direct (non-virtualized) rendering', () => {
         expect(container.querySelectorAll('.chat-messages').length).toBe(1);
     });
 
-    it('reports the scroll container to the parent via onScrollElChange', async () => {
-        const onScrollElChange = vi.fn();
+    it('attaches the real scroll container to the shared follow tracker', async () => {
+        const follow = createChatFollow();
         const entries = [makeEntry('msg-0', 'assistant')];
         const { container } = render(ChatEntries, {
             ...baseProps,
             entries,
             entryMetas: entries.map(makeMeta),
             lastEntryIdx: 0,
-            entriesReady: true,
-            onScrollElChange,
+            follow,
         });
         await flush();
 
-        expect(onScrollElChange).toHaveBeenCalled();
-        const lastArg = onScrollElChange.mock.calls.at(-1)?.[0] as HTMLElement | null;
-        expect(lastArg).toBeInstanceOf(HTMLElement);
-        expect(container.contains(lastArg)).toBe(true);
-        expect(lastArg?.classList.contains('chat-messages')).toBe(true);
+        // The tracker must be handed the real element the entries render into.
+        expect(follow.el).toBeInstanceOf(HTMLElement);
+        expect(container.contains(follow.el)).toBe(true);
+        expect(follow.el?.classList.contains('chat-messages')).toBe(true);
     });
 });

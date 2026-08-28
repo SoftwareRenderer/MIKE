@@ -13,7 +13,7 @@
         const _v = uiInjector.getPointVersion(INJECTION_POINTS.TASK_CHAT);
         uiInjector.refreshSlot(INJECTION_POINTS.TASK_CHAT, { component: 'TaskChat', taskId, projectId });
     });
-    import { DRAFT_SAVE_DEBOUNCE_MS, SCROLL_BOTTOM_THRESHOLD } from '$lib/constants';
+    import { DRAFT_SAVE_DEBOUNCE_MS } from '$lib/constants';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
     import { resolveWorker, getModelName } from '$lib/utils/providers';
@@ -22,6 +22,7 @@
     import { wsConnection } from '$lib/stores/connection';
     import { getDraftText, setDraftText, clearDraftText, loadDraftAttachments, saveDraftAttachments, clearDraftAttachments } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
+    import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
     import ChatForm from './ChatForm.svelte';
     import ChatEntries from './ChatEntries.svelte';
     import ReviewBar from './ReviewBar.svelte';
@@ -31,14 +32,11 @@
 
     let connected = $state(false);
     let connecting = $state(true);
-    // svelte-ignore non_reactive_update — DOM ref via bind:this
-    let scrollEl: HTMLElement | null = null;
-    // Hide entries until scrolled to bottom (avoids flash)
-    let entriesReady = $state(false);
+    // Owns everything about "follow the latest message" (scroll container,
+    // atBottom, pinning). Shared with ChatEntries, which renders both.
+    const follow = createChatFollow();
     // True while the initial conversation history is being fetched
     let historyLoading = $state(false);
-
-    let atBottom = $state(true);
     let inputValue = $state('');
     let draftAttachments = $state<Array<{ file: File; preview: string; mimeType: string; base64: string }>>([]);
 
@@ -532,8 +530,8 @@
                 stream.state.lastPromptTokens = (lastAssistant.stats.prompt_tokens || 0) + (lastAssistant.stats.predicted_tokens || 0);
                 stream.state.contextState = { ...stream.state.contextState, used: stream.state.lastPromptTokens };
             }
-            // After replacing entries, the DOM re-renders and scroll state may be lost.
-            // Scroll to bottom on the next frame.
+            // The DOM re-renders after the entries are replaced, so pin on the
+            // next frame.
             if (scrollAfter) {
                 await new Promise(resolve => requestAnimationFrame(resolve));
                 scroll();
@@ -614,26 +612,13 @@
         }
     }
 
+    /**
+     * Follow the latest content. Forced only for user-initiated actions (send,
+     * edit, regenerate); never for stream events, so a reader who scrolled up
+     * keeps their position.
+     */
     function scroll(force = false) {
-        entriesReady = true;
-        if (!force && !atBottom) return;
-        if (!scrollEl) return;
-        scrollEl.scrollTop = scrollEl.scrollHeight;
-        // Streaming entries keep growing after this frame; pin once more on the
-        // next frame so the viewport stays on the latest content.
-        requestAnimationFrame(() => {
-            if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
-        });
-    }
-
-    // Scroll handler — updates atBottom synchronously so a user scroll-up is
-    // registered before any token-triggered scroll() runs in the same frame.
-    // Once the user scrolls away from the bottom, auto-scroll stops immediately;
-    // scrolling back to the bottom resumes it.
-    function onScroll() {
-        if (!scrollEl) return;
-        const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-        atBottom = gap < SCROLL_BOTTOM_THRESHOLD;
+        follow.pin(force);
     }
 
     async function handleSend(msg: string, attachments?: Array<{ mimeType: string; data: string }>) {
@@ -1275,8 +1260,8 @@
                 // Task may not exist yet
             }
             connect();
-            // Scroll to bottom after history is loaded and DOM has rendered.
-            // scroll() uses requestAnimationFrame internally so the DOM update is ready.
+            // Scroll to bottom after history is loaded and rendered.
+            // pin() re-pins for a few frames, so the list need not be final yet.
             scroll();
             // If task was started externally (e.g., from board) and is running with no
             // assistant response yet, show the "awaiting LLM" spinner until first token/tool_call.
@@ -1319,6 +1304,7 @@
 
     onDestroy(() => {
         destroyed = true;
+        follow.destroy();
         // Clear the global streaming flag so the card's "Running" badge
         // doesn't persist after the detail is closed while the task streams.
         // The card falls back to execution_state === 'running' for the authoritative state.
@@ -1427,7 +1413,7 @@
         {taskExecutionState}
         {projectId}
         {taskId}
-        onScroll={onScroll}
+        {follow}
         onDismissError={handleDismissError}
         onRetryConnect={handleRetryConnect}
         onThreadSwitch={handleThreadSwitch}
@@ -1441,8 +1427,6 @@
         {onViewChanges}
         {onToggleFullscreen}
         {isChatFullscreen}
-        onScrollElChange={(el) => scrollEl = el}
-        {entriesReady}
         {historyLoading}
     />
     {#if showStartButton}
