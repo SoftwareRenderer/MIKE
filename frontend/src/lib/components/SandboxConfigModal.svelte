@@ -147,6 +147,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     let imageTag = $derived(`sandbox-${project.name.replace(/ /g, '-').replace(/\//g, '-')}`);
     let saving = $state(false);
     let building = $state(false);
+    // Checked = builds started from this modal skip the layer cache. Not persisted.
+    let buildNoCache = $state(false);
     let buildError = $state('');
     let buildLog = $state<string[]>([]);
     // svelte-ignore non_reactive_update — DOM ref via bind:this
@@ -468,7 +470,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                     buildLog.push(line);
                     scrollBuildLog();
                 }
-            });
+            }, { noCache: buildNoCache });
         } catch (e) {
             buildError = String(e);
         } finally {
@@ -1192,33 +1194,43 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                         <span class="config-label">Dockerfile</span>
                         <span class="config-desc">Select a Dockerfile on the server</span>
                     </div>
-                    {#if sandboxDockerfilePath && dockerfileChanged}
-                    <button type="button" class="btn-build" onclick={handleRebuild} disabled={isLocked || building} title="Build image">
-                        {#if building}
-                            <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                                <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
-                            </svg>
+                    {#if sandboxDockerfilePath}
+                    <div class="build-actions">
+                        <!-- Applies to the next build started here, not a saved setting -->
+                        <label class="cache-toggle" class:disabled={isLocked || building}
+                               title="Skip the container build layer cache for the next build">
+                            <input type="checkbox" aria-label="Disable build cache" bind:checked={buildNoCache} disabled={isLocked || building} />
+                            <span class="cache-toggle-text">Disable cache</span>
+                        </label>
+                        {#if dockerfileChanged}
+                        <button type="button" class="btn-build" onclick={handleRebuild} disabled={isLocked || building} title="Build image">
+                            {#if building}
+                                <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                                    <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
+                                </svg>
+                            {:else}
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                                    <path d="M7 2L2 12h10L7 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
+                                </svg>
+                            {/if}
+                            {building ? 'Building...' : 'Build'}
+                        </button>
                         {:else}
-                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                                <path d="M7 2L2 12h10L7 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/>
-                            </svg>
+                        <button type="button" class="btn-rebuild" onclick={handleRebuild} disabled={isLocked || building} title={buildNoCache ? 'Rebuild image without cache' : 'Rebuild image'}>
+                            {#if building}
+                                <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                                    <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
+                                </svg>
+                            {:else}
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                                    <path d="M1.5 7a5.5 5.5 0 0110.2-2.8M12.5 7a5.5 5.5 0 01-10.2 2.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+                                    <path d="M11.5 1.5v3h-3M2.5 12.5v-3h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                                </svg>
+                            {/if}
+                            {building ? 'Building...' : 'Rebuild'}
+                        </button>
                         {/if}
-                        {building ? 'Building...' : 'Build'}
-                    </button>
-                    {:else if sandboxDockerfilePath && !dockerfileChanged}
-                    <button type="button" class="btn-rebuild" onclick={handleRebuild} disabled={isLocked || building} title="Rebuild image">
-                        {#if building}
-                            <svg class="spin" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                                <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="20 10" stroke-linecap="round"/>
-                            </svg>
-                        {:else}
-                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                                <path d="M1.5 7a5.5 5.5 0 0110.2-2.8M12.5 7a5.5 5.5 0 01-10.2 2.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/>
-                                <path d="M11.5 1.5v3h-3M2.5 12.5v-3h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                            </svg>
-                        {/if}
-                        {building ? 'Building...' : 'Rebuild'}
-                    </button>
+                    </div>
                     {/if}
                 </div>
 
@@ -1819,6 +1831,41 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         align-items: flex-start;
         justify-content: space-between;
         gap: 8px;
+    }
+
+    /* Build controls: cache modifier + build/rebuild button, right-aligned */
+    .build-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+
+    /* "Disable cache" checkbox next to the build button */
+    .cache-toggle {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        white-space: nowrap;
+        user-select: none;
+    }
+
+    .cache-toggle input[type="checkbox"] {
+        margin: 0;
+        cursor: pointer;
+        accent-color: var(--color-accent);
+    }
+
+    .cache-toggle.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .cache-toggle.disabled input[type="checkbox"] {
+        cursor: not-allowed;
     }
 
     .btn-rebuild {
