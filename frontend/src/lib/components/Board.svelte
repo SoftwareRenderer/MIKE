@@ -18,7 +18,7 @@
         uiInjector.refreshSlot(INJECTION_POINTS.PROJECT_BOARD, { component: 'Board', projectId });
     });
 
-    let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, onSelectTask, scrollToColumn }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; onSelectTask?: (task: Task) => void; scrollToColumn?: string | null } = $props();
+    let { tasks, projectId, projectPath, onAddTask, onCreateChildTask, onRefreshBoard, onSelectTask, scrollToColumn, boardFocus }: { tasks: Task[]; projectId: string; projectPath?: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; onSelectTask?: (task: Task) => void; scrollToColumn?: string | null; boardFocus?: { projectId: string; column: string } | null } = $props();
     let expandedTasksContext = getExpandedTasksContext();
 
     // Multi-select actions (wires up floating bar events)
@@ -239,6 +239,16 @@
 
     // Scroll to a specific column on mobile (e.g. after task delete or close)
     let boardEl: HTMLDivElement | null = null;
+
+    /** Column element for a status id, e.g. 'review' -> the Review column. */
+    function getColumnEl(status: string): HTMLElement | null {
+        if (!boardEl) return null;
+        const title = columns.find(c => c.id === status)?.title;
+        if (!title) return null;
+        const el = boardEl.querySelector(`.column[aria-label="${title} column"]`);
+        return el instanceof HTMLElement ? el : null;
+    }
+
     let hasScrolled = $state(false);
     let lastScrolledTarget = $state<string | null>(null);
     $effect(() => {
@@ -254,10 +264,23 @@
         hasScrolled = true;
         (async () => {
             await tick();
-            const col = boardEl.querySelector(`.column[aria-label="${target === 'in_progress' ? 'In Progress' : target === 'backlog' ? 'Backlog' : target === 'review' ? 'Review' : 'Done'} column"]`);
-            if (col instanceof HTMLElement) {
+            const col = getColumnEl(target);
+            if (col) {
                 col.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
             }
+        })();
+    });
+
+    // Jump to the landing column after switching project (mobile). Used once per project,
+    // and skipped when the board is not on screen (a task detail is open).
+    let lastFocusedProject: string | null = null;
+    $effect(() => {
+        const req = boardFocus;
+        if (!req || req.projectId !== projectId || req.projectId === lastFocusedProject) return;
+        lastFocusedProject = req.projectId;
+        (async () => {
+            await tick();
+            getColumnEl(req.column)?.scrollIntoView({ behavior: 'auto', inline: 'center', block: 'nearest' });
         })();
     });
 </script>
