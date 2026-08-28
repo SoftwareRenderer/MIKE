@@ -3,6 +3,7 @@
     import { slide } from 'svelte/transition';
     import type { Project, Task } from '$lib/types';
     import { updateProject, buildSandboxImageStream, getBoard, getProject } from '$lib/api';
+    import { formatMemoryLimitMB, memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { dialogStore } from '$lib/stores';
     import type { PortForward, AssignedPort, SandboxMount, SandboxEnv } from '$lib/types';
     import Icon from '$lib/components/Icon.svelte';
@@ -28,7 +29,8 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     let sandboxEnabled = $state(false);
     let networkIsolation = $state(false);
-    let sandboxMemoryLimit = $state(1024);
+    const DEFAULT_MEMORY_LIMIT_MB = 1024;
+    let sandboxMemoryLimit = $state<number | null>(DEFAULT_MEMORY_LIMIT_MB);
     let sandboxImage = $state('');
     let sandboxDockerfilePath = $state('');
     let forwardPorts = $state<PortForward[]>([]);
@@ -45,7 +47,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 
     $effect(() => { sandboxEnabled = project.sandbox_enabled ?? false; });
     $effect(() => { networkIsolation = project.sandbox_network_isolation ?? false; });
-    $effect(() => { sandboxMemoryLimit = project.sandbox_memory_limit ?? 1024; });
+    $effect(() => { sandboxMemoryLimit = memoryLimitToInput(project.sandbox_memory_limit ?? DEFAULT_MEMORY_LIMIT_MB); });
     $effect(() => { sandboxImage = project.sandbox_image ?? ''; });
     $effect(() => { sandboxDockerfilePath = project.sandbox_dockerfile_path ?? ''; });
     $effect(() => { forwardPorts = project.forward_ports ?? []; });
@@ -508,8 +510,12 @@ import ToggleSwitch from './ToggleSwitch.svelte';
         if (networkIsolation !== networkIsolationBaseline) {
             changes.sandbox_network_isolation = networkIsolation;
         }
-        if (sandboxMemoryLimit !== (project.sandbox_memory_limit ?? 1024)) {
-            changes.sandbox_memory_limit = sandboxMemoryLimit;
+        // Blank (like 0 or a negative) means "no limit", sent as an explicit 0:
+        // null/omitted tells the server to leave the limit unchanged, so an empty
+        // field could never remove an existing limit.
+        const memoryLimitMB = parseMemoryLimitMB(sandboxMemoryLimit);
+        if (memoryLimitMB !== parseMemoryLimitMB(project.sandbox_memory_limit ?? DEFAULT_MEMORY_LIMIT_MB)) {
+            changes.sandbox_memory_limit = memoryLimitMB;
         }
 
         // Handle image source switch — clear unused field
@@ -643,7 +649,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <!-- Memory limit -->
                 <div class="setting-row">
                     <span class="setting-label">Memory Limit</span>
-                    <span class="setting-value">{sandboxMemoryLimit} MB</span>
+                    <span class="setting-value">{formatMemoryLimitMB(sandboxMemoryLimit)}</span>
                 </div>
 
                 <!-- Image -->
@@ -1131,11 +1137,11 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                     </div>
                     <div class="config-text">
                         <span class="config-label">Memory Limit</span>
-                        <span class="config-desc">Max container memory (MB)</span>
+                        <span class="config-desc">Max container memory (MB) — blank = no limit</span>
                     </div>
                 </div>
                 <div class="memory-input-group">
-                    <input type="number" class="memory-input" bind:value={sandboxMemoryLimit} min="0" step="256" disabled={isLocked} aria-label="Maximum container memory in MB" />
+                    <input type="number" class="memory-input" bind:value={sandboxMemoryLimit} min="0" step="256" placeholder="No limit" disabled={isLocked} aria-label="Maximum container memory in MB" />
                     <span class="memory-unit">MB</span>
                 </div>
             </div>
@@ -1697,6 +1703,12 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     .memory-input:focus {
         outline: none;
         border-color: var(--color-accent);
+    }
+
+    /* Blank field = unlimited; the placeholder says so instead of showing 0. */
+    .memory-input::placeholder {
+        color: var(--color-text-secondary);
+        opacity: 1;
     }
 
     .memory-input:disabled {
