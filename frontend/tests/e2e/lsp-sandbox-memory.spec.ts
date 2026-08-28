@@ -243,8 +243,10 @@ test.describe.serial('LSP Sandbox Memory (editor footer tooltip)', () => {
 
     // 2. Save a 512 MB limit via the host-owned field in the edit form.
     await openLspEditForm(page);
-    // The form seeds from the effective sandbox_config value (0 = no limit).
-    await expect(page.locator(MEM_INPUT)).toHaveValue('0');
+    // The form seeds from the effective sandbox_config value: unlimited (0)
+    // renders as a blank field carrying the "No limit" placeholder.
+    await expect(page.locator(MEM_INPUT)).toHaveValue('');
+    await expect(page.locator(MEM_INPUT)).toHaveAttribute('placeholder', 'No limit');
     await page.locator(MEM_INPUT).fill('512');
     await saveEditForm(page);
     await closeSettings(page);
@@ -256,11 +258,11 @@ test.describe.serial('LSP Sandbox Memory (editor footer tooltip)', () => {
     await closeLspTooltip(page);
     await closeExplorer(page);
 
-    // 4. The saved value persists — reopening the form shows 512. Back to 0
-    //    (no limit), also applied live.
+    // 4. The saved value persists — reopening the form shows 512. Clearing the
+    //    field (blank = no limit) goes back to unlimited, applied live.
     await openLspEditForm(page);
     await expect(page.locator(MEM_INPUT)).toHaveValue('512');
-    await page.locator(MEM_INPUT).fill('0');
+    await page.locator(MEM_INPUT).fill('');
     await saveEditForm(page);
     await closeSettings(page);
 
