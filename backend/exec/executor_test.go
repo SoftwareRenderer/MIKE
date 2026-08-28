@@ -841,3 +841,52 @@ func TestInitTask_ClearsOrphanedBranchOnWorktreeFailure(t *testing.T) {
 		t.Fatalf("branch should be cleared after worktree failure, got %q", reloaded.Branch)
 	}
 }
+
+// A panicking tool must still produce a result and must not strand the worktree
+// lock: a tool_call left without a result renders as "Running" forever, and the
+// stranded lock deadlocks every later write for the task.
+func TestRunToolProtected_PanicBecomesFailedResult(t *testing.T) {
+	te := &TaskExecutor{}
+
+	result, ok := te.runToolProtected("task-panic", "bash", func() (string, bool) {
+		panic("boom")
+	})
+
+	if ok {
+		t.Errorf("success = true after a panic, want false")
+	}
+	if !strings.Contains(result, "internal error while running bash") || !strings.Contains(result, "boom") {
+		t.Errorf("result = %q, want an internal-error message naming the tool", result)
+	}
+
+	mu := te.GetWorktreeMu("task-panic")
+	if !mu.TryLock() {
+		t.Fatal("worktree lock still held after a panicking tool — later tools would deadlock")
+	}
+	mu.Unlock()
+}
+
+func TestRunToolProtected_PassesResultThroughUnderLock(t *testing.T) {
+	te := &TaskExecutor{}
+
+	var heldInside bool
+	result, ok := te.runToolProtected("task-ok", "read_file", func() (string, bool) {
+		mu := te.GetWorktreeMu("task-ok")
+		heldInside = !mu.TryLock() // fails only because we already hold it
+		if !heldInside {
+			mu.Unlock()
+		}
+		return "file contents", true
+	})
+
+	if !ok || result != "file contents" {
+		t.Errorf("runToolProtected() = (%q, %v), want (\"file contents\", true)", result, ok)
+	}
+	if !heldInside {
+		t.Error("the worktree lock was not held while the tool ran")
+	}
+	if !te.GetWorktreeMu("task-ok").TryLock() {
+		t.Fatal("worktree lock still held after a successful tool")
+	}
+	te.GetWorktreeMu("task-ok").Unlock()
+}

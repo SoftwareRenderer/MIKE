@@ -523,6 +523,9 @@
             if (taskStatus !== 'in_progress') {
                 stream.state.entries = stream.state.entries.filter(e => !e.toolCalls?.some(tc => tc.isPending));
             }
+            // These are new entry objects, so refs captured while streaming are now
+            // detached; re-point them before more events for this turn arrive.
+            stream.reconcileActiveToolCalls();
             // Restore context usage from the last assistant message.
             // Use total context (prompt + predicted) to reflect full window consumed.
             const lastAssistant = [...stream.state.entries].reverse().find(e => e.role === 'assistant' && e.stats);
@@ -1373,6 +1376,7 @@
         stream.state.entries = stream.state.entries.filter(
             e => !e.isStreaming && !(e.toolCalls?.some(tc => tc.isPending))
         );
+        // resetStreaming already drops every ref — no reconcile needed here.
         stream.resetStreaming();
         markNotStreaming();
     }

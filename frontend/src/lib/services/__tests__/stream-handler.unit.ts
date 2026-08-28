@@ -841,3 +841,119 @@ describe('createStreamHandler', () => {
 });
 
 
+
+// A history reload (loadHistory) replaces the streaming buffer entry with a
+// DB-loaded one: new entry id (message UUID), SAME tool_id. Every activeToolCalls
+// ref captured while streaming therefore points at a detached copy. These are the
+// "bash card shows Running although the command finished" regressions.
+describe('stale activeToolCalls ref after a history reload', () => {
+    function setup() {
+        const cb = makeCallbacks();
+        const stream = new StreamState();
+        const handleEvent = createStreamHandler(stream, cb);
+        return { cb, stream, handleEvent };
+    }
+
+    /** Mirror what loadHistory() does to an in-flight tool call's entry. */
+    function simulateHistoryReload(stream: StreamState, toolId: string, toolName = 'bash') {
+        stream.state.entries = [{
+            id: 'db-msg-1', role: 'assistant', content: '', isStreaming: false,
+            createdAt: new Date().toISOString(),
+            toolCalls: [{ toolId, toolName, args: { command: 'npm test' }, isPending: true, startedAt: Date.now(), messageId: 'db-msg-1' }],
+        }];
+        stream.state.currentAssistantId = null;
+    }
+
+    function startBash(handleEvent: ReturnType<typeof createStreamHandler>) {
+        handleEvent({ type: 'token', data: { text: '' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: { command: 'npm test' } } }, false, 'p1', 't1');
+    }
+
+    it('regression: tool_result clears pending when the entry was replaced by the DB entry', () => {
+        const { stream, handleEvent } = setup();
+        startBash(handleEvent);
+        simulateHistoryReload(stream, 'tc1');
+
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: '23 passing', duration: 4200, streamed: true, message_id: 'db-msg-1' } }, false, 'p1', 't1');
+
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.isPending).toBe(false);          // ← the card stops saying "Running"
+        expect(tc.result).toBe('23 passing');
+        expect(tc.duration).toBe(4200);
+        expect(stream.state.activeToolCalls.has('tc1')).toBe(false);
+    });
+
+    it('regression: tool_output after a reload reaches the visible card instead of a detached copy', () => {
+        const { stream, handleEvent } = setup();
+        startBash(handleEvent);
+        simulateHistoryReload(stream, 'tc1');
+
+        handleEvent({ type: 'tool_output', data: { tool_id: 'tc1', text: 'building...\n' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_output', data: { tool_id: 'tc1', text: 'done.\n' } }, false, 'p1', 't1');
+
+        expect(stream.state.entries[0].toolCalls![0].result).toBe('building...\ndone.\n');
+    });
+
+    it('regression: streamed output survives the tool_result preview', () => {
+        const { stream, handleEvent } = setup();
+        startBash(handleEvent);
+        simulateHistoryReload(stream, 'tc1');
+
+        handleEvent({ type: 'tool_output', data: { tool_id: 'tc1', text: 'full build log\n' } }, false, 'p1', 't1');
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: '…preview…', duration: 10, streamed: true } }, false, 'p1', 't1');
+
+        const tc = stream.state.entries[0].toolCalls![0];
+        expect(tc.result).toBe('full build log\n');
+        expect(tc.isPending).toBe(false);
+    });
+
+    it('tool_progress after a reload still updates the visible card', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'tool_call', data: { tool_id: 'wf1', tool_name: 'write_file', args: { path: 'a.ts' } } }, false, 'p1', 't1');
+        simulateHistoryReload(stream, 'wf1', 'write_file');
+
+        handleEvent({ type: 'tool_progress', data: { tool_id: 'wf1', bytes_written: 4096 } }, false, 'p1', 't1');
+
+        expect(stream.state.entries[0].toolCalls![0].bytesWritten).toBe(4096);
+    });
+
+    it('a tool_call update after a reload updates the DB-loaded card in place (no duplicate)', () => {
+        const { stream, handleEvent } = setup();
+        startBash(handleEvent);
+        simulateHistoryReload(stream, 'tc1');
+
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: { command: 'npm test', timeout: 120 }, raw_args: '{"command":"npm test","timeout":120}' } }, false, 'p1', 't1');
+
+        expect(stream.state.entries).toHaveLength(1);
+        expect(stream.state.entries[0].id).toBe('db-msg-1');
+        expect(stream.state.entries[0].toolCalls).toHaveLength(1);
+        expect(stream.state.entries[0].toolCalls![0].args).toEqual({ command: 'npm test', timeout: 120 });
+    });
+
+    it('reconcileActiveToolCalls re-points refs at the live entries', () => {
+        const { stream, handleEvent } = setup();
+        startBash(handleEvent);
+        simulateHistoryReload(stream, 'tc1');
+
+        stream.reconcileActiveToolCalls();
+
+        expect(stream.state.activeToolCalls.get('tc1')?.entryId).toBe('db-msg-1');
+        // And the re-pointed ref is usable: output lands on the live card.
+        handleEvent({ type: 'tool_output', data: { tool_id: 'tc1', text: 'x\n' } }, false, 'p1', 't1');
+        expect(stream.state.entries[0].toolCalls![0].result).toBe('x\n');
+    });
+
+    it('reconcileActiveToolCalls drops refs whose tool call is gone from the entries', () => {
+        const { stream, handleEvent } = setup();
+        startBash(handleEvent);
+        // loadHistory removes pending tool calls of a non-running task entirely.
+        stream.state.entries = [{ id: 'db-msg-9', role: 'user', content: 'hi', isStreaming: false, createdAt: new Date().toISOString() }];
+
+        stream.reconcileActiveToolCalls();
+
+        expect(stream.state.activeToolCalls.size).toBe(0);
+        // A late result for a vanished tool call must not resurrect it or throw.
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'late', duration: 1 } }, false, 'p1', 't1');
+        expect(stream.state.entries.find(e => e.toolCalls?.length)).toBeUndefined();
+    });
+});
