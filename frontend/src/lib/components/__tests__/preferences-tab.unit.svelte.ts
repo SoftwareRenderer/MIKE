@@ -413,3 +413,40 @@ describe('PreferencesTab start-task row', () => {
         expect(start.getAllByText(/task view/i).length).toBeGreaterThan(0);
     });
 });
+
+describe('PreferencesTab board sort toggle', () => {
+    const TOGGLE = 'button[aria-label="Oldest moved on top"]';
+
+    function renderSortTab(props: { sortOldestFirst?: boolean } = {}) {
+        const onDirty = vi.fn();
+        const utils = render(PreferencesTab, {
+            props: { createTaskKey: undefined, sortOldestFirst: false, onDirty, ...props },
+        });
+        return { ...utils, onDirty, toggle: () => utils.container.querySelector(TOGGLE) as HTMLButtonElement };
+    }
+
+    it('renders the toggle, off by default (newest move on top)', () => {
+        const { toggle } = renderSortTab();
+        expect(toggle()).toBeTruthy();
+        expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+    });
+
+    it('reflects a stored preference', () => {
+        const { toggle } = renderSortTab({ sortOldestFirst: true });
+        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('toggles and reports dirty', async () => {
+        const { toggle, onDirty } = renderSortTab();
+        await fireEvent.click(toggle()!);
+        expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+    });
+
+    it('explains what turning it on does', () => {
+        const { container } = renderSortTab();
+        const toggle = container.querySelector(TOGGLE) as HTMLButtonElement;
+        const desc = container.querySelector(`#${toggle.getAttribute('aria-describedby')!}`);
+        expect(desc?.textContent).toMatch(/least recently moved/i);
+    });
+});

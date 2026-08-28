@@ -1,7 +1,6 @@
 package managers
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"kanban/backend/config"
@@ -65,28 +64,4 @@ func (h *BoardHandler) HandleBoard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.JSONResponse(w, http.StatusOK, types.Board{Tasks: tasks})
-}
-
-// HandleReorder bulk-reorders tasks within columns.
-func (h *BoardHandler) HandleReorder(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("projectID")
-
-	if _, err := h.store.GetProject(projectID); err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
-		return
-	}
-
-	var reorders []types.ReorderRequest
-	if err := json.NewDecoder(r.Body).Decode(&reorders); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	if err := h.store.ReorderTasks(projectID, reorders); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to reorder tasks")
-		return
-	}
-
-	h.boardStreamMgr.Broadcast(projectID)
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }

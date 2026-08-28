@@ -64,7 +64,8 @@ export async function deleteTask(projectId: string, taskId: string): Promise<voi
 /** Move a task to a different column (status). Queued when offline. */
 export async function moveTask(projectId: string, taskId: string, status: string): Promise<Task> {
     if (getOfflineStatus()) {
-        return await queueWrite('moveTask', { projectId, taskId, status }, { id: taskId, status } as Task);
+        // Carry moved_at so a queued move still lands on top of its column offline
+        return await queueWrite('moveTask', { projectId, taskId, status }, { id: taskId, status, moved_at: new Date().toISOString() } as Task);
     }
     return moveTaskRaw(projectId, taskId, status);
 }
@@ -72,7 +73,7 @@ export async function moveTask(projectId: string, taskId: string, status: string
 /** Commit changes and mark a task as done. Queued when offline. */
 export async function commitAndDone(projectId: string, taskId: string, commitMessage?: string): Promise<Task> {
     if (getOfflineStatus()) {
-        return await queueWrite('commitAndDone', { projectId, taskId }, { id: taskId, status: 'done' } as Task);
+        return await queueWrite('commitAndDone', { projectId, taskId }, { id: taskId, status: 'done', moved_at: new Date().toISOString() } as Task);
     }
     return commitAndDoneRaw(projectId, taskId, commitMessage);
 }

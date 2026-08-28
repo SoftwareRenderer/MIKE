@@ -110,7 +110,6 @@ CREATE TABLE IF NOT EXISTS tasks (
     title                        TEXT NOT NULL,
     prompt                       TEXT NOT NULL,
     status                       TEXT NOT NULL DEFAULT 'backlog',
-    column_order                 INTEGER NOT NULL DEFAULT 0,
     session_id                   TEXT,
     branch                       TEXT,
     base_ref                     TEXT DEFAULT NULL,
@@ -130,6 +129,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     autostarted                  INTEGER NOT NULL DEFAULT 0,
     created_at                   TEXT NOT NULL,
     updated_at                   TEXT NOT NULL,
+    moved_at                     TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (parent_task_id) REFERENCES tasks(id) ON DELETE SET NULL
 );
@@ -314,6 +314,11 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN session_cost REAL NOT NULL DEFAULT 0`)
 	// Records whether the task execution was auto-started from a parent (sibling continuation)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN autostarted INTEGER NOT NULL DEFAULT 0`)
+	// moved_at orders the board: it changes only when a task moves column (see UpdateTask).
+	// Backfilled from created_at on the first startup after the upgrade.
+	if _, err := s.db.Exec(`ALTER TABLE tasks ADD COLUMN moved_at TEXT NOT NULL DEFAULT ''`); err == nil {
+		_, _ = s.db.Exec(`UPDATE tasks SET moved_at = created_at WHERE moved_at = ''`)
+	}
 	// Cumulative token stats table (survives task deletion)
 	_, _ = s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS project_token_stats (
@@ -447,12 +452,12 @@ func scanTime(s string) time.Time {
 // scanTask scans a row into a Task, handling bool/time conversions.
 func scanTask(s scanner, t *types.Task) error {
 	var autoCommit, autoMerge, subtasksAutoMerge, titleGenerating, summarizing, hasMergeConflict, autostarted int
-	var createdAt, updatedAt string
+	var createdAt, updatedAt, movedAt string
 	var parentTaskID, currentThreadID, reasoningEffort, baseRef, baseCommit, branchTip, assignedPortsJSON sql.NullString
-	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status, &t.ColumnOrder,
+	err := s.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Prompt, &t.Status,
 		&t.SessionID, &t.Branch, &baseRef, &baseCommit, &branchTip, &t.Output, &t.ExecutionState, &hasMergeConflict,
 		&t.LlamaServerURL, &t.ModelName, &reasoningEffort, &t.MaxConsecutiveFailedTurns,
-		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &autostarted, &titleGenerating, &summarizing, &currentThreadID, &createdAt, &updatedAt, &assignedPortsJSON, &t.SessionCost)
+		&autoCommit, &autoMerge, &subtasksAutoMerge, &t.OperatingMode, &parentTaskID, &autostarted, &titleGenerating, &summarizing, &currentThreadID, &createdAt, &updatedAt, &movedAt, &assignedPortsJSON, &t.SessionCost)
 	if err != nil {
 		return err
 	}
@@ -471,6 +476,11 @@ func scanTask(s scanner, t *types.Task) error {
 	t.BranchTip = branchTip.String
 	t.CreatedAt = scanTime(createdAt)
 	t.UpdatedAt = scanTime(updatedAt)
+	// Rows predating the migration have an empty moved_at; created_at keeps their order stable.
+	if movedAt == "" {
+		movedAt = createdAt
+	}
+	t.MovedAt = scanTime(movedAt)
 	if assignedPortsJSON.Valid && assignedPortsJSON.String != "" {
 		_ = json.Unmarshal([]byte(assignedPortsJSON.String), &t.AssignedPorts)
 	}
