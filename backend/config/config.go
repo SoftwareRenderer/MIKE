@@ -246,6 +246,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	defaultAutoSummarizeThresholdRaw, _ := cs.store.GetConfigValue("default_auto_summarize_threshold")
 	hideModelBadgeRaw, _ := cs.store.GetConfigValue("hide_model_badge")
 	runSiblingsParallelRaw, _ := cs.store.GetConfigValue("run_siblings_parallel")
+	sortOldestFirstRaw, _ := cs.store.GetConfigValue("sort_oldest_first")
 	keyboardShortcutsRaw, _ := cs.store.GetConfigValue("keyboard_shortcuts")
 
 	cfg := &types.Config{
@@ -291,6 +292,9 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	}
 	if v, err := parseBoolPtr(runSiblingsParallelRaw); err == nil && v != nil {
 		cfg.RunSiblingsParallel = v
+	}
+	if v, err := parseBoolPtr(sortOldestFirstRaw); err == nil && v != nil {
+		cfg.SortOldestFirst = v
 	}
 	cfg.KeyboardShortcuts = normalizeKeyboardShortcuts(cfg.KeyboardShortcuts)
 	return cfg, nil
@@ -391,6 +395,11 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 			return err
 		}
 	}
+	if c.SortOldestFirst != nil {
+		if err := cs.store.SetConfigValue("sort_oldest_first", fmt.Sprintf("%t", *c.SortOldestFirst)); err != nil {
+			return err
+		}
+	}
 	if c.KeyboardShortcuts != nil {
 		ksJSON, err := json.Marshal(c.KeyboardShortcuts)
 		if err != nil {
@@ -421,6 +430,7 @@ type configResponse struct {
 	DefaultAutoSummarizeThreshold *int                     `json:"default_auto_summarize_threshold,omitempty"`
 	HideModelBadge                *bool                    `json:"hide_model_badge,omitempty"`
 	RunSiblingsParallel           *bool                    `json:"run_siblings_parallel,omitempty"`
+	SortOldestFirst               *bool                    `json:"sort_oldest_first,omitempty"`
 	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 	EncryptionEnabled             bool                     `json:"encryption_enabled"`
 }
@@ -481,6 +491,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		DefaultAutoSummarizeThreshold: cfg.DefaultAutoSummarizeThreshold,
 		HideModelBadge:                cfg.HideModelBadge,
 		RunSiblingsParallel:           cfg.RunSiblingsParallel,
+		SortOldestFirst:               cfg.SortOldestFirst,
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
 		EncryptionEnabled:             crypto.IsEnabled(),
 	}
@@ -592,6 +603,11 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		if rps, ok := updates["run_siblings_parallel"]; ok {
 			if v, ok := rps.(bool); ok {
 				current.RunSiblingsParallel = &v
+			}
+		}
+		if sof, ok := updates["sort_oldest_first"]; ok {
+			if v, ok := sof.(bool); ok {
+				current.SortOldestFirst = &v
 			}
 		}
 		if ksRaw, ok := updates["keyboard_shortcuts"]; ok {

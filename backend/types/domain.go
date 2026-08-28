@@ -11,7 +11,6 @@ type Task struct {
 	Title                     string `json:"title"`
 	Prompt                    string `json:"prompt"`
 	Status                    string `json:"status"`
-	ColumnOrder               int    `json:"column_order"`
 	SessionID                 string `json:"session_id"`
 	Branch                    string `json:"branch"`
 	BaseRef                   string `json:"base_ref,omitempty"`
@@ -34,9 +33,11 @@ type Task struct {
 	CurrentThreadID           string `json:"current_thread_id,omitempty"`
 	WorktreeExists            bool   `json:"worktree_exists"`
 	// Autostarted records whether this execution was started autonomously
-	Autostarted   bool           `json:"-"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	Autostarted bool      `json:"-"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	// MovedAt is when the task last changed column; the board orders by it, newest first.
+	MovedAt       time.Time      `json:"moved_at"`
 	AssignedPorts []AssignedPort `json:"assigned_ports,omitempty"`
 	SessionCost   float64        `json:"session_cost"`
 }
@@ -91,8 +92,11 @@ type Config struct {
 	HideModelBadge *bool `json:"hide_model_badge,omitempty"`
 	// RunSiblingsParallel starts all of a parent's startable subtasks at once
 	// (instead of one at a time). Nil = off (sequential, the default).
-	RunSiblingsParallel *bool              `json:"run_siblings_parallel,omitempty"`
-	KeyboardShortcuts   *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
+	RunSiblingsParallel *bool `json:"run_siblings_parallel,omitempty"`
+	// SortOldestFirst puts the least recently moved card at the top of a board
+	// column. Nil = off (newest move on top, the default).
+	SortOldestFirst   *bool              `json:"sort_oldest_first,omitempty"`
+	KeyboardShortcuts *KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 }
 
 // KeyboardShortcuts holds user-customizable keyboard shortcut bindings.

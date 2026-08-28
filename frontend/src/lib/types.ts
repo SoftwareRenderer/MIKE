@@ -78,7 +78,6 @@ export interface Task {
     title: string;
     prompt: string;
     status: string;
-    column_order: number;
     session_id?: string;
     branch?: string;
     base_commit?: string; // commit hash of base_ref at task start
@@ -101,6 +100,8 @@ export interface Task {
     worktree_exists?: boolean;
     created_at: string;
     updated_at: string;
+    /** When the task last changed column — the board's sort key (newest move first). */
+    moved_at: string;
     assigned_ports?: AssignedPort[];
     base_ref?: string;
     session_cost?: number;
@@ -222,6 +223,7 @@ export interface Config {
     default_auto_summarize_threshold?: number; // percent of context window, 1-100
     hide_model_badge?: boolean; // hide the model badge on task cards
     run_siblings_parallel?: boolean; // start all of a parent's subtasks at once (default off)
+    sort_oldest_first?: boolean; // put the least recently moved card on top of a column (default off)
     encryption_enabled?: boolean;
     keyboard_shortcuts?: KeyboardShortcuts;
 }
@@ -336,11 +338,6 @@ export interface TaskCommit {
     short: string;
     subject: string;
     date: string;
-}
-
-export interface ReorderRequest {
-    id: string;
-    column_order: number;
 }
 
 export interface ProjectCounts {

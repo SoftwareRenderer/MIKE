@@ -306,38 +306,6 @@ func TestTaskMoveAutoStartFailReverts(t *testing.T) {
 	}
 }
 
-func TestTaskReorder(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-
-	// Create 3 tasks
-	taskIDs := make([]string, 3)
-	for i := range 3 {
-		taskIDs[i] = createTestTask(t, s, projID, "Task "+string(rune('A'+i)))
-	}
-
-	// Reorder: set explicit column_order values
-	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/reorder", []map[string]any{
-		{"id": taskIDs[0], "column_order": 10},
-		{"id": taskIDs[1], "column_order": 20},
-		{"id": taskIDs[2], "column_order": 0},
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	// Verify new order: taskIDs[2] (order=0) first, taskIDs[0] (order=10) last
-	req = testRequest("GET", "/api/projects/"+projID+"/tasks", nil)
-	rr = testResponseAuth(t, s, req)
-	tasks := mustJSON[[]map[string]any](t, rr.Body)
-	if tasks[0]["id"] != taskIDs[2] || tasks[1]["id"] != taskIDs[0] || tasks[2]["id"] != taskIDs[1] {
-		t.Fatalf("reorder failed: expected [%s, %s, %s], got [%s, %s, %s]",
-			taskIDs[2], taskIDs[0], taskIDs[1],
-			tasks[0]["id"], tasks[1]["id"], tasks[2]["id"])
-	}
-}
-
 func TestTaskParentValidation(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
@@ -2602,5 +2570,57 @@ func TestTaskUpdateParentNotFound(t *testing.T) {
 	rr := testResponseAuth(t, s, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestTaskMovedAtOnlyChangesOnMove pins the board's sort contract: moved_at advances only
+// when the task changes column, never on an ordinary edit.
+func TestTaskMovedAtOnlyChangesOnMove(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Move me later")
+
+	// Pin the timestamps so a move within the same second is still observable.
+	old := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
+	if _, err := s.store.Exec(`UPDATE tasks SET created_at = ?, updated_at = ?, moved_at = ? WHERE id = ?`, old, old, old, taskID); err != nil {
+		t.Fatalf("seed timestamps: %v", err)
+	}
+
+	// A plain edit must leave moved_at alone.
+	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{"title": "Renamed"})
+	rr := testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result := mustJSON[map[string]any](t, rr.Body)
+	if result["moved_at"] != old {
+		t.Fatalf("title edit must not change moved_at: expected %v, got %v", old, result["moved_at"])
+	}
+	if result["updated_at"] == old {
+		t.Fatalf("updated_at should still advance on an edit")
+	}
+
+	// A move advances it — and the response echoes the stored value.
+	req = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/move", map[string]any{"status": "review"})
+	rr = testResponseAuth(t, s, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	result = mustJSON[map[string]any](t, rr.Body)
+	movedAt, err := time.Parse(time.RFC3339, result["moved_at"].(string))
+	if err != nil {
+		t.Fatalf("parse moved_at %v: %v", result["moved_at"], err)
+	}
+	oldT, _ := time.Parse(time.RFC3339, old)
+	if !movedAt.After(oldT) {
+		t.Fatalf("expected moved_at to advance after a move, got %v (was %v)", result["moved_at"], old)
+	}
+
+	// The stored row agrees with what the API returned.
+	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
+	rr = testResponseAuth(t, s, req)
+	stored := mustJSON[map[string]any](t, rr.Body)
+	if stored["moved_at"] != result["moved_at"] {
+		t.Fatalf("API echoed moved_at %v but stored %v", result["moved_at"], stored["moved_at"])
 	}
 }

@@ -10,6 +10,7 @@
         toggleFullscreenKey = $bindable<string | undefined>(),
         hideHints = $bindable(false),
         hideModelBadge = $bindable(false),
+        sortOldestFirst = $bindable(false),
         onDirty,
     }: {
         createTaskKey?: string | undefined;
@@ -19,6 +20,7 @@
         toggleFullscreenKey?: string | undefined;
         hideHints?: boolean;
         hideModelBadge?: boolean;
+        sortOldestFirst?: boolean;
         onDirty?: () => void;
     } = $props();
 
@@ -170,6 +172,15 @@
         </div>
         <div class="shortcut-controls">
             <ToggleSwitch bind:checked={hideModelBadge} ariaLabel="Hide model badge" ariaDescribedby="hide-model-badge-desc" onChange={() => onDirty?.()} />
+        </div>
+    </div>
+    <div class="shortcut-row">
+        <div class="shortcut-info">
+            <span class="shortcut-name">Oldest moved on top</span>
+            <span id="sort-oldest-first-desc" class="shortcut-desc">Put the least recently moved card at the top of each column</span>
+        </div>
+        <div class="shortcut-controls">
+            <ToggleSwitch bind:checked={sortOldestFirst} ariaLabel="Oldest moved on top" ariaDescribedby="sort-oldest-first-desc" onChange={() => onDirty?.()} />
         </div>
     </div>
 </section>
