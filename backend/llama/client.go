@@ -145,8 +145,13 @@ func (c *LlamaClient) setAuthHeader(req *http.Request) {
 // If ContentParts is set, content is serialized as an array of parts (multi-modal).
 // Uses standard OpenAI format: {type: "image_url", image_url: {url: "data:..."}}
 func toAPIMessage(m types.ChatMessage) map[string]any {
+	// An advisory is an environment note the model must see but the user never said
+	role := m.Role
+	if role == "advisory" {
+		role = "user"
+	}
 	result := map[string]any{
-		"role": m.Role,
+		"role": role,
 	}
 	if len(m.ContentParts) > 0 {
 		parts := make([]any, len(m.ContentParts))

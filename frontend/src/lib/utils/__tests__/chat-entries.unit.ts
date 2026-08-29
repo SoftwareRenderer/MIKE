@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages } from '$lib/utils/chat-entries';
+import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel } from '$lib/utils/chat-entries';
 import type { ChatEntry, Thread } from '$lib/types';
 
 function entry(role: string, content: string): ChatEntry {
@@ -593,5 +593,33 @@ describe('buildEntriesFromMessages', () => {
         expect(entries[0].toolCalls).toHaveLength(1);
         expect(entries[0].toolCalls![0].isPending).toBe(false);
         expect(entries[0].toolCalls![0].startedAt).toBeUndefined();
+    });
+});
+
+describe('advisoryLabel', () => {
+    // The card title comes from the kind the executor recorded, never from severity:
+    // both producers post this change send severity "error", so titling by severity drew a
+    // merge conflict as "Workspace diagnostics".
+    it('titles each known kind', () => {
+        expect(advisoryLabel('diagnostics')).toBe('Workspace diagnostics');
+        expect(advisoryLabel('merge_conflict')).toBe('Merge conflict');
+    });
+
+    it('falls back to the generic note for unknown or missing kinds', () => {
+        expect(advisoryLabel('something_new')).toBe('Environment note');
+        expect(advisoryLabel(undefined)).toBe('Environment note');
+    });
+
+    it('survives the history reload (kind comes off the row, not the live event)', () => {
+        const messages = [
+            { id: 'adv-1', role: 'advisory', content: 'Merge conflict in b.go', severity: 'error', kind: 'merge_conflict', created_at: '2025-01-01T00:00:00Z' },
+            { id: 'adv-2', role: 'advisory', content: 'no kind row', created_at: '2025-01-01T00:00:01Z' },
+        ];
+        const { entries } = buildEntriesFromMessages(messages);
+        expect(entries[0].kind).toBe('merge_conflict');
+        expect(advisoryLabel(entries[0].kind)).toBe('Merge conflict');
+        expect(advisoryLabel(entries[1].kind)).toBe('Environment note');
+        // Never rendered as something the user said.
+        expect(entries.every(e => e.role === 'advisory')).toBe(true);
     });
 });

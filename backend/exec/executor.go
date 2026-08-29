@@ -2152,68 +2152,10 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 
 	messages := []types.ChatMessage{{Role: "system", Content: composeSystemPrompt(task, worktreePath, projectName, sandboxEnabled, summary)}}
 
-	i := 0
-	for i < len(taskMsgs) {
-		m := taskMsgs[i]
-		// keep loop hints out of LLM context
-		if m.IsLoopHint {
-			i++
-			continue
-		}
-		switch m.Role {
-		case "summarization":
-			// buildLLMContext filters these out (summary is in system prompt)
-			messages = append(messages, types.ChatMessage{Role: "summarization", Content: m.Content})
-			i++
-		case "user":
-			if parts, ok := types.ContentParts(m.Content, m.Attachments); ok {
-				messages = append(messages, types.ChatMessage{Role: m.Role, ContentParts: parts})
-				i++
-				continue
-			}
-			messages = append(messages, types.ChatMessage{Role: m.Role, Content: m.Content})
-			i++
-		case "assistant":
-			// Collect all tool_call messages for this turn (look ahead).
-			i++
-			var turnToolCalls []types.TaskMessage
-			for i < len(taskMsgs) && taskMsgs[i].Role == "tool_call" {
-				turnToolCalls = append(turnToolCalls, taskMsgs[i])
-				i++
-			}
-			// Add assistant message with tool calls merged in.
-			msg := types.ChatMessage{Role: m.Role, Content: m.Content}
-			if m.ReasoningContent != "" {
-				msg.ReasoningContent = m.ReasoningContent
-			}
-			// Merge tool calls from this turn into the assistant message.
-			for _, tc := range turnToolCalls {
-				var tcMap map[string]any
-				if tc.ToolCalls != "" {
-					if err := json.Unmarshal([]byte(tc.ToolCalls), &tcMap); err == nil {
-						toolID, _ := tcMap["tool_id"].(string)
-						toolName, _ := tcMap["tool_name"].(string)
-						rawArgs, _ := tcMap["raw_args"].(string)
-						if toolID != "" && toolName != "" {
-							msg.ToolCalls = append(msg.ToolCalls, types.ToolCallMsg{ID: toolID, Type: "function"})
-							msg.ToolCalls[len(msg.ToolCalls)-1].Function.Name = toolName
-							msg.ToolCalls[len(msg.ToolCalls)-1].Function.Arguments = rawArgs
-						}
-					}
-				}
-			}
-			messages = append(messages, msg)
-			// Add tool results for each tool call.
-			for _, tc := range turnToolCalls {
-				if msg, ok := toolResultMessage(tc); ok {
-					messages = append(messages, msg)
-				}
-			}
-		default:
-			i++
-		}
-	}
-
+	// One rebuild path for every consumer of persisted rows (see groupTaskMessages): the
+	// system prompt on front, the conversation — tool calls with their assistant row, tool
+	// results right after, advisories under their own role — behind it.
+	messages = append(messages, groupTaskMessages(taskMsgs)...)
 	return messages
 }
 

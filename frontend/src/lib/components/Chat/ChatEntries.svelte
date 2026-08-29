@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Thread, ChatEntry } from '$lib/types';
-    import type { EntryMeta } from '$lib/utils/chat-entries';
+    import { advisoryLabel, type EntryMeta } from '$lib/utils/chat-entries';
     import { computeStickyHeader, type StickyUserMessage } from '$lib/utils/chat-sticky-header';
     import { distanceFromBottom, type ChatFollow } from '$lib/composables/use-chat-follow.svelte';
     import ChatMessage from './ChatMessage.svelte';
@@ -313,6 +313,18 @@
                             <div class="divider-line"></div>
                         </div>
                         <ChatMessage role="assistant" content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} formatToolArgs={formatToolArgs} onDelete={() => onMsgDelete(entry)} onEdit={(msgId, newContent) => onMsgEdit(msgId, newContent)} isLastUserMessage={false} isFirstUserMessage={false} taskStatus={taskStatus} onRegenerate={() => onRegenerate(entry.id)} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
+                    </div>
+                {:else if entry.role === 'advisory'}
+                    <div class="advisory-entry">
+                        <div class="advisory-card" class:advisory-error={entry.severity === 'error'}>
+                            <div class="advisory-header">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                                </svg>
+                                <span class="advisory-label">{advisoryLabel(entry.kind)}</span>
+                            </div>
+                            <div class="advisory-text">{entry.content}</div>
+                        </div>
                     </div>
                 {:else if entry.role === 'merge_resolution'}
                     <div class="merge-resolution-entry">
@@ -643,6 +655,40 @@
         opacity: 0.8;
         white-space: nowrap;
     }
+    .advisory-entry {
+        padding: 4px 0;
+    }
+    .advisory-card {
+        background: color-mix(in srgb, var(--color-accent) 5%, transparent);
+        border-radius: var(--radius-md);
+        border-left: 3px solid var(--color-accent);
+        padding: 8px 10px;
+    }
+    .advisory-error {
+        background: color-mix(in srgb, var(--color-status-red) 6%, transparent);
+        border-left-color: var(--color-status-red);
+    }
+    .advisory-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+        color: var(--color-text-muted);
+    }
+    .advisory-error .advisory-header { color: var(--color-status-red); }
+    .advisory-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .advisory-text {
+        font-size: 0.78rem;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--color-text);
+    }
+
     .merge-resolution-entry {
         padding: 8px 0;
     }
