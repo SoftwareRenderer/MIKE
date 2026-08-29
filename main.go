@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -198,18 +199,32 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		if err := srv.Serve(); err != nil {
-			log.Fatalf("Server error: %v", err)
-		}
-	}()
+	// A Serve() failure must not end the process where it happens: take the same cleanup
+	// a signal does (trace close, Shutdown), then exit 1 so a supervisor restarts. Never
+	// log.Fatalf here — it skips that cleanup.
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve() }()
 
-	<-sigCh
-	log.Println("Shutting down...")
+	exitCode := 0
+	select {
+	case <-sigCh:
+		log.Println("Shutting down...")
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("Server error: %v", err)
+			exitCode = 1
+		} else {
+			log.Println("Shutting down...")
+		}
+	}
+
 	close(rotationDone)
 	trace.Stop()
 	traceFile.Close()
-	srv.Shutdown(context.Background())
+	if err := srv.Shutdown(context.Background()); err != nil {
+		log.Printf("Shutdown: %v", err)
+	}
+	os.Exit(exitCode)
 }
 
 // openTraceFile creates (or truncates) a flight-recorder trace file. The trace
