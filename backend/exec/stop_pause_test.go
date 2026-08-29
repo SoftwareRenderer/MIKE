@@ -326,10 +326,9 @@ func TestRecoverStaleTasks(t *testing.T) {
 
 // --- StartTask assistant-last early return ---
 
-// TestStartTaskAssistantLastSettleIdle verifies that starting a task whose
-// last message is already from the assistant settles into idle (no executor)
-// instead of leaving a stale "running" row — one of the sources of the
-// "stop button doesn't work" bug.
+// TestStartTaskAssistantLastSettleIdle verifies that starting a task whose last message is
+// already from the assistant settles into review/idle — no executor, no stale "running"
+// row, and no "Pending" card for a conversation that is waiting on the user.
 func TestStartTaskAssistantLastSettleIdle(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	s := te.store
@@ -364,8 +363,8 @@ func TestStartTaskAssistantLastSettleIdle(t *testing.T) {
 	}
 
 	task = waitTaskState(t, s, task.ID, func(st, es string) bool { return es == "idle" })
-	if task.Status != "in_progress" {
-		t.Fatalf("status = %s, want in_progress (caller's status preserved)", task.Status)
+	if task.Status != "review" {
+		t.Fatalf("status = %s, want review (nothing to run — the agent waits for the user)", task.Status)
 	}
 	// No executor may remain registered.
 	te.taskMu.Lock()
