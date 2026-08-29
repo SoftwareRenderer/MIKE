@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -22,10 +23,28 @@ type Store struct {
 
 // NewStore creates a new Store instance, initializing the schema if needed.
 func NewStore(dbPath string) (*Store, error) {
-	// Ensure the parent directory exists
+	// The database holds session credentials and encrypted provider secrets, so
+	// neither the directory nor the file may be world-readable. MkdirAll only
+	// applies the mode to directories it creates, and sql.Open would create the
+	// file under the process umask (0644 on a typical system) — so both modes
+	// are set explicitly. Idempotent for pre-existing 0755 data dirs/DBs.
 	dbDir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+	if err := os.MkdirAll(dbDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
+	}
+	if err := os.Chmod(dbDir, 0o700); err != nil {
+		return nil, fmt.Errorf("chmod data dir: %w", err)
+	}
+	// Create the file before handing the path to the driver.
+	f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("create db file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return nil, fmt.Errorf("close db file: %w", err)
+	}
+	if err := os.Chmod(dbPath, 0o600); err != nil {
+		return nil, fmt.Errorf("chmod db file: %w", err)
 	}
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -39,6 +58,9 @@ func NewStore(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("set journal mode: %w", err)
 	}
+	// WAL sidecars are written by the driver under the umask and can hold the
+	// same rows as the main file until they are checkpointed.
+	restrictSidecarModes(dbPath)
 	// Set busy timeout to handle concurrent access (e.g., during parallel test runs)
 	_, err = db.Exec("PRAGMA busy_timeout = 10000")
 	if err != nil {
@@ -59,7 +81,20 @@ func NewStore(dbPath string) (*Store, error) {
 	if err := s.initConfigDefaults(); err != nil {
 		return nil, fmt.Errorf("init config defaults: %w", err)
 	}
+	// Schema creation above is the first write — the WAL sidecar exists by now.
+	restrictSidecarModes(dbPath)
 	return s, nil
+}
+
+// restrictSidecarModes tightens the WAL sidecar files (-wal/-shm) to 0600.
+// Best-effort: they may not exist yet, and a file this process does not own is
+// not a reason to refuse to start.
+func restrictSidecarModes(dbPath string) {
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Chmod(dbPath+suffix, 0o600); err != nil && !os.IsNotExist(err) {
+			log.Printf("[store] could not restrict permissions of %s: %v", dbPath+suffix, err)
+		}
+	}
 }
 
 // Close closes the database connection.

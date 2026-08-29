@@ -13,7 +13,8 @@ const (
 	sessionMaxAge     = 30 * 24 * 3600 // 30 days in seconds
 )
 
-// sessionCookieSecure is set at server startup based on the bind address.
+// sessionCookieSecure is set at server startup based on whether TLS is active
+// (or MIKE_SECURE_COOKIES=1 behind a TLS-terminating proxy) — see NewServer.
 var sessionCookieSecure bool
 
 // handleAuthLogin handles POST /api/auth/login.
@@ -33,7 +34,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, token, csrfToken, err := s.sessionMgr.Login(req.Password)
+	_, token, csrfToken, err := s.sessionMgr.Login(req.Password, clientIP(r), r.UserAgent())
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidPassword) {
 			JSONError(w, http.StatusUnauthorized, "invalid password")
@@ -116,4 +117,3 @@ func clearSessionCookie(w http.ResponseWriter) {
 		Secure:   sessionCookieSecure,
 	})
 }
-
