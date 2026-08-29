@@ -727,10 +727,8 @@ func TestHandleStart_MovesParentToInProgress(t *testing.T) {
 	}
 
 	child, _ := s.GetTaskByID("child-mip")
-	// The seeded child's conversation already ends in an assistant message, so
-	// StartTask skips the LLM call and settles into idle (not a stale running).
-	if child.Status != "in_progress" || child.ExecutionState != "idle" {
-		t.Errorf("deepest subtask should be started-but-idle: status=%q state=%q", child.Status, child.ExecutionState)
+	if child.Status != "review" || child.ExecutionState != "idle" {
+		t.Errorf("deepest subtask with nothing to run should wait in review: status=%q state=%q", child.Status, child.ExecutionState)
 	}
 	if !child.Autostarted {
 		t.Error("subtask started via its parent should be marked autostarted")
@@ -753,10 +751,8 @@ func TestHandleStart_AllChildrenDoneStartsOwnExecution(t *testing.T) {
 	}
 
 	parent, _ := s.GetTaskByID("par-ad")
-	// The seeded parent's conversation already ends in an assistant message, so
-	// StartTask skips the LLM call and settles into idle (not a stale running).
-	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
-		t.Errorf("parent should be started-but-idle once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
+	if parent.Status != "review" || parent.ExecutionState != "idle" {
+		t.Errorf("parent with nothing to run should wait in review once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
 	}
 	if parent.Autostarted {
 		t.Error("user-initiated start should not mark the task autostarted")
@@ -809,10 +805,8 @@ func TestHandleStartSubtask_WithChildren_StartsDeepestSubtask(t *testing.T) {
 		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
 	}
 	leaf, _ := s.GetTaskByID("leaf-nsp")
-	// The seeded leaf's conversation already ends in an assistant message, so
-	// StartTask skips the LLM call and settles into idle (not a stale running).
-	if leaf.Status != "in_progress" || leaf.ExecutionState != "idle" {
-		t.Errorf("deepest descendant should be started-but-idle: status=%q state=%q", leaf.Status, leaf.ExecutionState)
+	if leaf.Status != "review" || leaf.ExecutionState != "idle" {
+		t.Errorf("deepest descendant with nothing to run should wait in review: status=%q state=%q", leaf.Status, leaf.ExecutionState)
 	}
 	if !leaf.Autostarted {
 		t.Error("deepest descendant should be marked autostarted")
@@ -840,10 +834,11 @@ func TestHandleMove_SubtaskWithChildren_StartsDeepestSubtask(t *testing.T) {
 		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
 	}
 	leaf, _ := s.GetTaskByID("leaf-msc")
-	// The seeded leaf's conversation already ends in an assistant message, so
-	// StartTask skips the LLM call and settles into idle (not a stale running).
-	if leaf.Status != "in_progress" || leaf.ExecutionState != "idle" {
-		t.Errorf("deepest descendant should be started-but-idle: status=%q state=%q", leaf.Status, leaf.ExecutionState)
+	if leaf.Status != "review" || leaf.ExecutionState != "idle" {
+		t.Errorf("deepest descendant with nothing to run should wait in review: status=%q state=%q", leaf.Status, leaf.ExecutionState)
+	}
+	if !leaf.Autostarted {
+		t.Error("deepest descendant started via its parent should be marked autostarted")
 	}
 }
 
@@ -863,10 +858,70 @@ func TestHandleMove_ParentAllChildrenDone_StartsOwnExecution(t *testing.T) {
 	}
 
 	parent, _ := s.GetTaskByID("par-mad")
-	// The seeded parent's conversation already ends in an assistant message, so
-	// StartTask skips the LLM call and settles into idle (not a stale running).
-	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
-		t.Errorf("parent should be started-but-idle once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
+	if parent.Status != "review" || parent.ExecutionState != "idle" {
+		t.Errorf("parent with nothing to run should wait in review once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
+	}
+}
+
+// TestHandleMove_AwaitingUserLeafReturnsToReview: a task sitting in review because the
+// agent asked something, dragged into In Progress, has nothing to run — so the move must
+// land it back in review, not park it as "Pending".
+func TestHandleMove_AwaitingUserLeafReturnsToReview(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "leaf-await", "Leaf", "review", "idle", "", "thread-leaf-await", true)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", h.HandleMove)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/leaf-await/move", map[string]any{"status": "in_progress"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HandleMove status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	leaf, _ := s.GetTaskByID("leaf-await")
+	if leaf.Status != "review" || leaf.ExecutionState != "idle" {
+		t.Errorf("task awaiting the user must return to review, not sit Pending in In Progress: status=%q state=%q", leaf.Status, leaf.ExecutionState)
+	}
+	// the column really changed, so the card lands on top of review
+	if leaf.MovedAt.IsZero() {
+		t.Errorf("moved_at did not advance — the row never changed column: moved_at=%v", leaf.MovedAt)
+	}
+	// the board moves the card from the response body
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["status"] != "review" {
+		t.Errorf("response status = %v, want review", body["status"])
+	}
+}
+
+// TestHandleMove_AwaitingUserParentKeepsDoneChildren: same for a parent whose children are
+// all Done — it lands in review, and its Done children stay Done.
+func TestHandleMove_AwaitingUserParentKeepsDoneChildren(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	createChainTask(t, s, projID, "par-await", "Parent", "review", "idle", "", "thread-par-await", true)
+	createChainTask(t, s, projID, "child-await-done1", "D1", "done", "completed", "par-await", "", false)
+	createChainTask(t, s, projID, "child-await-done2", "D2", "done", "completed", "par-await", "", false)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/move", h.HandleMove)
+	rr := postToMux(t, mux, "/api/projects/"+projID+"/tasks/par-await/move", map[string]any{"status": "in_progress"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HandleMove status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	parent, _ := s.GetTaskByID("par-await")
+	if parent.Status != "review" || parent.ExecutionState != "idle" {
+		t.Errorf("parent with nothing to run should wait in review: status=%q state=%q", parent.Status, parent.ExecutionState)
+	}
+	for _, id := range []string{"child-await-done1", "child-await-done2"} {
+		child, err := s.GetTaskByID(id)
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		if child.Status != "done" || child.ExecutionState != "completed" {
+			t.Errorf("%s must stay done/completed: status=%q state=%q", id, child.Status, child.ExecutionState)
+		}
 	}
 }
 
@@ -892,8 +947,9 @@ func TestHandleMove_ParentWithGatedChildren_KeepsThemInPlace(t *testing.T) {
 		t.Errorf("parent should stay started-but-pending: status=%q state=%q", parent.Status, parent.ExecutionState)
 	}
 	backlog, _ := s.GetTaskByID("child-gate-backlog")
-	if backlog.Status != "in_progress" {
-		t.Errorf("backlog child should follow parent to In Progress: status=%q", backlog.Status)
+	// it followed its parent out of Backlog, then waited in review (nothing to run)
+	if backlog.Status != "review" {
+		t.Errorf("backlog child should leave Backlog and wait in review (nothing to run): status=%q", backlog.Status)
 	}
 	review, _ := s.GetTaskByID("child-gate-review")
 	if review.Status != "review" {

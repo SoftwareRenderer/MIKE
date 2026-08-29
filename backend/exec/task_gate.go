@@ -6,6 +6,13 @@ import (
 
 // Task-level provider concurrency.
 //
+// "In Progress + Pending" means status in_progress with execution_state idle. It is only
+// allowed while work is really pending: queued for a slot here, a user message just
+// accepted (HandleSend), or a parent waiting on unfinished subtasks (MoveTask). A finished
+// turn always lands in review, which is where a conversation waits for the user; a manual
+// pause is "paused", not idle. So nothing may rest in in_progress+idle — check the three
+// cases above before adding a writer.
+//
 // The per-provider "concurrency" setting limits the number of RUNNING TASKS
 // per provider (via te.taskGate, a ConcurrencyGate keyed by provider URL).
 // A task holds its slot from the start of executeTask until it goes idle
@@ -30,6 +37,7 @@ func (te *TaskExecutor) acquireTaskSlot(setup *taskExecSetup, providerURL string
 	providerURL = strings.TrimRight(providerURL, "/")
 	concurrency := te.configStore.GetProviderConcurrency(providerURL)
 
+	// allowed Pending: queued for a slot is real pending work.
 	// Show the task as started-but-pending while waiting for a slot:
 	// In Progress column with the "Pending" badge.
 	setup.task.Status = "in_progress"
