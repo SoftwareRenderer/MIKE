@@ -70,30 +70,25 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	threadID := task.CurrentThreadID
 
-	// Move task to in_progress if it's in review or done
-	if task.Status == "review" || task.Status == "done" {
+	// A duplicate is the same submit arriving twice (double-click, WS replay, offline queue
+	// flush): the thread's last row is still that identical user message. Once the agent has
+	// said anything since, the same words again are a new answer.
+	msgID := uuid.New().String()
+	isDuplicate := false
+	if last, err := te.store.GetLastMessageInThread(threadID); err == nil && last != nil &&
+		last.Role == "user" && last.Content == req.Content && last.Attachments == req.Attachments {
+		isDuplicate = true
+		msgID = last.ID
+	}
+
+	// allowed Pending: a message that will run starts the task, so it leaves review here.
+	// A deduped message starts nothing and must not move the card.
+	if !isDuplicate && (task.Status == "review" || task.Status == "done") {
 		task.Status = "in_progress"
 		task.ExecutionState = "idle"
 		task.UpdatedAt = time.Now().UTC()
 		_ = te.storeTask(task, projectID)
 		te.appStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
-	}
-
-	// Check for duplicate — compare both content and attachments
-	msgID := uuid.New().String()
-	existingID, lookupErr := te.store.GetLastUserMessageInThread(threadID)
-	isDuplicate := false
-	if lookupErr == nil && existingID != "" {
-		existingMsgs, _ := te.store.GetTaskMessages(taskID, threadID)
-		for i := len(existingMsgs) - 1; i >= 0; i-- {
-			if existingMsgs[i].ID == existingID {
-				if existingMsgs[i].Content == req.Content && existingMsgs[i].Attachments == req.Attachments {
-					isDuplicate = true
-					msgID = existingID
-				}
-				break
-			}
-		}
 	}
 
 	if !isDuplicate {
