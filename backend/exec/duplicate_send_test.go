@@ -10,23 +10,16 @@ import (
 	"kanban/backend/types"
 )
 
-// TestHandleSend_DuplicateMessage_DoesNotStartExecutor verifies that re-sending a
-// user message identical to the last one in the thread (content + attachments) is
-// deduped: it is NOT persisted again, and it does NOT trigger the executor. Before
-// the fix, a deduped message still went through ForwardUserMessage → handleLazyStart,
-// which rebuilt a context ending in the previous message (often an assistant
-// message) and called the LLM with a trailing assistant message — producing a
-// second assistant message and the "Cannot have 2 or more assistant messages at
-// the end of the list" error on every subsequent call.
-func TestHandleSend_DuplicateMessage_DoesNotStartExecutor(t *testing.T) {
-	te, _, projectID, _ := setupExecutorWithGit(t)
-	te.gate = NewConcurrencyGate()
-	te.taskMu.Lock()
-	te.tasks = make(map[string]*executionState)
-	te.taskMu.Unlock()
+// HandleSend dedups a double submit: the same send landing twice with nothing in
+// between. It used to match the last user message however old, so answering a second
+// question with the same words dropped the answer — and flipped the task out of
+// review first, stranding it as "Pending". It now needs that message to still be the
+// thread's last row, and only flips status for a message that will run.
 
-	taskID := "dup-send-task"
-	threadID := "dup-thread"
+// seedReviewTask creates an awaiting-user task (review/idle) with the given message
+// tail. Timestamps are spaced a second apart so "newest row" is unambiguous.
+func seedReviewTask(t *testing.T, te *TaskExecutor, projectID, taskID, threadID string, tail ...types.TaskMessage) {
+	t.Helper()
 	task := &types.Task{
 		ID:              taskID,
 		ProjectID:       projectID,
@@ -43,119 +36,166 @@ func TestHandleSend_DuplicateMessage_DoesNotStartExecutor(t *testing.T) {
 	if err := te.store.CreateThread(&types.TaskThread{ID: threadID, TaskID: taskID, IsActive: true}); err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	// Seed a last user message (the "Yes" approval) and an assistant message after
-	// it, mirroring the grace-snow-sunset state that reproduced the bug.
-	seed := []*types.TaskMessage{
-		{ID: "u1", TaskID: taskID, ThreadID: threadID, Role: "user", Content: "Yes", CreatedAt: time.Now()},
-		{ID: "a1", TaskID: taskID, ThreadID: threadID, Role: "assistant", Content: "I've created TODO.md. Here's the full plan", CreatedAt: time.Now()},
-	}
-	for _, m := range seed {
-		if err := te.store.CreateTaskMessage(m); err != nil {
-			t.Fatalf("seed message: %v", err)
+	base := time.Now().UTC().Add(-time.Duration(len(tail)) * time.Minute)
+	for i := range tail {
+		m := tail[i]
+		m.TaskID, m.ThreadID = taskID, threadID
+		if m.CreatedAt.IsZero() {
+			m.CreatedAt = base.Add(time.Duration(i) * time.Second)
+		}
+		if err := te.store.CreateTaskMessage(&m); err != nil {
+			t.Fatalf("seed message %d: %v", i, err)
 		}
 	}
+}
 
-	// Re-send "Yes" — identical to the last persisted user message. HandleSend must
-	// detect the duplicate, NOT persist another user row, and NOT start an executor.
-	send := func(content string) *httptest.ResponseRecorder {
-		body := bytes.NewBufferString(`{"content":"` + content + `"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/tasks/"+taskID+"/messages", body)
-		req.SetPathValue("projectID", projectID)
-		req.SetPathValue("taskID", taskID)
-		rec := httptest.NewRecorder()
-		te.HandleSend(rec, req)
-		return rec
+// sendUserMessage posts content to HandleSend and returns the recorder.
+func sendUserMessage(t *testing.T, te *TaskExecutor, projectID, taskID, content string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/tasks/"+taskID+"/messages",
+		bytes.NewBufferString(`{"content":"`+content+`"}`))
+	req.SetPathValue("projectID", projectID)
+	req.SetPathValue("taskID", taskID)
+	rec := httptest.NewRecorder()
+	te.HandleSend(rec, req)
+	return rec
+}
+
+func countUserMessages(t *testing.T, te *TaskExecutor, taskID, threadID, content string) int {
+	t.Helper()
+	msgs, err := te.store.GetTaskMessages(taskID, threadID)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
 	}
+	n := 0
+	for _, m := range msgs {
+		if m.Role == "user" && m.Content == content {
+			n++
+		}
+	}
+	return n
+}
 
-	rec := send("Yes")
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("duplicate send status = %d, want 201", rec.Code)
+func taskRow(t *testing.T, te *TaskExecutor, projectID, taskID string) *types.Task {
+	t.Helper()
+	task, err := te.store.GetTask(projectID, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	return task
+}
+
+// stopExecutorIfStarted tears down an executor that the test expects may have started,
+// so its retry goroutines (no live LLM in unit tests) don't leak into other tests.
+func stopExecutorIfStarted(t *testing.T, te *TaskExecutor, taskID string) {
+	t.Helper()
+	te.taskMu.Lock()
+	_, exists := te.tasks[taskID]
+	te.taskMu.Unlock()
+	if !exists {
+		return
+	}
+	_ = te.StopTask(taskID)
+	waitForExecutor(t, te, taskID, false)
+}
+
+// The agent asked something after the previous "Yes", so this "Yes" is a new answer:
+// it must be stored, move the task out of review and run it.
+func TestHandleSend_RepeatedAnswerAfterAgentReply_IsDelivered(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID, threadID := "dup-answer-task", "dup-answer-thread"
+	seedReviewTask(t, te, projectID, taskID, threadID,
+		types.TaskMessage{ID: "u1", Role: "user", Content: "Yes"},
+		types.TaskMessage{ID: "a1", Role: "assistant", Content: "Want me to implement the fix?"},
+		types.TaskMessage{ID: "a2", Role: "assistant", Content: "I've created TODO.md. Here's the full plan — approve?"},
+	)
+
+	if rec := sendUserMessage(t, te, projectID, taskID, "Yes"); rec.Code != http.StatusCreated {
+		t.Fatalf("send status = %d, want 201 (body=%s)", rec.Code, rec.Body.String())
+	}
+	t.Cleanup(func() { stopExecutorIfStarted(t, te, taskID) })
+
+	if n := countUserMessages(t, te, taskID, threadID, "Yes"); n != 2 {
+		t.Fatalf("user messages with content \"Yes\" = %d, want 2 — the answer was deduped and lost", n)
+	}
+	waitForExecutor(t, te, taskID, true)
+
+	if task := taskRow(t, te, projectID, taskID); task.Status != "in_progress" {
+		t.Fatalf("delivered answer must start the task, status = %q, want in_progress", task.Status)
+	}
+}
+
+// The same words again after an ask_question turn (assistant row + its tool_call row):
+// still a new answer.
+func TestHandleSend_ReplyAfterAskQuestionToolCall_IsDelivered(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID, threadID := "dup-ask-task", "dup-ask-thread"
+	seedReviewTask(t, te, projectID, taskID, threadID,
+		types.TaskMessage{ID: "u1", Role: "user", Content: "Yes"},
+		types.TaskMessage{ID: "a1", Role: "assistant", Content: "One more thing — which scope?"},
+		types.TaskMessage{ID: "t1", Role: "tool_call", ToolCalls: `{"tool_name":"ask_question","tool_id":"call-1"}`, ToolResult: `{"output":"Which scope?","success":true}`},
+	)
+
+	if rec := sendUserMessage(t, te, projectID, taskID, "Yes"); rec.Code != http.StatusCreated {
+		t.Fatalf("send status = %d, want 201", rec.Code)
+	}
+	t.Cleanup(func() { stopExecutorIfStarted(t, te, taskID) })
+
+	if n := countUserMessages(t, te, taskID, threadID, "Yes"); n != 2 {
+		t.Fatalf("user messages with content \"Yes\" = %d, want 2", n)
+	}
+}
+
+// The case the dedup exists for: the identical message is still the last row. Nothing new
+// is stored, no executor starts, and the task stays in review.
+func TestHandleSend_DoubleSubmit_IsDeduped_AndLeavesReview(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID, threadID := "dup-submit-task", "dup-submit-thread"
+	seedReviewTask(t, te, projectID, taskID, threadID,
+		types.TaskMessage{ID: "a0", Role: "assistant", Content: "Here's what I found"},
+		types.TaskMessage{ID: "u1", Role: "user", Content: "Yes"},
+	)
+
+	if rec := sendUserMessage(t, te, projectID, taskID, "Yes"); rec.Code != http.StatusCreated {
+		t.Fatalf("send status = %d, want 201", rec.Code)
 	}
 	time.Sleep(100 * time.Millisecond) // allow any (incorrect) executor goroutine to start
 
+	if n := countUserMessages(t, te, taskID, threadID, "Yes"); n != 1 {
+		t.Fatalf("duplicate send must not persist a second row, got %d", n)
+	}
 	te.taskMu.Lock()
 	_, exists := te.tasks[taskID]
 	te.taskMu.Unlock()
 	if exists {
 		t.Fatal("duplicate user message must not start an executor")
 	}
-
-	// Only one user message with content "Yes" must exist.
-	msgs, _ := te.store.GetTaskMessages(taskID, threadID)
-	yesCount := 0
-	for _, m := range msgs {
-		if m.Role == "user" && m.Content == "Yes" {
-			yesCount++
-		}
-	}
-	if yesCount != 1 {
-		t.Fatalf("expected exactly 1 user message with content \"Yes\", got %d", yesCount)
+	if task := taskRow(t, te, projectID, taskID); task.Status != "review" || task.ExecutionState != "idle" {
+		t.Fatalf("dropped duplicate moved the card: status=%q state=%q, want review/idle", task.Status, task.ExecutionState)
 	}
 }
 
-// TestHandleSend_NewMessage_StillStartsExecutor verifies that a genuinely new
-// message still persists a user row and triggers the executor.
+// A genuinely new message still stores, flips review -> in_progress and starts.
 func TestHandleSend_NewMessage_StillStartsExecutor(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
-	te.gate = NewConcurrencyGate()
-	te.taskMu.Lock()
-	te.tasks = make(map[string]*executionState)
-	te.taskMu.Unlock()
+	taskID, threadID := "new-msg-task", "new-msg-thread"
+	seedReviewTask(t, te, projectID, taskID, threadID,
+		types.TaskMessage{ID: "u1", Role: "user", Content: "Yes"},
+	)
 
-	taskID := "new-msg-task"
-	threadID := "new-msg-thread"
-	task := &types.Task{
-		ID:              taskID,
-		ProjectID:       projectID,
-		Prompt:          "Test task",
-		Status:          "review",
-		ExecutionState:  "idle",
-		LlamaServerURL:  "http://localhost:8080/v1",
-		ModelName:       "test-model",
-		CurrentThreadID: threadID,
-	}
-	if err := te.store.CreateTask(task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	if err := te.store.CreateThread(&types.TaskThread{ID: threadID, TaskID: taskID, IsActive: true}); err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	if err := te.store.CreateTaskMessage(&types.TaskMessage{ID: "u1", TaskID: taskID, ThreadID: threadID, Role: "user", Content: "Yes", CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("seed message: %v", err)
-	}
-
-	body := bytes.NewBufferString(`{"content":"No, do something else"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/tasks/"+taskID+"/messages", body)
-	req.SetPathValue("projectID", projectID)
-	req.SetPathValue("taskID", taskID)
-	rec := httptest.NewRecorder()
-	te.HandleSend(rec, req)
-	if rec.Code != http.StatusCreated {
+	if rec := sendUserMessage(t, te, projectID, taskID, "No, do something else"); rec.Code != http.StatusCreated {
 		t.Fatalf("new send status = %d, want 201", rec.Code)
 	}
+	t.Cleanup(func() { stopExecutorIfStarted(t, te, taskID) })
 
-	// The new message must be persisted.
-	msgs, _ := te.store.GetTaskMessages(taskID, threadID)
-	found := false
-	for _, m := range msgs {
-		if m.Role == "user" && m.Content == "No, do something else" {
-			found = true
-		}
+	if n := countUserMessages(t, te, taskID, threadID, "No, do something else"); n != 1 {
+		t.Fatalf("new user message must be persisted, got %d", n)
 	}
-	if !found {
-		t.Fatal("new user message must be persisted")
-	}
-
-	// The executor must start (it may exit immediately without a live LLM).
 	waitForExecutor(t, te, taskID, true)
 
-	// Clean up: stop the executor so its goroutines (worktree watchers, LLM retry)
-	// don't leak into subsequent tests in this package. Without a live mock LLM the
-	// loop would otherwise keep retrying in the background.
-	if err := te.StopTask(taskID); err != nil {
-		t.Fatalf("stop task: %v", err)
+	if task := taskRow(t, te, projectID, taskID); task.Status != "in_progress" {
+		t.Fatalf("status = %q, want in_progress", task.Status)
 	}
-	waitForExecutor(t, te, taskID, false)
 }
 
 // waitForExecutor polls until an executor is (or is not) present for taskID.

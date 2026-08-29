@@ -137,6 +137,30 @@ func (s *Store) GetInFlightTasks() ([]types.Task, error) {
 	return tasks, rows.Err()
 }
 
+// GetPendingIdleTasks returns the tasks shown as "In Progress + Pending". Nothing may rest
+// in that pair, so at startup — with no live executors — every row here needs a look; see
+// TaskExecutor.normalizePendingTasks.
+func (s *Store) GetPendingIdleTasks() ([]types.Task, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(
+		`SELECT ` + taskColumns + ` FROM tasks WHERE status = 'in_progress' AND execution_state = 'idle' ORDER BY updated_at ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tasks := []types.Task{}
+	for rows.Next() {
+		var t types.Task
+		if err := scanTask(rows, &t); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
 // UpdateTaskSessionCost updates only the session_cost of a task. Targeted
 // (single-column) write so executor-exit bookkeeping can never clobber the
 // task's current status/execution_state with a stale in-memory copy.
