@@ -101,6 +101,24 @@ func makeSandboxCallbacks(client *sandbox.Client) (execFunc, execStreamFunc, rea
 	return execCb, execStreamCb, readCb, writeCb, editCb
 }
 
+// ensureRootDir creates the parent directory chain of path inside root.
+//
+// The mkdir MUST go through the os.Root handle. The obvious host-side form,
+// os.MkdirAll(filepath.Join(worktreePath, path), 0o755), resolves ".." against the host
+// path, so an LLM-supplied path such as "../../x/y" creates <parent-of-worktree>/x/y on
+// the host *before* root.Create rejects the write with "path escapes from parent" —
+// arbitrary directory creation as the server user, reachable from prompt injection lifted
+// out of repo content. Root.MkdirAll refuses the same path up front and creates nothing.
+//
+// New directories are 0o700: a worktree is private to the server user by default.
+func ensureRootDir(root *os.Root, path string) error {
+	dir := filepath.Dir(filepath.Clean(path))
+	if dir == "." || dir == "/" || dir == string(filepath.Separator) {
+		return nil // file sits in the root itself — nothing to create
+	}
+	return root.MkdirAll(dir, 0o700)
+}
+
 // makeRootCallbacks creates read/write callbacks that use os.Root for folder isolation.
 func makeRootCallbacks(root *os.Root, worktreePath string) (readFunc, writeFunc) {
 	readCb := func(_ context.Context, path string) ([]byte, error) {
@@ -112,8 +130,9 @@ func makeRootCallbacks(root *os.Root, worktreePath string) (readFunc, writeFunc)
 		return io.ReadAll(f)
 	}
 	writeCb := func(_ context.Context, path, content string) error {
-		dir := filepath.Dir(filepath.Join(worktreePath, path))
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		// Creates parent dirs inside the jail; an escaping path fails here, before
+		// anything is created on the host (see ensureRootDir).
+		if err := ensureRootDir(root, path); err != nil {
 			return err
 		}
 		f, err := root.Create(path)
@@ -204,8 +223,9 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		te.taskMu.Unlock()
 		return func(_ context.Context, p, c string) error {
 			norm := normalizePath(state.projectName, p)
-			dir := filepath.Dir(filepath.Join(worktreePath, norm))
-			if err := os.MkdirAll(dir, 0o755); err != nil {
+			// Creates parent dirs inside the jail; an escaping path fails here, before
+			// anything is created on the host (see ensureRootDir).
+			if err := ensureRootDir(root, norm); err != nil {
 				return err
 			}
 			f, err := root.Create(norm)
