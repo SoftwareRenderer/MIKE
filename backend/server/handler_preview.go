@@ -5,13 +5,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -112,8 +113,12 @@ func (ps *previewStore) stopSweeper() {
 var errPreviewTooLarge = errors.New("preview content too large")
 
 func (ps *previewStore) put(content, fileName, baseDir, dirRel string, allowNetwork bool) (string, error) {
-	// Mint the token first — the rewrite target is built from it.
-	token := newPreviewToken()
+	// Mint the token first — the rewrite target is built from it. A mint
+	// failure aborts the put: a weak token is never registered, never served.
+	token, err := newPreviewToken()
+	if err != nil {
+		return "", err
+	}
 	if isHTMLFamilyCT(previewDocContentType(fileName)) {
 		content = rewriteRootRelative(content, "/api/preview/"+token+"/")
 	}
@@ -243,16 +248,22 @@ func (ps *previewStore) evictOldestLocked() {
 	delete(ps.docs, oldest)
 }
 
+// previewRand is the entropy source behind preview tokens. Package-level seam
+// — only tests replace it (to exercise the mint-failure path); production
+// always reads crypto/rand.
+var previewRand io.Reader = rand.Reader
+
 // newPreviewToken — 128 bits of randomness; the only credential for the
-// public document/asset GETs.
-func newPreviewToken() string {
+// public document/asset GETs. Minting is fallible on purpose: a guessable
+// token is an unauthenticated read of the document plus every sibling under
+// the doc's asset root, so a failed entropy read fails the request — there
+// is no fallback.
+func newPreviewToken() (string, error) {
 	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		// crypto/rand failing means the environment is broken; fall back rather
-		// than fail the request.
-		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	if _, err := io.ReadFull(previewRand, b); err != nil {
+		return "", fmt.Errorf("mint preview token: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
 // previewServeRequest: only `content` comes from the client. The host fills
@@ -316,7 +327,13 @@ func (s *Server) HandlePreviewServe(w http.ResponseWriter, r *http.Request) {
 
 	token, err := s.previewStore.put(req.Content, fileName, baseDir, dirRel, req.AllowNetwork)
 	if err != nil {
-		JSONError(w, http.StatusRequestEntityTooLarge, err.Error())
+		if errors.Is(err, errPreviewTooLarge) {
+			JSONError(w, http.StatusRequestEntityTooLarge, err.Error())
+			return
+		}
+		// Token mint failure: never emit a weak token.
+		log.Printf("preview serve failed: %v", err)
+		JSONError(w, http.StatusInternalServerError, "preview unavailable")
 		return
 	}
 	url := "/api/preview/" + token + "/"
