@@ -1,8 +1,8 @@
 package types
 
 import (
-	"math/rand"
-	"time"
+	"crypto/rand"
+	"math/big"
 )
 
 var taskWords = []string{
@@ -58,19 +58,34 @@ var taskWords = []string{
 	"plume", "drift",
 }
 
+// secureIndex returns a uniformly distributed index in [0, n) from the
+// cryptographic random source. Task and thread IDs surface in URLs, git branch
+// names and worktree paths, so they must not be guessable — math/rand seeded
+// from the clock was. A failure here means the system's random source is gone
+// (token generation would fail the same way), so it panics rather than handing
+// out a weak ID.
+func secureIndex(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	i, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		panic("types: secure random source unavailable: " + err.Error())
+	}
+	return int(i.Int64())
+}
+
+// pickTaskWord draws one dictionary word.
+func pickTaskWord() string {
+	return taskWords[secureIndex(len(taskWords))]
+}
+
 // GenerateTaskID returns a human-readable task ID (e.g., "frost-amber-quartz").
 func GenerateTaskID() string {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	w1 := taskWords[r.Intn(len(taskWords))]
-	w2 := taskWords[r.Intn(len(taskWords))]
-	w3 := taskWords[r.Intn(len(taskWords))]
-	return w1 + "-" + w2 + "-" + w3
+	return pickTaskWord() + "-" + pickTaskWord() + "-" + pickTaskWord()
 }
 
 // GenerateThreadID returns a human-readable thread ID (e.g., "voice-ash").
 func GenerateThreadID() string {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	w1 := taskWords[r.Intn(len(taskWords))]
-	w2 := taskWords[r.Intn(len(taskWords))]
-	return w1 + "-" + w2
+	return pickTaskWord() + "-" + pickTaskWord()
 }

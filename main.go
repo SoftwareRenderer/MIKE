@@ -78,8 +78,9 @@ func main() {
 		frontendDist = "./frontend/dist"
 	}
 
-	// Ensure data directory exists
-	if err := os.MkdirAll(effectiveDataDir, 0o755); err != nil {
+	// Ensure data directory exists. It holds the database (session hashes,
+	// encrypted secrets) and the TLS key material, so it is owner-only.
+	if err := os.MkdirAll(effectiveDataDir, 0o700); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 

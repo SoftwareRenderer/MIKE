@@ -1,9 +1,14 @@
 package auth
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"kanban/backend/store"
 )
@@ -30,6 +35,32 @@ func testManager(t *testing.T) *SessionManager {
 	return m
 }
 
+// testIP / testUA are the client metadata Login records on a new session.
+const (
+	testIP = "203.0.113.9"
+	testUA = "MIKE-test-agent/1.0"
+)
+
+// login signs in with the test password and fails the test on error.
+func login(t *testing.T, m *SessionManager) (id, token, csrfToken string) {
+	t.Helper()
+	id, token, csrfToken, err := m.Login("test-password", testIP, testUA)
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	return id, token, csrfToken
+}
+
+// lastSeenOf reads the raw last_seen stamp of a session from the database.
+func lastSeenOf(t *testing.T, m *SessionManager, id string) int64 {
+	t.Helper()
+	var v int64
+	if err := m.store.QueryRow(`SELECT COALESCE(last_seen, 0) FROM sessions WHERE id = ?`, id).Scan(&v); err != nil {
+		t.Fatalf("read last_seen for %s: %v", id, err)
+	}
+	return v
+}
+
 func TestNewSessionManagerNoPassword(t *testing.T) {
 	old := os.Getenv("MIKE_LOGIN_PASSWORD")
 	t.Cleanup(func() { os.Setenv("MIKE_LOGIN_PASSWORD", old) })
@@ -51,7 +82,7 @@ func TestNewSessionManagerNoPassword(t *testing.T) {
 func TestLoginValidPassword(t *testing.T) {
 	m := testManager(t)
 
-	id, token, csrfToken, err := m.Login("test-password")
+	id, token, csrfToken, err := m.Login("test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -75,7 +106,7 @@ func TestLoginValidPassword(t *testing.T) {
 func TestLoginInvalidPassword(t *testing.T) {
 	m := testManager(t)
 
-	_, _, _, err := m.Login("wrong-password")
+	_, _, _, err := m.Login("wrong-password", testIP, testUA)
 	if err != ErrInvalidPassword {
 		t.Fatalf("expected ErrInvalidPassword, got: %v", err)
 	}
@@ -84,7 +115,7 @@ func TestLoginInvalidPassword(t *testing.T) {
 func TestValidateValidToken(t *testing.T) {
 	m := testManager(t)
 
-	_, token, _, err := m.Login("test-password")
+	_, token, _, err := m.Login("test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -122,7 +153,7 @@ func TestValidateEmptyToken(t *testing.T) {
 func TestLogout(t *testing.T) {
 	m := testManager(t)
 
-	_, token, _, err := m.Login("test-password")
+	_, token, _, err := m.Login("test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -150,11 +181,11 @@ func TestLogoutEmptyToken(t *testing.T) {
 func TestMultipleSessions(t *testing.T) {
 	m := testManager(t)
 
-	_, token1, _, err := m.Login("test-password")
+	_, token1, _, err := m.Login("test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login 1: %v", err)
 	}
-	_, token2, _, err := m.Login("test-password")
+	_, token2, _, err := m.Login("test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login 2: %v", err)
 	}
@@ -186,12 +217,170 @@ func TestLoginNearMissPassword(t *testing.T) {
 	// A same-length password differing in a single byte must be rejected
 	// (exercises the constant-time comparison path where lengths match).
 	m := testManager(t)
-	if _, _, _, err := m.Login("test-password"); err != nil {
+	if _, _, _, err := m.Login("test-password", testIP, testUA); err != nil {
 		t.Fatalf("valid password login: %v", err)
 	}
-	if _, _, _, err := m.Login("test-passwordX"); err == nil {
+	if _, _, _, err := m.Login("test-passwordX", testIP, testUA); err == nil {
 		t.Fatal("near-miss password accepted; expected ErrInvalidPassword")
 	} else if err != ErrInvalidPassword {
 		t.Fatalf("expected ErrInvalidPassword, got %v", err)
+	}
+}
+
+// TestLoginComparesPasswordDigests pins the credential-comparison hardening:
+// the manager keeps only sha256(MIKE_LOGIN_PASSWORD) and compares digests, so
+// the constant-time comparison never sees two operands of different length
+// (subtle.ConstantTimeCompare short-circuits on a length mismatch, which leaks
+// the configured password's length).
+func TestLoginComparesPasswordDigests(t *testing.T) {
+	m := testManager(t)
+
+	want := sha256.Sum256([]byte("test-password"))
+	if m.passwordHash != want {
+		t.Fatal("SessionManager must retain only the sha256 digest of MIKE_LOGIN_PASSWORD")
+	}
+
+	// Wrong passwords of every shape — including lengths shorter and longer
+	// than the real one — are rejected identically.
+	for _, bad := range []string{
+		"",
+		"t",
+		"test-passwor",   // one char short
+		"test-passwordX", // one char longer
+		"TEST-PASSWORD",  // same length, different bytes
+		strings.Repeat("p", 4096),
+	} {
+		if _, _, _, err := m.Login(bad, testIP, testUA); err != ErrInvalidPassword {
+			t.Errorf("Login(%q) error = %v; want ErrInvalidPassword", bad, err)
+		}
+	}
+
+	// The real password still authenticates.
+	if _, _, _, err := m.Login("test-password", testIP, testUA); err != nil {
+		t.Errorf("correct password rejected: %v", err)
+	}
+}
+
+// TestLoginRecordsIPAndUserAgent checks the metadata the Sessions UI shows.
+func TestLoginRecordsIPAndUserAgent(t *testing.T) {
+	m := testManager(t)
+
+	id, _, _, err := m.Login("test-password", "198.51.100.7", "Mozilla/5.0 (Test Browser)")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	list, err := m.store.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("sessions = %d; want 1", len(list))
+	}
+	if list[0].ID != id {
+		t.Fatalf("id = %q; want %q", list[0].ID, id)
+	}
+	if list[0].IP != "198.51.100.7" {
+		t.Errorf("ip = %q; want 198.51.100.7", list[0].IP)
+	}
+	if list[0].UserAgent != "Mozilla/5.0 (Test Browser)" {
+		t.Errorf("user_agent = %q", list[0].UserAgent)
+	}
+}
+
+// TestValidateThrottlesLastSeen: activity is recorded, but at most once a
+// minute — the store serialises on a single connection, so a write per request
+// would be a write per page render.
+func TestValidateThrottlesLastSeen(t *testing.T) {
+	m := testManager(t)
+	id, token, _, err := m.Login("test-password", testIP, testUA)
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	backdate := func(secs int64) {
+		t.Helper()
+		if _, err := m.store.Exec(`UPDATE sessions SET last_seen = ? WHERE id = ?`, time.Now().Unix()-secs, id); err != nil {
+			t.Fatalf("backdate last_seen: %v", err)
+		}
+	}
+
+	// Older than the interval → this validation refreshes the stamp.
+	backdate(120)
+	if _, _, err := m.Validate(token); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	refreshed := lastSeenOf(t, m, id)
+	if time.Now().Unix()-refreshed > 5 {
+		t.Fatalf("last_seen not refreshed: %d (now %d)", refreshed, time.Now().Unix())
+	}
+
+	// Inside the same minute → no further writes.
+	backdate(0)
+	for i := 0; i < 3; i++ {
+		if _, _, err := m.Validate(token); err != nil {
+			t.Fatalf("validate %d: %v", i, err)
+		}
+	}
+	if got := lastSeenOf(t, m, id); got != refreshed {
+		t.Fatalf("last_seen rewritten within the throttle window: %d != %d", got, refreshed)
+	}
+
+	// Once the interval has passed, validation stamps again.
+	backdate(120)
+	if stale := lastSeenOf(t, m, id); time.Now().Unix()-stale < 60 {
+		t.Fatalf("backdate did not take effect: last_seen = %d", stale)
+	}
+	if _, _, err := m.Validate(token); err != nil {
+		t.Fatalf("validate after interval: %v", err)
+	}
+	if got := lastSeenOf(t, m, id); time.Now().Unix()-got > 5 {
+		t.Fatalf("last_seen was not restamped after the throttle window: %d (now %d)", got, time.Now().Unix())
+	}
+}
+
+// TestStartupBackfillsLegacySessions: NewSessionManager runs the token-hash
+// migration, so a session created by an older build keeps working after an
+// upgrade while its plaintext token leaves the database.
+func TestStartupBackfillsLegacySessions(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.NewStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	const legacyToken = "0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+	if _, err := s.Exec(
+		`INSERT INTO sessions (id, token, csrf_token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		"legacy-1", legacyToken, "csrf-legacy", time.Now().Unix(), time.Now().Add(24*time.Hour).Unix(),
+	); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	old := os.Getenv(passwordEnv)
+	t.Cleanup(func() { os.Setenv(passwordEnv, old) })
+	os.Setenv(passwordEnv, "test-password")
+
+	if _, err := NewSessionManager(s); err != nil {
+		t.Fatalf("NewSessionManager: %v", err)
+	}
+
+	var storedToken, storedHash string
+	if err := s.QueryRow(`SELECT token, COALESCE(token_hash, '') FROM sessions WHERE id = ?`, "legacy-1").
+		Scan(&storedToken, &storedHash); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	sum := sha256.Sum256([]byte(legacyToken))
+	if want := hex.EncodeToString(sum[:]); storedHash != want {
+		t.Errorf("token_hash = %q; want %q", storedHash, want)
+	}
+	if storedToken == legacyToken {
+		t.Error("startup left the plaintext session token in the database")
+	}
+
+	m := &SessionManager{store: s, passwordHash: sha256.Sum256([]byte("test-password"))}
+	if gotID, _, err := m.Validate(legacyToken); err != nil || gotID != "legacy-1" {
+		t.Fatalf("the upgraded session must still validate: id=%q err=%v", gotID, err)
 	}
 }
