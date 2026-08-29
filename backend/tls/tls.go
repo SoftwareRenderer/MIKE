@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	cryptotls "crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -13,6 +14,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -20,12 +23,38 @@ import (
 type Config struct {
 	CertFile string
 	KeyFile  string
+	CAFile string
+}
+
+const (
+	certOrganization = "MIKE"
+	caCommonName     = "MIKE Local CA"
+	leafCommonName   = "localhost"
+
+	caValidFor   = 10 * 365 * 24 * time.Hour // the CA is imported once; make it last
+	leafValidFor = 365 * 24 * time.Hour      // the leaf is cheap to replace
+
+	caCertName   = "mike-ca.crt"
+	caKeyName    = "mike-ca.key"
+	leafCertName = "mike.crt"
+	leafKeyName  = "mike.key"
+)
+
+// certificateAuthority is the local CA used to sign the server certificate.
+type certificateAuthority struct {
+	cert     *x509.Certificate
+	key      *ecdsa.PrivateKey
+	certPath string
 }
 
 // LoadWithCert creates a TLS config with explicit certificate paths.
 //
 // If certFile and keyFile are both non-empty, they are used directly.
-// Otherwise, a self-signed certificate is auto-generated in dataDir/tls/.
+// Otherwise a local CA (dataDir/tls/mike-ca.crt) is created if needed and used
+// to sign the server certificate (dataDir/tls/mike.crt), whose subject
+// alternative names cover localhost, the machine hostname and the host's LAN
+// addresses. The leaf is re-issued only when those names change; the CA itself
+// is reused across restarts.
 //
 // Returns a *Config (never nil). Use LoadDisabled() to disable TLS.
 func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
@@ -41,26 +70,33 @@ func LoadWithCert(dataDir, certFile, keyFile string) (*Config, error) {
 		return &Config{CertFile: certFile, KeyFile: keyFile}, nil
 	}
 
-	// Default: auto-generate self-signed certificate
+	// Default: local CA + CA-signed certificate
 	tlsDir := filepath.Join(dataDir, "tls")
 	if err := os.MkdirAll(tlsDir, 0o700); err != nil {
 		return nil, fmt.Errorf("tls: failed to create tls directory: %w", err)
 	}
 
-	certPath := filepath.Join(tlsDir, "kanban.crt")
-	keyPath := filepath.Join(tlsDir, "kanban.key")
-
-	// Only generate if files don't exist
-	if _, err := os.Stat(certPath); os.IsNotExist(err) {
-		if err := generateSelfSignedCert(certPath, keyPath); err != nil {
-			return nil, fmt.Errorf("tls: failed to generate self-signed cert: %w", err)
-		}
-		log.Printf("TLS: generated self-signed certificate (%s)", certPath)
-	} else {
-		log.Printf("TLS: using existing self-signed certificate (%s)", certPath)
+	ca, err := ensureCA(tlsDir)
+	if err != nil {
+		return nil, fmt.Errorf("tls: failed to prepare local CA: %w", err)
 	}
 
-	return &Config{CertFile: certPath, KeyFile: keyPath}, nil
+	certPath := filepath.Join(tlsDir, leafCertName)
+	keyPath := filepath.Join(tlsDir, leafKeyName)
+
+	dnsNames, ips := collectLeafNames()
+
+	if leafIsValid(certPath, keyPath, ca, dnsNames, ips) {
+		log.Printf("TLS: using existing certificate (%s)", certPath)
+	} else {
+		if err := generateLeaf(certPath, keyPath, ca, dnsNames, ips); err != nil {
+			return nil, fmt.Errorf("tls: failed to generate server certificate: %w", err)
+		}
+		log.Printf("TLS: generated certificate signed by %s (%s); import %s into a device's trust store to trust it",
+			caCommonName, certPath, ca.certPath)
+	}
+
+	return &Config{CertFile: certPath, KeyFile: keyPath, CAFile: ca.certPath}, nil
 }
 
 // LoadDisabled returns nil to signal TLS should be disabled (plain HTTP).
@@ -68,67 +104,320 @@ func LoadDisabled() *Config {
 	return nil
 }
 
-// generateSelfSignedCert creates a self-signed ECDSA certificate valid for localhost.
-func generateSelfSignedCert(certPath, keyPath string) error {
-	// Generate ECDSA private key
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+// ensureCA loads the local CA from tlsDir, creating and persisting it on first
+// use. An existing, usable CA is never replaced: devices that already imported
+// it would stop trusting the server otherwise.
+func ensureCA(tlsDir string) (*certificateAuthority, error) {
+	certPath := filepath.Join(tlsDir, caCertName)
+	keyPath := filepath.Join(tlsDir, caKeyName)
+
+	if ca, err := loadCA(certPath, keyPath); err == nil {
+		return ca, nil
+	} else if !os.IsNotExist(err) {
+		// Files exist but are unusable (corrupt, rotated key, …) — regenerate.
+		log.Printf("TLS: regenerating local CA (%v)", err)
+	}
+
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate CA key: %w", err)
+	}
+
+	serial, err := randomSerial()
+	if err != nil {
+		return nil, err
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			Organization: []string{certOrganization},
+			CommonName:   caCommonName,
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(caValidFor),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &caKey.PublicKey, caKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CA certificate: %w", err)
+	}
+
+	if err := writeCertPEM(certPath, certDER); err != nil {
+		return nil, err
+	}
+	if err := writeKeyPEM(keyPath, caKey); err != nil {
+		return nil, err
+	}
+
+	caCert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse generated CA certificate: %w", err)
+	}
+
+	return &certificateAuthority{cert: caCert, key: caKey, certPath: certPath}, nil
+}
+
+// loadCA reads and validates a persisted CA certificate/key pair.
+// Returns an os.IsNotExist-compatible error when the files are absent.
+func loadCA(certPath, keyPath string) (*certificateAuthority, error) {
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, err
+	}
+	keyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, err
+	}
+
+	caCert, err := parseCertificatePEM(certPEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse CA certificate: %w", err)
+	}
+	caKey, err := parseKeyPEM(keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse CA key: %w", err)
+	}
+	pub, ok := caCert.PublicKey.(*ecdsa.PublicKey)
+	if !ok || !pub.Equal(&caKey.PublicKey) {
+		return nil, fmt.Errorf("CA key does not match CA certificate")
+	}
+
+	return &certificateAuthority{cert: caCert, key: caKey, certPath: certPath}, nil
+}
+
+// generateLeaf creates a server certificate for the given names, signed by ca.
+func generateLeaf(certPath, keyPath string, ca *certificateAuthority, dnsNames []string, ips []net.IP) error {
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return fmt.Errorf("failed to generate private key: %w", err)
 	}
 
-	// Certificate template
-	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	serial, err := randomSerial()
 	if err != nil {
-		return fmt.Errorf("failed to generate serial number: %w", err)
+		return err
 	}
 
 	template := x509.Certificate{
-		SerialNumber: serialNumber,
+		SerialNumber: serial,
 		Subject: pkix.Name{
-			Organization: []string{"kanban"},
-			CommonName:   "localhost",
+			Organization: []string{certOrganization},
+			CommonName:   leafCommonName,
 		},
 		NotBefore: time.Now(),
-		NotAfter:  time.Now().Add(365 * 24 * time.Hour), // valid for 1 year
+		NotAfter:  time.Now().Add(leafValidFor),
 
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
+		IsCA:                  false,
 
-		DNSNames:    []string{"localhost"},
-		IPAddresses: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+		DNSNames:    dnsNames,
+		IPAddresses: ips,
 	}
 
-	// Self-sign the certificate
-	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, ca.cert, &leafKey.PublicKey, ca.key)
 	if err != nil {
 		return fmt.Errorf("failed to create certificate: %w", err)
 	}
 
-	// Write certificate file
-	certOut, err := os.Create(certPath)
-	if err != nil {
-		return fmt.Errorf("failed to create cert file: %w", err)
+	if err := writeCertPEM(certPath, certDER); err != nil {
+		return err
 	}
-	defer certOut.Close()
-	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
-		return fmt.Errorf("failed to write cert file: %w", err)
+	return writeKeyPEM(keyPath, leafKey)
+}
+
+// leafIsValid reports whether the certificate/key pair at certPath/keyPath is
+// still the right one to serve: it must parse, its key must match, it must be
+// signed by ca, and its alternative names must match the ones we would issue
+// today. Expiry is deliberately not part of this check — a leaf is only
+// replaced when the host's names change, never silently on rotation.
+func leafIsValid(certPath, keyPath string, ca *certificateAuthority, dnsNames []string, ips []net.IP) bool {
+	pair, err := cryptotls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return false
+	}
+	leaf := pair.Leaf
+	if leaf == nil {
+		return false
+	}
+	if err := leaf.CheckSignatureFrom(ca.cert); err != nil {
+		return false
+	}
+	return sameNames(leaf.DNSNames, dnsNames) && sameIPs(leaf.IPAddresses, ips)
+}
+
+// leafSANsMatch reports whether the certificate at certPath carries exactly the
+// given subject alternative names (order-independent). A missing or unparseable
+// certificate never matches.
+func leafSANsMatch(certPath string, dnsNames []string, ips []net.IP) bool {
+	pem, err := os.ReadFile(certPath)
+	if err != nil {
+		return false
+	}
+	leaf, err := parseCertificatePEM(pem)
+	if err != nil {
+		return false
+	}
+	return sameNames(leaf.DNSNames, dnsNames) && sameIPs(leaf.IPAddresses, ips)
+}
+
+// collectLeafNames returns the names the server certificate should be valid for:
+// localhost, the machine hostname (plus its .local mDNS alias) and every
+// non-loopback address of the host. Both slices are de-duplicated and sorted so
+// that an unchanged host yields an identical set.
+func collectLeafNames() (dnsNames []string, ips []net.IP) {
+	nameSet := map[string]bool{"localhost": true}
+	ipSet := map[string]net.IP{}
+
+	addIP := func(ip net.IP) {
+		if ip == nil {
+			return
+		}
+		ipSet[ip.String()] = ip
 	}
 
-	// Write key file
-	keyOut, err := os.OpenFile(keyPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("failed to create key file: %w", err)
-	}
-	defer keyOut.Close()
+	addIP(net.IPv4(127, 0, 0, 1))
+	addIP(net.ParseIP("::1"))
 
-	keyBytes, err := x509.MarshalECPrivateKey(privateKey)
+	if hostname, err := os.Hostname(); err == nil {
+		if h := strings.TrimSuffix(hostname, "."); h != "" {
+			nameSet[h] = true
+			if !strings.HasSuffix(h, ".local") {
+				nameSet[h+".local"] = true
+			}
+		}
+	}
+
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, addr := range addrs {
+			ipnet, ok := addr.(*net.IPNet)
+			if !ok || ipnet.IP == nil {
+				continue
+			}
+			ip := ipnet.IP
+			if ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() {
+				continue
+			}
+			addIP(ip)
+		}
+	}
+
+	for name := range nameSet {
+		dnsNames = append(dnsNames, name)
+	}
+	sort.Strings(dnsNames)
+
+	for _, ip := range ipSet {
+		ips = append(ips, ip)
+	}
+	sort.Slice(ips, func(i, j int) bool { return ips[i].String() < ips[j].String() })
+
+	return dnsNames, ips
+}
+
+// randomSerial returns a random 128-bit certificate serial number.
+func randomSerial() (*big.Int, error) {
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate serial number: %w", err)
+	}
+	return serial, nil
+}
+
+// writeCertPEM writes a DER certificate as PEM to path (0644).
+func writeCertPEM(path string, der []byte) error {
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	if err := os.WriteFile(path, pemBytes, 0o644); err != nil {
+		return fmt.Errorf("failed to write certificate %s: %w", path, err)
+	}
+	return nil
+}
+
+// writeKeyPEM writes an ECDSA key as PEM to path with owner-only permissions.
+func writeKeyPEM(path string, key *ecdsa.PrivateKey) error {
+	keyBytes, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
 		return fmt.Errorf("failed to marshal private key: %w", err)
 	}
-	if err := pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes}); err != nil {
-		return fmt.Errorf("failed to write key file: %w", err)
+	block := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
+	if err := os.WriteFile(path, block, 0o600); err != nil {
+		return fmt.Errorf("failed to write key %s: %w", path, err)
 	}
-
 	return nil
+}
+
+// parseCertificatePEM decodes the first CERTIFICATE block in pemBytes.
+func parseCertificatePEM(pemBytes []byte) (*x509.Certificate, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("no CERTIFICATE PEM block found")
+	}
+	return x509.ParseCertificate(block.Bytes)
+}
+
+// parseKeyPEM decodes a PEM-encoded ECDSA private key.
+func parseKeyPEM(pemBytes []byte) (*ecdsa.PrivateKey, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block found")
+	}
+	if block.Type == "PRIVATE KEY" {
+		parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		ecKey, ok := parsed.(*ecdsa.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("PKCS8 key is not an ECDSA key")
+		}
+		return ecKey, nil
+	}
+	return x509.ParseECPrivateKey(block.Bytes)
+}
+
+// sameNames compares two DNS name sets, ignoring order and duplicates.
+func sameNames(a, b []string) bool {
+	setA := make(map[string]bool, len(a))
+	for _, v := range a {
+		setA[v] = true
+	}
+	setB := make(map[string]bool, len(b))
+	for _, v := range b {
+		setB[v] = true
+	}
+	if len(setA) != len(setB) {
+		return false
+	}
+	for v := range setA {
+		if !setB[v] {
+			return false
+		}
+	}
+	return true
+}
+
+// sameIPs compares two IP sets, ignoring order, duplicates and the 4- vs
+// 16-byte representation of IPv4 addresses.
+func sameIPs(a, b []net.IP) bool {
+	setA := make(map[string]bool, len(a))
+	for _, v := range a {
+		setA[v.String()] = true
+	}
+	setB := make(map[string]bool, len(b))
+	for _, v := range b {
+		setB[v.String()] = true
+	}
+	if len(setA) != len(setB) {
+		return false
+	}
+	for v := range setA {
+		if !setB[v] {
+			return false
+		}
+	}
+	return true
 }
