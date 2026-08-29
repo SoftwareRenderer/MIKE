@@ -159,15 +159,19 @@ func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
 	return paths, nil
 }
 
+// extensionColumns is the SELECT list shared by every extensions query; the
+// order must match scanExtension's argument order.
+const extensionColumns = `id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir`
+
 // GetByType returns extensions filtered by type (empty = all).
 func (es *ExtensionStore) GetByType(extType string) ([]Extension, error) {
 	var query string
 	var args []any
 	if extType != "" {
-		query = `SELECT id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions WHERE type = ? ORDER BY name`
+		query = `SELECT ` + extensionColumns + ` FROM extensions WHERE type = ? ORDER BY name`
 		args = append(args, extType)
 	} else {
-		query = `SELECT id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions ORDER BY name`
+		query = `SELECT ` + extensionColumns + ` FROM extensions ORDER BY name`
 	}
 
 	rows, err := es.db.Query(query, args...)
@@ -192,126 +196,44 @@ func (es *ExtensionStore) GetByType(extType string) ([]Extension, error) {
 
 // GetByID retrieves an extension by ID.
 func (es *ExtensionStore) GetByID(id string) (*Extension, error) {
-	return es.getBy("id", id)
-}
-
-// GetByName retrieves an extension by name (records have timestamped IDs).
-func (es *ExtensionStore) GetByName(name string) (*Extension, error) {
-	return es.getBy("name", name)
-}
-
-func (es *ExtensionStore) getBy(column, value string) (*Extension, error) {
-	var ext Extension
-	var manifestJSON, configJSON, containerConfigJSON, sandboxConfigJSON, imageRef sql.NullString
-	var extType, installSource string
-	var enabled int
-	var installedAt, builtAt string
-	var repo, commitSHA, subdir string
-
-	err := es.db.QueryRow(
-		`SELECT id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions WHERE `+column+` = ?`,
-		value,
-	).Scan(&ext.ID, &ext.Name, &ext.Author, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt, &repo, &commitSHA, &subdir)
+	ext, err := es.queryOne(`WHERE id = ?`, id)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("extension not found: %s", id)
+	}
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("extension not found: %s", value)
-		}
-		return nil, fmt.Errorf("query extension: %w", err)
+		return nil, err
 	}
-
-	ext.Type = extType
-	ext.InstallSource = installSource
-	ext.ImageRef = imageRef.String
-	ext.Enabled = store.I2B(enabled)
-	ext.InstalledAt = installedAt
-	ext.BuiltAt = builtAt
-	ext.Repo = repo
-	ext.Commit = commitSHA
-	ext.Subdir = subdir
-
-	if manifestJSON.Valid {
-		if err := json.Unmarshal([]byte(manifestJSON.String), &ext.Manifest); err != nil {
-			return nil, fmt.Errorf("unmarshal manifest: %w", err)
-		}
-	}
-	if configJSON.Valid {
-		if err := json.Unmarshal([]byte(configJSON.String), &ext.Config); err != nil {
-			return nil, fmt.Errorf("unmarshal config: %w", err)
-		}
-	} else {
-		ext.Config = map[string]any{}
-	}
-	ext.Config = decryptConfigValues(ext.Config, ext.Manifest.ConfigSchema)
-	if containerConfigJSON.Valid {
-		if err := json.Unmarshal([]byte(containerConfigJSON.String), &ext.ContainerConfig); err != nil {
-			return nil, fmt.Errorf("unmarshal container config: %w", err)
-		}
-	}
-	if sandboxConfigJSON.Valid {
-		if err := json.Unmarshal([]byte(sandboxConfigJSON.String), &ext.SandboxConfig); err != nil {
-			return nil, fmt.Errorf("unmarshal sandbox config: %w", err)
-		}
-	}
-
-	return &ext, nil
+	return ext, nil
 }
 
-// GetByAuthorName retrieves an extension by its author/name identity key.
+// GetByAuthorName retrieves an extension by its author/name identity key — the
+// pair is the extension's stable identity (IDs are timestamped, so the same
+// tool installed twice is one identity).
 func (es *ExtensionStore) GetByAuthorName(author, name string) (*Extension, error) {
-	var ext Extension
-	var manifestJSON, configJSON, containerConfigJSON, sandboxConfigJSON, imageRef sql.NullString
-	var extType, installSource string
-	var enabled int
-	var installedAt, builtAt string
-	var repo, commitSHA, subdir string
-
-	err := es.db.QueryRow(
-		`SELECT id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir FROM extensions WHERE author = ? AND name = ?`,
-		author, name,
-	).Scan(&ext.ID, &ext.Name, &ext.Author, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt, &repo, &commitSHA, &subdir)
+	ext, err := es.queryOne(`WHERE author = ? AND name = ?`, author, name)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("extension not found: %s/%s", author, name)
+	}
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("extension not found: %s/%s", author, name)
-		}
+		return nil, err
+	}
+	return ext, nil
+}
+
+// queryOne runs a single-row extensions query and decodes it. The WHERE clause
+// is a literal fragment (never built from caller data); values are always bound
+// as parameters. sql.ErrNoRows is returned unwrapped so the caller can name the
+// identity it looked up.
+func (es *ExtensionStore) queryOne(where string, args ...any) (*Extension, error) {
+	ext, err := scanExtension(es.db.QueryRow(
+		`SELECT `+extensionColumns+` FROM extensions `+where, args...))
+	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("query extension: %w", err)
 	}
-
-	ext.Type = extType
-	ext.InstallSource = installSource
-	ext.ImageRef = imageRef.String
-	ext.Enabled = store.I2B(enabled)
-	ext.InstalledAt = installedAt
-	ext.BuiltAt = builtAt
-	ext.Repo = repo
-	ext.Commit = commitSHA
-	ext.Subdir = subdir
-
-	if manifestJSON.Valid {
-		if err := json.Unmarshal([]byte(manifestJSON.String), &ext.Manifest); err != nil {
-			return nil, fmt.Errorf("unmarshal manifest: %w", err)
-		}
+	if err == sql.ErrNoRows {
+		return nil, err
 	}
-	if configJSON.Valid {
-		if err := json.Unmarshal([]byte(configJSON.String), &ext.Config); err != nil {
-			return nil, fmt.Errorf("unmarshal config: %w", err)
-		}
-	} else {
-		ext.Config = map[string]any{}
-	}
-	// Decrypt sensitive config values after loading
-	ext.Config = decryptConfigValues(ext.Config, ext.Manifest.ConfigSchema)
-	if containerConfigJSON.Valid {
-		if err := json.Unmarshal([]byte(containerConfigJSON.String), &ext.ContainerConfig); err != nil {
-			return nil, fmt.Errorf("unmarshal container config: %w", err)
-		}
-	}
-	if sandboxConfigJSON.Valid {
-		if err := json.Unmarshal([]byte(sandboxConfigJSON.String), &ext.SandboxConfig); err != nil {
-			return nil, fmt.Errorf("unmarshal sandbox config: %w", err)
-		}
-	}
-
-	return &ext, nil
+	return ext, nil
 }
 
 // Create inserts a new extension.

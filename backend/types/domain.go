@@ -246,27 +246,6 @@ type ProjectCounts struct {
 	Review     int `json:"review"`
 }
 
-// TaskDependency represents a parent-child link between tasks.
-type TaskDependency struct {
-	ID           string    `json:"id"`
-	ParentTaskID string    `json:"parent_task_id"`
-	ChildTaskID  string    `json:"child_task_id"`
-	AutoStart    bool      `json:"auto_start"`
-	CreatedAt    time.Time `json:"created_at"`
-}
-
-// ReviewComment represents a line-level review comment.
-type ReviewComment struct {
-	ID        string    `json:"id"`
-	TaskID    string    `json:"task_id"`
-	FilePath  string    `json:"file_path"`
-	LineNum   int       `json:"line_num"`
-	Comment   string    `json:"comment"`
-	Resolved  bool      `json:"resolved"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
 // GitCommit represents a git commit in the log.
 type GitCommit struct {
 	Hash     string   `json:"hash"`

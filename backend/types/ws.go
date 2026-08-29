@@ -1,7 +1,5 @@
 package types
 
-import "encoding/json"
-
 // WSMessageType is the type of a WebSocket message.
 type WSMessageType string
 
@@ -34,12 +32,6 @@ const (
 type StreamEvent struct {
 	Type WSMessageType
 	Data any
-}
-
-// WSMessage is the envelope for all WebSocket frames.
-type WSMessage struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data"`
 }
 
 // TerminalMessage is the envelope for terminal WebSocket frames.

@@ -569,19 +569,8 @@ func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.Cha
 				}
 			}
 			// Also add a tool result message if available (for status lookup)
-			if m.ToolResult != "" {
-				var resultMap map[string]any
-				if err := json.Unmarshal([]byte(m.ToolResult), &resultMap); err == nil {
-					output, _ := resultMap["output"].(string)
-					toolID := ""
-					if m.ToolCalls != "" {
-						var tcMap map[string]any
-						if err2 := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err2 == nil {
-							toolID, _ = tcMap["tool_id"].(string)
-						}
-					}
-					conversation = append(conversation, types.ChatMessage{Role: "tool", Content: output, ToolCallID: toolID})
-				}
+			if msg, ok := toolResultMessage(m); ok {
+				conversation = append(conversation, msg)
 			}
 			continue
 		}
@@ -592,6 +581,38 @@ func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.Cha
 		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
 	}
 	return conversation
+}
+
+// toolCallIDFromMessage returns the tool_id recorded in a task message's
+// tool_calls JSON, or "" when the message carries none. The id is what ties a
+// "tool" role reply back to the assistant's call, so a missing one degrades to
+// an unlinked result rather than dropping the result.
+func toolCallIDFromMessage(m types.TaskMessage) string {
+	if m.ToolCalls == "" {
+		return ""
+	}
+	var tc map[string]any
+	if err := json.Unmarshal([]byte(m.ToolCalls), &tc); err != nil {
+		return ""
+	}
+	id, _ := tc["tool_id"].(string)
+	return id
+}
+
+// toolResultMessage rebuilds the "tool" role message that answers a tool call
+// from the task message holding its result. ok is false when there is no
+// tool_result or it does not parse, so callers skip the message instead of
+// appending an empty result the model would read as a successful no-op.
+func toolResultMessage(m types.TaskMessage) (types.ChatMessage, bool) {
+	if m.ToolResult == "" {
+		return types.ChatMessage{}, false
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(m.ToolResult), &result); err != nil {
+		return types.ChatMessage{}, false
+	}
+	output, _ := result["output"].(string)
+	return types.ChatMessage{Role: "tool", Content: output, ToolCallID: toolCallIDFromMessage(m)}, true
 }
 
 // collectUniqueModels extracts unique model names from task messages, preserving

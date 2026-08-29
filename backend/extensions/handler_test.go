@@ -973,9 +973,9 @@ func TestHandleInstallLocal(t *testing.T) {
 	}
 
 	// The extension record should be persisted with the local install source.
-	stored, err := h.store.GetByName("svelte-language-server")
+	stored, err := h.store.GetByID(last.Result.ID)
 	if err != nil {
-		t.Fatalf("GetByName: %v", err)
+		t.Fatalf("GetByID(%s): %v", last.Result.ID, err)
 	}
 	if stored.InstallSource != "local" {
 		t.Errorf("stored InstallSource = %q, want local", stored.InstallSource)

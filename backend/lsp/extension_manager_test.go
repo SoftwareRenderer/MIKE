@@ -181,40 +181,6 @@ func TestExtensionRegistry_Lookup_Disabled(t *testing.T) {
 	}
 }
 
-func TestExtensionRegistry_GetAvailable(t *testing.T) {
-	store := testExtensionStore(t)
-	if err := store.InitSchema(); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-
-	// Create test extensions
-	for _, lang := range []string{"go", "typescript"} {
-		ext := makeTestLSPExt(lang, lang)
-		if err := store.Create(ext); err != nil {
-			t.Fatalf("Create(%s): %v", lang, err)
-		}
-	}
-
-	reg := NewExtensionRegistry(store)
-	langs := reg.GetAvailable()
-
-	if len(langs) != 2 {
-		t.Errorf("GetAvailable() = %d, want 2", len(langs))
-	}
-
-	// Check languages
-	langSet := make(map[string]bool)
-	for _, l := range langs {
-		langSet[l] = true
-	}
-	if !langSet["go"] {
-		t.Error("GetAvailable() missing go")
-	}
-	if !langSet["typescript"] {
-		t.Error("GetAvailable() missing typescript")
-	}
-}
-
 func TestExtensionRegistry_GetConfig(t *testing.T) {
 	store := testExtensionStore(t)
 	if err := store.InitSchema(); err != nil {

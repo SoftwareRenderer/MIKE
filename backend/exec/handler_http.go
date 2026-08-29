@@ -55,8 +55,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		Attachments     string `json:"attachments"`
 		Regenerate      bool   `json:"regenerate"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 	if req.Content == "" && req.Attachments == "" {

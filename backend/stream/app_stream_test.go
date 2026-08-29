@@ -1,8 +1,13 @@
 package stream
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"kanban/backend/types"
 
@@ -175,12 +180,17 @@ func TestTaskDeletedWireFormat(t *testing.T) {
 // TestOldStyleBroken verifies that the old WSMessage-wrapped approach
 // placed task inside msg.data instead of msg.task (regression reference).
 func TestOldStyleBroken(t *testing.T) {
-	// This is what the OLD code did: wrap in WSMessage{Type, Data: json.Marshal(payload)}
+	// This is what the OLD code did: wrap in {Type, Data: json.Marshal(payload)}.
+	// The envelope is declared here on purpose — production sends flat frames,
+	// so this shape exists only to pin down the regression it guards against.
 	payload, _ := json.Marshal(map[string]any{
 		"type": "task_updated",
 		"task": map[string]string{"id": "test-task"},
 	})
-	oldStyle := types.WSMessage{Type: "task_updated", Data: payload}
+	oldStyle := struct {
+		Type string          `json:"type"`
+		Data json.RawMessage `json:"data"`
+	}{Type: "task_updated", Data: payload}
 	frame, _ := json.Marshal(oldStyle)
 
 	// The old style produces: {"type":"task_updated","data":{"type":"task_updated","task":{...}}}
@@ -271,101 +281,187 @@ func TestClientParseTaskEvent(t *testing.T) {
 	}
 }
 
-// TestTaskEventDelivery verifies that task event delivery is gated by
-// task subscription (taskSub key exists with count > 0).
-// We test the subscription filtering logic via hasTaskSubscribers,
-// which uses the same key-based lookup as sendTaskPayload.
+// --- Live WebSocket subscription helpers ---
+//
+// These drive the real protocol (HandleStream on a throwaway server) so the
+// production code registers the client, applies the subscription and performs
+// the delivery — the test never reaches into AppStreamManager's maps.
+
+// frameStream pumps every frame a client receives into a channel. Reading with
+// a per-call context deadline is NOT an option here: coder/websocket closes the
+// connection when a read's context expires, which would silently disconnect the
+// client between assertions.
+type frameStream struct {
+	conn   *websocket.Conn
+	ctx    context.Context
+	frames chan map[string]any
+}
+
+// dialStream serves asm on a throwaway server, connects a real client and
+// starts pumping its frames. Everything is torn down with the test.
+func dialStream(t *testing.T, asm *AppStreamManager) *frameStream {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial stream: %v", err)
+	}
+	t.Cleanup(func() { conn.CloseNow() })
+
+	fs := &frameStream{conn: conn, ctx: ctx, frames: make(chan map[string]any, 1024)}
+	go func() {
+		defer close(fs.frames)
+		for {
+			_, raw, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			var frame map[string]any
+			if json.Unmarshal(raw, &frame) == nil {
+				fs.frames <- frame
+			}
+		}
+	}()
+	return fs
+}
+
+// sendSubscription sends one subscribe_/unsubscribe_ frame over the real wire
+// format. An empty taskID means the project-level variant.
+func (fs *frameStream) sendSubscription(t *testing.T, action, projectID, taskID string) {
+	t.Helper()
+	body := map[string]any{"type": action, "data": map[string]string{"project_id": projectID, "task_id": taskID}}
+	frame, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal %s: %v", action, err)
+	}
+	if err := fs.conn.Write(fs.ctx, websocket.MessageText, frame); err != nil {
+		t.Fatalf("write %s: %v", action, err)
+	}
+}
+
+// await blocks until want frames matching pred arrive, failing after window.
+// Reads are ordered per connection, so anything seen here was written before
+// what a later assertion on the same connection looks for.
+func (fs *frameStream) await(t *testing.T, window time.Duration, pred func(map[string]any) bool, want int, what string) {
+	t.Helper()
+	if got := fs.collect(window, pred, want); got != want {
+		t.Fatalf("%s: got %d frames within %v, want %d", what, got, window, want)
+	}
+}
+
+// quietWindow fails if any frame matching pred arrives within window — the
+// negative half of a delivery assertion. Callers must have proven the client is
+// live beforehand, or "nothing arrived" proves nothing.
+func (fs *frameStream) quietWindow(t *testing.T, window time.Duration, pred func(map[string]any) bool, what string) {
+	t.Helper()
+	if got := fs.collect(window, pred, 1); got != 0 {
+		t.Fatalf("%s: got %d frames within %v, want none", what, got, window)
+	}
+}
+
+// collect counts matching frames, stopping early at stopAt or after window.
+func (fs *frameStream) collect(window time.Duration, pred func(map[string]any) bool, stopAt int) int {
+	deadline := time.NewTimer(window)
+	defer deadline.Stop()
+	hits := 0
+	for {
+		select {
+		case frame, ok := <-fs.frames:
+			if !ok {
+				return hits // connection closed
+			}
+			if pred(frame) {
+				hits++
+				if hits >= stopAt {
+					return hits
+				}
+			}
+		case <-deadline.C:
+			return hits
+		}
+	}
+}
+
+// flushSubscriptions makes the server acknowledge everything this client has
+// sent so far: HandleStream's read loop is sequential, so a probe subscription
+// whose replay we observe proves every earlier frame from this connection (an
+// unsubscribe, say) has already been applied. Without it a negative assertion
+// would race the server's read loop.
+func (fs *frameStream) flushSubscriptions(t *testing.T, projectID, probeTaskID string) {
+	t.Helper()
+	fs.sendSubscription(t, "subscribe_task", projectID, probeTaskID)
+	fs.await(t, 5*time.Second, isTaskEventFor(probeTaskID, "warm-"+probeTaskID), 1, "subscription flush")
+}
+
+// isTaskEventFor reports a frame predicate for a task_event carrying text.
+func isTaskEventFor(taskID, text string) func(map[string]any) bool {
+	return func(frame map[string]any) bool {
+		if frame["type"] != "task_event" || frame["task_id"] != taskID {
+			return false
+		}
+		data, _ := frame["data"].(map[string]any)
+		return data["text"] == text
+	}
+}
+
+// TestTaskEventDelivery verifies task event delivery is gated by the task
+// subscription: project-only and other-task subscribers never see it, and a
+// task subscriber stops seeing it exactly when its subscription count drops to
+// zero (multi-tab).
 func TestTaskEventDelivery(t *testing.T) {
-	asm := NewAppStreamManager(nil, nil)
+	_, s, _, wm, _ := setupDoneSnapshotTest(t)
+	asm := NewAppStreamManager(s, wm)
+	t.Cleanup(asm.Close)
 
-	// Create unique fake connection pointers
-	connA := (*websocket.Conn)(new(websocket.Conn))
-	connB := (*websocket.Conn)(new(websocket.Conn))
-	connC := (*websocket.Conn)(new(websocket.Conn))
+	const projectID, taskID, probeTask = "proj-1", "task-1", "other-task"
 
-	projectID := "test-project"
-	taskID := "test-task"
+	// Warm-up frames: buffered now (nobody is subscribed), replayed by the
+	// production subscribe path, so their arrival proves the server processed
+	// that client's subscribe_task.
+	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "warm-" + taskID}})
+	asm.SendTaskEvent(projectID, probeTask, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "warm-" + probeTask}})
 
-	// Set up client states directly (subscribe/unsubscribe are unexported)
-	asm.mu.Lock()
+	// A: subscribed to the task under test.
+	a := dialStream(t, asm)
+	a.sendSubscription(t, "subscribe_task", projectID, taskID)
+	a.await(t, 5*time.Second, isTaskEventFor(taskID, "warm-"+taskID), 1, "task subscriber replay")
 
-	// Client A: subscribed to the target task
-	asm.clients[connA] = &clientState{
-		conn:       connA,
-		projectSub: map[string]int{projectID: 1},
-		taskSub:    map[string]int{projectID + ":" + taskID: 1},
-		bufSize:    DefaultBufferSize,
-	}
+	// B: subscribed to the project only. Its liveness is proven by the
+	// initial-data burst subscribe_project ends with (project_branch).
+	b := dialStream(t, asm)
+	b.sendSubscription(t, "subscribe_project", projectID, "")
+	b.await(t, 5*time.Second, func(f map[string]any) bool { return f["type"] == "project_branch" }, 1, "project subscriber initial data")
 
-	// Client B: subscribed to project but NOT to the task
-	asm.clients[connB] = &clientState{
-		conn:       connB,
-		projectSub: map[string]int{projectID: 1},
-		taskSub:    map[string]int{},
-		bufSize:    DefaultBufferSize,
-	}
+	// C: subscribed to a different task in the same project.
+	c := dialStream(t, asm)
+	c.sendSubscription(t, "subscribe_task", projectID, probeTask)
+	c.await(t, 5*time.Second, isTaskEventFor(probeTask, "warm-"+probeTask), 1, "other-task subscriber replay")
 
-	// Client C: subscribed to a DIFFERENT task
-	asm.clients[connC] = &clientState{
-		conn:       connC,
-		projectSub: map[string]int{projectID: 1},
-		taskSub:    map[string]int{projectID + ":" + "other-task": 1},
-		bufSize:    DefaultBufferSize,
-	}
+	// 1. Only the task subscriber receives the event.
+	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "gated"}})
+	a.await(t, 5*time.Second, isTaskEventFor(taskID, "gated"), 1, "task subscriber")
+	b.quietWindow(t, time.Second, isTaskEventFor(taskID, "gated"), "project-only subscriber")
+	c.quietWindow(t, time.Second, isTaskEventFor(taskID, "gated"), "other-task subscriber")
 
-	asm.mu.Unlock()
+	// 2. Two tabs on one connection (subscribe_task twice): the first
+	// unsubscribe drops the count to 1, so delivery must continue.
+	a.sendSubscription(t, "subscribe_task", projectID, taskID)
+	a.sendSubscription(t, "unsubscribe_task", projectID, taskID)
+	a.flushSubscriptions(t, projectID, probeTask)
+	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "still-subscribed"}})
+	a.await(t, 5*time.Second, isTaskEventFor(taskID, "still-subscribed"), 1, "second tab still subscribed")
 
-	// 1. hasTaskSubscribers returns true when at least one client is subscribed
-	if !asm.hasTaskSubscribers(projectID, taskID) {
-		t.Fatal("expected hasTaskSubscribers=true for subscribed task")
-	}
-
-	// 2. hasTaskSubscribers returns false for a task with no subscribers
-	if asm.hasTaskSubscribers(projectID, "nonexistent-task") {
-		t.Fatal("expected hasTaskSubscribers=false for nonexistent task")
-	}
-
-	// 3. hasTaskSubscribers returns false for a different project
-	if asm.hasTaskSubscribers("other-project", taskID) {
-		t.Fatal("expected hasTaskSubscribers=false for different project")
-	}
-
-	// 4. After removing the subscription, hasTaskSubscribers returns false
-	asm.mu.Lock()
-	key := projectID + ":" + taskID
-	delete(asm.clients[connA].taskSub, key)
-	asm.mu.Unlock()
-
-	if asm.hasTaskSubscribers(projectID, taskID) {
-		t.Fatal("expected hasTaskSubscribers=false after unsubscribe")
-	}
-
-	// 5. Re-subscribe and verify multi-tab support (count > 1)
-	asm.mu.Lock()
-	asm.clients[connA].taskSub[key] = 2 // two tabs subscribed
-	asm.mu.Unlock()
-
-	if !asm.hasTaskSubscribers(projectID, taskID) {
-		t.Fatal("expected hasTaskSubscribers=true with count=2")
-	}
-
-	// Unsubscribe once — should still have subscribers (count=1)
-	asm.mu.Lock()
-	asm.clients[connA].taskSub[key]--
-	asm.mu.Unlock()
-
-	if !asm.hasTaskSubscribers(projectID, taskID) {
-		t.Fatal("expected hasTaskSubscribers=true after one unsubscribe (count=1)")
-	}
-
-	// Unsubscribe again — should have no subscribers
-	asm.mu.Lock()
-	delete(asm.clients[connA].taskSub, key)
-	asm.mu.Unlock()
-
-	if asm.hasTaskSubscribers(projectID, taskID) {
-		t.Fatal("expected hasTaskSubscribers=false after second unsubscribe")
-	}
+	// 3. The last unsubscribe removes the key, so delivery stops.
+	a.sendSubscription(t, "unsubscribe_task", projectID, taskID)
+	a.flushSubscriptions(t, projectID, probeTask)
+	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "after-unsubscribe"}})
+	a.quietWindow(t, time.Second, isTaskEventFor(taskID, "after-unsubscribe"), "unsubscribed client")
 }
 
 // TestSandboxStatsTaskEventPayload verifies the sandbox_stats task event
@@ -449,18 +545,18 @@ func TestTaskBufferClearedOnTaskDeleted(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		asm.SendTaskEvent("proj-1", "task-1", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "x"}})
 	}
-	if got := len(asm.GetTaskBuffer("proj-1", "task-1")); got != 3 {
+	if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 3 {
 		t.Fatalf("buffer before delete = %d frames, want 3", got)
 	}
 
 	asm.BroadcastTaskDeleted("proj-1", "task-1")
-	if got := len(asm.GetTaskBuffer("proj-1", "task-1")); got != 0 {
+	if got := len(asm.getTaskBuffer("proj-1:task-1")); got != 0 {
 		t.Fatalf("buffer after delete = %d frames, want 0", got)
 	}
 
 	// Other tasks' buffers are untouched.
 	asm.SendTaskEvent("proj-1", "task-2", types.StreamEvent{Type: types.WSTypeToken, Data: map[string]string{"text": "y"}})
-	if got := len(asm.GetTaskBuffer("proj-1", "task-2")); got != 1 {
+	if got := len(asm.getTaskBuffer("proj-1:task-2")); got != 1 {
 		t.Fatalf("other task buffer = %d frames, want 1", got)
 	}
 }

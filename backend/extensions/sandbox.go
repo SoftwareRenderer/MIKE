@@ -572,33 +572,6 @@ func (sm *ExtensionSandboxManager) Close() {
 	}
 }
 
-// UpdateMemoryLimit persists a new memory limit (MB)
-func (sm *ExtensionSandboxManager) UpdateMemoryLimit(extID string, limitMB int) error {
-	if limitMB < 0 {
-		limitMB = 0
-	}
-
-	ext, err := sm.store.GetByID(extID)
-	if err != nil {
-		return fmt.Errorf("load extension %s: %w", extID, err)
-	}
-	ext.SandboxConfig.MemoryLimit = limitMB
-	// Keep config.memory_limit in sync with sandbox_config (the edit form's
-	// save path keys off config).
-	if ext.Config == nil {
-		ext.Config = map[string]any{}
-	}
-	ext.Config["memory_limit"] = limitMB
-	if err := sm.store.Update(extID, ext); err != nil {
-		return fmt.Errorf("persist memory limit for extension %s: %w", extID, err)
-	}
-
-	if err := sm.ApplyMemoryLimit(extID, limitMB); err != nil {
-		return fmt.Errorf("apply memory limit %dMB to running sandbox %s: %w", limitMB, extID, err)
-	}
-	return nil
-}
-
 // ApplyMemoryLimit applies the given memory limit (MB)
 func (sm *ExtensionSandboxManager) ApplyMemoryLimit(extID string, limitMB int) error {
 	sm.mu.Lock()
@@ -696,24 +669,6 @@ func (sm *ExtensionSandboxManager) IsRunning(extID string) bool {
 	state.isAlive = running && err == nil
 	state.lastCheckedAt = time.Now()
 	return state.isAlive
-}
-
-// MountMapping returns the project mount mapping for an extension sandbox.
-// Returns nil if the sandbox is not running.
-func (sm *ExtensionSandboxManager) MountMapping(extID string) map[string]string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	state := sm.states[extID]
-	if state == nil {
-		return nil
-	}
-	// Return a copy to avoid external mutation
-	result := make(map[string]string, len(state.projectMounts))
-	for k, v := range state.projectMounts {
-		result[k] = v
-	}
-	return result
 }
 
 // customMountSnapshot returns a sorted list of "host:container:mode" strings
@@ -845,46 +800,6 @@ func (sm *ExtensionSandboxManager) findLocalDockerfile(name string) (string, err
 		return "", err
 	}
 	return found, nil
-}
-
-// InstallAndCreate installs an extension from a registry entry and creates its sandbox.
-func (sm *ExtensionSandboxManager) InstallAndCreate(entry *RegistryEntry, ext *Extension, workspacePath string) ([]types.AssignedPort, error) {
-	// Determine image reference
-	imageRef := entry.Image
-	if imageRef == "" {
-		// Build from Dockerfile
-		imageRef = fmt.Sprintf("kanban-ext-%s:%s", entry.Name, entry.Version)
-	}
-
-	// Pull or build image
-	if entry.Image != "" {
-		// Pull OCI image
-		if !sm.registry.ImageExists(entry.Image) {
-			if err := sm.registry.PullImage(entry.Image); err != nil {
-				return nil, fmt.Errorf("pull image %s: %w", entry.Image, err)
-			}
-		}
-	} else if entry.DockerfileURL != "" {
-		// Build from Dockerfile
-		dockerfile, err := sm.registry.FetchDockerfile(entry.DockerfileURL)
-		if err != nil {
-			return nil, fmt.Errorf("fetch dockerfile: %w", err)
-		}
-		if err := sm.registry.BuildImageFromReader(dockerfile, imageRef); err != nil {
-			return nil, fmt.Errorf("build image: %w", err)
-		}
-	}
-
-	// Update extension with image ref
-	ext.ContainerConfig.Image = imageRef
-	ext.ImageRef = imageRef
-
-	// Create sandbox with workspace as a single project mount
-	absWorkspace, _ := filepath.Abs(workspacePath)
-	projectMounts := map[string]string{
-		absWorkspace: "/mnt/" + filepath.Base(absWorkspace),
-	}
-	return sm.Create(ext, projectMounts)
 }
 
 // MarshalJSON implements json.Marshaler for ExtensionRuntimeStatus.

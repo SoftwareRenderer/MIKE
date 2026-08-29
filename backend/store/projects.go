@@ -235,8 +235,6 @@ func (s *Store) DeleteProject(id string) error {
 	// Delete task-level data first (FK to tasks)
 	_, _ = s.db.Exec(`DELETE FROM task_messages WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id)
 	_, _ = s.db.Exec(`DELETE FROM task_threads WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id)
-	_, _ = s.db.Exec(`DELETE FROM task_dependencies WHERE parent_task_id IN (SELECT id FROM tasks WHERE project_id = ?) OR child_task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id, id)
-	_, _ = s.db.Exec(`DELETE FROM review_comments WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id)
 
 	// Delete tasks (FK to projects)
 	_, _ = s.db.Exec(`DELETE FROM tasks WHERE project_id = ?`, id)

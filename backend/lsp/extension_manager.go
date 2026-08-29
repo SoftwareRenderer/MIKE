@@ -178,20 +178,6 @@ func (m *ExtensionLSPManager) SandboxMemory(workspacePath, filePath string) *typ
 	return m.extSandbox.GetMemoryStats(extensionID)
 }
 
-// GetMountPath returns the container mount path for a given host workspace path.
-// Returns the host path if no mapping is found.
-func (m *ExtensionLSPManager) GetMountPath(workspacePath string) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for _, sc := range m.clients {
-		if containerPath, ok := sc.projectMounts[workspacePath]; ok {
-			return containerPath
-		}
-	}
-	return workspacePath
-}
-
 // Close stops the manager and removes all client state.
 func (m *ExtensionLSPManager) Close() {
 	m.mu.Lock()
@@ -987,23 +973,6 @@ func (r *ExtensionRegistry) Lookup(fileOrPath string) *ServerConfig {
 	}
 
 	return nil
-}
-
-// GetAvailable returns all available language servers from installed extensions.
-func (r *ExtensionRegistry) GetAvailable() []string {
-	extensions, err := r.extStore.GetByType(extensions.ExtensionTypeLSP)
-	if err != nil {
-		return nil
-	}
-
-	langs := make([]string, 0, len(extensions))
-	for _, ext := range extensions {
-		lspCfg := ext.Manifest.Capabilities.GetLSP()
-		if ext.Enabled && lspCfg != nil && lspCfg.Language != "" {
-			langs = append(langs, lspCfg.Language)
-		}
-	}
-	return langs
 }
 
 // HasAnyLSPToolCallsExtension returns true if any enabled LSP extension has

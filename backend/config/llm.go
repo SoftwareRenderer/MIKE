@@ -117,8 +117,7 @@ func (cs *ConfigStore) HandleTestConnection(w http.ResponseWriter, r *http.Reque
 	}
 
 	var req TestConnectionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 	if req.LlamaServerURL == "" {
@@ -305,30 +304,6 @@ func extractContextWindow(maxModelLen, maxTokens int, nContext *int, metadata ma
 		}
 	}
 	return nil
-}
-
-// HandleFetchModels handles POST /api/config/fetch-models.
-func (cs *ConfigStore) HandleFetchModels(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req FetchModelsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.LlamaServerURL == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "llama_server_url is required")
-		return
-	}
-
-	// A masked/empty key means "use the stored key for this provider".
-	req.APIKey = cs.ResolveAPIKey(req.LlamaServerURL, req.APIKey)
-
-	result := cs.FetchModels(req)
-	httputil.JSONResponse(w, http.StatusOK, result)
 }
 
 // GetModelReasoningEffort looks up the reasoning effort for a model by name across all providers.

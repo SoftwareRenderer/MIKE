@@ -71,55 +71,6 @@ func NewBashChunk(stream uint8, data []byte) []byte {
 	return payload
 }
 
-// ShellOpenResult holds the parsed result of a shell_open command.
-type ShellOpenResult struct {
-	SessionID uint32
-}
-
-// ParseShellOpenResult parses a shell_open result payload.
-// Format: [sessionID:4 BE]
-func ParseShellOpenResult(payload []byte) (ShellOpenResult, error) {
-	if len(payload) < 4 {
-		return ShellOpenResult{}, fmt.Errorf("shell_open result too short (%d bytes)", len(payload))
-	}
-	return ShellOpenResult{
-		SessionID: binary.BigEndian.Uint32(payload[0:4]),
-	}, nil
-}
-
-// NewShellOpenResult creates a shell_open result payload.
-func NewShellOpenResult(sessionID uint32) []byte {
-	payload := make([]byte, 4)
-	binary.BigEndian.PutUint32(payload, sessionID)
-	return payload
-}
-
-// ShellChunk holds the parsed data of a shell output chunk.
-type ShellChunk struct {
-	SessionID uint32
-	Data      []byte
-}
-
-// ParseShellChunk parses a shell chunk payload.
-// Format: [sessionID:4 BE][data bytes]
-func ParseShellChunk(payload []byte) (ShellChunk, error) {
-	if len(payload) < 4 {
-		return ShellChunk{}, fmt.Errorf("shell chunk too short (%d bytes)", len(payload))
-	}
-	return ShellChunk{
-		SessionID: binary.BigEndian.Uint32(payload[0:4]),
-		Data:      payload[4:],
-	}, nil
-}
-
-// NewShellChunk creates a shell chunk payload.
-func NewShellChunk(sessionID uint32, data []byte) []byte {
-	payload := make([]byte, 4+len(data))
-	binary.BigEndian.PutUint32(payload[0:4], sessionID)
-	copy(payload[4:], data)
-	return payload
-}
-
 // Uint64Result parses a simple uint64 result (used by write/edit).
 func Uint64Result(payload []byte) (uint64, error) {
 	if len(payload) != 8 {
@@ -162,13 +113,6 @@ type WriteParams struct {
 type BashParams struct {
 	Command string `json:"command"`
 	Timeout int64  `json:"timeout"`
-}
-
-// ShellOpenParams holds the parsed parameters for a shell_open request.
-type ShellOpenParams struct {
-	Shell string `json:"shell"`
-	Rows  uint16 `json:"rows"`
-	Cols  uint16 `json:"cols"`
 }
 
 // LSPParams holds the parsed parameters for an LSP request.

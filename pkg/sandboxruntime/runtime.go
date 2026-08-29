@@ -1,11 +1,9 @@
 package sandboxruntime
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -242,103 +240,6 @@ func (r *Runtime) SanitizeID(id string) (string, error) {
 		return "", fmt.Errorf("ID %q contains no valid container name characters", id)
 	}
 	return s, nil
-}
-
-// ImageExists checks if a container image is available locally.
-func (r *Runtime) ImageExists(image string) bool {
-	if err := r.ValidateImageRef(image); err != nil {
-		return false
-	}
-	_, err := r.PodmanExec("image", "exists", image)
-	return err == nil
-}
-
-// PullImage downloads a container image.
-func (r *Runtime) PullImage(image string, onProgress func(line string)) error {
-	if err := r.ValidateImageRef(image); err != nil {
-		return err
-	}
-	log.Printf("[sandboxruntime] pulling image %s", image)
-	c := exec.Command("podman", "pull", image)
-	pr, pw := io.Pipe()
-	c.Stdout = pw
-	c.Stderr = pw
-
-	if err := c.Start(); err != nil {
-		pw.Close()
-		pr.Close()
-		return fmt.Errorf("start pull: %w", err)
-	}
-
-	go func() {
-		scanner := bufio.NewScanner(pr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if onProgress != nil {
-				onProgress(line)
-			}
-		}
-	}()
-
-	waitErr := c.Wait()
-	pw.Close()
-	if waitErr != nil {
-		return fmt.Errorf("pull image %s: %w", image, waitErr)
-	}
-	return nil
-}
-
-// BuildImage builds a container image from a Dockerfile.
-func (r *Runtime) BuildImage(imageName, dockerfilePath string, onProgress func(line string)) error {
-	if err := r.ValidateImageRef(imageName); err != nil {
-		return err
-	}
-	if err := ValidateDockerfilePath(dockerfilePath); err != nil {
-		return err
-	}
-	content, err := os.ReadFile(dockerfilePath)
-	if err != nil {
-		return fmt.Errorf("read dockerfile: %w", err)
-	}
-
-	tmpDir, err := os.MkdirTemp("", "kanban-sandbox-build")
-	if err != nil {
-		return fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	dockerfile := filepath.Join(tmpDir, "Dockerfile")
-	if err := os.WriteFile(dockerfile, content, 0o644); err != nil {
-		return fmt.Errorf("write dockerfile to temp dir: %w", err)
-	}
-
-	c := exec.Command("podman", "build", "-t", imageName, tmpDir)
-	pr, pw := io.Pipe()
-	c.Stdout = pw
-	c.Stderr = pw
-
-	if err := c.Start(); err != nil {
-		pw.Close()
-		pr.Close()
-		return fmt.Errorf("start build: %w", err)
-	}
-
-	go func() {
-		scanner := bufio.NewScanner(pr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if onProgress != nil {
-				onProgress(line)
-			}
-		}
-	}()
-
-	waitErr := c.Wait()
-	pw.Close()
-	if waitErr != nil {
-		return fmt.Errorf("build image %s: %w", imageName, waitErr)
-	}
-	return nil
 }
 
 // cgroupRoot is the mount point of the cgroup v2 (unified) hierarchy.

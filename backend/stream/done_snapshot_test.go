@@ -215,9 +215,17 @@ func TestMaterializeDoneTaskDiff_WorktreeDeletedFallback(t *testing.T) {
 	tip := commitInWorktree(t, wm, "task-1", "a.txt", "alpha\n")
 	markDone(t, s, task, base, tip)
 
-	// Remove the worktree directory (keep the branch).
-	if err := wm.RemoveWorktreeDir("proj-1", "task-1"); err != nil {
+	// Remove the worktree directory but keep the branch (the fallback reads
+	// commits from the project repo).
+	wtPath, err := wm.WorktreePath("task-1")
+	if err != nil {
+		t.Fatalf("worktree path: %v", err)
+	}
+	if err := os.RemoveAll(wtPath); err != nil {
 		t.Fatalf("remove worktree dir: %v", err)
+	}
+	if err := wm.GitRunInProject("proj-1", "worktree", "prune"); err != nil {
+		t.Fatalf("prune worktree: %v", err)
 	}
 
 	got, err := MaterializeDoneTaskDiff(s, wm, "proj-1", task)

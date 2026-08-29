@@ -341,18 +341,6 @@ func (g *ConcurrencyGate) EstimateWait(providerURL string, currentEntry *queueEn
 	return int((avgSlot * time.Duration(pos)) / time.Second)
 }
 
-// Close releases all queued waiters. The production executor never shuts the
-// gate down (it lives for the process lifetime); this exists for test teardown
-// so waiters blocked on a Background context unblock when the test ends.
-func (g *ConcurrencyGate) Close() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	for _, e := range g.queue {
-		e.once.Do(func() { close(e.done) })
-	}
-	g.queue = nil
-}
-
 // cleanupEntry removes a cancelled entry from the queue.
 func (g *ConcurrencyGate) cleanupEntry(entry *queueEntry) {
 	g.mu.Lock()

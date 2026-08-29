@@ -55,3 +55,27 @@ func addRecursiveWatcher(w *fsnotify.Watcher, pathCache map[string]string, dir, 
 		return nil
 	})
 }
+
+// lookupWatchedOwner resolves which watched tree owns path, returning the value
+// recorded by addRecursiveWatcher. It checks path itself and then every ancestor
+// directory, because fsnotify reports events for files *inside* a watched dir
+// while pathCache is keyed by directory. Both the bare path and the path+separator
+// forms are consulted, mirroring the two keys the setter writes.
+//
+// Callers must hold the lock guarding pathCache; this reads the map as-is.
+func lookupWatchedOwner(pathCache map[string]string, path string) (string, bool) {
+	dir := path
+	for {
+		if value, ok := pathCache[dir]; ok {
+			return value, true
+		}
+		if value, ok := pathCache[dir+string(filepath.Separator)]; ok {
+			return value, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}

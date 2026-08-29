@@ -42,8 +42,6 @@ type Server struct {
 	taskHandler         *managers.TaskHandler
 	boardHandler        *managers.BoardHandler
 	appStreamMgr        *stream.AppStreamManager
-	depHandler          *managers.DependencyHandler
-	reviewHandler       *managers.ReviewHandler
 	gitHandler          *managers.GitHandler
 	executor            *kanbanexec.TaskExecutor
 	terminalMgr         *term.TerminalManager
@@ -210,8 +208,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)
 	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
-	s.depHandler = managers.NewDependencyHandler(store)
-	s.reviewHandler = managers.NewReviewHandler(store)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
 	// Wire worktree mutex so GitHandler can serialize per-task git operations.
 	s.gitHandler.SetWorktreeMutex(s.getWorktreeMutex)
@@ -297,8 +293,7 @@ func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req config.FetchModelsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 	if req.LlamaServerURL == "" {
