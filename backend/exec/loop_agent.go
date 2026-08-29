@@ -735,6 +735,11 @@ func buildContextReplay(messages []types.TaskMessage) string {
 
 	for _, msg := range messages {
 		switch msg.Role {
+		case "advisory":
+			sb.WriteString("**Environment note**: ")
+			sb.WriteString(msg.Content)
+			sb.WriteString("\n\n")
+
 		case "user":
 			sb.WriteString("**User**: ")
 			sb.WriteString(msg.Content)

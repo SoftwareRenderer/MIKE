@@ -125,6 +125,8 @@ export interface ChatEntry {
     role: string;
     content: string;
     severity?: string;
+    /** Sub-classification within a role — advisory rows: 'diagnostics' | 'merge_conflict'. */
+    kind?: string;
     mergeLabel?: string;
     isError?: boolean;
     reasoningContent?: string;
@@ -311,6 +313,8 @@ export interface TaskMessage {
     predicted_ms?: number;
     duration?: number;
     git_commit_hash?: string;
+    /** Sub-classification within a role — advisory rows: 'diagnostics' | 'merge_conflict'. */
+    kind?: string;
     created_at: string;
 }
 
@@ -397,7 +401,8 @@ export type StreamEventType =
     | 'build_progress'
     | 'sandbox_stats'
     | 'prompt_progress'
-    | 'hint';
+    | 'hint'
+    | 'advisory';
 
 export interface StreamEvent {
     type: StreamEventType;

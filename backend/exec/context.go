@@ -181,6 +181,14 @@ func formatChatHistory(messages []types.ChatMessage, skipSummaryMsg bool) string
 		case "tool":
 			// Already incorporated into assistant line above
 			continue
+		case "advisory":
+			line := m.Content
+			if idx := strings.Index(line, "\n"); idx > 0 {
+				line = line[:idx]
+			}
+			sb.WriteString("Environment note: ")
+			sb.WriteString(line)
+			sb.WriteString("\n")
 		case "user":
 			sb.WriteString("User: ")
 			sb.WriteString(m.Content)
@@ -541,46 +549,146 @@ func (te *TaskExecutor) generateCommitMessageLLM(ctx context.Context, task *type
 	return label
 }
 
-// BuildConversationFromTaskMessages converts DB TaskMessages into ChatMessages.
-// It extracts ToolCalls from tool_call messages and merges them into the preceding assistant
-// message, so FormatConversationTurns can render descriptive tool-use lines.
-// Used by commit message generation and checkpoint label generation.
+// BuildConversationFromTaskMessages converts DB TaskMessages into ChatMessages for the
+// utility prompts (commit messages, checkpoint labels, thread fork titles). It rebuilds
+// the same conversation the LLM sees — see groupTaskMessages.
 func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
-	var conversation []types.ChatMessage
-	for _, m := range taskMsgs {
-		if m.Role == "tool_call" {
-			// Merge tool call info into the preceding assistant message
-			if m.ToolCalls != "" && len(conversation) > 0 && conversation[len(conversation)-1].Role == "assistant" {
-				var tcMap map[string]any
-				if err := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err == nil {
-					toolID, _ := tcMap["tool_id"].(string)
-					toolName, _ := tcMap["tool_name"].(string)
-					rawArgs, _ := tcMap["raw_args"].(string)
-					if toolID != "" && toolName != "" {
-						conversation[len(conversation)-1].ToolCalls = append(conversation[len(conversation)-1].ToolCalls, types.ToolCallMsg{
-							ID:   toolID,
-							Type: "function",
-							Function: struct {
-								Name      string `json:"name"`
-								Arguments string `json:"arguments"`
-							}{Name: toolName, Arguments: rawArgs},
-						})
-					}
-				}
-			}
-			// Also add a tool result message if available (for status lookup)
-			if msg, ok := toolResultMessage(m); ok {
-				conversation = append(conversation, msg)
-			}
+	return groupTaskMessages(taskMsgs)
+}
+
+// groupTaskMessages rebuilds a conversation from persisted rows:
+//
+//   - every tool_call row is emitted with the assistant row that issued it, its tool
+//     results immediately after, so a call is never separated from its answer;
+//   - loop hints are dropped (they are UI commentary the model already acted on);
+//   - advisory rows keep their own role, which is what stops toAPIMessage's "user"
+//     mapping and formatChatHistory from crediting the user with an environment note;
+//   - roles no conversation understands (merge_resolution, legacy markers) are dropped.
+//
+// Both rebuild paths share it: the LLM context (buildMessagesFromDB) and the utility
+// prompts (BuildConversationFromTaskMessages). They used to be separate scans, and the one
+// that differed attached tool calls to whatever row happened to be adjacent — so any row
+// written between an assistant row and its tool_call rows (an LSP note used to be written
+// there) silently cost that turn its remaining calls and results.
+func groupTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
+	toolRows, totalToolRows := toolCallRowsByOwner(taskMsgs)
+	messages := make([]types.ChatMessage, 0, len(taskMsgs))
+	attached := 0
+	for i, m := range taskMsgs {
+		if m.IsLoopHint {
 			continue
 		}
-		content := m.Content
-		if m.ReasoningContent != "" {
-			content = m.ReasoningContent + "\n" + m.Content
+		switch m.Role {
+		case "tool_call":
+			// Emitted with its assistant message, never here.
+			continue
+		case "user":
+			if parts, ok := types.ContentParts(m.Content, m.Attachments); ok {
+				messages = append(messages, types.ChatMessage{Role: m.Role, ContentParts: parts})
+				continue
+			}
+			messages = append(messages, types.ChatMessage{Role: m.Role, Content: m.Content})
+		case "advisory", "summarization":
+			// Advisories are kept after a restart because the model still needs them (the
+			// merge-conflict instructions are the case that matters); summarization rows ride
+			// along and are filtered by buildLLMContext, whose system prompt carries the summary.
+			messages = append(messages, types.ChatMessage{Role: m.Role, Content: m.Content})
+		case "assistant":
+			owned := toolRows[i]
+			attached += len(owned)
+			msg := types.ChatMessage{Role: m.Role, Content: m.Content}
+			if m.ReasoningContent != "" {
+				msg.ReasoningContent = m.ReasoningContent
+			}
+			for _, tc := range owned {
+				toolID, toolName, rawArgs := parseToolCallRow(tc)
+				if toolID == "" || toolName == "" {
+					continue
+				}
+				msg.ToolCalls = append(msg.ToolCalls, types.ToolCallMsg{ID: toolID, Type: "function"})
+				msg.ToolCalls[len(msg.ToolCalls)-1].Function.Name = toolName
+				msg.ToolCalls[len(msg.ToolCalls)-1].Function.Arguments = rawArgs
+			}
+			messages = append(messages, msg)
+			for _, tc := range owned {
+				if result, ok := toolResultMessage(tc); ok {
+					messages = append(messages, result)
+				}
+			}
 		}
-		conversation = append(conversation, types.ChatMessage{Role: m.Role, Content: content})
 	}
-	return conversation
+
+	if unattached := totalToolRows - attached; unattached > 0 {
+		log.Printf("[messages] dropped %d tool_call rows whose assistant message is not in this thread", unattached)
+	}
+	return messages
+}
+
+// toolCallRowsByOwner maps each assistant row's POSITION to the tool_call rows that belong
+// to it, in row order, and reports how many tool_call rows the rows contain in total (the
+// caller compares the two to log what could not be attached). A row recorded with
+// assistant_msg_id is resolved to that assistant's row; a row written before the column
+// existed attaches to the nearest preceding assistant — the same reading the old
+// contiguity scan made implicitly, but without its habit of stopping at the first
+// unrelated row. Rows that resolve to nothing (no owner id and no assistant above them, or
+// an owner that is not in this thread) are left out.
+//
+// Positions rather than message ids are the key because rows assembled by tests or older
+// writers may carry no id at all, and the grouping must degrade to adjacency, not to
+// "drop everything".
+func toolCallRowsByOwner(taskMsgs []types.TaskMessage) (map[int][]types.TaskMessage, int) {
+	idxByAssistantID := make(map[string]int)
+	total := 0
+	for i, m := range taskMsgs {
+		switch m.Role {
+		case "assistant":
+			if m.ID != "" {
+				idxByAssistantID[m.ID] = i
+			}
+		case "tool_call":
+			total++
+		}
+	}
+
+	byAssistantIdx := make(map[int][]types.TaskMessage)
+	lastAssistantIdx := -1
+	for i, m := range taskMsgs {
+		switch m.Role {
+		case "assistant":
+			lastAssistantIdx = i
+		case "tool_call":
+			ownerIdx := lastAssistantIdx
+			if m.AssistantMsgID != "" {
+				// An owner id that names no row in this thread attaches to nothing: guessing
+				// would stitch a tool call onto a turn that never made it.
+				idx, ok := idxByAssistantID[m.AssistantMsgID]
+				if !ok {
+					continue
+				}
+				ownerIdx = idx
+			}
+			if ownerIdx < 0 {
+				continue
+			}
+			byAssistantIdx[ownerIdx] = append(byAssistantIdx[ownerIdx], m)
+		}
+	}
+	return byAssistantIdx, total
+}
+
+// parseToolCallRow reads the tool invocation stored on a tool_call row.
+func parseToolCallRow(m types.TaskMessage) (toolID, toolName, rawArgs string) {
+	if m.ToolCalls == "" {
+		return "", "", ""
+	}
+	var tcMap map[string]any
+	if err := json.Unmarshal([]byte(m.ToolCalls), &tcMap); err != nil {
+		return "", "", ""
+	}
+	toolID, _ = tcMap["tool_id"].(string)
+	toolName, _ = tcMap["tool_name"].(string)
+	rawArgs, _ = tcMap["raw_args"].(string)
+	return toolID, toolName, rawArgs
 }
 
 // toolCallIDFromMessage returns the tool_id recorded in a task message's
@@ -918,8 +1026,15 @@ func FormatConversationTurns(messages []types.ChatMessage) string {
 			sb.WriteString("\n\n")
 		case "assistant":
 			sb.WriteString("Assistant: ")
-			if m.Content != "" {
-				sb.WriteString(strings.TrimRight(m.Content, "\n"))
+			// Reasoning rides in its own field after the rebuild (groupTaskMessages keeps it
+			// there so toAPIMessage can send it as reasoning_content); this renderer only reads
+			// Content, so the text it used to get pre-merged is folded in here.
+			text := m.Content
+			if m.ReasoningContent != "" {
+				text = m.ReasoningContent + "\n" + m.Content
+			}
+			if text != "" {
+				sb.WriteString(strings.TrimRight(text, "\n"))
 			}
 			if len(m.ToolCalls) > 0 {
 				for _, tc := range m.ToolCalls {

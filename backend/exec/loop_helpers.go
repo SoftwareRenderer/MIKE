@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"kanban/backend/llama"
@@ -409,6 +410,102 @@ func (te *TaskExecutor) maybeAutoSummarize(setup *taskExecSetup, lc *loopContext
 	}
 	lc.detector.reset()
 	lc.detector.clearHints()
+}
+
+// Advisory kinds. The kind is what the UI titles the note with; it never changes what
+// the model receives.
+const (
+	advisoryDiagnostics   = "diagnostics"
+	advisoryMergeConflict = "merge_conflict"
+)
+
+// advisory is a note about the workspace that the model must see but the user never
+// said: LSP diagnostics after an edit, the instructions for resolving a merge conflict.
+//
+// These used to be smuggled into the conversation as user messages, which cost three
+// things: a fake user bubble in the transcript, a summarizer that believed the user had
+// said it, and — because the row was written in the middle of the turn's tool_call rows —
+// the tail of that turn's tool calls and results on every rebuild. Advisories are
+// therefore buffered during tool execution and delivered by flushAdvisories once the
+// turn's own messages are in the conversation.
+type advisory struct {
+	kind     string // advisoryDiagnostics | advisoryMergeConflict — how the UI titles the note
+	severity string // mirrors TaskMessage.Severity: "" (default), "info", "error" — drives emphasis
+	text     string // what the model reads and the UI shows
+}
+
+// queueAdvisory buffers a note for delivery at the turn boundary. Safe to call from
+// inside tool execution, where writing a message would land it between tool_call rows.
+func queueAdvisory(lc *loopContext, a advisory) {
+	if strings.TrimSpace(a.text) == "" {
+		return
+	}
+	lc.pendingAdvisories = append(lc.pendingAdvisories, a)
+}
+
+// flushAdvisories delivers every buffered note in queue order: persisted as an advisory
+// row, appended to the live conversation, and broadcast to the UI. Call it after the
+// turn's assistant and tool messages have been appended, so the note reads as commentary
+// on work that already happened, and before summarization, so the note is in the
+// summarizer's input.
+func (te *TaskExecutor) flushAdvisories(setup *taskExecSetup, lc *loopContext) {
+	if len(lc.pendingAdvisories) == 0 {
+		return
+	}
+	for _, a := range lc.pendingAdvisories {
+		msgID := uuid.New().String()
+		now := time.Now().UTC()
+		_ = te.store.CreateTaskMessage(&types.TaskMessage{
+			ID: msgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
+			Role: "advisory", Severity: a.severity, Content: a.text, Kind: a.kind, CreatedAt: now,
+		})
+		lc.messages = append(lc.messages, types.ChatMessage{Role: "advisory", Content: a.text})
+		te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
+			Type: types.WSTypeAdvisory,
+			Data: map[string]any{
+				"id":         msgID,
+				"kind":       a.kind,
+				"severity":   a.severity,
+				"text":       a.text,
+				"created_at": now.Format(time.RFC3339Nano),
+			},
+		})
+	}
+	lc.pendingAdvisories = nil
+}
+
+// prepareMergeConflictTurn hands the model the instructions for resolving a conflict and
+// resets the turn state around it: the loop detector forgets the history (conflict work
+// repeating is expected, not a loop) and the half-built assistant/tool buffers are dropped.
+//
+// The note is flushed, not merely queued. Every caller continues straight into the next
+// LLM call, and a note still sitting in the queue would then arrive one call late — the
+// model would resolve the conflict before ever being told which files conflict. It is also
+// the full text that gets persisted, so a run restarted mid-conflict rebuilds the same
+// instructions instead of the terse marker row the old code wrote and the rebuild skipped.
+func (te *TaskExecutor) prepareMergeConflictTurn(setup *taskExecSetup, lc *loopContext, conflictedFiles []string) {
+	prompt, err := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
+		TaskBranch:      setup.task.Branch,
+		TargetBranch:    te.ResolveMergeTarget(setup.projectID, setup.task),
+		TaskTitle:       setup.task.Title,
+		TaskDescription: setup.task.Prompt,
+		ConflictedFiles: conflictedFiles,
+	})
+	if err != nil {
+		// No instructions, but still continue: the conflict is in the worktree either way,
+		// and the model can read `git status` for itself.
+		log.Printf("[merge] task=%s failed to render merge conflict prompt: %v", setup.task.ID, err)
+	} else {
+		queueAdvisory(lc, advisory{kind: advisoryMergeConflict, severity: "error", text: prompt})
+	}
+	lc.detector.reset()
+	lc.detector.clearHints()
+	te.flushAdvisories(setup, lc)
+	te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Resolving merge conflicts"}})
+	lc.pendingToolCalls = nil
+	lc.assistantContent.Reset()
+	lc.reasoningContent.Reset()
+	lc.finishReason = ""
 }
 
 // injectProceedMessage persists and broadcasts a "Proceed" user message
