@@ -24,10 +24,10 @@ type Store struct {
 // NewStore creates a new Store instance, initializing the schema if needed.
 func NewStore(dbPath string) (*Store, error) {
 	// The database holds session credentials and encrypted provider secrets, so
-	// neither the directory nor the file may be world-readable. MkdirAll only
-	// applies the mode to directories it creates, and sql.Open would create the
-	// file under the process umask (0644 on a typical system) — so both modes
-	// are set explicitly. Idempotent for pre-existing 0755 data dirs/DBs.
+	// neither the directory nor the file may be world-readable. MkdirAll applies the
+	// mode only to directories it creates and sql.Open would create the file under
+	// the umask (0644), so both modes are set explicitly — also for pre-existing
+	// 0755 ones.
 	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
@@ -58,8 +58,8 @@ func NewStore(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("set journal mode: %w", err)
 	}
-	// WAL sidecars are written by the driver under the umask and can hold the
-	// same rows as the main file until they are checkpointed.
+	// The WAL sidecars (-wal/-shm) are written by the driver under the umask and can
+	// hold the same rows as the main file until checkpointed.
 	restrictSidecarModes(dbPath)
 	// Set busy timeout to handle concurrent access (e.g., during parallel test runs)
 	_, err = db.Exec("PRAGMA busy_timeout = 10000")
@@ -87,8 +87,8 @@ func NewStore(dbPath string) (*Store, error) {
 }
 
 // restrictSidecarModes tightens the WAL sidecar files (-wal/-shm) to 0600.
-// Best-effort: they may not exist yet, and a file this process does not own is
-// not a reason to refuse to start.
+// Best-effort: they may not exist yet, and a file this process does not own is no
+// reason to refuse to start.
 func restrictSidecarModes(dbPath string) {
 	for _, suffix := range []string{"-wal", "-shm"} {
 		if err := os.Chmod(dbPath+suffix, 0o600); err != nil && !os.IsNotExist(err) {

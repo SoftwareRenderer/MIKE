@@ -104,14 +104,13 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// allowedHostsEnv lists additional hostnames accepted in the Host header,
-// comma-separated (e.g. "kanban.example.com,staging.lan"). This is the
-// opt-out for reverse proxies — a proxy forwards the public domain in Host,
-// which is not a name the server could ever infer from its bind address.
+// allowedHostsEnv lists extra hostnames accepted in the Host header,
+// comma-separated (e.g. "kanban.example.com,staging.lan"). It is the opt-out for
+// reverse proxies, which forward a public domain the server cannot infer from
+// its bind address.
 const allowedHostsEnv = "MIKE_ALLOWED_HOSTS"
 
-// loopbackHosts are always accepted: they can only name this machine, so they
-// are the addresses the local UI (and CLI/tooling) use.
+// loopbackHosts are always accepted: they can only name this machine.
 var loopbackHosts = []string{"localhost", "127.0.0.1", "::1"}
 
 // hostAllowlist is the set of Host-header hostnames this server answers.
@@ -168,12 +167,12 @@ func normalizeHost(raw string) string {
 // authority than this server (HTTP 421).
 //
 // This is DNS-rebinding protection, not authentication: a page at evil.test can
-// point its A record at 127.0.0.1, and once the rebinding navigation makes that
-// page same-origin, SameSite=Lax, CORS and the (publicly readable) CSRF token
-// all stop protecting. A fixed allowlist breaks the attack because the attacker
-// must use the same authority as their own page origin for the read to succeed,
-// and that authority is not in the list. It never substitutes for the session
-// check — it only decides which names this server answers.
+// point its A record at 127.0.0.1, and once that navigation makes the page
+// same-origin, SameSite=Lax, CORS and the publicly readable CSRF token all stop
+// protecting. A fixed allowlist breaks the attack because the attacker has to
+// use the same authority as their own page origin for the read to work, and that
+// authority is not in the list. It never replaces the session check — it only
+// decides which names this server answers.
 func (s *Server) HostPinMiddleware(next http.Handler) http.Handler {
 	allowed := newHostAllowlist(s.addr, os.Getenv(allowedHostsEnv))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

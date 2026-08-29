@@ -658,24 +658,21 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// validateGitCloneURL validates a git clone source URL before it is passed to
-// `git clone`. It closes two independent risks:
+// validateGitCloneURL validates a clone source before it reaches `git clone`.
+// It closes two risks:
 //
-//   - Argument injection: a value starting with '-' would be parsed by git as a
-//     flag ("--upload-pack=…", "--reference", …) instead of a repository, so it
-//     is rejected.
-//   - Transport injection: git accepts URLs whose scheme is an executable
-//     helper — `ext::sh -c 'id'` runs a shell. Modern git refuses helper
-//     transports by default, but that is a DOWNSTREAM default this product does
-//     not control (`-c protocol.ext.allow=always`, in the user's config or in
-//     the environment, re-enables it), so the scheme is checked against an
-//     explicit allowlist here as well — see git.CloneArgs/git.CloneEnv for the
-//     matching runtime restriction.
+//   - Argument injection: a leading '-' would be read by git as a flag
+//     ("--upload-pack=…", "--reference"), so it is rejected.
+//   - Transport injection: git runs a URL whose scheme is an executable helper,
+//     so `ext::sh -c 'id'` runs a shell. Git refuses helper transports by
+//     default, but that is a downstream default this product does not control
+//     (`-c protocol.ext.allow=always` in the user's config or environment
+//     re-enables it), so the scheme is allowlisted here too. git.CloneArgs and
+//     git.CloneEnv apply the same restriction at runtime.
 //
-// Accepted forms (local cloning is a documented, supported workflow):
-//   - URLs with an allowed scheme: http, https, git, ssh, file
-//   - scp-like SSH syntax: git@host:org/repo.git
-//   - a bare filesystem path, absolute or relative
+// Accepted: URLs with an allowed scheme (http, https, git, ssh, file), scp-like
+// SSH syntax (git@host:org/repo.git), or a bare filesystem path — local cloning
+// is a supported workflow.
 func validateGitCloneURL(gitURL string) error {
 	s := strings.TrimSpace(gitURL)
 	if s == "" {
@@ -687,10 +684,10 @@ func validateGitCloneURL(gitURL string) error {
 	if strings.ContainsAny(s, "\x00\n\r\v\f") {
 		return fmt.Errorf("git_url must not contain control characters")
 	}
-	// Remote-helper transport syntax (`<helper>::<args>`, e.g.
-	// "ext::sh -c 'id'") never appears in a real repository URL. It has no
-	// "://", so it must be caught ahead of the scheme rules below. The search is
-	// limited to the text before a scheme so an IPv6 host (http://[::1]:8080/…) still passes.
+	// Remote-helper transport syntax (`<helper>::<args>`, e.g. "ext::sh -c 'id'")
+	// never appears in a real repository URL and has no "://", so it must be
+	// caught before the scheme rules. Only the text before a scheme is searched,
+	// so an IPv6 host (http://[::1]:8080/…) still passes.
 	head := s
 	if i := strings.Index(s, "://"); i >= 0 {
 		head = s[:i]
@@ -698,7 +695,7 @@ func validateGitCloneURL(gitURL string) error {
 	if strings.Contains(head, "::") {
 		return fmt.Errorf("git_url must not use the git remote-helper transport syntax (::)")
 	}
-	// Explicit scheme: only the transports the product allows (git.CloneAllowedProtocols).
+	// Explicit scheme: only the transports in git.CloneAllowedProtocols.
 	// Compared verbatim, because git's own GIT_ALLOW_PROTOCOL check is
 	// case-sensitive ("HTTPS://…" is refused as transport 'HTTPS').
 	if scheme, ok := cloneURLScheme(s); ok {
@@ -708,7 +705,7 @@ func validateGitCloneURL(gitURL string) error {
 		}
 		return nil
 	}
-	// No scheme: git chooses between an scp-style SSH remote and a local path by
+	// No scheme: git picks between an scp-style SSH remote and a local path by
 	// looking at the first ':' — text before it that holds no '/' is a host.
 	if i := strings.Index(s, ":"); i >= 0 {
 		if slash := strings.Index(s, "/"); slash < 0 || i < slash {
@@ -738,10 +735,10 @@ func cloneURLScheme(s string) (string, bool) {
 }
 
 // validateScpLikeGitURL validates the scp-style SSH form `[user@]host:path`
-// (e.g. `git@github.com:org/repo.git`) — the only scheme-less form git treats as
-// a remote. Anything looser (whitespace, a second colon or slash in the host, an
-// empty path) is rejected: it is either not a repository or an attempt to
-// smuggle something else past the checks.
+// (e.g. `git@github.com:org/repo.git`), the only scheme-less form git treats as a
+// remote. Anything looser (whitespace, a second colon or slash in the host, an
+// empty path) is rejected: it is either not a repository or something trying to
+// get past the checks.
 func validateScpLikeGitURL(s string, colon int) error {
 	host, path := s[:colon], s[colon+1:]
 	if host == "" || path == "" {

@@ -182,10 +182,9 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 }
 
 // forwardPortSpec renders the podman `-p` value publishing hostPort →
-// containerPort. The host side is pinned to loopback: a sandbox's forwarded
-// port is only ever read by the server on this machine (the bridge, LSP,
-// terminal port checks), so binding it to every interface would expose a
-// container's listener on the LAN — and to anything else on a shared host.
+// containerPort. The host side is pinned to loopback: only this machine's server
+// reads a sandbox's forwarded port (the bridge, LSP, terminal port checks), so
+// binding every interface would expose a container's listener on the LAN.
 func forwardPortSpec(hostPort, containerPort int) string {
 	return fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort)
 }
@@ -209,9 +208,9 @@ func forwardPortSpec(hostPort, containerPort int) string {
 //   - Environment: User-defined environment variables in opts.SandboxEnvs are set via -e flags.
 //
 // Networking:
-//   - Port Forwarding: For each entry in opts.ForwardPorts, an ephemeral host port is auto-assigned
-//     via net.Listen(":0") and mapped to the container port. The host side is bound to
-//     loopback only (127.0.0.1), never to every interface.
+//   - Port Forwarding: for each entry in opts.ForwardPorts an ephemeral host port is
+//     auto-assigned via net.Listen(":0") and mapped to the container port, bound to
+//     loopback only (127.0.0.1).
 //
 // Returns:
 //   - (assignedPorts, nil) on success, where assignedPorts lists the host→container mappings.

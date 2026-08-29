@@ -7,14 +7,12 @@ import (
 )
 
 // Session management API — lets the signed-in user inspect and revoke their own
-// sessions. Every route here is session-authenticated (SessionMiddleware) and
-// every non-GET route is CSRF-guarded (CSRFMiddleware); no /api/sessions path is
-// ever added to publicPaths.
+// sessions. Every route here is session-authenticated and every non-GET one is
+// CSRF-guarded; no /api/sessions path is ever added to publicPaths.
 
-// sessionInfoResponse is one row of GET /api/sessions.
-//
-// There is deliberately no field for a token, a token hash or a CSRF token:
-// the store's SessionInfo carries none, so a credential can't leak by accident.
+// sessionInfoResponse is one row of GET /api/sessions. It deliberately has no
+// field for a token, token hash or CSRF token, so a credential cannot leak by
+// accident.
 type sessionInfoResponse struct {
 	ID        string `json:"id"`
 	CreatedAt string `json:"created_at"` // RFC3339, UTC
@@ -25,8 +23,8 @@ type sessionInfoResponse struct {
 	Current   bool   `json:"current"`    // true for the session making this request
 }
 
-// formatSessionTime renders a session timestamp for the API. A zero time (a
-// session that has never been seen, or a row predating the columns) is "".
+// formatSessionTime renders a session timestamp for the API. A zero time — never
+// seen, or a row predating the columns — is "".
 func formatSessionTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
@@ -71,9 +69,9 @@ func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, out)
 }
 
-// handleSessionRevoke handles DELETE /api/sessions/{id}.
-// Revoking the caller's own session is allowed — their next request 401s and
-// the SPA falls back to the login modal.
+// handleSessionRevoke handles DELETE /api/sessions/{id}. Revoking the caller's own
+// session is allowed — their next request 401s and the SPA falls back to the login
+// modal.
 func (s *Server) handleSessionRevoke(w http.ResponseWriter, r *http.Request) {
 	if currentSessionID(r) == "" {
 		JSONError(w, http.StatusUnauthorized, "not authenticated")
@@ -98,9 +96,8 @@ func (s *Server) handleSessionRevoke(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleSessionsRevokeOthers handles POST /api/sessions/revoke-others.
-// Deletes every session except the caller's and reports how many were revoked:
-// {"revoked": n}.
+// handleSessionsRevokeOthers handles POST /api/sessions/revoke-others: deletes
+// every session except the caller's and reports {"revoked": n}.
 func (s *Server) handleSessionsRevokeOthers(w http.ResponseWriter, r *http.Request) {
 	current := currentSessionID(r)
 	if current == "" {

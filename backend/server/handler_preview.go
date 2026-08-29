@@ -113,8 +113,8 @@ func (ps *previewStore) stopSweeper() {
 var errPreviewTooLarge = errors.New("preview content too large")
 
 func (ps *previewStore) put(content, fileName, baseDir, dirRel string, allowNetwork bool) (string, error) {
-	// Mint the token first — the rewrite target is built from it. A mint
-	// failure aborts the put: a weak token is never registered, never served.
+	// Mint the token first — the rewrite target is built from it. A mint failure
+	// aborts the put, so a weak token is never registered or served.
 	token, err := newPreviewToken()
 	if err != nil {
 		return "", err
@@ -248,16 +248,14 @@ func (ps *previewStore) evictOldestLocked() {
 	delete(ps.docs, oldest)
 }
 
-// previewRand is the entropy source behind preview tokens. Package-level seam
-// — only tests replace it (to exercise the mint-failure path); production
-// always reads crypto/rand.
+// previewRand is the entropy source behind preview tokens. Package-level seam so
+// tests can exercise the mint-failure path; production always reads crypto/rand.
 var previewRand io.Reader = rand.Reader
 
-// newPreviewToken — 128 bits of randomness; the only credential for the
-// public document/asset GETs. Minting is fallible on purpose: a guessable
-// token is an unauthenticated read of the document plus every sibling under
-// the doc's asset root, so a failed entropy read fails the request — there
-// is no fallback.
+// newPreviewToken — 128 bits of randomness; the only credential for the public
+// document/asset GETs. Minting is fallible on purpose: a guessable token is an
+// unauthenticated read of the document and every sibling under its asset root, so
+// a failed entropy read fails the request instead of falling back.
 func newPreviewToken() (string, error) {
 	b := make([]byte, 16)
 	if _, err := io.ReadFull(previewRand, b); err != nil {

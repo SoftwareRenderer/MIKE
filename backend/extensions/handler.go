@@ -133,11 +133,9 @@ func (h *ExtensionHandler) SetOnExtensionChanged(fn func()) {
 	h.onExtensionChanged = fn
 }
 
-// mountPolicy returns the host-mount allowlist an extension sandbox is held to.
-// It is the sandbox manager's policy (workspace dir, registered projects,
-// extensions dir, temp dir, MIKE_EXT_MOUNT_ROOTS) plus the extensions directory
-// this handler is configured with. Without a manager it still permits only the
-// extensions dir, the temp dir and the env extras.
+// mountPolicy returns the host-mount allowlist an extension sandbox is held to:
+// the sandbox manager's policy (workspace dir, registered projects, extensions
+// dir, temp dir, MIKE_EXT_MOUNT_ROOTS) plus this handler's extensions directory.
 func (h *ExtensionHandler) mountPolicy() *MountPolicy {
 	extDir := h.config.ExtensionsDirOrDefault()
 	if h.sandbox != nil {
@@ -216,9 +214,9 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// A client must not be able to widen a sandbox past the extension's purpose:
-	// host mounts are limited to the app's own roots and capabilities that reach
-	// past the container are refused. Rejected values are named and nothing is
-	// persisted (buildExtensionCreateArgs re-checks at container creation).
+	// mounts are limited to the app's own roots and capabilities that reach past the
+	// container are refused. Nothing is persisted on rejection, and
+	// buildExtensionCreateArgs re-checks at container creation.
 	if err := h.mountPolicy().ValidateSandboxAdditions(req.SandboxConfig.Mounts, req.SandboxConfig.Capabilities); err != nil {
 		httputil.JSONError(w, http.StatusBadRequest, err.Error())
 		return
@@ -793,9 +791,9 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 	// Create extension record
 	author := authorDir(entry.Author)
 	id := fmt.Sprintf("%s-%s-%d", author, strings.ToLower(entry.Name), time.Now().Unix())
-	// A manifest may not grant itself host mounts outside the app's own roots or
-	// capabilities that reach past the container; the install is rejected rather
-	// than persisted and skipped at every later container start.
+	// A manifest may not grant itself mounts outside the app's own roots or
+	// capabilities that reach past the container. The install is rejected rather
+	// than stored and then silently skipped at every container start.
 	sandboxCfg := sandboxConfigFromManifest(lspSandboxFromManifest(&manifest))
 	if err := h.mountPolicy().ValidateSandboxAdditions(sandboxCfg.Mounts, sandboxCfg.Capabilities); err != nil {
 		fail(fmt.Errorf("extension %s declares an unusable sandbox configuration: %w", entry.Name, err))

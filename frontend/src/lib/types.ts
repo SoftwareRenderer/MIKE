@@ -589,10 +589,8 @@ export interface ExtensionUpdate {
 }
 
 /**
- * One active login session (GET /api/sessions).
- *
- * There is deliberately no token / token-hash / CSRF field: the server never
- * exposes one, so a credential cannot leak through this shape.
+ * One active login session (GET /api/sessions). There is deliberately no token,
+ * token-hash or CSRF field, so this shape cannot leak a credential.
  */
 export interface SessionInfo {
     id: string;
