@@ -344,7 +344,7 @@ func okHostHandler() http.Handler {
 }
 
 func TestHostPinMiddleware(t *testing.T) {
-	s := testServer(t) // addr ":0" — no bind host contributes to the allowlist
+	s := testServer(t) // addr ":0" — no listen host contributes to the allowlist
 
 	tests := []struct {
 		name string
@@ -416,8 +416,8 @@ func TestHostPinMiddlewareAllowedHostsEnv(t *testing.T) {
 	}
 }
 
-func TestHostPinMiddlewareBindHostAllowed(t *testing.T) {
-	// Binding to an explicit address (the container/reverse-proxy escape hatch)
+func TestHostPinMiddlewareListenHostAllowed(t *testing.T) {
+	// Listening on an explicit address (the container/reverse-proxy escape hatch)
 	// pins that address as an accepted Host value too.
 	s := &Server{addr: "192.168.1.50:3000"}
 
