@@ -12,12 +12,91 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 )
 
-// --- helpers ---------------------------------------------------------------
+// --- token minting -------------------------------------------------------------
+
+// previewTokenPattern — the only shape a preview token may ever take: 16
+// random bytes as lowercase hex. A time-derived or short token is guessable,
+// which would expose the doc plus every sibling under its asset root.
+var previewTokenPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+func TestPreviewToken_Minting(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 8; i++ {
+		token, err := newPreviewToken()
+		if err != nil {
+			t.Fatalf("newPreviewToken: %v", err)
+		}
+		if !previewTokenPattern.MatchString(token) {
+			t.Fatalf("token %q must match ^[0-9a-f]{32}$", token)
+		}
+		if seen[token] {
+			t.Fatalf("token %q repeated — entropy is not random", token)
+		}
+		seen[token] = true
+	}
+
+	// End-to-end: the served token carries the same shape.
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	token, _ := servePreview(t, s, cookie, csrfToken, map[string]any{"content": "<html></html>"})
+	if !previewTokenPattern.MatchString(token) {
+		t.Fatalf("served token %q must match ^[0-9a-f]{32}$", token)
+	}
+}
+
+// failingReader is the previewRand test seam: an entropy source that only
+// ever fails.
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("entropy source unavailable") }
+
+// L2: when the entropy source fails, minting fails the request — a weak
+// (time-derived) token must never be minted, stored, or served.
+func TestPreviewToken_MintFailureIsFatal(t *testing.T) {
+	oldRand := previewRand
+	previewRand = failingReader{}
+	t.Cleanup(func() { previewRand = oldRand })
+
+	// Store level: put errors out and registers nothing.
+	ps := newPreviewStore()
+	token, err := ps.put("<html></html>", "index.html", "", "", false)
+	if err == nil {
+		t.Fatalf("expected put to fail when the entropy source fails, got token %q", token)
+	}
+	if token != "" {
+		t.Fatalf("no token may be returned on mint failure, got %q", token)
+	}
+	ps.mu.Lock()
+	stored := len(ps.docs)
+	ps.mu.Unlock()
+	if stored != 0 {
+		t.Fatalf("no document may be registered on mint failure, got %d", stored)
+	}
+
+	// Handler level: POST /api/preview answers 500 with an empty store.
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	req := testRequest("POST", "/api/preview", map[string]any{"content": "<html></html>"})
+	withAuthCSRF(req, cookie, csrfToken)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when the token cannot be minted, got %d %s", rr.Code, rr.Body.String())
+	}
+	s.previewStore.mu.Lock()
+	served := len(s.previewStore.docs)
+	s.previewStore.mu.Unlock()
+	if served != 0 {
+		t.Fatalf("expected an empty preview store after a mint failure, got %d docs", served)
+	}
+}
+
+// --- helpers -------------------------------------------------------------------
 
 func previewTestProject(t *testing.T, s *Server) (projectID, dir string) {
 	t.Helper()
@@ -130,8 +209,8 @@ func TestPreviewServesDocWithoutSession(t *testing.T) {
 	if !strings.HasPrefix(url, "/api/preview/"+token+"/") {
 		t.Fatalf("unexpected url %q (want /api/preview/%s/)", url, token)
 	}
-	if len(token) < 32 {
-		t.Fatalf("token too short to be a 128-bit bearer: %q", token)
+	if !previewTokenPattern.MatchString(token) {
+		t.Fatalf("token %q is not a 128-bit hex bearer", token)
 	}
 
 	rr := getPreview(t, s, "/api/preview/"+token+"/")

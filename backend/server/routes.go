@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"strings"
 )
 
 func (s *Server) setupRoutes() {
@@ -172,6 +173,46 @@ func (s *Server) setupRoutes() {
 		}
 	}
 
-	// Extensions static files
-	s.mux.Handle("/extensions/", http.StripPrefix("/extensions/", http.FileServer(http.Dir("extensions"))))
+	// Extensions static files — FILES ONLY. This prefix is public (see
+	// isPublicPath: sandboxed extension iframes have an opaque origin and
+	// cannot send session cookies), so it must stay minimal: a raw
+	// http.FileServer would render a directory index for /extensions/ and
+	// /extensions/<author>/, disclosing the installed-extension tree to any
+	// unauthenticated client. noListingFS rejects such directories (404);
+	// extension directories still serve through their own index.html (the
+	// iframe entry page). http.Dir keeps rejecting path traversal.
+	s.mux.Handle("/extensions/", http.StripPrefix("/extensions/", http.FileServer(noListingFS{http.Dir("extensions")})))
+}
+
+// noListingFS wraps an http.FileSystem so http.FileServer can never render a
+// directory index. Directories without an index.html (the extensions root,
+// author dirs, asset dirs) fail to open as fs.ErrNotExist — FileServer maps
+// that to 404, exactly like a missing file, so the tree structure stays
+// hidden. Directories that DO hold an index.html open normally, preserving
+// the extension entry contract (the iframe loads /extensions/<author>/<name>/,
+// which FileServer answers with that index.html). Traversal protection is
+// untouched — it lives in the wrapped FileSystem.
+type noListingFS struct {
+	http.FileSystem
+}
+
+func (n noListingFS) Open(name string) (http.File, error) {
+	f, err := n.FileSystem.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		index, err := n.FileSystem.Open(strings.TrimSuffix(name, "/") + "/index.html")
+		if err != nil {
+			f.Close()
+			return nil, fs.ErrNotExist
+		}
+		index.Close()
+	}
+	return f, nil
 }
