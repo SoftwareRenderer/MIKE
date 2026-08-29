@@ -26,9 +26,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Go 1.26 ──────────────────────────────────────────────────
-RUN curl -fsSL https://go.dev/dl/go1.26.4.linux-amd64.tar.gz \
-    | tar -C /usr/local -xzf - \
+# ── Go (latest stable release) ───────────────────────────────
+ADD https://go.dev/VERSION?m=text /tmp/go-latest.txt
+RUN ver="$(head -n1 /tmp/go-latest.txt)" \
+    && curl -fsSL "https://go.dev/dl/${ver}.linux-amd64.tar.gz" | tar -C /usr/local -xzf - \
+    && rm -f /tmp/go-latest.txt \
     && rm -rf /usr/local/go/doc /usr/local/go/test
 
 ENV PATH="/usr/local/go/bin:${PATH}"

@@ -1060,6 +1060,22 @@ func ProjectImageName(projectName string) string {
 	return fmt.Sprintf("%s-%s", ProjectImagePrefix, safeName)
 }
 
+// BuildOptions controls optional behavior of an image build.
+type BuildOptions struct {
+	// NoCache disables the container build layer cache (podman build --no-cache).
+	NoCache bool
+}
+
+// buildPodmanBuildArgs returns the podman arguments for an image build.
+// The context directory is always last so a flag can never swallow it.
+func buildPodmanBuildArgs(imageName, contextDir string, noCache bool) []string {
+	args := []string{"build", "-t", imageName}
+	if noCache {
+		args = append(args, "--no-cache")
+	}
+	return append(args, contextDir)
+}
+
 // BuildImage builds a container image from a Dockerfile and tags it with the
 // project-specific name. The Dockerfile is copied to a temp directory for the build.
 // The temp directory is cleaned up after the build completes.
@@ -1069,7 +1085,14 @@ func (sm *SandboxManager) BuildImage(projectName, dockerfilePath string) error {
 
 // BuildImageWithProgress builds a container image, streaming progress lines via onProgress.
 // onProgress is called for each line of output (nil means no callback).
+// The build layer cache is used; use BuildImageWithOptions to disable it.
 func (sm *SandboxManager) BuildImageWithProgress(projectName, dockerfilePath string, onProgress func(line string)) error {
+	return sm.BuildImageWithOptions(projectName, dockerfilePath, BuildOptions{}, onProgress)
+}
+
+// BuildImageWithOptions builds a container image with explicit options, streaming
+// progress lines via onProgress (nil means no callback).
+func (sm *SandboxManager) BuildImageWithOptions(projectName, dockerfilePath string, opts BuildOptions, onProgress func(line string)) error {
 	if !sm.available {
 		return fmt.Errorf("gVisor not available (runsc not installed)")
 	}
@@ -1107,8 +1130,8 @@ func (sm *SandboxManager) BuildImageWithProgress(projectName, dockerfilePath str
 	_, _ = sm.podmanExec("rmi", imageName) // best-effort
 
 	// Build the image with streaming output
-	log.Printf("[sandbox] project=%s building image %s from %s", projectName, imageName, dockerfilePath)
-	c := exec.Command("podman", "build", "-t", imageName, tmpDir)
+	log.Printf("[sandbox] project=%s building image %s from %s (no_cache=%v)", projectName, imageName, dockerfilePath, opts.NoCache)
+	c := exec.Command("podman", buildPodmanBuildArgs(imageName, tmpDir, opts.NoCache)...)
 	// Merge stdout+stderr into a single pipe for streaming
 	pr, pw := io.Pipe()
 	c.Stdout = pw

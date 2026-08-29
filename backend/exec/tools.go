@@ -10,11 +10,9 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"kanban/backend/git"
@@ -467,56 +465,13 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 				// Use sandbox execution (non-streaming fallback) — ctx propagates task cancellation
 				return sandboxExec(ctx, cmd, timeout)
 			} else {
-				// Direct execution (no sandbox) with streaming output.
-				c := exec.CommandContext(ctx, "bash", "-c", cmd)
-				c.Dir = worktreePath
-				stdout, pipeErr := c.StdoutPipe()
-				if pipeErr != nil {
-					return "", fmt.Errorf("failed: %v", pipeErr)
+				// Direct execution (no sandbox), streaming output line by line. The timeout
+				// is enforced there, so a command that never exits can't pin the tool.
+				var onLine func(text string)
+				if outputCallback != nil {
+					onLine = func(text string) { outputCallback(task.ID, text) }
 				}
-				stderr, pipeErr := c.StderrPipe()
-				if pipeErr != nil {
-					return "", fmt.Errorf("failed: %v", pipeErr)
-				}
-				if startErr := c.Start(); startErr != nil {
-					return "", fmt.Errorf("failed: %v", startErr)
-				}
-				// Read stdout and stderr concurrently, stream output line by line.
-				var buf bytes.Buffer
-				var bufMu sync.Mutex // protect concurrent writes from stdout/stderr goroutines
-				var scanErr error
-				var scanMu sync.Mutex
-				var wg sync.WaitGroup
-				stream := outputCallback != nil
-				readStream := func(r io.Reader) {
-					defer wg.Done()
-					scanner := bufio.NewScanner(r)
-					for scanner.Scan() {
-						line := scanner.Text() + "\n"
-						bufMu.Lock()
-						buf.WriteString(line)
-						bufMu.Unlock()
-						if stream {
-							outputCallback(task.ID, line)
-						}
-					}
-					if err := scanner.Err(); err != nil {
-						scanMu.Lock()
-						if scanErr == nil {
-							scanErr = fmt.Errorf("scan output: %w", err)
-						}
-						scanMu.Unlock()
-					}
-				}
-				wg.Add(2)
-				go readStream(stdout)
-				go readStream(stderr)
-				waitErr := c.Wait()
-				wg.Wait()
-				if scanErr != nil {
-					return fmt.Sprintf("Failed: %v\n%s", scanErr, buf.String()), waitErr
-				}
-				return buf.String(), waitErr
+				return execCommandStream(ctx, worktreePath, cmd, timeout, onLine)
 			}
 		}
 
