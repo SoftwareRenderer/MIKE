@@ -107,7 +107,7 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 // allowedHostsEnv lists extra hostnames accepted in the Host header,
 // comma-separated (e.g. "kanban.example.com,staging.lan"). It is the opt-out for
 // reverse proxies, which forward a public domain the server cannot infer from
-// its bind address.
+// the address it listens on.
 const allowedHostsEnv = "MIKE_ALLOWED_HOSTS"
 
 // loopbackHosts are always accepted: they can only name this machine.
@@ -119,15 +119,15 @@ type hostAllowlist struct {
 }
 
 // newHostAllowlist builds the allowlist from the listen address and the
-// MIKE_ALLOWED_HOSTS value: loopback names, the configured bind host (unless it
-// is a wildcard, which names no host), plus every explicit extra entry.
+// MIKE_ALLOWED_HOSTS value: loopback names, the address the server listens on
+// (unless it is a wildcard, which names no host), plus every explicit extra entry.
 func newHostAllowlist(addr, extraHosts string) *hostAllowlist {
 	a := &hostAllowlist{hosts: make(map[string]struct{})}
 	for _, h := range loopbackHosts {
 		a.hosts[h] = struct{}{}
 	}
-	if bindHost := normalizeHost(addr); bindHost != "" && bindHost != "0.0.0.0" && bindHost != "::" {
-		a.hosts[bindHost] = struct{}{}
+	if listenHost := normalizeHost(addr); listenHost != "" && listenHost != "0.0.0.0" && listenHost != "::" {
+		a.hosts[listenHost] = struct{}{}
 	}
 	for _, entry := range strings.Split(extraHosts, ",") {
 		if h := normalizeHost(entry); h != "" {
