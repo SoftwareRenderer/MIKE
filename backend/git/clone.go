@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // cloneProgressRe matches the "Receiving objects: 42% (123/456)..." progress
@@ -16,7 +18,36 @@ import (
 // "Counting objects" and "Resolving deltas" phases report no percent.
 var cloneProgressRe = regexp.MustCompile(`Receiving objects:\s+(\d{1,3})%`)
 
-// Clone runs `git clone --progress src dst` and invokes
+// CloneAllowedProtocols is the transport allowlist enforced on every clone:
+// the URL schemes git may use. Helper transports (ext:, fd:, python:, …) are
+// deliberately absent — a clone target is client-supplied, so the product must
+// not rely on the host git's own default of refusing them.
+var CloneAllowedProtocols = []string{"http", "https", "git", "ssh", "file"}
+
+// CloneArgs builds the argv for a progress-reporting clone: the transport
+// restrictions come BEFORE the `clone` subcommand, so they apply to the process
+// that parses the (client-supplied) source URL.
+//
+//	git -c protocol.ext.allow=never clone --progress <src> <dst>
+//
+// src must already have been validated (see managers.validateGitCloneURL) — in
+// particular it must never start with '-', which git would read as a flag.
+func CloneArgs(src, dst string) []string {
+	return []string{"-c", "protocol.ext.allow=never", "clone", "--progress", src, dst}
+}
+
+// CloneEnv builds the environment for a clone: never prompt for credentials,
+// and hard-restrict the transports git is allowed to speak (GIT_ALLOW_PROTOCOL
+// is enforced by git itself, independently of the user's git config).
+func CloneEnv() []string {
+	return append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_ALLOW_PROTOCOL="+strings.Join(CloneAllowedProtocols, ":"),
+	)
+}
+
+// Clone runs `git clone --progress src dst` (restricted to
+// CloneAllowedProtocols — see CloneArgs/CloneEnv) and invokes
 // onProgress with the "Receiving objects" percentage (0-100) every time it
 // strictly increases. onProgress may be nil. The --progress flag forces
 // progress output even though stderr is not a terminal.
@@ -26,7 +57,8 @@ var cloneProgressRe = regexp.MustCompile(`Receiving objects:\s+(\d{1,3})%`)
 func Clone(src, dst string, onProgress func(percent int)) (string, error) {
 	// `git clone` is silent on stdout — stderr carries both progress and
 	// errors, so discarding stdout is safe.
-	cmd := exec.Command("git", "clone", "--progress", src, dst)
+	cmd := exec.Command("git", CloneArgs(src, dst)...)
+	cmd.Env = CloneEnv()
 	cmd.Stdout = io.Discard
 
 	stderr, err := cmd.StderrPipe()

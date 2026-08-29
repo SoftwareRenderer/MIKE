@@ -63,9 +63,22 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 	}
 	// Optional: read file at a specific git ref (e.g. HEAD) instead of working tree
 	ref := r.URL.Query().Get("ref")
+	// The ref is client-supplied and lands inside a `git show <ref>:<path>`
+	// argument, so it must never be usable as an option (e.g.
+	// "--output=/tmp/pwn", which git accepts and which creates/truncates a
+	// file anywhere the server user can write).
+	if ref != "" {
+		if err := types.ValidateGitRef(ref); err != nil {
+			JSONError(w, http.StatusBadRequest, "invalid ref: "+err.Error())
+			return
+		}
+	}
 	var content []byte
 	var readErr error
 	if ref != "" {
+		// --end-of-options (git >= 2.24) is a second line of defence: everything
+		// after it is parsed as a revision, never as an option.
+		const endOfOptions = "--end-of-options"
 		var output string
 		if taskID != "" {
 			relPath, relErr := filepath.Rel(worktreePath, path)
@@ -73,14 +86,14 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 				JSONError(w, http.StatusBadRequest, relErr.Error())
 				return
 			}
-			output, readErr = s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "show", ref+":"+relPath)
+			output, readErr = s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "show", endOfOptions, ref+":"+relPath)
 		} else {
 			relPath, relErr := filepath.Rel(project.Path, path)
 			if relErr != nil {
 				JSONError(w, http.StatusBadRequest, relErr.Error())
 				return
 			}
-			output, readErr = s.executor.WorktreeMgr().GitRunInDirOutput(worktreePath, "show", ref+":"+relPath)
+			output, readErr = s.executor.WorktreeMgr().GitRunInDirOutput(worktreePath, "show", endOfOptions, ref+":"+relPath)
 		}
 		if readErr != nil {
 			JSONError(w, http.StatusNotFound, "file not found at ref "+ref)

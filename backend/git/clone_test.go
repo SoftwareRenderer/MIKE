@@ -3,6 +3,7 @@ package git
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -66,6 +67,101 @@ func TestClone(t *testing.T) {
 	if events[len(events)-1] != 100 {
 		t.Fatalf("final progress = %d, want 100 (events: %v)", events[len(events)-1], events)
 	}
+}
+
+// TestCloneArgs verifies the argv used for every clone: the transport lockdown
+// (-c protocol.ext.allow=never) must come BEFORE the `clone` subcommand, so the
+// process that parses the client-supplied URL is the one that carries it.
+func TestCloneArgs(t *testing.T) {
+	args := CloneArgs("https://example.com/x/y.git", "/tmp/dst")
+
+	// Locate the subcommand and the config override.
+	cloneIdx, cfgIdx := -1, -1
+	for i, a := range args {
+		if a == "clone" && cloneIdx == -1 {
+			cloneIdx = i
+		}
+		if a == "-c" {
+			cfgIdx = i
+		}
+	}
+	if cloneIdx == -1 {
+		t.Fatalf("args missing `clone` subcommand: %v", args)
+	}
+	if cfgIdx == -1 {
+		t.Fatalf("args missing `-c` config override: %v", args)
+	}
+	if cfgIdx > cloneIdx {
+		t.Errorf("`-c protocol.ext.allow=never` must precede `clone`, got %v", args)
+	}
+	if cfgIdx+1 >= len(args) || args[cfgIdx+1] != "protocol.ext.allow=never" {
+		t.Errorf("expected `-c protocol.ext.allow=never`, got %v", args)
+	}
+	// Source and destination are the two trailing arguments, in order.
+	if args[len(args)-2] != "https://example.com/x/y.git" || args[len(args)-1] != "/tmp/dst" {
+		t.Errorf("src/dst not passed last in order: %v", args)
+	}
+	if !containsExact(args, "--progress") {
+		t.Errorf("progress reporting lost: %v", args)
+	}
+}
+
+// TestCloneEnv verifies the clone environment: no interactive credential prompt,
+// plus an explicit transport allowlist so helper transports (ext:, fd:, …) are
+// refused even on a host whose git config enables them.
+func TestCloneEnv(t *testing.T) {
+	env := CloneEnv()
+
+	if !containsExact(env, "GIT_TERMINAL_PROMPT=0") {
+		t.Errorf("GIT_TERMINAL_PROMPT=0 missing from clone env: %v", env)
+	}
+	want := "GIT_ALLOW_PROTOCOL=" + strings.Join(CloneAllowedProtocols, ":")
+	if !containsExact(env, want) {
+		t.Errorf("%s missing from clone env: %v", want, env)
+	}
+	if !containsExact(env, "GIT_ALLOW_PROTOCOL=http:https:git:ssh:file") {
+		t.Errorf("GIT_ALLOW_PROTOCOL must be exactly http:https:git:ssh:file, got %v", env)
+	}
+	// The allowlist must not silently grow a helper transport.
+	for _, p := range CloneAllowedProtocols {
+		switch p {
+		case "ext", "fd", "python", "rc", "internal":
+			t.Errorf("helper transport %q must not be allowed", p)
+		}
+	}
+}
+
+// TestClone_HostileEnvironment proves the restriction does not depend on the
+// host's git config: even when the environment opens GIT_ALLOW_PROTOCOL to the
+// `ext` helper and an earlier `-c protocol.ext.allow=always` is present, the
+// flags CloneArgs/CloneEnv add win and `ext::` never executes.
+func TestClone_HostileEnvironment(t *testing.T) {
+	tmp := t.TempDir()
+	canary := filepath.Join(tmp, "pwned")
+
+	// Later -c wins in git, so our `protocol.ext.allow=never` (from CloneArgs)
+	// overrides the hostile one placed ahead of it.
+	args := append([]string{"-c", "protocol.ext.allow=always"}, CloneArgs("ext::sh -c 'touch "+canary+"'", filepath.Join(tmp, "dst"))...)
+	cmd := exec.Command("git", args...)
+	// Go keeps the LAST duplicate of an env var, so this opens the allowlist...
+	cmd.Env = append(CloneEnv(), "GIT_ALLOW_PROTOCOL=ext:http:https:git:ssh:file")
+	out, err := cmd.CombinedOutput()
+
+	if err == nil {
+		t.Fatalf("expected the ext:: clone to fail, got success: %s", out)
+	}
+	if _, statErr := os.Stat(canary); statErr == nil {
+		t.Fatalf("ext:: transport executed a command despite the restrictions: %s", out)
+	}
+}
+
+func containsExact(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestClone_NilCallback(t *testing.T) {
