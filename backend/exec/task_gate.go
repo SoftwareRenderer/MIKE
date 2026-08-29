@@ -53,7 +53,7 @@ func (te *TaskExecutor) acquireTaskSlot(setup *taskExecSetup, providerURL string
 
 	// Slot granted — the task is actually running now.
 	setup.task.ExecutionState = "running"
-	te.persistTask(setup)
+	te.persistTaskClaiming(setup)
 	te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 	return true
 }

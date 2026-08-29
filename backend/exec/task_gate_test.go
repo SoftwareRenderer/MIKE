@@ -128,6 +128,7 @@ func runExecTask(t *testing.T, te *TaskExecutor, proj *types.Project, taskID, se
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	done := make(chan struct{})
+	finished := make(chan struct{})
 	setup := &taskExecSetup{
 		task:           task,
 		project:        proj,
@@ -141,6 +142,7 @@ func runExecTask(t *testing.T, te *TaskExecutor, proj *types.Project, taskID, se
 		summarizeCh:    make(chan *summarizeRequest, 16),
 		sandboxEnabled: false,
 		done:           done,
+		finished:       finished,
 	}
 	te.taskMu.Lock()
 	te.tasks[taskID] = &executionState{
@@ -150,6 +152,7 @@ func runExecTask(t *testing.T, te *TaskExecutor, proj *types.Project, taskID, se
 		summarizeCh:  setup.summarizeCh,
 		executorType: "llm",
 		done:         done,
+		finished:     finished,
 	}
 	te.taskMu.Unlock()
 
