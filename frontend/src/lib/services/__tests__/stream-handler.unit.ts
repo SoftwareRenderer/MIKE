@@ -957,3 +957,41 @@ describe('stale activeToolCalls ref after a history reload', () => {
         expect(stream.state.entries.find(e => e.toolCalls?.length)).toBeUndefined();
     });
 });
+
+describe('advisory events', () => {
+    function setup() {
+        const cb = makeCallbacks();
+        const stream = new StreamState();
+        return { cb, stream, handleEvent: createStreamHandler(stream, cb) };
+    }
+
+    it('renders as a note, never as a user message', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({
+            type: 'advisory',
+            data: { id: 'adv-1', kind: 'diagnostics', severity: 'error', text: 'LSP diagnostics: 3 errors in 2 files', created_at: '2026-01-01T00:00:00Z' },
+        }, false, 'p1', 't1');
+
+        expect(stream.state.entries.length).toBe(1);
+        const entry = stream.state.entries[0];
+        expect(entry.role).toBe('advisory');
+        expect(entry.severity).toBe('error');
+        // kind is what the card is titled with, so it has to survive the event → entry hop
+        // (and the row's kind column) or a reload silently retitles the note.
+        expect(entry.kind).toBe('diagnostics');
+        expect(entry.content).toContain('3 errors in 2 files');
+        // The row's own timestamp, not the moment the frame was handled.
+        expect(entry.createdAt).toBe('2026-01-01T00:00:00Z');
+        expect(entry.isStreaming).toBe(false);
+        // The whole point: nothing here may look like something the user said.
+        expect(stream.state.entries.some(e => e.role === 'user')).toBe(false);
+    });
+
+    it('is deduplicated by id (history reload must not double-render)', () => {
+        const { stream, handleEvent } = setup();
+        const event = { type: 'advisory' as const, data: { id: 'adv-1', severity: 'warning', text: 'Merge conflict in b.go' } };
+        handleEvent(event, false, 'p1', 't1');
+        handleEvent(event, false, 'p1', 't1');
+        expect(stream.state.entries.length).toBe(1);
+    });
+});

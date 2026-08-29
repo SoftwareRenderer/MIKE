@@ -836,6 +836,29 @@ func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
 	return out, nil
 }
 
+// ParseStatusPaths reads `git status --porcelain` (v1) output into workspace-relative
+// paths: two status columns, a space, then the path — "R  old -> new" for a rename (whose
+// destination is the file that exists), quoted when it contains unusual characters.
+// Directories reported as untracked ("?? dir/") come back as the directory, not expanded;
+// callers that need files use walkUntrackedEntries for those.
+func ParseStatusPaths(out string) []string {
+	var files []string
+	for _, line := range strings.Split(out, "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		path := strings.TrimSpace(line[2:])
+		if idx := strings.Index(path, " -> "); idx >= 0 {
+			path = path[idx+4:] // a rename is about its destination
+		}
+		path = strings.Trim(strings.ReplaceAll(path, "\\", "/"), `"`)
+		if path != "" {
+			files = append(files, path)
+		}
+	}
+	return files
+}
+
 // HasWorktreeChanges returns true if the worktree has uncommitted changes
 // (modified, staged, or untracked files). Uses git status --porcelain.
 func (wm *WorktreeManager) HasWorktreeChanges(taskID string) bool {

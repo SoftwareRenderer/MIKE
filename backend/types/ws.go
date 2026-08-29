@@ -25,6 +25,7 @@ const (
 	WSTypeSandboxStats       WSMessageType = "sandbox_stats"
 	WSTypePromptProgress     WSMessageType = "prompt_progress"
 	WSTypeHint               WSMessageType = "hint"
+	WSTypeAdvisory           WSMessageType = "advisory"
 	WSTypeExtensionChange    WSMessageType = "extension_change"
 )
 

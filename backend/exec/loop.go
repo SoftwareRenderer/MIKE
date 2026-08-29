@@ -245,8 +245,14 @@ type loopContext struct {
 	sandboxEnabled   bool
 	callStartTime    time.Time // start of current LLM call (for per-call Duration)
 	usage            *types.ChatUsage
-	sessionCost      float64 // accumulated API cost (USD) of completed calls for this task run
-	checkpointIdx    int     // messages index of last checkpoint
+	// pendingAdvisories holds lsp notes collected during tool execution
+	pendingAdvisories        []advisory
+	touchedFiles             []string
+	shellMayHaveChangedFiles bool
+	// lastDiagnosticsText suppresses re-injecting findings the model has already been shown.
+	lastDiagnosticsText string
+	sessionCost         float64 // accumulated API cost (USD) of completed calls for this task run
+	checkpointIdx       int     // messages index of last checkpoint
 }
 
 // toolResult holds one executed tool call's outcome. Incomplete calls (empty
@@ -1052,7 +1058,11 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					Role:      "tool_call",
 					Content:   "",
 					ToolCalls: string(tcJSON),
-					CreatedAt: time.Now().UTC(),
+					// The assistant row is persisted before tools run, so its id is known
+					// here: recording it is what lets the conversation be rebuilt without
+					// relying on the tool_call rows being contiguous.
+					AssistantMsgID: assistantMsgID,
+					CreatedAt:      time.Now().UTC(),
 				}); err != nil {
 					log.Printf("[tool] FAILED to persist tool_call message for setup.task=%s tool=%s: %v", setup.task.ID, tc.Function.Name, err)
 				}
@@ -1072,45 +1082,19 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
 					})
 
-					// Trigger LSP diagnostics for files modified by the tool.
-					// For write/edit tools, use the path from tool args directly.
-					// For bash, extract file paths from the command and only check files
-					// that match an installed LSP extension.
-					var lspHint string
+					// Remember what this tool touched. Diagnostics are NOT run here: this
+					// callback runs while the worktree mutex is held, and a language server
+					// round trip there serialises the rest of the turn and reports a state
+					// the turn's own later edits may already have fixed. The turn boundary
+					// pass (collectTurnDiagnostics) asks for the files that actually ended
+					// up changed.
 					switch tc.Function.Name {
 					case "write_file", "edit_file":
 						if path, ok := args["path"].(string); ok && path != "" {
-							lspHint = te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, path)
+							lc.noteTouchedFile(path)
 						}
 					case "bash":
-						if cmd, ok := args["command"].(string); ok && cmd != "" {
-							files := extractFilesFromBashCommand(cmd)
-							for _, f := range files {
-								if hint := te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, f); hint != "" {
-									lspHint = hint
-									break
-								}
-							}
-						}
-					}
-					// Inject LSP diagnostic hint into LLM context if found.
-					if lspHint != "" {
-						task, _ := te.store.GetTaskByID(setup.task.ID)
-						if task != nil {
-							msgID := uuid.New().String()
-							_ = te.store.CreateTaskMessage(&types.TaskMessage{
-								ID: msgID, TaskID: setup.task.ID, ThreadID: task.CurrentThreadID, Role: "user", Content: lspHint, CreatedAt: time.Now().UTC(),
-							})
-							lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: lspHint})
-							te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
-								Type: types.WSTypeUserMessage,
-								Data: map[string]any{
-									"id":      msgID,
-									"role":    "user",
-									"content": lspHint,
-								},
-							})
-						}
+						lc.noteShellMayHaveChangedFiles()
 					}
 					return result, success
 				})
@@ -1204,6 +1188,9 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 						"summary":  "Agent has a question",
 					}})
 					log.Printf("[ask_question] setup.task=%s stopping executor, awaiting user answer", setup.task.ID)
+					// Deliver anything the environment said this turn before idling: the answer
+					// arrives on a later run, which rebuilds its context from the DB.
+					te.flushAdvisories(setup, lc)
 					// Remove from setup.task registry so next user message triggers handleLazyStart
 					te.taskMu.Lock()
 					delete(te.tasks, setup.task.ID)
@@ -1220,31 +1207,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					if setup.task.HasMergeConflict {
 						_, setup.task = te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
 						if setup.task.HasMergeConflict {
-							// Still conflicted — inject resolution prompt and continue
-							conflictedFiles := GetConflictedFiles(setup.worktreePath)
-							prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
-								TaskBranch:      setup.task.Branch,
-								TargetBranch:    te.ResolveMergeTarget(setup.projectID, setup.task),
-								TaskTitle:       setup.task.Title,
-								TaskDescription: setup.task.Prompt,
-								ConflictedFiles: conflictedFiles,
-							})
-							if pErr != nil {
-								log.Printf("[merge] setup.task=%s failed to render merge conflict prompt: %v", setup.task.ID, pErr)
-							}
-							lc.detector.reset()
-							lc.detector.clearHints()
-							lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: prompt})
-							te.store.CreateTaskMessage(&types.TaskMessage{
-								ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
-								Role: "system", Content: "Merge conflict detected — resolving with tools",
-								CreatedAt: time.Now().UTC(),
-							})
-							te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Resolving merge conflicts"}})
-							lc.pendingToolCalls = nil
-							lc.assistantContent.Reset()
-							lc.reasoningContent.Reset()
-							lc.finishReason = ""
+							// Still conflicted — hand the model the instructions and continue
+							te.prepareMergeConflictTurn(setup, lc, GetConflictedFiles(setup.worktreePath))
 							continue
 						}
 						if !setup.task.AutoMerge {
@@ -1278,30 +1242,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					mergeErr := te.CommitAndMerge(setup.projectID, setup.task.ID, setup.worktreePath, commitMsg, setup.task.AutoMerge)
 					setup.task, _ = te.store.GetTaskByID(setup.task.ID)
 					if setup.task.HasMergeConflict {
-						conflictedFiles := GetResolvedConflictedFiles(setup.worktreePath)
-						prompt, pErr := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
-							TaskBranch:      setup.task.Branch,
-							TargetBranch:    te.ResolveMergeTarget(setup.projectID, setup.task),
-							TaskTitle:       setup.task.Title,
-							TaskDescription: setup.task.Prompt,
-							ConflictedFiles: conflictedFiles,
-						})
-						if pErr != nil {
-							log.Printf("[merge] setup.task=%s failed to render merge conflict prompt: %v", setup.task.ID, pErr)
-						}
-						lc.detector.reset()
-						lc.detector.clearHints()
-						lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: prompt})
-						te.store.CreateTaskMessage(&types.TaskMessage{
-							ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID,
-							Role: "system", Content: "Merge conflict detected — resolving with tools",
-							CreatedAt: time.Now().UTC(),
-						})
-						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Resolving merge conflicts"}})
-						lc.pendingToolCalls = nil
-						lc.assistantContent.Reset()
-						lc.reasoningContent.Reset()
-						lc.finishReason = ""
+						te.prepareMergeConflictTurn(setup, lc, GetResolvedConflictedFiles(setup.worktreePath))
 						continue
 					}
 					if mergeErr != nil {
@@ -1408,6 +1349,13 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			for _, tr := range toolResults {
 				lc.messages = append(lc.messages, types.ChatMessage{Role: "tool", Content: tr.output, ToolCallID: tr.toolCallID})
 			}
+
+			// One diagnostics pass for everything this turn changed, then deliver the
+			// buffered environment notes. Both must happen after the tool messages above
+			// (so the notes comment on work the model can already see) and before
+			// summarization (so the notes survive compaction).
+			te.collectTurnDiagnostics(setup, lc)
+			te.flushAdvisories(setup, lc)
 
 			// Loop detection: record this turn and check for repetition
 			loopType, _, toolArgs := lc.detector.recordTurn(lc.pendingToolCalls, assistantText, lc.finishReason)
@@ -1819,247 +1767,6 @@ func logStatsSpeed(taskID, model string, processedTokens, predictedTokens, promp
 	}
 	log.Printf("[stats] task=%s model=%s prompt=%.0f t/s, gen=%.0f t/s (prompt_tokens=%d, gen_tokens=%d, prompt_ms=%d, gen_ms=%d)",
 		taskID, model, promptTps, genTps, processedTokens, predictedTokens, promptMs, predictedMs)
-}
-
-// extractFilesFromBashCommand parses a bash command and extracts file paths that
-// are likely being written to or modified. Only returns paths with known code file
-// extensions (e.g., .go, .ts, .py, .rs) — the triggerLSPDiagnostics function
-// further filters by installed LSP extensions.
-//
-// Handles common patterns:
-//   - Shell redirections: > file, >> file
-//   - echo/cat/printf ... > file
-//   - tee file
-//   - sed -i 's/...' file
-//   - mv old new (returns new)
-//   - cp src dest (returns dest)
-//   - touch file
-func extractFilesFromBashCommand(cmd string) []string {
-	var files []string
-	seen := make(map[string]bool)
-
-	addFile := func(path string) {
-		path = strings.TrimSpace(path)
-		if path == "" || path == "." || path == "-" {
-			return
-		}
-		// Remove quotes
-		path = strings.Trim(path, "\"'")
-		if seen[path] {
-			return
-		}
-		// Only include files with extensions (skip directories, /dev/null, etc.)
-		if filepath.Ext(path) == "" {
-			return
-		}
-		// Skip non-code files
-		if isImageFile(path) || strings.HasPrefix(path, "/dev/") {
-			return
-		}
-		seen[path] = true
-		files = append(files, path)
-	}
-
-	// Split into lines for multi-line commands, then split each line by &&/||
-	for _, line := range strings.Split(cmd, "\n") {
-		for _, part := range splitChainedCommands(line) {
-			part = strings.TrimSpace(part)
-			if part == "" || strings.HasPrefix(part, "#") {
-				continue
-			}
-
-			// 1. Shell redirections: > file, >> file
-			// Match patterns like: echo "foo" > file.ts or cat > file.ts <<EOF
-			for _, re := range []string{">>", ">"} {
-				parts := strings.Split(part, re)
-				if len(parts) < 2 {
-					continue
-				}
-				// Check each part after the first (before the command) for file paths.
-				// The first redirect target is the one we want (e.g., > file 2>&1).
-				// parts[1] is right after the first >, parts[2+] are from 2> etc.
-				for i := 1; i < len(parts); i++ {
-					right := strings.TrimSpace(parts[i])
-					if right == "" {
-						continue
-					}
-					// Skip stderr redirect patterns like 2>&1, 2>/dev/null
-					if strings.HasPrefix(right, "2") {
-						continue
-					}
-					// Skip if it's a heredoc (starts with <<)
-					if strings.HasPrefix(right, "<<") {
-						continue
-					}
-					// Skip pipes
-					if strings.HasPrefix(right, "|") {
-						continue
-					}
-					// Extract just the filename (may have trailing commands)
-					fields := strings.Fields(right)
-					if len(fields) == 0 {
-						continue
-					}
-					addFile(fields[0])
-					break // only the first valid redirect matters
-				}
-			}
-
-			// 2. sed -i 's/...' file (and similar in-place edit commands)
-			if strings.Contains(part, "sed ") && strings.Contains(part, "-i") {
-				fields := strings.Fields(part)
-				for i, f := range fields {
-					if f == "sed" && i+1 < len(fields) {
-						j := i + 1
-						if j < len(fields) && fields[j] == "-i" {
-							j++
-						}
-						if j < len(fields) && !strings.HasPrefix(fields[j], "-") {
-							j++
-						}
-						for k := j; k < len(fields); k++ {
-							if !strings.HasPrefix(fields[k], "-") && fields[k] != "|" && fields[k] != "&&" && fields[k] != "||" {
-								addFile(fields[k])
-							}
-						}
-					}
-				}
-			}
-
-			// 3. tee file
-			if idx := strings.Index(part, "tee "); idx != -1 {
-				rest := strings.TrimSpace(part[idx+4:])
-				fields := strings.Fields(rest)
-				for _, f := range fields {
-					if !strings.HasPrefix(f, "-") && f != "|" && f != "&&" && f != "||" {
-						addFile(f)
-					}
-				}
-			}
-
-			// 4. mv old new (returns destination)
-			if strings.HasPrefix(part, "mv ") {
-				fields := strings.Fields(part)
-				for i, f := range fields {
-					if f == "mv" && i+2 < len(fields) {
-						j := i + 1
-						for j < len(fields) && strings.HasPrefix(fields[j], "-") {
-							j++
-						}
-						if j+1 < len(fields) {
-							addFile(fields[j+1])
-						}
-						break
-					}
-				}
-			}
-
-			// 5. cp src dest (returns destination)
-			if strings.HasPrefix(part, "cp ") {
-				fields := strings.Fields(part)
-				for i, f := range fields {
-					if f == "cp" && i+2 < len(fields) {
-						j := i + 1
-						for j < len(fields) && strings.HasPrefix(fields[j], "-") {
-							j++
-						}
-						for k := len(fields) - 1; k > j; k-- {
-							if !strings.HasPrefix(fields[k], "-") && fields[k] != "|" && fields[k] != "&&" && fields[k] != "||" {
-								addFile(fields[k])
-								break
-							}
-						}
-						break
-					}
-				}
-			}
-
-			// 6. touch file
-			if strings.HasPrefix(part, "touch ") {
-				fields := strings.Fields(part)
-				for i, f := range fields {
-					if f == "touch" {
-						for j := i + 1; j < len(fields); j++ {
-							if !strings.HasPrefix(fields[j], "-") && fields[j] != "|" && fields[j] != "&&" && fields[j] != "||" {
-								addFile(fields[j])
-							}
-						}
-						break
-					}
-				}
-			}
-
-			// 7. Commands that write to a file via argument: gofmt -w file
-			if strings.Contains(part, " -w ") {
-				fields := strings.Fields(part)
-				for i, f := range fields {
-					if f == "-w" && i+1 < len(fields) {
-						addFile(fields[i+1])
-					}
-				}
-			}
-		}
-	}
-
-	return files
-}
-
-// splitChainedCommands splits a bash command line by && and || operators,
-// respecting quoted strings. This allows processing each sub-command separately.
-func splitChainedCommands(line string) []string {
-	var parts []string
-	var current strings.Builder
-	inSingleQuote, inDoubleQuote := false, false
-	i := 0
-
-	for i < len(line) {
-		ch := line[i]
-
-		// Track quote state
-		switch ch {
-		case '\'':
-			if !inDoubleQuote {
-				inSingleQuote = !inSingleQuote
-			}
-		case '"':
-			if !inSingleQuote {
-				inDoubleQuote = !inDoubleQuote
-			}
-		case '\\':
-			if inSingleQuote {
-				current.WriteByte(ch)
-			} else {
-				// Escape next char
-				current.WriteByte(ch)
-				if i+1 < len(line) {
-					i++
-					current.WriteByte(line[i])
-				}
-				i++
-				continue
-			}
-		}
-
-		// Check for && or || outside quotes
-		if !inSingleQuote && !inDoubleQuote {
-			if i+1 < len(line) && ((line[i:i+2] == "&&") || (line[i:i+2] == "||")) {
-				parts = append(parts, strings.TrimSpace(current.String()))
-				current.Reset()
-				i += 2
-				continue
-			}
-		}
-
-		current.WriteByte(ch)
-		i++
-	}
-
-	// Add the last part
-	if last := strings.TrimSpace(current.String()); last != "" {
-		parts = append(parts, last)
-	}
-
-	return parts
 }
 
 // buildToolResultEvent constructs the data payload for a WSTypeToolResult event.

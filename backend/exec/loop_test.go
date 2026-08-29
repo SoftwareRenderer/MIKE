@@ -1527,8 +1527,11 @@ func TestBuildCommitConversation_MergesToolCallsIntoAssistant(t *testing.T) {
 	}
 }
 
-func TestBuildCommitConversation_SkipsToolCallsWithoutAssistant(t *testing.T) {
-	// Edge case: tool_call at the start (no preceding assistant)
+func TestBuildCommitConversation_OrphanToolRowsIgnored(t *testing.T) {
+	// A tool_call row with no assistant row to own it belongs to nothing. The utility
+	// conversation is built by the same groupTaskMessages the LLM context uses, so the row
+	// contributes neither a call nor a result here either — an orphan result with no call is
+	// noise a commit-message prompt cannot act on.
 	taskMsgs := []types.TaskMessage{
 		{Role: "tool_call", ToolCalls: `{"tool_id":"call_1","tool_name":"read_file","raw_args":"{}"}`, ToolResult: `{"output":"contents","success":true}`},
 		{Role: "user", Content: "Hello"},
@@ -1536,12 +1539,43 @@ func TestBuildCommitConversation_SkipsToolCallsWithoutAssistant(t *testing.T) {
 
 	messages := BuildConversationFromTaskMessages(taskMsgs)
 
-	// Should have: tool(result), user — tool_call with no assistant is skipped, tool result added
-	if len(messages) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(messages))
+	if len(messages) != 1 || messages[0].Role != "user" {
+		t.Fatalf("expected only the user message, got %+v", messages)
 	}
-	if messages[0].Role != "tool" {
-		t.Errorf("expected tool result, got role=%s", messages[0].Role)
+}
+
+func TestBuildCommitConversation_AdvisoryRowKeepsToolRows(t *testing.T) {
+	// The same regression the LLM rebuild was fixed for, on the utility entry point: a note
+	// written between an assistant row and its tool_call rows must not cost the commit
+	// message that turn's calls and results.
+	taskMsgs := []types.TaskMessage{
+		{ID: "a1", Role: "user", Content: "Fix it"},
+		{ID: "as-1", Role: "assistant", Content: "editing"},
+		{Role: "tool_call", AssistantMsgID: "as-1", ToolCalls: `{"tool_id":"call_1","tool_name":"edit_file","raw_args":"{\"path\":\"a.go\"}"}`, ToolResult: `{"output":"Edited a.go","success":true}`},
+		{Role: "advisory", Content: "LSP diagnostics for this turn's changes (1 file with findings):\n\nFix issues in a.go:\n1. line 3 error"},
+		{Role: "tool_call", AssistantMsgID: "as-1", ToolCalls: `{"tool_id":"call_2","tool_name":"edit_file","raw_args":"{\"path\":\"b.go\"}"}`, ToolResult: `{"output":"Edited b.go","success":true}`},
+	}
+
+	messages := BuildConversationFromTaskMessages(taskMsgs)
+
+	if len(messages) != 5 {
+		t.Fatalf("expected user, assistant, 2 tool results, advisory, got %d: %+v", len(messages), messages)
+	}
+	if len(messages[1].ToolCalls) != 2 {
+		t.Fatalf("assistant rebuilt with %d tool calls, want 2", len(messages[1].ToolCalls))
+	}
+	if messages[2].ToolCallID != "call_1" || messages[3].ToolCallID != "call_2" {
+		t.Errorf("tool results = %q, %q, want call_1, call_2", messages[2].ToolCallID, messages[3].ToolCallID)
+	}
+	if messages[4].Role != "advisory" {
+		t.Fatalf("last rebuilt message = %q, want advisory (it follows the work it comments on)", messages[4].Role)
+	}
+
+	// The note itself never reaches the prompt text — FormatConversationTurns has no case
+	// for it — but it must not be attributed to the user either.
+	turnText := FormatConversationTurns(messages)
+	if strings.Contains(turnText, "User: LSP diagnostics") {
+		t.Errorf("advisory attributed to the user:\n%s", turnText)
 	}
 }
 

@@ -193,3 +193,26 @@ func TestToAPIMessage_ReasoningOnlyOnAssistantRole(t *testing.T) {
 		t.Errorf("assistant message should have reasoning_content, got %v", result["reasoning_content"])
 	}
 }
+
+func TestToAPIMessage_AdvisoryGoesOutAsUser(t *testing.T) {
+	// An advisory is an environment note (LSP diagnostics, merge-conflict instructions).
+	// The chat API has no role for it, so it must leave as "user" while the transcript and
+	// the summarizer keep calling it "advisory".
+	msg := types.ChatMessage{
+		Role:    "advisory",
+		Content: "LSP diagnostics for this turn's changes (1 file with findings):",
+	}
+
+	result := toAPIMessage(msg)
+
+	if result["role"] != "user" {
+		t.Errorf("expected role='user' on the wire, got %v", result["role"])
+	}
+	if result["content"] != msg.Content {
+		t.Errorf("content changed on the way out: %v", result["content"])
+	}
+	// Other roles are untouched.
+	if toAPIMessage(types.ChatMessage{Role: "system", Content: "x"})["role"] != "system" {
+		t.Error("system role must pass through")
+	}
+}

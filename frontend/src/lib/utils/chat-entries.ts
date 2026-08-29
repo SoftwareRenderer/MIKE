@@ -158,6 +158,7 @@ export function buildEntriesFromMessages(
         predicted_ms?: number;
         duration?: number;
         severity?: string;
+        kind?: string;
     }>,
 ): { entries: ChatEntry[]; checkpointHashes: Map<string, string> } {
     const checkpointHashes = new Map<string, string>();
@@ -224,6 +225,7 @@ export function buildEntriesFromMessages(
         const entry: Partial<ChatEntry> = {
             ...base, id: m.id, role: m.role, content: m.content,
             severity: m.severity,
+            kind: m.kind,
             reasoningContent: m.reasoning_content, hasReasoning: m.has_reasoning,
             attachments: parsedAttachments, isStreaming: false, createdAt: m.created_at,
         };
@@ -332,4 +334,19 @@ export function buildCheckpointStateMap(
     }
 
     return result;
+}
+
+/**
+ * Title for an advisory note (an environment note the model had to see but the user never
+ * said). Keyed on `kind`, the sub-classification the executor records on the row: severity
+ * only decides how loudly the card is drawn, so titling by severity would render a merge
+ * conflict as "Workspace diagnostics". Unknown and missing kinds (rows written before the
+ * kind existed) fall back to the generic note.
+ */
+export function advisoryLabel(kind?: string): string {
+    switch (kind) {
+        case 'diagnostics': return 'Workspace diagnostics';
+        case 'merge_conflict': return 'Merge conflict';
+        default: return 'Environment note';
+    }
 }

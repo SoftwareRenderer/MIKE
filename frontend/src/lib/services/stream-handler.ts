@@ -438,6 +438,24 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 if (data.total > 0) s.promptProgress = Math.round((data.processed / data.total) * 100);
                 break;
             }
+            case 'advisory': {
+                // An environment note (LSP diagnostics, merge-conflict instructions): the
+                // model had to see it, the user never said it. Rendered as a note, never as
+                // a user bubble. `kind` is what the card is titled with; `severity` only
+                // decides whether it is drawn in the warning colour.
+                const data = event.data as { id?: string; kind?: string; severity?: string; text?: string; created_at?: string };
+                if (data.id && s.entries.some(e => e.id === data.id)) break;
+                s.entries = [...s.entries, {
+                    id: data.id || genId(),
+                    role: 'advisory',
+                    kind: data.kind || '',
+                    content: data.text || '',
+                    severity: data.severity || '',
+                    isStreaming: false,
+                    createdAt: data.created_at || new Date().toISOString(),
+                }];
+                break;
+            }
             case 'summarization': {
                 const data = event.data as { id?: string; summary: string; created_at?: string; prompt_tokens?: number; predicted_tokens?: number; prompt_ms?: number; predicted_ms?: number; model_name?: string };
                 if (data.id && s.entries.some(e => e.id === data.id)) break;

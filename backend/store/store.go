@@ -207,6 +207,8 @@ CREATE TABLE IF NOT EXISTS task_messages (
     duration           INTEGER DEFAULT 0,
     git_commit_hash    TEXT DEFAULT NULL,
     is_loop_hint       INTEGER NOT NULL DEFAULT 0,
+    assistant_msg_id   TEXT DEFAULT NULL,
+    kind               TEXT DEFAULT NULL,
     created_at         TEXT NOT NULL,
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
@@ -312,6 +314,14 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN git_commit_hash TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN attachments TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN severity TEXT DEFAULT NULL`)
+	// The assistant message a tool_call row belongs to. Rebuilding the conversation used
+	// to rely on tool_call rows being contiguous with their assistant row, which any
+	// message written during tool execution (LSP diagnostics, merge-conflict notes)
+	// silently broke — dropping the rest of the turn's tool calls and results.
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN assistant_msg_id TEXT DEFAULT NULL`)
+	// Sub-classification of a row within its role — advisory rows carry "diagnostics" or
+	// "merge_conflict" so the transcript can title the note after a reload, not just live.
+	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN kind TEXT DEFAULT NULL`)
 	// Add cost column to cumulative token stats (idempotent — ALTER TABLE IF NOT EXISTS is not standard SQLite)
 	_, _ = s.db.Exec(`ALTER TABLE project_token_stats ADD COLUMN cost REAL NOT NULL DEFAULT 0`)
 	// Separate merge conflict flag so execution_state can stay "running"

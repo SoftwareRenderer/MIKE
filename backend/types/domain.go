@@ -290,6 +290,8 @@ type TaskMessage struct {
 	Duration         int64     `json:"duration,omitempty"`
 	GitCommitHash    string    `json:"git_commit_hash,omitempty"`
 	IsLoopHint       bool      `json:"is_loop_hint,omitempty"` // true for injected loop-detection hints (shown in UI, excluded from LLM context)
+	AssistantMsgID   string    `json:"-"`                      // assistant row a tool_call row belongs to; rebuild-internal (groupTaskMessages), never sent to the client
+	Kind             string    `json:"kind,omitempty"`         // sub-classifies a row within its role; advisory rows: "diagnostics" | "merge_conflict" (titles the note)
 	CreatedAt        time.Time `json:"created_at"`
 }
 

@@ -8,13 +8,48 @@ import (
 	"kanban/backend/types"
 )
 
+// taskMessageCols is the column list every task_messages reader must use, kept next to
+// scanTaskMessage so a new column cannot be selected in one query and missed in another.
+const taskMessageCols = `id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, assistant_msg_id, kind, created_at`
+
+// optStr is the inverse of nullStr: the empty string for a NULL column.
+func optStr(n sql.NullString) string {
+	if n.Valid {
+		return n.String
+	}
+	return ""
+}
+
+// scanTaskMessage scans one row of taskMessageCols into a TaskMessage.
+func scanTaskMessage(s interface{ Scan(...any) error }) (types.TaskMessage, error) {
+	var m types.TaskMessage
+	var createdAt string
+	var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent, gitCommitHash, attachments, severity, assistantMsgID, kind sql.NullString
+	if err := s.Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &severity, &m.Content, &reasoningContent, &toolCalls, &toolResult, &attachments, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &gitCommitHash, &m.IsLoopHint, &assistantMsgID, &kind, &createdAt); err != nil {
+		return m, err
+	}
+	m.ThreadID = optStr(threadID)
+	m.Severity = optStr(severity)
+	m.ReasoningContent = optStr(reasoningContent)
+	m.ModelName = optStr(modelName)
+	m.ProviderName = optStr(providerName)
+	m.ToolCalls = optStr(toolCalls)
+	m.ToolResult = optStr(toolResult)
+	m.GitCommitHash = optStr(gitCommitHash)
+	m.Attachments = optStr(attachments)
+	m.AssistantMsgID = optStr(assistantMsgID)
+	m.Kind = optStr(kind)
+	m.CreatedAt = scanTime(createdAt)
+	return m, nil
+}
+
 // CreateTaskMessage inserts a task chat message and accumulates token stats.
 func (s *Store) CreateTaskMessage(m *types.TaskMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_messages (id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, ptrStr(m.Severity), m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, ptrStr(m.Attachments), m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, ptrStr(m.GitCommitHash), B2I(m.IsLoopHint), m.CreatedAt.Format(time.RFC3339Nano),
+		`INSERT INTO task_messages (id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, assistant_msg_id, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.TaskID, ptrStr(m.ThreadID), m.Role, ptrStr(m.Severity), m.Content, m.ReasoningContent, m.ToolCalls, m.ToolResult, ptrStr(m.Attachments), m.ModelName, m.ProviderName, m.PromptTokens, m.PredictedTokens, m.CacheTokens, m.PromptMs, m.PredictedMs, m.Duration, ptrStr(m.GitCommitHash), B2I(m.IsLoopHint), ptrStr(m.AssistantMsgID), ptrStr(m.Kind), m.CreatedAt.Format(time.RFC3339Nano),
 	)
 	if err != nil {
 		return err
@@ -57,19 +92,19 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 		// taskID is provided, keep both filters for callers that expect them.
 		if taskID != "" {
 			rows, err = s.db.Query(
-				`SELECT id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
+				`SELECT `+taskMessageCols+` FROM task_messages WHERE task_id = ? AND thread_id = ? ORDER BY created_at ASC`,
 				taskID, threadID,
 			)
 		} else {
 			rows, err = s.db.Query(
-				`SELECT id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE thread_id = ? ORDER BY created_at ASC`,
+				`SELECT `+taskMessageCols+` FROM task_messages WHERE thread_id = ? ORDER BY created_at ASC`,
 				threadID,
 			)
 		}
 	} else {
 		// For backward compatibility: get messages with no thread_id (legacy) or all messages
 		rows, err = s.db.Query(
-			`SELECT id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
+			`SELECT `+taskMessageCols+` FROM task_messages WHERE task_id = ? ORDER BY created_at ASC`,
 			taskID,
 		)
 	}
@@ -79,40 +114,10 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	defer rows.Close()
 	messages := []types.TaskMessage{}
 	for rows.Next() {
-		var m types.TaskMessage
-		var createdAt string
-		var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent, gitCommitHash, attachments, severity sql.NullString
-		if err := rows.Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &severity, &m.Content, &reasoningContent, &toolCalls, &toolResult, &attachments, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &gitCommitHash, &m.IsLoopHint, &createdAt); err != nil {
+		m, err := scanTaskMessage(rows)
+		if err != nil {
 			return nil, err
 		}
-		if threadID.Valid {
-			m.ThreadID = threadID.String
-		}
-		if severity.Valid {
-			m.Severity = severity.String
-		}
-		if reasoningContent.Valid {
-			m.ReasoningContent = reasoningContent.String
-		}
-		if modelName.Valid {
-			m.ModelName = modelName.String
-		}
-		if providerName.Valid {
-			m.ProviderName = providerName.String
-		}
-		if toolCalls.Valid {
-			m.ToolCalls = toolCalls.String
-		}
-		if toolResult.Valid {
-			m.ToolResult = toolResult.String
-		}
-		if gitCommitHash.Valid {
-			m.GitCommitHash = gitCommitHash.String
-		}
-		if attachments.Valid {
-			m.Attachments = attachments.String
-		}
-		m.CreatedAt = scanTime(createdAt)
 		messages = append(messages, m)
 	}
 	return messages, rows.Err()
@@ -122,44 +127,11 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 func (s *Store) GetTaskMessageByID(messageID string) (*types.TaskMessage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var m types.TaskMessage
-	var createdAt string
-	var threadID, modelName, providerName, toolCalls, toolResult, reasoningContent, gitCommitHash, attachments, severity sql.NullString
-	err := s.db.QueryRow(
-		`SELECT id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, created_at FROM task_messages WHERE id = ?`,
-		messageID,
-	).Scan(&m.ID, &m.TaskID, &threadID, &m.Role, &severity, &m.Content, &reasoningContent, &toolCalls, &toolResult, &attachments, &modelName, &providerName, &m.PromptTokens, &m.PredictedTokens, &m.CacheTokens, &m.PromptMs, &m.PredictedMs, &m.Duration, &gitCommitHash, &m.IsLoopHint, &createdAt)
+	row := s.db.QueryRow(`SELECT `+taskMessageCols+` FROM task_messages WHERE id = ?`, messageID)
+	m, err := scanTaskMessage(row)
 	if err != nil {
 		return nil, err
 	}
-	if threadID.Valid {
-		m.ThreadID = threadID.String
-	}
-	if severity.Valid {
-		m.Severity = severity.String
-	}
-	if reasoningContent.Valid {
-		m.ReasoningContent = reasoningContent.String
-	}
-	if modelName.Valid {
-		m.ModelName = modelName.String
-	}
-	if providerName.Valid {
-		m.ProviderName = providerName.String
-	}
-	if toolCalls.Valid {
-		m.ToolCalls = toolCalls.String
-	}
-	if toolResult.Valid {
-		m.ToolResult = toolResult.String
-	}
-	if gitCommitHash.Valid {
-		m.GitCommitHash = gitCommitHash.String
-	}
-	if attachments.Valid {
-		m.Attachments = attachments.String
-	}
-	m.CreatedAt = scanTime(createdAt)
 	return &m, nil
 }
 
