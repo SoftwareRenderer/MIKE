@@ -1,7 +1,10 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +12,7 @@ import (
 	"testing"
 
 	"kanban/backend/git"
+	"kanban/backend/types"
 )
 
 // canaryPath is used to detect command injection. If any malicious payload
@@ -208,5 +212,241 @@ func TestGitAuthorFlagCmd_RoundTrip(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// fsReadRefRepo creates a git repo registered as a project, with one committed
+// file, a branch and a known HEAD sha — the fixture for the `?ref=` tests.
+// Returns the absolute file path, the HEAD sha and the branch name.
+func fsReadRefRepo(t *testing.T, s *Server, projectID string) (string, string, string) {
+	t.Helper()
+	repo := t.TempDir()
+	if err := s.store.CreateProject(&types.Project{
+		ID:   projectID,
+		Name: "FS Ref Project",
+		Path: repo,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mustRunGit(t, repo, "init")
+	mustRunGit(t, repo, "config", "user.email", "test@test.com")
+	mustRunGit(t, repo, "config", "user.name", "Test")
+	file := filepath.Join(repo, "f.txt")
+	if err := os.WriteFile(file, []byte(fsReadRefContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustRunGit(t, repo, "add", "f.txt")
+	mustRunGit(t, repo, "commit", "-m", "init")
+	sha := mustRunGitOutput(t, repo, "rev-parse", "HEAD")
+	mustRunGit(t, repo, "branch", "feature/ref-check")
+	return file, sha, "feature/ref-check"
+}
+
+const fsReadRefContent = "hello from the commit\n"
+
+// fsReadAt issues GET /api/fs/read for the fixture file at the given ref.
+func fsReadAt(t *testing.T, s *Server, cookie, csrfToken, projectID, file, ref string) *httptest.ResponseRecorder {
+	t.Helper()
+	q := url.Values{"path": {file}, "project": {projectID}}
+	if ref != "" {
+		q.Set("ref", ref)
+	}
+	req := testRequest(http.MethodGet, "/api/fs/read?"+q.Encode(), nil)
+	withAuthCSRF(req, cookie, csrfToken)
+	return testResponse(t, s, req)
+}
+
+// TestFSReadRefRejectsGitOptions is the regression test for the `?ref=` argument
+// injection: the handler used to hand the raw query parameter to
+// `git show <ref>:<path>`, and git happily parses an option-shaped ref as an
+// option. Reproduced with git 2.43 before the fix:
+//
+//	$ git show "--output=/tmp/pwn:f.txt"   # exit 0
+//	$ ls -l /tmp/pwn:f.txt                 # created
+//
+// i.e. arbitrary empty-file creation/truncation anywhere the server user can
+// write. The fix validates the ref (400 on rejection) and passes
+// --end-of-options before the rev.
+func TestFSReadRefRejectsGitOptions(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	file, _, _ := fsReadRefRepo(t, s, "fs-ref-inject")
+
+	// Payload: ref="--output=/tmp/pwn" + ":" + <relPath> -> writes /tmp/pwn:f.txt.
+	// Remove any leftover from an earlier (vulnerable) run so the assertions below
+	// describe THIS request, then re-check after the request.
+	targets := []string{"/tmp/pwn", "/tmp/pwn:f.txt"}
+	for _, p := range targets {
+		_ = os.Remove(p)
+		p := p
+		t.Cleanup(func() { _ = os.Remove(p) })
+	}
+
+	rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-inject", file, "--output=/tmp/pwn")
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for an option-shaped ref, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "ref") {
+		t.Errorf("error should mention the offending parameter, got %s", rr.Body.String())
+	}
+	for _, p := range targets {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("injection succeeded: %s was created by the request", p)
+		}
+	}
+
+	// Other option-shaped / syntax-carrying refs are refused the same way.
+	for _, ref := range []string{
+		"-C/tmp",
+		"--exec-path=/tmp",
+		"--output=/tmp/pwn",
+		"HEAD~1",      // revision syntax
+		"HEAD^{}",     // revision syntax
+		"HEAD:f.txt",  // the colon is added by the handler, not the client
+		"main..HEAD",  // range syntax
+		"-",           // stdin
+		"feat branch", // whitespace
+		"feat$(touch /tmp/pwn)",
+	} {
+		rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-inject", file, ref)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("ref %q: expected 400, got %d: %s", ref, rr.Code, rr.Body.String())
+		}
+	}
+	for _, p := range targets {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("injection succeeded: %s was created by a rejected request", p)
+		}
+	}
+}
+
+// TestFSReadRefValidRefsStillWork keeps the feature: reading a file at HEAD, at
+// a hex SHA and at a branch name must keep returning the committed content.
+func TestFSReadRefValidRefsStillWork(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+	file, sha, branch := fsReadRefRepo(t, s, "fs-ref-valid")
+
+	// Modify the working tree copy: a ref read must still return the COMMITTED
+	// content, proving the read really goes through `git show`.
+	if err := os.WriteFile(file, []byte("dirty working tree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, ref := range []string{"HEAD", sha, branch, "refs/heads/" + branch} {
+		rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-valid", file, ref)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("ref %q: expected 200, got %d: %s", ref, rr.Code, rr.Body.String())
+		}
+		var resp fsReadResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("ref %q: decode: %v", ref, err)
+		}
+		if resp.Content != fsReadRefContent {
+			t.Errorf("ref %q: expected committed content %q, got %q", ref, fsReadRefContent, resp.Content)
+		}
+		if resp.GutterMarkers != nil {
+			t.Errorf("ref %q: expected no gutter markers, got %v", ref, resp.GutterMarkers)
+		}
+	}
+
+	// A well-formed ref whose blob does not exist is still a 404, not a 400.
+	rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-valid", filepath.Dir(file), "HEAD")
+	if rr.Code == http.StatusOK {
+		t.Fatal("expected the directory read at a ref to fail")
+	}
+	missing := filepath.Join(filepath.Dir(file), "nope.txt")
+	if rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-valid", missing, "HEAD"); rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for a file missing at the ref, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestValidateGitRefBlocksOptions double-checks the shared validator used by
+// /api/fs/read (the table lives in backend/types/validate_test.go).
+func TestFSReadRefTable(t *testing.T) {
+	for _, ref := range []string{"HEAD", "main", "refs/heads/main", "0123456789abcdef0123456789abcdef01234567", "task/frost-amber-quartz"} {
+		if err := types.ValidateGitRef(ref); err != nil {
+			t.Errorf("ValidateGitRef(%q) = %v, want nil", ref, err)
+		}
+	}
+	for _, ref := range []string{"", "-", "-f", "--output=/tmp/pwn", "HEAD~1", "HEAD^", "a..b", "feat branch", "feat\n"} {
+		if err := types.ValidateGitRef(ref); err == nil {
+			t.Errorf("ValidateGitRef(%q) = nil, want error", ref)
+		}
+	}
+}
+
+// TestFSReadRefInTaskWorktree covers the task-scoped branch of the handler
+// (GitRunInWorktreeOutput), which resolves the worktree from the DB before the
+// ref reaches git. Same rule must hold: option-shaped refs are rejected before
+// git runs, valid refs still read from the worktree's history.
+func TestFSReadRefInTaskWorktree(t *testing.T) {
+	s := testServer(t)
+	cookie, csrfToken := loginTestCSRF(t, s)
+
+	repo := t.TempDir()
+	projID := "fs-ref-task"
+	if err := s.store.CreateProject(&types.Project{ID: projID, Name: "FS Ref Task Project", Path: repo}); err != nil {
+		t.Fatal(err)
+	}
+	mustRunGit(t, repo, "init")
+	mustRunGit(t, repo, "config", "user.email", "test@test.com")
+	mustRunGit(t, repo, "config", "user.name", "Test")
+	writeAndCommit := func(dir, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mustRunGit(t, dir, "add", "f.txt")
+		mustRunGit(t, dir, "commit", "-m", "commit")
+	}
+	writeAndCommit(repo, "base commit\n")
+
+	taskID := createTestTask(t, s, projID, "worktree ref task")
+	worktreePath, _, err := s.executor.WorktreeMgr().CreateWorktree(projID, taskID, "task/"+taskID, "HEAD")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	writeAndCommit(worktreePath, "worktree commit\n")
+
+	read := func(ref string) *httptest.ResponseRecorder {
+		q := url.Values{
+			"path":    {filepath.Join(worktreePath, "f.txt")},
+			"project": {projID},
+			"task":    {taskID},
+		}
+		if ref != "" {
+			q.Set("ref", ref)
+		}
+		req := testRequest(http.MethodGet, "/api/fs/read?"+q.Encode(), nil)
+		withAuthCSRF(req, cookie, csrfToken)
+		return testResponse(t, s, req)
+	}
+
+	canary := "/tmp/pwt-pwn:f.txt"
+	_ = os.Remove(canary)
+	t.Cleanup(func() { _ = os.Remove(canary) })
+
+	if rr := read("--output=/tmp/pwt-pwn"); rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for an option-shaped ref in a worktree read, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(canary); err == nil {
+		t.Error("injection succeeded in the worktree branch: /tmp/pwt-pwn:f.txt was created")
+	}
+
+	// A valid ref still resolves inside the worktree's history.
+	sha := mustRunGitOutput(t, worktreePath, "rev-parse", "HEAD")
+	for _, ref := range []string{"HEAD", sha, "task/" + taskID} {
+		rr := read(ref)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("ref %q: expected 200, got %d: %s", ref, rr.Code, rr.Body.String())
+		}
+		var resp fsReadResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("ref %q: decode: %v", ref, err)
+		}
+		if resp.Content != "worktree commit\n" {
+			t.Errorf("ref %q: got %q, want the worktree commit content", ref, resp.Content)
+		}
 	}
 }
