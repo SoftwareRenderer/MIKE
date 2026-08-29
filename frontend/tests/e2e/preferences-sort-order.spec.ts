@@ -2,14 +2,14 @@ import { test, expect, type Page } from '@playwright/test';
 import { apiPutConfig, apiGetConfig, waitForConfig, getProjectId, createTaskViaApi, csrfFetch } from './helpers';
 
 // Board sort direction (Settings → Preferences → UI). By default the card moved most
-// recently sits on top of its column; "Oldest moved on top" flips that. The preference
+// recently sits on top of its column; "Oldest Task on top" flips that. The preference
 // persists server-side (sort_oldest_first in /api/config).
 //
 // Runs in the `isolated` project: mutates server config via the UI Save flow.
 
 const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';
 const PREFERENCES_TAB = 'button.tab-btn:has-text("Preferences")';
-const SORT_TOGGLE = 'button[aria-label="Oldest moved on top"]';
+const SORT_TOGGLE = 'button[aria-label="Oldest Task on top"]';
 const SAVE_BTN = 'button.btn-primary[title="Save settings"]';
 const REVIEW_COLUMN = 2;
 

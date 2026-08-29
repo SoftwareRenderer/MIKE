@@ -415,7 +415,7 @@ describe('PreferencesTab start-task row', () => {
 });
 
 describe('PreferencesTab board sort toggle', () => {
-    const TOGGLE = 'button[aria-label="Oldest moved on top"]';
+    const TOGGLE = 'button[aria-label="Oldest Task on top"]';
 
     function renderSortTab(props: { sortOldestFirst?: boolean } = {}) {
         const onDirty = vi.fn();
