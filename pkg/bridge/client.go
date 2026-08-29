@@ -35,23 +35,17 @@ func (c *pipeConn) SetWriteDeadline(t time.Time) error { return nil }
 // Client connects to a sandbox bridge.
 // It handles request/response correlation and chunk streaming.
 type Client struct {
-	mu       sync.Mutex
-	writeMu  sync.Mutex // serializes writes to conn (see writeFrame)
-	conn     net.Conn
-	nextID   atomic.Uint32
-	pending  map[uint32]*pendingReq
-	sessions map[uint32]*shellSessionState // sessionID → shell state
+	mu      sync.Mutex
+	writeMu sync.Mutex // serializes writes to conn (see writeFrame)
+	conn    net.Conn
+	nextID  atomic.Uint32
+	pending map[uint32]*pendingReq
+
 	readDone chan struct{}
 	closed   bool
 	// lspNotificationCh receives LSP server notifications (e.g., publishDiagnostics)
 	// forwarded from the sandbox bridge.
 	lspNotificationCh chan json.RawMessage
-}
-
-// shellSessionState tracks a persistent shell session.
-type shellSessionState struct {
-	outputCh chan []byte   // output chunks arrive here
-	done     chan struct{} // closed when session ends
 }
 
 // pendingReq tracks an in-flight request.
@@ -85,7 +79,6 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser) *Client {
 	c := &Client{
 		conn:              conn,
 		pending:           make(map[uint32]*pendingReq),
-		sessions:          make(map[uint32]*shellSessionState),
 		readDone:          make(chan struct{}),
 		lspNotificationCh: make(chan json.RawMessage, 64),
 	}
@@ -143,7 +136,7 @@ func (c *Client) writeFrame(frame *protocol.Frame) error {
 }
 
 // readLoop reads frames from the connection and dispatches them to pending requests
-// and shell sessions.
+// and LSP notifications.
 func (c *Client) readLoop() {
 	defer func() {
 		c.mu.Lock()
@@ -160,10 +153,6 @@ func (c *Client) readLoop() {
 			p.closeChunk()
 			p.closeDone()
 		}
-		// Close all shell sessions
-		for _, s := range c.sessions {
-			close(s.outputCh)
-		}
 		c.mu.Unlock()
 	}()
 
@@ -176,7 +165,6 @@ func (c *Client) readLoop() {
 		c.mu.Lock()
 
 		p, isPending := c.pending[frame.MsgID]
-		s, isShell := c.sessions[frame.MsgID]
 
 		if isPending {
 			switch frame.Type {
@@ -197,29 +185,6 @@ func (c *Client) readLoop() {
 			continue
 		}
 
-		// Check shell sessions (chunks use sessionID as MsgID)
-		if isShell && frame.Type == protocol.TypeChunk {
-			chunk, err := protocol.ParseShellChunk(frame.Payload)
-			if err != nil {
-				c.mu.Unlock()
-				continue
-			}
-			// Empty data = session closed signal
-			if len(chunk.Data) == 0 {
-				close(s.outputCh)
-				delete(c.sessions, frame.MsgID)
-				c.mu.Unlock()
-				continue
-			}
-			select {
-			case s.outputCh <- chunk.Data:
-			default:
-				log.Printf("[sandbox/client] shell output channel full for session %d", frame.MsgID)
-			}
-			c.mu.Unlock()
-			continue
-		}
-
 		// Handle LSP notifications (e.g., publishDiagnostics)
 		if frame.Type == protocol.TypeNotification && frame.MsgID == 0 {
 			select {
@@ -234,12 +199,6 @@ func (c *Client) readLoop() {
 
 		log.Printf("[sandbox/client] unhandled frame MsgID=%d Type=%s", frame.MsgID, protocol.MessageTypeName(frame.Type))
 	}
-}
-
-// waitFor sends a request and waits for the final Result/Error frame.
-// Returns the final frame and any chunks received.
-func (c *Client) waitFor(frame *protocol.Frame, timeout time.Duration) (*protocol.Frame, []*protocol.Frame, error) {
-	return c.waitForCtx(context.Background(), frame, timeout)
 }
 
 func (c *Client) waitForCtx(ctx context.Context, frame *protocol.Frame, timeout time.Duration) (*protocol.Frame, []*protocol.Frame, error) {
@@ -550,86 +509,6 @@ func (c *Client) Bash(ctx context.Context, command string, timeout int64) (*Bash
 	return holder, nil
 }
 
-// ShellOpen starts a new shell session in the sandbox.
-// Returns a session ID for subsequent ShellIO/ShellResize/ShellClose calls.
-func (c *Client) ShellOpen(shell string, rows, cols uint16) (uint32, error) {
-	params, _ := json.Marshal(protocol.ShellOpenParams{Shell: shell, Rows: rows, Cols: cols})
-	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodShellOpen, params)
-
-	final, _, err := c.waitFor(frame, 0)
-	if err != nil {
-		return 0, err
-	}
-	if final.Type == protocol.TypeError {
-		return 0, errors.New(final.ErrorMsg())
-	}
-
-	result, err := protocol.ParseShellOpenResult(final.Payload)
-	if err != nil {
-		return 0, fmt.Errorf("parse shell_open result: %w", err)
-	}
-
-	// Register session for chunk routing
-	c.mu.Lock()
-	c.sessions[result.SessionID] = &shellSessionState{
-		outputCh: make(chan []byte, 128),
-		done:     make(chan struct{}),
-	}
-	c.mu.Unlock()
-
-	return result.SessionID, nil
-}
-
-// ShellIO sends input to a shell session.
-func (c *Client) ShellIO(sessionID uint32, input []byte) error {
-	frame := protocol.NewShellIORequest(c.nextMsgID(), sessionID, input)
-	return c.writeFrame(frame)
-}
-
-// ShellOutput returns an io.Reader that yields shell output for a session.
-func (c *Client) ShellOutput(sessionID uint32) io.Reader {
-	c.mu.Lock()
-	s := c.sessions[sessionID]
-	c.mu.Unlock()
-
-	if s == nil {
-		pr, pw := io.Pipe()
-		_ = pw.Close()
-		return pr
-	}
-
-	pr, pw := io.Pipe()
-	go func() {
-		for data := range s.outputCh {
-			if len(data) == 0 {
-				break
-			}
-			_, _ = pw.Write(data)
-		}
-		pw.Close()
-	}()
-	return pr
-}
-
-// ShellResize resizes a shell session's PTY.
-func (c *Client) ShellResize(sessionID uint32, rows, cols uint16) error {
-	frame := protocol.NewShellResizeRequest(c.nextMsgID(), sessionID, rows, cols)
-	return c.writeFrame(frame)
-}
-
-// ShellClose terminates a shell session.
-func (c *Client) ShellClose(sessionID uint32) error {
-	c.mu.Lock()
-	if s, ok := c.sessions[sessionID]; ok {
-		close(s.outputCh)
-		delete(c.sessions, sessionID)
-	}
-	c.mu.Unlock()
-
-	frame := protocol.NewShellCloseRequest(c.nextMsgID(), sessionID)
-	return c.writeFrame(frame)
-}
-
 // LSPSend sends a raw JSON-RPC message to the LSP server and waits for the response.
 // The raw parameter is the raw JSON-RPC message bytes.
 // Returns the raw JSON-RPC response bytes.
@@ -691,7 +570,9 @@ func (c *Client) Ping(ctx context.Context) error {
 	return err
 }
 
-// Close closes the client connection and all shell sessions.
+// Close closes the client connection. The readLoop's own shutdown delivers
+// errors to any requests still in flight, so Close only has to mark the client
+// closed (which fails fast for later calls) and drop the pipes.
 func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -699,10 +580,5 @@ func (c *Client) Close() error {
 		return nil
 	}
 	c.closed = true
-	// Close all shell sessions
-	for _, s := range c.sessions {
-		close(s.outputCh)
-	}
-	c.sessions = nil
 	return c.conn.Close()
 }

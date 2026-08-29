@@ -247,21 +247,14 @@ func leafIsValid(certPath, keyPath string, ca *certificateAuthority, dnsNames []
 	if err := leaf.CheckSignatureFrom(ca.cert); err != nil {
 		return false
 	}
-	return sameNames(leaf.DNSNames, dnsNames) && sameIPs(leaf.IPAddresses, ips)
+	return sanNamesMatch(leaf, dnsNames, ips)
 }
 
-// leafSANsMatch reports whether the certificate at certPath carries exactly the
-// given subject alternative names (order-independent). A missing or unparseable
-// certificate never matches.
-func leafSANsMatch(certPath string, dnsNames []string, ips []net.IP) bool {
-	pem, err := os.ReadFile(certPath)
-	if err != nil {
-		return false
-	}
-	leaf, err := parseCertificatePEM(pem)
-	if err != nil {
-		return false
-	}
+// sanNamesMatch reports whether a leaf certificate carries exactly the given
+// subject alternative names (order-independent, per kind). The leaf is compared
+// against the names collectLeafNames would issue today, so any host rename or
+// interface change reads as a mismatch and triggers a re-issue.
+func sanNamesMatch(leaf *x509.Certificate, dnsNames []string, ips []net.IP) bool {
 	return sameNames(leaf.DNSNames, dnsNames) && sameIPs(leaf.IPAddresses, ips)
 }
 

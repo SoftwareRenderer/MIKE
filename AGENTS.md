@@ -20,7 +20,9 @@ gVisor (`runsc`) is required for project sandboxing — task tool calls and term
 - **Plan mode's bash restriction is advisory by design** (prompt text in `prompts/plan-mode.tmpl`, not an executor-enforced allowlist): a read-only worktree mount + the sandbox is what actually holds a planning turn, so the wording guides the model rather than pretending to gate it.
 
 ### Sandbox Bridge
-`sandbox-bridge` is a static Go binary that runs inside each sandbox container and services tool calls (read, write, edit, bash, shell) over **the stdin/stdout of one `podman exec -i … /sandbox-bridge` per sandbox** — the process (and its connection) lives for the sandbox's lifetime, so tool calls don't pay for a `podman exec` each. There is **no listener and no port**: the agent (`pkg/bridge/agent/main.go`) wraps `os.Stdin`/`os.Stdout` in a `net.Conn` shim (`stdioConn`), the host side (`backend/sandbox/sandbox.go` → `sandbox.NewClient(stdin, stdout)`) speaks the same framing into those pipes, and nothing in the repo calls `net.Dial`. Logging goes to stderr only.
+`sandbox-bridge` is a static Go binary that runs inside each sandbox container and services tool calls (read, write, edit, bash — plus a `bash_cancel` notification and the LSP JSON-RPC passthrough) over **the stdin/stdout of one `podman exec -i … /sandbox-bridge` per sandbox** — the process (and its connection) lives for the sandbox's lifetime, so tool calls don't pay for a `podman exec` each. There is **no listener and no port**: the agent (`pkg/bridge/agent/main.go`) wraps `os.Stdin`/`os.Stdout` in a `net.Conn` shim (`stdioConn`), the host side (`backend/sandbox/sandbox.go` → `sandbox.NewClient(stdin, stdout)`) speaks the same framing into those pipes, and nothing in the repo calls `net.Dial`. Logging goes to stderr only.
+
+Interactive terminals do **not** go through the bridge: `sandbox.SandboxManager.startShell` runs `podman exec -it <container> <shell>` with a host-side PTY (`backend/term/terminal.go`), which is why the bridge protocol has no shell methods. Wire method IDs `0x05`-`0x08` are retired (they were `shell_open`/`shell_io`/`shell_resize`/`shell_close`) and must not be reused, so a stale bridge binary gets a clean "unknown method" error instead of a wrong handler.
 
 The only `-p` publishing on a sandbox container is for **user-configured** forwarded ports (`project.ForwardPorts` / an extension's `forward_ports`), never for the bridge; `forwardPortSpec` binds the host side to `127.0.0.1` so a container's listener is never exposed on the LAN. Container ports outside 1-65535 are skipped.
 
@@ -160,7 +162,7 @@ Stale processes hold the ports (symptom: `ERR_CONNECTION_REFUSED`, or a stale TL
 
 ### Client-Server Boundary
 - **The frontend ONLY communicates through the Go server** (`localhost:3000/api/...`). It never calls the LLM endpoint directly — all LLM traffic (chat, model listing, e.g. `POST /api/config/fetch-models`) is proxied through Go.
-- All real-time communication is WebSocket through the Go server. Client sends `{"type": "user_message", "data": {"content": "..."}}`; `WSMessage.Data` is `json.RawMessage` in Go → parsed JS value in the browser. Use optimistic UI for user messages (add immediately, skip the echo).
+- All real-time communication is WebSocket through the Go server. Client sends `{"type": "user_message", "data": {"content": "..."}}`; the inbound envelope is `stream.AppStreamMessage` (`Data` is `json.RawMessage`) → parsed JS value in the browser. **Outbound** frames are flat maps built where they are broadcast (no shared envelope struct in Go) — a `task_event` carries `task_id`/`event` beside `data`, so the client reads `msg.task_id`, not `msg.data.task_id`. Use optimistic UI for user messages (add immediately, skip the echo).
 - Model/provider changes ride a `user_message` with optional `model_name`/`llama_server_url` fields.
 
 ### Sessions & Auth
@@ -237,6 +239,8 @@ NEVER commit. The user will commit manually.
 - `frontend/src/lib/services/extension-manager.svelte.ts`, `ui-injector.svelte.ts`; `$lib/api/extensions.ts`; `ConfigModal/ExtensionsTab.svelte`
 
 **REST:** `/api/extensions` (list/get/update/delete), `PATCH /{id}/enabled`, `/registry`, `/install`, `/check-updates`, `/{id}/logs`, `/build-progress` (SSE), plus the preview endpoints below.
+
+**LSP capability gates** (`manifest.capabilities.lsp`, both default to enabled when unset, both toggled per extension in Settings → Extensions): `editor_enabled` gates the *browser's* LSP features (diagnostics, completions, go-to-definition) — the server only stores and serves the flag, and `extension-manager.getEditorLSPExtensions()` is what actually filters (`getLSPForFile` → the editor's LSP connection). `tool_calls_enabled` gates the *agent's* LSP tools and is enforced server-side (`ExtensionRegistry.IsToolCallsEnabledForFile`, checked by the executor before an LSP tool runs). The two are independent: an extension can serve the editor without exposing tools to the model, or the reverse.
 
 **UI injection:** extensions activate per scope; components call `renderSlot(scope, context)` on mount. Scopes → components: `task-card`→Card, `file-editor`→FileEditor, `project-board`→Board, `task-chat`→TaskChat, `project-sidebar`→Sidebar, `file-browser`→dir picker modal, `create-task`→CreateTaskModal.
 

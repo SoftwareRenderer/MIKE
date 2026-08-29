@@ -50,15 +50,6 @@ var deniedCapabilities = map[string]string{
 	"LINUX_IMMUTABLE": "mounts read-only bind mounts read-write",
 }
 
-// deniedCapabilityNames lists the denied capability names in map order.
-func deniedCapabilityNames() []string {
-	names := make([]string, 0, len(deniedCapabilities))
-	for name := range deniedCapabilities {
-		names = append(names, name)
-	}
-	return names
-}
-
 // MountPolicy is an allowlist of host roots an extension sandbox may
 // bind-mount from. A nil policy is valid and fails closed: nothing is inside an
 // empty allowlist.

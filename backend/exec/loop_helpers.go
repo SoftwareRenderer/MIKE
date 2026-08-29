@@ -2,10 +2,8 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"kanban/backend/llama"
@@ -514,41 +512,10 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 // userMessageToChatMessage converts a UserMessage (with optional image attachments)
 // into a ChatMessage. If attachments are present, builds multi-modal ContentParts.
 func userMessageToChatMessage(um stream.UserMessage) types.ChatMessage {
-	if um.Attachments == "" {
-		return types.ChatMessage{Role: "user", Content: um.Content}
+	if parts, ok := types.ContentParts(um.Content, um.Attachments); ok {
+		return types.ChatMessage{Role: "user", ContentParts: parts}
 	}
-
-	var atts []struct {
-		MimeType string `json:"mimeType"`
-		Data     string `json:"data"`
-	}
-	if err := json.Unmarshal([]byte(um.Attachments), &atts); err != nil {
-		return types.ChatMessage{Role: "user", Content: um.Content}
-	}
-
-	parts := []types.ContentPart{{Type: "text", Text: um.Content}}
-	for _, att := range atts {
-		if att.Data == "" {
-			continue
-		}
-		mediaType := att.MimeType
-		if mediaType == "" {
-			mediaType = "image/png"
-		}
-		base64Data := att.Data
-		if idx := strings.Index(base64Data, ","); idx >= 0 {
-			base64Data = base64Data[idx+1:]
-		}
-		parts = append(parts, types.ContentPart{
-			Type: "image",
-			ImageSource: &struct {
-				Type      string `json:"type"`
-				MediaType string `json:"media_type"`
-				Data      string `json:"data"`
-			}{Type: "base64", MediaType: mediaType, Data: base64Data},
-		})
-	}
-	return types.ChatMessage{Role: "user", ContentParts: parts}
+	return types.ChatMessage{Role: "user", Content: um.Content}
 }
 
 // handleLoopDetected processes a detected loop: increments the consecutive loop counter,

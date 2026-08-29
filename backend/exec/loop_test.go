@@ -18,6 +18,8 @@ import (
 	"kanban/backend/store"
 	"kanban/backend/stream"
 	"kanban/backend/types"
+
+	"github.com/coder/websocket"
 )
 
 // --- Phrase Detector Tests ---
@@ -457,36 +459,124 @@ func TestHandleLoopDetected_HintBroadcastCarriesMessageID(t *testing.T) {
 
 	// The broadcast frame must carry the same message ID so the frontend can
 	// dedupe the real-time entry against the DB entry on history reload.
-	frames := e.appStreamMgr.GetTaskBuffer(proj.ID, task.ID)
-	var found bool
-	for _, frame := range frames {
-		var payload struct {
-			Type   string         `json:"type"`
-			Event  string         `json:"event"`
-			TaskID string         `json:"task_id"`
-			Data   map[string]any `json:"data"`
-		}
-		if err := json.Unmarshal(frame, &payload); err != nil {
-			continue
-		}
-		if payload.Event != "hint" {
-			continue
-		}
-		found = true
-		if payload.Data["id"] != hintMsg.ID {
-			t.Errorf("hint broadcast id = %v, want %s", payload.Data["id"], hintMsg.ID)
-		}
-		if payload.Data["content"] != hintMsg.Content {
-			t.Errorf("hint broadcast content = %v, want %s", payload.Data["content"], hintMsg.Content)
-		}
-	}
+	hintFrame, found := findTaskStreamEvent(taskStreamFrames(t, e.appStreamMgr, proj.ID, task.ID), "hint")
 	if !found {
-		t.Fatal("no hint broadcast frame found in task buffer")
+		t.Fatal("no hint broadcast frame received")
+	}
+	if hintFrame.Data["id"] != hintMsg.ID {
+		t.Errorf("hint broadcast id = %v, want %s", hintFrame.Data["id"], hintMsg.ID)
+	}
+	if hintFrame.Data["content"] != hintMsg.Content {
+		t.Errorf("hint broadcast content = %v, want %s", hintFrame.Data["content"], hintMsg.Content)
 	}
 }
 
 // TestSendRetryHint_SystemRole: retry notification persists as a system message
 // and the hint broadcast carries role "system".
+// taskStreamFrame is one task_event frame as a subscriber receives it on the
+// wire (the flat envelope built by stream.TaskEventPayload).
+type taskStreamFrame struct {
+	Type   string         `json:"type"`
+	Event  string         `json:"event"`
+	TaskID string         `json:"task_id"`
+	Data   map[string]any `json:"data"`
+}
+
+// taskStreamFrames captures what a task subscriber receives, using the real
+// stream WebSocket: subscribe_task makes the server replay the task's frame
+// buffer through the same path a reconnecting browser takes. A flush event is
+// sent after subscribing so the read has a definite end — its arrival proves the
+// subscription was applied — plus a short drain for the replayed frames.
+func taskStreamFrames(t *testing.T, asm *stream.AppStreamManager, projectID, taskID string) []taskStreamFrame {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial stream: %v", err)
+	}
+	defer conn.CloseNow()
+
+	sub, _ := json.Marshal(map[string]any{
+		"type": "subscribe_task",
+		"data": map[string]string{"project_id": projectID, "task_id": taskID},
+	})
+	if err := conn.Write(ctx, websocket.MessageText, sub); err != nil {
+		t.Fatalf("subscribe_task: %v", err)
+	}
+
+	const flushText = "__stream_capture_flush__"
+	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{
+		Type: types.WSTypeToken,
+		Data: map[string]string{"text": flushText},
+	})
+
+	// readOne classifies the next frame. A read whose context expired closes the
+	// connection (coder/websocket semantics), so it ends the capture.
+	type readOutcome int
+	const (
+		readClosed readOutcome = iota
+		readSkip
+		readFrame
+		readFlush
+	)
+	readOne := func(rctx context.Context) (taskStreamFrame, readOutcome) {
+		_, raw, err := conn.Read(rctx)
+		if err != nil {
+			return taskStreamFrame{}, readClosed
+		}
+		var frame taskStreamFrame
+		if json.Unmarshal(raw, &frame) != nil || frame.Type != "task_event" {
+			return taskStreamFrame{}, readSkip // project_counts and friends
+		}
+		if frame.Event == string(types.WSTypeToken) && frame.Data["text"] == flushText {
+			return taskStreamFrame{}, readFlush
+		}
+		return frame, readFrame
+	}
+
+	var frames []taskStreamFrame
+	for {
+		frame, outcome := readOne(ctx)
+		switch outcome {
+		case readFrame:
+			frames = append(frames, frame)
+		case readSkip:
+			continue
+		case readClosed:
+			return frames
+		case readFlush:
+			// The replay goroutine writes the whole buffer under one writeMu hold,
+			// but it can lose that race to the flush event's write. Drain briefly so
+			// a late replay still lands before the capture ends.
+			for {
+				drainCtx, cancelDrain := context.WithTimeout(ctx, 500*time.Millisecond)
+				late, lateOutcome := readOne(drainCtx)
+				cancelDrain()
+				if lateOutcome != readFrame {
+					return frames
+				}
+				frames = append(frames, late)
+			}
+		}
+	}
+}
+
+// findTaskStreamEvent returns the first captured frame for the named event.
+func findTaskStreamEvent(frames []taskStreamFrame, event string) (taskStreamFrame, bool) {
+	for _, f := range frames {
+		if f.Event == event {
+			return f, true
+		}
+	}
+	return taskStreamFrame{}, false
+}
+
 func TestSendRetryHint_SystemRole(t *testing.T) {
 	e := newTestExecutor(t)
 	now := time.Now().UTC()
@@ -525,34 +615,18 @@ func TestSendRetryHint_SystemRole(t *testing.T) {
 	}
 
 	// The broadcast frame must carry the same message ID plus role "system".
-	frames := e.appStreamMgr.GetTaskBuffer(proj.ID, task.ID)
-	var found bool
-	for _, frame := range frames {
-		var payload struct {
-			Type   string         `json:"type"`
-			Event  string         `json:"event"`
-			TaskID string         `json:"task_id"`
-			Data   map[string]any `json:"data"`
-		}
-		if err := json.Unmarshal(frame, &payload); err != nil {
-			continue
-		}
-		if payload.Event != "hint" {
-			continue
-		}
-		found = true
-		if payload.Data["id"] != msgs[0].ID {
-			t.Errorf("hint broadcast id = %v, want %s", payload.Data["id"], msgs[0].ID)
-		}
-		if payload.Data["role"] != "system" {
-			t.Errorf("hint broadcast role = %v, want \"system\"", payload.Data["role"])
-		}
-		if payload.Data["content"] != msgs[0].Content {
-			t.Errorf("hint broadcast content = %v, want %s", payload.Data["content"], msgs[0].Content)
-		}
-	}
+	hintFrame, found := findTaskStreamEvent(taskStreamFrames(t, e.appStreamMgr, proj.ID, task.ID), "hint")
 	if !found {
-		t.Fatal("no hint broadcast frame found in task buffer")
+		t.Fatal("no hint broadcast frame received")
+	}
+	if hintFrame.Data["id"] != msgs[0].ID {
+		t.Errorf("hint broadcast id = %v, want %s", hintFrame.Data["id"], msgs[0].ID)
+	}
+	if hintFrame.Data["role"] != "system" {
+		t.Errorf("hint broadcast role = %v, want \"system\"", hintFrame.Data["role"])
+	}
+	if hintFrame.Data["content"] != msgs[0].Content {
+		t.Errorf("hint broadcast content = %v, want %s", hintFrame.Data["content"], msgs[0].Content)
 	}
 }
 
@@ -3403,11 +3477,7 @@ func TestRemoveDuplicateUserMessage_DifferentContent(t *testing.T) {
 }
 
 func TestRemoveDuplicateUserMessage_ContentPartsSameText(t *testing.T) {
-	imgSource := &struct {
-		Type      string `json:"type"`
-		MediaType string `json:"media_type"`
-		Data      string `json:"data"`
-	}{Type: "base64", MediaType: "image/png", Data: "abc123"}
+	imgSource := &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}
 
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "prompt"},
@@ -3430,11 +3500,7 @@ func TestRemoveDuplicateUserMessage_ContentPartsSameText(t *testing.T) {
 }
 
 func TestRemoveDuplicateUserMessage_ContentPartsDifferentText(t *testing.T) {
-	imgSource := &struct {
-		Type      string `json:"type"`
-		MediaType string `json:"media_type"`
-		Data      string `json:"data"`
-	}{Type: "base64", MediaType: "image/png", Data: "abc123"}
+	imgSource := &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}
 
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "prompt"},
@@ -3457,11 +3523,7 @@ func TestRemoveDuplicateUserMessage_ContentPartsDifferentText(t *testing.T) {
 }
 
 func TestRemoveDuplicateUserMessage_ContentPartsDifferentCount(t *testing.T) {
-	imgSource := &struct {
-		Type      string `json:"type"`
-		MediaType string `json:"media_type"`
-		Data      string `json:"data"`
-	}{Type: "base64", MediaType: "image/png", Data: "abc123"}
+	imgSource := &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}
 
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "prompt"},
@@ -3483,11 +3545,7 @@ func TestRemoveDuplicateUserMessage_ContentPartsDifferentCount(t *testing.T) {
 }
 
 func TestRemoveDuplicateUserMessage_MixedPlainAndContentParts(t *testing.T) {
-	imgSource := &struct {
-		Type      string `json:"type"`
-		MediaType string `json:"media_type"`
-		Data      string `json:"data"`
-	}{Type: "base64", MediaType: "image/png", Data: "abc123"}
+	imgSource := &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}
 
 	messages := []types.ChatMessage{
 		{Role: "system", Content: "prompt"},

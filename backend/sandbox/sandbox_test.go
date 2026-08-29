@@ -454,31 +454,6 @@ func TestCreate_ValidImageRefPassesValidation(t *testing.T) {
 	}
 }
 
-func TestHasActiveContainer(t *testing.T) {
-	sm := &SandboxManager{
-		active:     make(map[string]string),
-		mountPaths: make(map[string]string),
-		agents:     make(map[string]*agentConn),
-		available:  true,
-	}
-
-	// Empty map — no containers running
-	if sm.HasActiveContainer("task-1") {
-		t.Error("expected HasActiveContainer to return false for unknown task")
-	}
-
-	// Simulate an active container
-	sm.active["task-2"] = "sandbox-task-2"
-	if !sm.HasActiveContainer("task-2") {
-		t.Error("expected HasActiveContainer to return true for active task")
-	}
-
-	// Other tasks should still be false
-	if sm.HasActiveContainer("task-3") {
-		t.Error("expected HasActiveContainer to return false for non-active task")
-	}
-}
-
 func TestContainerIsRunning_Cache(t *testing.T) {
 	sm := &SandboxManager{
 		active:        make(map[string]string),
@@ -553,18 +528,14 @@ func TestStopProjectContainers(t *testing.T) {
 	sm.StopProjectContainers("proj-A", []string{"task-a1", "task-a2"})
 
 	// Project A containers should be stopped (removed from active map)
-	if sm.HasActiveContainer("task-a1") {
-		t.Error("expected task-a1 container to be stopped")
-	}
-	if sm.HasActiveContainer("task-a2") {
-		t.Error("expected task-a2 container to be stopped")
-	}
-	if sm.HasActiveContainer("proj:proj-A") {
-		t.Error("expected project-level container to be stopped")
+	for _, taskID := range []string{"task-a1", "task-a2", "proj:proj-A"} {
+		if _, tracked := sm.active[taskID]; tracked {
+			t.Errorf("expected %s container to be stopped", taskID)
+		}
 	}
 
 	// Project B container should still be running
-	if !sm.HasActiveContainer("task-b1") {
+	if _, tracked := sm.active["task-b1"]; !tracked {
 		t.Error("expected task-b1 container to still be running (different project)")
 	}
 }

@@ -61,7 +61,6 @@ func bytesContains(haystack, needle []byte) bool {
 
 const (
 	DefaultBufferSize = 5000
-	MaxBufferSize     = 20000
 )
 
 // UserMessage carries a user message with optional model override.
@@ -179,13 +178,6 @@ func (asm *AppStreamManager) SetLazyStartHandler(h LazyStartHandler) {
 	asm.lazyMu.Lock()
 	defer asm.lazyMu.Unlock()
 	asm.lazyStartHandler = h
-}
-
-// GetLazyStartHandler returns the current lazy start handler.
-func (asm *AppStreamManager) GetLazyStartHandler() LazyStartHandler {
-	asm.lazyMu.RLock()
-	defer asm.lazyMu.RUnlock()
-	return asm.lazyStartHandler
 }
 
 // WatchWorktree starts filesystem monitoring for a task's worktree.
@@ -373,39 +365,57 @@ func (asm *AppStreamManager) unsubscribeTask(conn *websocket.Conn, projectID, ta
 func (asm *AppStreamManager) hasProjectSubscribers(projectID string) bool {
 	asm.mu.RLock()
 	defer asm.mu.RUnlock()
-	for _, client := range asm.clients {
-		if count, ok := client.projectSub[projectID]; ok && count > 0 {
-			return true
-		}
-	}
-	return false
+	return len(asm.subscribers(projectSubs, projectID)) > 0
 }
 
-// hasTaskSubscribers reports whether any client holds a task subscription.
-// No production caller: TestTaskEventDelivery uses it as the observable for
-// sendTaskPayload's subscription gating.
-func (asm *AppStreamManager) hasTaskSubscribers(projectID, taskID string) bool {
-	asm.mu.RLock()
-	defer asm.mu.RUnlock()
-	key := projectID + ":" + taskID
+// subField selects one of a client's subscription maps (project- or
+// task-scoped), so the fan-out helpers below stay single-purpose.
+type subField func(*clientState) map[string]int
+
+var (
+	projectSubs subField = func(c *clientState) map[string]int { return c.projectSub }
+	taskSubs    subField = func(c *clientState) map[string]int { return c.taskSub }
+)
+
+// subscribers returns the connected clients holding an active (>0) count for
+// key in the chosen subscription map. Callers must hold at least asm.mu.RLock().
+func (asm *AppStreamManager) subscribers(field subField, key string) []*clientState {
+	targets := make([]*clientState, 0, len(asm.clients))
 	for _, client := range asm.clients {
-		if count, ok := client.taskSub[key]; ok && count > 0 {
-			return true
+		if count, ok := field(client)[key]; ok && count > 0 {
+			targets = append(targets, client)
 		}
 	}
-	return false
+	return targets
+}
+
+// allClients snapshots the connected clients. Callers must hold at least
+// asm.mu.RLock(); the snapshot lets per-client writes run lock-free.
+func (asm *AppStreamManager) allClients() []*clientState {
+	targets := make([]*clientState, 0, len(asm.clients))
+	for _, client := range asm.clients {
+		targets = append(targets, client)
+	}
+	return targets
+}
+
+// writeFrame delivers a marshalled frame to each target. Per-client writeMu
+// serialises this with the keepalive pinger and the replay goroutines.
+func (asm *AppStreamManager) writeFrame(targets []*clientState, frame []byte) {
+	for _, client := range targets {
+		client.writeMu.Lock()
+		if err := client.conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
+			// Client disconnected; its read loop removes it from asm.clients.
+		}
+		client.writeMu.Unlock()
+	}
 }
 
 // -- Broadcast methods --
 
 func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 	asm.mu.RLock()
-	targets := make([]*clientState, 0)
-	for _, client := range asm.clients {
-		if count, ok := client.projectSub[projectID]; ok && count > 0 {
-			targets = append(targets, client)
-		}
-	}
+	targets := asm.subscribers(projectSubs, projectID)
 	asm.mu.RUnlock()
 
 	frame, err := json.Marshal(payload)
@@ -413,13 +423,7 @@ func (asm *AppStreamManager) sendBoardPayload(projectID string, payload any) {
 		return
 	}
 
-	for _, client := range targets {
-		client.writeMu.Lock()
-		if err := client.conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
-			// Client disconnected, will be cleaned up
-		}
-		client.writeMu.Unlock()
-	}
+	asm.writeFrame(targets, frame)
 
 	// Buffer for reconnect sync
 	asm.bufferRaw(frame)
@@ -456,14 +460,9 @@ func (asm *AppStreamManager) SendTaskEvent(projectID, taskID string, event types
 }
 
 func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload any) {
-	asm.mu.RLock()
-	targets := make([]*clientState, 0)
 	key := projectID + ":" + taskID
-	for _, client := range asm.clients {
-		if count, ok := client.taskSub[key]; ok && count > 0 {
-			targets = append(targets, client)
-		}
-	}
+	asm.mu.RLock()
+	targets := asm.subscribers(taskSubs, key)
 	asm.mu.RUnlock()
 
 	frame, err := json.Marshal(payload)
@@ -471,13 +470,7 @@ func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload a
 		return
 	}
 
-	for _, client := range targets {
-		client.writeMu.Lock()
-		if err := client.conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
-			// Client disconnected
-		}
-		client.writeMu.Unlock()
-	}
+	asm.writeFrame(targets, frame)
 
 	// Buffer for reconnect sync (per-client and per-task)
 	asm.bufferRaw(frame)
@@ -487,19 +480,9 @@ func (asm *AppStreamManager) sendTaskPayload(projectID, taskID string, payload a
 // BroadcastAll sends a raw message to all connected clients.
 func (asm *AppStreamManager) BroadcastAll(msg []byte) {
 	asm.mu.RLock()
-	allClients := make([]*clientState, 0, len(asm.clients))
-	for _, client := range asm.clients {
-		allClients = append(allClients, client)
-	}
+	targets := asm.allClients()
 	asm.mu.RUnlock()
-
-	for _, client := range allClients {
-		client.writeMu.Lock()
-		if err := client.conn.Write(context.Background(), websocket.MessageText, msg); err != nil {
-			// Client disconnected
-		}
-		client.writeMu.Unlock()
-	}
+	asm.writeFrame(targets, msg)
 }
 
 // BroadcastProjectCounts computes and broadcasts task counts for all projects.
@@ -652,10 +635,7 @@ func (asm *AppStreamManager) bufferRaw(frame []byte) {
 	}
 	// Collect clients under global lock, then release before per-client writes.
 	asm.mu.RLock()
-	targets := make([]*clientState, 0, len(asm.clients))
-	for _, client := range asm.clients {
-		targets = append(targets, client)
-	}
+	targets := asm.allClients()
 	asm.mu.RUnlock()
 
 	for _, client := range targets {
@@ -762,12 +742,6 @@ func (asm *AppStreamManager) clearTaskBuffer(taskKey string) {
 // ClearTaskBuffer removes the per-task ring buffer.
 func (asm *AppStreamManager) ClearTaskBuffer(projectID, taskID string) {
 	asm.clearTaskBuffer(projectID + ":" + taskID)
-}
-
-// GetTaskBuffer returns the raw frames buffered for a task (replay payloads).
-// Read-only; used by tests to assert task event contents.
-func (asm *AppStreamManager) GetTaskBuffer(projectID, taskID string) [][]byte {
-	return asm.getTaskBuffer(projectID + ":" + taskID)
 }
 
 // resolveTaskDiffBaseline resolves a task's diff baseline the way every path

@@ -41,16 +41,6 @@ const (
 	testUA = "MIKE-test-agent/1.0"
 )
 
-// login signs in with the test password and fails the test on error.
-func login(t *testing.T, m *SessionManager) (id, token, csrfToken string) {
-	t.Helper()
-	id, token, csrfToken, err := m.Login("test-password", testIP, testUA)
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
-	return id, token, csrfToken
-}
-
 // lastSeenOf reads the raw last_seen stamp of a session from the database.
 func lastSeenOf(t *testing.T, m *SessionManager, id string) int64 {
 	t.Helper()

@@ -140,29 +140,7 @@ func (pw *ProjectWatcher) StartEventLoop() {
 func (pw *ProjectWatcher) handleEvent(event fsnotify.Event) {
 	pw.mu.Lock()
 
-	var projectID string
-	if tid, ok := pw.pathCache[event.Name]; ok {
-		projectID = tid
-	} else if tid, ok := pw.pathCache[event.Name+string(filepath.Separator)]; ok {
-		projectID = tid
-	} else {
-		dir := filepath.Dir(event.Name)
-		for {
-			if tid, ok := pw.pathCache[dir]; ok {
-				projectID = tid
-				break
-			}
-			if tid, ok := pw.pathCache[dir+string(filepath.Separator)]; ok {
-				projectID = tid
-				break
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
-	}
+	projectID, _ := lookupWatchedOwner(pw.pathCache, event.Name)
 
 	if projectID == "" {
 		pw.mu.Unlock()

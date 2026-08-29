@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
@@ -22,11 +23,6 @@ func TestClientCompiles(t *testing.T) {
 		_, _ = c.WriteFile(context.Background(), "path", "content")
 		_, _ = c.EditFile(context.Background(), "path", []protocol.Edit{})
 		_, _ = c.Bash(context.Background(), "cmd", 5)
-		_, _ = c.ShellOpen("bash", 40, 120)
-		_ = c.ShellIO(1, []byte("ls\n"))
-		_ = c.ShellOutput(1)
-		_ = c.ShellResize(1, 40, 120)
-		_ = c.ShellClose(1)
 		_ = c.Close()
 	}
 }
@@ -277,6 +273,14 @@ func TestPing(t *testing.T) {
 	})
 }
 
+// TestConcurrentWritesNoCorruption verifies that writeFrame serializes concurrent
+// frame writes. Payloads here are larger than PIPE_BUF, so one frame spans
+// several Write calls on the underlying pipe; without the write lock two
+// goroutines would interleave bytes and corrupt both frames.
+//
+// Frames are sent as bash requests (JSON params), which ParseRequest also
+// validates — a torn frame fails JSON parsing before the payload check, so
+// corruption is caught even earlier.
 func TestConcurrentWritesNoCorruption(t *testing.T) {
 	agentReadPr, agentReadPw := io.Pipe() // client → reader (frames written by client)
 	clientReadPr, _ := io.Pipe()          // reader → client (responses; unused here)
@@ -299,13 +303,20 @@ func TestConcurrentWritesNoCorruption(t *testing.T) {
 			if err != nil {
 				return // pipe closed
 			}
-			params, err := protocol.ParseShellIOParams(frame)
+			req, err := protocol.ParseRequest(frame)
 			if err != nil {
 				recvErr <- fmt.Errorf("corrupted/parse error frame: %v", err)
 				return
 			}
+			var p struct {
+				Payload string `json:"payload"`
+			}
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				recvErr <- fmt.Errorf("corrupted params frame: %v", err)
+				return
+			}
 			seenMu.Lock()
-			seen[string(params.Input)] = true
+			seen[p.Payload] = true
 			seenMu.Unlock()
 		}
 	}()
@@ -317,11 +328,13 @@ func TestConcurrentWritesNoCorruption(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			payload := make([]byte, payloadSize)
-			for j := range payload {
-				payload[j] = byte(i)
+			payload := strings.Repeat(string(rune('a'+i%26)), payloadSize)
+			body, err := json.Marshal(map[string]string{"payload": payload})
+			if err != nil {
+				return
 			}
-			_ = client.ShellIO(uint32(i), payload)
+			frame := protocol.NewRequest(uint32(i+1), protocol.MethodBash, body)
+			_ = client.writeFrame(frame)
 		}(i)
 	}
 	close(start)

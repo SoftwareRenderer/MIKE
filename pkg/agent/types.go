@@ -68,7 +68,9 @@ type PersistEntry struct {
 	ToolResultJSON   string  `json:"tool_result_json,omitempty"` // JSON of tool result data (role=tool_call)
 }
 
-// Event type constants.
+// Event type constants. This package is a published cross-repo contract: the
+// WASM adapters (see ../MIKE-extensions/agent/*) compile against it, so these
+// exported names have consumers that a scan of this repository cannot see.
 const (
 	EventTypeToken        = "token"
 	EventTypeReasoning    = "reasoning"

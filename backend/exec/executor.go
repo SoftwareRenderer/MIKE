@@ -2157,37 +2157,10 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 			messages = append(messages, types.ChatMessage{Role: "summarization", Content: m.Content})
 			i++
 		case "user":
-			if m.Attachments != "" {
-				var atts []struct {
-					MimeType string `json:"mimeType"`
-					Data     string `json:"data"`
-				}
-				if err := json.Unmarshal([]byte(m.Attachments), &atts); err == nil {
-					parts := []types.ContentPart{{Type: "text", Text: m.Content}}
-					for _, att := range atts {
-						if att.Data != "" {
-							mediaType := att.MimeType
-							if mediaType == "" {
-								mediaType = "image/png"
-							}
-							base64Data := att.Data
-							if idx := strings.Index(base64Data, ","); idx >= 0 {
-								base64Data = base64Data[idx+1:]
-							}
-							parts = append(parts, types.ContentPart{
-								Type: "image",
-								ImageSource: &struct {
-									Type      string `json:"type"`
-									MediaType string `json:"media_type"`
-									Data      string `json:"data"`
-								}{Type: "base64", MediaType: mediaType, Data: base64Data},
-							})
-						}
-					}
-					messages = append(messages, types.ChatMessage{Role: m.Role, ContentParts: parts})
-					i++
-					continue
-				}
+			if parts, ok := types.ContentParts(m.Content, m.Attachments); ok {
+				messages = append(messages, types.ChatMessage{Role: m.Role, ContentParts: parts})
+				i++
+				continue
 			}
 			messages = append(messages, types.ChatMessage{Role: m.Role, Content: m.Content})
 			i++
@@ -2223,19 +2196,8 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 			messages = append(messages, msg)
 			// Add tool results for each tool call.
 			for _, tc := range turnToolCalls {
-				if tc.ToolResult != "" {
-					var resultMap map[string]any
-					if err := json.Unmarshal([]byte(tc.ToolResult), &resultMap); err == nil {
-						output, _ := resultMap["output"].(string)
-						toolID := ""
-						if tc.ToolCalls != "" {
-							var tcMap map[string]any
-							if err2 := json.Unmarshal([]byte(tc.ToolCalls), &tcMap); err2 == nil {
-								toolID, _ = tcMap["tool_id"].(string)
-							}
-						}
-						messages = append(messages, types.ChatMessage{Role: "tool", Content: output, ToolCallID: toolID})
-					}
+				if msg, ok := toolResultMessage(tc); ok {
+					messages = append(messages, msg)
 				}
 			}
 		default:

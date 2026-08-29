@@ -62,8 +62,7 @@ func (h *ProjectHandler) HandleCounts(w http.ResponseWriter, r *http.Request) {
 // HandleCreate creates a new project from a directory path.
 func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	var req types.CreateProjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 	if req.Path == "" {
@@ -216,8 +215,7 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 //	{"type":"error","message":"..."}   — failure, no project created
 func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 	var req types.CreateProjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 	req.Path = strings.TrimSpace(req.Path)
@@ -490,8 +488,7 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPut:
 		var req types.UpdateProjectRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+		if !httputil.DecodeJSON(w, r, &req) {
 			return
 		}
 		// Partial update: apply only provided fields

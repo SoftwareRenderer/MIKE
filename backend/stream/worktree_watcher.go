@@ -252,23 +252,8 @@ func (ww *WorktreeWatcher) handleEvent(event fsnotify.Event) {
 			}
 		}
 		if taskID == "" {
-			// Walk up directory tree to find a cached parent.
-			dir := filepath.Dir(event.Name)
-			for {
-				if tid, ok := ww.pathCache[dir]; ok {
-					taskID = tid
-					break
-				}
-				if tid, ok := ww.pathCache[dir+string(filepath.Separator)]; ok {
-					taskID = tid
-					break
-				}
-				parent := filepath.Dir(dir)
-				if parent == dir {
-					break
-				}
-				dir = parent
-			}
+			// Fall back to a cached ancestor directory of the event.
+			taskID, _ = lookupWatchedOwner(ww.pathCache, event.Name)
 		}
 	}
 
