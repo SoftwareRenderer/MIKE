@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime/trace"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,7 +36,7 @@ func main() {
 
 	// CLI flags
 	port := flag.Int("port", 0, "Server listen port (default: $MIKE_PORT or 3000)")
-	bind := flag.String("bind", "", "Server bind address (default: $MIKE_BIND or all interfaces; e.g. 127.0.0.1 for localhost-only)")
+	bind := flag.String("bind", "", "Server bind address (default: $MIKE_BIND or 127.0.0.1; use 0.0.0.0 or :: to listen on all interfaces)")
 	dataDir := flag.String("data-dir", "", "Data directory for DB, TLS certs, trace files (default: $MIKE_DATA_DIR or ./data)")
 	worktreesDir := flag.String("worktrees-dir", "", "Runtime override for the git worktrees dir (default: $MIKE_WORKTREES_DIR or ./.worktrees)")
 	noTLS := flag.Bool("no-tls", false, "Disable TLS (plain HTTP); overrides $MIKE_TLS")
@@ -94,9 +95,37 @@ func main() {
 		log.Printf("⚠ WARNING: %s is less than 8 characters. A stronger secret is recommended for production use.", name)
 	}
 
-	// Start flight recorder for crash diagnostics (always-on, ~1% overhead)
+	// Bind address: flag > env var > loopback (default).
+	// Loopback by default: the API is RCE-complete (terminal WebSocket, git
+	// operations, filesystem write), so it must never end up on a public
+	// interface by accident. An explicit 0.0.0.0 / :: is the escape hatch for
+	// container / reverse-proxy use and still means all interfaces.
+	effectiveBind := *bind
+	if effectiveBind == "" {
+		effectiveBind = os.Getenv("MIKE_BIND")
+	}
+	if effectiveBind == "" {
+		effectiveBind = defaultBind
+	}
+	addr := listenAddr(effectiveBind, effectivePort)
+	if _, err := net.ResolveTCPAddr("tcp", addr); err != nil {
+		log.Fatalf("Invalid bind address %q (from --bind / MIKE_BIND): %v", addr, err)
+	}
+
+	// A weak master password is fine on loopback (dev flow) but not on an
+	// address other hosts can reach. Checked before any startup side effect
+	// (trace file, TLS material) so a refusal leaves nothing behind.
+	if refusesWeakSecret(effectiveBind, os.Getenv("MIKE_LOGIN_PASSWORD")) {
+		log.Fatalf("Refusing to start: MIKE_LOGIN_PASSWORD is weak (fewer than 8 characters, or a well-known default) while the server listens on %q, which is reachable from other machines. "+
+			"Bind to loopback instead (--bind 127.0.0.1 or MIKE_BIND=127.0.0.1), or set a strong MIKE_LOGIN_PASSWORD of at least 8 characters.",
+			effectiveBind)
+	}
+
+	// Start flight recorder for crash diagnostics (always-on, ~1% overhead).
+	// The trace holds ~30s of runtime memory (request paths, strings that may
+	// appear in arguments), so it is written owner-only.
 	tracePath := filepath.Join(effectiveDataDir, "kanban.trace")
-	traceFile, err := os.Create(tracePath)
+	traceFile, err := openTraceFile(tracePath)
 	if err != nil {
 		log.Fatalf("Failed to create trace file: %v", err)
 	}
@@ -120,7 +149,7 @@ func main() {
 				oldName := tracePath + ".old"
 				_ = os.Rename(tracePath, oldName)
 				// Start fresh trace
-				f, err := os.Create(tracePath)
+				f, err := openTraceFile(tracePath)
 				if err != nil {
 					log.Printf("[trace] rotate: failed to create new trace: %v", err)
 					continue
@@ -149,15 +178,8 @@ func main() {
 		}
 	}
 
-	// Bind address: flag > env var > all interfaces (default, backward compatible)
-	effectiveBind := *bind
-	if effectiveBind == "" {
-		effectiveBind = os.Getenv("MIKE_BIND")
-	}
-	addr := listenAddr(effectiveBind, effectivePort)
-	if _, err := net.ResolveTCPAddr("tcp", addr); err != nil {
-		log.Fatalf("Invalid bind address %q (from --bind / MIKE_BIND): %v", addr, err)
-	}
+	// Bind address was resolved (and validated against the master password)
+	// above, before the flight recorder started.
 
 	srv, err := server.NewServer(dbPath, worktreesOverride, addr, frontendDist, tlsCfg)
 	if err != nil {
@@ -182,12 +204,64 @@ func main() {
 	srv.Shutdown(context.Background())
 }
 
-// listenAddr builds the server listen address from a bind address and port
+// openTraceFile creates (or truncates) a flight-recorder trace file. The trace
+// captures ~30s of runtime internals, so it is created owner-only (0600) — the
+// same posture as the data directory that holds the DB and TLS keys.
+func openTraceFile(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+}
+
+// defaultBind is the bind address used when neither --bind nor MIKE_BIND is
+// set: loopback only, so the (RCE-complete) API is never exposed by default.
+const defaultBind = "127.0.0.1"
+
+// listenAddr builds the server listen address from a bind address and port.
+// An empty bind means loopback; "0.0.0.0"/"::" are the explicit
+// all-interfaces escape hatch (a bare ":port" covers both families).
 func listenAddr(bind string, port int) string {
 	switch bind {
-	case "", "0.0.0.0", "::":
+	case "":
+		return net.JoinHostPort(defaultBind, strconv.Itoa(port))
+	case "0.0.0.0", "::":
 		return fmt.Sprintf(":%d", port)
 	default:
 		return net.JoinHostPort(bind, strconv.Itoa(port))
 	}
+}
+
+// weakPasswords are master passwords that must never guard a non-loopback bind.
+var weakPasswords = map[string]struct{}{
+	"test": {}, "dev": {}, "admin": {}, "password": {}, "pass": {}, "changeme": {},
+}
+
+// minPasswordLength is the minimum master password length accepted on an
+// exposed (non-loopback) bind.
+const minPasswordLength = 8
+
+// isLoopbackBind reports whether a bind address accepts connections from the
+// loopback interface only. "" is the default (loopback); an explicit
+// "0.0.0.0"/"::" or any routable address is not.
+func isLoopbackBind(bind string) bool {
+	b := strings.TrimSpace(bind)
+	if b == "" || strings.EqualFold(b, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(b, "[]"))
+	return ip != nil && ip.IsLoopback()
+}
+
+// refusesWeakSecret is the decision behind the startup check: a weak
+// MIKE_LOGIN_PASSWORD (shorter than minPasswordLength, or a well-known
+// default) is fatal unless the server is bound to loopback only.
+// Loopback + weak stays allowed so the documented dev flow keeps working.
+func refusesWeakSecret(bind, password string) bool {
+	if isLoopbackBind(bind) {
+		return false
+	}
+	pw := strings.TrimSpace(password)
+	if len(pw) < minPasswordLength {
+		return true
+	}
+	_, known := weakPasswords[strings.ToLower(pw)]
+	return known
 }
