@@ -24,10 +24,25 @@ import (
 // edits, async title generation), so a full-row write from the executor's
 // start-time copy would clobber a title that changed while the task was
 // queued or running. Refresh them from the DB first.
+//
+// It cannot start a run; use storeTaskClaiming for that (see Store.UpdateTask).
 func (te *TaskExecutor) storeTask(task *types.Task, projectID string) error {
+	return te.storeTaskWith(task, projectID, false)
+}
+
+// storeTaskClaiming is storeTask for the caller that owns the run: it may put
+// the row into an in-flight execution_state.
+func (te *TaskExecutor) storeTaskClaiming(task *types.Task, projectID string) error {
+	return te.storeTaskWith(task, projectID, true)
+}
+
+func (te *TaskExecutor) storeTaskWith(task *types.Task, projectID string, claim bool) error {
 	if cur, err := te.store.GetTask(projectID, task.ID); err == nil {
 		task.Title = cur.Title
 		task.TitleGenerating = cur.TitleGenerating
+	}
+	if claim {
+		return te.store.UpdateTaskClaimingExecution(task)
 	}
 	return te.store.UpdateTask(task)
 }
@@ -35,6 +50,11 @@ func (te *TaskExecutor) storeTask(task *types.Task, projectID string) error {
 // persistTask is storeTask for the executor's task copy.
 func (te *TaskExecutor) persistTask(setup *taskExecSetup) {
 	te.storeTask(setup.task, setup.projectID)
+}
+
+// persistTaskClaiming is persistTask for when the loop starts or resumes a run.
+func (te *TaskExecutor) persistTaskClaiming(setup *taskExecSetup) {
+	te.storeTaskClaiming(setup.task, setup.projectID)
 }
 
 // startGateQueuePoller runs the 1-second queue-status poller used while a
@@ -97,6 +117,46 @@ func applyStopTransition(task *types.Task) bool {
 	}
 	task.UpdatedAt = time.Now().UTC()
 	return true
+}
+
+// executorExitGrace bounds how long a caller waits for an executor to finish
+// writing before it applies a state transition anyway. Stop must stay
+// responsive and authoritative: the transition happens on timeout too, and the
+// guarded UpdateTask keeps a late writer from undoing it.
+const executorExitGrace = 3 * time.Second
+
+// cancelExistingExecutor cancels the executor registered for taskID, if any,
+// and returns its state so the caller can wait for it. It leaves the map entry
+// for the caller to replace or delete. Agent executors keep their event loop
+// alive after completion, so they need cancelling too.
+func (te *TaskExecutor) cancelExistingExecutor(taskID string) *executionState {
+	te.taskMu.Lock()
+	defer te.taskMu.Unlock()
+	state, exists := te.tasks[taskID]
+	if !exists {
+		return nil
+	}
+	if state.agentRunner != nil && !state.runnerClosed {
+		state.agentRunner.Close()
+		state.runnerClosed = true
+	}
+	state.cancel()
+	return state
+}
+
+// waitForExecutorExit blocks until the executor has closed its finished channel
+// (every exit-path write has landed) or the timeout expires. The transition is
+// applied either way: a wedged executor must not keep a task stuck, and losing
+// the ordering is the lesser evil.
+func waitForExecutorExit(taskID string, state *executionState, timeout time.Duration) {
+	if state == nil || state.finished == nil {
+		return
+	}
+	select {
+	case <-state.finished:
+	case <-time.After(timeout):
+		log.Printf("[exec] task=%s executor still writing after %s; applying the transition anyway", taskID, timeout)
+	}
 }
 
 // sendStopStatusEvent sends the WS status event that tells task subscribers the executor exited

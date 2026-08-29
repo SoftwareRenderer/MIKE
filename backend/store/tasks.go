@@ -10,16 +10,23 @@ import (
 	"kanban/backend/types"
 )
 
+// marshalAssignedPorts encodes the assigned_ports column. An empty slice
+// stores "" (not "null"), which is what every reader expects.
+func marshalAssignedPorts(ports []types.AssignedPort) string {
+	if len(ports) == 0 {
+		return ""
+	}
+	if b, err := json.Marshal(ports); err == nil {
+		return string(b)
+	}
+	return ""
+}
+
 // CreateTask inserts a new task.
 func (s *Store) CreateTask(t *types.Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	assignedPortsJSON := ""
-	if len(t.AssignedPorts) > 0 {
-		if b, err := json.Marshal(t.AssignedPorts); err == nil {
-			assignedPortsJSON = string(b)
-		}
-	}
+	assignedPortsJSON := marshalAssignedPorts(t.AssignedPorts)
 	// A new task has never been moved, so its position is its creation time.
 	movedAt := t.MovedAt
 	if movedAt.IsZero() {
@@ -134,27 +141,53 @@ func (s *Store) UpdateTaskSessionCost(taskID string, cost float64) error {
 	return err
 }
 
+// inFlightStates are the execution_state values that mean a run is live.
+const inFlightStates = "('running','pulling_image')"
+
 // UpdateTask updates all fields of the task.
+//
+// Ownership guard: it must not move a row into an in-flight execution_state.
+// Callers hand in a long-lived copy of the task, so a stale copy (a shutting
+// down executor, say) would restart a run that StopTask had just ended.
+// UpdateTaskClaimingExecution is the version that may start a run.
 //
 // moved_at (the board's sort key) advances only when the column changes: SQLite evaluates
 // SET expressions against the pre-update row, so "status <> ?" compares old with new status.
 // RETURNING puts the stored value back into t, so a broadcast right after persisting is exact.
 func (s *Store) UpdateTask(t *types.Task) error {
+	return s.updateTask(t, false)
+}
+
+// UpdateTaskClaimingExecution is UpdateTask for the caller that owns the run.
+func (s *Store) UpdateTaskClaimingExecution(t *types.Task) error {
+	return s.updateTask(t, true)
+}
+
+func (s *Store) updateTask(t *types.Task, claim bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
-	assignedPortsJSON := ""
-	if len(t.AssignedPorts) > 0 {
-		if b, err := json.Marshal(t.AssignedPorts); err == nil {
-			assignedPortsJSON = string(b)
-		}
+	assignedPortsJSON := marshalAssignedPorts(t.AssignedPorts)
+
+	// A bare column name in SET reads the old row, so the CASE keeps the stored
+	// state whenever the write would start a run.
+	execSet := `execution_state = CASE WHEN ? IN ` + inFlightStates + ` THEN execution_state ELSE ? END`
+	execArgs := []any{t.ExecutionState, t.ExecutionState}
+	if claim {
+		execSet = `execution_state = ?`
+		execArgs = []any{t.ExecutionState}
 	}
-	var movedAt string
+
+	args := []any{t.Status, now.Format(time.RFC3339), t.Title, t.Prompt, t.Status, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output}
+	args = append(args, execArgs...)
+	args = append(args, B2I(t.HasMergeConflict),
+		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode, ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), ptrStr(t.CurrentThreadID), assignedPortsJSON, t.SessionCost, now.Format(time.RFC3339), t.ID)
+
+	var movedAt, storedExec string
 	err := s.db.QueryRow(
-		`UPDATE tasks SET moved_at = CASE WHEN status <> ? THEN ? ELSE moved_at END, title = ?, prompt = ?, status = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, execution_state = ?, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ? RETURNING moved_at`,
-		t.Status, now.Format(time.RFC3339), t.Title, t.Prompt, t.Status, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, B2I(t.HasMergeConflict),
-		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode, ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), ptrStr(t.CurrentThreadID), assignedPortsJSON, t.SessionCost, now.Format(time.RFC3339), t.ID,
-	).Scan(&movedAt)
+		`UPDATE tasks SET moved_at = CASE WHEN status <> ? THEN ? ELSE moved_at END, title = ?, prompt = ?, status = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, `+execSet+`, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ? RETURNING moved_at, execution_state`,
+		args...,
+	).Scan(&movedAt, &storedExec)
 	if err != nil {
 		// No row matched (task deleted concurrently): same outcome as the 0-rows-affected
 		// case the previous Exec-based update returned without error for.
@@ -164,7 +197,15 @@ func (s *Store) UpdateTask(t *types.Task) error {
 		return err
 	}
 	t.MovedAt = scanTime(movedAt)
+	t.ExecutionState = storedExec
 	return nil
+}
+
+// SetTaskAssignedPorts writes only the assigned_ports column. Ports are set
+// while a run is live and cleared when it ends, so this must not touch the
+// status or execution_state of the row.
+func (s *Store) SetTaskAssignedPorts(taskID, projectID string, ports []types.AssignedPort) error {
+	return s.updateTaskColumn(taskID, projectID, "assigned_ports", marshalAssignedPorts(ports))
 }
 
 // updateTaskColumn updates a single tasks column, scoped to the task's project.
@@ -192,10 +233,10 @@ func (s *Store) TransitionInFlightTask(taskID, projectID, executionState string,
 	var res sql.Result
 	var err error
 	if output != nil {
-		res, err = s.db.Exec(`UPDATE tasks SET execution_state = ?, output = ?, updated_at = ? WHERE id = ? AND project_id = ? AND execution_state IN ('running','pulling_image')`,
+		res, err = s.db.Exec(`UPDATE tasks SET execution_state = ?, output = ?, updated_at = ? WHERE id = ? AND project_id = ? AND execution_state IN `+inFlightStates,
 			executionState, *output, now.Format(time.RFC3339), taskID, projectID)
 	} else {
-		res, err = s.db.Exec(`UPDATE tasks SET execution_state = ?, updated_at = ? WHERE id = ? AND project_id = ? AND execution_state IN ('running','pulling_image')`,
+		res, err = s.db.Exec(`UPDATE tasks SET execution_state = ?, updated_at = ? WHERE id = ? AND project_id = ? AND execution_state IN `+inFlightStates,
 			executionState, now.Format(time.RFC3339), taskID, projectID)
 	}
 	if err != nil {
