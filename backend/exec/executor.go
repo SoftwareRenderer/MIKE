@@ -130,6 +130,8 @@ type executionState struct {
 	bridgeRecoveryAttempts int
 	// Closed by executor defer so ForwardUserMessage type-switch can wait for clean exit.
 	done chan struct{}
+	// Closed last by the executor defer
+	finished chan struct{}
 }
 
 // modelConfig holds mutable model/provider settings for an executor.
@@ -986,6 +988,7 @@ type taskExecSetup struct {
 	sandboxDockerfilePath string
 	sandboxOpts           sandboxmgr.SandboxOpts
 	done                  chan struct{} // closed by executor defer; see executionState.done
+	finished              chan struct{} // closed after the executor's last DB write
 	// taskSlotURL is the provider URL whose running-task slot this execution
 	// currently holds ("" = not held). LLM providers only; agent providers
 	// manage their own concurrency.
@@ -1121,10 +1124,14 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	if modelName != "" {
 		task.ModelName = modelName
 	}
+	// Cancel any earlier executor for this task and let it finish writing before
+	// claiming the row, so its stale copy can't land after our "running".
+	waitForExecutorExit(taskID, te.cancelExistingExecutor(taskID), executorExitGrace)
+
 	if updateStatus {
 		task.ExecutionState = "running"
 		task.Status = "in_progress"
-		if err := te.storeTask(task, projectID); err != nil {
+		if err := te.storeTaskClaiming(task, projectID); err != nil {
 			return nil, err
 		}
 	}
@@ -1158,22 +1165,13 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 
 	te.taskMu.Lock()
-	// Cancel old executor if this task is being restarted.
-	// For agent executors, the event loop stays alive after completion (for follow-ups).
-	// We must cancel it to prevent duplicate executors.
-	if oldState, exists := te.tasks[taskID]; exists {
-		if oldState.agentRunner != nil && !oldState.runnerClosed {
-			oldState.agentRunner.Close()
-			oldState.runnerClosed = true
-		}
-		oldState.cancel() // cancel old context so its event loop exits
-	}
 	execType := "llm"
 	if te.configStore.IsAgentProvider(serverURL) {
 		execType = "agent"
 	}
 	doneCh := make(chan struct{})
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan *CompactResult, 16), projectName: project.Name, executorType: execType, taskStatus: task.Status, done: doneCh}
+	finishedCh := make(chan struct{})
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, userMsgChan: userMsgChan, summarizeCh: summarizeCh, compactCh: make(chan chan *CompactResult, 16), projectName: project.Name, executorType: execType, taskStatus: task.Status, done: doneCh, finished: finishedCh}
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
@@ -1198,7 +1196,8 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 			SandboxEnvs:      project.SandboxEnvs,
 			Capabilities:     project.SandboxCapabilities,
 		},
-		done: doneCh,
+		done:     doneCh,
+		finished: finishedCh,
 	}, nil
 }
 
@@ -1284,6 +1283,7 @@ func (te *TaskExecutor) getAgentRunner(ctx context.Context, projectID, taskID st
 		executorType: "agent",
 		taskStatus:   task.Status,
 		done:         setup.done,
+		finished:     setup.finished,
 	}
 	te.tasks[taskID] = state
 	te.taskMu.Unlock()
@@ -1364,6 +1364,12 @@ func (te *TaskExecutor) StopTask(taskID string) error {
 	}
 	te.taskMu.Unlock()
 
+	// Wait for the cancelled executor to finish writing before transitioning.
+	// Transitioning first let its stale copy put "running" back with no executor
+	// behind it, leaving the task stuck until a second Stop. No-op with no live
+	// executor (state is nil).
+	waitForExecutorExit(taskID, state, executorExitGrace)
+
 	task, err := te.store.GetTaskByID(taskID)
 	if err != nil {
 		return err
@@ -1386,13 +1392,14 @@ func (te *TaskExecutor) StopProjectTasks(projectID string) int {
 	stopped := 0
 	for _, task := range tasks {
 		te.taskMu.Lock()
-		if _, ok := te.tasks[task.ID]; ok {
-			state := te.tasks[task.ID]
+		if state, ok := te.tasks[task.ID]; ok {
 			state.cancel()
 			delete(te.tasks, task.ID)
 			stopped++
 			log.Printf("[stop-project-tasks] task=%s project=%s stopped (settings change)", task.ID, projectID)
 			te.taskMu.Unlock()
+			// Same ordering as StopTask.
+			waitForExecutorExit(task.ID, state, executorExitGrace)
 			// Reset only in-flight tasks (in_progress → paused); preserve the column.
 			if applyStopTransition(&task) {
 				te.persistStopTransition(&task)

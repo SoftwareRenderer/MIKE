@@ -3,6 +3,8 @@ package store
 import (
 	"testing"
 	"time"
+
+	"kanban/backend/types"
 )
 
 func TestCreateAndGetTask(t *testing.T) {
@@ -146,10 +148,10 @@ func TestUpdateTask(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	// Update status
+	// Update status; starting a run claims the in-flight state.
 	task.Status = "in_progress"
 	task.ExecutionState = "running"
-	if err := s.UpdateTask(task); err != nil {
+	if err := s.UpdateTaskClaimingExecution(task); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
 
@@ -784,7 +786,7 @@ func TestUpdateTaskSameStatusKeepsMovedAt(t *testing.T) {
 	got.Output = "some run output"
 	got.SessionCost = 1.25
 	got.ExecutionState = "running"
-	if err := s.UpdateTask(got); err != nil {
+	if err := s.UpdateTaskClaimingExecution(got); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
 
@@ -851,5 +853,195 @@ func TestUpdateTaskColumnChangeBumpsMovedAt(t *testing.T) {
 	}
 	if second.MovedAt.Before(after.MovedAt) {
 		t.Fatalf("expected moved_at to stay monotonic across moves, got %v then %v", after.MovedAt, second.MovedAt)
+	}
+}
+
+// --- execution_state ownership guard ---
+
+// newTaskInState creates a task row already sitting in the given execution state.
+func newTaskInState(t *testing.T, s *Store, id, projectID, status, execState string) {
+	t.Helper()
+	task := newTask(id, projectID)
+	task.Status = status
+	task.ExecutionState = execState
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+}
+
+// TestUpdateTaskGuardBlocksInFlightPromotion: a full-row write must not put a
+// stopped task back to "running", which is how a task ended up showing a run
+// with no executor behind it.
+func TestUpdateTaskGuardBlocksInFlightPromotion(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-guard", "guard", "/tmp/guard")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	for _, stored := range []string{"idle", "paused", "completed", "failed"} {
+		for _, wanted := range []string{"running", "pulling_image"} {
+			id := "task-" + stored + "-" + wanted
+			newTaskInState(t, s, id, "proj-guard", "in_progress", stored)
+
+			got, err := s.GetTaskByID(id)
+			if err != nil {
+				t.Fatalf("get task: %v", err)
+			}
+			got.ExecutionState = wanted
+			got.Title = "written by the stale writer"
+			got.Output = "output written by the stale writer"
+			if err := s.UpdateTask(got); err != nil {
+				t.Fatalf("update task (%s -> %s): %v", stored, wanted, err)
+			}
+
+			after, err := s.GetTaskByID(id)
+			if err != nil {
+				t.Fatalf("get task after update: %v", err)
+			}
+			if after.ExecutionState != stored {
+				t.Errorf("%s -> %s: execution_state = %s, want stored %s", stored, wanted, after.ExecutionState, stored)
+			}
+			// The struct must mirror what was stored, not what was asked for.
+			if got.ExecutionState != stored {
+				t.Errorf("%s -> %s: in-memory execution_state = %s, want stored %s", stored, wanted, got.ExecutionState, stored)
+			}
+			// Every other column is still written normally.
+			if after.Title != "written by the stale writer" || after.Output != "output written by the stale writer" {
+				t.Errorf("%s -> %s: other columns must still be written, got title=%q output=%q", stored, wanted, after.Title, after.Output)
+			}
+		}
+	}
+}
+
+// TestUpdateTaskGuardAllowsOtherExecutionStateWrites: the guard must not get in
+// the way of a live run keeping the row in-flight, or of settling it.
+func TestUpdateTaskGuardAllowsOtherExecutionStateWrites(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-guard2", "guard2", "/tmp/guard2")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	newTaskInState(t, s, "task-live", "proj-guard2", "in_progress", "running")
+
+	got, err := s.GetTaskByID("task-live")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	// Writing "running" again while running keeps it running.
+	if err := s.UpdateTask(got); err != nil {
+		t.Fatalf("re-write running: %v", err)
+	}
+	if after, _ := s.GetTaskByID("task-live"); after.ExecutionState != "running" {
+		t.Fatalf("running -> running: got %s", after.ExecutionState)
+	}
+
+	// Settling to any resting state works.
+	for _, want := range []string{"idle", "paused", "completed", "failed"} {
+		got.ExecutionState = want
+		if err := s.UpdateTask(got); err != nil {
+			t.Fatalf("settle to %s: %v", want, err)
+		}
+		if after, _ := s.GetTaskByID("task-live"); after.ExecutionState != want {
+			t.Fatalf("running -> %s: got %s", want, after.ExecutionState)
+		}
+		got.ExecutionState = "running"
+		if err := s.UpdateTaskClaimingExecution(got); err != nil {
+			t.Fatalf("re-claim running: %v", err)
+		}
+	}
+}
+
+// TestUpdateTaskClaimingExecutionPromotes: whoever owns a run can start or keep
+// an in-flight state, including right after a stop.
+func TestUpdateTaskClaimingExecutionPromotes(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-guard3", "guard3", "/tmp/guard3")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	newTaskInState(t, s, "task-claim", "proj-guard3", "in_progress", "paused")
+
+	got, err := s.GetTaskByID("task-claim")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	got.Status = "in_progress"
+	got.ExecutionState = "running"
+	if err := s.UpdateTaskClaimingExecution(got); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	after, err := s.GetTaskByID("task-claim")
+	if err != nil {
+		t.Fatalf("get task after claim: %v", err)
+	}
+	if after.ExecutionState != "running" {
+		t.Fatalf("claiming write must promote to running, got %s", after.ExecutionState)
+	}
+	if got.ExecutionState != "running" {
+		t.Fatalf("in-memory copy must mirror the promoted state, got %s", got.ExecutionState)
+	}
+}
+
+// TestSetTaskAssignedPortsIsTargeted: ports are written while a run is live and
+// cleared when it ends, so the write must leave status and execution_state alone.
+func TestSetTaskAssignedPortsIsTargeted(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-ports", "ports", "/tmp/ports")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	past := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	task := newTask("task-ports", "proj-ports")
+	task.Status = "in_progress"
+	task.ExecutionState = "running"
+	task.CreatedAt = past
+	task.UpdatedAt = past
+	task.MovedAt = past
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	ports := []types.AssignedPort{{HostPort: 32100, ContainerPort: 8080}}
+	if err := s.SetTaskAssignedPorts("task-ports", "proj-ports", ports); err != nil {
+		t.Fatalf("set ports: %v", err)
+	}
+	after, err := s.GetTaskByID("task-ports")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if len(after.AssignedPorts) != 1 || after.AssignedPorts[0].HostPort != 32100 || after.AssignedPorts[0].ContainerPort != 8080 {
+		t.Fatalf("assigned_ports not stored: %+v", after.AssignedPorts)
+	}
+	if after.ExecutionState != "running" || after.Status != "in_progress" {
+		t.Fatalf("ports write changed run columns: %s/%s", after.Status, after.ExecutionState)
+	}
+	if !after.MovedAt.Equal(past) {
+		t.Fatalf("ports write must not move the card: moved_at %v, want %v", after.MovedAt, past)
+	}
+	if !after.UpdatedAt.After(past) {
+		t.Fatalf("updated_at should advance, got %v", after.UpdatedAt)
+	}
+
+	// Clearing stores the same empty encoding UpdateTask writes.
+	if err := s.SetTaskAssignedPorts("task-ports", "proj-ports", nil); err != nil {
+		t.Fatalf("clear ports: %v", err)
+	}
+	cleared, err := s.GetTaskByID("task-ports")
+	if err != nil {
+		t.Fatalf("get task after clear: %v", err)
+	}
+	if len(cleared.AssignedPorts) != 0 {
+		t.Fatalf("ports not cleared: %+v", cleared.AssignedPorts)
+	}
+	if cleared.ExecutionState != "running" {
+		t.Fatalf("clearing ports changed execution_state: %s", cleared.ExecutionState)
+	}
+
+	// Scoped to the owning project.
+	if err := s.SetTaskAssignedPorts("task-ports", "other-project", ports); err != nil {
+		t.Fatalf("set ports (wrong project): %v", err)
+	}
+	if after, _ := s.GetTaskByID("task-ports"); len(after.AssignedPorts) != 0 {
+		t.Fatalf("wrong-project write must not apply, got %+v", after.AssignedPorts)
 	}
 }
