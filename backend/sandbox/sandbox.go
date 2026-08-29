@@ -181,6 +181,15 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 	return client, nil
 }
 
+// forwardPortSpec renders the podman `-p` value publishing hostPort →
+// containerPort. The host side is pinned to loopback: a sandbox's forwarded
+// port is only ever read by the server on this machine (the bridge, LSP,
+// terminal port checks), so binding it to every interface would expose a
+// container's listener on the LAN — and to anything else on a shared host.
+func forwardPortSpec(hostPort, containerPort int) string {
+	return fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort)
+}
+
 // Create creates a gVisor sandbox container for a task
 //
 // Filesystem Mounts:
@@ -201,7 +210,8 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 //
 // Networking:
 //   - Port Forwarding: For each entry in opts.ForwardPorts, an ephemeral host port is auto-assigned
-//     via net.Listen(":0") and mapped to the container port.
+//     via net.Listen(":0") and mapped to the container port. The host side is bound to
+//     loopback only (127.0.0.1), never to every interface.
 //
 // Returns:
 //   - (assignedPorts, nil) on success, where assignedPorts lists the host→container mappings.
@@ -311,7 +321,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		}
 		hostPort := ln.Addr().(*net.TCPAddr).Port
 		_ = ln.Close()
-		createArgs = append(createArgs, "-p", fmt.Sprintf("%d:%d", hostPort, pf.ContainerPort))
+		createArgs = append(createArgs, "-p", forwardPortSpec(hostPort, pf.ContainerPort))
 		assignedPorts = append(assignedPorts, types.AssignedPort{HostPort: hostPort, ContainerPort: pf.ContainerPort})
 		log.Printf("[sandbox] task=%s forwarding port %d -> %d", taskID, hostPort, pf.ContainerPort)
 	}

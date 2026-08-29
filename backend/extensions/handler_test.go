@@ -2035,3 +2035,131 @@ func TestHandleProxy_DoesNotFollowRedirects(t *testing.T) {
 		t.Fatal("proxy followed a redirect to a non-allowed host (SSRF via redirect)")
 	}
 }
+
+// putUpdate sends a PUT /api/extensions/{id} body and returns the recorder.
+func putUpdate(t *testing.T, h *ExtensionHandler, id string, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPut, "/api/extensions/"+id, bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.HandleUpdate(w, req, id)
+	return w
+}
+
+// TestHandleUpdate_RejectsSandboxWidening covers M5: the update endpoint must
+// refuse mounts that escape the app's own host roots and capabilities that
+// reach past the container, naming the offending value and persisting nothing.
+func TestHandleUpdate_RejectsSandboxWidening(t *testing.T) {
+	mountsBody := func(host, container, mode string) map[string]any {
+		return map[string]any{
+			"sandbox_config": map[string]any{
+				"mounts": []any{map[string]any{"host_path": host, "container_path": container, "mode": mode}},
+			},
+		}
+	}
+	capsBody := func(caps ...string) map[string]any {
+		return map[string]any{"sandbox_config": map[string]any{"capabilities": caps}}
+	}
+
+	cases := []struct {
+		name    string
+		body    map[string]any
+		wantMsg string
+	}{
+		{"mounting the host root read-write", mountsBody("/", "/host", "rw"), `mount host path "/"`},
+		{"mounting outside the allowlist", mountsBody("/etc", "/etc", "rw"), "/etc"},
+		{"host path traversal", mountsBody("/tmp/../etc", "/etc", "ro"), "'..'"},
+		{"relative host path", mountsBody("etc", "/etc", "ro"), "not absolute"},
+		{"container path with ':' (spec rewrite)", mountsBody("/tmp/whatever", "/workspace:rw", "ro"), "/workspace:rw"},
+		{"container path with ',' (options rewrite)", mountsBody("/tmp/whatever", "/workspace,rw", "ro"), "/workspace,rw"},
+		{"container path traversal", mountsBody("/tmp/whatever", "/mnt/../../etc", "ro"), "'..'"},
+		{"SYS_ADMIN", capsBody("SYS_ADMIN"), "SYS_ADMIN"},
+		{"SYS_PTRACE", capsBody("SYS_PTRACE"), "SYS_PTRACE"},
+		{"SYS_MODULE", capsBody("SYS_MODULE"), "SYS_MODULE"},
+		{"SYS_RAWIO", capsBody("SYS_RAWIO"), "SYS_RAWIO"},
+		{"DAC_OVERRIDE", capsBody("DAC_OVERRIDE"), "DAC_OVERRIDE"},
+		{"DAC_READ_SEARCH", capsBody("DAC_READ_SEARCH"), "DAC_READ_SEARCH"},
+		{"NET_ADMIN", capsBody("NET_ADMIN"), "NET_ADMIN"},
+		{"MKNOD", capsBody("MKNOD"), "MKNOD"},
+		{"SETUID", capsBody("SETUID"), "SETUID"},
+		{"SETGID", capsBody("SETGID"), "SETGID"},
+		{"SYS_BOOT", capsBody("SYS_BOOT"), "SYS_BOOT"},
+		{"LINUX_IMMUTABLE", capsBody("LINUX_IMMUTABLE"), "LINUX_IMMUTABLE"},
+		{"CAP_ prefix does not smuggle it in", capsBody("CAP_SYS_ADMIN"), "SYS_ADMIN"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := testHandler(t)
+			if err := h.store.Create(makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			w := putUpdate(t, h, "test-ext", tc.body)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (body: %s)", w.Code, w.Body.String())
+			}
+			var apiErr struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &apiErr); err != nil {
+				t.Fatalf("decode error body %q: %v", w.Body.String(), err)
+			}
+			if !strings.Contains(apiErr.Error, tc.wantMsg) {
+				t.Errorf("error %q does not name %q", apiErr.Error, tc.wantMsg)
+			}
+
+			// Nothing was persisted — a rejected value must not linger in the DB
+			// to be re-read by the next container create.
+			got, err := h.store.GetByID("test-ext")
+			if err != nil {
+				t.Fatalf("GetByID: %v", err)
+			}
+			if len(got.SandboxConfig.Mounts) != 0 {
+				t.Errorf("mounts were persisted: %+v", got.SandboxConfig.Mounts)
+			}
+			if len(got.SandboxConfig.Capabilities) != 0 {
+				t.Errorf("capabilities were persisted: %v", got.SandboxConfig.Capabilities)
+			}
+		})
+	}
+}
+
+// TestHandleUpdate_AcceptsAllowedSandboxAdditions keeps the legitimate case
+// working: a mount inside the app's own roots (the temp dir is allowlisted by
+// default) and a harmless capability are stored as requested.
+func TestHandleUpdate_AcceptsAllowedSandboxAdditions(t *testing.T) {
+	h := testHandler(t)
+	if err := h.store.Create(makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	src := filepath.Join(t.TempDir(), "node_modules")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	w := putUpdate(t, h, "test-ext", map[string]any{
+		"sandbox_config": map[string]any{
+			"mounts": []any{map[string]any{
+				"host_path": src, "container_path": "/workspace/node_modules", "mode": "ro",
+			}},
+			"capabilities": []string{"NET_BIND_SERVICE"},
+		},
+	})
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", w.Code, w.Body.String())
+	}
+	got, err := h.store.GetByID("test-ext")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if len(got.SandboxConfig.Mounts) != 1 || got.SandboxConfig.Mounts[0].ContainerPath != "/workspace/node_modules" {
+		t.Errorf("mounts = %+v, want the allowed mount stored", got.SandboxConfig.Mounts)
+	}
+	if len(got.SandboxConfig.Capabilities) != 1 || got.SandboxConfig.Capabilities[0] != "NET_BIND_SERVICE" {
+		t.Errorf("capabilities = %v, want NET_BIND_SERVICE stored", got.SandboxConfig.Capabilities)
+	}
+}
