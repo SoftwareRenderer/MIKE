@@ -417,7 +417,8 @@ func (a *wasmAdapter) ListModels(ctx context.Context) []agent.AgentModel {
 	}
 
 	cmd := exec.CommandContext(ctx, cfg.Binary, "--list-models")
-	cmd.Env = append(os.Environ(), cfg.Env...)
+	// Same rule as the agent runner: the allowlisted environment only (see SafeAgentEnv).
+	cmd.Env = SafeAgentEnv(cfg.Env...)
 	output, err := cmd.Output()
 	if err != nil {
 		log.Printf("[wasm-adapter] ListModels: failed to run %s --list-models: %v", cfg.Binary, err)
