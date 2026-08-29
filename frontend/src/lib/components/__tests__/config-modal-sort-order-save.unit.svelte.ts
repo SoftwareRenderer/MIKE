@@ -13,7 +13,7 @@ vi.mock('$lib/api', async (importOriginal) => {
     return { ...actual, updateConfig: vi.fn() };
 });
 
-const TOGGLE = 'button[aria-label="Oldest moved on top"]';
+const TOGGLE = 'button[aria-label="Oldest Task on top"]';
 const SAVE = 'button[title="Save settings"]';
 
 beforeEach(() => {
