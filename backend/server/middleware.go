@@ -7,7 +7,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strings"
 
@@ -99,6 +101,88 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// allowedHostsEnv lists additional hostnames accepted in the Host header,
+// comma-separated (e.g. "kanban.example.com,staging.lan"). This is the
+// opt-out for reverse proxies — a proxy forwards the public domain in Host,
+// which is not a name the server could ever infer from its bind address.
+const allowedHostsEnv = "MIKE_ALLOWED_HOSTS"
+
+// loopbackHosts are always accepted: they can only name this machine, so they
+// are the addresses the local UI (and CLI/tooling) use.
+var loopbackHosts = []string{"localhost", "127.0.0.1", "::1"}
+
+// hostAllowlist is the set of Host-header hostnames this server answers.
+type hostAllowlist struct {
+	hosts map[string]struct{}
+}
+
+// newHostAllowlist builds the allowlist from the listen address and the
+// MIKE_ALLOWED_HOSTS value: loopback names, the configured bind host (unless it
+// is a wildcard, which names no host), plus every explicit extra entry.
+func newHostAllowlist(addr, extraHosts string) *hostAllowlist {
+	a := &hostAllowlist{hosts: make(map[string]struct{})}
+	for _, h := range loopbackHosts {
+		a.hosts[h] = struct{}{}
+	}
+	if bindHost := normalizeHost(addr); bindHost != "" && bindHost != "0.0.0.0" && bindHost != "::" {
+		a.hosts[bindHost] = struct{}{}
+	}
+	for _, entry := range strings.Split(extraHosts, ",") {
+		if h := normalizeHost(entry); h != "" {
+			a.hosts[h] = struct{}{}
+		}
+	}
+	return a
+}
+
+// allows reports whether a Host header value names this server. Missing/empty
+// Host values are rejected: without an origin there is nothing to check.
+func (a *hostAllowlist) allows(rawHost string) bool {
+	h := normalizeHost(rawHost)
+	if h == "" {
+		return false
+	}
+	_, ok := a.hosts[h]
+	return ok
+}
+
+// normalizeHost reduces a Host header value (or allowlist entry) to a bare,
+// lowercase hostname: strip the port (falling back to the raw value when there
+// is none), unwrap IPv6 brackets, drop the FQDN root dot.
+func normalizeHost(raw string) string {
+	h := strings.TrimSpace(raw)
+	if h == "" {
+		return ""
+	}
+	if stripped, _, err := net.SplitHostPort(h); err == nil {
+		h = stripped
+	}
+	h = strings.TrimSuffix(strings.Trim(h, "[]"), ".")
+	return strings.ToLower(h)
+}
+
+// HostPinMiddleware rejects requests whose Host header names a different
+// authority than this server (HTTP 421).
+//
+// This is DNS-rebinding protection, not authentication: a page at evil.test can
+// point its A record at 127.0.0.1, and once the rebinding navigation makes that
+// page same-origin, SameSite=Lax, CORS and the (publicly readable) CSRF token
+// all stop protecting. A fixed allowlist breaks the attack because the attacker
+// must use the same authority as their own page origin for the read to succeed,
+// and that authority is not in the list. It never substitutes for the session
+// check — it only decides which names this server answers.
+func (s *Server) HostPinMiddleware(next http.Handler) http.Handler {
+	allowed := newHostAllowlist(s.addr, os.Getenv(allowedHostsEnv))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if allowed.allows(r.Host) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		log.Printf("[host] rejected request for Host %q (set %s to allow it)", r.Host, allowedHostsEnv)
+		JSONError(w, http.StatusMisdirectedRequest, "invalid Host header")
 	})
 }
 

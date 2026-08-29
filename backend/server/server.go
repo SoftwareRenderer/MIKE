@@ -476,6 +476,10 @@ func (s *Server) Serve() error {
 		// see tls_error_log.go.
 		ErrorLog: httpErrorLog(caFile),
 		Handler: AddMiddleware(s.mux,
+			// Outermost: every request — including the /api/stream, /api/lsp and
+			// terminal WebSocket upgrades and the HTTPS redirect — is origin-checked
+			// before it reaches a route.
+			s.HostPinMiddleware,
 			s.RedirectHTTPSMiddleware,
 			PanicRecoveryMiddleware,
 			NonceMiddleware,
