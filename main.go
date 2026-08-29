@@ -42,6 +42,7 @@ func main() {
 	noTLS := flag.Bool("no-tls", false, "Disable TLS (plain HTTP); overrides $MIKE_TLS")
 	tlsCert := flag.String("tls-cert", "", "Path to TLS certificate file (default: auto-generated self-signed)")
 	tlsKey := flag.String("tls-key", "", "Path to TLS private key file")
+	allowedHosts := flag.String("allowed-hosts", "", "Hostnames accepted in the Host header, comma-separated (default: $MIKE_ALLOWED_HOSTS; required behind a reverse proxy that forwards a public domain)")
 	flag.Parse()
 
 	// Resolve effective values: flag > env var > default
@@ -68,6 +69,14 @@ func main() {
 	worktreesOverride := *worktreesDir
 	if worktreesOverride == "" {
 		worktreesOverride = os.Getenv("MIKE_WORKTREES_DIR")
+	}
+
+	// Extra accepted Host values (DNS-rebinding pinning). A reverse proxy that
+	// forwards the public domain needs it listed here, or every request is
+	// rejected with HTTP 421 by HostPinMiddleware.
+	allowedHostsOverride := *allowedHosts
+	if allowedHostsOverride == "" {
+		allowedHostsOverride = os.Getenv("MIKE_ALLOWED_HOSTS")
 	}
 
 	// Database path (derived from data-dir)
@@ -180,7 +189,7 @@ func main() {
 	// The listen address was resolved (and validated against the master password)
 	// above, before the flight recorder started.
 
-	srv, err := server.NewServer(dbPath, worktreesOverride, addr, frontendDist, tlsCfg)
+	srv, err := server.NewServer(dbPath, worktreesOverride, addr, frontendDist, allowedHostsOverride, tlsCfg)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}

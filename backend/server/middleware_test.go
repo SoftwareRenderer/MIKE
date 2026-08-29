@@ -416,6 +416,64 @@ func TestHostPinMiddlewareAllowedHostsEnv(t *testing.T) {
 	}
 }
 
+// TestHostPinMiddlewareAllowedHostsFlag pins down the --allowed-hosts plumbing:
+// the flag value reaches the allowlist and REPLACES (never unions with) the
+// MIKE_ALLOWED_HOSTS fallback, so a stale environment variable cannot silently
+// widen the allowlist of a deployment that switched to the flag.
+func TestHostPinMiddlewareAllowedHostsFlag(t *testing.T) {
+	t.Setenv("MIKE_ALLOWED_HOSTS", "env.example.com")
+
+	s := &Server{addr: ":0", allowedHosts: "flag.example.com, other.lan"}
+
+	tests := []struct {
+		host string
+		want int
+	}{
+		{host: "flag.example.com", want: http.StatusOK},
+		{host: "flag.example.com:443", want: http.StatusOK},
+		{host: "OTHER.LAN", want: http.StatusOK},
+		{host: "localhost:3000", want: http.StatusOK},
+		// The flag replaces the env var rather than extending it.
+		{host: "env.example.com", want: http.StatusMisdirectedRequest},
+		{host: "evil.test", want: http.StatusMisdirectedRequest},
+	}
+
+	for _, tt := range tests {
+		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+		req.Host = tt.host
+		rr := httptest.NewRecorder()
+		s.HostPinMiddleware(okHostHandler()).ServeHTTP(rr, req)
+		if rr.Code != tt.want {
+			t.Errorf("Host %q: status = %d, want %d", tt.host, rr.Code, tt.want)
+		}
+	}
+}
+
+// TestEffectiveAllowedHosts covers the flag-over-env resolution the middleware
+// performs through it.
+func TestEffectiveAllowedHosts(t *testing.T) {
+	t.Setenv("MIKE_ALLOWED_HOSTS", "env.example.com")
+
+	tests := []struct {
+		name         string
+		allowedHosts string
+		want         string
+	}{
+		{name: "flag wins over env", allowedHosts: "flag.example.com", want: "flag.example.com"},
+		{name: "unset flag falls back to env", allowedHosts: "", want: "env.example.com"},
+		{name: "blank flag falls back to env", allowedHosts: "   ", want: "env.example.com"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{allowedHosts: tt.allowedHosts}
+			if got := s.effectiveAllowedHosts(); got != tt.want {
+				t.Fatalf("effectiveAllowedHosts() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHostPinMiddlewareListenHostAllowed(t *testing.T) {
 	// Listening on an explicit address (the container/reverse-proxy escape hatch)
 	// pins that address as an accepted Host value too.
