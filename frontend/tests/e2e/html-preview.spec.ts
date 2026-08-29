@@ -3,7 +3,6 @@ import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'path';
 import {
-    getProjectId,
     apiGetConfig,
     getTaskData,
     ensureTaskStarted,
@@ -273,11 +272,35 @@ async function getHtmlPreviewExtId(page: Page): Promise<string> {
   });
 }
 
+/**
+ * The project global-setup creates for TEST_REPO, looked up by PATH — the path is
+ * the stable identity (its display name is the generic `test-project`, and other
+ * specs create same-named siblings).
+ */
+async function testRepoProject(page: Page): Promise<{ id: string; name: string }> {
+  return await page.evaluate(async (path) => {
+    const projects = await (await fetch('/api/projects')).json();
+    const mine = (projects as any[]).find((p) => p.path === path);
+    return mine ? { id: mine.id, name: mine.name } : { id: '', name: '' };
+  }, TEST_REPO);
+}
+
+/** Select TEST_REPO's project row by name. Identity, not position: the chromium
+ * project runs several workers against one server, so `.project-item` `.first()`
+ * can be a project another spec created — possibly one whose directory it has
+ * just deleted, which leaves the explorer on an empty directory with no list to
+ * click into. */
+async function selectTestRepoProject(page: Page): Promise<void> {
+  const { name } = await testRepoProject(page);
+  expect(name, `a project exists for ${TEST_REPO}`).not.toBe('');
+  await page.locator(`.project-item:has(span.project-name:text-is("${name}"))`).first().click();
+}
+
 /** Open the project explorer and open `file` (relative to repo root, with subfolders). */
 async function openFile(page: Page, parts: string[]): Promise<void> {
   await page.goto('/');
   await page.waitForSelector('.card', { timeout: 10000 });
-  await page.locator('.project-item').first().click();
+  await selectTestRepoProject(page);
   await page.waitForSelector('.top-bar', { timeout: 10000 });
   await page.locator('.explorer-btn').click();
   await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
@@ -863,7 +886,10 @@ test.describe.serial('HTML Preview extension', () => {
     test.setTimeout(90000);
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 10000 });
-    const projectId = await getProjectId(page);
+    // Same identity rule as openFile: this spec's fixtures live in the TEST_REPO
+    // project, not in "whichever project happens to be first".
+    const { id: projectId } = await testRepoProject(page);
+    expect(projectId, `project for ${TEST_REPO} exists`).not.toBe('');
     // Own task (not the shared global-setup ones) — moved back to backlog in finally.
     const taskId = await createTaskViaApi(page, projectId, `preview live ${TS}`);
     let worktreeDir = '';

@@ -229,6 +229,9 @@
 
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let editorEl: HTMLDivElement | null = null;
+    /** The `.file-editor` root — the identity an extension-scoped save request
+     * is matched against (see handlers/editor.ts `saveFile`). */
+    let rootEl: HTMLDivElement | null = null;
     // svelte-ignore non_reactive_update — DOM ref via bind:this
     let searchContainerEl: HTMLDivElement | null = null;
     // svelte-ignore non_reactive_update — DOM ref via bind:this
@@ -925,8 +928,16 @@
         uiInjector.forwardEvent(INJECTION_POINTS.FILE_EDITOR, 'editor.jumpToLine', { line }, extAnchorEl);
     }
 
-    // Handle save requests from the tab bar (only when this editor is active)
-    function handleSaveRequest() {
+    // Handle save requests: from the tab bar (window-level, unscoped — only
+    // this editor if it is the active one) or from a UI extension mounted in
+    // THIS instance (`detail.scope` carries the owning `.file-editor` root, so
+    // an extension can only save the file it is attached to).
+    function handleSaveRequest(e: Event) {
+        const scope = (e as CustomEvent).detail?.scope as HTMLElement | undefined;
+        if (scope) {
+            if (scope === rootEl) handleSave();
+            return;
+        }
         if (active) {
             handleSave();
         }
@@ -1498,7 +1509,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions — role="application" makes this an interactive landmark for the diff-mode keyboard handler -->
-<div class="file-editor" role="application" tabindex="-1" class:has-file={!!filePath} class:active={mode === 'diff' ? true : active} class:diff={mode === 'diff'} class:line-sel={mode === 'explorer' && !!onLinesSelected} onkeydown={mode === 'diff' ? handleKeyDown : undefined}>
+<div class="file-editor" bind:this={rootEl} role="application" tabindex="-1" class:has-file={!!filePath} class:active={mode === 'diff' ? true : active} class:diff={mode === 'diff'} class:line-sel={mode === 'explorer' && !!onLinesSelected} onkeydown={mode === 'diff' ? handleKeyDown : undefined}>
     {#if mode === 'diff'}
         <!-- Diff-mode header -->
         <div class="editor-header">

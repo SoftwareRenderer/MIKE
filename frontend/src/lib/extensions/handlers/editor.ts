@@ -67,6 +67,24 @@ export function isExtensionContentSet(userEvents: readonly (string | undefined)[
 // up when the owning instance's channel is torn down.
 const footerButtons = new Map<string, Map<HTMLElement | null, () => void>>();
 
+/**
+ * How many footer buttons one extension may own in one editor instance. The
+ * footer is host UI shared with LSP status and the file's own controls, so a
+ * granted `editor.addFooterButton` must not be able to flood it.
+ */
+export const MAX_FOOTER_BUTTONS_PER_INSTANCE = 8;
+
+/** Buttons this extension already owns in `anchor` (by button id). */
+function ownedButtonIds(extensionId: string, anchor: HTMLElement | null): string[] {
+    const prefix = `${extensionId}:`;
+    const ids: string[] = [];
+    for (const [key, anchors] of footerButtons) {
+        if (!key.startsWith(prefix) || !anchors.has(anchor)) continue;
+        ids.push(key.slice(prefix.length));
+    }
+    return ids;
+}
+
 /** The `.file-editor` root containing the anchor for this extension. */
 function editorRoot(ctx: HostContext): HTMLElement | null {
     if (!ctx.anchor) return null;
@@ -96,6 +114,17 @@ function addFooterButton(ctx: HostContext, args: { id: string; label?: string; a
     if (!anchors) {
         anchors = new Map();
         footerButtons.set(key, anchors);
+    }
+
+    // Budget: re-declaring an id it already owns is an update, a NEW id is
+    // capped.
+    const owned = ownedButtonIds(ctx.extensionId, anchor);
+    if (!owned.includes(args.id) && owned.length >= MAX_FOOTER_BUTTONS_PER_INSTANCE) {
+        anchors.delete(anchor);
+        if (anchors.size === 0) footerButtons.delete(key);
+        throw new Error(
+            `too many editor footer buttons (max ${MAX_FOOTER_BUTTONS_PER_INSTANCE} per extension)`
+        );
     }
 
     // Replace an existing button with the same id *in this same instance
@@ -221,15 +250,22 @@ function setOverlay(ctx: HostContext, args: { visible: boolean }): void {
 }
 
 /**
- * Request the host save the current file.
+ * Request the host save the file this extension instance is mounted in.
  *
- * The FileEditor listens for the `editor-save-request` window event and
- * performs the save, guarded by its own active/unsaved/disabled checks.
+ * The event is dispatched on the extension's OWN `.file-editor` root (bubbling,
+ * so a window-level listener still sees it) carrying `detail.scope`. The tab bar
+ * dispatches the same event on `window` unscoped, where "the active editor" is
+ * the right target; with several editors open an extension must not be able to
+ * save whichever file happens to be active, so only the instance in `scope`
+ * responds — see FileEditor's `handleSaveRequest`.
  */
 function saveFile(ctx: HostContext): void {
     const root = editorRoot(ctx);
     if (!root) throw new Error('editor not found');
-    window.dispatchEvent(new CustomEvent('editor-save-request'));
+    root.dispatchEvent(new CustomEvent('editor-save-request', {
+        bubbles: true,
+        detail: { scope: root },
+    }));
 }
 
 /**

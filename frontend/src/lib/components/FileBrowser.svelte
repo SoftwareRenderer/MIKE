@@ -44,7 +44,18 @@
     let cloneLoading = $state(false);
     let cloneError = $state('');
 
+    /**
+     * Request sequence for `loadDir`. Two loads can overlap: the initial listing
+     * of the default path and a path the user types/picks right after it. The
+     * responses have no ordering guarantee, so without this guard a *stale*
+     * reply lands last and overwrites the directory the user actually asked for
+     * — the list (and `isGitRepo`, hence the indicator and the Select button)
+     * then describes a different directory than `currentPath`.
+     */
+    let loadSeq = 0;
+
     async function loadDir(path: string) {
+        const seq = ++loadSeq;
         loading = true;
         error = '';
         currentPath = path;
@@ -55,13 +66,15 @@
                 throw new Error(err.error || 'Failed to read directory');
             }
             const data = await res.json();
+            if (seq !== loadSeq) return; // a newer load won — keep its result
             entries = data.entries || [];
             isGitRepo = data.isGitRepo || false;
         } catch (e) {
+            if (seq !== loadSeq) return;
             error = String(e);
             entries = [];
         } finally {
-            loading = false;
+            if (seq === loadSeq) loading = false;
         }
     }
 

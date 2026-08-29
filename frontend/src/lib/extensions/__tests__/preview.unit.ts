@@ -19,6 +19,8 @@ vi.mock('$lib/api/helpers', async (importOriginal) => {
 
 const apiFetchMock = vi.mocked(apiFetch);
 
+const TEST_TOKEN = 'test-channel-token-0123456789abcdef';
+
 function makeChannel(granted: string[], context: any, anchor: HTMLElement | null = null) {
     const messages: any[] = [];
     const contentWindow = { postMessage: (msg: any) => messages.push(msg) };
@@ -32,7 +34,15 @@ function makeChannel(granted: string[], context: any, anchor: HTMLElement | null
         context,
         anchor,
         iframe,
+        channelToken: TEST_TOKEN,
     });
+    // Arm the channel: model the mounted document proving itself, then drop
+    // the handshake frames so assertions about posted messages stay index-stable.
+    channel.notifyFrameLoad();
+    window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'exthello', token: TEST_TOKEN }, source: contentWindow as any, origin: 'null',
+    }));
+    messages.length = 0;
     return { channel, contentWindow, messages };
 }
 
