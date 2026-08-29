@@ -409,29 +409,194 @@ func (s *Server) withNonce(next http.Handler) http.Handler {
 
 type Middleware func(http.Handler) http.Handler
 
+// defaultSniffTimeout is how long a connection gets to send the byte that identifies
+// it. Real clients send it immediately; it only bounds a peer that connected and went
+// silent (lost first packet, cancelled preconnect, health check, scan).
+const defaultSniffTimeout = 10 * time.Second
+
+// readyQueue paces sniffed connections against net/http's accept loop. No client
+// waits behind it: a connection lands in it only once it can be served.
+const readyQueue = 8
+
+// tlsRecordTypeHandshake is the first byte of a TLS record, which is how TLS is told
+// apart from plain HTTP before a request line exists.
+const tlsRecordTypeHandshake = 0x16
+
 // hybridListener handles both TLS and plain HTTP on the same port.
 type hybridListener struct {
 	net.Listener
 	stdTlsConfig *stdtls.Config
+	// sniffTimeout bounds the first-byte read. Zero means defaultSniffTimeout.
+	sniffTimeout time.Duration
+	drops        *sniffDropLogger
+
+	ready chan net.Conn // connections whose protocol is known
+	done  chan struct{} // closed once the listener is finished
+	once  sync.Once
+	mu    sync.Mutex
+	last  error // why the accept loop stopped, if a real failure caused it
 }
 
+// Accept hands net/http a connection whose protocol is already known.
+//
+// The first byte decides TLS vs plain HTTP, and net/http only looks at the concrete type
+// Accept returns, so that read cannot be deferred. It must not happen inside Accept
+// either: net/http accepts serially, so a peer that connects and sends nothing would
+// delay every later handshake, and its EOF or ECONNRESET would reach Serve as a dead
+// listener and end it.
+//
+// So Accept never touches a socket — acceptLoop sniffs each connection in its own
+// goroutine and queues the result. No worker pool: a pool of N only moves the stall to
+// the Nth silent peer. Only the listener's own error is returned, since it is the only
+// one that can end Serve.
 func (l *hybridListener) Accept() (net.Conn, error) {
-	conn, err := l.Listener.Accept()
-	if err != nil {
-		return nil, err
+	select {
+	case conn := <-l.ready:
+		return conn, nil
+	case <-l.done:
+		if err := l.stopErr(); err != nil {
+			return nil, err
+		}
+		// net/http turns this into http.ErrServerClosed while shutting down.
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *hybridListener) Close() error {
+	err := l.Listener.Close()
+	l.shutdown(err)
+	return err
+}
+
+// acceptLoop is the only caller of the underlying Accept, and it never reads from a
+// connection, so no client can block it.
+func (l *hybridListener) acceptLoop() {
+	for {
+		conn, err := l.Listener.Accept()
+		if err != nil {
+			// Listener gone (Close on shutdown, or a real failure): release Accept
+			// with the reason, since nothing more can be accepted.
+			l.shutdown(err)
+			return
+		}
+		go l.identify(conn)
+	}
+}
+
+// identify reads the first byte under a deadline and queues the connection wrapped for
+// the protocol it announced. A peer that stalled, hung up or reset is logged and closed
+// here: it says nothing about the listener and must not reach net/http.
+func (l *hybridListener) identify(raw net.Conn) {
+	timeout := l.sniffTimeout
+	if timeout <= 0 {
+		timeout = defaultSniffTimeout
+	}
+	conn := raw
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		l.drops.note(conn.RemoteAddr(), err)
+		conn.Close()
+		return
 	}
 
 	buf := make([]byte, 1)
 	if _, err := conn.Read(buf); err != nil {
+		l.drops.note(conn.RemoteAddr(), err)
 		conn.Close()
-		return nil, err
+		return
+	}
+	// The deadline was for the sniff alone. net/http sets its own (ReadHeaderTimeout),
+	// and a tls.Conn wrapping this socket would inherit the stale one.
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		l.drops.note(conn.RemoteAddr(), err)
+		conn.Close()
+		return
 	}
 
-	if buf[0] == 0x16 {
-		return stdtls.Server(newPeekConn(conn, buf), l.stdTlsConfig), nil
+	if buf[0] == tlsRecordTypeHandshake {
+		conn = stdtls.Server(newPeekConn(conn, buf), l.stdTlsConfig)
+	} else {
+		conn = newPeekConn(conn, buf)
 	}
 
-	return newPeekConn(conn, buf), nil
+	select {
+	case l.ready <- conn:
+	case <-l.done:
+		conn.Close()
+	}
+}
+
+// shutdown records why the listener stopped, releases Accept, and closes any queued
+// connection nobody will serve. The first reason wins, so Close cannot mask a failure.
+func (l *hybridListener) shutdown(reason error) {
+	l.mu.Lock()
+	if l.last == nil {
+		l.last = reason
+	}
+	l.mu.Unlock()
+
+	l.once.Do(func() {
+		close(l.done)
+		for {
+			select {
+			case conn := <-l.ready:
+				conn.Close()
+			default:
+				return
+			}
+		}
+	})
+}
+
+// stopErr returns why the accept loop stopped, if a real failure caused it.
+func (l *hybridListener) stopErr() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.last
+}
+
+// sniffLogInterval is how often one host may be reported for dropped connections;
+// a scanner or a device retrying on a dead network drops one per attempt.
+const sniffLogInterval = time.Minute
+
+// maxSniffHosts bounds the rate-limit map. Past it, new hosts are simply suppressed.
+const maxSniffHosts = 256
+
+// sniffDropLogger rate-limits drop logging per remote host, like tlsTrustNoiseFilter
+// does for handshake noise.
+type sniffDropLogger struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+// note logs the drop unless this host was reported within the last sniffLogInterval.
+func (l *sniffDropLogger) note(addr net.Addr, cause error) {
+	if l == nil || addr == nil || !l.allowed(addr) {
+		return
+	}
+	log.Printf("[accept] dropped connection from %s before its first byte: %v (further drops from this host are suppressed for %s)",
+		addr, cause, sniffLogInterval)
+}
+
+// allowed stamps addr's host and reports whether it may be logged now.
+func (l *sniffDropLogger) allowed(addr net.Addr) bool {
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		host = addr.String()
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.last == nil {
+		l.last = map[string]time.Time{}
+	}
+	if at, ok := l.last[host]; ok && time.Since(at) < sniffLogInterval {
+		return false
+	}
+	if _, ok := l.last[host]; !ok && len(l.last) >= maxSniffHosts {
+		return false
+	}
+	l.last[host] = time.Now()
+	return true
 }
 
 type peekConn struct {
@@ -514,15 +679,27 @@ func (s *Server) Serve() error {
 		if err != nil {
 			return fmt.Errorf("listen: %w", err)
 		}
-		return srv.Serve(newHybridListener(l, s.tlsConfigToStd()))
+		return srv.Serve(newHybridListener(l, s.tlsConfigToStd(), 0))
 	}
 
 	log.Printf("Server starting on http://%s", s.addr)
 	return srv.ListenAndServe()
 }
 
-func newHybridListener(l net.Listener, stdCfg *stdtls.Config) *hybridListener {
-	return &hybridListener{Listener: l, stdTlsConfig: stdCfg}
+func newHybridListener(l net.Listener, stdCfg *stdtls.Config, sniffTimeout time.Duration) *hybridListener {
+	h := &hybridListener{
+		Listener:     l,
+		stdTlsConfig: stdCfg,
+		sniffTimeout: sniffTimeout, // zero means defaultSniffTimeout
+		drops:        &sniffDropLogger{},
+		ready:        make(chan net.Conn, readyQueue),
+		done:         make(chan struct{}),
+	}
+	// A sniff still running when the listener closes lingers for at most sniffTimeout
+	// and costs one parked goroutine: closing done has already released Accept, Serve
+	// and every queued connection, so there is nothing to wait for.
+	go h.acceptLoop()
+	return h
 }
 
 // Shutdown gracefully shuts down the server.
