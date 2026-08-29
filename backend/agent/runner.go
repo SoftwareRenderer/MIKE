@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -123,7 +122,9 @@ func NewAgentRunner(ctx context.Context, ext *extensions.Extension, sandboxMgr *
 	} else {
 		cmd := exec.Command(spCfg.Binary, spCfg.Args...)
 		cmd.Dir = worktreePath
-		cmd.Env = append(os.Environ(), spCfg.Env...)
+		// Never hand the agent the server's own environment: it would expose
+		// MIKE_LOGIN_PASSWORD / MIKE_ENCRYPTION_KEY to an extension-supplied binary.
+		cmd.Env = SafeAgentEnv(spCfg.Env...)
 
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
