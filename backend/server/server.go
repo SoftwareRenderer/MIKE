@@ -62,6 +62,7 @@ type Server struct {
 	addr                string
 	frontendDist        string
 	tlsConfig           *tls.Config
+	allowedHosts        string // extra accepted Host values (--allowed-hosts, else MIKE_ALLOWED_HOSTS)
 
 	// worktreeMux serializes git operations per task.
 
@@ -80,7 +81,9 @@ type Server struct {
 
 // NewServer creates a new Server instance.
 // addr is the listen address (e.g. ":3000"). frontendDist is the path to the frontend build output (empty to skip).
-func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Config) (*Server, error) {
+// allowedHosts lists extra hostnames accepted in the Host header, comma-separated;
+// empty falls back to MIKE_ALLOWED_HOSTS (see effectiveAllowedHosts).
+func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tlsCfg *tls.Config) (*Server, error) {
 	store, err := store.NewStore(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("create store: %w", err)
@@ -113,6 +116,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 		addr:         addr,
 		frontendDist: frontendDist,
 		tlsConfig:    tlsCfg,
+		allowedHosts: allowedHosts,
 		worktreeMux:  make(map[string]*sync.Mutex),
 		projectMux:   make(map[string]*sync.Mutex),
 		loginLimiter: newLoginRateLimiter(),
@@ -498,6 +502,12 @@ func (s *Server) Serve() error {
 		),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
+	}
+
+	// Echo the Host allowlist extras: a 421 through a reverse proxy is almost
+	// always a missing entry here, so make the effective value visible at startup.
+	if extra := s.effectiveAllowedHosts(); extra != "" {
+		log.Printf("[host] accepting extra Host header values: %s", extra)
 	}
 
 	if s.tlsConfig != nil {

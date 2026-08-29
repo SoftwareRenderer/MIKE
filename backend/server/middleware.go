@@ -107,8 +107,18 @@ func (s *Server) CORSMiddleware(next http.Handler) http.Handler {
 // allowedHostsEnv lists extra hostnames accepted in the Host header,
 // comma-separated (e.g. "kanban.example.com,staging.lan"). It is the opt-out for
 // reverse proxies, which forward a public domain the server cannot infer from
-// the address it listens on.
+// the address it listens on. The --allowed-hosts flag takes priority over it.
 const allowedHostsEnv = "MIKE_ALLOWED_HOSTS"
+
+// effectiveAllowedHosts resolves the extra accepted Host values: the value the
+// server was constructed with (the --allowed-hosts flag) wins, and
+// MIKE_ALLOWED_HOSTS is the fallback for an unset/blank flag.
+func (s *Server) effectiveAllowedHosts() string {
+	if strings.TrimSpace(s.allowedHosts) != "" {
+		return s.allowedHosts
+	}
+	return os.Getenv(allowedHostsEnv)
+}
 
 // loopbackHosts are always accepted: they can only name this machine.
 var loopbackHosts = []string{"localhost", "127.0.0.1", "::1"}
@@ -119,8 +129,9 @@ type hostAllowlist struct {
 }
 
 // newHostAllowlist builds the allowlist from the listen address and the
-// MIKE_ALLOWED_HOSTS value: loopback names, the address the server listens on
-// (unless it is a wildcard, which names no host), plus every explicit extra entry.
+// extra-hosts value (flag over MIKE_ALLOWED_HOSTS): loopback names, the address
+// the server listens on (unless it is a wildcard, which names no host), plus
+// every explicit extra entry.
 func newHostAllowlist(addr, extraHosts string) *hostAllowlist {
 	a := &hostAllowlist{hosts: make(map[string]struct{})}
 	for _, h := range loopbackHosts {
@@ -174,13 +185,13 @@ func normalizeHost(raw string) string {
 // authority is not in the list. It never replaces the session check — it only
 // decides which names this server answers.
 func (s *Server) HostPinMiddleware(next http.Handler) http.Handler {
-	allowed := newHostAllowlist(s.addr, os.Getenv(allowedHostsEnv))
+	allowed := newHostAllowlist(s.addr, s.effectiveAllowedHosts())
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if allowed.allows(r.Host) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		log.Printf("[host] rejected request for Host %q (set %s to allow it)", r.Host, allowedHostsEnv)
+		log.Printf("[host] rejected request for Host %q (allow it with --allowed-hosts or %s)", r.Host, allowedHostsEnv)
 		JSONError(w, http.StatusMisdirectedRequest, "invalid Host header")
 	})
 }
