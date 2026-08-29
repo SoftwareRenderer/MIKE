@@ -87,10 +87,15 @@ function writeFileInWorktree(projectId: string, taskId: string, filePath: string
 }
 
 /**
- * Poll the diff API until the expected file appears, then re-navigate to the task
- * so the diff panel renders fresh data. The worktree watcher's 2s poll + WS broadcast
- * is unreliable in headless tests, so we force a reload once the backend confirms
- * the file is visible.
+ * Poll the diff API until the expected file appears, then get the diff panel to
+ * show it. The worktree watcher's 2s poll + WS broadcast is unreliable in
+ * headless tests, so we force a reload once the backend confirms the file is
+ * visible — and we RE-navigate until the panel agrees, because one reload is not
+ * enough: the panel fetches its diff once per mount, so a request that lands
+ * while the backend is still rewriting the worktree (a thread switch checks
+ * snapshots out) answers "No changes since last commit", and nothing refetches
+ * it after that. Under parallel load that window is easy to hit — the API has
+ * the file, the panel stays pinned to the empty answer forever.
  */
 async function waitForDiffFile(page: any, projectId: string, taskId: string, expectFile: string) {
     await page.waitForFunction(async ([pid, tid, file]: [string, string, string]) => {
@@ -98,8 +103,10 @@ async function waitForDiffFile(page: any, projectId: string, taskId: string, exp
         const data = await res.json();
         return data.files && Object.keys(data.files).some((k: string) => k.includes(file));
     }, [projectId, taskId, expectFile], { timeout: 15000 });
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.diff-content')).toContainText(expectFile, { timeout: 15000 });
+    await expect(async () => {
+        await navigateToTask(page, taskId);
+        await expect(page.locator('.diff-content')).toContainText(expectFile, { timeout: 4000 });
+    }).toPass({ timeout: 12000 });
 }
 
 /**
@@ -396,7 +403,11 @@ test.describe.serial('Diff panel user interactions', () => {
         const testFile = `staged-test-${uniqueId}.txt`;
 
         writeFileSync(join(worktreeDir, testFile), 'staged content\n');
-        execSync(`cd ${worktreeDir} && git add ${testFile}`);
+        // gitWithRetry, not a bare execSync: the backend runs its own git
+        // commands in this worktree (task startup, the watcher's status poll),
+        // and a concurrent one holds .git/index.lock — the raw call then throws
+        // and the test fails before it even reaches the UI.
+        await gitWithRetry(worktreeDir, `git add ${testFile}`);
 
         await navigateToTask(page, taskInfo.taskId, taskInfo.projectId);
         await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
@@ -486,7 +497,9 @@ test.describe.serial('Diff panel user interactions', () => {
     });
 
     test('diff panel shows correct content after multiple thread switches', async ({ page }) => {
-        test.setTimeout(60000);
+        // Seven waitForDiffFile round-trips (each may re-navigate while the panel
+        // catches up with the backend) — the default budget is too tight.
+        test.setTimeout(150000);
         const projectId = await getProjectId(page);
         const taskId = await createTaskViaApi(page, projectId, `thread-diff-${Date.now()}`);
 
@@ -712,7 +725,7 @@ test.describe.serial('Diff panel real-time file updates', () => {
         const filePath = join(worktreeDir, testFile);
 
         execSync(`echo "line one" > ${filePath}`);
-        execSync(`cd ${worktreeDir} && git add -A`);
+        await gitWithRetry(worktreeDir, 'git add -A');
 
         execSync(`echo "line modified" > ${filePath}`);
 
@@ -743,7 +756,7 @@ test.describe.serial('Diff panel real-time file updates', () => {
         const filePath = join(worktreeDir, testFile);
 
         execSync(`echo "hello world" > ${filePath}`);
-        execSync(`cd ${worktreeDir} && git add -A`);
+        await gitWithRetry(worktreeDir, 'git add -A');
 
         await navigateToTask(page, taskInfo.taskId, taskInfo.projectId);
         await page.waitForSelector('.tab-bar', { timeout: 5000 });

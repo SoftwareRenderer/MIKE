@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
@@ -13,6 +13,23 @@ const TEST_NEW_FOLDER_PARENT = '/tmp/kanban-test-mkdir-parent';
 
 test.describe('File Browser Actions', () => {
   test.describe.configure({ mode: 'serial' });
+
+  /** Wait for the project created from `path` to show up in the sidebar.
+   *  Identity-based on purpose: the chromium project runs 4 workers against one
+   *  server, so a global `.project-item` count moves under this test whenever
+   *  another spec adds or removes a project. */
+  async function expectProjectVisible(page: Page, path: string): Promise<void> {
+    const name = path.split('/').pop() as string;
+    await expect(page.locator('.project-item', { hasText: name }).first()).toBeVisible({ timeout: 10000 });
+  }
+
+  /** DELETE the project recorded for `path`, if any (idempotent pre-clean). */
+  async function removeProjectByPath(page: Page, path: string): Promise<void> {
+    const list = await page.evaluate(async () => await (await fetch('/api/projects')).json());
+    if (!Array.isArray(list)) return;
+    const stale = list.find((p: any) => p.path === path);
+    if (stale) await csrfFetch(page, `/api/projects/${stale.id}`, { method: 'DELETE' });
+  }
 
   test.beforeEach(async ({ page }) => {
     try { rmSync(TEST_NON_GIT, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -29,7 +46,10 @@ test.describe('File Browser Actions', () => {
   });
 
   test('should initialize git in a non-git directory and select it as project', async ({ page }) => {
-    const initialCount = await page.locator('.project-item').count();
+    // This describe re-creates the directory from scratch, so drop any project an
+    // earlier run left pointing at the same path (it would collide with the
+    // create below instead of exercising it).
+    await removeProjectByPath(page, TEST_NON_GIT);
 
     // Open the file browser (uses BaseModal with role="dialog")
     await page.click('.add-project-btn');
@@ -67,8 +87,8 @@ test.describe('File Browser Actions', () => {
     // Browser should close automatically after init (auto-select)
     await expect(page.locator('[role="dialog"]:has-text("Add Project")')).not.toBeVisible({ timeout: 5000 });
 
-    // New project should be added
-    await expect(page.locator('.project-item')).toHaveCount(initialCount + 1, { timeout: 5000 });
+    // The new project is listed
+    await expectProjectVisible(page, TEST_NON_GIT);
 
     // Board should be visible (project was selected)
     await expect(page.locator('.board')).toBeVisible({ timeout: 5000 });
@@ -111,7 +131,6 @@ test.describe('File Browser Actions', () => {
   });
 
   test('should create project with sandbox disabled when checkbox is unchecked', async ({ page }) => {
-    const initialCount = await page.locator('.project-item').count();
 
     // Open the file browser (uses BaseModal with role="dialog")
     await page.click('.add-project-btn');
@@ -142,8 +161,8 @@ test.describe('File Browser Actions', () => {
     // Browser should close
     await expect(page.locator('[role="dialog"]:has-text("Add Project")')).not.toBeVisible({ timeout: 5000 });
 
-    // New project should be added
-    await expect(page.locator('.project-item')).toHaveCount(initialCount + 1, { timeout: 5000 });
+    // The new project is listed
+    await expectProjectVisible(page, uniqueDir);
 
     // Verify via API that the last project has sandbox_enabled: false
     await expect(async () => {

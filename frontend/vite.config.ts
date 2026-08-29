@@ -40,41 +40,49 @@ export default defineConfig({
                 runtimeCaching: [
                     {
                         // Extension assets (served from disk by the Go server, not part
-                        // of the build) — shorter TTL so registry updates (incl. security
-                        // fixes shipped in an extension) reach clients within a week.
-                        urlPattern: ({ url }) => url.pathname.includes('/extensions/'),
-                        handler: 'CacheFirst',
+                        // of the build). Same-origin only. NetworkFirst so a security fix
+                        // shipped in an extension update reaches the client immediately,
+                        // with the cache as the offline fallback (not the other way round:
+                        // CacheFirst would pin a revoked/fixed extension for the whole TTL).
+                        urlPattern: ({ url }) => url.origin === self.location.origin && url.pathname.includes('/extensions/'),
+                        handler: 'NetworkFirst',
                         options: {
                             cacheName: 'kanban-extensions',
+                            networkTimeoutSeconds: 3,
                             expiration: {
                                 maxEntries: 50,
                                 maxAgeSeconds: 7 * 24 * 60 * 60, // 7 days
                             },
+                            // 200 only: never cache an opaque (status 0) response.
                             cacheableResponse: {
-                                statuses: [0, 200],
+                                statuses: [200],
                             },
                         },
                     },
                     {
-                        // Cache the app shell (JS, CSS, assets) — skip API calls entirely
+                        // Cache the app shell (JS, CSS, assets) — skip API calls entirely.
+                        // Same-origin only, and no opaque responses: a CacheFirst entry
+                        // keyed by URL would otherwise serve a cross-origin opaque body to
+                        // any later request for the same URL, for the full TTL.
                         urlPattern: ({ url }) => {
+                            if (url.origin !== self.location.origin) return false;
                             const href = url.href;
                             // Never cache or intercept API requests — let them fail naturally
                             // so the offline queue in queue.ts takes over
                             if (href.includes('/api/')) return false;
-                            // Extension assets have their own (shorter-TTL) rule above
+                            // Extension assets have their own rule above
                             if (url.pathname.includes('/extensions/')) return false;
                             return true;
                         },
                         handler: 'CacheFirst',
                         options: {
-                            cacheName: 'kanban-shell',
+                            cacheName: 'kanban-app-shell',
                             expiration: {
                                 maxEntries: 50,
                                 maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
                             },
                             cacheableResponse: {
-                                statuses: [0, 200],
+                                statuses: [200],
                             },
                         },
                     },

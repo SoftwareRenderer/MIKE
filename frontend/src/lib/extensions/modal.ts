@@ -27,11 +27,23 @@ export interface ExtensionModalOptions {
 
 const OVERLAY_Z_BASE = 2000;
 
+/**
+ * How many extension modals may be open at once. The dialog is blocking and
+ * user-dismissed, so an unbounded `ui.modal` loop would lock the UI; a granted
+ * capability should never be able to do that.
+ */
+export const MAX_OPEN_MODALS = 3;
+
 let zCounter = 0;
 /** Open overlays in open order; the last entry is the topmost. */
 const openOverlays: HTMLDivElement[] = [];
 
 export function showExtensionModal(opts: ExtensionModalOptions): Promise<void> {
+    if (openOverlays.length >= MAX_OPEN_MODALS) {
+        return Promise.reject(
+            new Error(`too many open extension dialogs (max ${MAX_OPEN_MODALS})`)
+        );
+    }
     const message = String(opts.message || '');
     const title = String(opts.title || '');
     const confirmLabel = String(opts.confirmLabel || 'OK');

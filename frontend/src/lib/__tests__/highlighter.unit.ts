@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getLanguageTreeFromView } from '$lib/highlighter';
+import { escapeHtml, getLanguageTreeFromView } from '$lib/highlighter';
 
 // Mock a CodeMirror EditorView enough for the markdown fallback path,
 // which only needs state.doc.toString() and state.doc.lineAt().
@@ -64,5 +64,18 @@ describe('getLanguageTreeFromView markdown outline', () => {
         const source = ['# A', '', '```', '# comment', '```', '', '# B'].join('\n');
         const symbols = getLanguageTreeFromView(mockView(source), 'doc.md');
         expect(symbols.map((s) => s.name)).toEqual(['A', 'B']);
+    });
+});
+
+describe('escapeHtml', () => {
+    it('escapes every character that can break out of a text node or attribute', () => {
+        // Diff/highlight output is interpolated into HTML strings that also
+        // carry attributes, so quotes must be escaped too.
+        expect(escapeHtml(`<img src=x onerror="alert('1')"> & more`))
+            .toBe('&lt;img src=x onerror=&quot;alert(&#39;1&#39;)&quot;&gt; &amp; more');
+    });
+
+    it('does not double-escape ampersands it introduces', () => {
+        expect(escapeHtml(`&'"`)).toBe('&amp;&#39;&quot;');
     });
 });

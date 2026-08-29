@@ -118,12 +118,18 @@ async function loadLanguage(path: string): Promise<Language | null> {
 
 /**
  * Escape HTML special characters in a string.
+ *
+ * Quotes are included (matching the other escapeHtml copies) so the result is
+ * safe in an attribute as well as a text node — callers build HTML strings that
+ * carry `class="…"` attributes next to the escaped content.
  */
 export function escapeHtml(text: string): string {
     return text
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 /** Simple LRU cache for highlight results (keyed by path + content hash). */
