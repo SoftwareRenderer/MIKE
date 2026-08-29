@@ -1,0 +1,325 @@
+<script lang="ts">
+    /**
+     * Sessions section of Settings → About.
+     *
+     * Lists every live login session (GET /api/sessions) and revokes them
+     * immediately — this section is NOT part of the config Save/Cancel flow, so
+     * it never touches the modal's dirty state or save payload (like the PWA
+     * install button above it).
+     *
+     * It is rendered inside the `activeTab === 'about'` block, so its mount
+     * effect only runs when the About tab is opened.
+     */
+    import type { SessionInfo } from '$lib/types';
+    import { listSessions, revokeSession, revokeOtherSessions } from '$lib/api';
+    import { dialogStore } from '$lib/stores';
+    import { formatRelativeTime } from '$lib/utils/format-time';
+
+    /** Sign-out path owned by the modal (App's logout handler). */
+    let { onSignOut }: { onSignOut?: () => void | Promise<void> } = $props();
+
+    let sessions = $state<SessionInfo[]>([]);
+    // Starts true: the mount effect fetches immediately, so the first paint is
+    // the loading state rather than a flash of the empty state.
+    let loading = $state(true);
+    let error = $state('');
+    /** id of the session whose Revoke button is in flight (disables the row). */
+    let revokingId = $state('');
+    let revokingOthers = $state(false);
+
+    /** Rows newest first, with the caller's own session pinned on top. */
+    const rows = $derived.by(() => {
+        const sorted = [...sessions].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+        return sorted.sort((a, b) => Number(b.current) - Number(a.current));
+    });
+    const otherCount = $derived(sessions.filter(s => !s.current).length);
+
+    /** Absolute timestamp for a row's `title` tooltip. */
+    function absolute(iso: string): string {
+        if (!iso) return 'Unknown';
+        const date = new Date(iso);
+        return isNaN(date.getTime()) ? iso : date.toLocaleString();
+    }
+
+    /** Relative display text; empty timestamps render as an em dash. */
+    function relative(iso: string): string {
+        if (!iso) return '\u2014';
+        return formatRelativeTime(iso) || absolute(iso);
+    }
+
+    async function loadSessions() {
+        loading = true;
+        error = '';
+        try {
+            sessions = await listSessions();
+        } catch (e: any) {
+            error = e?.message || 'Failed to load sessions';
+            sessions = [];
+        } finally {
+            loading = false;
+        }
+    }
+
+    async function handleRevoke(session: SessionInfo) {
+        const isCurrent = session.current;
+        const confirmed = await dialogStore.showConfirm({
+            title: isCurrent ? 'Revoke this device?' : 'Revoke this session?',
+            message: isCurrent
+                ? 'You are signed in on this device. Revoking it signs you out now.'
+                : 'The other device will be signed out and must sign in again.',
+            confirmText: isCurrent ? 'Sign out' : 'Revoke',
+            cancelText: 'Cancel',
+            variant: 'destructive',
+        });
+        if (!confirmed) return;
+
+        revokingId = session.id;
+        error = '';
+        try {
+            await revokeSession(session.id);
+            if (isCurrent) {
+                // The session is gone; every later request would 401. Hand over to
+                // the modal's existing sign-out path instead of refreshing.
+                await onSignOut?.();
+                return;
+            }
+            sessions = sessions.filter(s => s.id !== session.id);
+            dialogStore.showToast('Session revoked', 'success');
+        } catch (e: any) {
+            error = e?.message || 'Failed to revoke session';
+        } finally {
+            revokingId = '';
+        }
+    }
+
+    async function handleRevokeOthers() {
+        const count = otherCount;
+        const confirmed = await dialogStore.showConfirm({
+            title: 'Revoke all other sessions?',
+            message: count === 1
+                ? '1 other device will be signed out and must sign in again. This device stays signed in.'
+                : `${count} other devices will be signed out and must sign in again. This device stays signed in.`,
+            confirmText: 'Revoke all',
+            cancelText: 'Cancel',
+            variant: 'destructive',
+        });
+        if (!confirmed) return;
+
+        revokingOthers = true;
+        error = '';
+        try {
+            const { revoked } = await revokeOtherSessions();
+            dialogStore.showToast(revoked === 1 ? '1 other session revoked' : `${revoked} sessions revoked`, 'success');
+            await loadSessions();
+        } catch (e: any) {
+            error = e?.message || 'Failed to revoke other sessions';
+        } finally {
+            revokingOthers = false;
+        }
+    }
+
+    // Fetch when the section mounts — i.e. when the About tab is opened, not when
+    // the Settings modal mounts.
+    $effect(() => {
+        void loadSessions();
+    });
+</script>
+
+<section class="section sessions-section">
+    <div class="section-header">
+        <h3 class="section-label">Sessions</h3>
+        <div class="section-actions">
+            <button
+                type="button"
+                class="btn-small"
+                onclick={loadSessions}
+                disabled={loading || revokingOthers}
+                aria-label="refresh-sessions"
+                title="Reload the session list"
+            >{loading ? 'Loading...' : 'Refresh'}</button>
+            <button
+                type="button"
+                class="btn-small btn-danger"
+                onclick={handleRevokeOthers}
+                disabled={loading || revokingOthers || otherCount === 0}
+                aria-label="revoke-all-other-sessions"
+                title="Sign out every other device"
+            >{revokingOthers ? 'Revoking...' : 'Revoke all other sessions'}</button>
+        </div>
+    </div>
+
+    {#if error}
+        <div class="sessions-error" role="alert">{error}</div>
+    {/if}
+
+    {#if loading && sessions.length === 0}
+        <div class="sessions-status" role="status">Loading sessions...</div>
+    {:else if sessions.length === 0 && !error}
+        <div class="sessions-status" role="status">No other active sessions</div>
+    {:else}
+        {#each rows as session (session.id)}
+            <div class="session-row" class:session-row-current={session.current} data-session-id={session.id}>
+                <div class="session-info">
+                    <div class="session-headline">
+                        <span class="session-agent" title={session.user_agent || 'Unknown device'}>
+                            {session.user_agent || 'Unknown device'}
+                        </span>
+                        {#if session.current}
+                            <span class="session-badge">This device</span>
+                        {/if}
+                    </div>
+                    <div class="session-meta">
+                        <span class="session-meta-item" title="Signed in at {absolute(session.created_at)}">
+                            <span class="session-meta-key">Created</span> {relative(session.created_at)}
+                        </span>
+                        <span class="session-meta-item" title="Last seen at {absolute(session.last_seen)}">
+                            <span class="session-meta-key">Last seen</span> {relative(session.last_seen)}
+                        </span>
+                        <span class="session-meta-item">
+                            <span class="session-meta-key">IP</span> {session.ip || '\u2014'}
+                        </span>
+                    </div>
+                </div>
+                <button
+                    type="button"
+                    class="btn-small btn-danger session-revoke"
+                    onclick={() => handleRevoke(session)}
+                    disabled={revokingId === session.id || revokingOthers}
+                    aria-label={`revoke-session-${session.id}`}
+                    title={session.current ? 'Revoke this device and sign out' : 'Sign out this session'}
+                >{revokingId === session.id ? 'Revoking...' : 'Revoke'}</button>
+            </div>
+        {/each}
+        {#if otherCount === 0}
+            <div class="sessions-status" role="status">No other active sessions</div>
+        {/if}
+    {/if}
+</section>
+
+<style>
+    /* Matches the About tab's section chrome (ConfigModal.svelte). */
+    .section {
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .section-label {
+        margin: 0;
+        font-size: 0.875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-text-secondary);
+    }
+    .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .section-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+    .sessions-section {
+        gap: 10px;
+    }
+
+    .session-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-surface-2);
+        padding: 10px 12px;
+    }
+    .session-row-current {
+        border-color: var(--color-accent);
+    }
+    .session-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+    }
+    .session-headline {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+    /* Ellipsize the User-Agent; the full string stays in the title tooltip. */
+    .session-agent {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--color-text-primary);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .session-badge {
+        flex-shrink: 0;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        background: var(--color-accent);
+        color: white;
+    }
+    .session-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 14px;
+        font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', 'Fira Code', monospace);
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+    }
+    .session-meta-key {
+        color: var(--color-text-tertiary);
+    }
+
+    .btn-small {
+        padding: 6px 12px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-3);
+        color: var(--color-text-primary);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    .btn-small:hover:not(:disabled) {
+        background: var(--color-surface-4);
+    }
+    .btn-small:disabled {
+        opacity: 0.55;
+        cursor: default;
+    }
+    .btn-danger {
+        color: var(--color-status-red);
+        border-color: var(--color-status-red);
+    }
+
+    .sessions-status {
+        font-size: 0.8125rem;
+        color: var(--color-text-tertiary);
+    }
+    .sessions-error {
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--color-status-red);
+    }
+</style>
