@@ -995,6 +995,15 @@ type taskExecSetup struct {
 	taskSlotURL string
 }
 
+// projectName returns the project name used for prompt assembly. Tolerates a nil
+// project (unit-test setups); only the sandboxed container cwd uses it.
+func (s *taskExecSetup) projectName() string {
+	if s.project == nil {
+		return ""
+	}
+	return s.project.Name
+}
+
 // prepareTaskExecution sets up the shared infrastructure for task execution.
 // Both StartTask and handleLazyStart use this to avoid duplicating worktree
 // creation, branch watching, status updates, and sandbox configuration.
@@ -2117,14 +2126,21 @@ func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, task
 
 var wordRe = regexp.MustCompile(`\S+`)
 
+// composeSystemPrompt builds a task's system prompt, embedding the most recent
+// conversation summary (empty for a task that was never summarized)
+func composeSystemPrompt(task *types.Task, worktreePath, projectName string, sandboxEnabled bool, summary string) string {
+	cwd := worktreePath
+	skillsMount := ""
+	if sandboxEnabled {
+		cwd = "/home/sandbox/" + projectName
+		skillsMount = sandboxmgr.SkillsMount
+	}
+	return llama.BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, task.OperatingMode)
+}
+
 // buildMessagesFromDB loads persisted messages and builds the system prompt.
 // The most recent summary is injected into the system prompt.
 func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktreePath, projectName string, sandboxEnabled bool) []types.ChatMessage {
-	cwd := worktreePath
-	if sandboxEnabled {
-		cwd = "/home/sandbox/" + projectName
-	}
-
 	// Extract most recent summary for the system prompt.
 	var summary string
 	for i := len(taskMsgs) - 1; i >= 0; i-- {
@@ -2134,14 +2150,7 @@ func buildMessagesFromDB(task *types.Task, taskMsgs []types.TaskMessage, worktre
 		}
 	}
 
-	var systemPrompt string
-	skillsMount := ""
-	if sandboxEnabled {
-		skillsMount = sandboxmgr.SkillsMount
-	}
-	systemPrompt = llama.BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, task.OperatingMode)
-
-	messages := []types.ChatMessage{{Role: "system", Content: systemPrompt}}
+	messages := []types.ChatMessage{{Role: "system", Content: composeSystemPrompt(task, worktreePath, projectName, sandboxEnabled, summary)}}
 
 	i := 0
 	for i < len(taskMsgs) {
