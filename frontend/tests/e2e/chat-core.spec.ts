@@ -8,7 +8,6 @@ import {
   sendMessage,
   csrfFetch,
   ensureChatForm,
-  ensureTaskStarted,
   findProviderByRef,
 } from './helpers';
 
@@ -110,45 +109,10 @@ test.describe('Chat Core', () => {
     await expect(page.locator('.btn-stop')).toBeHidden({ timeout: 10000 });
   });
 
-  test('should stop generation when Escape is pressed in chat input', async ({ page }) => {
-    test.setTimeout(30000);
-    const taskId = await createTaskViaApi(page, projectId, `escape-stop-${Date.now()}`);
-    await navigateToTask(page, taskId);
-    await ensureTaskStarted(page, projectId, taskId);
-    await waitForChatForm(page);
-
-    if (!await requireSendButton(page)) return;
-
-    const chatTextarea = page.locator('textarea[placeholder*="message"]');
-    await chatTextarea.fill('stop-test message');
-    await chatTextarea.press('Enter');
-    await expect(chatTextarea).toHaveValue('');
-
-    const stopBtnVisible = await page.locator('.btn-stop').isVisible({ timeout: 10000 }).catch(() => false);
-    if (!stopBtnVisible) return;
-
-    // Wait for assistant message to appear (streaming in progress)
-    await expect(page.locator('.chat-message.assistant').first()).toBeVisible({ timeout: 5000 });
-
-    const assistantBefore = page.locator('.chat-message.assistant');
-    const assistantCountBefore = await assistantBefore.count();
-
-    await chatTextarea.focus();
-    await chatTextarea.press('Escape');
-
-    await expect(page.locator('.btn-stop')).toBeHidden({ timeout: 10000 });
-    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 10000 });
-
-    const cursorVisible = await page.locator('.streaming-cursor').isVisible().catch(() => false);
-    expect(cursorVisible).toBe(false);
-
-    const assistantAfter = page.locator('.chat-message.assistant');
-    const assistantCountAfter = await assistantAfter.count();
-    expect(assistantCountAfter).toBeLessThanOrEqual(assistantCountBefore);
-
-    const lastMessage = page.locator('.chat-message').last();
-    await expect(lastMessage).toHaveClass(/user/);
-  });
+  // Escape never cancels a turn — not even while the input is focused. The
+  // in-flight case is covered by chat-input-esc.spec.ts ("Escape while
+  // streaming blurs the input and never stops generation"); the button tests
+  // below cover the only remaining stop affordance.
 
   test('should not trigger stop when Escape is pressed and not loading', async ({ page }) => {
     test.setTimeout(30000);

@@ -176,6 +176,16 @@
         }
     }
 
+    /**
+     * Escape semantics: the chat input never cancels generation with Escape (an
+     * in-flight turn is stopped only via the Stop button) — Escape must mean the
+     * same thing whether or not the model is streaming, because the textarea stays
+     * editable while a turn runs (drafting the next message).
+     * With the @ mention dropdown open, Escape closes it and keeps focus in the
+     * input. Otherwise Escape blurs the input and swallows the event, so the
+     * Task View's window-level "back to board" Escape fires on the NEXT press,
+     * not this one (blur-first).
+     */
     function handleKeydown(e: KeyboardEvent) {
         // Handle @ mention dropdown navigation
         if (mentionTrigger && mentionResults.length > 0) {
@@ -202,12 +212,6 @@
                 closeMention();
                 return;
             }
-        }
-        if (e.key === 'Escape' && isLoading) {
-            e.preventDefault();
-            e.stopPropagation();
-            handleStop();
-            return;
         }
         if (e.key === 'Escape') {
             e.preventDefault();

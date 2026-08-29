@@ -1057,55 +1057,57 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				te.taskMu.Lock()
 				state := te.tasks[setup.task.ID]
 				te.taskMu.Unlock()
-				// Serialize tool writes against subtask merges into this worktree.
-				te.GetWorktreeMu(setup.task.ID).Lock()
 				streamed := false
-				result, success := te.executeTool(setup.ctx, tc.Function.Name, args, setup.worktreePath, setup.task, state, func(toolID string, text string) {
-					streamed = true
-					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
-				})
+				// runToolProtected holds the worktree lock for this block and turns a panic
+				// into a failed result, so the tool_result below is always sent and stored.
+				result, success := te.runToolProtected(setup.task.ID, tc.Function.Name, func() (string, bool) {
+					result, success := te.executeTool(setup.ctx, tc.Function.Name, args, setup.worktreePath, setup.task, state, func(toolID string, text string) {
+						streamed = true
+						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
+					})
 
-				// Trigger LSP diagnostics for files modified by the tool.
-				// For write/edit tools, use the path from tool args directly.
-				// For bash, extract file paths from the command and only check files
-				// that match an installed LSP extension.
-				var lspHint string
-				switch tc.Function.Name {
-				case "write_file", "edit_file":
-					if path, ok := args["path"].(string); ok && path != "" {
-						lspHint = te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, path)
-					}
-				case "bash":
-					if cmd, ok := args["command"].(string); ok && cmd != "" {
-						files := extractFilesFromBashCommand(cmd)
-						for _, f := range files {
-							if hint := te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, f); hint != "" {
-								lspHint = hint
-								break
+					// Trigger LSP diagnostics for files modified by the tool.
+					// For write/edit tools, use the path from tool args directly.
+					// For bash, extract file paths from the command and only check files
+					// that match an installed LSP extension.
+					var lspHint string
+					switch tc.Function.Name {
+					case "write_file", "edit_file":
+						if path, ok := args["path"].(string); ok && path != "" {
+							lspHint = te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, path)
+						}
+					case "bash":
+						if cmd, ok := args["command"].(string); ok && cmd != "" {
+							files := extractFilesFromBashCommand(cmd)
+							for _, f := range files {
+								if hint := te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, f); hint != "" {
+									lspHint = hint
+									break
+								}
 							}
 						}
 					}
-				}
-				// Inject LSP diagnostic hint into LLM context if found.
-				if lspHint != "" {
-					task, _ := te.store.GetTaskByID(setup.task.ID)
-					if task != nil {
-						msgID := uuid.New().String()
-						_ = te.store.CreateTaskMessage(&types.TaskMessage{
-							ID: msgID, TaskID: setup.task.ID, ThreadID: task.CurrentThreadID, Role: "user", Content: lspHint, CreatedAt: time.Now().UTC(),
-						})
-						lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: lspHint})
-						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
-							Type: types.WSTypeUserMessage,
-							Data: map[string]any{
-								"id":      msgID,
-								"role":    "user",
-								"content": lspHint,
-							},
-						})
+					// Inject LSP diagnostic hint into LLM context if found.
+					if lspHint != "" {
+						task, _ := te.store.GetTaskByID(setup.task.ID)
+						if task != nil {
+							msgID := uuid.New().String()
+							_ = te.store.CreateTaskMessage(&types.TaskMessage{
+								ID: msgID, TaskID: setup.task.ID, ThreadID: task.CurrentThreadID, Role: "user", Content: lspHint, CreatedAt: time.Now().UTC(),
+							})
+							lc.messages = append(lc.messages, types.ChatMessage{Role: "user", Content: lspHint})
+							te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
+								Type: types.WSTypeUserMessage,
+								Data: map[string]any{
+									"id":      msgID,
+									"role":    "user",
+									"content": lspHint,
+								},
+							})
+						}
 					}
-				}
-				te.GetWorktreeMu(setup.task.ID).Unlock()
+					return result, success
+				})
 				toolDuration := time.Since(toolStart).Milliseconds()
 				isSandboxed := (lc.sandboxEnabled && isSandboxableTool(tc.Function.Name)) || isLSPTool(tc.Function.Name)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolResult, Data: buildToolResultEvent(tc.ID, tc.Function.Name, result, success, toolDuration, args, tc.Function.Arguments, extractPathFromArgs(tc.Function.Arguments), isSandboxed, streamed, toolCallMsgID)})
@@ -1117,7 +1119,10 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					"success":  success,
 					"duration": toolDuration,
 				})
-				_ = te.store.UpdateTaskMessageToolResult(toolCallMsgID, string(resultJSON))
+				if err := te.store.UpdateTaskMessageToolResult(toolCallMsgID, string(resultJSON)); err != nil {
+					// The row keeps an empty result, which the chat renders as still running.
+					log.Printf("[tool] FAILED to persist tool_result for msg=%s tool=%s: %v", toolCallMsgID, tc.Function.Name, err)
+				}
 
 				turnFailures = append(turnFailures, turnResult{
 					signature: tc.Function.Name + ":" + tc.Function.Arguments,

@@ -5,6 +5,7 @@
     import { sortByLastMoved } from '$lib/utils/sort-tasks';
     import { appStore } from '$lib/stores';
     import { countWithDescendants } from '$lib/utils/task-utils';
+    import { isFullyVisibleIn, verticalScrollParent } from '$lib/utils/scroll-visibility';
     import type { MultiSelect } from '$lib/composables/use-multi-select.svelte';
 
     let {
@@ -55,24 +56,39 @@
     /** Card direction from Settings → Preferences: true = least recently moved on top. */
     const sortOldestFirst = $derived(appStore.config?.sort_oldest_first === true);
 
-    // Scroll to current task when task detail opens or task changes.
-    // The current task's section is always expanded (handled in template).
+    let listEl: HTMLDivElement | undefined = $state();
+
+    /**
+     * Current task id as a plain string. The reveal effect must key on the id, not
+     * on the task object: App.svelte replaces `selectedTask` with a new object on
+     * every `task_updated` frame — several per turn — and each one used to re-run
+     * the effect, dragging the column back to the running task while you read
+     * another card.
+     */
+    const currentTaskId = $derived(currentTask.id);
+
+    // Center the current task's card when the detail opens or the task changes.
+    // If its section is collapsed there is no card to reveal, so the column stays put.
     $effect(() => {
-        const taskId = currentTask.id;
+        const taskId = currentTaskId;
         if (!taskId) return;
-        // Scroll into view after DOM is painted
+        // Two frames: the card is laid out by then.
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-                const card = document.querySelector(`.card[data-task-id="${taskId}"]`);
-                if (card) {
-                    card.scrollIntoView({ behavior: 'auto', block: 'center' });
-                }
+                // Only this list — a floating task view can render the same task elsewhere.
+                const card = listEl?.querySelector<HTMLElement>(`.card[data-task-id="${taskId}"]`);
+                if (!card) return;
+                // Already fully visible: leave the reader where they are. Without a
+                // measurable scroll range (no layout, e.g. tests) we still scroll.
+                const scroller = verticalScrollParent(card);
+                if (scroller && isFullyVisibleIn(scroller.getBoundingClientRect(), card.getBoundingClientRect())) return;
+                card.scrollIntoView({ behavior: 'auto', block: 'center' });
             });
         });
     });
 </script>
 
-<div class="task-list">
+<div class="task-list" bind:this={listEl}>
     {#each sections as section (section.id)}
         {@const sectionTasks = sortByLastMoved(allTasks.filter(t => t.status === section.id && !consolidatedSubtaskIds.has(t.id)), sortOldestFirst)}
         {@const sectionCount = sectionTasks.reduce((sum, t) => sum + countWithDescendants(t.id, section.id, childrenMap), 0)}

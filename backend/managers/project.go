@@ -376,14 +376,30 @@ func (h *ProjectHandler) applyPricing(stats *types.ProjectStats) {
 	}
 }
 
+// buildWantsNoCache reports whether a build request asked to skip the layer
+// cache. Absent or unparsable values mean "use the cache".
+func buildWantsNoCache(r *http.Request) bool {
+	v := r.URL.Query().Get("no_cache")
+	if v == "" {
+		return false
+	}
+	noCache, err := strconv.ParseBool(v)
+	if err != nil {
+		return false
+	}
+	return noCache
+}
+
 // HandleSandboxBuild builds a container image from the project's Dockerfile.
 // Streams build progress as SSE and returns final JSON result.
+// ?no_cache=1 skips the layer cache for this build only.
 func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("projectID")
 	if r.Method != http.MethodPost {
 		httputil.JSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	noCache := buildWantsNoCache(r)
 
 	// Get the project to find the Dockerfile path
 	project, err := h.store.GetProject(id)
@@ -415,9 +431,13 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 		flusher.Flush()
 	}
 
-	sendLine("Building sandbox image from Dockerfile...")
+	if noCache {
+		sendLine("Building sandbox image from Dockerfile (no cache)...")
+	} else {
+		sendLine("Building sandbox image from Dockerfile...")
+	}
 
-	err = h.sandboxMgr.BuildImageWithProgress(project.Name, project.SandboxDockerfilePath, func(line string) {
+	err = h.sandboxMgr.BuildImageWithOptions(project.Name, project.SandboxDockerfilePath, sandbox.BuildOptions{NoCache: noCache}, func(line string) {
 		sendLine(line)
 	})
 
