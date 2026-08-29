@@ -465,8 +465,16 @@ func (s *Server) tlsConfigToStd() *stdtls.Config {
 	return &stdtls.Config{Certificates: []stdtls.Certificate{cert}}
 }
 func (s *Server) Serve() error {
+	caFile := ""
+	if s.tlsConfig != nil {
+		caFile = s.tlsConfig.CAFile
+	}
+
 	srv := &http.Server{
 		Addr: s.addr,
+		// Silences repeated "client does not trust the local CA" handshake noise;
+		// see tls_error_log.go.
+		ErrorLog: httpErrorLog(caFile),
 		Handler: AddMiddleware(s.mux,
 			s.RedirectHTTPSMiddleware,
 			PanicRecoveryMiddleware,
