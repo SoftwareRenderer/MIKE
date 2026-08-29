@@ -507,7 +507,7 @@ func TestBuildExtensionCreateArgs_AlwaysNetworkIsolated(t *testing.T) {
 					NetworkIsolation: name == "isolated",
 				},
 			}
-			args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-network-test", "ubuntu:latest", nil)
+			args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-network-test", "ubuntu:latest", nil, nil)
 			if !hasArgPair(args, "--network", "none") {
 				t.Errorf("args missing --network none (NetworkIsolation=%v): %v", ext.SandboxConfig.NetworkIsolation, args)
 			}
@@ -517,7 +517,7 @@ func TestBuildExtensionCreateArgs_AlwaysNetworkIsolated(t *testing.T) {
 
 func TestBuildExtensionCreateArgs_KeepsHardeningFlags(t *testing.T) {
 	ext := &Extension{ID: "ext-hardening-test"}
-	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-hardening-test", "ubuntu:latest", nil)
+	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-hardening-test", "ubuntu:latest", nil, nil)
 
 	if !hasArgPair(args, "--runtime", "runsc") {
 		t.Error("args missing --runtime runsc")
@@ -536,7 +536,7 @@ func TestBuildExtensionCreateArgs_MountsProjectsReadOnly(t *testing.T) {
 		"/host/proj-a": "/mnt/proj-a",
 		"/host/proj-b": "/mnt/proj-b",
 	}
-	args, mounted := buildExtensionCreateArgs(ext, "kanban-ext-ext-mount-test", "ubuntu:latest", projectMounts)
+	args, mounted := buildExtensionCreateArgs(ext, "kanban-ext-ext-mount-test", "ubuntu:latest", projectMounts, nil)
 
 	for _, m := range []string{"/host/proj-a:/mnt/proj-a:rprivate,ro", "/host/proj-b:/mnt/proj-b:rprivate,ro"} {
 		if !hasArg(args, m) {
@@ -552,7 +552,7 @@ func TestBuildExtensionCreateArgs_MountsProjectsReadOnly(t *testing.T) {
 
 func TestBuildExtensionCreateArgs_EntrypointAndImage(t *testing.T) {
 	ext := &Extension{ID: "ext-entry-test"}
-	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-entry-test", "my-custom-image:v1", nil)
+	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-entry-test", "my-custom-image:v1", nil, nil)
 
 	if !hasArg(args, "my-custom-image:v1") {
 		t.Error("args missing image reference")
@@ -567,7 +567,7 @@ func TestBuildExtensionCreateArgs_ClearsImageEntrypoint(t *testing.T) {
 	// otherwise treat the keep-alive command as a subcommand and exit
 	// immediately. An empty --entrypoint tells podman to clear it.
 	ext := &Extension{ID: "ext-entrypoint-clear-test"}
-	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-entrypoint-clear-test", "docker.io/alpine/git:latest", nil)
+	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-entrypoint-clear-test", "docker.io/alpine/git:latest", nil, nil)
 
 	if !hasArgPair(args, "--entrypoint", "") {
 		t.Errorf(`args missing --entrypoint "" (must clear the image entrypoint): %v`, args)
@@ -578,7 +578,7 @@ func TestBuildExtensionCreateArgs_MemoryLimit(t *testing.T) {
 	t.Run("zero limit omits the memory flag", func(t *testing.T) {
 		// Default (unset) sandbox config = 0 = no limit.
 		ext := &Extension{ID: "ext-mem-zero"}
-		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-zero", "ubuntu:latest", nil)
+		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-zero", "ubuntu:latest", nil, nil)
 		if hasArg(args, "--memory") {
 			t.Errorf("args should not set --memory for a 0 (no-limit) sandbox: %v", args)
 		}
@@ -586,7 +586,7 @@ func TestBuildExtensionCreateArgs_MemoryLimit(t *testing.T) {
 
 	t.Run("negative limit is clamped to no limit", func(t *testing.T) {
 		ext := &Extension{ID: "ext-mem-neg", SandboxConfig: SandboxConfig{MemoryLimit: -64}}
-		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-neg", "ubuntu:latest", nil)
+		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-neg", "ubuntu:latest", nil, nil)
 		if hasArg(args, "--memory") {
 			t.Errorf("args should not set --memory for a negative limit: %v", args)
 		}
@@ -594,7 +594,7 @@ func TestBuildExtensionCreateArgs_MemoryLimit(t *testing.T) {
 
 	t.Run("positive limit sets the memory flag", func(t *testing.T) {
 		ext := &Extension{ID: "ext-mem-set", SandboxConfig: SandboxConfig{MemoryLimit: 512}}
-		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-set", "ubuntu:latest", nil)
+		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-mem-set", "ubuntu:latest", nil, nil)
 		if !hasArgPair(args, "--memory", "512M") {
 			t.Errorf("args missing --memory 512M: %v", args)
 		}
@@ -844,5 +844,162 @@ func TestMemoryStatsFromDir_MissingCurrent(t *testing.T) {
 func TestMemoryStatsFromDir_MissingDir(t *testing.T) {
 	if _, err := memoryStatsFromDir(filepath.Join(t.TempDir(), "nonexistent")); err == nil {
 		t.Error("expected error for missing cgroup directory")
+	}
+}
+
+// mountSpecs returns the value of every "-v" argument in a create arg list.
+func mountSpecs(args []string) []string {
+	var out []string
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "-v" {
+			out = append(out, args[i+1])
+		}
+	}
+	return out
+}
+
+// capAdds returns the value of every "--cap-add" argument.
+func capAdds(args []string) []string {
+	var out []string
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--cap-add" {
+			out = append(out, args[i+1])
+		}
+	}
+	return out
+}
+
+func hasElem(hay []string, needle string) bool {
+	for _, h := range hay {
+		if h == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// TestBuildExtensionCreateArgs_RejectedMountsNeverReachPodman is the defence in
+// depth half of the fix: a mount that the write paths would refuse — because it
+// was persisted before validation existed, or came from a manifest — must never
+// become a container argument.
+func TestBuildExtensionCreateArgs_RejectedMountsNeverReachPodman(t *testing.T) {
+	allowed := t.TempDir()
+	inside := filepath.Join(allowed, "node_modules")
+	if err := os.MkdirAll(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(allowed, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	policy := newMountPolicy([]string{allowed})
+
+	ext := func(mounts ...types.SandboxMount) *Extension {
+		return &Extension{ID: "ext-mount-reject", SandboxConfig: SandboxConfig{Mounts: mounts}}
+	}
+
+	t.Run("an allowed mount is emitted", func(t *testing.T) {
+		args, _ := buildExtensionCreateArgs(ext(types.SandboxMount{
+			HostPath: inside, ContainerPath: "/workspace/node_modules", Mode: "ro",
+		}), "kanban-ext-ext-mount-reject", "ubuntu:latest", nil, policy)
+		if !hasElem(mountSpecs(args), inside+":/workspace/node_modules:rprivate,ro") {
+			t.Errorf("expected the valid mount in %v", mountSpecs(args))
+		}
+	})
+
+	t.Run("an rw mount keeps its mode", func(t *testing.T) {
+		args, _ := buildExtensionCreateArgs(ext(types.SandboxMount{
+			HostPath: inside, ContainerPath: "/workspace/node_modules", Mode: "rw",
+		}), "kanban-ext-ext-mount-reject", "ubuntu:latest", nil, policy)
+		if !hasElem(mountSpecs(args), inside+":/workspace/node_modules:rprivate,rw") {
+			t.Errorf("expected the rw mount in %v", mountSpecs(args))
+		}
+	})
+
+	rejected := map[string][]types.SandboxMount{
+		"host path outside the allowlist": {{HostPath: outside, ContainerPath: "/etc-passwd", Mode: "rw"}},
+		"host root itself":                {{HostPath: "/", ContainerPath: "/host", Mode: "rw"}},
+		"'..' in the host path":           {{HostPath: allowed + "/../etc", ContainerPath: "/etc", Mode: "ro"}},
+		"symlink out of the allowlist":    {{HostPath: filepath.Join(link, "secret"), ContainerPath: "/secret", Mode: "ro"}},
+		"relative host path":              {{HostPath: "node_modules", ContainerPath: "/nm", Mode: "ro"}},
+		"':' in the container path":       {{HostPath: inside, ContainerPath: "/workspace:/host:rprivate,rw", Mode: "ro"}},
+		"',' in the container path":       {{HostPath: inside, ContainerPath: "/workspace,rw", Mode: "ro"}},
+		"'..' in the container path":      {{HostPath: inside, ContainerPath: "/workspace/../../etc", Mode: "ro"}},
+	}
+	for name, mounts := range rejected {
+		t.Run(name, func(t *testing.T) {
+			args, _ := buildExtensionCreateArgs(ext(mounts...), "kanban-ext-ext-mount-reject", "ubuntu:latest", nil, policy)
+			if specs := mountSpecs(args); len(specs) != 0 {
+				t.Errorf("rejected mount leaked into create args: %v", specs)
+			}
+		})
+	}
+
+	// A mode outside ro/rw can never reach podman either: the spec is assembled
+	// from a literal, so an unexpected mode is clamped to read-only (least
+	// privilege) instead of being appended verbatim.
+	t.Run("an unexpected mount mode is clamped to read-only", func(t *testing.T) {
+		args, _ := buildExtensionCreateArgs(ext(types.SandboxMount{
+			HostPath: inside, ContainerPath: "/nm", Mode: "rw,noexec",
+		}), "kanban-ext-ext-mount-reject", "ubuntu:latest", nil, policy)
+		specs := mountSpecs(args)
+		if len(specs) != 1 || specs[0] != inside+":/nm:rprivate,ro" {
+			t.Errorf("specs = %v, want the mount clamped to rprivate,ro", specs)
+		}
+	})
+
+	t.Run("one bad mount does not drop the good ones", func(t *testing.T) {
+		args, _ := buildExtensionCreateArgs(ext(
+			types.SandboxMount{HostPath: "/", ContainerPath: "/host", Mode: "rw"},
+			types.SandboxMount{HostPath: inside, ContainerPath: "/workspace/node_modules", Mode: "ro"},
+		), "kanban-ext-ext-mount-reject", "ubuntu:latest", nil, policy)
+		specs := mountSpecs(args)
+		if len(specs) != 1 || specs[0] != inside+":/workspace/node_modules:rprivate,ro" {
+			t.Errorf("specs = %v, want only the valid mount", specs)
+		}
+	})
+
+	t.Run("no policy means no custom mount", func(t *testing.T) {
+		args, _ := buildExtensionCreateArgs(ext(types.SandboxMount{
+			HostPath: inside, ContainerPath: "/workspace/node_modules", Mode: "ro",
+		}), "kanban-ext-ext-mount-reject", "ubuntu:latest", nil, nil)
+		if specs := mountSpecs(args); len(specs) != 0 {
+			t.Errorf("a nil policy must permit nothing, got %v", specs)
+		}
+	})
+}
+
+// TestBuildExtensionCreateArgs_DeniedCapabilitiesAreSkipped asserts the
+// `--cap-drop ALL` posture survives: denied (or malformed) capabilities are
+// never re-added, requested-but-harmless ones still are.
+func TestBuildExtensionCreateArgs_DeniedCapabilitiesAreSkipped(t *testing.T) {
+	for _, cap := range deniedCapabilityNames() {
+		ext := &Extension{ID: "ext-cap-reject", SandboxConfig: SandboxConfig{Capabilities: []string{"CHOWN", cap}}}
+		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-cap-reject", "ubuntu:latest", nil, nil)
+
+		if !hasArgPair(args, "--cap-drop", "ALL") {
+			t.Errorf("args lost --cap-drop ALL: %v", args)
+		}
+		added := capAdds(args)
+		if hasElem(added, cap) {
+			t.Errorf("--cap-add %s reached the argument list", cap)
+		}
+		if !hasElem(added, "CHOWN") {
+			t.Errorf("harmless capability CHOWN was dropped: %v", added)
+		}
+		if len(added) != 1 {
+			t.Errorf("cap-add list = %v, want only CHOWN", added)
+		}
+	}
+
+	// The CAP_ prefix and lowercase spellings are the same capability.
+	ext := &Extension{ID: "ext-cap-reject", SandboxConfig: SandboxConfig{Capabilities: []string{"cap_sys_admin", "sys_ptrace", "-v"}}}
+	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-cap-reject", "ubuntu:latest", nil, nil)
+	if added := capAdds(args); len(added) != 0 {
+		t.Errorf("denied/malformed capabilities reached the argument list: %v", added)
 	}
 }

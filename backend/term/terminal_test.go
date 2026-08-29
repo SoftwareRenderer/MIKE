@@ -1,7 +1,10 @@
 package term
 
 import (
+	"bufio"
 	"context"
+	"encoding/base64"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -505,4 +508,99 @@ func TestHandleTerminal_RejectsTaskFromAnotherProject(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("cross-project task: status = %d, want 404", w.Code)
 	}
+}
+
+// wsUpgradeStatus performs a raw WebSocket upgrade handshake against urlStr and
+// returns the HTTP status the server answered with (101 = accepted). The Origin
+// header is set verbatim when non-empty, so the test observes exactly what the
+// library's same-host Origin verification does.
+func wsUpgradeStatus(t *testing.T, urlStr, origin string) int {
+	t.Helper()
+
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		t.Fatalf("parse %q: %v", urlStr, err)
+	}
+	conn, err := net.Dial("tcp", u.Host)
+	if err != nil {
+		t.Fatalf("dial %s: %v", u.Host, err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, urlStr, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	req.Header.Set("Sec-WebSocket-Key", base64.StdEncoding.EncodeToString([]byte("0123456789abcdef")))
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	if err := req.Write(conn); err != nil {
+		t.Fatalf("write handshake: %v", err)
+	}
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		t.Fatalf("read handshake response: %v", err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+
+// TestHandleTerminal_OriginVerification covers M2: the endpoint that hands out a
+// shell must verify the WebSocket Origin like the LSP endpoint does, so a
+// cross-site page cannot ride the session cookie into a shell. Cookies are not
+// involved in this test — it isolates the Origin check itself.
+func TestHandleTerminal_OriginVerification(t *testing.T) {
+	s, cs := newTestConfigStore(t)
+	mock := newMockSandbox(t)
+	tm := NewTerminalManager(s, cs, mock, nil)
+
+	projID := "origin-proj"
+	if err := s.CreateProject(&types.Project{ID: projID, Name: "OriginProj", Path: t.TempDir(), SandboxEnabled: true}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskID := "origin-task"
+	now := time.Now().UTC()
+	if err := s.CreateTask(&types.Task{
+		ID: taskID, ProjectID: projID, Status: "in_progress",
+		ExecutionState: "idle", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	// The terminal's cwd must exist for the (mock) shell to start.
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(cfg.WorkspaceDir, projID, taskID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.SetPathValue("projectID", projID)
+		r.SetPathValue("taskID", taskID)
+		tm.HandleTerminal(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Run("same-host origin is accepted", func(t *testing.T) {
+		if code := wsUpgradeStatus(t, srv.URL, srv.URL); code != http.StatusSwitchingProtocols {
+			t.Errorf("same-host origin: status = %d, want 101", code)
+		}
+	})
+
+	t.Run("cross-site origin is rejected", func(t *testing.T) {
+		for _, origin := range []string{"http://evil.example", "https://evil.example", "http://localhost:1234", "null"} {
+			if code := wsUpgradeStatus(t, srv.URL, origin); code != http.StatusForbidden {
+				t.Errorf("origin %q: status = %d, want 403", origin, code)
+			}
+		}
+	})
 }

@@ -43,6 +43,7 @@ type ExtensionSandboxManager struct {
 	store         *ExtensionStore
 	available     bool
 	extensionsDir string
+	workspaceDir  string
 }
 
 // extensionSandboxState tracks the runtime state of an extension sandbox.
@@ -131,6 +132,48 @@ func (sm *ExtensionSandboxManager) IsAvailable() bool {
 	return sm.available
 }
 
+// SetExtensionsDir records the directory extension files are materialized in,
+// so it can be part of the mount allowlist (and so findLocalDockerfile looks in
+// the right place).
+func (sm *ExtensionSandboxManager) SetExtensionsDir(dir string) {
+	if strings.TrimSpace(dir) == "" {
+		return
+	}
+	sm.extensionsDir = dir
+}
+
+// SetWorkspaceDir records the configured worktrees/workspace directory, so it
+// can be part of the mount allowlist.
+func (sm *ExtensionSandboxManager) SetWorkspaceDir(dir string) {
+	if strings.TrimSpace(dir) == "" {
+		return
+	}
+	sm.workspaceDir = dir
+}
+
+// MountPolicy returns the host-mount allowlist for extension sandboxes: the
+// configured workspace dir, the registered project paths, the extensions dir,
+// the system temp dir and the EnvMountRoots extras. Built on demand so project
+// additions take effect without a restart. A nil manager yields an empty policy,
+// which permits no custom mount at all (fail closed).
+func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
+	var (
+		workspaceDir  string
+		extensionsDir string
+		projectPaths  []string
+	)
+	if sm != nil {
+		workspaceDir = sm.workspaceDir
+		extensionsDir = sm.extensionsDir
+		var err error
+		if projectPaths, err = sm.store.ListProjectPaths(); err != nil {
+			log.Printf("[ext-sandbox] WARNING: cannot list project paths for the mount allowlist: %v", err)
+			projectPaths = nil
+		}
+	}
+	return newMountPolicy(mountRoots(extensionsDir, workspaceDir, projectPaths))
+}
+
 // extensionMemoryLimit resolves the memory limit (MB) for an extension's
 // sandbox: the extension's configured value. 0 means no limit; negative
 // values are clamped to 0.
@@ -146,9 +189,15 @@ func extensionMemoryLimit(ext *Extension) int {
 //
 // Extension sandboxes always run with --network none.
 //
+// The mount and capability lists that reach podman are re-validated here — even
+// though the write paths (PUT /api/extensions/{id}, install) already reject
+// them — so a value persisted before validation existed, or arriving from a
+// manifest, is skipped (and logged) instead of becoming a container argument.
+// A nil policy permits no custom mount at all (fail closed).
+//
 // Returns the create args and the sorted list of mounted host project paths
 // (used to detect mount-set changes).
-func buildExtensionCreateArgs(ext *Extension, containerName, image string, projectMounts map[string]string) ([]string, []string) {
+func buildExtensionCreateArgs(ext *Extension, containerName, image string, projectMounts map[string]string, policy *MountPolicy) ([]string, []string) {
 	// Container runs sleep infinity; sandbox-bridge is started via podman exec when needed.
 	createArgs := []string{
 		"--runtime-flag=overlay2=root:self",
@@ -163,8 +212,13 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		"--network", "none",
 	}
 
-	// Add back explicitly requested capabilities
+	// Add back explicitly requested capabilities — except the ones that reach
+	// past the container, which never make it into the argument list.
 	for _, cap := range ext.SandboxConfig.Capabilities {
+		if err := ValidateCapability(cap); err != nil {
+			log.Printf("[ext-sandbox] ext=%s SKIPPED capability %q: %v", ext.ID, cap, err)
+			continue
+		}
 		createArgs = append(createArgs, "--cap-add", cap)
 	}
 
@@ -193,18 +247,26 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memLimit))
 	}
 
-	// Custom mounts
+	// Custom mounts, each re-checked against the mount allowlist: the container
+	// path charset is what keeps the "<host>:<container>:rprivate,<mode>" spec
+	// from being rewritten by the value itself, and the host path must resolve
+	// inside one of the app's own roots.
 	for _, m := range ext.SandboxConfig.Mounts {
+		if err := ValidateContainerPath(m.ContainerPath); err != nil {
+			log.Printf("[ext-sandbox] ext=%s SKIPPED mount (host %q): %v", ext.ID, m.HostPath, err)
+			continue
+		}
+		resolved, err := policy.ValidateHostPath(m.HostPath)
+		if err != nil {
+			log.Printf("[ext-sandbox] ext=%s SKIPPED mount (container %q): %v", ext.ID, m.ContainerPath, err)
+			continue
+		}
 		mode := "ro"
 		if m.Mode == "rw" {
 			mode = "rw"
 		}
-		absHost, err := filepath.Abs(m.HostPath)
-		if err != nil {
-			continue
-		}
 		createArgs = append(createArgs,
-			"-v", fmt.Sprintf("%s:%s:rprivate,%s", absHost, m.ContainerPath, mode),
+			"-v", fmt.Sprintf("%s:%s:rprivate,%s", resolved, m.ContainerPath, mode),
 		)
 	}
 
@@ -269,7 +331,7 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		return nil, err
 	}
 
-	createArgs, mountedProjects := buildExtensionCreateArgs(ext, containerName, image, projectMounts)
+	createArgs, mountedProjects := buildExtensionCreateArgs(ext, containerName, image, projectMounts, sm.MountPolicy())
 
 	// Create container
 	out, err := exec.Command("podman", createArgs...).CombinedOutput()

@@ -179,6 +179,10 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist string, tlsCfg *tls.Conf
 	// to provider-specific formats. Mappings come from each extension's
 	// mappings file and are re-collected on every extension change below.
 	extCfg := &extensions.ExtensionConfig{RegistryURL: cfg.RegistryURL}
+	// Extension sandbox host mounts are restricted to an allowlist; teach it the
+	// effective workspace dir and the directory extension files live in.
+	s.extSandboxMgr.SetWorkspaceDir(cfg.WorkspaceDir)
+	s.extSandboxMgr.SetExtensionsDir(extCfg.ExtensionsDirOrDefault())
 	s.llmAdapter = llmadapter.NewAdapter()
 	refreshLLMAdapters := func() {
 		ms, err := extensions.CollectLLMMappings(s.extStore, extCfg.ExtensionsDirOrDefault())
