@@ -18,27 +18,27 @@ import (
 // "Counting objects" and "Resolving deltas" phases report no percent.
 var cloneProgressRe = regexp.MustCompile(`Receiving objects:\s+(\d{1,3})%`)
 
-// CloneAllowedProtocols is the transport allowlist enforced on every clone:
-// the URL schemes git may use. Helper transports (ext:, fd:, python:, …) are
-// deliberately absent — a clone target is client-supplied, so the product must
-// not rely on the host git's own default of refusing them.
+// CloneAllowedProtocols is the transport allowlist enforced on every clone: the
+// URL schemes git may use. Helper transports (ext:, fd:, python:, …) are absent on
+// purpose — the clone target is client-supplied, so the product cannot rely on the
+// host git defaulting to refusing them.
 var CloneAllowedProtocols = []string{"http", "https", "git", "ssh", "file"}
 
-// CloneArgs builds the argv for a progress-reporting clone: the transport
-// restrictions come BEFORE the `clone` subcommand, so they apply to the process
-// that parses the (client-supplied) source URL.
+// CloneArgs builds the argv for a progress-reporting clone. The transport
+// restrictions come before the `clone` subcommand, so they reach the process that
+// parses the client-supplied source URL:
 //
 //	git -c protocol.ext.allow=never clone --progress <src> <dst>
 //
-// src must already have been validated (see managers.validateGitCloneURL) — in
-// particular it must never start with '-', which git would read as a flag.
+// src must already be validated (see managers.validateGitCloneURL); in particular
+// it must not start with '-', which git would read as a flag.
 func CloneArgs(src, dst string) []string {
 	return []string{"-c", "protocol.ext.allow=never", "clone", "--progress", src, dst}
 }
 
-// CloneEnv builds the environment for a clone: never prompt for credentials,
-// and hard-restrict the transports git is allowed to speak (GIT_ALLOW_PROTOCOL
-// is enforced by git itself, independently of the user's git config).
+// CloneEnv builds the environment for a clone: never prompt for credentials, and
+// restrict the transports git may speak (GIT_ALLOW_PROTOCOL is enforced by git
+// itself, whatever the user's git config says).
 func CloneEnv() []string {
 	return append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",

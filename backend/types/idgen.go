@@ -59,11 +59,10 @@ var taskWords = []string{
 }
 
 // secureIndex returns a uniformly distributed index in [0, n) from the
-// cryptographic random source. Task and thread IDs surface in URLs, git branch
-// names and worktree paths, so they must not be guessable — math/rand seeded
-// from the clock was. A failure here means the system's random source is gone
-// (token generation would fail the same way), so it panics rather than handing
-// out a weak ID.
+// cryptographic random source. Task and thread IDs appear in URLs, git branch
+// names and worktree paths, so they must not be guessable the way a clock-seeded
+// math/rand is. A failure means the system random source is gone, so this panics
+// rather than issuing a weak ID.
 func secureIndex(n int) int {
 	if n <= 0 {
 		return 0

@@ -31,10 +31,10 @@ var (
 // SessionManager handles session lifecycle: login, validation, and logout.
 type SessionManager struct {
 	store *store.Store
-	// passwordHash is sha256(MIKE_LOGIN_PASSWORD). The plaintext password is
-	// not retained, and logins compare digests: both sides are always 32 bytes,
-	// so the constant-time comparison can neither short-circuit on a differing
-	// length nor leak the configured password's length.
+	// passwordHash is sha256(MIKE_LOGIN_PASSWORD); the plaintext is not retained.
+	// Logins compare digests, so both sides are always 32 bytes and the
+	// constant-time comparison can neither short-circuit on length nor leak the
+	// password's length.
 	passwordHash [sha256.Size]byte
 }
 
@@ -52,9 +52,9 @@ func NewSessionManager(s *store.Store) (*SessionManager, error) {
 	} else if n > 0 {
 		log.Printf("[auth] cleaned up %d expired session(s)", n)
 	}
-	// One-time migration for sessions created before tokens were hashed. Safe
-	// to run every startup: rows that already carry a hash are skipped and no
-	// live session is invalidated.
+	// One-time migration for sessions created before tokens were hashed. Safe to run
+	// every startup: rows that already carry a hash are skipped and no live session
+	// is invalidated.
 	if n, err := s.BackfillSessionTokens(ctx); err != nil {
 		return nil, fmt.Errorf("backfill session token hashes: %w", err)
 	} else if n > 0 {
@@ -63,10 +63,9 @@ func NewSessionManager(s *store.Store) (*SessionManager, error) {
 	return &SessionManager{store: s, passwordHash: sha256.Sum256([]byte(password))}, nil
 }
 
-// Login validates the password and creates a new session, recording the
-// caller's IP and User-Agent on it.
-// Returns the session id, session token, and CSRF token on success. The token
-// is returned to the caller only here — the store keeps just its hash.
+// Login validates the password and creates a session, recording the caller's IP
+// and User-Agent on it. Returns the session id, session token and CSRF token. The
+// token reaches the caller only here — the store keeps just its hash.
 func (m *SessionManager) Login(password, ip, userAgent string) (id, token, csrfToken string, err error) {
 	presented := sha256.Sum256([]byte(password))
 	if subtle.ConstantTimeCompare(presented[:], m.passwordHash[:]) != 1 {

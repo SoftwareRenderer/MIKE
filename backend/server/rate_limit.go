@@ -137,15 +137,14 @@ func indexByte(s string, b byte) int {
 	return -1
 }
 
-// defaultLoginRateLimit is the login budget per client IP per minute, used
-// whenever MIKE_LOGIN_RATE_LIMIT is unset, unparsable, or non-positive.
+// defaultLoginRateLimit is the login budget per client IP per minute, used when
+// MIKE_LOGIN_RATE_LIMIT is unset, unparsable or non-positive.
 const defaultLoginRateLimit = 5
 
-// newLoginRateLimiter creates the rate limiter for the login endpoint.
-// The rate limit can be configured via the MIKE_LOGIN_RATE_LIMIT environment
-// variable (requests per minute per IP, default 5). It can no longer be turned
-// off: 0 and unparsable values fall back to the default with a warning, so a
-// typo cannot silently disable brute-force protection.
+// newLoginRateLimiter builds the login rate limiter from MIKE_LOGIN_RATE_LIMIT
+// (requests per minute per IP, default 5). It cannot be turned off: 0 and
+// unparsable values fall back to the default with a warning, so a typo cannot
+// silently drop brute-force protection.
 func newLoginRateLimiter() *RateLimiter {
 	limit := defaultLoginRateLimit
 	if v := os.Getenv("MIKE_LOGIN_RATE_LIMIT"); v != "" {

@@ -180,7 +180,7 @@
             <span id="sort-oldest-first-desc" class="shortcut-desc">Put the least recently moved task at the top of each column</span>
         </div>
         <div class="shortcut-controls">
-            <ToggleSwitch bind:checked={sortOldestFirst} ariaLabel="Oldest moved on top" ariaDescribedby="sort-oldest-first-desc" onChange={() => onDirty?.()} />
+            <ToggleSwitch bind:checked={sortOldestFirst} ariaLabel="Oldest Task on top" ariaDescribedby="sort-oldest-first-desc" onChange={() => onDirty?.()} />
         </div>
     </div>
 </section>

@@ -488,11 +488,10 @@ func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.
 // This allows sending status messages (e.g., pulling image) before the shell is ready.
 func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *http.Request, sessionKey, taskID, worktreePath, projectID string) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		// Origin verification is left on (like the LSP endpoint): the browser must
-		// connect from the same host, so a third-party page cannot ride the
-		// session's SameSite=Lax cookie into an endpoint that hands out a shell.
-		// SameSite already blocks the cross-site request; this is the second
-		// lock, not the only one.
+		// Origin verification is left on (like the LSP endpoint): the browser must come
+		// from the same host, so a third-party page cannot ride the session's
+		// SameSite=Lax cookie into an endpoint that hands out a shell. SameSite blocks
+		// that request first; this is the second lock, not the only one.
 		CompressionMode: websocket.CompressionContextTakeover,
 	})
 	if err != nil {

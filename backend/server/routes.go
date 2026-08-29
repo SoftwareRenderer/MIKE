@@ -12,9 +12,8 @@ func (s *Server) setupRoutes() {
 
 	// Health & auth
 	s.mux.HandleFunc("/api/health", s.handleHealth)
-	// Rate limit login attempts to prevent brute-force attacks (5 attempts/min
-	// per IP by default — MIKE_LOGIN_RATE_LIMIT can raise or lower it, but no
-	// longer turn it off).
+	// Rate limit login attempts (5/min per IP by default; MIKE_LOGIN_RATE_LIMIT can
+	// raise or lower it, but no longer turn it off).
 	s.mux.Handle("/api/auth/login", RateLimitMiddleware(s.loginLimiter, http.HandlerFunc(s.handleAuthLogin)))
 	s.mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("/api/auth/session", s.handleAuthSession)
@@ -174,24 +173,21 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Extensions static files — FILES ONLY. This prefix is public (see
-	// isPublicPath: sandboxed extension iframes have an opaque origin and
-	// cannot send session cookies), so it must stay minimal: a raw
-	// http.FileServer would render a directory index for /extensions/ and
-	// /extensions/<author>/, disclosing the installed-extension tree to any
-	// unauthenticated client. noListingFS rejects such directories (404);
-	// extension directories still serve through their own index.html (the
-	// iframe entry page). http.Dir keeps rejecting path traversal.
+	// isPublicPath: sandboxed extension iframes have an opaque origin and cannot
+	// send session cookies), so it stays minimal. A raw http.FileServer would
+	// render a directory index for /extensions/ and /extensions/<author>/,
+	// handing the installed-extension tree to any unauthenticated client;
+	// noListingFS returns 404 for those instead. http.Dir still rejects traversal.
 	s.mux.Handle("/extensions/", http.StripPrefix("/extensions/", http.FileServer(noListingFS{http.Dir("extensions")})))
 }
 
 // noListingFS wraps an http.FileSystem so http.FileServer can never render a
-// directory index. Directories without an index.html (the extensions root,
-// author dirs, asset dirs) fail to open as fs.ErrNotExist — FileServer maps
-// that to 404, exactly like a missing file, so the tree structure stays
-// hidden. Directories that DO hold an index.html open normally, preserving
-// the extension entry contract (the iframe loads /extensions/<author>/<name>/,
-// which FileServer answers with that index.html). Traversal protection is
-// untouched — it lives in the wrapped FileSystem.
+// directory index. A directory without an index.html (the extensions root, author
+// dirs, asset dirs) opens as fs.ErrNotExist, which FileServer answers as 404, so
+// the tree structure stays hidden. Directories that do hold an index.html open
+// normally, so the extension entry contract still works (the iframe loads
+// /extensions/<author>/<name>/). Traversal protection is untouched — it lives in
+// the wrapped FileSystem.
 type noListingFS struct {
 	http.FileSystem
 }

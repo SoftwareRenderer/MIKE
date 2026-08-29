@@ -23,14 +23,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 `
 
-// lastSeenInterval is the minimum number of seconds between two last_seen
-// writes for the same session. The store serialises all access on a single
-// connection, so an unconditional write per request would turn every
-// authenticated request into a database write.
+// lastSeenInterval is the minimum seconds between two last_seen writes for one
+// session. The store serialises on a single connection, so an unconditional
+// write would make every authenticated request a database write.
 const lastSeenInterval = 60
 
 // HashSessionToken returns the lookup key stored for a session token:
-// hex(sha256(token)). Only this digest ever reaches the database, so a copy of
+// hex(sha256(token)). Only the digest reaches the database, so a copy of
 // kanban.db cannot be replayed as a live session.
 func HashSessionToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
@@ -46,10 +45,10 @@ func (s *Store) initSessions() error {
 	if err != nil {
 		return err
 	}
-	// Migrations for existing DBs. SQLite has no "ADD COLUMN IF NOT EXISTS":
-	// re-adding an existing column errors, which is ignored. The token column
-	// keeps its NOT NULL UNIQUE constraint (it now holds the digest, or the
-	// "revoked-<id>" placeholder written by BackfillSessionTokens).
+	// Migrate existing DBs. SQLite has no "ADD COLUMN IF NOT EXISTS", so the
+	// error from re-adding a column is ignored. The token column keeps its NOT
+	// NULL UNIQUE constraint and now holds the digest, or the 'revoked-<id>'
+	// placeholder written by BackfillSessionTokens.
 	for _, stmt := range []string{
 		`ALTER TABLE sessions ADD COLUMN csrf_token TEXT`,
 		`ALTER TABLE sessions ADD COLUMN token_hash TEXT`,
@@ -74,9 +73,8 @@ type NewSession struct {
 }
 
 // CreateSession inserts a new session row. The raw token is stored only as
-// hex(sha256(token)); the legacy `token` column (NOT NULL UNIQUE) receives the
-// same digest so the uniqueness constraint keeps guarding distinct sessions
-// while no plaintext token lands on disk.
+// hex(sha256(token)); the legacy `token` column gets the same digest, so its
+// UNIQUE constraint still guards distinct sessions with no plaintext on disk.
 func (s *Store) CreateSession(ctx context.Context, ses NewSession) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,11 +92,9 @@ func (s *Store) CreateSession(ctx context.Context, ses NewSession) error {
 	return nil
 }
 
-// GetSessionByToken returns the session id, CSRF token, and expiry time for a
-// presented token, or sql.ErrNoRows if no session matches. The lookup goes by
-// digest only — the plaintext token is never compared against the database.
-//
-// It also stamps last_seen, throttled to one write per lastSeenInterval.
+// GetSessionByToken returns the session id, CSRF token and expiry for a
+// presented token, or sql.ErrNoRows if nothing matches. The lookup is by digest
+// only. It also stamps last_seen, throttled to one write per lastSeenInterval.
 func (s *Store) GetSessionByToken(ctx context.Context, token string) (id, csrfToken string, expiresAt time.Time, err error) {
 	if token == "" {
 		return "", "", time.Time{}, sql.ErrNoRows
@@ -154,16 +150,13 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
-// BackfillSessionTokens migrates sessions created before tokens were hashed.
-// For every row without a token_hash it derives hex(sha256(token)) in Go
-// (SQLite has no sha256), stores it, and overwrites the legacy plaintext with
-// the non-secret placeholder 'revoked-' || id — which keeps the column's
-// NOT NULL UNIQUE constraint intact instead of colliding on an empty string.
-//
-// No session is invalidated: lookups go through the digest, which is derived
-// from the very token the client already holds. The migration is idempotent —
-// rows already migrated have a token_hash and are skipped. Returns the number
-// of rows migrated.
+// BackfillSessionTokens migrates sessions created before tokens were hashed:
+// for each row without a token_hash it derives hex(sha256(token)) in Go (SQLite
+// has no sha256) and overwrites the legacy plaintext with the non-secret
+// placeholder 'revoked-' || id, which keeps the NOT NULL UNIQUE constraint
+// instead of colliding on an empty string. No session is invalidated — lookups
+// use the digest of the token the client already holds. Idempotent: rows with a
+// token_hash are skipped. Returns the number of rows migrated.
 func (s *Store) BackfillSessionTokens(ctx context.Context) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -202,22 +195,19 @@ func (s *Store) BackfillSessionTokens(ctx context.Context) (int, error) {
 		n++
 	}
 	if n > 0 {
-		// The overwritten plaintext still sits in freed page space until the file
-		// is rebuilt; VACUUM rewrites it so a stolen copy of the database leaks
-		// nothing (best-effort — a busy database keeps the slack until the next
-		// startup). In WAL mode that new image lands in the -wal first, so it is
-		// checkpointed and the sidecar truncated: otherwise the pre-migration
-		// pages — plaintext token and all — survive in the main file and in the
-		// sidecar until some later checkpoint.
+		// The overwritten plaintext still sits in freed page space, so VACUUM
+		// rewrites the file. In WAL mode the new image lands in the -wal first,
+		// so checkpoint and truncate it too — otherwise the pre-migration pages
+		// (plaintext token included) survive in the main file and the sidecar.
+		// Best-effort: a busy database keeps the slack until the next startup.
 		_, _ = s.db.ExecContext(ctx, `VACUUM`)
 		_, _ = s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
 	}
 	return n, nil
 }
 
-// SessionInfo is one session row for the session-management API. It carries no
-// credential material by construction (there is no field for a token, a token
-// hash, or a CSRF token).
+// SessionInfo is one session row for the session-management API. It has no
+// field for a token, token hash or CSRF token, so it cannot leak one.
 type SessionInfo struct {
 	ID        string
 	CreatedAt time.Time
@@ -285,8 +275,8 @@ func (s *Store) DeleteSessionByID(ctx context.Context, id string) (bool, error) 
 }
 
 // DeleteOtherSessions revokes every session except currentID and returns the
-// number deleted. An empty currentID deletes nothing: the caller's identity is
-// unknown, and nuking every session would be the wrong guess.
+// number deleted. An empty currentID deletes nothing — the caller's identity is
+// unknown and deleting every session would be the wrong guess.
 func (s *Store) DeleteOtherSessions(ctx context.Context, currentID string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
