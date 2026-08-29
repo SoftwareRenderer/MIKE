@@ -24,12 +24,33 @@
 
     const post = (msg) => window.parent.postMessage(msg, '*');
 
+    // ── channel handshake (document identity) ───────────────────────
+    // The host mints a one-time token per mount and puts it in this document's
+    // URL as `extch`. Only the document the host actually mounted knows it, so
+    // echoing it back is what opens the channel: until the host accepts it, no
+    // `init` and no pushed events arrive, and calls are refused. Never send a
+    // call before `init` — buffer it instead.
+    const channelToken = (function () {
+        try { return new URLSearchParams(window.location.search).get('extch') || ''; }
+        catch (e) { return ''; }
+    })();
+    let callQueue = [];
+
+    function sendHello() { post({ type: 'exthello', token: channelToken }); }
+
     function call(cap, args) {
         return new Promise((resolve, reject) => {
             const id = uid();
             pending.set(id, { resolve, reject });
-            post({ type: 'call', id, cap, args: args || {} });
+            const msg = { type: 'call', id, cap, args: args || {} };
+            if (initialized) post(msg); else callQueue.push(msg);
         });
+    }
+
+    function flushCalls() {
+        const queued = callQueue;
+        callQueue = [];
+        for (const m of queued) post(m);
     }
 
     function handleMessage(msg) {
@@ -55,11 +76,20 @@
         const msg = ev.data;
         if (!msg || typeof msg !== 'object') return;
 
+        if (msg.type === 'exthello-request') {
+            // The host is asking who is in this frame. Answer on every load —
+            // a reload produces a new document that must re-handshake.
+            sendHello();
+            return;
+        }
+
         if (msg.type === 'init') {
             granted = Array.isArray(msg.granted) ? msg.granted : [];
             config = msg.config;
             context = msg.context;
             initialized = true;
+            // Outbound calls buffered until the channel opened.
+            flushCalls();
             // Flush anything buffered before init.
             const flushed = buffered;
             buffered = [];
@@ -186,4 +216,7 @@
     };
 
     window.extHost = extHost;
+
+    // Announce ourselves immediately; the host also asks on each frame load.
+    sendHello();
 })();

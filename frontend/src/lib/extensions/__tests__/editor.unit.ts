@@ -11,7 +11,7 @@ import {
     CAP_EDITOR_SAVE,
 } from '../capabilities';
 import { computeGrants, SUPPORTED_CAPABILITIES } from '../capabilities';
-import { cleanupFooterButtons, CONTENT_SET_USER_EVENT, isExtensionContentSet } from '../handlers/editor';
+import { cleanupFooterButtons, CONTENT_SET_USER_EVENT, isExtensionContentSet, MAX_FOOTER_BUTTONS_PER_INSTANCE } from '../handlers/editor';
 import type { HostRequest } from '../types';
 
 function makeFakeIframe() {
@@ -55,6 +55,8 @@ function buildEditorDom(): { root: HTMLElement; anchor: HTMLElement; footerLeft:
     return { root, anchor, footerLeft };
 }
 
+const TEST_TOKEN = 'test-channel-token-0123456789abcdef';
+
 function makeChannel(granted: string[], anchor: HTMLElement) {
     const { iframe, contentWindow, messages } = makeFakeIframe();
     const channel = new ExtensionHostChannel({
@@ -66,7 +68,15 @@ function makeChannel(granted: string[], anchor: HTMLElement) {
         context: { component: 'FileEditor', filePath: '/repo/README.md' },
         anchor,
         iframe,
+        channelToken: TEST_TOKEN,
     });
+    // Arm the channel: model the mounted document proving itself, then drop
+    // the handshake frames so assertions about posted messages stay index-stable.
+    channel.notifyFrameLoad();
+    window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'exthello', token: TEST_TOKEN }, source: contentWindow as any, origin: 'null',
+    }));
+    messages.length = 0;
     return { channel, contentWindow, messages, iframe };
 }
 
@@ -117,7 +127,6 @@ describe('editor.addFooterButton', () => {
 
     it('adds a button to the footer right after Wrap', async () => {
         const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_ADD_FOOTER_BUTTON], anchor);
-        channel.start();
         send(channel, contentWindow, { type: 'call', id: 'b1', cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: 'md-preview', label: 'Preview' } });
         await flush();
 
@@ -140,7 +149,6 @@ describe('editor.addFooterButton', () => {
         // capability. The click on a button the extension itself created is
         // intrinsic to addFooterButton, so the event is delivered regardless.
         const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_ADD_FOOTER_BUTTON], anchor);
-        channel.start();
         send(channel, contentWindow, { type: 'call', id: 'b1', cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: 'md-preview', label: 'Preview' } });
         await flush();
 
@@ -156,7 +164,6 @@ describe('editor.addFooterButton', () => {
 
     it('updates active state without resetting the label', async () => {
         const { channel, contentWindow } = makeChannel([CAP_EDITOR_ADD_FOOTER_BUTTON], anchor);
-        channel.start();
         send(channel, contentWindow, { type: 'call', id: 'b1', cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: 'md-preview', label: 'Preview' } });
         await flush();
         // Pure active-state update (no label).
@@ -171,7 +178,6 @@ describe('editor.addFooterButton', () => {
 
     it('editor.footerRemoveButton removes the button', async () => {
         const { channel, contentWindow } = makeChannel([CAP_EDITOR_ADD_FOOTER_BUTTON, CAP_EDITOR_REMOVE_FOOTER_BUTTON], anchor);
-        channel.start();
         send(channel, contentWindow, { type: 'call', id: 'b1', cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: 'md-preview', label: 'Preview' } });
         await flush();
         expect(footerLeft.querySelector('button[data-ext-footer-btn="md-preview"]')).toBeTruthy();
@@ -184,7 +190,6 @@ describe('editor.addFooterButton', () => {
 
     it('channel.destroy cleans up footer buttons', async () => {
         const { channel, contentWindow } = makeChannel([CAP_EDITOR_ADD_FOOTER_BUTTON], anchor);
-        channel.start();
         send(channel, contentWindow, { type: 'call', id: 'b1', cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: 'md-preview', label: 'Preview' } });
         await flush();
         expect(footerLeft.querySelector('button[data-ext-footer-btn="md-preview"]')).toBeTruthy();
@@ -195,7 +200,6 @@ describe('editor.addFooterButton', () => {
 
     it('rejects a button call when the footer is missing', async () => {
         const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_ADD_FOOTER_BUTTON], anchor);
-        channel.start();
         anchor.closest = () => null as any; // simulate no .file-editor ancestor
         send(channel, contentWindow, { type: 'call', id: 'b1', cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: 'md-preview', label: 'Preview' } });
         await flush();
@@ -219,7 +223,6 @@ describe('editor.getContent and editor.setOverlay', () => {
         wrapper.appendChild(cm);
 
         const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_GET_CONTENT], anchor);
-        channel.start();
         send(channel, contentWindow, { type: 'call', id: 'g1', cap: CAP_EDITOR_GET_CONTENT, args: {} });
         await flush();
         const resp = messages[messages.length - 1];
@@ -231,7 +234,6 @@ describe('editor.getContent and editor.setOverlay', () => {
     it('editor.setOverlay(true) hides the editor and sizes the iframe', async () => {
         const wrapper = root.querySelector('.editor-wrapper') as HTMLElement;
         const { channel, contentWindow, iframe } = makeChannel([CAP_EDITOR_SET_OVERLAY], anchor);
-        channel.start();
         send(channel, contentWindow, { type: 'call', id: 'o1', cap: CAP_EDITOR_SET_OVERLAY, args: { visible: true } });
         await flush();
         expect(wrapper.style.display).toBe('none');
@@ -245,7 +247,6 @@ describe('editor.getContent and editor.setOverlay', () => {
         const wrapper = root.querySelector('.editor-wrapper') as HTMLElement;
         wrapper.style.display = 'none';
         const { channel, contentWindow } = makeChannel([CAP_EDITOR_SET_OVERLAY], anchor);
-        channel.start();
         send(channel, contentWindow, { type: 'call', id: 'o1', cap: CAP_EDITOR_SET_OVERLAY, args: { visible: false } });
         await flush();
         expect(wrapper.style.display).not.toBe('none');
@@ -275,7 +276,6 @@ describe('editor.setContent and isExtensionContentSet', () => {
         wrapper.appendChild(cm);
 
         const { channel, contentWindow } = makeChannel([CAP_EDITOR_SET_CONTENT], anchor);
-        channel.start();
         send(channel, contentWindow, { type: 'call', id: 'sc1', cap: CAP_EDITOR_SET_CONTENT, args: { content: 'new text' } });
         await flush();
 
@@ -298,7 +298,6 @@ describe('editor.setContent and isExtensionContentSet', () => {
         wrapper.appendChild(cm);
 
         const { channel, contentWindow } = makeChannel([CAP_EDITOR_SET_CONTENT], anchor);
-        channel.start();
         send(channel, contentWindow, { type: 'call', id: 'sc2', cap: CAP_EDITOR_SET_CONTENT, args: { content: 'same' } });
         await flush();
         expect(dispatch).not.toHaveBeenCalled();
@@ -330,30 +329,89 @@ describe('editor.save', () => {
         expect(computeGrants([CAP_EDITOR_SAVE])).toContain(CAP_EDITOR_SAVE);
     });
 
-    it('dispatches an editor-save-request event on window', async () => {
+    it('dispatches a scoped editor-save-request on its own editor root', async () => {
+        // Bubbling (not window-dispatched) so a listener anywhere still sees
+        // it, but detail.scope names the owning instance.
         const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_SAVE], anchor);
         const listener = vi.fn();
         window.addEventListener('editor-save-request', listener);
-        channel.start();
         send(channel, contentWindow, { type: 'call', id: 's1', cap: CAP_EDITOR_SAVE, args: {} });
         await flush();
 
         expect(listener).toHaveBeenCalledTimes(1);
+        const ev = listener.mock.calls[0][0] as CustomEvent;
+        const root = anchor.closest('.file-editor') as HTMLElement;
+        expect(ev.detail?.scope).toBe(root);
         const resp = messages[messages.length - 1];
         expect(resp.ok).toBe(true);
         window.removeEventListener('editor-save-request', listener);
         channel.destroy();
     });
 
+    it('names only the editor instance the extension is mounted in', async () => {
+        // Two editors open at once: a save requested through the extension in
+        // editor A must reach A alone — never "whichever file is active".
+        const { root: rootA, anchor: anchorA } = buildEditorDom();
+        const anchorAEl = anchorA;
+        document.body.appendChild(rootA.cloneNode(true)); // a second .file-editor
+        const rootB = document.querySelectorAll('.file-editor')[1] as HTMLElement;
+        const anchorB = rootB.querySelector('.ext-anchor') as HTMLElement;
+
+        const chanA = makeChannel([CAP_EDITOR_SAVE], anchorAEl);
+        const chanB = makeChannel([CAP_EDITOR_SAVE], anchorB);
+
+        const scoped: EventTarget[] = [];
+        const capture = (e: Event) => { scoped.push((e as CustomEvent).detail.scope); };
+        window.addEventListener('editor-save-request', capture);
+
+        send(chanA.channel, chanA.contentWindow, { type: 'call', id: 'sA', cap: CAP_EDITOR_SAVE, args: {} });
+        await flush();
+
+        expect(scoped).toEqual([rootA]);
+        window.removeEventListener('editor-save-request', capture);
+        chanA.channel.destroy();
+        chanB.channel.destroy();
+    });
+
     it('rejects when the editor root is missing', async () => {
         const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_SAVE], anchor);
-        channel.start();
         anchor.closest = () => null as any; // simulate no .file-editor ancestor
         send(channel, contentWindow, { type: 'call', id: 's1', cap: CAP_EDITOR_SAVE, args: {} });
         await flush();
         const resp = messages[messages.length - 1];
         expect(resp.ok).toBe(false);
         expect(resp.error).toContain('editor not found');
+        channel.destroy();
+    });
+});
+
+describe('editor.addFooterButton budget', () => {
+    let anchor: HTMLElement, footerLeft: HTMLElement;
+    beforeEach(() => { ({ anchor, footerLeft } = buildEditorDom()); });
+    afterEach(() => cleanupFooterButtons('ext-md'));
+
+    it('caps how many buttons one extension may own in one editor', async () => {
+        const { channel, contentWindow, messages } = makeChannel([CAP_EDITOR_ADD_FOOTER_BUTTON], anchor);
+        for (let i = 0; i < MAX_FOOTER_BUTTONS_PER_INSTANCE; i++) {
+            send(channel, contentWindow, { type: 'call', id: 'fb' + i, cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: 'b' + i } });
+            await flush();
+        }
+        expect(footerLeft.querySelectorAll(`button[data-ext-footer-ext="ext-md"]`)).toHaveLength(MAX_FOOTER_BUTTONS_PER_INSTANCE);
+
+        // One more (new id) is refused instead of flooding the host footer.
+        send(channel, contentWindow, { type: 'call', id: 'fbX', cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: 'over' } });
+        await flush();
+        const over = messages.find((m) => m.id === 'fbX');
+        expect(over.ok).toBe(false);
+        expect(over.error).toContain('too many editor footer buttons');
+        expect(footerLeft.querySelector('button[data-ext-footer-btn="over"]')).toBeNull();
+
+        // Re-declaring an id it already owns stays an update, not a new slot.
+        send(channel, contentWindow, { type: 'call', id: 'fbU', cap: CAP_EDITOR_ADD_FOOTER_BUTTON, args: { id: 'b0', label: 'Renamed' } });
+        await flush();
+        const upd = messages.find((m) => m.id === 'fbU');
+        expect(upd.ok).toBe(true);
+        expect(footerLeft.querySelector('button[data-ext-footer-btn="b0"]')!.textContent).toBe('Renamed');
         channel.destroy();
     });
 });

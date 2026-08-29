@@ -1,7 +1,7 @@
 import type { Extension } from '$lib/types';
 import { computeGrants, CAP_THEME_UPDATE } from '$lib/extensions/capabilities';
 import { readThemeVars } from '$lib/extensions/handlers/theme';
-import { ExtensionHostChannel } from '$lib/extensions/channel';
+import { ExtensionHostChannel, mintChannelToken } from '$lib/extensions/channel';
 import {
     INJECTION_POINTS,
     type InjectionPoint,
@@ -42,8 +42,14 @@ function authorDir(author?: string): string {
 }
 
 // extBaseURL returns the served base URL for an installed extension directory.
-function extBaseURL(ext: Extension): string {
-    return `/extensions/${authorDir(ext.manifest.author)}/${ext.name}`;
+//
+// `ext.name` is percent-encoded so a name can never reshape the same-origin
+// path (a raw `../` would otherwise climb out of /extensions/<author>/ before
+// the browser normalises it). The Go static handler decodes the path again, so
+// an encoded name still resolves to the same on-disk directory. Exported for
+// tests.
+export function extBaseURL(ext: Extension): string {
+    return `/extensions/${authorDir(ext.manifest.author)}/${encodeURIComponent(ext.name)}`;
 }
 
 // resolveAssetURL resolves a manifest asset path (e.g. a css_url) against the
@@ -53,8 +59,8 @@ function extBaseURL(ext: Extension): string {
 // data:, …) or protocol-relative URLs (//host/…) are rejected ('') — a CSS
 // extension must not load its global stylesheet from an external origin.
 // A leading '/' is treated as relative to the extension's own directory
-// (never as a server-root path).
-function resolveAssetURL(ext: Extension, asset: string): string {
+// (never as a server-root path). Exported for tests.
+export function resolveAssetURL(ext: Extension, asset: string): string {
     if (!asset) return asset;
     if (/^[a-z][a-z0-9+.-]*:/i.test(asset) || asset.startsWith('//')) return ''; // external — reject
     return `${extBaseURL(ext)}/${asset.replace(/^\.?\//, '')}`;
@@ -203,8 +209,13 @@ export class UIInjector {
 
             try {
                 const iframe = document.createElement('iframe');
+                // Per-mount channel token, delivered through the document URL so
+                // only the document we mount can know it. The bridge echoes it
+                // back before the host sends `init` or honours any capability
+                // call (see types.ts HostHello).
+                const channelToken = mintChannelToken();
                 iframe.setAttribute('sandbox', 'allow-scripts');
-                iframe.setAttribute('src', reg.moduleUrl);
+                iframe.setAttribute('src', `${reg.moduleUrl}?extch=${channelToken}`);
                 // Invisible by default — extension surfaces itself via ui.* API.
                 iframe.style.cssText = 'width:100%;height:0;border:none;display:block;';
                 anchor.appendChild(iframe);
@@ -218,10 +229,12 @@ export class UIInjector {
                     context,
                     anchor,
                     iframe,
+                    channelToken,
                 });
                 anchorChannels.set(key, channel);
-                // Start channel after sandbox loads so init is not missed.
-                iframe.addEventListener('load', () => channel.start());
+                // Every load: request the handshake (and disarm + warn on a
+                // reload). Started after sandbox loads so nothing is missed.
+                iframe.addEventListener('load', () => channel.notifyFrameLoad());
             } catch (e: any) {
                 console.error(`[ui-injector] Failed to activate ${reg.extensionName} at ${point}:`, e);
             }
