@@ -2,7 +2,9 @@ package sandbox
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1359,5 +1361,36 @@ func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 	}
 	if out != "test content" {
 		t.Errorf("expected 'test content', got %q", out)
+	}
+}
+
+// TestForwardPortSpecIsLoopbackOnly pins the L3 fix: a forwarded container port
+// is published on loopback only. An unprefixed "<hostPort>:<containerPort>" spec
+// binds every interface, exposing the sandbox's listener on the LAN.
+func TestForwardPortSpecIsLoopbackOnly(t *testing.T) {
+	for _, tc := range []struct{ hostPort, containerPort int }{
+		{41234, 9999},
+		{1, 65535},
+	} {
+		spec := forwardPortSpec(tc.hostPort, tc.containerPort)
+
+		want := fmt.Sprintf("127.0.0.1:%d:%d", tc.hostPort, tc.containerPort)
+		if spec != want {
+			t.Errorf("forwardPortSpec(%d, %d) = %q, want %q", tc.hostPort, tc.containerPort, spec, want)
+		}
+
+		// podman parses "[ip:]hostPort:containerPort": without the IP the bind is
+		// 0.0.0.0, so the first field must always be a loopback address.
+		parts := strings.Split(spec, ":")
+		if len(parts) != 3 {
+			t.Fatalf("spec %q is not <ip>:<hostPort>:<containerPort>", spec)
+		}
+		ip := net.ParseIP(parts[0])
+		if ip == nil {
+			t.Fatalf("spec %q does not start with an IP address", spec)
+		}
+		if !ip.IsLoopback() {
+			t.Errorf("spec %q binds %s, which is not loopback", spec, ip)
+		}
 	}
 }

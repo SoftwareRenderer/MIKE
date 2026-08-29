@@ -139,6 +139,27 @@ func (es *ExtensionStore) List() ([]Extension, error) {
 	return es.GetByType("")
 }
 
+// ListProjectPaths returns the host path of every registered project. These
+// paths are part of the extension-sandbox mount allowlist (see MountPolicy):
+// an extension may mount anything the app itself already mounts for its
+// workspaces, and nothing else.
+func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
+	if es == nil || es.db == nil {
+		return nil, nil
+	}
+	projects, err := es.db.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(projects))
+	for _, p := range projects {
+		if p.Path != "" {
+			paths = append(paths, p.Path)
+		}
+	}
+	return paths, nil
+}
+
 // GetByType returns extensions filtered by type (empty = all).
 func (es *ExtensionStore) GetByType(extType string) ([]Extension, error) {
 	var query string
