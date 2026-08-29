@@ -66,7 +66,7 @@ func TestSafeAgentEnv_StripsServerSecrets(t *testing.T) {
 		"MIKE_REGISTRY_URL":     "https://example.invalid/registry.json",
 		"DANGER_ZONE":           "1",
 		"MIKE_TLS_KEY":          "pem-blob",
-		"MIKE_BIND":             "127.0.0.1",
+		"MIKE_LISTEN":           "127.0.0.1",
 		"ANTHROPIC_API_KEY":     "sk-ant-nope",
 		"OPENAI_API_KEY":        "sk-nope",
 		"AWS_SECRET_ACCESS_KEY": "aws-nope",
