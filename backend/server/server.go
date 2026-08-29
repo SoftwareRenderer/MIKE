@@ -482,6 +482,9 @@ func (s *Server) Serve() error {
 
 	if s.tlsConfig != nil {
 		log.Printf("Server starting on https://%s (TLS: %s, %s)", s.addr, s.tlsConfig.CertFile, s.tlsConfig.KeyFile)
+		if s.tlsConfig.CAFile != "" {
+			log.Printf("TLS: import %s into a device's trust store to trust this certificate", s.tlsConfig.CAFile)
+		}
 		l, err := net.Listen("tcp", s.addr)
 		if err != nil {
 			return fmt.Errorf("listen: %w", err)
