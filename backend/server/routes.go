@@ -11,14 +11,18 @@ func (s *Server) setupRoutes() {
 
 	// Health & auth
 	s.mux.HandleFunc("/api/health", s.handleHealth)
-	// Rate limit login attempts to prevent brute-force attacks (5 attempts/min per IP)
-	if s.loginLimiter != nil {
-		s.mux.Handle("/api/auth/login", RateLimitMiddleware(s.loginLimiter, http.HandlerFunc(s.handleAuthLogin)))
-	} else {
-		s.mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
-	}
+	// Rate limit login attempts to prevent brute-force attacks (5 attempts/min
+	// per IP by default — MIKE_LOGIN_RATE_LIMIT can raise or lower it, but no
+	// longer turn it off).
+	s.mux.Handle("/api/auth/login", RateLimitMiddleware(s.loginLimiter, http.HandlerFunc(s.handleAuthLogin)))
 	s.mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("/api/auth/session", s.handleAuthSession)
+
+	// Session management (signed-in user only — no public path, so
+	// SessionMiddleware auths these and CSRFMiddleware guards the non-GET ones).
+	s.mux.HandleFunc("GET /api/sessions", s.handleSessionsList)
+	s.mux.HandleFunc("POST /api/sessions/revoke-others", s.handleSessionsRevokeOthers)
+	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleSessionRevoke)
 	s.mux.HandleFunc("/api/prompts/reload", s.handleReloadPrompts)
 
 	// Config

@@ -3,10 +3,12 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -28,8 +30,12 @@ var (
 
 // SessionManager handles session lifecycle: login, validation, and logout.
 type SessionManager struct {
-	store    *store.Store
-	password string
+	store *store.Store
+	// passwordHash is sha256(MIKE_LOGIN_PASSWORD). The plaintext password is
+	// not retained, and logins compare digests: both sides are always 32 bytes,
+	// so the constant-time comparison can neither short-circuit on a differing
+	// length nor leak the configured password's length.
+	passwordHash [sha256.Size]byte
 }
 
 // NewSessionManager creates a new SessionManager.
@@ -44,16 +50,26 @@ func NewSessionManager(s *store.Store) (*SessionManager, error) {
 	if n, err := s.DeleteExpiredSessions(ctx); err != nil {
 		return nil, fmt.Errorf("cleanup expired sessions: %w", err)
 	} else if n > 0 {
-		// best-effort, log would go here
-		_ = n
+		log.Printf("[auth] cleaned up %d expired session(s)", n)
 	}
-	return &SessionManager{store: s, password: password}, nil
+	// One-time migration for sessions created before tokens were hashed. Safe
+	// to run every startup: rows that already carry a hash are skipped and no
+	// live session is invalidated.
+	if n, err := s.BackfillSessionTokens(ctx); err != nil {
+		return nil, fmt.Errorf("backfill session token hashes: %w", err)
+	} else if n > 0 {
+		log.Printf("[auth] hashed %d legacy session token(s); plaintext tokens removed from the database", n)
+	}
+	return &SessionManager{store: s, passwordHash: sha256.Sum256([]byte(password))}, nil
 }
 
-// Login validates the password and creates a new session.
-// Returns the session id, session token, and CSRF token on success.
-func (m *SessionManager) Login(password string) (id, token, csrfToken string, err error) {
-	if subtle.ConstantTimeCompare([]byte(password), []byte(m.password)) != 1 {
+// Login validates the password and creates a new session, recording the
+// caller's IP and User-Agent on it.
+// Returns the session id, session token, and CSRF token on success. The token
+// is returned to the caller only here — the store keeps just its hash.
+func (m *SessionManager) Login(password, ip, userAgent string) (id, token, csrfToken string, err error) {
+	presented := sha256.Sum256([]byte(password))
+	if subtle.ConstantTimeCompare(presented[:], m.passwordHash[:]) != 1 {
 		return "", "", "", ErrInvalidPassword
 	}
 
@@ -72,13 +88,22 @@ func (m *SessionManager) Login(password string) (id, token, csrfToken string, er
 	id = hex.EncodeToString(tokenBytes[:8]) // short id from first 8 bytes
 	expiresAt := time.Now().Add(sessionDuration)
 
-	if err := m.store.CreateSession(context.Background(), id, token, csrfToken, expiresAt); err != nil {
+	if err := m.store.CreateSession(context.Background(), store.NewSession{
+		ID:        id,
+		Token:     token,
+		CSRFToken: csrfToken,
+		IP:        ip,
+		UserAgent: userAgent,
+		ExpiresAt: expiresAt,
+	}); err != nil {
 		return "", "", "", fmt.Errorf("create session: %w", err)
 	}
 	return id, token, csrfToken, nil
 }
 
-// Validate checks a session token and returns the session id and CSRF token if valid.
+// Validate checks a session token and returns the session id and CSRF token if
+// valid. The store looks the session up by token hash and stamps last_seen
+// (throttled) as a side effect.
 func (m *SessionManager) Validate(token string) (id, csrfToken string, err error) {
 	if token == "" {
 		return "", "", ErrInvalidToken

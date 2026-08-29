@@ -42,11 +42,12 @@ func testServer(t *testing.T) *Server {
 		}
 	})
 
-	// Disable login rate limiting during tests — tests make many rapid login
-	// attempts that would hit the default limit of 5/minute.
+	// Keep login rate limiting ON but effectively unlimited: 0 (and any
+	// unparsable value) is no longer a way to disable it, and tests make many
+	// rapid login attempts that would hit the 5/minute default.
 	// Skip if the caller already set MIKE_LOGIN_RATE_LIMIT (e.g., rate limit tests).
 	if os.Getenv("MIKE_LOGIN_RATE_LIMIT") == "" {
-		os.Setenv("MIKE_LOGIN_RATE_LIMIT", "0")
+		os.Setenv("MIKE_LOGIN_RATE_LIMIT", "100000")
 		t.Cleanup(func() { os.Unsetenv("MIKE_LOGIN_RATE_LIMIT") })
 	}
 

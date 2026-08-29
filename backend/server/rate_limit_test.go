@@ -252,3 +252,75 @@ func TestRateLimitMiddleware_XFFCannotBypassByDefault(t *testing.T) {
 		t.Error("expected XFF spoofing to be blocked by default (should hit rate limit)")
 	}
 }
+
+// setLoginRateLimit pins MIKE_LOGIN_RATE_LIMIT for one test ("" = unset).
+func setLoginRateLimit(t *testing.T, value string) {
+	t.Helper()
+	old, had := os.LookupEnv("MIKE_LOGIN_RATE_LIMIT")
+	if value == "" {
+		os.Unsetenv("MIKE_LOGIN_RATE_LIMIT")
+	} else {
+		os.Setenv("MIKE_LOGIN_RATE_LIMIT", value)
+	}
+	t.Cleanup(func() {
+		if had {
+			os.Setenv("MIKE_LOGIN_RATE_LIMIT", old)
+		} else {
+			os.Unsetenv("MIKE_LOGIN_RATE_LIMIT")
+		}
+	})
+}
+
+// TestNewLoginRateLimiterCannotBeDisabled: 0 and unparsable values used to
+// return a nil limiter, silently switching brute-force protection off. They now
+// fall back to the documented default.
+func TestNewLoginRateLimiterCannotBeDisabled(t *testing.T) {
+	for _, v := range []string{"", "0", "-1", "abc", "1.5", "  "} {
+		v := v
+		t.Run("MIKE_LOGIN_RATE_LIMIT="+v, func(t *testing.T) {
+			setLoginRateLimit(t, v)
+			rl := newLoginRateLimiter()
+			if rl == nil {
+				t.Fatal("newLoginRateLimiter returned nil; login rate limiting was disabled")
+			}
+			defer rl.Stop()
+			if rl.limit != defaultLoginRateLimit {
+				t.Errorf("limit = %d; want the default %d", rl.limit, defaultLoginRateLimit)
+			}
+			if rl.window != time.Minute {
+				t.Errorf("window = %v; want 1m", rl.window)
+			}
+		})
+	}
+}
+
+func TestNewLoginRateLimiterHonoursValidValue(t *testing.T) {
+	setLoginRateLimit(t, "17")
+	rl := newLoginRateLimiter()
+	defer rl.Stop()
+	if rl.limit != 17 {
+		t.Errorf("limit = %d; want 17", rl.limit)
+	}
+}
+
+// TestLoginRouteRateLimitedWithZeroEnv is the end-to-end regression for the
+// "0 disables it" behaviour: the login route must still answer 429.
+func TestLoginRouteRateLimitedWithZeroEnv(t *testing.T) {
+	setLoginRateLimit(t, "0")
+	s := testServer(t)
+
+	limited := false
+	for i := 0; i < 12; i++ {
+		req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
+			"password": "wrong-password",
+		})
+		rr := testResponseRateLimited(t, s, req)
+		if rr.Code == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatal("12 rapid login attempts were never rate limited with MIKE_LOGIN_RATE_LIMIT=0")
+	}
+}
