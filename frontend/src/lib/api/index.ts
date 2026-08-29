@@ -118,6 +118,13 @@ export { createTerminal, createProjectTerminal, isTerminalStale } from './termin
 // -- LSP --
 export { fetchLSPSandboxMemory } from './lsp';
 
+// -- Sessions (login sessions, Settings → About) --
+export {
+    listSessions,
+    revokeSession,
+    revokeOtherSessions,
+} from './sessions';
+
 // -- Extensions --
 export {
     listExtensions,
