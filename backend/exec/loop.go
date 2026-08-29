@@ -242,7 +242,6 @@ type loopContext struct {
 	client           *llama.LlamaClient
 	providerName     string
 	contextWindow    *int
-	systemPrompt     string
 	sandboxEnabled   bool
 	callStartTime    time.Time // start of current LLM call (for per-call Duration)
 	usage            *types.ChatUsage
@@ -453,7 +452,6 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		client:           client,
 		providerName:     providerName,
 		contextWindow:    contextWindow,
-		systemPrompt:     messages[0].Content,
 		sandboxEnabled:   setup.sandboxEnabled,
 	}
 	// Sync once more to ensure we have the latest DB state (e.g. if messages were added/deleted)
@@ -1622,7 +1620,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				// Fallback (non-utility) summarization requests go to the task's
 				// CURRENT provider - lc.mc follows mid-run switches.
 				sumURL, _ := lc.mc.get()
-				lc.messages = te.applySummarization(req.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, sumURL, activeModel, req.resultCh)
+				lc.messages, _ = te.applySummarization(setup, req.ctx, lc.messages, sumURL, activeModel, req.resultCh)
 				lc.detector.reset() // context changed, clear stale text window
 				lc.detector.clearHints()
 				// Count messages before DB sync (includes in-memory summary).
