@@ -4,11 +4,13 @@ import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted } fro
 // ============================================================
 // CHAT INPUT — ESCAPE REMOVES FOCUS (Task View)
 // ============================================================
-// With the chat input focused (not streaming, mention dropdown
-// closed), Esc blurs the input — it must NOT close the task view
-// or clear the draft text. Esc while the @ mention dropdown is
-// open closes the dropdown first and keeps focus in the input.
-// Esc while streaming still stops generation (see chat-core.spec.ts).
+// With the chat input focused (mention dropdown closed), Esc blurs the
+// input — it must NOT close the task view or clear the draft text. Esc
+// while the @ mention dropdown is open closes the dropdown first and
+// keeps focus in the input.
+// Esc NEVER stops generation, streaming or not — an in-flight turn is
+// stopped with the ■ Stop button only. Because Esc blurs first, the
+// NEXT Esc (focus outside any input) is the "back to board" one.
 
 test.describe.serial('Chat input Escape removes focus', () => {
   test.beforeEach(async ({ page }) => {
@@ -74,5 +76,63 @@ test.describe.serial('Chat input Escape removes focus', () => {
 
     await expect(page.locator('.mention-dropdown')).toBeHidden();
     await expect(chatInput).toBeFocused();
+  });
+
+  test('Escape while streaming blurs the input and never stops generation', async ({ page }) => {
+    test.setTimeout(60000);
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `chat-esc-streaming-${Date.now()}`);
+    await navigateToTask(page, taskId);
+    expect(await ensureTaskStarted(page, projectId, taskId)).toBe(true);
+
+    const chatInput = page.locator('#chat-message-input');
+    await expect(chatInput).toBeVisible({ timeout: 10000 });
+
+    // The initial prompt must still be streaming (■ Stop visible) so Escape
+    // lands on an in-flight turn — the case that used to cancel it.
+    const streaming = await page.locator('.btn-stop').isVisible({ timeout: 15000 }).catch(() => false);
+    test.skip(!streaming, 'initial turn was not streaming');
+
+    await chatInput.click();
+    await expect(chatInput).toBeFocused();
+
+    await chatInput.press('Escape');
+
+    // Blurred, task view still open — and the turn was NOT cancelled.
+    expect(await page.evaluate(() => document.activeElement?.id)).not.toBe('chat-message-input');
+    await expect(page.locator('.task-detail-page')).toBeVisible();
+
+    // The turn runs to completion on its own. A cancelled turn ends on the
+    // user message, so ending on a non-user message proves it kept running.
+    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
+    const last = page.locator('.chat-message').last();
+    await expect(last).toBeVisible();
+    await expect(last).not.toHaveClass(/user/);
+  });
+
+  test('the next Escape (input blurred) is the "back to board" one', async ({ page }) => {
+    test.setTimeout(60000);
+    const projectId = await getProjectId(page);
+    const taskId = await createTaskViaApi(page, projectId, `chat-esc-back-to-board-${Date.now()}`);
+    await navigateToTask(page, taskId);
+    expect(await ensureTaskStarted(page, projectId, taskId)).toBe(true);
+
+    const chatInput = page.locator('#chat-message-input');
+    await expect(chatInput).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 30000 });
+
+    await chatInput.click();
+    await expect(chatInput).toBeFocused();
+
+    // Press 1 — consumed by the chat input: blur only, task view stays open.
+    await page.keyboard.press('Escape');
+    expect(await page.evaluate(() => document.activeElement?.id)).not.toBe('chat-message-input');
+    await expect(page.locator('.task-detail-page')).toBeVisible();
+
+    // Press 2 — focus is outside any input, so CardDetail's window-level
+    // handler closes the task view (back to the board).
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.task-detail-page')).not.toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.board')).toBeVisible();
   });
 });
