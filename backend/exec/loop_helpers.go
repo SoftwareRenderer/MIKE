@@ -388,10 +388,11 @@ func extractPrevSummary(messages []types.ChatMessage) string {
 // the window limit. It is invoked immediately after an assistant message is appended,
 // so it triggers right when context crosses the threshold (no waiting for the task to
 // transition to idle). applySummarization sets/clears the Summarizing flag, which shows
-// the spinner in the UI.
+// the spinner in the UI, and installs the new summary into the system prompt so the
+// next LLM call carries it.
 //
 // When injectProceed is true and summarization succeeds, a persisted "Proceed" user
-// message is appended to the context to the next LLM call
+// message is appended to the context to the next LLM call.
 func (te *TaskExecutor) maybeAutoSummarize(setup *taskExecSetup, lc *loopContext, activeModel string, injectProceed bool) {
 	if lc.contextWindow == nil {
 		return
@@ -400,12 +401,12 @@ func (te *TaskExecutor) maybeAutoSummarize(setup *taskExecSetup, lc *loopContext
 	if !shouldSummarize(contextTokensUsed(lc), *lc.contextWindow, threshold) {
 		return
 	}
-	before := len(lc.messages)
 	// Fallback (non-utility) summarization requests go to the task's CURRENT
 	// provider — lc.mc follows mid-run switches, setup.serverURL does not.
 	curURL, _ := lc.mc.get()
-	lc.messages = te.applySummarization(setup.ctx, setup.task, setup.projectID, setup.task.ID, lc.messages, curURL, activeModel, nil)
-	if injectProceed && len(lc.messages) > before {
+	var summary string
+	lc.messages, summary = te.applySummarization(setup, setup.ctx, lc.messages, curURL, activeModel, nil)
+	if summary != "" && injectProceed {
 		te.injectProceedMessage(setup, lc)
 	}
 	lc.detector.reset()
@@ -426,9 +427,43 @@ func (te *TaskExecutor) injectProceedMessage(setup *taskExecSetup, lc *loopConte
 	})
 }
 
-// applySummarization runs summarization, appends the summary message, and broadcasts the event.
-// Summary is injected into the system prompt on the next LLM call.
-func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task, projectID, taskID string, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error) []types.ChatMessage {
+// setSystemPrompt installs prompt as the conversation's system message and returns
+// the conversation. Index 0 is the system message in every path that builds one
+// (buildMessagesFromDB), so the normal case is an in-place replace that shifts no
+// message indices. Prepending is the defensive fallback: keeping the summary is worth
+// more than the off-by-one it introduces, and it only ever grows the slice, so no
+// index-based reader (lc.checkpointIdx) can run past the end.
+func setSystemPrompt(messages []types.ChatMessage, prompt string) []types.ChatMessage {
+	if len(messages) > 0 && messages[0].Role == "system" {
+		messages[0].Content = prompt
+		return messages
+	}
+	log.Printf("[summarize] warning: conversation has no system message at index 0; prepending one to carry the summary")
+	return append([]types.ChatMessage{{Role: "system", Content: prompt}}, messages...)
+}
+
+// applySummarization runs summarization, persists the summary, installs it into the
+// system prompt, and broadcasts the event. It returns the conversation for the next
+// LLM call and the installed summary; the summary is "" when summarization failed and
+// the caller's messages came back untouched.
+//
+// The summary row is persisted BEFORE anything is published, so a server restart at
+// any point resumes with it: a fresh process rebuilds the conversation with
+// buildMessagesFromDB, which embeds the newest summarization row into its system
+// prompt. The live run needs the same treatment, because buildLLMContext sends
+// messages[0] verbatim and drops the summarization marker together with every message
+// the summary replaced — without the refresh below the new summary never reaches the
+// model until something happens to re-sync from the DB.
+//
+// The prompt is rewritten in place rather than rebuilt from the DB: the in-memory
+// conversation is a superset of the persisted one (loop hints, the merge-conflict
+// instruction prompt), and buildMessagesFromDB deliberately skips rows the LLM still
+// needs mid-turn.
+func (te *TaskExecutor) applySummarization(setup *taskExecSetup, ctx context.Context, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error) ([]types.ChatMessage, string) {
+	task := setup.task
+	taskID := setup.task.ID
+	projectID := setup.projectID
+
 	// Signal the UI that summarization is in progress
 	origTask := task
 	task.Summarizing = true
@@ -457,7 +492,7 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 		if resultCh != nil {
 			resultCh <- err
 		}
-		return messages
+		return messages, ""
 	}
 
 	// Persist to DB.
@@ -491,6 +526,11 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 		Content: sumResult.summary,
 	})
 
+	// Install the summary into the live system prompt (see the doc comment): the
+	// summary reaches the LLM through messages[0] only, never through the marker.
+	// `task` is the row reloaded above, so the mode is current.
+	messages = setSystemPrompt(messages, composeSystemPrompt(task, setup.worktreePath, setup.projectName(), setup.sandboxEnabled, sumResult.summary))
+
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: "summarization", Data: map[string]any{
 		"id":               summaryMsgID,
 		"summary":          sumResult.summary,
@@ -508,7 +548,7 @@ func (te *TaskExecutor) applySummarization(ctx context.Context, task *types.Task
 	if resultCh != nil {
 		resultCh <- nil
 	}
-	return messages
+	return messages, sumResult.summary
 }
 
 // userMessageToChatMessage converts a UserMessage (with optional image attachments)
