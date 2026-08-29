@@ -1,14 +1,10 @@
 <script lang="ts">
     /**
-     * Sessions section of Settings → About.
-     *
-     * Lists every live login session (GET /api/sessions) and revokes them
-     * immediately — this section is NOT part of the config Save/Cancel flow, so
-     * it never touches the modal's dirty state or save payload (like the PWA
-     * install button above it).
-     *
-     * It is rendered inside the `activeTab === 'about'` block, so its mount
-     * effect only runs when the About tab is opened.
+     * Sessions section of Settings → About. Lists every live login session
+     * (GET /api/sessions) and revokes on click — deliberately outside the modal's
+     * Save/Cancel flow, so it never touches the dirty state or save payload (like
+     * the PWA install button above it). Rendered inside the `about` tab block, so
+     * it fetches when that tab opens.
      */
     import type { SessionInfo } from '$lib/types';
     import { listSessions, revokeSession, revokeOtherSessions } from '$lib/api';
@@ -19,8 +15,8 @@
     let { onSignOut }: { onSignOut?: () => void | Promise<void> } = $props();
 
     let sessions = $state<SessionInfo[]>([]);
-    // Starts true: the mount effect fetches immediately, so the first paint is
-    // the loading state rather than a flash of the empty state.
+    // Starts true so the first paint is the loading state, not a flash of the
+    // empty state (the mount effect fetches immediately).
     let loading = $state(true);
     let error = $state('');
     /** id of the session whose Revoke button is in flight (disables the row). */
@@ -78,8 +74,8 @@
         try {
             await revokeSession(session.id);
             if (isCurrent) {
-                // The session is gone; every later request would 401. Hand over to
-                // the modal's existing sign-out path instead of refreshing.
+                // The session is gone and every later request would 401. Hand over
+                // to the modal's sign-out path instead of refreshing.
                 await onSignOut?.();
                 return;
             }
@@ -118,8 +114,8 @@
         }
     }
 
-    // Fetch when the section mounts — i.e. when the About tab is opened, not when
-    // the Settings modal mounts.
+    // Fetch on mount — that is, when the About tab opens, not when the Settings
+    // modal mounts.
     $effect(() => {
         void loadSessions();
     });

@@ -132,9 +132,9 @@ func (sm *ExtensionSandboxManager) IsAvailable() bool {
 	return sm.available
 }
 
-// SetExtensionsDir records the directory extension files are materialized in,
-// so it can be part of the mount allowlist (and so findLocalDockerfile looks in
-// the right place).
+// SetExtensionsDir records the directory extension files are materialized in. It
+// is part of the mount allowlist, and findLocalDockerfile looks for a Dockerfile
+// there.
 func (sm *ExtensionSandboxManager) SetExtensionsDir(dir string) {
 	if strings.TrimSpace(dir) == "" {
 		return
@@ -152,10 +152,9 @@ func (sm *ExtensionSandboxManager) SetWorkspaceDir(dir string) {
 }
 
 // MountPolicy returns the host-mount allowlist for extension sandboxes: the
-// configured workspace dir, the registered project paths, the extensions dir,
-// the system temp dir and the EnvMountRoots extras. Built on demand so project
-// additions take effect without a restart. A nil manager yields an empty policy,
-// which permits no custom mount at all (fail closed).
+// workspace dir, the registered project paths, the extensions dir, the system
+// temp dir and the EnvMountRoots extras. Built on demand so new projects apply
+// without a restart.
 func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
 	var (
 		workspaceDir  string
@@ -189,12 +188,11 @@ func extensionMemoryLimit(ext *Extension) int {
 //
 // Extension sandboxes always run with --network none.
 //
-// The mount and capability lists that reach podman are re-validated here — even
-// though the write paths (PUT /api/extensions/{id}, install) already reject
-// them — so a value persisted before validation existed, or arriving from a
-// manifest, is skipped (and logged) instead of becoming a container argument.
-// A nil policy permits no custom mount at all (fail closed).
-//
+// The mounts and capabilities that reach podman are re-validated here even though
+// the write paths (PUT /api/extensions/{id}, install) already reject them, so a
+// value stored before validation existed, or one from a manifest, is skipped and
+// logged instead of becoming a container argument. A nil policy permits no custom
+// mount at all (fail closed).
 // Returns the create args and the sorted list of mounted host project paths
 // (used to detect mount-set changes).
 func buildExtensionCreateArgs(ext *Extension, containerName, image string, projectMounts map[string]string, policy *MountPolicy) ([]string, []string) {
@@ -212,8 +210,8 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		"--network", "none",
 	}
 
-	// Add back explicitly requested capabilities — except the ones that reach
-	// past the container, which never make it into the argument list.
+	// Add back explicitly requested capabilities, except the ones that reach past
+	// the container.
 	for _, cap := range ext.SandboxConfig.Capabilities {
 		if err := ValidateCapability(cap); err != nil {
 			log.Printf("[ext-sandbox] ext=%s SKIPPED capability %q: %v", ext.ID, cap, err)
@@ -247,10 +245,9 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memLimit))
 	}
 
-	// Custom mounts, each re-checked against the mount allowlist: the container
-	// path charset is what keeps the "<host>:<container>:rprivate,<mode>" spec
-	// from being rewritten by the value itself, and the host path must resolve
-	// inside one of the app's own roots.
+	// Custom mounts, each re-checked: the container path charset keeps the
+	// "<host>:<container>:rprivate,<mode>" spec from being rewritten by the value
+	// itself, and the host path must resolve inside one of the app's own roots.
 	for _, m := range ext.SandboxConfig.Mounts {
 		if err := ValidateContainerPath(m.ContainerPath); err != nil {
 			log.Printf("[ext-sandbox] ext=%s SKIPPED mount (host %q): %v", ext.ID, m.HostPath, err)

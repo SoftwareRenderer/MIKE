@@ -95,11 +95,10 @@ func main() {
 		log.Printf("⚠ WARNING: %s is less than 8 characters. A stronger secret is recommended for production use.", name)
 	}
 
-	// Bind address: flag > env var > loopback (default).
-	// Loopback by default: the API is RCE-complete (terminal WebSocket, git
-	// operations, filesystem write), so it must never end up on a public
-	// interface by accident. An explicit 0.0.0.0 / :: is the escape hatch for
-	// container / reverse-proxy use and still means all interfaces.
+	// Bind address: flag > env var > loopback. Loopback by default because the API
+	// is RCE-complete (terminal WebSocket, git operations, file writes) and must
+	// never land on a public interface by accident; an explicit 0.0.0.0 / :: is the
+	// deliberate escape hatch for containers and reverse proxies.
 	effectiveBind := *bind
 	if effectiveBind == "" {
 		effectiveBind = os.Getenv("MIKE_BIND")
@@ -112,9 +111,9 @@ func main() {
 		log.Fatalf("Invalid bind address %q (from --bind / MIKE_BIND): %v", addr, err)
 	}
 
-	// A weak master password is fine on loopback (dev flow) but not on an
-	// address other hosts can reach. Checked before any startup side effect
-	// (trace file, TLS material) so a refusal leaves nothing behind.
+	// A weak master password is fine on loopback (dev flow) but not on an address
+	// other hosts can reach. Checked before any startup side effect (trace file,
+	// TLS material) so a refusal leaves nothing behind.
 	if refusesWeakSecret(effectiveBind, os.Getenv("MIKE_LOGIN_PASSWORD")) {
 		log.Fatalf("Refusing to start: MIKE_LOGIN_PASSWORD is weak (fewer than 8 characters, or a well-known default) while the server listens on %q, which is reachable from other machines. "+
 			"Bind to loopback instead (--bind 127.0.0.1 or MIKE_BIND=127.0.0.1), or set a strong MIKE_LOGIN_PASSWORD of at least 8 characters.",
@@ -205,8 +204,8 @@ func main() {
 }
 
 // openTraceFile creates (or truncates) a flight-recorder trace file. The trace
-// captures ~30s of runtime internals, so it is created owner-only (0600) — the
-// same posture as the data directory that holds the DB and TLS keys.
+// captures ~30s of runtime internals, so it is owner-only (0600), like the data
+// directory holding the DB and TLS keys.
 func openTraceFile(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 }
@@ -250,10 +249,9 @@ func isLoopbackBind(bind string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// refusesWeakSecret is the decision behind the startup check: a weak
-// MIKE_LOGIN_PASSWORD (shorter than minPasswordLength, or a well-known
-// default) is fatal unless the server is bound to loopback only.
-// Loopback + weak stays allowed so the documented dev flow keeps working.
+// refusesWeakSecret reports whether startup must abort: a weak MIKE_LOGIN_PASSWORD
+// (shorter than minPasswordLength, or a well-known default) is fatal unless the
+// server binds loopback only. Loopback + weak stays allowed so the dev flow works.
 func refusesWeakSecret(bind, password string) bool {
 	if isLoopbackBind(bind) {
 		return false

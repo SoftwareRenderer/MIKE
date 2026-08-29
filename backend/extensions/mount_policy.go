@@ -10,36 +10,31 @@ import (
 	"kanban/backend/types"
 )
 
-// Extension sandbox containers are created with `--cap-drop ALL` and no host
-// filesystem access beyond the mounts the app itself installs (the read-only
-// project mounts). Everything a caller can add on top — mounts and capabilities
-// from `PUT /api/extensions/{id}`, or from an extension manifest at install
-// time — is validated by this file. Without it a single mount of "/" (or
-// CAP_SYS_ADMIN) turns the gVisor boundary decorative.
+// Extension sandboxes start with `--cap-drop ALL` and no host filesystem access
+// beyond the mounts the app adds itself. This file checks what a caller can add
+// on top: mounts and capabilities from `PUT /api/extensions/{id}`, or from a
+// manifest at install time. One mount of "/" or one CAP_SYS_ADMIN would
+// otherwise make the gVisor boundary meaningless.
 
-// EnvMountRoots is a path-list separated (os.PathListSeparator) list of extra
-// host roots an extension sandbox may mount from, in addition to the implicit
-// roots (workspace dir, registered project paths, the extensions dir and the
-// system temp dir). Provided for deployments that legitimately keep extension
-// data elsewhere (e.g. /srv/ext-data:/opt/models).
+// EnvMountRoots lists extra host roots an extension sandbox may mount from,
+// separated by os.PathListSeparator (':' on Linux). The implicit roots are the
+// workspace dir, registered project paths, the extensions dir and the system
+// temp dir; this is for deployments that keep extension data elsewhere.
 const EnvMountRoots = "MIKE_EXT_MOUNT_ROOTS"
 
 // containerPathPattern is the only shape accepted for a mount's container path.
-// The charset deliberately excludes ':' and ',': the podman mount spec is
-// "<host>:<container>:rprivate,<mode>", so either character inside a
-// user-supplied container path rewrites the spec — a trailing ":rw" or ",rw"
-// turns a read-only mount into a writable one, and a "," can replace the
-// mount options entirely.
+// It excludes ':' and ',' on purpose: the podman mount spec is
+// "<host>:<container>:rprivate,<mode>", so a ":rw" or ",rw" inside a
+// user-supplied path would rewrite the options and make a read-only mount writable.
 var containerPathPattern = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
 
-// capabilityPattern guards against a capability value being interpreted as
-// something other than a capability name (leading '-', whitespace, separators).
+// capabilityPattern accepts plain capability names only, so a value cannot
+// smuggle a flag, whitespace or a separator into the podman arguments.
 var capabilityPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 
-// deniedCapabilities are never re-added to an extension sandbox, no matter who
-// asked. The sandbox is already `--cap-drop ALL` + `no-new-privileges`; these
-// are the capabilities that reach past the container (host kernel, other
-// processes, devices, network namespace) rather than staying inside it.
+// deniedCapabilities are never re-added, no matter who asked. The sandbox is
+// already `--cap-drop ALL` + `no-new-privileges`; these are the ones that reach
+// past the container (host kernel, other processes, devices, network).
 var deniedCapabilities = map[string]string{
 	"SYS_ADMIN":       "grants near-root control of the container's namespaces and the host kernel interface",
 	"SYS_PTRACE":      "ptraces other processes",
@@ -55,7 +50,7 @@ var deniedCapabilities = map[string]string{
 	"LINUX_IMMUTABLE": "mounts read-only bind mounts read-write",
 }
 
-// deniedCapabilityNames lists the denylist in a stable order (tests, messages).
+// deniedCapabilityNames lists the denied capability names in map order.
 func deniedCapabilityNames() []string {
 	names := make([]string, 0, len(deniedCapabilities))
 	for name := range deniedCapabilities {
@@ -64,18 +59,17 @@ func deniedCapabilityNames() []string {
 	return names
 }
 
-// MountPolicy is an immutable allowlist of host roots an extension sandbox may
-// bind-mount from, plus the mount/capability shape rules. A nil policy is valid
-// and fails closed: nothing resolves inside an empty allowlist.
+// MountPolicy is an allowlist of host roots an extension sandbox may
+// bind-mount from. A nil policy is valid and fails closed: nothing is inside an
+// empty allowlist.
 type MountPolicy struct {
 	roots []string
 }
 
-// newMountPolicy builds a policy from raw root paths. Each root is made
-// absolute and symlink-resolved (best effort — a root that does not exist yet
-// is kept as its cleaned absolute form) so containment is compared against the
-// same resolved form as the candidate path. Empty roots are dropped, duplicates
-// collapsed.
+// newMountPolicy builds a policy from raw root paths. Each is made absolute and
+// symlink-resolved (a root that does not exist yet keeps its cleaned absolute
+// form) so it matches the resolved form of a candidate path. Blanks and
+// duplicates are dropped.
 func newMountPolicy(roots []string) *MountPolicy {
 	p := &MountPolicy{}
 	seen := map[string]bool{}
@@ -182,10 +176,9 @@ func ValidateContainerPath(containerPath string) error {
 	return nil
 }
 
-// resolvePath symlink-resolves p. When p (or a deep component of it) does not
-// exist yet — a mount target podman would create — the nearest existing ancestor
-// is resolved and the remaining components re-joined, so a symlink anywhere on
-// the existing part of the path is still followed.
+// resolvePath symlink-resolves p. If p (or a component of it) does not exist
+// yet, the nearest existing ancestor is resolved and the rest re-joined, so a
+// symlink on the existing part of the path is still followed.
 func resolvePath(p string) (string, error) {
 	clean := filepath.Clean(p)
 	var missing []string
@@ -305,8 +298,8 @@ func ValidateCapabilities(caps []string) error {
 	return nil
 }
 
-// ValidateSandboxAdditions checks the two fields that can widen a sandbox past
-// its purpose (host mounts and Linux capabilities) against the policy.
+// ValidateSandboxAdditions checks the two fields that can widen a sandbox: host
+// mounts and Linux capabilities.
 func (p *MountPolicy) ValidateSandboxAdditions(mounts []types.SandboxMount, capabilities []string) error {
 	if err := p.ValidateMounts(mounts); err != nil {
 		return err
