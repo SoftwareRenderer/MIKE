@@ -1,16 +1,80 @@
 package types
 
+import (
+	"encoding/json"
+	"strings"
+)
+
+// Attachment is one file attached to a user message — the element type of the
+// JSON array stored in TaskMessage.Attachments. The field names follow what the
+// frontend sends (camelCase mimeType), which is why they differ from the usual
+// snake_case JSON tags.
+type Attachment struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"` // base64, optionally a data: URL
+}
+
+// ImageSource carries base64 image data for a multi-modal content part.
+//
+// It is a named type rather than an inline struct field so that every place
+// building an image part does not have to re-declare the same anonymous shape.
+// Internally it holds raw base64; llama serializes it into OpenAI's
+// {type:"image_url", image_url:{url:"data:<media>;base64,..."}} wire format.
+type ImageSource struct {
+	Type      string `json:"type"` // always "base64"
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
+
 // ContentPart represents a part of a multi-modal message (text or image).
-// Internal format: ImageSource holds base64 data, serialized to OpenAI image_url format for the LLM API.
 type ContentPart struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
-	// Internal: base64 image data. Serialized to {type:"image_url", image_url:{url:"data:..."}} for LLM.
-	ImageSource *struct {
-		Type      string `json:"type"`
-		MediaType string `json:"media_type"`
-		Data      string `json:"data"`
-	} `json:"source,omitempty"`
+	// ImageSource is set only for image parts; serialized to OpenAI image_url
+	// format for the LLM API.
+	ImageSource *ImageSource `json:"source,omitempty"`
+}
+
+// NewImagePart builds an image ContentPart from an attachment. An empty mime
+// type falls back to image/png (what the frontend sends for clipboard images),
+// and a data: URL is stripped down to its bare base64 payload.
+func NewImagePart(att Attachment) ContentPart {
+	mediaType := att.MimeType
+	if mediaType == "" {
+		mediaType = "image/png"
+	}
+	data := att.Data
+	if idx := strings.Index(data, ","); idx >= 0 {
+		data = data[idx+1:]
+	}
+	return ContentPart{
+		Type:        "image",
+		ImageSource: &ImageSource{Type: "base64", MediaType: mediaType, Data: data},
+	}
+}
+
+// ContentParts builds the multi-modal content for a message: the text as the
+// leading part, then one image part per attachment (attachments with no data are
+// dropped). ok is false when attachmentsJSON is empty or unparseable, so the
+// caller falls back to plain-text content instead of sending a content-part
+// message the model may reject.
+func ContentParts(text, attachmentsJSON string) (parts []ContentPart, ok bool) {
+	if attachmentsJSON == "" {
+		return nil, false
+	}
+	var atts []Attachment
+	if err := json.Unmarshal([]byte(attachmentsJSON), &atts); err != nil {
+		return nil, false
+	}
+	parts = make([]ContentPart, 0, len(atts)+1)
+	parts = append(parts, ContentPart{Type: "text", Text: text})
+	for _, att := range atts {
+		if att.Data == "" {
+			continue
+		}
+		parts = append(parts, NewImagePart(att))
+	}
+	return parts, true
 }
 
 // ChatMessage represents a message in the conversation.

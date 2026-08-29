@@ -977,7 +977,7 @@ func TestBuildExtensionCreateArgs_RejectedMountsNeverReachPodman(t *testing.T) {
 // `--cap-drop ALL` posture survives: denied (or malformed) capabilities are
 // never re-added, requested-but-harmless ones still are.
 func TestBuildExtensionCreateArgs_DeniedCapabilitiesAreSkipped(t *testing.T) {
-	for _, cap := range deniedCapabilityNames() {
+	for cap := range deniedCapabilities {
 		ext := &Extension{ID: "ext-cap-reject", SandboxConfig: SandboxConfig{Capabilities: []string{"CHOWN", cap}}}
 		args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-cap-reject", "ubuntu:latest", nil, nil)
 

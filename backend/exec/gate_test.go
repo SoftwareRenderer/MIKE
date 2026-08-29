@@ -2,14 +2,12 @@ package exec
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 )
 
 func TestAcquireRelease_SlotAvailable(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 
 	// First acquire should succeed immediately (no queue entry)
 	ctx := context.Background()
@@ -27,7 +25,6 @@ func TestAcquireRelease_SlotAvailable(t *testing.T) {
 
 func TestAcquireRelease_ConcurrencyLimit(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// Acquire both slots
@@ -80,7 +77,6 @@ func TestAcquireRelease_ConcurrencyLimit(t *testing.T) {
 
 func TestAcquireRelease_PerProviderIsolation(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// Fill slot for provider A
@@ -97,7 +93,6 @@ func TestAcquireRelease_PerProviderIsolation(t *testing.T) {
 
 func TestAcquireRelease_FIFOOrdering(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// Hold the only slot
@@ -148,7 +143,6 @@ func TestAcquireRelease_FIFOOrdering(t *testing.T) {
 
 func TestAcquireRelease_ContextCancellation(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 
 	// Hold the only slot
 	ctx := context.Background()
@@ -191,7 +185,6 @@ func TestAcquireRelease_ContextCancellation(t *testing.T) {
 
 func TestAcquireRelease_CancelledEntrySkipped(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// Hold the only slot
@@ -250,7 +243,6 @@ func TestAcquireRelease_CancelledEntrySkipped(t *testing.T) {
 
 func TestEstimateWait_NoHistory(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// Hold the slot
@@ -284,7 +276,6 @@ func TestEstimateWait_NoHistory(t *testing.T) {
 
 func TestEstimateWait_WithHistory(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// Build some history: acquire, hold for 100ms, release (repeat 3x)
@@ -325,30 +316,8 @@ func TestEstimateWait_WithHistory(t *testing.T) {
 	g.Release("http://p")
 }
 
-func TestClose_ReleasesAllWaiters(t *testing.T) {
-	g := NewConcurrencyGate()
-	ctx := context.Background()
-
-	g.Acquire(ctx, "http://p", 1, 0, nil)
-
-	// Enqueue 3 waiters
-	var wg sync.WaitGroup
-	for range 3 {
-		wg.Go(func() {
-			g.Acquire(ctx, "http://p", 1, 0, nil)
-		})
-	}
-	time.Sleep(50 * time.Millisecond)
-
-	// Close should release all waiters
-	g.Close()
-
-	wg.Wait() // should not timeout
-}
-
 func TestAcquireRelease_MultipleWaitersPositions(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// Hold the only slot
@@ -401,7 +370,6 @@ func TestAcquireRelease_MultipleWaitersPositions(t *testing.T) {
 
 func TestAcquireRelease_TrailingSlashNormalization(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// Fill the only slot using a URL WITHOUT a trailing slash...
@@ -441,7 +409,6 @@ func TestAcquireRelease_TrailingSlashNormalization(t *testing.T) {
 
 func TestMinConcurrency_One(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// concurrency=0 should be treated as 1
@@ -474,7 +441,6 @@ func TestMinConcurrency_One(t *testing.T) {
 // when concurrency slots are plentiful.
 func TestAcquire_RateLimit_Spacing(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	starts := make([]time.Time, 0, 3)
@@ -501,7 +467,6 @@ func TestAcquire_RateLimit_Spacing(t *testing.T) {
 // 10 sequential acquires complete well under any rate-limit interval.
 func TestAcquire_RateLimit_ZeroUnlimited(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	start := time.Now()
@@ -520,7 +485,6 @@ func TestAcquire_RateLimit_ZeroUnlimited(t *testing.T) {
 // does not delay acquires for a different provider.
 func TestAcquire_RateLimit_PerProviderIsolation(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// Provider A: in-flight request with maxRPS=1 → its next start is ~1s away
@@ -544,7 +508,6 @@ func TestAcquire_RateLimit_PerProviderIsolation(t *testing.T) {
 // context error promptly when cancelled, and the gate stays consistent afterwards.
 func TestAcquire_RateLimit_Cancellation(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// Fill the rate window: maxRPS=1, one request in flight → next start ~1s away
@@ -592,7 +555,6 @@ func TestAcquire_RateLimit_Cancellation(t *testing.T) {
 // still waits for the rate window (total from the first start >= ~1s).
 func TestAcquire_RateLimit_WithSlotWait(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	t0 := time.Now()
@@ -633,7 +595,6 @@ func TestAcquire_RateLimit_WithSlotWait(t *testing.T) {
 // are blocked by both slot and rate: the first-enqueued waiter is served first.
 func TestAcquire_RateLimit_FIFO(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// Hold the only slot (maxRPS=1 → also blocks rate for ~1s)
@@ -691,7 +652,6 @@ func TestAcquire_RateLimit_FIFO(t *testing.T) {
 // by a full interval.
 func TestAcquire_RateLimit_ReleaseServeSpacing(t *testing.T) {
 	g := NewConcurrencyGate()
-	defer g.Close()
 	ctx := context.Background()
 
 	// concurrency=1, maxRPS=10 (100ms interval). A holds the only slot.

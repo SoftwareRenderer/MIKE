@@ -24,6 +24,23 @@ func mustParseCert(t *testing.T, path string) *x509.Certificate {
 	return cert
 }
 
+// leafSANsMatch is the file-based entry point to sanNamesMatch for tests that
+// drive the re-issue decision from a certificate on disk. Production only ever
+// compares a leaf it has already loaded, so this wrapper — which reports false
+// for a missing or unparseable certificate instead of failing the test — lives
+// here rather than in tls.go.
+func leafSANsMatch(certPath string, dnsNames []string, ips []net.IP) bool {
+	pemBytes, err := os.ReadFile(certPath)
+	if err != nil {
+		return false
+	}
+	leaf, err := parseCertificatePEM(pemBytes)
+	if err != nil {
+		return false
+	}
+	return sanNamesMatch(leaf, dnsNames, ips)
+}
+
 func hasString(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {

@@ -161,31 +161,6 @@ func TestBashChunkRoundTrip(t *testing.T) {
 	}
 }
 
-func TestShellOpenResultRoundTrip(t *testing.T) {
-	payload := NewShellOpenResult(42)
-	result, err := ParseShellOpenResult(payload)
-	if err != nil {
-		t.Fatalf("ParseShellOpenResult: %v", err)
-	}
-	if result.SessionID != 42 {
-		t.Errorf("SessionID = %d, want 42", result.SessionID)
-	}
-}
-
-func TestShellChunkRoundTrip(t *testing.T) {
-	payload := NewShellChunk(7, []byte("$ echo hi\necho hi\nhi\n$ "))
-	chunk, err := ParseShellChunk(payload)
-	if err != nil {
-		t.Fatalf("ParseShellChunk: %v", err)
-	}
-	if chunk.SessionID != 7 {
-		t.Errorf("SessionID = %d, want 7", chunk.SessionID)
-	}
-	if string(chunk.Data) != "$ echo hi\necho hi\nhi\n$ " {
-		t.Errorf("Data mismatch")
-	}
-}
-
 func TestUint64ResultRoundTrip(t *testing.T) {
 	payload := NewUint64Result(12345)
 	n, err := Uint64Result(payload)
@@ -197,63 +172,36 @@ func TestUint64ResultRoundTrip(t *testing.T) {
 	}
 }
 
-func TestShellIORequestRoundTrip(t *testing.T) {
-	frame := NewShellIORequest(1, 42, []byte("ls -la\n"))
-	var buf bytes.Buffer
-	_ = WriteFrame(&buf, frame)
+// TestBinaryMethodParamFraming pins the two framing rules for binary methods
+// (currently just bash_cancel):
+//
+//  1. Params are read by offset from payload[6:], so the jsonLen field plays no
+//     part in decoding — a mismatched jsonLen must not shift the decoded value.
+//  2. ParseRequest skips JSON validation for them (see isBinaryMethod), so params
+//     that are not JSON at all still parse. jsonLen *is* still bounds-checked,
+//     which is why the builders always write a truthful length.
+func TestBinaryMethodParamFraming(t *testing.T) {
+	// Layout: [method][reserved][jsonLen: 4 bytes][targetMsgID: 4 bytes]
+	payload := make([]byte, 6+4)
+	payload[0] = MethodBashCancel
+	binary.BigEndian.PutUint32(payload[2:6], 0xDEADBEEF) // deliberately wrong jsonLen
+	binary.BigEndian.PutUint32(payload[6:10], 789)       // target MsgID
 
-	f, err := ReadFrame(&buf)
+	params, err := ParseBashCancelParams(&Frame{Payload: payload})
 	if err != nil {
-		t.Fatalf("ReadFrame: %v", err)
+		t.Fatalf("ParseBashCancelParams: %v", err)
 	}
-	params, err := ParseShellIOParams(f)
-	if err != nil {
-		t.Fatalf("ParseShellIOParams: %v", err)
+	if params.TargetMsgID != 789 {
+		t.Errorf("TargetMsgID = %d, want 789", params.TargetMsgID)
 	}
-	if params.SessionID != 42 {
-		t.Errorf("SessionID = %d, want 42", params.SessionID)
-	}
-	if string(params.Input) != "ls -la\n" {
-		t.Errorf("Input = %q, want %q", params.Input, "ls -la\n")
-	}
-}
 
-func TestShellResizeRequestRoundTrip(t *testing.T) {
-	frame := NewShellResizeRequest(1, 99, 24, 80)
-	var buf bytes.Buffer
-	_ = WriteFrame(&buf, frame)
-
-	f, err := ReadFrame(&buf)
+	// A well-formed frame whose params are raw bytes, not JSON.
+	req, err := ParseRequest(NewBashCancelRequest(1, 789))
 	if err != nil {
-		t.Fatalf("ReadFrame: %v", err)
+		t.Fatalf("ParseRequest on a binary-method frame = %v, want nil", err)
 	}
-	params, err := ParseShellResizeParams(f)
-	if err != nil {
-		t.Fatalf("ParseShellResizeParams: %v", err)
-	}
-	if params.SessionID != 99 {
-		t.Errorf("SessionID = %d, want 99", params.SessionID)
-	}
-	if params.Rows != 24 || params.Cols != 80 {
-		t.Errorf("Rows/Cols = %d/%d, want 24/80", params.Rows, params.Cols)
-	}
-}
-
-func TestShellCloseRequestRoundTrip(t *testing.T) {
-	frame := NewShellCloseRequest(1, 55)
-	var buf bytes.Buffer
-	_ = WriteFrame(&buf, frame)
-
-	f, err := ReadFrame(&buf)
-	if err != nil {
-		t.Fatalf("ReadFrame: %v", err)
-	}
-	params, err := ParseShellCloseParams(f)
-	if err != nil {
-		t.Fatalf("ParseShellCloseParams: %v", err)
-	}
-	if params.SessionID != 55 {
-		t.Errorf("SessionID = %d, want 55", params.SessionID)
+	if req.Method != MethodBashCancel {
+		t.Errorf("Method = %s, want bash_cancel", req.MethodString())
 	}
 }
 
@@ -266,10 +214,11 @@ func TestMethodString(t *testing.T) {
 		{MethodWrite, "write"},
 		{MethodEdit, "edit"},
 		{MethodBash, "bash"},
-		{MethodShellOpen, "shell_open"},
-		{MethodShellIO, "shell_io"},
-		{MethodShellResize, "shell_resize"},
-		{MethodShellClose, "shell_close"},
+		{MethodBashCancel, "bash_cancel"},
+		{MethodLSP, "lsp"},
+		// 0x05-0x08 were the retired shell methods; they must stay unassigned.
+		{0x05, "unknown(5)"},
+		{0x08, "unknown(8)"},
 		{0xFF, "unknown(255)"},
 	}
 	for _, tc := range cases {
@@ -289,66 +238,6 @@ func TestErrorMsg(t *testing.T) {
 	f2 := NewResult(1, []byte("data"))
 	if got := f2.ErrorMsg(); got != "" {
 		t.Errorf("ErrorMsg on Result = %q, want empty", got)
-	}
-}
-
-func TestShellBinaryOffsets(t *testing.T) {
-	// Test ShellIO offsets
-	// Payload: [method][reserved][jsonLen: 4 bytes][sessionID: 4 bytes][inputLen: 4 bytes][input]
-	ioPayload := make([]byte, 6+4+4+5)
-	ioPayload[0] = MethodShellIO
-	binary.BigEndian.PutUint32(ioPayload[2:6], 0xDEADBEEF) // "poison" jsonLen
-	binary.BigEndian.PutUint32(ioPayload[6:10], 123)       // sessionID
-	binary.BigEndian.PutUint32(ioPayload[10:14], 5)        // inputLen
-	copy(ioPayload[14:], []byte("hello"))
-
-	fIO := &Frame{Payload: ioPayload}
-	paramsIO, err := ParseShellIOParams(fIO)
-	if err != nil {
-		t.Fatalf("ParseShellIOParams: %v", err)
-	}
-	if paramsIO.SessionID != 123 {
-		t.Errorf("SessionID = %d, want 123", paramsIO.SessionID)
-	}
-	if string(paramsIO.Input) != "hello" {
-		t.Errorf("Input = %q, want %q", paramsIO.Input, "hello")
-	}
-
-	// Test ShellResize offsets
-	// Payload: [method][reserved][jsonLen: 4 bytes][sessionID: 4 bytes][rows: 2 bytes][cols: 2 bytes]
-	resizePayload := make([]byte, 6+4+2+2)
-	resizePayload[0] = MethodShellResize
-	binary.BigEndian.PutUint32(resizePayload[2:6], 0xCAFEBABE) // "poison" jsonLen
-	binary.BigEndian.PutUint32(resizePayload[6:10], 456)       // sessionID
-	binary.BigEndian.PutUint16(resizePayload[10:12], 24)       // rows
-	binary.BigEndian.PutUint16(resizePayload[12:14], 80)       // cols
-
-	fResize := &Frame{Payload: resizePayload}
-	paramsResize, err := ParseShellResizeParams(fResize)
-	if err != nil {
-		t.Fatalf("ParseShellResizeParams: %v", err)
-	}
-	if paramsResize.SessionID != 456 {
-		t.Errorf("SessionID = %d, want 456", paramsResize.SessionID)
-	}
-	if paramsResize.Rows != 24 || paramsResize.Cols != 80 {
-		t.Errorf("Rows/Cols = %d/%d, want 24/80", paramsResize.Rows, paramsResize.Cols)
-	}
-
-	// Test ShellClose offsets
-	// Payload: [method][reserved][jsonLen: 4 bytes][sessionID: 4 bytes]
-	closePayload := make([]byte, 6+4)
-	closePayload[0] = MethodShellClose
-	binary.BigEndian.PutUint32(closePayload[2:6], 0xBADF00D) // "poison" jsonLen
-	binary.BigEndian.PutUint32(closePayload[6:10], 789)      // sessionID
-
-	fClose := &Frame{Payload: closePayload}
-	paramsClose, err := ParseShellCloseParams(fClose)
-	if err != nil {
-		t.Fatalf("ParseShellCloseParams: %v", err)
-	}
-	if paramsClose.SessionID != 789 {
-		t.Errorf("SessionID = %d, want 789", paramsClose.SessionID)
 	}
 }
 

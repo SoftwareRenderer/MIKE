@@ -23,6 +23,13 @@ func marshalAssignedPorts(ports []types.AssignedPort) string {
 }
 
 // CreateTask inserts a new task.
+// taskColumns lists the tasks table columns in the exact order scanTask reads
+// them, and is the single source of truth for every query that returns a task
+// (and for CreateTask's INSERT). The mapping is positional, so a column added to
+// the schema but not to this list — or listed in a different order than scanTask
+// expects — breaks at scan time rather than at compile time.
+const taskColumns = `id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost`
+
 func (s *Store) CreateTask(t *types.Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -33,7 +40,7 @@ func (s *Store) CreateTask(t *types.Task) error {
 		movedAt = t.CreatedAt
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO tasks (id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost)
+		`INSERT INTO tasks (`+taskColumns+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.ProjectID, t.Title, t.Prompt, t.Status, t.SessionID, t.Branch, ptrStr(t.BaseRef), ptrStr(t.BaseCommit), ptrStr(t.BranchTip), t.Output, t.ExecutionState, B2I(t.HasMergeConflict),
 		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode,
@@ -54,7 +61,7 @@ func (s *Store) GetTaskByID(taskID string) (*types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	row := s.db.QueryRow(
-		`SELECT id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost FROM tasks WHERE id = ?`,
+		`SELECT `+taskColumns+` FROM tasks WHERE id = ?`,
 		taskID,
 	)
 	var t types.Task
@@ -67,7 +74,7 @@ func (s *Store) GetTaskByID(taskID string) (*types.Task, error) {
 
 func (s *Store) queryTask(projectID, taskID string) (*types.Task, error) {
 	row := s.db.QueryRow(
-		`SELECT id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost FROM tasks WHERE id = ? AND project_id = ?`,
+		`SELECT `+taskColumns+` FROM tasks WHERE id = ? AND project_id = ?`,
 		taskID, projectID,
 	)
 	var t types.Task
@@ -88,7 +95,7 @@ func (s *Store) GetTasksByProject(projectID string) ([]types.Task, error) {
 
 func (s *Store) queryTasksByProject(projectID string) ([]types.Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost FROM tasks WHERE project_id = ? ORDER BY created_at DESC, rowid DESC`,
+		`SELECT `+taskColumns+` FROM tasks WHERE project_id = ? ORDER BY created_at DESC, rowid DESC`,
 		projectID,
 	)
 	if err != nil {
@@ -113,7 +120,7 @@ func (s *Store) GetInFlightTasks() ([]types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(
-		`SELECT id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost FROM tasks WHERE execution_state IN ('running', 'pulling_image')`,
+		`SELECT ` + taskColumns + ` FROM tasks WHERE execution_state IN ('running', 'pulling_image')`,
 	)
 	if err != nil {
 		return nil, err
@@ -355,7 +362,7 @@ func (s *Store) GetChildren(taskID string) ([]types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	rows, err := s.db.Query(
-		`SELECT id, project_id, title, prompt, status, session_id, branch, base_ref, base_commit, branch_tip, output, execution_state, has_merge_conflict, llama_server_url, model_name, reasoning_effort, max_consecutive_failed_turns, auto_commit, auto_merge, subtasks_auto_merge, operating_mode, parent_task_id, autostarted, title_generating, summarizing, current_thread_id, created_at, updated_at, moved_at, assigned_ports, session_cost FROM tasks WHERE parent_task_id = ? ORDER BY created_at DESC, rowid DESC`,
+		`SELECT `+taskColumns+` FROM tasks WHERE parent_task_id = ? ORDER BY created_at DESC, rowid DESC`,
 		taskID,
 	)
 	if err != nil {

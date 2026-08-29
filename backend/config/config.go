@@ -511,8 +511,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		// Partial update: only update fields that are provided
 		var updates map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-			httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+		if !httputil.DecodeJSON(w, r, &updates) {
 			return
 		}
 		current, err := cs.GetConfig()

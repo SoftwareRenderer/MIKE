@@ -46,17 +46,6 @@ func TestInferExtensionTypeLLM(t *testing.T) {
 	}
 }
 
-func TestIsLLMHelpers(t *testing.T) {
-	ext := makeLLMExt("id", "local", "name", true, "")
-	if !ext.IsLLM() || !ext.HasLLMConfig() {
-		t.Error("IsLLM/HasLLMConfig should be true")
-	}
-	ext.Type = ExtensionTypeUI
-	if ext.IsLLM() || ext.HasLLMConfig() {
-		t.Error("non-llm type must not report IsLLM/HasLLMConfig")
-	}
-}
-
 func TestCollectLLMMappings(t *testing.T) {
 	es := testStore(t)
 	extDir := t.TempDir()

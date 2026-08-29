@@ -590,11 +590,7 @@ func TestEstimatePromptTokens_ContentParts(t *testing.T) {
 	messages := []types.ChatMessage{
 		{Role: "user", ContentParts: []types.ContentPart{
 			{Type: "text", Text: "check this image for me please"},
-			{Type: "image", ImageSource: &struct {
-				Type      string `json:"type"`
-				MediaType string `json:"media_type"`
-				Data      string `json:"data"`
-			}{Type: "base64", MediaType: "image/png", Data: "abc123"}},
+			{Type: "image", ImageSource: &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}},
 		}},
 	}
 	tokens := estimatePromptTokens(messages)

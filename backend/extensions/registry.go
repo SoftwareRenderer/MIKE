@@ -1,7 +1,6 @@
 package extensions
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -156,22 +155,6 @@ func (rc *RegistryClient) PullImage(imageRef string) error {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("pull image %s: %w (output: %s)", imageRef, err, string(output))
-	}
-	return nil
-}
-
-// BuildImage builds an image from a Dockerfile path via podman.
-func (rc *RegistryClient) BuildImage(dockerfilePath, imageRef string) error {
-	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
-		return err
-	}
-	if err := sandboxruntime.ValidateDockerfilePath(dockerfilePath); err != nil {
-		return err
-	}
-	cmd := exec.Command("podman", "build", "-t", imageRef, "-f", dockerfilePath, ".")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("build image %s from %s: %w (output: %s)", imageRef, dockerfilePath, err, string(output))
 	}
 	return nil
 }
@@ -409,48 +392,4 @@ func copyDir(src, dst string) error {
 		}
 	}
 	return nil
-}
-
-// StreamBuildOutput builds an image and streams output via a channel.
-func (rc *RegistryClient) StreamBuildOutput(ctx context.Context, dockerfilePath, imageRef string, ch chan<- string) error {
-	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
-		return err
-	}
-	if err := sandboxruntime.ValidateDockerfilePath(dockerfilePath); err != nil {
-		return err
-	}
-	cmd := exec.CommandContext(ctx, "podman", "build", "-t", imageRef, "-f", dockerfilePath, ".")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("create stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("create stderr pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start build: %w", err)
-	}
-
-	// Stream output
-	go func() {
-		defer close(ch)
-		mergeIO := func(r io.Reader) {
-			buf := make([]byte, 4096)
-			for {
-				n, err := r.Read(buf)
-				if n > 0 {
-					ch <- string(buf[:n])
-				}
-				if err != nil {
-					return
-				}
-			}
-		}
-		mergeIO(stdout)
-		mergeIO(stderr)
-	}()
-
-	return cmd.Wait()
 }

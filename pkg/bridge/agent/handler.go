@@ -13,16 +13,14 @@ import (
 	"kanban/pkg/bridge/protocol"
 )
 
-// handler manages request dispatch and shell sessions for a single client connection.
+// handler manages request dispatch for a single client connection.
 type handler struct {
-	mu          sync.Mutex
-	sessions    map[uint32]*shellSession
-	nextSession uint32
-	bashProcs   map[uint32]*bashProc // msgID → running bash process
-	lsp         *lspState            // LSP server state (one per connection)
-	writeMu     sync.Mutex           // serializes all writes to conn (shell readLoop + dispatch + read loop)
-	closed      atomic.Bool          // set true when connection is torn down (atomic: accessed from readLoop + close)
-	fileLocks   sync.Map             // path → *sync.Mutex, prevents concurrent read-modify-write on same file
+	mu        sync.Mutex
+	bashProcs map[uint32]*bashProc // msgID → running bash process
+	lsp       *lspState            // LSP server state (one per connection)
+	writeMu   sync.Mutex           // serializes all writes to conn (bash streaming + dispatch + read loop)
+	closed    atomic.Bool          // set true when connection is torn down (atomic: accessed from readLoop + close)
+	fileLocks sync.Map             // path → *sync.Mutex, prevents concurrent read-modify-write on same file
 }
 
 // lockFile returns a lock for the given file path and an unlock function.
@@ -81,9 +79,7 @@ func (bp *bashProc) pid() int {
 
 func newHandler() *handler {
 	h := &handler{
-		sessions:    make(map[uint32]*shellSession),
-		nextSession: 1,
-		bashProcs:   make(map[uint32]*bashProc),
+		bashProcs: make(map[uint32]*bashProc),
 	}
 	h.closed.Store(true) // set to false by caller when connection is ready
 	return h
@@ -118,10 +114,6 @@ func (h *handler) writeFrame(conn net.Conn, frame *protocol.Frame) error {
 func (h *handler) close() {
 	h.closed.Store(true) // prevent readLoop from writing to closed connection
 	h.mu.Lock()
-	for id, s := range h.sessions {
-		s.close()
-		delete(h.sessions, id)
-	}
 	// Kill all tracked bash processes (and their process groups)
 	for id, bp := range h.bashProcs {
 		bp.kill()
@@ -131,8 +123,8 @@ func (h *handler) close() {
 }
 
 // handleConn reads frames from conn and dispatches them to handlers.
-// Binary shell methods (shell_io, shell_resize, shell_close) are handled
-// synchronously on this goroutine. JSON methods are dispatched to goroutines.
+// Binary methods (bash_cancel) are handled synchronously on this goroutine.
+// JSON methods are dispatched to goroutines.
 func (h *handler) handleConn(conn net.Conn) error {
 	for {
 		frame, err := protocol.ReadFrame(conn)
@@ -158,11 +150,8 @@ func (h *handler) handleConn(conn net.Conn) error {
 			continue
 
 		case protocol.TypeRequest:
-			// Binary shell methods — parse directly from frame
+			// Binary methods — parse directly from frame
 			switch method {
-			case protocol.MethodShellIO:
-				h.handleShellIO(conn, frame)
-				continue
 			case protocol.MethodLSP:
 				req, err := protocol.ParseRequest(frame)
 				if err != nil {
@@ -171,12 +160,6 @@ func (h *handler) handleConn(conn net.Conn) error {
 					continue
 				}
 				go h.handleLSP(conn, req)
-				continue
-			case protocol.MethodShellResize:
-				h.handleShellResize(conn, frame)
-				continue
-			case protocol.MethodShellClose:
-				h.handleShellClose(conn, frame)
 				continue
 			case protocol.MethodBashCancel:
 				h.handleBashCancel(frame)
@@ -209,8 +192,6 @@ func (h *handler) dispatch(conn net.Conn, req *protocol.Request) {
 		err = handleEdit(h, conn, req)
 	case protocol.MethodBash:
 		err = handleBash(h, conn, req)
-	case protocol.MethodShellOpen:
-		err = h.handleShellOpen(conn, req)
 	default:
 		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, fmt.Sprintf("unknown method: %s", req.MethodString())))
 		return
@@ -219,62 +200,6 @@ func (h *handler) dispatch(conn net.Conn, req *protocol.Request) {
 	if err != nil {
 		log.Printf("agent: MsgID %d method %s error: %v", req.MsgID, req.MethodString(), err)
 		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
-	}
-}
-
-// --- Shell binary method handlers ---
-
-func (h *handler) handleShellIO(conn net.Conn, frame *protocol.Frame) {
-	params, err := protocol.ParseShellIOParams(frame)
-	if err != nil {
-		log.Printf("agent: shell_io parse error: %v", err)
-		return
-	}
-
-	h.mu.Lock()
-	sess, ok := h.sessions[params.SessionID]
-	h.mu.Unlock()
-	if !ok {
-		return // session already closed
-	}
-
-	if len(params.Input) > 0 {
-		sess.write(params.Input)
-	}
-}
-
-func (h *handler) handleShellResize(conn net.Conn, frame *protocol.Frame) {
-	params, err := protocol.ParseShellResizeParams(frame)
-	if err != nil {
-		log.Printf("agent: shell_resize parse error: %v", err)
-		return
-	}
-
-	h.mu.Lock()
-	sess, ok := h.sessions[params.SessionID]
-	h.mu.Unlock()
-	if !ok {
-		return
-	}
-	sess.resize(params.Rows, params.Cols)
-}
-
-func (h *handler) handleShellClose(conn net.Conn, frame *protocol.Frame) {
-	params, err := protocol.ParseShellCloseParams(frame)
-	if err != nil {
-		log.Printf("agent: shell_close parse error: %v", err)
-		return
-	}
-
-	h.mu.Lock()
-	sess, ok := h.sessions[params.SessionID]
-	if ok {
-		delete(h.sessions, params.SessionID)
-	}
-	h.mu.Unlock()
-	if ok {
-		sess.close()
-		log.Printf("agent: shell session %d closed", params.SessionID)
 	}
 }
 

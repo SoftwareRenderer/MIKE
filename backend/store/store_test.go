@@ -72,32 +72,6 @@ func newThread(id, taskID, name string) *types.TaskThread {
 	}
 }
 
-// newDependency creates a TaskDependency with default values for testing.
-func newDependency(id, parentID, childID string) *types.TaskDependency {
-	return &types.TaskDependency{
-		ID:           id,
-		ParentTaskID: parentID,
-		ChildTaskID:  childID,
-		AutoStart:    true,
-		CreatedAt:    time.Now().UTC(),
-	}
-}
-
-// newReviewComment creates a ReviewComment with default values for testing.
-func newReviewComment(id, taskID, filePath, comment string, lineNum int) *types.ReviewComment {
-	now := time.Now().UTC()
-	return &types.ReviewComment{
-		ID:        id,
-		TaskID:    taskID,
-		FilePath:  filePath,
-		LineNum:   lineNum,
-		Comment:   comment,
-		Resolved:  false,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-}
-
 // TestNewStoreFilePermissions verifies the database and its directory are not
 // readable by anyone but the owner — the file holds session token hashes and
 // encrypted provider secrets.

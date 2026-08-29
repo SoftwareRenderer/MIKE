@@ -399,27 +399,6 @@ func (wm *WorktreeManager) RemoveWorktree(projectID, taskID, branchName string) 
 	return nil
 }
 
-// RemoveWorktreeDir removes a task's worktree directory and prunes git worktree tracking.
-func (wm *WorktreeManager) RemoveWorktreeDir(projectID, taskID string) error {
-	project, err := wm.store.GetProject(projectID)
-	if err != nil {
-		return fmt.Errorf("get project: %w", err)
-	}
-
-	worktreePath, err := wm.WorktreePath(taskID)
-	if err != nil {
-		return err
-	}
-
-	if err := os.RemoveAll(worktreePath); err != nil {
-		return fmt.Errorf("remove worktree dir: %w", err)
-	}
-
-	wm.gitRun(project.Path, "worktree", "prune")
-
-	return nil
-}
-
 // GarbageCollect removes worktree directories that have no matching task in the database.
 func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	cfg, err := wm.configStore.GetConfig()

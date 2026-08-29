@@ -223,18 +223,6 @@ func TestDeleteProject(t *testing.T) {
 		}
 	}
 
-	// Create dependencies between proj-1 tasks
-	dep := newDependency("dep-1", "task-1a", "task-1b")
-	if err := s.CreateDependency(dep); err != nil {
-		t.Fatalf("create dependency: %v", err)
-	}
-
-	// Create review comments for proj-1 tasks
-	review := newReviewComment("review-1", "task-1a", "main.go", "looks good", 42)
-	if err := s.CreateReviewComment(review); err != nil {
-		t.Fatalf("create review: %v", err)
-	}
-
 	// --- Delete proj-1 ---
 	if err := s.DeleteProject("proj-1"); err != nil {
 		t.Fatalf("delete project with data: %v", err)
@@ -278,24 +266,6 @@ func TestDeleteProject(t *testing.T) {
 	}
 	if len(threads1a) != 0 {
 		t.Fatalf("expected 0 threads for task-1a, got %d", len(threads1a))
-	}
-
-	// Verify dependencies are gone
-	deps, err := s.GetDependencies("task-1b")
-	if err != nil {
-		t.Fatalf("get dependencies: %v", err)
-	}
-	if len(deps) != 0 {
-		t.Fatalf("expected 0 dependencies, got %d", len(deps))
-	}
-
-	// Verify review comments are gone
-	reviews, err := s.GetReviewComments("task-1a")
-	if err != nil {
-		t.Fatalf("get reviews: %v", err)
-	}
-	if len(reviews) != 0 {
-		t.Fatalf("expected 0 reviews, got %d", len(reviews))
 	}
 
 	// Verify token stats are gone

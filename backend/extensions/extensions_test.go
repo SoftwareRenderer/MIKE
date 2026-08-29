@@ -46,79 +46,18 @@ func TestExtension_IsLSP(t *testing.T) {
 	}
 }
 
-func TestExtension_IsUI(t *testing.T) {
-	tests := []struct {
-		name string
-		ext  *Extension
-		want bool
-	}{
-		{"lsp type", makeTestExtension(t, ExtensionTypeLSP, "registry"), false},
-		{"ui type", makeTestExtension(t, ExtensionTypeUI, "registry"), true},
-		{"unknown type", makeTestExtension(t, "unknown", "registry"), false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.ext.IsUI(); got != tt.want {
-				t.Errorf("IsUI() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestExtension_HasLSPConfig(t *testing.T) {
-	ext := makeTestExtension(t, ExtensionTypeLSP, "registry")
-	// No LSP config set
-	if ext.HasLSPConfig() {
-		t.Error("HasLSPConfig() = true, want false (no LSP config)")
-	}
-	// Set LSP config
-	ext.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{Command: "gopls", Args: []string{"serve"}}}
-	if !ext.HasLSPConfig() {
-		t.Error("HasLSPConfig() = false, want true")
-	}
-	// UI type with LSP config (should still be false)
-	uiExt := makeTestExtension(t, ExtensionTypeUI, "registry")
-	uiExt.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{Command: "test"}}
-	if uiExt.HasLSPConfig() {
-		t.Error("HasLSPConfig() = true for UI extension, want false")
-	}
-}
-
-func TestExtension_HasUIConfig(t *testing.T) {
-	ext := makeTestExtension(t, ExtensionTypeUI, "registry")
-	// No UI config set
-	if ext.HasUIConfig() {
-		t.Error("HasUIConfig() = true, want false (no UI config)")
-	}
-	// Set UI config
-	ext.Manifest.Capabilities = &Capabilities{UI: &UIConfig{InjectionPoints: []string{"createTask"}}}
-	if !ext.HasUIConfig() {
-		t.Error("HasUIConfig() = false, want true")
-	}
-	// LSP type with UI config (should still be false)
-	lspExt := makeTestExtension(t, ExtensionTypeLSP, "registry")
-	lspExt.Manifest.Capabilities = &Capabilities{UI: &UIConfig{InjectionPoints: []string{"createTask"}}}
-	if lspExt.HasUIConfig() {
-		t.Error("HasUIConfig() = true for LSP extension, want false")
-	}
-}
-
 func TestExtension_InstallSourceChecks(t *testing.T) {
 	tests := []struct {
-		source       string
-		wantRegistry bool
-		wantLocal    bool
+		source    string
+		wantLocal bool
 	}{
-		{"registry", true, false},
-		{"local", false, true},
-		{"unknown", false, false},
+		{"registry", false},
+		{"local", true},
+		{"unknown", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.source, func(t *testing.T) {
 			ext := makeTestExtension(t, ExtensionTypeLSP, tt.source)
-			if got := ext.IsRegistryInstalled(); got != tt.wantRegistry {
-				t.Errorf("IsRegistryInstalled() = %v, want %v", got, tt.wantRegistry)
-			}
 			if got := ext.IsLocalInstalled(); got != tt.wantLocal {
 				t.Errorf("IsLocalInstalled() = %v, want %v", got, tt.wantLocal)
 			}
@@ -157,34 +96,6 @@ func TestLSPConfig_FullConfig(t *testing.T) {
 	}
 	if cfg.InitParamsOverride["staticcheck"] != true {
 		t.Error("InitParamsOverride.staticcheck = false, want true")
-	}
-}
-
-func TestLSPConfig_EditorEnabled(t *testing.T) {
-	// Default (nil) should return true
-	cfg := &LSPConfig{Command: "gopls", Args: []string{"serve"}}
-	if !cfg.IsEditorEnabled() {
-		t.Error("IsEditorEnabled() = false, want true (nil defaults to true)")
-	}
-
-	// Explicitly enabled
-	trueVal := true
-	cfg.EditorEnabled = &trueVal
-	if !cfg.IsEditorEnabled() {
-		t.Error("IsEditorEnabled() = false, want true (explicitly enabled)")
-	}
-
-	// Explicitly disabled
-	falseVal := false
-	cfg.EditorEnabled = &falseVal
-	if cfg.IsEditorEnabled() {
-		t.Error("IsEditorEnabled() = true, want false (explicitly disabled)")
-	}
-
-	// Nil config
-	var nilCfg *LSPConfig
-	if !nilCfg.IsEditorEnabled() {
-		t.Error("nil.IsEditorEnabled() = false, want true")
 	}
 }
 
@@ -497,25 +408,6 @@ func TestAgentConfig_ResolveSandboxTemplates(t *testing.T) {
 	}
 }
 
-func TestExtension_IsCSS(t *testing.T) {
-	tests := []struct {
-		name string
-		ext  *Extension
-		want bool
-	}{
-		{"css type", makeTestExtension(t, ExtensionTypeCSS, "registry"), true},
-		{"lsp type", makeTestExtension(t, ExtensionTypeLSP, "registry"), false},
-		{"ui type", makeTestExtension(t, ExtensionTypeUI, "registry"), false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.ext.IsCSS(); got != tt.want {
-				t.Errorf("IsCSS() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestManifest_Priority_Default(t *testing.T) {
 	m := ExtensionManifest{DisplayName: "Test"}
 	if m.Priority != 0 {
@@ -570,28 +462,6 @@ func TestManifest_Priority_JSONDefault(t *testing.T) {
 	}
 	if m.Priority != 0 {
 		t.Errorf("Priority = %d, want 0 (default from missing field)", m.Priority)
-	}
-}
-
-func TestExtension_HasCSSConfig(t *testing.T) {
-	// CSS type with CSS config
-	cssExt := makeTestExtension(t, ExtensionTypeCSS, "manual")
-	cssExt.Manifest.Capabilities = &Capabilities{CSS: &CSSConfig{CSSURL: "/theme.css"}}
-	if !cssExt.HasCSSConfig() {
-		t.Error("HasCSSConfig() = false, want true")
-	}
-
-	// CSS type without CSS config
-	emptyCSS := makeTestExtension(t, ExtensionTypeCSS, "manual")
-	if emptyCSS.HasCSSConfig() {
-		t.Error("HasCSSConfig() = true, want false (no CSS config)")
-	}
-
-	// UI type with CSS config (should still be false)
-	uiExt := makeTestExtension(t, ExtensionTypeUI, "manual")
-	uiExt.Manifest.Capabilities = &Capabilities{CSS: &CSSConfig{CSSURL: "/theme.css"}}
-	if uiExt.HasCSSConfig() {
-		t.Error("HasCSSConfig() = true for UI extension, want false")
 	}
 }
 

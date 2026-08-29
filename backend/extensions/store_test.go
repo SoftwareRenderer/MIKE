@@ -61,10 +61,6 @@ func TestGitSourceRoundTrip(t *testing.T) {
 	if got.Repo != ext.Repo || got.Commit != ext.Commit || got.Subdir != ext.Subdir {
 		t.Errorf("git source roundtrip: repo=%q commit=%q subdir=%q", got.Repo, got.Commit, got.Subdir)
 	}
-	if !got.IsGitPinned() {
-		t.Error("IsGitPinned() = false, want true")
-	}
-
 	// List must also carry the git fields.
 	listed, err := es.List()
 	if err != nil {
@@ -122,9 +118,9 @@ func TestUIConfigSandboxPermissionsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	ui := got.Manifest.Capabilities.GetUI()
+	ui := got.Manifest.Capabilities.UI
 	if ui == nil {
-		t.Fatal("GetUI() = nil, want non-nil")
+		t.Fatal("Capabilities.UI = nil, want non-nil")
 	}
 	if len(ui.Permissions) != 4 {
 		t.Fatalf("len(Permissions) = %d, want 4", len(ui.Permissions))
@@ -140,27 +136,6 @@ func TestGetByIDNotFound(t *testing.T) {
 	_, err := es.GetByID("nonexistent")
 	if err == nil {
 		t.Error("GetByID(nil) = nil, want error")
-	}
-}
-
-func TestGetByName(t *testing.T) {
-	es := testStore(t)
-	// GetByName must find records whose ID differs from the name.
-	ext := makeTestExt("gopls-1234567890", "gopls", ExtensionTypeLSP)
-	if err := es.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	got, err := es.GetByName("gopls")
-	if err != nil {
-		t.Fatalf("GetByName: %v", err)
-	}
-	if got.ID != "gopls-1234567890" || got.Name != "gopls" {
-		t.Errorf("GetByName = %+v, want timestamped-ID record for gopls", got)
-	}
-
-	if _, err := es.GetByName("nonexistent"); err == nil {
-		t.Error("GetByName(nonexistent) = nil, want error")
 	}
 }
 
@@ -410,8 +385,9 @@ func TestExtensionWithFullConfig(t *testing.T) {
 	}
 
 	// Verify LSP config
-	if !got.HasLSPConfig() {
-		t.Fatal("HasLSPConfig = false, want true")
+	lsp := got.Manifest.Capabilities.GetLSP()
+	if lsp == nil {
+		t.Fatal("LSP config missing after round-trip")
 	}
 	if got.Manifest.Capabilities.GetLSP().Command != "gopls" {
 		t.Errorf("LSP.Command = %v, want gopls", got.Manifest.Capabilities.GetLSP().Command)
@@ -443,8 +419,8 @@ func TestExtensionWithFullConfig(t *testing.T) {
 	}
 
 	// Verify install source
-	if !got.IsRegistryInstalled() {
-		t.Error("IsRegistryInstalled = false, want true")
+	if got.InstallSource != "registry" {
+		t.Errorf("InstallSource = %q, want registry", got.InstallSource)
 	}
 }
 
@@ -632,69 +608,5 @@ func TestStorageDeleteAll(t *testing.T) {
 	other, _ := es.StorageGet("ext2", "nsA", "k1")
 	if other == nil || string(other.Value) != `4` {
 		t.Fatalf("ext2 storage should be untouched, got %+v", other)
-	}
-}
-
-func TestUpdateMemoryLimit_PersistsAndSyncsConfig(t *testing.T) {
-	es := testStore(t)
-	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, es)
-
-	ext := makeTestExt("ext-mem", "ext-mem", ExtensionTypeLSP)
-	ext.Config["other"] = "keep-me"
-	if err := es.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// No sandbox is running — UpdateMemoryLimit must persist and sync config;
-	// the live-apply path is a no-op.
-	if err := sm.UpdateMemoryLimit("ext-mem", 512); err != nil {
-		t.Fatalf("UpdateMemoryLimit(512) = %v", err)
-	}
-	got, err := es.GetByID("ext-mem")
-	if err != nil {
-		t.Fatalf("GetByID: %v", err)
-	}
-	if got.SandboxConfig.MemoryLimit != 512 {
-		t.Errorf("SandboxConfig.MemoryLimit = %d, want 512", got.SandboxConfig.MemoryLimit)
-	}
-	// JSON round-trip: numbers come back as float64.
-	if ml, ok := got.Config["memory_limit"]; !ok || ml != float64(512) {
-		t.Errorf("Config[memory_limit] = %v, want 512", got.Config["memory_limit"])
-	}
-	if got.Config["other"] != "keep-me" {
-		t.Errorf("Config[other] = %v, want keep-me (unrelated keys preserved)", got.Config["other"])
-	}
-
-	// 0 clears the limit (run unlimited).
-	if err := sm.UpdateMemoryLimit("ext-mem", 0); err != nil {
-		t.Fatalf("UpdateMemoryLimit(0) = %v", err)
-	}
-	got, err = es.GetByID("ext-mem")
-	if err != nil {
-		t.Fatalf("GetByID: %v", err)
-	}
-	if got.SandboxConfig.MemoryLimit != 0 {
-		t.Errorf("SandboxConfig.MemoryLimit = %d, want 0 (cleared)", got.SandboxConfig.MemoryLimit)
-	}
-	if ml, ok := got.Config["memory_limit"]; !ok || ml != float64(0) {
-		t.Errorf("Config[memory_limit] = %v, want 0", got.Config["memory_limit"])
-	}
-
-	// Negative input clamps to 0.
-	if err := sm.UpdateMemoryLimit("ext-mem", -64); err != nil {
-		t.Fatalf("UpdateMemoryLimit(-64) = %v", err)
-	}
-	got, err = es.GetByID("ext-mem")
-	if err != nil {
-		t.Fatalf("GetByID: %v", err)
-	}
-	if got.SandboxConfig.MemoryLimit != 0 {
-		t.Errorf("SandboxConfig.MemoryLimit = %d, want 0 (negative clamped)", got.SandboxConfig.MemoryLimit)
-	}
-
-	// Unknown extension is an error.
-	if err := sm.UpdateMemoryLimit("no-such-ext", 100); err == nil {
-		t.Error("UpdateMemoryLimit(no-such-ext) = nil, want error")
 	}
 }

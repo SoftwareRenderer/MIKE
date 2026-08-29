@@ -32,8 +32,6 @@ const (
 	BaseImage = "docker.io/library/ubuntu:latest"
 	// SkillsMount is where the prompts/skills/ directory is bind-mounted read-only.
 	SkillsMount = "/mnt/skills"
-	// KeepAliveTimeout is how long to wait for container cleanup.
-	KeepAliveTimeout = 30 * time.Second
 	// livenessTTL is how long to cache the result of a container liveness check.
 	// Avoids expensive podman inspect calls on every FS operation.
 	livenessTTL = 5 * time.Minute
@@ -861,15 +859,6 @@ func (sm *SandboxManager) Stop(taskID string) error {
 	return nil
 }
 
-// HasActiveContainer returns true if a sandbox container for the given task is
-// tracked in the active map (i.e., was created in the current server session).
-func (sm *SandboxManager) HasActiveContainer(taskID string) bool {
-	sm.mu.Lock()
-	_, ok := sm.active[taskID]
-	sm.mu.Unlock()
-	return ok
-}
-
 // ContainerIsRunning returns true if the container is tracked in the active map
 // AND is actually running in podman (verified via podman inspect).
 // Results are cached for livenessTTL (5 min) to avoid expensive podman inspect
@@ -1105,8 +1094,10 @@ func (sm *SandboxManager) BuildImageWithOptions(projectName, dockerfilePath stri
 	if !sm.available {
 		return fmt.Errorf("gVisor not available (runsc not installed)")
 	}
-	if strings.HasPrefix(dockerfilePath, "-") {
-		return fmt.Errorf("dockerfile path must not start with a dash: %q", dockerfilePath)
+	// Rejects an empty path and one starting with a dash, which podman would
+	// otherwise read as a flag.
+	if err := sandboxruntime.ValidateDockerfilePath(dockerfilePath); err != nil {
+		return err
 	}
 
 	// Read the Dockerfile

@@ -208,8 +208,7 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 	oldMemoryLimit := ext.SandboxConfig.MemoryLimit
 
 	var req UpdateExtensionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 
@@ -415,8 +414,7 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 
@@ -617,8 +615,7 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req InstallExtensionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 	if req.Name == "" {
@@ -681,8 +678,7 @@ func (h *ExtensionHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Req
 	}
 
 	var req InstallExtensionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 	if req.Name == "" || req.Author == "" {
@@ -1214,8 +1210,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 		Method string `json:"method"`
 		Body   string `json:"body,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+	if !httputil.DecodeJSON(w, r, &req) {
 		return
 	}
 	if req.URL == "" {
@@ -1343,8 +1338,7 @@ func (h *ExtensionHandler) HandleStorage(w http.ResponseWriter, r *http.Request,
 			Key       string          `json:"key"`
 			Value     json.RawMessage `json:"value"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			httputil.JSONError(w, http.StatusBadRequest, "invalid request body")
+		if !httputil.DecodeJSON(w, r, &req) {
 			return
 		}
 		if req.Key == "" {

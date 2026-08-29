@@ -82,22 +82,6 @@ func (c *Capabilities) GetLSP() *LSPConfig {
 	return c.LSP
 }
 
-// GetUI returns the UI capability, or nil if not present.
-func (c *Capabilities) GetUI() *UIConfig {
-	if c == nil {
-		return nil
-	}
-	return c.UI
-}
-
-// GetCSS returns the CSS capability, or nil if not present.
-func (c *Capabilities) GetCSS() *CSSConfig {
-	if c == nil {
-		return nil
-	}
-	return c.CSS
-}
-
 // GetAgent returns the Agent capability, or nil if not present.
 func (c *Capabilities) GetAgent() *AgentConfig {
 	if c == nil {
@@ -146,23 +130,18 @@ type LSPConfig struct {
 	Extensions         []string       `json:"extensions,omitempty"`
 	Language           string         `json:"language,omitempty"`
 	InitParamsOverride map[string]any `json:"initParamsOverride,omitempty"`
-	// EditorEnabled controls whether LSP features (diagnostics, completions,
-	// go-to-definition) are available in the editor. Nil or true = enabled.
+	// EditorEnabled gates the editor's LSP features (diagnostics, completions,
+	// go-to-definition). Nil or true = enabled. The gate is applied client-side
+	// (extension-manager.getEditorLSPExtensions feeds the editor's LSP
+	// connection), so the server only stores and serves it — there is no
+	// server-side reader. Independent of ToolCallsEnabled, which the executor
+	// checks server-side for the agent's LSP tools.
 	EditorEnabled *bool `json:"editor_enabled,omitempty"`
 	// ToolCallsEnabled controls whether LSP tools (references, definition,
 	// rename, hover) are available to agent tool calls. Nil or true = enabled.
 	ToolCallsEnabled *bool `json:"tool_calls_enabled,omitempty"`
 	// Sandbox declares default sandbox options (writable mounts, envs, memory).
 	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
-}
-
-// IsEditorEnabled returns true if editor LSP features are enabled.
-// Defaults to true when not explicitly set (nil).
-func (c *LSPConfig) IsEditorEnabled() bool {
-	if c == nil || c.EditorEnabled == nil {
-		return true
-	}
-	return *c.EditorEnabled
 }
 
 // IsToolCallsEnabled returns true if LSP tool calls are enabled.
@@ -417,64 +396,14 @@ func (e *Extension) IsLSP() bool {
 	return e.Type == ExtensionTypeLSP
 }
 
-// IsUI returns true if this extension is a UI extension.
-func (e *Extension) IsUI() bool {
-	return e.Type == ExtensionTypeUI
-}
-
-// IsCSS returns true if this extension is a CSS extension.
-func (e *Extension) IsCSS() bool {
-	return e.Type == ExtensionTypeCSS
-}
-
-// HasLSPConfig returns true if this extension has LSP configuration.
-func (e *Extension) HasLSPConfig() bool {
-	return e.IsLSP() && e.Manifest.Capabilities.GetLSP() != nil
-}
-
-// HasUIConfig returns true if this extension has UI configuration.
-func (e *Extension) HasUIConfig() bool {
-	return e.IsUI() && e.Manifest.Capabilities.GetUI() != nil
-}
-
-// HasCSSConfig returns true if this extension has CSS configuration.
-func (e *Extension) HasCSSConfig() bool {
-	return e.IsCSS() && e.Manifest.Capabilities.GetCSS() != nil
-}
-
 // IsAgent returns true if this extension is an agent extension.
 func (e *Extension) IsAgent() bool {
 	return e.Type == ExtensionTypeAgent
 }
 
-// HasAgentConfig returns true if this extension has agent configuration.
-func (e *Extension) HasAgentConfig() bool {
-	return e.IsAgent() && e.Manifest.Capabilities.GetAgent() != nil
-}
-
-// IsLLM returns true if this extension is an LLM request-adapter extension.
-func (e *Extension) IsLLM() bool {
-	return e.Type == ExtensionTypeLLM
-}
-
-// HasLLMConfig returns true if this extension has LLM capability configuration.
-func (e *Extension) HasLLMConfig() bool {
-	return e.IsLLM() && e.Manifest.Capabilities.GetLLM() != nil
-}
-
-// IsRegistryInstalled returns true if this extension was installed from a registry.
-func (e *Extension) IsRegistryInstalled() bool {
-	return e.InstallSource == "registry"
-}
-
 // IsLocalInstalled returns true if this extension was installed from a local Dockerfile.
 func (e *Extension) IsLocalInstalled() bool {
 	return e.InstallSource == "local"
-}
-
-// IsGitPinned returns true if this extension was installed from a pinned git commit.
-func (e *Extension) IsGitPinned() bool {
-	return e.Repo != "" && e.Commit != ""
 }
 
 // sanitizeURL validates that a URL uses an allowed scheme (http or https).

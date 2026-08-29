@@ -35,25 +35,6 @@ type UpdateProjectRequest struct {
 	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
 }
 
-// CreateDependencyRequest is the request body for creating a dependency.
-type CreateDependencyRequest struct {
-	ChildTaskID string `json:"child_task_id"`
-	AutoStart   bool   `json:"auto_start"`
-}
-
-// CreateReviewCommentRequest is the request body for creating a review comment.
-type CreateReviewCommentRequest struct {
-	FilePath string `json:"file_path"`
-	LineNum  int    `json:"line_num"`
-	Comment  string `json:"comment"`
-}
-
-// UpdateReviewCommentRequest is the request body for updating a review comment.
-type UpdateReviewCommentRequest struct {
-	Comment  *string `json:"comment"`
-	Resolved *bool   `json:"resolved"`
-}
-
 // GitCheckoutRequest is the request body for git checkout.
 type GitCheckoutRequest struct {
 	Branch string `json:"branch"`

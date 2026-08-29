@@ -2338,12 +2338,12 @@ func TestTaskOperatingModeRemount(t *testing.T) {
 		// Wait for sandbox to be created (happens asynchronously in executeTask goroutine)
 		// Use longer timeout for parallel test runs (podman contention)
 		for i := 0; i < 100; i++ {
-			if s.sandboxMgr.HasActiveContainer(taskID) {
+			if s.sandboxMgr.ContainerIsRunning(taskID) {
 				break
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		if !s.sandboxMgr.HasActiveContainer(taskID) {
+		if !s.sandboxMgr.ContainerIsRunning(taskID) {
 			t.Fatal("expected sandbox to be created after start")
 		}
 
@@ -2374,7 +2374,7 @@ func TestTaskOperatingModeRemount(t *testing.T) {
 		}
 
 		// 4. Verify sandbox was stopped (remounted)
-		if s.sandboxMgr.HasActiveContainer(taskID) {
+		if s.sandboxMgr.ContainerIsRunning(taskID) {
 			t.Fatal("expected sandbox to be stopped after mode change")
 		}
 	})
@@ -2389,12 +2389,12 @@ func TestTaskOperatingModeRemount(t *testing.T) {
 
 		// Wait for sandbox to be created (longer timeout for parallel runs)
 		for i := 0; i < 100; i++ {
-			if s.sandboxMgr.HasActiveContainer(taskID) {
+			if s.sandboxMgr.ContainerIsRunning(taskID) {
 				break
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		if !s.sandboxMgr.HasActiveContainer(taskID) {
+		if !s.sandboxMgr.ContainerIsRunning(taskID) {
 			t.Fatal("expected sandbox to be created after start")
 		}
 
@@ -2409,12 +2409,12 @@ func TestTaskOperatingModeRemount(t *testing.T) {
 
 		// 3. Wait for sandbox recreation (mode switch triggers stop + create in executor loop)
 		for i := 0; i < 100; i++ {
-			if s.sandboxMgr.HasActiveContainer(taskID) {
+			if s.sandboxMgr.ContainerIsRunning(taskID) {
 				break
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		if !s.sandboxMgr.HasActiveContainer(taskID) {
+		if !s.sandboxMgr.ContainerIsRunning(taskID) {
 			t.Fatal("expected sandbox to remain active while task is running")
 		}
 	})

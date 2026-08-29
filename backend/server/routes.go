@@ -135,15 +135,6 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/threads/fork", s.handleThreadFork)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/threads/switch", s.handleThreadSwitch)
 
-	// Task dependencies
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/dependencies", s.depHandler.HandleDependencies)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/dependencies/{childID}", s.depHandler.HandleDependency)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/dependents", s.depHandler.HandleDependents)
-
-	// Task review comments
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/review-comments", s.reviewHandler.HandleComments)
-	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/review-comments/{commentID}", s.reviewHandler.HandleComment)
-
 	// Git operations
 	s.mux.HandleFunc("/api/projects/{projectID}/git/log", s.gitHandler.HandleLog)
 	s.mux.HandleFunc("/api/projects/{projectID}/git/branch", s.gitHandler.HandleBranch)

@@ -174,29 +174,6 @@ CREATE TABLE IF NOT EXISTS config (
     value TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS task_dependencies (
-    id             TEXT PRIMARY KEY,
-    parent_task_id TEXT NOT NULL,
-    child_task_id  TEXT NOT NULL,
-    auto_start     INTEGER NOT NULL DEFAULT 1,
-    created_at     TEXT NOT NULL,
-    FOREIGN KEY (parent_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY (child_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    UNIQUE(parent_task_id, child_task_id)
-);
-
-CREATE TABLE IF NOT EXISTS review_comments (
-    id         TEXT PRIMARY KEY,
-    task_id    TEXT NOT NULL,
-    file_path  TEXT NOT NULL,
-    line_num   INTEGER NOT NULL,
-    comment    TEXT NOT NULL,
-    resolved   INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS task_threads (
     id              TEXT PRIMARY KEY,
     task_id         TEXT NOT NULL,
@@ -272,9 +249,6 @@ CREATE TABLE IF NOT EXISTS task_diff_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
-CREATE INDEX IF NOT EXISTS idx_task_dependencies_parent ON task_dependencies(parent_task_id);
-CREATE INDEX IF NOT EXISTS idx_task_dependencies_child ON task_dependencies(child_task_id);
-CREATE INDEX IF NOT EXISTS idx_review_comments_task ON review_comments(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 `
@@ -540,32 +514,5 @@ func scanTaskThread(s scanner, th *types.TaskThread) error {
 	th.CheckpointCommitHash = checkpointCommitHash.String
 	th.WorktreeStashHash = worktreeStashHash.String
 	th.CreatedAt = scanTime(createdAt)
-	return nil
-}
-
-// scanTaskDependency scans a row into a TaskDependency, handling bool/time conversions.
-func scanTaskDependency(s scanner, d *types.TaskDependency) error {
-	var autoStart int
-	var createdAt string
-	err := s.Scan(&d.ID, &d.ParentTaskID, &d.ChildTaskID, &autoStart, &createdAt)
-	if err != nil {
-		return err
-	}
-	d.AutoStart = I2B(autoStart)
-	d.CreatedAt = scanTime(createdAt)
-	return nil
-}
-
-// scanReviewComment scans a row into a ReviewComment, handling bool/time conversions.
-func scanReviewComment(s scanner, c *types.ReviewComment) error {
-	var resolved int
-	var createdAt, updatedAt string
-	err := s.Scan(&c.ID, &c.TaskID, &c.FilePath, &c.LineNum, &c.Comment, &resolved, &createdAt, &updatedAt)
-	if err != nil {
-		return err
-	}
-	c.Resolved = I2B(resolved)
-	c.CreatedAt = scanTime(createdAt)
-	c.UpdatedAt = scanTime(updatedAt)
 	return nil
 }
