@@ -14,6 +14,7 @@
     import PreferencesTab from './ConfigModal/PreferencesTab.svelte';
     import ProviderCard from './ConfigModal/ProviderCard.svelte';
     import ExtensionsTab from './ConfigModal/ExtensionsTab.svelte';
+    import SessionsSection from './ConfigModal/SessionsSection.svelte';
     import pwaIcon from '$lib/assets/icons/pwa-icon.svg?raw';
 
     let { config, onClose, onSaved, onSignOut }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void> } = $props();
@@ -827,6 +828,10 @@
                     <span class="field-help">Path to the server's SQLite database</span>
                 </div>
             </div>
+
+            <!-- Login sessions: mutates immediately (like the PWA button above),
+                 so it is deliberately outside the dirty/Save flow. -->
+            <SessionsSection onSignOut={onSignOut} />
         {/if}
 
         {#if error}

@@ -588,3 +588,25 @@ export interface ExtensionUpdate {
     changelog?: ExtensionChangelogEntry[];
 }
 
+/**
+ * One active login session (GET /api/sessions).
+ *
+ * There is deliberately no token / token-hash / CSRF field: the server never
+ * exposes one, so a credential cannot leak through this shape.
+ */
+export interface SessionInfo {
+    id: string;
+    /** RFC3339 UTC login time. "" on rows predating the column. */
+    created_at: string;
+    /** RFC3339 UTC last authenticated request. "" when never used since login. */
+    last_seen: string;
+    /** RFC3339 UTC expiry. */
+    expires_at: string;
+    /** Client IP recorded at login. "" on rows predating the column. */
+    ip: string;
+    /** User-Agent recorded at login. "" on rows predating the column. */
+    user_agent: string;
+    /** True for the session making the request — "this device". */
+    current: boolean;
+}
+
