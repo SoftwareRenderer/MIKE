@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -183,6 +184,29 @@ func (s *Store) GetLastUserMessageInThread(threadID string) (string, error) {
 		LIMIT 1
 	`, threadID).Scan(&id)
 	return id, err
+}
+
+// GetLastMessageInThread returns the newest row of a thread, or nil when it has none.
+// It ignores role, so callers can ask "has anything happened since this message?". rowid
+// breaks ties inside one turn, where an assistant row and its tool_call rows share a
+// created_at.
+func (s *Store) GetLastMessageInThread(threadID string) (*types.TaskMessage, error) {
+	if threadID == "" {
+		return nil, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, err := scanTaskMessage(s.db.QueryRow(
+		`SELECT `+taskMessageCols+` FROM task_messages WHERE thread_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+		threadID,
+	))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &m, nil
 }
 
 // GetMessageCreatedAt returns the created_at time of a message by ID.

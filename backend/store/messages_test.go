@@ -492,3 +492,76 @@ func TestGetTaskMessagesByThreadEmptyTaskID(t *testing.T) {
 		t.Fatalf("expected msg-1 for thread-1 with empty taskID, got %+v", got)
 	}
 }
+
+// TestGetLastMessageInThread: the newest row whatever its role, and inside one turn (an
+// assistant row and its tool_call rows can share a created_at) the row written last wins.
+func TestGetLastMessageInThread(t *testing.T) {
+	s := testStore(t)
+	if err := s.CreateProject(newProject("proj-lm", "test", "/tmp/test")); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-lm", "proj-lm")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Empty thread: no message, no error.
+	last, err := s.GetLastMessageInThread("thread-empty")
+	if err != nil || last != nil {
+		t.Fatalf("empty thread: last=%v err=%v, want nil,nil", last, err)
+	}
+	if last, err := s.GetLastMessageInThread(""); err != nil || last != nil {
+		t.Fatalf("empty thread id: last=%v err=%v, want nil,nil", last, err)
+	}
+
+	stamp := time.Now().UTC()
+	// Turn 1: user question; turn 2: assistant answer + its tool_call, all with the SAME
+	// created_at, so only insertion order (rowid) can order them.
+	rows := []*types.TaskMessage{
+		newMessage("m-user", "task-lm", "user", "yes"),
+		newMessage("m-assistant", "task-lm", "assistant", "asking"),
+		newMessage("m-tool", "task-lm", "tool_call", ""),
+	}
+	for i, m := range rows {
+		m.ThreadID = "thread-lm"
+		m.CreatedAt = stamp.Add(time.Duration(i) * time.Second)
+		if err := s.CreateTaskMessage(m); err != nil {
+			t.Fatalf("create message %d: %v", i, err)
+		}
+	}
+	last, err = s.GetLastMessageInThread("thread-lm")
+	if err != nil {
+		t.Fatalf("get last message: %v", err)
+	}
+	if last == nil || last.ID != "m-tool" {
+		t.Fatalf("last = %+v, want the tool_call row", last)
+	}
+
+	// Same timestamp for the assistant and its tool_call row: rowid decides.
+	sameStamp := time.Now().UTC().Add(time.Hour)
+	for _, m := range []*types.TaskMessage{
+		newMessage("m-tie-assistant", "task-lm", "assistant", "done"),
+		newMessage("m-tie-tool", "task-lm", "tool_call", ""),
+	} {
+		m.ThreadID = "thread-lm"
+		m.CreatedAt = sameStamp
+		if err := s.CreateTaskMessage(m); err != nil {
+			t.Fatalf("create tie message: %v", err)
+		}
+	}
+	if last, err = s.GetLastMessageInThread("thread-lm"); err != nil {
+		t.Fatalf("get last message after tie: %v", err)
+	}
+	if last == nil || last.ID != "m-tie-tool" {
+		t.Fatalf("tie broken wrong: %+v, want m-tie-tool (written last)", last)
+	}
+
+	// A different thread's rows never leak in.
+	other := newMessage("m-other", "task-lm", "user", "elsewhere")
+	other.ThreadID = "thread-other"
+	if err := s.CreateTaskMessage(other); err != nil {
+		t.Fatalf("create other message: %v", err)
+	}
+	if last, err = s.GetLastMessageInThread("thread-lm"); err != nil || last == nil || last.ID != "m-tie-tool" {
+		t.Fatalf("thread filter broken: %+v err=%v", last, err)
+	}
+}

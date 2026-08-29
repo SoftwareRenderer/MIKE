@@ -520,6 +520,8 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		task.ExecutionState = "idle"
 	}
 	started := false
+	// set when the start had nothing to run; the move must not cascade into children then
+	awaitingUser := false
 	if req.Status == "in_progress" && task.ExecutionState != "running" {
 		children, _ := h.store.GetChildren(taskID)
 		if len(children) > 0 {
@@ -558,6 +560,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			// else: subtasks still finishing (review/failed) — stay started-but-pending
+			// (allowed Pending: waiting on the children).
 		} else if task.ParentTaskID != "" {
 			// Leaf subtask: subtask-aware start (branch from parent, inherit model config)
 			if err := h.StartSubtask(projectID, taskID, false); err != nil {
@@ -581,11 +584,16 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	}
 	// Reload after a successful start so the final UpdateTask doesn't clobber the
 	// branch set by the start path. Re-apply the target status: starting a
-	// subtask instead of this task leaves its row's status stale.
+	// subtask instead of this task leaves its row's status stale. Not when the start
+	// found nothing to run and left the row in review — that is where it belongs.
 	if started {
 		reloaded, err := h.store.GetTask(projectID, taskID)
 		if err == nil {
-			reloaded.Status = req.Status
+			if req.Status == "in_progress" && reloaded.Status == "review" {
+				awaitingUser = true
+			} else {
+				reloaded.Status = req.Status
+			}
 			task = reloaded
 		}
 	}
@@ -595,8 +603,12 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Move all descendants to the same column (recursive, leaf-first)
-	// Use task.Status (actual final status) in case auto-start failed and reverted
-	h.moveAllDescendants(projectID, taskID, task.Status)
+	// Use task.Status (actual final status) in case auto-start failed and reverted.
+	// Skipped when nothing ran: dragging a parent whose children are all Done must not
+	// pull those Done children into review.
+	if !awaitingUser {
+		h.moveAllDescendants(projectID, taskID, task.Status)
+	}
 
 	// If a subtask moved to review/done, auto-start the next sibling
 	if task.ParentTaskID != "" && (req.Status == "review" || req.Status == "done") {
@@ -615,6 +627,8 @@ func (h *TaskHandler) autoStartNextSibling(projectID, finishedTaskID, parentTask
 
 // moveAllDescendantsToInProgress recursively moves all descendant tasks (children, grandchildren, etc.)
 // to in_progress/idle. Tasks in backlog or in_progress (not running/failed) are moved.
+//
+// allowed Pending: the work is in these children, not in the parent's own turn.
 func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {

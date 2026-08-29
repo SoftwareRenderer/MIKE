@@ -1332,15 +1332,19 @@ func (te *TaskExecutor) StartTask(projectID, taskID string, autostarted bool) er
 		})
 	}
 
-	// update status without re-triggering the LLM
+	// The conversation already ends with the assistant, so the agent is done and waits for
+	// the user — that is review. Leaving it in_progress would show "Pending" with nothing
+	// pending: this start has no work to do.
 	if len(existingMsgs) > 0 && existingMsgs[len(existingMsgs)-1].Role == "assistant" {
-		log.Printf("[start] task=%s last message is from assistant, skipping LLM call", taskID)
+		log.Printf("[start] task=%s last message is from assistant, skipping LLM call -> review (awaiting user)", taskID)
 		execSetup.cancel()
 		te.taskMu.Lock()
 		delete(te.tasks, taskID)
 		te.taskMu.Unlock()
 		if fresh, err := te.store.GetTask(projectID, taskID); err == nil {
+			fresh.Status = "review"
 			fresh.ExecutionState = "idle"
+			fresh.Output = "Nothing to run — the agent has the last word and is waiting for your reply"
 			fresh.UpdatedAt = time.Now().UTC()
 			_ = te.storeTask(fresh, projectID)
 			te.appStreamMgr.BroadcastTaskUpdated(projectID, fresh)
@@ -1453,7 +1457,62 @@ func (te *TaskExecutor) RecoverStaleTasks() int {
 	if recovered > 0 {
 		log.Printf("[recover] %d stale in-flight task(s) recovered", recovered)
 	}
+	// Now the rows that were never in flight but still show as pending.
+	te.normalizePendingTasks()
 	return recovered
+}
+
+// normalizePendingTasks moves tasks that rest in In Progress with execution_state idle
+// back to review, where a finished turn waiting for the user belongs. It runs at startup,
+// when nothing can be mid-queue, and skips what is legitimately pending: a live executor,
+// a parent with unfinished subtasks, and a thread whose newest row is a user message —
+// work that never ran is a dropped message, not a finished turn, so it is only reported.
+func (te *TaskExecutor) normalizePendingTasks() int {
+	pending, err := te.store.GetPendingIdleTasks()
+	if err != nil {
+		log.Printf("[recover] list pending tasks failed: %v", err)
+		return 0
+	}
+	normalized := 0
+	for _, task := range pending {
+		te.taskMu.Lock()
+		_, live := te.tasks[task.ID]
+		te.taskMu.Unlock()
+		if live {
+			continue
+		}
+		if children, cerr := te.store.GetChildren(task.ID); cerr == nil && len(children) > 0 && !ChildrenAllDone(children) {
+			log.Printf("[recover] task=%s pending while subtasks are unfinished — left as is", task.ID)
+			continue
+		}
+		last, lerr := te.store.GetLastMessageInThread(task.CurrentThreadID)
+		if lerr != nil {
+			log.Printf("[recover] task=%s last message lookup failed: %v", task.ID, lerr)
+			continue
+		}
+		if last == nil || last.Role == "user" {
+			log.Printf("[recover] task=%s pending with an unanswered user message — left as is", task.ID)
+			continue
+		}
+		fresh, gerr := te.store.GetTask(task.ProjectID, task.ID)
+		if gerr != nil {
+			continue
+		}
+		fresh.Status = "review"
+		fresh.ExecutionState = "idle"
+		fresh.Output = "Nothing to run — the agent has the last word and is waiting for your reply"
+		fresh.UpdatedAt = time.Now().UTC()
+		if perr := te.storeTask(fresh, task.ProjectID); perr != nil {
+			log.Printf("[recover] task=%s pending normalization failed: %v", task.ID, perr)
+			continue
+		}
+		log.Printf("[recover] task=%s pending with %s holding the last word -> review/idle", task.ID, last.Role)
+		normalized++
+	}
+	if normalized > 0 {
+		log.Printf("[recover] %d task(s) moved to review: pending with nothing pending", normalized)
+	}
+	return normalized
 }
 
 // HasRunningTasks returns true if any task in the given project has an active
