@@ -182,6 +182,7 @@ func startExecTaskExisting(t *testing.T, te *TaskExecutor, proj *types.Project, 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	done := make(chan struct{})
+	finished := make(chan struct{})
 	setup := &taskExecSetup{
 		task:           task,
 		project:        proj,
@@ -195,6 +196,7 @@ func startExecTaskExisting(t *testing.T, te *TaskExecutor, proj *types.Project, 
 		summarizeCh:    make(chan *summarizeRequest, 16),
 		sandboxEnabled: false,
 		done:           done,
+		finished:       finished,
 	}
 	te.taskMu.Lock()
 	te.tasks[taskID] = &executionState{
@@ -204,6 +206,7 @@ func startExecTaskExisting(t *testing.T, te *TaskExecutor, proj *types.Project, 
 		summarizeCh:  setup.summarizeCh,
 		executorType: "llm",
 		done:         done,
+		finished:     finished,
 	}
 	te.taskMu.Unlock()
 
@@ -371,4 +374,132 @@ func TestStartTaskAssistantLastSettleIdle(t *testing.T) {
 	if active {
 		t.Fatal("executor left registered for assistant-last task")
 	}
+}
+
+// --- the stop must be the last write to the row ---
+
+// TestStopWithAssignedPortsLeavesTaskPaused: stopping a task that holds
+// forwarded ports must leave it paused with the ports cleared. Clearing them
+// used to be a full-row write, which put "running" back after the stop and left
+// the task stuck until a second Stop.
+func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
+	te := newSessionCostTestExecutor(t)
+	s := te.store
+	proj := createProject(t, s, "proj-stop-ports", "Stop Ports")
+
+	mock := newHeldLLMMock()
+	server := httptest.NewServer(mock.Handler())
+	defer server.Close()
+
+	setup := runExecTask(t, te, proj, "stop-ports-1", server.URL, "task one")
+	mock.waitForArrival(t, 1)
+	waitTaskState(t, s, "stop-ports-1", isRunning)
+
+	// A terminal session forwarded a port: the row and the executor's copy both
+	// carry it, which is what makes the exit path write.
+	ports := []types.AssignedPort{{HostPort: 32145, ContainerPort: 3000}}
+	if err := s.SetTaskAssignedPorts("stop-ports-1", proj.ID, ports); err != nil {
+		t.Fatalf("assign ports: %v", err)
+	}
+	setup.task.AssignedPorts = ports
+
+	if err := te.StopTask("stop-ports-1"); err != nil {
+		t.Fatalf("StopTask: %v", err)
+	}
+
+	// The ordering itself: StopTask returns only after the executor's last write,
+	// so its own transition is the final one.
+	select {
+	case <-setup.finished:
+	default:
+		t.Fatal("StopTask returned before the executor finished its exit writes")
+	}
+
+	// So the row is paused already, not "running" awaiting a stale write.
+	got, err := s.GetTaskByID("stop-ports-1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.ExecutionState != "paused" {
+		t.Fatalf("row right after StopTask: exec=%s, want paused", got.ExecutionState)
+	}
+
+	select {
+	case <-setup.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("executor did not exit after StopTask")
+	}
+
+	final := waitTaskState(t, s, "stop-ports-1", isPaused)
+	if len(final.AssignedPorts) != 0 {
+		t.Fatalf("assigned_ports must be cleared when the run ends: %+v", final.AssignedPorts)
+	}
+
+	// Give any late writer a chance to land, then re-check.
+	time.Sleep(500 * time.Millisecond)
+	after, err := s.GetTaskByID("stop-ports-1")
+	if err != nil {
+		t.Fatalf("get task after exit: %v", err)
+	}
+	if after.ExecutionState != "paused" {
+		t.Fatalf("executor exit resurrected the run: exec=%s", after.ExecutionState)
+	}
+}
+
+// TestStaleWriterCannotResurrectButRealClaimCan: after a stop a stale full-row
+// write must not restart the run, but the resumed run's own claim must work.
+func TestStaleWriterCannotResurrectButRealClaimCan(t *testing.T) {
+	te := newSessionCostTestExecutor(t)
+	s := te.store
+	proj := createProject(t, s, "proj-claim", "Claim")
+
+	mock := newHeldLLMMock()
+	server := httptest.NewServer(mock.Handler())
+	defer server.Close()
+
+	setup := runExecTask(t, te, proj, "claim-1", server.URL, "task one")
+	mock.waitForArrival(t, 1)
+	waitTaskState(t, s, "claim-1", isRunning)
+
+	if err := te.StopTask("claim-1"); err != nil {
+		t.Fatalf("StopTask: %v", err)
+	}
+	select {
+	case <-setup.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("executor did not exit after StopTask")
+	}
+	waitTaskState(t, s, "claim-1", isPaused)
+
+	// A stale full-row write, the shape of a dying executor's copy.
+	stale, err := s.GetTaskByID("claim-1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	stale.ExecutionState = "running"
+	stale.Output = "written by a stale copy"
+	if err := s.UpdateTask(stale); err != nil {
+		t.Fatalf("stale write: %v", err)
+	}
+	// The struct mirrors what was stored instead of keeping its stale value.
+	if stale.ExecutionState != "paused" {
+		t.Fatalf("in-memory copy after guarded write: exec=%s, want paused", stale.ExecutionState)
+	}
+	after, err := s.GetTaskByID("claim-1")
+	if err != nil {
+		t.Fatalf("get task after stale write: %v", err)
+	}
+	if after.ExecutionState != "paused" {
+		t.Fatalf("guarded UpdateTask resurrected the run: exec=%s", after.ExecutionState)
+	}
+	if after.Output != "written by a stale copy" {
+		t.Fatalf("guard must protect execution_state only, output=%q", after.Output)
+	}
+
+	// The resumed run may claim the row again.
+	startExecTaskExisting(t, te, proj, "claim-1", server.URL)
+	mock.waitForArrival(t, 2)
+	waitTaskState(t, s, "claim-1", isRunning)
+
+	te.StopTask("claim-1")
 }

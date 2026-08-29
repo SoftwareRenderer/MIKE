@@ -1005,7 +1005,8 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	task.Status = "in_progress"
 	task.ExecutionState = "running"
 	task.Branch = "task/" + taskID
-	if err := s.UpdateTask(task); err != nil {
+	// Stands in for a task start, which may claim the in-flight state.
+	if err := s.UpdateTaskClaimingExecution(task); err != nil {
 		t.Fatal(err)
 	}
 

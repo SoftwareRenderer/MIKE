@@ -285,6 +285,13 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	var lc *loopContext
 	defer func() {
 		close(setup.done) // signal executor exit for ForwardUserMessage type-switch
+		// Signal exit last, even if the cleanup below panics: callers waiting on it
+		// (StopTask) then know every write of this defer has landed.
+		defer func() {
+			if setup.finished != nil {
+				close(setup.finished)
+			}
+		}()
 		// Persist accumulated session cost for this task run
 		if lc != nil {
 			setup.task.SessionCost = lc.sessionCost
@@ -320,10 +327,11 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			}
 		}
 		te.taskMu.Unlock()
-		// Clear assigned ports when setup.task execution ends
+		// Clear assigned ports when the run ends. Column-only write: the task may
+		// already be stopped here, and a full-row write would put "running" back.
 		if len(setup.task.AssignedPorts) > 0 {
 			setup.task.AssignedPorts = nil
-			te.persistTask(setup)
+			_ = te.store.SetTaskAssignedPorts(setup.task.ID, setup.projectID, nil)
 			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 		}
 		// Don't remove the stream here — the broadcaster lives as long as clients are connected.
@@ -711,7 +719,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		// Set status before the LLM call so the frontend picks up streaming tokens.
 		setup.task.Status = "in_progress"
 		setup.task.ExecutionState = "running"
-		te.persistTask(setup)
+		te.persistTaskClaiming(setup)
 		te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 
 		// streamFlusher batches streaming events to reduce WebSocket write overhead.
@@ -1473,7 +1481,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				if !setup.task.IsExploreMode() && !setup.task.IsPlanMode() {
 					// In act mode: loop detected, inject hint, continue
 					setup.task.ExecutionState = "running"
-					te.persistTask(setup)
+					te.persistTaskClaiming(setup)
 					continue
 				}
 				// In exploration/plan mode: text-only responses are valid (brainstorming / planning).
@@ -1545,7 +1553,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					return
 				}
 				setup.task.ExecutionState = "running"
-				te.persistTask(setup)
+				te.persistTaskClaiming(setup)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
 				continue
 			default:
@@ -1647,7 +1655,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				}
 				setup.task.Status = "in_progress"
 				setup.task.ExecutionState = "running"
-				te.persistTask(setup)
+				te.persistTaskClaiming(setup)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing queued message"}})
 				break idleWait
 			case um := <-setup.userMsgChan:
@@ -1680,7 +1688,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					return
 				}
 				setup.task.ExecutionState = "running"
-				te.persistTask(setup)
+				te.persistTaskClaiming(setup)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
 				break idleWait
 			}
