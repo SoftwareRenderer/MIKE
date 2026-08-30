@@ -96,7 +96,7 @@ type lspRegistry interface {
 
 // lspManager defines the operations the LSP handler needs from the process manager.
 type lspManager interface {
-	GetOrCreate(workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error)
+	GetOrCreate(ctx context.Context, workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error)
 	Release(workspacePath, language string)
 	SendToServer(process *LSPProcess, msg json.RawMessage) error
 	ServerMessageCh() <-chan json.RawMessage
@@ -464,7 +464,7 @@ func (h *LSPHandler) handleSubscription(ctx context.Context, session *ClientSess
 
 	if !ok {
 		// Spawn a new process (OUTSIDE lock to avoid blocking other operations)
-		process, err := h.manager.GetOrCreate(sub.Params.Workspace, cfg.Language, cfg)
+		process, err := h.manager.GetOrCreate(ctx, sub.Params.Workspace, cfg.Language, cfg)
 		if err != nil {
 			log.Printf("[lsp] client %d: failed to spawn process: %v", session.clientID, err)
 			session.conn.Close(websocket.StatusInternalError, fmt.Sprintf("spawn failed: %v", err))
@@ -524,7 +524,7 @@ func (h *LSPHandler) handleInitialize(ctx context.Context, session *ClientSessio
 			log.Printf("[lsp] client %d: no language server config for file %s (lazy init failed)", session.clientID, filePath)
 			return
 		}
-		process, err := h.manager.GetOrCreate(workspacePath, cfg.Language, cfg)
+		process, err := h.manager.GetOrCreate(ctx, workspacePath, cfg.Language, cfg)
 		if err != nil {
 			log.Printf("[lsp] client %d: failed to spawn process for lazy init: %v", session.clientID, err)
 			return
