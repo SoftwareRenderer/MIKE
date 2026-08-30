@@ -24,15 +24,24 @@ import (
 //	Backend ──Prompt()──► Runner ──EncodeCommand()──► Adapter ──bytes──► Agent stdin
 //	Agent stdout ──bytes──► Adapter ──ParseOutput()──► pkgagent.Events ──► Runner ──► Backend
 type AgentRunner struct {
-	adapter      pkgagent.AgentAdapter
-	stdin        io.WriteCloser
-	stdout       io.Reader
-	cmd          *exec.Cmd
-	mu           sync.Mutex
-	closed       bool
-	eventChan    chan pkgagent.Event
-	statsChan    chan pkgagent.SessionStatsData
-	compactChan  chan *pkgagent.CompactResult
+	adapter pkgagent.AgentAdapter
+	stdin   io.WriteCloser
+	stdout  io.Reader
+	cmd     *exec.Cmd
+	mu      sync.Mutex
+	closed  bool
+	// sendMu guards eventChan against close-while-sending: Close() may tear the
+	// channels down while the reader goroutine is mid-dispatch. channelsClosed is set
+	// under the write lock, so a send that observed false is still in flight under the
+	// read lock and cannot race the close.
+	sendMu         sync.RWMutex
+	channelsClosed bool
+	// closeOnce makes channel teardown idempotent — see closeChannels.
+	closeOnce   sync.Once
+	eventChan   chan pkgagent.Event
+	statsChan   chan pkgagent.SessionStatsData
+	compactChan chan *pkgagent.CompactResult
+	// modelUpdated is closed (not sent to) so multiple waiters can observe it.
 	modelUpdated chan struct{}
 	done         chan struct{}
 
@@ -396,30 +405,33 @@ func (r *AgentRunner) Close() {
 
 	r.adapter.Close()
 
-	// Close channels (guarded — readOutput may have already closed done)
-	select {
-	case <-r.done:
-		// Already closed by readOutput (process exited)
-	default:
+	r.closeChannels()
+}
+
+// closeChannels tears down the outbound channels exactly once, whichever path gets
+// there first: Close() (runner shut down, stdout possibly still open) or readOutput's
+// defer (the agent process exited on its own). Both used to test r.done and then close
+// both channels themselves, which is not atomic — two concurrent teardowns could both
+// pass the test and close the same channel twice, panicking the whole process with
+// "close of closed channel".
+func (r *AgentRunner) closeChannels() {
+	r.closeOnce.Do(func() {
+		r.sendMu.Lock()
+		defer r.sendMu.Unlock()
+		r.channelsClosed = true
 		close(r.eventChan)
 		close(r.done)
-	}
+	})
 }
 
 // readOutput reads raw bytes from agent stdout and feeds them to the adapter.
 // ctx is cancelled when the runner closes, providing cancellation for ParseOutput
 // and HandleUIRequest calls.
 func (r *AgentRunner) readOutput(ctx context.Context) {
-	// Close event channel when stdout is exhausted (process exited)
-	defer func() {
-		close(r.eventChan)
-		// Signal done — Close() checks this to avoid double-close
-		select {
-		case <-r.done:
-		default:
-			close(r.done)
-		}
-	}()
+	// The process exited (or stdout was closed): no more events will be produced, so
+	// release the outbound channels. Close() may have done it already — closeChannels
+	// is a no-op in that case.
+	defer r.closeChannels()
 
 	buf := make([]byte, 32*1024)
 	for {
@@ -551,10 +563,16 @@ func (r *AgentRunner) dispatchEvent(ctx context.Context, event pkgagent.Event) {
 		}
 	}
 
-	// Send to main event channel (non-blocking)
-	select {
-	case r.eventChan <- event:
-	default:
-		log.Printf("[agent] event channel full, dropping type=%s", event.Type)
+	// Send to main event channel (non-blocking). The read lock spans the send itself:
+	// closeChannels needs the write lock, so an in-flight send can never hit a closed
+	// channel. Non-blocking is what makes holding the lock here safe.
+	r.sendMu.RLock()
+	if !r.channelsClosed {
+		select {
+		case r.eventChan <- event:
+		default:
+			log.Printf("[agent] event channel full, dropping type=%s", event.Type)
+		}
 	}
+	r.sendMu.RUnlock()
 }

@@ -44,193 +44,128 @@ func TestSelectEncoding(t *testing.T) {
 	}
 }
 
-func TestCompressMiddleware_Brotli_Preference(t *testing.T) {
-	s := testServer(t)
-	largeBody := strings.Repeat("preference test ", 100)
-	s.mux.HandleFunc("/test/br-pref", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(largeBody))
-	})
-
-	handler := CompressMiddleware(s.mux)
-
-	// Client sends both br and gzip — server should prefer br
-	req := httptest.NewRequest("GET", "/test/br-pref", nil)
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	resp := w.Result()
-	if resp.Header.Get("Content-Encoding") != "br" {
-		t.Errorf("expected Content-Encoding: br (preferred), got: %q", resp.Header.Get("Content-Encoding"))
+// TestCompressMiddleware_EncodingNegotiation is the negotiation matrix: what the client
+// offers × how big the body is → which encoding the response ends up carrying, plus the
+// invariants that hold on every response (Vary is always set, the bytes survive the
+// round trip, and a response claiming an encoding really is encoded). SSE, websocket
+// upgrades and the stacked middleware are separate mechanisms and keep their own tests.
+func TestCompressMiddleware_EncodingNegotiation(t *testing.T) {
+	cases := []struct {
+		name string
+		// acceptEncoding is sent verbatim; "" omits the header entirely.
+		acceptEncoding string
+		body           string
+		contentType    string
+		wantEncoding   string // "" means the response must pass through untouched
+	}{
+		{
+			name:           "brotli wins when the client offers both",
+			acceptEncoding: "gzip, deflate, br",
+			body:           strings.Repeat("preference test ", 100),
+			wantEncoding:   "br",
+		},
+		{
+			name:           "gzip when brotli is not offered",
+			acceptEncoding: "gzip, deflate",
+			body:           strings.Repeat("gzip fallback ", 100),
+			wantEncoding:   "gzip",
+		},
+		{
+			name:           "large body over brotli",
+			acceptEncoding: "br",
+			body:           strings.Repeat("x", 2048),
+			contentType:    "application/json",
+			wantEncoding:   "br",
+		},
+		{
+			name:           "large body over gzip",
+			acceptEncoding: "gzip",
+			body:           strings.Repeat("y", 2048),
+			contentType:    "application/json",
+			wantEncoding:   "gzip",
+		},
+		{
+			// minCompressSize is 1024; 15 bytes is nowhere near it.
+			name:           "body under minCompressSize is left alone",
+			acceptEncoding: "br",
+			body:           `{"status":"ok"}`,
+			wantEncoding:   "",
+		},
+		{
+			name:           "no Accept-Encoding header",
+			acceptEncoding: "",
+			body:           "hello",
+			wantEncoding:   "",
+		},
 	}
-	if resp.Header.Get("Vary") != "Accept-Encoding" {
-		t.Errorf("expected Vary: Accept-Encoding, got: %q", resp.Header.Get("Vary"))
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			const path = "/test/compress"
+			s := testServer(t)
+			s.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+				if tc.contentType != "" {
+					w.Header().Set("Content-Type", tc.contentType)
+				}
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(tc.body))
+			})
+
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			if tc.acceptEncoding != "" {
+				req.Header.Set("Accept-Encoding", tc.acceptEncoding)
+			}
+			w := httptest.NewRecorder()
+			CompressMiddleware(s.mux).ServeHTTP(w, req)
+
+			resp := w.Result()
+			if got := resp.Header.Get("Content-Encoding"); got != tc.wantEncoding {
+				t.Errorf("Content-Encoding = %q, want %q", got, tc.wantEncoding)
+			}
+			if got := resp.Header.Get("Vary"); got != "Accept-Encoding" {
+				t.Errorf("Vary = %q, want Accept-Encoding", got)
+			}
+
+			if tc.wantEncoding == "" {
+				if got := w.Body.String(); got != tc.body {
+					t.Errorf("body should pass through byte-identical, got %q", got)
+				}
+				return
+			}
+			if bytes.Equal(w.Body.Bytes(), []byte(tc.body)) {
+				t.Fatalf("response claims Content-Encoding %s but the body is uncompressed", tc.wantEncoding)
+			}
+			mustRoundTrip(t, tc.wantEncoding, w.Body.Bytes(), tc.body)
+		})
 	}
 }
 
-func TestCompressMiddleware_Gzip_Fallback(t *testing.T) {
-	s := testServer(t)
-	largeBody := strings.Repeat("gzip fallback ", 100)
-	s.mux.HandleFunc("/test/gz-fallback", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(largeBody))
-	})
+// mustRoundTrip expands a response body with the decoder for the negotiated encoding and
+// requires the original bytes back.
+func mustRoundTrip(t *testing.T, encoding string, raw []byte, want string) {
+	t.Helper()
 
-	handler := CompressMiddleware(s.mux)
-
-	// Client only supports gzip (no br)
-	req := httptest.NewRequest("GET", "/test/gz-fallback", nil)
-	req.Header.Set("Accept-Encoding", "gzip, deflate")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	resp := w.Result()
-	if resp.Header.Get("Content-Encoding") != "gzip" {
-		t.Errorf("expected Content-Encoding: gzip (fallback), got: %q", resp.Header.Get("Content-Encoding"))
-	}
-}
-
-func TestCompressMiddleware_NoCompression_SmallBody(t *testing.T) {
-	s := testServer(t)
-	s.mux.HandleFunc("/test/small", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`)) // 15 bytes, well below 1024
-	})
-
-	handler := CompressMiddleware(s.mux)
-
-	req := httptest.NewRequest("GET", "/test/small", nil)
-	req.Header.Set("Accept-Encoding", "br")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	resp := w.Result()
-	if resp.Header.Get("Content-Encoding") != "" {
-		t.Errorf("expected no Content-Encoding for small body, got: %q", resp.Header.Get("Content-Encoding"))
-	}
-	body := w.Body.String()
-	if body != `{"status":"ok"}` {
-		t.Errorf("expected uncompressed body, got: %q", body)
-	}
-}
-
-func TestCompressMiddleware_Brotli_LargeBody(t *testing.T) {
-	s := testServer(t)
-	largeBody := strings.Repeat("x", 2048) // above minCompressSize
-	s.mux.HandleFunc("/test/large", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(largeBody))
-	})
-
-	handler := CompressMiddleware(s.mux)
-
-	req := httptest.NewRequest("GET", "/test/large", nil)
-	req.Header.Set("Accept-Encoding", "br")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	resp := w.Result()
-	if resp.Header.Get("Content-Encoding") != "br" {
-		t.Errorf("expected Content-Encoding: br, got: %q", resp.Header.Get("Content-Encoding"))
+	var src io.Reader
+	switch encoding {
+	case "br":
+		src = brotli.NewReader(bytes.NewReader(raw))
+	case "gzip":
+		gr, err := gzip.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			t.Fatalf("gzip reader: %v", err)
+		}
+		defer gr.Close()
+		src = gr
+	default:
+		t.Fatalf("no decoder wired up for %q", encoding)
 	}
 
-	// Decompress and verify body
-	br := brotli.NewReader(w.Body)
-	decompressed, err := io.ReadAll(br)
+	got, err := io.ReadAll(src)
 	if err != nil {
-		t.Fatalf("failed to decompress brotli: %v", err)
+		t.Fatalf("decompress %s: %v", encoding, err)
 	}
-	if string(decompressed) != largeBody {
-		t.Errorf("decompressed body mismatch: got %d bytes, want %d", len(decompressed), len(largeBody))
-	}
-}
-
-func TestCompressMiddleware_Gzip_LargeBody(t *testing.T) {
-	s := testServer(t)
-	largeBody := strings.Repeat("y", 2048)
-	s.mux.HandleFunc("/test/large-gz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(largeBody))
-	})
-
-	handler := CompressMiddleware(s.mux)
-
-	req := httptest.NewRequest("GET", "/test/large-gz", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	resp := w.Result()
-	if resp.Header.Get("Content-Encoding") != "gzip" {
-		t.Errorf("expected Content-Encoding: gzip, got: %q", resp.Header.Get("Content-Encoding"))
-	}
-
-	// Decompress and verify body
-	gr, err := gzip.NewReader(w.Body)
-	if err != nil {
-		t.Fatalf("failed to create gzip reader: %v", err)
-	}
-	defer gr.Close()
-	decompressed, err := io.ReadAll(gr)
-	if err != nil {
-		t.Fatalf("failed to decompress gzip: %v", err)
-	}
-	if string(decompressed) != largeBody {
-		t.Errorf("decompressed body mismatch: got %d bytes, want %d", len(decompressed), len(largeBody))
-	}
-}
-
-func TestCompressMiddleware_NoCompression_SSE(t *testing.T) {
-	s := testServer(t)
-	s.mux.HandleFunc("/test/sse", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("data: test\n\n"))
-	})
-
-	handler := CompressMiddleware(s.mux)
-
-	req := httptest.NewRequest("GET", "/test/sse", nil)
-	req.Header.Set("Accept-Encoding", "br")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	resp := w.Result()
-	if resp.Header.Get("Content-Encoding") != "" {
-		t.Errorf("expected no Content-Encoding for SSE, got: %q", resp.Header.Get("Content-Encoding"))
-	}
-}
-
-func TestCompressMiddleware_NoAcceptEncoding(t *testing.T) {
-	s := testServer(t)
-	s.mux.HandleFunc("/test/no-enc", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("hello"))
-	})
-
-	handler := CompressMiddleware(s.mux)
-
-	req := httptest.NewRequest("GET", "/test/no-enc", nil)
-	// No Accept-Encoding header
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	resp := w.Result()
-	if resp.Header.Get("Content-Encoding") != "" {
-		t.Errorf("expected no Content-Encoding, got: %q", resp.Header.Get("Content-Encoding"))
-	}
-	if resp.Header.Get("Vary") != "Accept-Encoding" {
-		t.Errorf("expected Vary: Accept-Encoding, got: %q", resp.Header.Get("Vary"))
+	if string(got) != want {
+		t.Errorf("round trip returned %d bytes, want %d", len(got), len(want))
 	}
 }
 
@@ -356,39 +291,6 @@ func TestCompressMiddleware_ContentLengthRemoved(t *testing.T) {
 	// (the http.Response will have one set by httptest, but it should be the compressed size)
 	if resp.Header.Get("Content-Encoding") != "br" {
 		t.Errorf("expected Content-Encoding: br, got: %q", resp.Header.Get("Content-Encoding"))
-	}
-}
-
-func TestCompressMiddleware_BrotliBetterThanGzip(t *testing.T) {
-	s := testServer(t)
-	// Use repetitive text that compresses well
-	largeBody := strings.Repeat("compression test data ", 100)
-	s.mux.HandleFunc("/test/compare", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(largeBody))
-	})
-
-	handler := CompressMiddleware(s.mux)
-
-	// Test brotli
-	reqBr := httptest.NewRequest("GET", "/test/compare", nil)
-	reqBr.Header.Set("Accept-Encoding", "br")
-	wBr := httptest.NewRecorder()
-	handler.ServeHTTP(wBr, reqBr)
-
-	// Test gzip
-	reqGz := httptest.NewRequest("GET", "/test/compare", nil)
-	reqGz.Header.Set("Accept-Encoding", "gzip")
-	wGz := httptest.NewRecorder()
-	handler.ServeHTTP(wGz, reqGz)
-
-	brSize := wBr.Body.Len()
-	gzSize := wGz.Body.Len()
-
-	t.Logf("brotli: %d bytes, gzip: %d bytes", brSize, gzSize)
-	if brSize >= gzSize {
-		t.Logf("warning: brotli (%d) not smaller than gzip (%d) for this data", brSize, gzSize)
-		// This is a soft check — depends on the data
 	}
 }
 

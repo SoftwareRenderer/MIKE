@@ -22,8 +22,9 @@ import (
 // definition/references/rename). It proves cross-file resolution is complete
 // for .ts/.js with the protocol the LSP manager sends.
 //
-// Skipped when typescript-language-server is not available. Locate it with
-// the MIKE_TSSERVER_BIN env var or on PATH.
+// Skipped when typescript-language-server, or a typescript package it can resolve,
+// is not available. Locate the server with the MIKE_TSSERVER_BIN env var or on PATH,
+// and the typescript package with MIKE_TYPESCRIPT_DIR (see seedTypeScript).
 func TestTSServerCrossFileViaBridge(t *testing.T) {
 	tsserver := os.Getenv("MIKE_TSSERVER_BIN")
 	if tsserver == "" {
@@ -37,6 +38,7 @@ func TestTSServerCrossFileViaBridge(t *testing.T) {
 
 	// ── Test workspace: two files in one tsconfig project ──
 	ws := t.TempDir()
+	seedTypeScript(t, ws, tsserver)
 	src := filepath.Join(ws, "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
@@ -287,6 +289,51 @@ func notifyLSP(ctx context.Context, t *testing.T, client *bridge.Client, method 
 	if err := client.LSPNotify(ctx, raw); err != nil {
 		t.Fatalf("notify %s: %v", method, err)
 	}
+}
+
+// seedTypeScript links a typescript package into the test workspace so the language
+// server can actually start tsserver. typescript-language-server resolves typescript
+// from the workspace's node_modules first and only then from its own install tree,
+// where it is a peer dependency that a global install frequently does not have. When
+// nothing resolves it still answers initialize and then returns null/[] for every
+// request — indistinguishable from a cross-file resolution bug in the product.
+//
+// Search order: MIKE_TYPESCRIPT_DIR, the server binary's own node_modules (following
+// the bin symlink), then this repo's frontend/node_modules. Skips the test when none
+// of them holds a tsserver.js.
+func seedTypeScript(t *testing.T, ws, tsserver string) {
+	t.Helper()
+
+	var candidates []string
+	if env := os.Getenv("MIKE_TYPESCRIPT_DIR"); env != "" {
+		candidates = append(candidates, env)
+	}
+	if resolved, err := filepath.EvalSymlinks(tsserver); err == nil {
+		for dir := filepath.Dir(resolved); dir != "/" && dir != "."; dir = filepath.Dir(dir) {
+			candidates = append(candidates, filepath.Join(dir, "node_modules", "typescript"))
+		}
+	}
+	candidates = append(candidates, filepath.Join("..", "..", "frontend", "node_modules", "typescript"))
+
+	for _, c := range candidates {
+		if _, err := os.Stat(filepath.Join(c, "lib", "tsserver.js")); err != nil {
+			continue
+		}
+		abs, err := filepath.Abs(c)
+		if err != nil {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Join(ws, "node_modules"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(abs, filepath.Join(ws, "node_modules", "typescript")); err != nil {
+			t.Fatalf("link typescript from %s: %v", abs, err)
+		}
+		t.Logf("typescript package: %s", abs)
+		return
+	}
+	t.Skipf("no resolvable typescript package (looked in %v; set MIKE_TYPESCRIPT_DIR) — "+
+		"typescript-language-server would answer every request with null", candidates)
 }
 
 func waitForSettle(t *testing.T, d time.Duration) {

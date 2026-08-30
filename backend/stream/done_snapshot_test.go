@@ -3,14 +3,13 @@ package stream
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/store"
+	"kanban/backend/testutil/testgit"
 	"kanban/backend/types"
 )
 
@@ -89,24 +88,16 @@ func revParse(t *testing.T, dir, ref string) string {
 	return runGitTestOutput(t, dir, "rev-parse", ref)
 }
 
+// runGitTest runs a git command in dir, failing the test on error.
 func runGitTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %s", args, string(out))
-	}
+	testgit.Git(t, dir, args...)
 }
 
+// runGitTestOutput runs a git command in dir and returns trimmed output.
 func runGitTestOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %s", args, string(out))
-	}
-	return strings.TrimSpace(string(out))
+	return testgit.GitOutput(t, dir, args...)
 }
 
 func writeTestFile(t *testing.T, dir, name, content string) {

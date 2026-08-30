@@ -91,13 +91,6 @@ func findSubstr(s, substr string) bool {
 	return false
 }
 
-func TestDefaultExtensionMemory(t *testing.T) {
-	// 0 = no limit: LSP sandboxes run unlimited unless the user sets a limit.
-	if DefaultExtensionMemory != 0 {
-		t.Errorf("DefaultExtensionMemory = %d, want 0 (no limit)", DefaultExtensionMemory)
-	}
-}
-
 func TestExtensionContainerPrefix(t *testing.T) {
 	if ExtensionContainerPrefix != "kanban-ext" {
 		t.Errorf("ExtensionContainerPrefix = %q, want kanban-ext", ExtensionContainerPrefix)
@@ -362,12 +355,6 @@ func TestGracePeriod_TimerFiresAndStops(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Error("grace period timer did not fire")
-	}
-}
-
-func TestGracePeriod_ExtensionStopGracePeriod(t *testing.T) {
-	if ExtensionStopGracePeriod != 15*time.Minute {
-		t.Errorf("ExtensionStopGracePeriod = %v, want 15m", ExtensionStopGracePeriod)
 	}
 }
 

@@ -35,30 +35,30 @@ func TestProjectCreate_RejectsInvalidName(t *testing.T) {
 	initGitRepo(t, dir)
 
 	invalidNames := []string{
-		"-my-project",     // leading dash
-		"--verbose",       // double dash
-		"my; rm -rf /",    // shell injection
+		"-my-project",      // leading dash
+		"--verbose",        // double dash
+		"my; rm -rf /",     // shell injection
 		"my$(rm /)project", // shell injection
-		"my`whoami`proj",  // backtick injection
-		"my|cat",          // pipe injection
-		"my&project",      // ampersand
-		"my!project",      // exclamation
-		"my?project",      // question mark
-		"my*project",      // asterisk
-		"my#project",      // hash
-		"my%project",      // percent
-		"my^project",      // caret
-		`my"project"`,     // double quote
-		"my'project",      // single quote
-		"my=project",      // equals
-		"my+project",      // plus
-		"my,project",      // comma
-		"my:project",      // colon
-		"my;project",      // semicolon
-		"my@project",      // at sign
-		"my(project)",     // parentheses
-		"my<project>",     // angle brackets
-		"my\\project",     // backslash
+		"my`whoami`proj",   // backtick injection
+		"my|cat",           // pipe injection
+		"my&project",       // ampersand
+		"my!project",       // exclamation
+		"my?project",       // question mark
+		"my*project",       // asterisk
+		"my#project",       // hash
+		"my%project",       // percent
+		"my^project",       // caret
+		`my"project"`,      // double quote
+		"my'project",       // single quote
+		"my=project",       // equals
+		"my+project",       // plus
+		"my,project",       // comma
+		"my:project",       // colon
+		"my;project",       // semicolon
+		"my@project",       // at sign
+		"my(project)",      // parentheses
+		"my<project>",      // angle brackets
+		"my\\project",      // backslash
 	}
 
 	for _, name := range invalidNames {
@@ -97,8 +97,8 @@ func TestProjectUpdate_RejectsInvalidName(t *testing.T) {
 	projID := createTestProject(t, s)
 
 	invalidNames := []string{
-		"-renamed",       // leading dash
-		"my; rm -rf /",   // shell injection
+		"-renamed",         // leading dash
+		"my; rm -rf /",     // shell injection
 		"my$(rm /)project", // shell injection
 	}
 

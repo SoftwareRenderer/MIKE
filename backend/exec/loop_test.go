@@ -869,79 +869,96 @@ func TestLoopDetector_RemoveHints_Noop(t *testing.T) {
 	}
 }
 
-func TestBuildHint_Phrase(t *testing.T) {
-	hint := buildHint(LoopPhrase, "")
-	if hint == "" {
-		t.Error("LoopPhrase should have a hint message")
+// TestBuildHint covers the loop-hint text the model is sent for each loop kind: the two
+// hints whose exact wording is load-bearing are pinned verbatim, LoopReasoningOnly is
+// checked for the things it must offer (a reason to act, and the tools to act with),
+// LoopNone must produce nothing at all, and the rest must not come back empty — an empty
+// hint means the loop is detected but the model is never told.
+func TestBuildHint(t *testing.T) {
+	cases := []struct {
+		name      string
+		kind      LoopType
+		arg       string
+		want      string
+		contains  []string
+		wantEmpty bool
+	}{
+		{
+			name: "repeated phrase",
+			kind: LoopPhrase,
+			want: "You repeated yourself in your last response. Continue with a new action or tool call.",
+		},
+		{
+			name: "repeated tool target",
+			kind: LoopTool,
+			arg:  "src/main.go",
+			want: "You've read/checked `src/main.go` twice in a row without making any changes in between. You already have the contents of this file. Summarize what you know and decide on the next action — edit the file, run a command, or mark the task complete.",
+		},
+		{name: "repeated text", kind: LoopText},
+		{name: "no loop", kind: LoopNone, wantEmpty: true},
+		{
+			name: "reasoning only",
+			kind: LoopReasoningOnly,
+			contains: []string{"reasoning", "function calling",
+				"read_file", "write_file", "edit_file", "bash", "ask_question", "request_review"},
+		},
+		{
+			name: "statement without action",
+			kind: LoopStatement,
+			want: "Is the task complete? Use `ask_question` if clarification/approval is needed, or `request_review` if the task is complete. Otherwise use `read_file`, `write_file`, `edit_file`, or `bash` to make progress.",
+		},
 	}
-	if hint != "You repeated yourself in your last response. Continue with a new action or tool call." {
-		t.Errorf("unexpected hint: %s", hint)
-	}
-}
 
-func TestBuildHint_Tool(t *testing.T) {
-	hint := buildHint(LoopTool, "src/main.go")
-	if hint == "" {
-		t.Error("LoopTool should have a hint message")
-	}
-	if hint != "You've read/checked `src/main.go` twice in a row without making any changes in between. You already have the contents of this file. Summarize what you know and decide on the next action — edit the file, run a command, or mark the task complete." {
-		t.Errorf("unexpected hint: %s", hint)
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hint := buildHint(tc.kind, tc.arg)
 
-func TestBuildHint_Text(t *testing.T) {
-	hint := buildHint(LoopText, "")
-	if hint == "" {
-		t.Error("LoopText should have a hint message")
-	}
-}
-
-func TestBuildHint_None(t *testing.T) {
-	hint := buildHint(LoopNone, "")
-	if hint != "" {
-		t.Error("LoopNone should return empty hint")
-	}
-}
-
-func TestBuildHint_ReasoningOnly(t *testing.T) {
-	hint := buildHint(LoopReasoningOnly, "")
-	if hint == "" {
-		t.Fatal("LoopReasoningOnly should have a hint message")
-	}
-	// Verify it mentions reasoning
-	if !strings.Contains(hint, "reasoning") {
-		t.Error("hint should mention reasoning")
-	}
-	// Verify it lists available tools
-	for _, tool := range []string{"read_file", "write_file", "edit_file", "bash", "ask_question", "request_review"} {
-		if !strings.Contains(hint, tool) {
-			t.Errorf("hint should mention tool %q, got: %s", tool, hint)
-		}
-	}
-	// Verify it mentions function calling format
-	if !strings.Contains(hint, "function calling") {
-		t.Error("hint should mention function calling format")
-	}
-}
-
-func TestBuildHint_Statement(t *testing.T) {
-	hint := buildHint(LoopStatement, "")
-	if hint == "" {
-		t.Fatal("LoopStatement should have a hint message")
-	}
-	expected := "Is the task complete? Use `ask_question` if clarification/approval is needed, or `request_review` if the task is complete. Otherwise use `read_file`, `write_file`, `edit_file`, or `bash` to make progress."
-	if hint != expected {
-		t.Errorf("unexpected hint: %s", hint)
+			if tc.wantEmpty {
+				if hint != "" {
+					t.Errorf("kind %v should produce no hint, got %q", tc.kind, hint)
+				}
+				return
+			}
+			if hint == "" {
+				t.Fatalf("kind %v produced an empty hint", tc.kind)
+			}
+			if tc.want != "" && hint != tc.want {
+				t.Errorf("hint = %q, want %q", hint, tc.want)
+			}
+			for _, sub := range tc.contains {
+				if !strings.Contains(hint, sub) {
+					t.Errorf("hint should mention %q, got: %s", sub, hint)
+				}
+			}
+		})
 	}
 }
 
 // --- Text Analysis Helper Tests ---
 
+// TestNormalizePhrase covers the comparison key behind phrase-loop detection. Everything
+// here is a detection miss if it goes wrong: case and run-of-whitespace differences must
+// collapse (so the same sentence typed twice matches), UTF-8 must survive untouched, and
+// trailing punctuation must drop without eating the word it follows — or "hello world!!!"
+// stops matching "hello world".
 func TestNormalizePhrase(t *testing.T) {
-	result := normalizePhrase("  Hello   World  ")
-	expected := "hello world"
-	if result != expected {
-		t.Errorf("expected %q, got %q", expected, result)
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "collapses case and whitespace", in: "  Hello   World  ", want: "hello world"},
+		{name: "preserves UTF-8", in: "  Café Résumé  ", want: "café résumé"},
+		{name: "punctuation only", in: "....", want: ""},
+		{name: "strips trailing punctuation", in: "hello world!!!", want: "hello world"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizePhrase(tc.in); got != tc.want {
+				t.Errorf("normalizePhrase(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -952,33 +969,72 @@ func TestWordCount(t *testing.T) {
 	}
 }
 
-func TestSplitSentences_Basic(t *testing.T) {
-	segments := splitSentences("Hello world. How are you? I am fine!")
-	if len(segments) != 3 {
-		t.Errorf("expected 3 segments, got %d: %v", len(segments), segments)
+// TestSplitSentences covers the sentence splitter that feeds phrase detection. Exact
+// segment lists are asserted wherever the boundaries are defined, because a segment that
+// loses or gains a character corrupts the phrase comparison downstream. The UTF-8 rows are
+// the point of the table: splitSentences walks bytes, so a boundary scan that lands
+// mid-rune silently corrupts the text it is supposed to be only cutting.
+func TestSplitSentences(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		// want is the exact segment list; nil means only min is asserted.
+		want []string
+		min  int
+	}{
+		{
+			name: "punctuation boundaries",
+			in:   "Hello world. How are you? I am fine!",
+			want: []string{"Hello world.", "How are you?", "I am fine!"},
+		},
+		{name: "no boundary", in: "No sentence boundary here at all", want: []string{"No sentence boundary here at all"}},
+		{
+			name: "paragraph break",
+			in:   "First paragraph here is long enough.\n\nSecond paragraph also long enough.",
+			min:  2,
+		},
+		{
+			name: "multi-byte Latin",
+			in:   "Café résumé naïve. Hello world!",
+			want: []string{"Café résumé naïve.", "Hello world!"},
+		},
+		{
+			// isSentenceEnd only knows ASCII .!?, so this pins that CJK passes through intact.
+			name: "CJK is not corrupted",
+			in:   "你好世界. 这是一个测试!",
+			want: []string{"你好世界.", "这是一个测试!"},
+		},
+		{
+			name: "4-byte emoji",
+			in:   "Hello 👋 world. How are you?",
+			want: []string{"Hello 👋 world.", "How are you?"},
+		},
+		{
+			name: "mixed 2-, 3- and 4-byte runes",
+			in:   "café 日本語 🎉 done. Next!",
+			want: []string{"café 日本語 🎉 done.", "Next!"},
+		},
 	}
-	if segments[0] != "Hello world." {
-		t.Errorf("expected 'Hello world.', got %q", segments[0])
-	}
-	if segments[1] != "How are you?" {
-		t.Errorf("expected 'How are you?', got %q", segments[1])
-	}
-	if segments[2] != "I am fine!" {
-		t.Errorf("expected 'I am fine!', got %q", segments[2])
-	}
-}
 
-func TestSplitSentences_NoBoundary(t *testing.T) {
-	segments := splitSentences("No sentence boundary here at all")
-	if len(segments) != 1 {
-		t.Errorf("expected 1 segment, got %d: %v", len(segments), segments)
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitSentences(tc.in)
 
-func TestSplitSentences_DoubleNewline(t *testing.T) {
-	segments := splitSentences("First paragraph here is long enough.\n\nSecond paragraph also long enough.")
-	if len(segments) < 2 {
-		t.Errorf("expected at least 2 segments, got %d: %v", len(segments), segments)
+			if tc.want == nil {
+				if len(got) < tc.min {
+					t.Fatalf("expected at least %d segments, got %d: %v", tc.min, len(got), got)
+				}
+				return
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("segments = %v (%d), want %v (%d)", got, len(got), tc.want, len(tc.want))
+			}
+			for i, want := range tc.want {
+				if got[i] != want {
+					t.Errorf("segment %d = %q, want %q", i, got[i], want)
+				}
+			}
+		})
 	}
 }
 
@@ -1006,38 +1062,6 @@ func TestIsReadOnlyCommand(t *testing.T) {
 }
 
 // --- Sandbox Prompt Path Tests ---
-
-func TestPromptPath_SandboxEnabled(t *testing.T) {
-	worktreePath := "/home/user/project/.worktrees/task/alpha-bravo-charlie"
-	projectName := "my-project"
-	sandboxEnabled := true
-
-	// Simulate the prompt path logic from executeTask
-	promptPath := worktreePath
-	if sandboxEnabled {
-		promptPath = "/home/sandbox/" + projectName
-	}
-
-	if promptPath != "/home/sandbox/my-project" {
-		t.Errorf("sandbox enabled: promptPath = %q, want %q", promptPath, "/home/sandbox/my-project")
-	}
-}
-
-func TestPromptPath_SandboxDisabled(t *testing.T) {
-	worktreePath := "/home/user/project/.worktrees/task/alpha-bravo-charlie"
-	projectName := "my-project"
-	sandboxEnabled := false
-
-	// Simulate the prompt path logic from executeTask
-	promptPath := worktreePath
-	if sandboxEnabled {
-		promptPath = "/home/sandbox/" + projectName
-	}
-
-	if promptPath != worktreePath {
-		t.Errorf("sandbox disabled: promptPath = %q, want %q", promptPath, worktreePath)
-	}
-}
 
 // --- ExtractLastTurns Tests ---
 
@@ -1228,113 +1252,134 @@ func TestFormatConversationTurns_TrimsTrailingNewlines(t *testing.T) {
 
 // --- isTaskID Tests ---
 
-func TestIsTaskID_Valid(t *testing.T) {
-	validIDs := []string{"frost-amber-quartz", "abc-def-ghi", "a-b-c"}
-	for _, id := range validIDs {
-		if !isTaskID(id) {
-			t.Errorf("expected %q to be a valid task ID", id)
-		}
+// TestIsTaskID pins the shape of a task ID (three dictionary words) at the one place that
+// decides whether a token in a command line is an ID. The invalid rows are the interesting
+// ones: two words, four words, an empty string and the dash-adjacent forms must all read as
+// prose, or a model's sentence starts being parsed as a task reference.
+func TestIsTaskID(t *testing.T) {
+	cases := []struct {
+		id   string
+		want bool
+	}{
+		{id: "frost-amber-quartz", want: true},
+		{id: "abc-def-ghi", want: true},
+		{id: "a-b-c", want: true},
+		{id: "", want: false},
+		{id: "foo", want: false},
+		{id: "foo-bar", want: false},
+		{id: "foo-bar-baz-qux", want: false},
+		{id: "-foo-bar", want: false},
+		{id: "foo--bar", want: false},
+		{id: "foo-bar-", want: false},
 	}
-}
 
-func TestIsTaskID_Invalid(t *testing.T) {
-	invalidIDs := []string{"", "foo", "foo-bar", "foo-bar-baz-qux", "-foo-bar", "foo--bar", "foo-bar-"}
-	for _, id := range invalidIDs {
-		if isTaskID(id) {
-			t.Errorf("expected %q to be invalid task ID", id)
+	for _, tc := range cases {
+		name := tc.id
+		if name == "" {
+			name = "empty"
 		}
+		t.Run(name, func(t *testing.T) {
+			if got := isTaskID(tc.id); got != tc.want {
+				t.Errorf("isTaskID(%q) = %v, want %v", tc.id, got, tc.want)
+			}
+		})
 	}
 }
 
 // --- formatToolAction Tests ---
 
-func TestFormatToolAction_CreateTask(t *testing.T) {
-	result := formatToolAction("create_task", `{"title":"Test task"}`)
-	if result != "create" {
-		t.Errorf("expected 'create', got %q", result)
+// TestFormatToolAction covers the one-line label the commit-message generator sees instead
+// of a tool call's full arguments.
+func TestFormatToolAction(t *testing.T) {
+	cases := []struct {
+		tool string
+		args string
+		want string
+	}{
+		{tool: "create_task", args: `{"title":"Test task"}`, want: "create"},
+		{tool: "edit_task", args: `{"task_id":"frost-amber-quartz","title":"New title"}`, want: "edit"},
 	}
-}
 
-func TestFormatToolAction_EditTask(t *testing.T) {
-	result := formatToolAction("edit_task", `{"task_id":"frost-amber-quartz","title":"New title"}`)
-	if result != "edit" {
-		t.Errorf("expected 'edit', got %q", result)
+	for _, tc := range cases {
+		t.Run(tc.tool, func(t *testing.T) {
+			if got := formatToolAction(tc.tool, tc.args); got != tc.want {
+				t.Errorf("formatToolAction(%q, …) = %q, want %q", tc.tool, got, tc.want)
+			}
+		})
 	}
 }
 
 // --- formatToolResult Tests ---
 
-func TestFormatToolResult_CreateTask_Success(t *testing.T) {
-	toolResults := map[string]string{"call_1": `{"task_id":"frost-amber-quartz","title":"New task"}`}
-	result := formatToolResult("create_task", "call_1", "successful", toolResults)
-	if result != "task ID: frost-amber-quartz, title: New task" {
-		t.Errorf("expected 'task ID: frost-amber-quartz, title: New task', got %q", result)
+// TestFormatToolResult covers how a tool call's result is rendered back into the commit
+// message context. Two things are pinned per row: what a SUCCESS names (the task id and
+// title, falling back to "a task" when the result is not JSON or carries no id) and what a
+// FAILURE leaks (create_task/edit_task quote the error, other tools only say it failed).
+// The pending row matters too — a call with no recorded result must not claim success.
+func TestFormatToolResult(t *testing.T) {
+	cases := []struct {
+		name    string
+		tool    string
+		status  string
+		results map[string]string
+		want    string
+	}{
+		{
+			name: "create_task with id and title", tool: "create_task", status: "successful",
+			results: map[string]string{"call_1": `{"task_id":"frost-amber-quartz","title":"New task"}`},
+			want:    "task ID: frost-amber-quartz, title: New task",
+		},
+		{
+			name: "create_task with a non-JSON result", tool: "create_task", status: "successful",
+			results: map[string]string{"call_1": "Task created successfully"},
+			want:    "a task",
+		},
+		{
+			name: "create_task with an id only", tool: "create_task", status: "successful",
+			results: map[string]string{"call_1": `{"task_id":"frost-amber-quartz"}`},
+			want:    "task ID: frost-amber-quartz",
+		},
+		{
+			name: "create_task failure quotes the error", tool: "create_task", status: "unsuccessful",
+			results: map[string]string{"call_1": "error: project not found"},
+			want:    "but was unsuccessful. Error: error: project not found",
+		},
+		{
+			// No recorded result at all must not read as success.
+			name: "create_task still pending", tool: "create_task", status: "pending",
+			results: map[string]string{},
+			want:    "a task",
+		},
+		{
+			name: "edit_task with id and title", tool: "edit_task", status: "successful",
+			results: map[string]string{"call_1": `{"task_id":"frost-amber-quartz","title":"New title","status":"updated"}`},
+			want:    "task ID: frost-amber-quartz, title: New title",
+		},
+		{
+			name: "edit_task failure quotes the error", tool: "edit_task", status: "unsuccessful",
+			results: map[string]string{"call_1": "tool edit_task failed: task frost-amber-quartz not found"},
+			want:    "but was unsuccessful. Error: tool edit_task failed: task frost-amber-quartz not found",
+		},
+		{
+			name: "other tool success", tool: "read_file", status: "successful",
+			results: map[string]string{"call_1": "file contents"},
+			want:    "which was successful",
+		},
+		{
+			// Unlike create_task/edit_task, an unnamed tool's error text is not echoed.
+			name: "other tool failure", tool: "read_file", status: "unsuccessful",
+			results: map[string]string{"call_1": "error: file not found"},
+			want:    "which was unsuccessful",
+		},
 	}
-}
 
-func TestFormatToolResult_CreateTask_Success_NoTaskID(t *testing.T) {
-	// Result is not valid JSON
-	toolResults := map[string]string{"call_1": "Task created successfully"}
-	result := formatToolResult("create_task", "call_1", "successful", toolResults)
-	if result != "a task" {
-		t.Errorf("expected 'a task', got %q", result)
-	}
-}
-
-func TestFormatToolResult_CreateTask_Success_TaskIDOnly(t *testing.T) {
-	// JSON result with task_id but no title
-	toolResults := map[string]string{"call_1": `{"task_id":"frost-amber-quartz"}`}
-	result := formatToolResult("create_task", "call_1", "successful", toolResults)
-	if result != "task ID: frost-amber-quartz" {
-		t.Errorf("expected 'task ID: frost-amber-quartz', got %q", result)
-	}
-}
-
-func TestFormatToolResult_CreateTask_Failure(t *testing.T) {
-	toolResults := map[string]string{"call_1": "error: project not found"}
-	result := formatToolResult("create_task", "call_1", "unsuccessful", toolResults)
-	if result != "but was unsuccessful. Error: error: project not found" {
-		t.Errorf("expected 'but was unsuccessful. Error: error: project not found', got %q", result)
-	}
-}
-
-func TestFormatToolResult_EditTask_Success(t *testing.T) {
-	toolResults := map[string]string{"call_1": `{"task_id":"frost-amber-quartz","title":"New title","status":"updated"}`}
-	result := formatToolResult("edit_task", "call_1", "successful", toolResults)
-	if result != "task ID: frost-amber-quartz, title: New title" {
-		t.Errorf("expected 'task ID: frost-amber-quartz, title: New title', got %q", result)
-	}
-}
-
-func TestFormatToolResult_EditTask_Failure(t *testing.T) {
-	toolResults := map[string]string{"call_1": "tool edit_task failed: task frost-amber-quartz not found"}
-	result := formatToolResult("edit_task", "call_1", "unsuccessful", toolResults)
-	if result != "but was unsuccessful. Error: tool edit_task failed: task frost-amber-quartz not found" {
-		t.Errorf("expected error message, got %q", result)
-	}
-}
-
-func TestFormatToolResult_CreateTask_Pending(t *testing.T) {
-	toolResults := map[string]string{}
-	result := formatToolResult("create_task", "call_1", "pending", toolResults)
-	if result != "a task" {
-		t.Errorf("expected 'a task', got %q", result)
-	}
-}
-
-func TestFormatToolResult_OtherTool_Success(t *testing.T) {
-	toolResults := map[string]string{"call_1": "file contents"}
-	result := formatToolResult("read_file", "call_1", "successful", toolResults)
-	if result != "which was successful" {
-		t.Errorf("expected 'which was successful', got %q", result)
-	}
-}
-
-func TestFormatToolResult_OtherTool_Failure(t *testing.T) {
-	toolResults := map[string]string{"call_1": "error: file not found"}
-	result := formatToolResult("read_file", "call_1", "unsuccessful", toolResults)
-	if result != "which was unsuccessful" {
-		t.Errorf("expected 'which was unsuccessful', got %q", result)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatToolResult(tc.tool, "call_1", tc.status, tc.results)
+			if got != tc.want {
+				t.Errorf("formatToolResult(%q, %s) = %q, want %q", tc.tool, tc.status, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -1614,58 +1659,6 @@ func TestFormatConversationTurns_FullPipeline(t *testing.T) {
 
 // --- UTF-8 Tests (regression for CPU spike bug) ---
 
-func TestSplitSentences_UTF8Characters(t *testing.T) {
-	// Multi-byte UTF-8 characters should be preserved correctly
-	segments := splitSentences("Café résumé naïve. Hello world!")
-	if len(segments) != 2 {
-		t.Fatalf("expected 2 segments, got %d: %v", len(segments), segments)
-	}
-	if segments[0] != "Café résumé naïve." {
-		t.Errorf("expected 'Café résumé naïve.', got %q", segments[0])
-	}
-	if segments[1] != "Hello world!" {
-		t.Errorf("expected 'Hello world!', got %q", segments[1])
-	}
-}
-
-func TestSplitSentences_CJKCharacters(t *testing.T) {
-	// CJK characters are 3 bytes each — must not be corrupted.
-	// Note: isSentenceEnd only recognizes ASCII .!? not CJK full-width 。！
-	// So this tests that CJK chars pass through without corruption.
-	segments := splitSentences("你好世界. 这是一个测试!")
-	if len(segments) != 2 {
-		t.Fatalf("expected 2 segments, got %d: %v", len(segments), segments)
-	}
-	if segments[0] != "你好世界." {
-		t.Errorf("expected '你好世界.', got %q", segments[0])
-	}
-	if segments[1] != "这是一个测试!" {
-		t.Errorf("expected '这是一个测试!', got %q", segments[1])
-	}
-}
-
-func TestSplitSentences_Emoji(t *testing.T) {
-	// Emoji are 4-byte UTF-8 (surrogate pairs)
-	segments := splitSentences("Hello 👋 world. How are you?")
-	if len(segments) != 2 {
-		t.Fatalf("expected 2 segments, got %d: %v", len(segments), segments)
-	}
-	if segments[0] != "Hello 👋 world." {
-		t.Errorf("expected 'Hello 👋 world.', got %q", segments[0])
-	}
-}
-
-func TestSplitSentences_MixedUTF8(t *testing.T) {
-	// Mix of ASCII, 2-byte, 3-byte, and 4-byte characters
-	segments := splitSentences("café 日本語 🎉 done. Next!")
-	if len(segments) != 2 {
-		t.Fatalf("expected 2 segments, got %d: %v", len(segments), segments)
-	}
-	if segments[0] != "café 日本語 🎉 done." {
-		t.Errorf("expected 'café 日本語 🎉 done.', got %q", segments[0])
-	}
-}
-
 func TestPhraseDetector_UTF8Streaming(t *testing.T) {
 	// Simulate streaming chunks containing multi-byte UTF-8 characters.
 	// This is the exact scenario that caused the CPU spike:
@@ -1736,32 +1729,6 @@ func TestPhraseDetector_UTF8NoBufferBloat(t *testing.T) {
 	// Without the fix, it would be ~utf8Text * 10 * corruption_factor.
 	if len(d.pending) > maxPendingSize {
 		t.Errorf("pending buffer %d bytes exceeds maxPendingSize %d (UTF-8 bloat?)", len(d.pending), maxPendingSize)
-	}
-}
-
-func TestNormalizePhrase_UTF8(t *testing.T) {
-	// Ensure normalizePhrase preserves UTF-8 characters
-	result := normalizePhrase("  Café Résumé  ")
-	expected := "café résumé"
-	if result != expected {
-		t.Errorf("expected %q, got %q", expected, result)
-	}
-}
-
-func TestNormalizePhrase_TrailingPunctuationOnlyWord(t *testing.T) {
-	// Edge case: a single word that is entirely punctuation after trim
-	result := normalizePhrase("....")
-	if result != "" {
-		t.Errorf("expected empty string, got %q", result)
-	}
-}
-
-func TestNormalizePhrase_WordWithTrailingPunctuation(t *testing.T) {
-	// Word followed by punctuation should have punctuation stripped
-	result := normalizePhrase("hello world!!!")
-	expected := "hello world"
-	if result != expected {
-		t.Errorf("expected %q, got %q", expected, result)
 	}
 }
 
@@ -1928,41 +1895,6 @@ func createTaskInProject(t *testing.T, s *store.Store, projectID, taskID string)
 }
 
 // --- Reasoning Effort Tests ---
-
-func TestUserMessage_ReasoningEffortField(t *testing.T) {
-	// Verify the UserMessage struct carries ReasoningEffort
-	um := stream.UserMessage{
-		Content:         "test message",
-		ModelName:       "test-model",
-		ServerURL:       "http://localhost:8080/v1",
-		ReasoningEffort: "high",
-		Attachments:     "",
-	}
-
-	if um.ReasoningEffort != "high" {
-		t.Errorf("expected ReasoningEffort='high', got %q", um.ReasoningEffort)
-	}
-	if um.ModelName != "test-model" {
-		t.Errorf("expected ModelName='test-model', got %q", um.ModelName)
-	}
-	if um.ServerURL != "http://localhost:8080/v1" {
-		t.Errorf("expected ServerURL='http://localhost:8080/v1', got %q", um.ServerURL)
-	}
-}
-
-func TestUserMessage_ReasoningEffortEmpty(t *testing.T) {
-	// Verify empty ReasoningEffort is handled (falls back to config default)
-	um := stream.UserMessage{
-		Content:         "test message",
-		ModelName:       "test-model",
-		ServerURL:       "http://localhost:8080/v1",
-		ReasoningEffort: "", // empty — should use config default
-	}
-
-	if um.ReasoningEffort != "" {
-		t.Errorf("expected empty ReasoningEffort, got %q", um.ReasoningEffort)
-	}
-}
 
 func TestModelConfig_SetAndGet(t *testing.T) {
 	mc := &modelConfig{
@@ -2152,50 +2084,57 @@ func TestUserMessageToChatMessage_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestExtractPrevSummary_NoSummary(t *testing.T) {
-	messages := []types.ChatMessage{{Role: "system", Content: "you are a helper"}}
-	got := extractPrevSummary(messages)
-	if got != "" {
-		t.Errorf("expected empty string, got %q", got)
+// TestExtractPrevSummary covers picking up the earlier summary to continue from. Two rules
+// matter: only the summarization role counts (an assistant message is not a summary), and
+// the LAST one wins — resuming from a stale summary would re-summarize from the wrong point.
+func TestExtractPrevSummary(t *testing.T) {
+	cases := []struct {
+		name     string
+		messages []types.ChatMessage
+		want     string
+	}{
+		{
+			name:     "no summary",
+			messages: []types.ChatMessage{{Role: "system", Content: "you are a helper"}},
+			want:     "",
+		},
+		{
+			name: "assistant messages are not summaries",
+			messages: []types.ChatMessage{
+				{Role: "system", Content: "you are a helper"},
+				{Role: "assistant", Content: "not a summary"},
+			},
+			want: "",
+		},
+		{
+			name: "picks the summary",
+			messages: []types.ChatMessage{
+				{Role: "system", Content: "you are a helper"},
+				{Role: "user", Content: "hello"},
+				{Role: "assistant", Content: "hi there"},
+				{Role: "summarization", Content: "The user asked about Go generics"},
+				{Role: "user", Content: "tell me more"},
+			},
+			want: "The user asked about Go generics",
+		},
+		{
+			name: "most recent summary wins",
+			messages: []types.ChatMessage{
+				{Role: "system", Content: "you are a helper"},
+				{Role: "summarization", Content: "first summary"},
+				{Role: "user", Content: "more stuff"},
+				{Role: "summarization", Content: "second summary"},
+			},
+			want: "second summary",
+		},
 	}
-}
 
-func TestExtractPrevSummary_WithSummary(t *testing.T) {
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "you are a helper"},
-		{Role: "user", Content: "hello"},
-		{Role: "assistant", Content: "hi there"},
-		{Role: "summarization", Content: "The user asked about Go generics"},
-		{Role: "user", Content: "tell me more"},
-	}
-	got := extractPrevSummary(messages)
-	if got != "The user asked about Go generics" {
-		t.Errorf("expected 'The user asked about Go generics', got %q", got)
-	}
-}
-
-func TestExtractPrevSummary_MultipleSummaries(t *testing.T) {
-	// Should return the most recent summary.
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "you are a helper"},
-		{Role: "summarization", Content: "first summary"},
-		{Role: "user", Content: "more stuff"},
-		{Role: "summarization", Content: "second summary"},
-	}
-	got := extractPrevSummary(messages)
-	if got != "second summary" {
-		t.Errorf("expected 'second summary', got %q", got)
-	}
-}
-
-func TestExtractPrevSummary_OnlyAssistantMessages(t *testing.T) {
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "you are a helper"},
-		{Role: "assistant", Content: "not a summary"},
-	}
-	got := extractPrevSummary(messages)
-	if got != "" {
-		t.Errorf("expected empty string for no summarization role, got %q", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractPrevSummary(tc.messages); got != tc.want {
+				t.Errorf("extractPrevSummary() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -2505,50 +2444,37 @@ func TestBuildLLMContext_FiltersOnlyTaskCompleteToolCall(t *testing.T) {
 
 // --- shouldSummarize Tests ---
 
-func TestShouldSummarize_BelowThreshold(t *testing.T) {
-	if shouldSummarize(100, 32768, 90) {
-		t.Error("usage below 90% of window should not trigger summarization")
+// TestShouldSummarize covers the auto-summarization trigger. The boundary rows are the
+// point: the threshold is inclusive (>=), so exactly 90% must fire, and an unusable window
+// or threshold must never fire OR silently disable itself — an out-of-range threshold falls
+// back to the 90% default rather than being trusted.
+func TestShouldSummarize(t *testing.T) {
+	cases := []struct {
+		name      string
+		tokens    int
+		window    int
+		threshold int
+		want      bool
+	}{
+		{name: "below threshold", tokens: 100, window: 32768, threshold: 90, want: false},
+		{name: "exactly at threshold", tokens: 90, window: 100, threshold: 90, want: true},
+		{name: "above threshold", tokens: 92, window: 100, threshold: 90, want: true},
+		{name: "zero window never triggers", tokens: 100, window: 0, threshold: 90, want: false},
+		{name: "custom threshold, above", tokens: 60, window: 100, threshold: 50, want: true},
+		{name: "custom threshold, below", tokens: 40, window: 100, threshold: 50, want: false},
+		// An unset (0) or out-of-range threshold falls back to the 90% default, so the 90%
+		// sample must still trigger.
+		{name: "unset threshold uses the default", tokens: 90, window: 100, threshold: 0, want: true},
+		{name: "out-of-range threshold uses the default", tokens: 90, window: 100, threshold: 150, want: true},
 	}
-}
 
-func TestShouldSummarize_AboveThreshold(t *testing.T) {
-	// 92% of a 100-token window (>= 90) should trigger.
-	if !shouldSummarize(92, 100, 90) {
-		t.Error("usage at 92% of window should trigger summarization")
-	}
-}
-
-func TestShouldSummarize_AtThreshold(t *testing.T) {
-	// Exactly 90% of a 100-token window should trigger (>= 90).
-	if !shouldSummarize(90, 100, 90) {
-		t.Error("usage at 90% of window should trigger summarization")
-	}
-}
-
-func TestShouldSummarize_ZeroWindow(t *testing.T) {
-	if shouldSummarize(100, 0, 90) {
-		t.Error("zero context window should never trigger summarization")
-	}
-}
-
-func TestShouldSummarize_CustomThreshold(t *testing.T) {
-	// With a 50% threshold, 60% of the window should trigger.
-	if !shouldSummarize(60, 100, 50) {
-		t.Error("usage at 60% of window with 50% threshold should trigger summarization")
-	}
-	// But below the custom threshold it should not trigger.
-	if shouldSummarize(40, 100, 50) {
-		t.Error("usage at 40% of window with 50% threshold should not trigger summarization")
-	}
-}
-
-func TestShouldSummarize_InvalidThresholdFallsBackToDefault(t *testing.T) {
-	// Invalid thresholds fall back to the 90% default.
-	if !shouldSummarize(90, 100, 0) {
-		t.Error("usage at 90% of window with invalid threshold should trigger summarization")
-	}
-	if !shouldSummarize(90, 100, 150) {
-		t.Error("usage at 90% of window with out-of-range threshold should trigger summarization")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldSummarize(tc.tokens, tc.window, tc.threshold); got != tc.want {
+				t.Errorf("shouldSummarize(%d tokens, %d window, %d%%) = %v, want %v",
+					tc.tokens, tc.window, tc.threshold, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -3016,68 +2942,6 @@ func TestRawArgsDelta_Update(t *testing.T) {
 	}
 }
 
-func TestRawArgsDelta_Accumulation(t *testing.T) {
-	// Simulate frontend accumulation of deltas
-	chunks := []string{
-		`{"command":"ls`, // chunk 1 (new, full)
-		` -la`,           // chunk 2 (delta)
-		` /home/user`,    // chunk 3 (delta)
-		`/projects"}`,    // chunk 4 (delta)
-	}
-
-	// Simulate: first chunk is full raw_args, subsequent are deltas
-	var accumulated string
-	for i, chunk := range chunks {
-		if i == 0 {
-			accumulated = chunk // first = full raw_args
-		} else {
-			accumulated += chunk // subsequent = raw_args_delta appended
-		}
-	}
-
-	expected := `{"command":"ls -la /home/user/projects"}`
-	if accumulated != expected {
-		t.Errorf("expected accumulated=%q, got %q", expected, accumulated)
-	}
-}
-
-func TestRawArgsDelta_BandwidthSavings(t *testing.T) {
-	// Verify that delta approach saves bandwidth for large write_file calls
-	// Simulate a write_file with 10KB of content
-	largeContent := strings.Repeat("x", 10000)
-	fullArgs := `{"path":"./file.txt","content":"` + largeContent + `"}`
-
-	// Simulate 5 streaming updates (each adding 2000 chars)
-	var totalSent int
-	prevLen := 0
-	chunkSize := 2000
-
-	// First update: full raw_args
-	totalSent += len(fullArgs[0:chunkSize])
-	prevLen = chunkSize
-
-	// Subsequent updates: raw_args_delta only
-	for prevLen < len(fullArgs) {
-		nextLen := prevLen + chunkSize
-		if nextLen > len(fullArgs) {
-			nextLen = len(fullArgs)
-		}
-		totalSent += len(fullArgs[prevLen:nextLen]) // delta only
-		prevLen = nextLen
-	}
-
-	// Old approach: would send full args on every update
-	numUpdates := (len(fullArgs) + chunkSize - 1) / chunkSize
-	oldTotal := len(fullArgs) * numUpdates
-
-	// Delta approach should save significant bandwidth
-	savings := float64(oldTotal-totalSent) / float64(oldTotal) * 100
-	if savings < 50 {
-		t.Errorf("expected >50%% bandwidth savings, got %.1f%%", savings)
-	}
-	t.Logf("bandwidth savings: %.1f%% (old=%d bytes, new=%d bytes)", savings, oldTotal, totalSent)
-}
-
 // --- streamFlusher Tests ---
 
 func TestStreamFlusher_TokenBatching(t *testing.T) {
@@ -3473,130 +3337,6 @@ func TestFormatChatHistory_ReasoningOnlyWithToolCalls(t *testing.T) {
 }
 
 // --- removeDuplicateUserMessage Tests ---
-
-func TestRemoveDuplicateUserMessage_PlainText(t *testing.T) {
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "prompt"},
-		{Role: "user", Content: "hello"},
-		{Role: "user", Content: "hello"}, // duplicate
-		{Role: "assistant", Content: "hi"},
-	}
-
-	result := removeDuplicateUserMessage(messages)
-
-	// Should have removed one of the duplicate user messages
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(result))
-	}
-	// The newer user message (index 2 in original) should be kept
-	if result[1].Role != "user" || result[1].Content != "hello" {
-		t.Errorf("expected user 'hello', got role=%s content=%s", result[1].Role, result[1].Content)
-	}
-}
-
-func TestRemoveDuplicateUserMessage_DifferentContent(t *testing.T) {
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "prompt"},
-		{Role: "user", Content: "hello"},
-		{Role: "user", Content: "world"}, // different
-		{Role: "assistant", Content: "hi"},
-	}
-
-	result := removeDuplicateUserMessage(messages)
-
-	// Should NOT remove anything
-	if len(result) != 4 {
-		t.Fatalf("expected 4 messages (no duplicates), got %d", len(result))
-	}
-}
-
-func TestRemoveDuplicateUserMessage_ContentPartsSameText(t *testing.T) {
-	imgSource := &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}
-
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "prompt"},
-		{Role: "user", ContentParts: []types.ContentPart{
-			{Type: "text", Text: "check this"},
-			{Type: "image", ImageSource: imgSource},
-		}},
-		{Role: "user", ContentParts: []types.ContentPart{
-			{Type: "text", Text: "check this"},
-			{Type: "image", ImageSource: imgSource},
-		}}, // duplicate with same parts
-	}
-
-	result := removeDuplicateUserMessage(messages)
-
-	// Should have removed one duplicate
-	if len(result) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(result))
-	}
-}
-
-func TestRemoveDuplicateUserMessage_ContentPartsDifferentText(t *testing.T) {
-	imgSource := &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}
-
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "prompt"},
-		{Role: "user", ContentParts: []types.ContentPart{
-			{Type: "text", Text: "check this"},
-			{Type: "image", ImageSource: imgSource},
-		}},
-		{Role: "user", ContentParts: []types.ContentPart{
-			{Type: "text", Text: "check that"}, // different text
-			{Type: "image", ImageSource: imgSource},
-		}},
-	}
-
-	result := removeDuplicateUserMessage(messages)
-
-	// Should NOT remove — text differs
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages (different text), got %d", len(result))
-	}
-}
-
-func TestRemoveDuplicateUserMessage_ContentPartsDifferentCount(t *testing.T) {
-	imgSource := &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}
-
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "prompt"},
-		{Role: "user", ContentParts: []types.ContentPart{
-			{Type: "text", Text: "check this"},
-		}},
-		{Role: "user", ContentParts: []types.ContentPart{
-			{Type: "text", Text: "check this"},
-			{Type: "image", ImageSource: imgSource}, // has image, other doesn't
-		}},
-	}
-
-	result := removeDuplicateUserMessage(messages)
-
-	// Should NOT remove — different part counts
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages (different part counts), got %d", len(result))
-	}
-}
-
-func TestRemoveDuplicateUserMessage_MixedPlainAndContentParts(t *testing.T) {
-	imgSource := &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}
-
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "prompt"},
-		{Role: "user", Content: "hello"}, // plain text
-		{Role: "user", ContentParts: []types.ContentPart{
-			{Type: "text", Text: "hello"},
-			{Type: "image", ImageSource: imgSource},
-		}}, // has ContentParts
-	}
-
-	result := removeDuplicateUserMessage(messages)
-
-	// Should NOT remove — one is plain, one has ContentParts
-	if len(result) != 3 {
-		t.Fatalf("expected 3 messages (mixed types), got %d", len(result))
-	}
-}
 
 func TestBuildContextReplay_Empty(t *testing.T) {
 	result := buildContextReplay(nil)
