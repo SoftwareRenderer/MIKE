@@ -2467,6 +2467,11 @@ func (te *TaskExecutor) formatLSPDiagnostics(filePath string, diagnostics []LSPD
 }
 
 func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, taskID, filePath string) string {
+	// Bound this file's whole pass. Derived from the caller's ctx, so stopping the task
+	// ends it; given a deadline, so a silent language server cannot park this goroutine.
+	ctx, cancel := context.WithTimeout(ctx, lspDiagnosticsBudget)
+	defer cancel()
+
 	// Normalize sandbox path to relative path (e.g., /home/sandbox/temp/lsp_test.go -> lsp_test.go)
 	relPath := normalizePath(projectID, filePath)
 	if te.lspMgr == nil {
@@ -2491,7 +2496,7 @@ func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, ta
 		log.Printf("[lsp-diag] task=%s worktree path error: %v", taskID, err)
 		return ""
 	}
-	proc, err := te.lspMgr.GetOrCreate(worktreePath, lang, cfg)
+	proc, err := te.lspMgr.GetOrCreate(ctx, worktreePath, lang, cfg)
 	if err != nil {
 		log.Printf("[lsp-diag] task=%s GetOrCreate failed: %v", taskID, err)
 		return ""

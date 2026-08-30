@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -418,4 +419,165 @@ func waitForFrame(t *testing.T, ch <-chan *protocol.Frame, label string) *protoc
 		t.Fatalf("timeout waiting for %s", label)
 	}
 	return nil // unreachable
+}
+
+// withShortLSPRoundTrip shrinks the client-side LSP floor for one test.
+func withShortLSPRoundTrip(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := maxLSPRoundTrip
+	maxLSPRoundTrip = d
+	t.Cleanup(func() { maxLSPRoundTrip = prev })
+}
+
+// wedgedBridge returns a client whose peer neither reads nor writes, so no send can finish.
+func wedgedBridge(t *testing.T) *Client {
+	t.Helper()
+	unread, clientWrite := io.Pipe() // never drained
+	bridgeRead, _ := io.Pipe()       // never written
+	t.Cleanup(func() {
+		_ = unread.Close()
+		_ = bridgeRead.Close()
+	})
+	return NewClient(clientWrite, bridgeRead)
+}
+
+// TestLSPNotifyAbandonsWedgedWrite is the regression test: LSPNotify used to ignore its
+// context, so a bridge that stopped reading parked the task's executor goroutine forever.
+func TestLSPNotifyAbandonsWedgedWrite(t *testing.T) {
+	withShortLSPRoundTrip(t, 50*time.Millisecond)
+	client := wedgedBridge(t)
+
+	raw := json.RawMessage(`{"jsonrpc":"2.0","method":"textDocument/didOpen"}`)
+	call := make(chan error, 1)
+	go func() { call <- client.LSPNotify(context.Background(), raw) }()
+
+	var err error
+	select {
+	case err = <-call:
+	case <-time.After(5 * time.Second):
+		t.Fatal("LSPNotify never returned: a wedged bridge parks the caller forever")
+	}
+
+	if !errors.Is(err, ErrWriteStalled) {
+		t.Errorf("LSPNotify() error = %v, want it to wrap ErrWriteStalled", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("LSPNotify() error = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+	// It must not close itself: see writeFrameCtx.
+	if !client.IsAlive() {
+		t.Error("IsAlive() = false after a stalled write; the client must not close itself")
+	}
+}
+
+// TestLSPNotifyCancellationKeepsClientUsable: a caller walking away is not a broken bridge.
+func TestLSPNotifyCancellationKeepsClientUsable(t *testing.T) {
+	prev := maxLSPRoundTrip
+	maxLSPRoundTrip = time.Hour // so only cancellation can end this
+	t.Cleanup(func() { maxLSPRoundTrip = prev })
+	client := wedgedBridge(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	call := make(chan error, 1)
+	go func() { call <- client.LSPNotify(ctx, json.RawMessage(`{"jsonrpc":"2.0","method":"x"}`)) }()
+
+	time.Sleep(50 * time.Millisecond) // let the write get stuck
+	cancel()
+
+	var err error
+	select {
+	case err = <-call:
+	case <-time.After(5 * time.Second):
+		t.Fatal("LSPNotify ignored cancellation")
+	}
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("LSPNotify() error = %v, want context.Canceled", err)
+	}
+	if errors.Is(err, ErrWriteStalled) {
+		t.Error("a cancelled caller was reported as ErrWriteStalled; that error means the bridge stopped reading")
+	}
+	if !client.IsAlive() {
+		t.Error("IsAlive() = false after the caller cancelled; cancellation does not retire the bridge")
+	}
+}
+
+// TestLSPStartBoundedWithoutCallerDeadline: LSPStart used to take context.Background()
+// from GetOrCreate, so a bridge that accepted the request and never answered was waited
+// on forever. The client imposes its own floor now.
+func TestLSPStartBoundedWithoutCallerDeadline(t *testing.T) {
+	withShortLSPRoundTrip(t, 100*time.Millisecond)
+
+	agentRead, clientWrite := io.Pipe() // read by the peer, never answered
+	bridgeRead, bridgeWrite := io.Pipe()
+	client := NewClient(clientWrite, bridgeRead)
+	t.Cleanup(func() {
+		client.Close()
+		_ = agentRead.Close()
+		_ = bridgeWrite.Close()
+	})
+	go func() {
+		for {
+			if _, err := protocol.ReadFrame(agentRead); err != nil {
+				return
+			}
+		}
+	}()
+
+	call := make(chan error, 1)
+	go func() {
+		call <- client.LSPStart(context.Background(), "typescript-language-server", nil)
+	}()
+
+	var err error
+	select {
+	case err = <-call:
+	case <-time.After(5 * time.Second):
+		t.Fatal("LSPStart(context.Background()) waited forever on a silent bridge")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("LSPStart() error = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+}
+
+// TestLSPCallCtx: a tighter caller deadline survives, a looser or absent one gets the floor.
+func TestLSPCallCtx(t *testing.T) {
+	withShortLSPRoundTrip(t, time.Minute)
+
+	t.Run("tighter caller deadline wins", func(t *testing.T) {
+		ctx, cancel := lspCallCtx(deadlineCtx(t, 10*time.Millisecond))
+		defer cancel()
+		dl, ok := ctx.Deadline()
+		if !ok || time.Until(dl) > 50*time.Millisecond {
+			t.Errorf("deadline = %v (ok=%v), want the caller's ~10ms", time.Until(dl), ok)
+		}
+	})
+
+	t.Run("no deadline gets the floor", func(t *testing.T) {
+		ctx, cancel := lspCallCtx(context.Background())
+		defer cancel()
+		dl, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("no deadline; an unbounded caller could hang forever")
+		}
+		if left := time.Until(dl); left > time.Minute || left < 500*time.Millisecond {
+			t.Errorf("deadline = %v, want ~%v", left, maxLSPRoundTrip)
+		}
+	})
+
+	t.Run("looser caller deadline is pulled in", func(t *testing.T) {
+		ctx, cancel := lspCallCtx(deadlineCtx(t, time.Hour))
+		defer cancel()
+		if dl, _ := ctx.Deadline(); time.Until(dl) > time.Minute {
+			t.Errorf("deadline = %v, want the %v floor", time.Until(dl), maxLSPRoundTrip)
+		}
+	})
+}
+
+// deadlineCtx returns a context with a deadline, cancelled on cleanup.
+func deadlineCtx(t *testing.T, d time.Duration) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	t.Cleanup(cancel)
+	return ctx
 }
