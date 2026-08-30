@@ -816,6 +816,11 @@ func TestKeyboardShortcuts_RoundTrip(t *testing.T) {
 		{"toggle_fullscreen", "shift+alt+f",
 			func(ks *types.KeyboardShortcuts, v *string) { ks.ToggleFullscreen = v },
 			func(ks *types.KeyboardShortcuts) *string { return ks.ToggleFullscreen }},
+		// A mouse binding (pseudo-key "click") rides the same column and the same
+		// normalization as the keyboard ones.
+		{"multi_select_click", "shift+click",
+			func(ks *types.KeyboardShortcuts, v *string) { ks.MultiSelectClick = v },
+			func(ks *types.KeyboardShortcuts) *string { return ks.MultiSelectClick }},
 	}
 
 	for _, b := range bindings {

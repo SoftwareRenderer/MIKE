@@ -84,7 +84,8 @@ function collectNavColumns(): BoardColumnRef[] {
     const cols: BoardColumnRef[] = [];
     const listNav = document.querySelector('nav.project-list');
     if (listNav) {
-        const items = Array.from(listNav.querySelectorAll<HTMLElement>('button.project-item'));
+        // Project rows are anchors, not buttons — select them by class.
+        const items = Array.from(listNav.querySelectorAll<HTMLElement>('.project-item'));
         if (items.length) cols.push({ el: listNav, cards: items, isProjects: true });
     }
     const board = document.querySelector('.board');
@@ -110,8 +111,8 @@ export function boardEdgeCard(edge: 'first' | 'last'): HTMLElement | null {
 /** Entering the project list always lands on the active project (fallback: first). */
 function activeProjectItem(): HTMLElement | null {
     return (
-        document.querySelector<HTMLElement>('nav.project-list .project-item-wrapper.active button.project-item') ??
-        document.querySelector<HTMLElement>('nav.project-list button.project-item')
+        document.querySelector<HTMLElement>('nav.project-list .project-item-wrapper.active .project-item') ??
+        document.querySelector<HTMLElement>('nav.project-list .project-item')
     );
 }
 

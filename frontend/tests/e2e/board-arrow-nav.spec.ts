@@ -71,7 +71,7 @@ test.describe.serial('Board arrow-key navigation', () => {
     await page.waitForSelector('.board .column', { timeout: 10000 });
 
     // Only one project at this point — the active project item
-    const projItem = page.locator('nav.project-list button.project-item').first();
+    const projItem = page.locator('nav.project-list .project-item').first();
     const firstCol = page.locator('.board .column');
 
     await firstCol.nth(0).locator('.task-wrapper > .card').first().focus();
@@ -125,8 +125,8 @@ test.describe.serial('Board arrow-key navigation', () => {
     });
     if (!res.ok) throw new Error(`create project: ${JSON.stringify(res.data)}`);
     await page.reload();
-    const emptyItem = page.locator('nav.project-list button.project-item', { hasText: 'kanban-test-repo-2' });
-    const mainItem = page.locator('nav.project-list button.project-item', { hasText: 'test-project' });
+    const emptyItem = page.locator('nav.project-list .project-item', { hasText: 'kanban-test-repo-2' });
+    const mainItem = page.locator('nav.project-list .project-item', { hasText: 'test-project' });
     const emptyWrap = page.locator('nav.project-list .project-item-wrapper', { hasText: 'kanban-test-repo-2' });
     const mainWrap = page.locator('nav.project-list .project-item-wrapper', { hasText: 'test-project' });
     await expect(emptyItem).toBeVisible({ timeout: 10000 });
@@ -156,7 +156,7 @@ test.describe.serial('Board arrow-key navigation', () => {
   });
 
   test('Right from a project focuses the board\'s first card', async ({ page }) => {
-    const mainItem = page.locator('nav.project-list button.project-item', { hasText: 'test-project' });
+    const mainItem = page.locator('nav.project-list .project-item', { hasText: 'test-project' });
     await mainItem.click();
     await expect(page.locator('.board .card').first()).toBeVisible({ timeout: 10000 });
     await mainItem.focus();

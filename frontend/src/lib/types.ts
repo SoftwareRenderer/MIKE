@@ -244,6 +244,11 @@ export interface KeyboardShortcuts {
     start_task?: string;
     /** Maximizes or minimizes the focused area (chat, diff, editor, terminal). */
     toggle_fullscreen?: string;
+    /**
+     * Modifier+Click that toggles task-card multi-select (e.g. "meta+click").
+     * Unbound modifier clicks reach the browser, so they open the card's link.
+     */
+    multi_select_click?: string;
     /** Hide the keycap hints on shortcut buttons (tooltips stay). */
     hide_hints?: boolean;
 }

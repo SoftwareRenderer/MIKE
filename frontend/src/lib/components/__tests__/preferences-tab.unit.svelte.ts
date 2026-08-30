@@ -15,10 +15,10 @@ function mockUserAgent(ua: string) {
 }
 
 /** Render the tab with per-row scoped queries (rows share class/aria names). */
-function renderTab(props: { createTaskKey?: string; createTaskSubmitKey?: string; openTerminalKey?: string; startTaskKey?: string; toggleFullscreenKey?: string } = {}) {
+function renderTab(props: { createTaskKey?: string; createTaskSubmitKey?: string; openTerminalKey?: string; startTaskKey?: string; toggleFullscreenKey?: string; multiSelectClickKey?: string } = {}) {
     const onDirty = vi.fn();
     const utils = render(PreferencesTab, {
-        props: { createTaskKey: undefined, createTaskSubmitKey: undefined, openTerminalKey: undefined, startTaskKey: undefined, toggleFullscreenKey: undefined, onDirty, ...props },
+        props: { createTaskKey: undefined, createTaskSubmitKey: undefined, openTerminalKey: undefined, startTaskKey: undefined, toggleFullscreenKey: undefined, multiSelectClickKey: undefined, onDirty, ...props },
     });
     const row = (id: string) => within(utils.container.querySelector(`[data-shortcut="${id}"]`)!);
     return {
@@ -29,6 +29,7 @@ function renderTab(props: { createTaskKey?: string; createTaskSubmitKey?: string
         terminal: row('open_terminal'),
         start: row('start_task'),
         fullscreen: row('toggle_fullscreen'),
+        multiSelect: row('multi_select_click'),
     };
 }
 
@@ -448,5 +449,94 @@ describe('PreferencesTab board sort toggle', () => {
         const toggle = container.querySelector(TOGGLE) as HTMLButtonElement;
         const desc = container.querySelector(`#${toggle.getAttribute('aria-describedby')!}`);
         expect(desc?.textContent).toMatch(/least recently moved/i);
+    });
+});
+
+describe('PreferencesTab multi-select click row', () => {
+    const chipOf = (row: ReturnType<typeof renderTab>['multiSelect']) =>
+        row.getByRole('button', { name: /multi-select cards shortcut/i });
+
+    it('shows the platform default: Cmd+Click on Mac, Ctrl+Click elsewhere', () => {
+        mockUserAgent(MAC_UA);
+        expect(chipOf(renderTab().multiSelect).textContent).toBe('Cmd+Click');
+        cleanup();
+        mockUserAgent(WIN_UA);
+        expect(chipOf(renderTab().multiSelect).textContent).toBe('Ctrl+Click');
+    });
+
+    it('shows a stored binding formatted', () => {
+        const { multiSelect } = renderTab({ multiSelectClickKey: 'shift+click' });
+        expect(chipOf(multiSelect).textContent).toBe('Shift+Click');
+    });
+
+    it('captures a modifier+click and assigns it to this row only', async () => {
+        const { multiSelect, create, onDirty } = renderTab();
+        const chip = chipOf(multiSelect);
+        await fireEvent.click(chip);
+        expect(chip.textContent).toBe('Now modifier+click...');
+        await fireEvent.mouseDown(window, { ctrlKey: true });
+        expect(chip.textContent).toBe('Ctrl+Click');
+        expect(onDirty).toHaveBeenCalledTimes(1);
+        // Keyboard rows are untouched by a mouse capture.
+        expect(create.getByRole('button', { name: /create task shortcut/i }).textContent).toBe('C');
+    });
+
+    it('captures a Cmd+Shift+Click combo in canonical order', async () => {
+        const { multiSelect } = renderTab();
+        const chip = chipOf(multiSelect);
+        await fireEvent.click(chip);
+        await fireEvent.mouseDown(window, { shiftKey: true, metaKey: true });
+        expect(chip.textContent).toBe('Cmd+Shift+Click');
+    });
+
+    it('rejects an unmodified click — a bare click stays the card\u2019s own action', async () => {
+        const { multiSelect, getByText, onDirty } = renderTab();
+        const chip = chipOf(multiSelect);
+        await fireEvent.click(chip);
+        await fireEvent.mouseDown(window, { button: 0 });
+        expect(chip.textContent).toBe('Now modifier+click...');
+        expect(getByText(/invalid combo/i)).toBeTruthy();
+        expect(onDirty).not.toHaveBeenCalled();
+    });
+
+    it('ignores non-primary buttons (middle click belongs to the browser)', async () => {
+        const { multiSelect, onDirty } = renderTab();
+        await fireEvent.click(chipOf(multiSelect));
+        await fireEvent.mouseDown(window, { button: 1, ctrlKey: true });
+        expect(onDirty).not.toHaveBeenCalled();
+    });
+
+    it('rejects keypresses while capturing a mouse combo', async () => {
+        const { multiSelect, getByText, onDirty } = renderTab();
+        const chip = chipOf(multiSelect);
+        await fireEvent.click(chip);
+        await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+        expect(chip.textContent).toBe('Now modifier+click...');
+        expect(getByText(/invalid combo/i)).toBeTruthy();
+        expect(onDirty).not.toHaveBeenCalled();
+    });
+
+    it('stays clickable: Escape and a second chip click cancel capture', async () => {
+        const { multiSelect } = renderTab();
+        const chip = chipOf(multiSelect);
+        await fireEvent.click(chip);
+        await fireEvent.keyDown(window, { key: 'Escape' });
+        expect(chip.textContent).not.toBe('Now modifier+click...');
+        await fireEvent.click(chip);
+        expect(chip.textContent).toBe('Now modifier+click...');
+        // Clicking the chip itself while capturing cancels instead of binding.
+        await fireEvent.mouseDown(chip);
+        await fireEvent.click(chip);
+        expect(chip.textContent).not.toBe('Now modifier+click...');
+    });
+
+    it('clears (disables) and resets to the platform default', async () => {
+        mockUserAgent(MAC_UA);
+        const { multiSelect, onDirty } = renderTab({ multiSelectClickKey: 'shift+click' });
+        await fireEvent.click(multiSelect.getByRole('button', { name: 'Clear shortcut' }));
+        expect(chipOf(multiSelect).textContent).toBe('None');
+        await fireEvent.click(multiSelect.getByRole('button', { name: 'Reset to default' }));
+        expect(chipOf(multiSelect).textContent).toBe('Cmd+Click');
+        expect(onDirty).toHaveBeenCalledTimes(2);
     });
 });
