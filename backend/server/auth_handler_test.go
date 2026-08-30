@@ -45,39 +45,67 @@ func TestAuthLoginValidPassword(t *testing.T) {
 	}
 }
 
-func TestAuthLoginInvalidPassword(t *testing.T) {
-	s := testServer(t)
-
-	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": "wrong-password",
-	})
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d; want 401; body: %s", rr.Code, rr.Body.String())
+// TestAuthRequestRejections is the auth endpoint's rejection matrix: one row per way a
+// request may be turned away, differing only in method, path, body and the status the
+// caller gets back. Each row gets its own server so the login rate-limit budget (per IP
+// per minute) can't be exhausted by an earlier row and report a 429 as a wrong verdict.
+func TestAuthRequestRejections(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+		want   int
+	}{
+		{
+			name:   "login with the wrong password",
+			method: http.MethodPost,
+			path:   "/api/auth/login",
+			body:   map[string]string{"password": "wrong-password"},
+			want:   http.StatusUnauthorized,
+		},
+		{
+			name:   "login without a password field",
+			method: http.MethodPost,
+			path:   "/api/auth/login",
+			body:   map[string]string{},
+			want:   http.StatusBadRequest,
+		},
+		{
+			// Only POST /api/auth/login is public, so middleware gates GET before the handler runs.
+			name:   "GET on the login endpoint",
+			method: http.MethodGet,
+			path:   "/api/auth/login",
+			want:   http.StatusUnauthorized,
+		},
+		{
+			name:   "logout while unauthenticated",
+			method: http.MethodPost,
+			path:   "/api/auth/logout",
+			want:   http.StatusUnauthorized,
+		},
+		{
+			name:   "GET on the logout endpoint",
+			method: http.MethodGet,
+			path:   "/api/auth/logout",
+			want:   http.StatusUnauthorized,
+		},
+		{
+			name:   "POST on the session endpoint",
+			method: http.MethodPost,
+			path:   "/api/auth/session",
+			want:   http.StatusUnauthorized,
+		},
 	}
-}
 
-func TestAuthLoginMissingPassword(t *testing.T) {
-	s := testServer(t)
-
-	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{})
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d; want 400; body: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestAuthLoginWrongMethod(t *testing.T) {
-	s := testServer(t)
-
-	// GET /api/auth/login is not a public path+method, so middleware blocks it
-	req := testRequest(http.MethodGet, "/api/auth/login", nil)
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d; want 401; body: %s", rr.Code, rr.Body.String())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+			rr := testResponse(t, s, testRequest(tc.method, tc.path, tc.body))
+			if rr.Code != tc.want {
+				t.Errorf("status = %d, want %d; body: %s", rr.Code, tc.want, rr.Body.String())
+			}
+		})
 	}
 }
 
@@ -96,7 +124,6 @@ func TestAuthSessionNotAuthenticated(t *testing.T) {
 		t.Error("expected authenticated = false")
 	}
 }
-
 func TestAuthSessionAuthenticated(t *testing.T) {
 	s := testServer(t)
 
@@ -132,17 +159,6 @@ func TestAuthSessionAuthenticated(t *testing.T) {
 	// CSRF token should be present in session response
 	if body["csrf_token"] == nil || body["csrf_token"] == "" {
 		t.Error("expected csrf_token in session response")
-	}
-}
-
-func TestAuthLogoutNotAuthenticated(t *testing.T) {
-	s := testServer(t)
-
-	req := testRequest(http.MethodPost, "/api/auth/logout", nil)
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d; want 401; body: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -182,29 +198,5 @@ func TestAuthLogoutSuccess(t *testing.T) {
 	body := mustJSON[map[string]bool](t, rr.Body)
 	if body["authenticated"] {
 		t.Error("expected authenticated = false after logout")
-	}
-}
-
-func TestAuthLogoutWrongMethod(t *testing.T) {
-	s := testServer(t)
-
-	// GET /api/auth/logout requires auth (only POST is the handler, and it requires session)
-	req := testRequest(http.MethodGet, "/api/auth/logout", nil)
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d; want 401; body: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestAuthSessionWrongMethod(t *testing.T) {
-	s := testServer(t)
-
-	// POST /api/auth/session is not a public path+method, so middleware blocks it
-	req := testRequest(http.MethodPost, "/api/auth/session", nil)
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d; want 401; body: %s", rr.Code, rr.Body.String())
 	}
 }

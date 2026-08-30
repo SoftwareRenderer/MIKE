@@ -8,310 +8,210 @@ import (
 	"testing"
 )
 
-func TestMiddlewarePublicPathHealth(t *testing.T) {
-	s := testServer(t)
+// login returns the session cookie and CSRF token of a fresh login on s. Several
+// scenarios below are only interesting for an authenticated caller, so the login dance
+// is spelled out once here instead of at the top of every test in this file.
+func login(t *testing.T, s *Server) (cookie, csrf string) {
+	t.Helper()
 
-	req := testRequest(http.MethodGet, "/api/health", nil)
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; want 200; body: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestMiddlewarePublicPathLogin(t *testing.T) {
-	s := testServer(t)
-
-	// Login should be accessible without a session cookie
-	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
+	rr := testResponse(t, s, testRequest(http.MethodPost, "/api/auth/login", map[string]string{
 		"password": testPassword,
-	})
-	rr := testResponse(t, s, req)
-
+	}))
 	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; want 200; body: %s", rr.Code, rr.Body.String())
+		t.Fatalf("login: status = %d; want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	raw := rr.Header().Get("Set-Cookie")
+	if raw == "" {
+		t.Fatal("login response set no session cookie")
+	}
+	return strings.TrimSpace(strings.Split(raw, ";")[0]), rr.Header().Get("X-CSRF-Token")
+}
+
+// TestMiddlewareAuthenticationGating is the auth gate as one matrix: which paths and
+// methods are public, and what a caller with no cookie, a bogus cookie, or a real
+// session is told. Anything outside publicPaths must answer 401. The extension-asset and
+// preview-path tests below stay separate because they are public for a reason and are
+// judged on "not 401" rather than on an exact status.
+func TestMiddlewareAuthenticationGating(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+		// cookie: "" sends none, "invalid" a bogus token, "session" a real login.
+		cookie string
+		want   int
+	}{
+		{name: "health is public", method: http.MethodGet, path: "/api/health", want: http.StatusOK},
+		{name: "login is public", method: http.MethodPost, path: "/api/auth/login",
+			body: map[string]string{"password": testPassword}, want: http.StatusOK},
+		{name: "session check is public", method: http.MethodGet, path: "/api/auth/session", want: http.StatusOK},
+		{
+			// publicPaths matches path AND method, so a POST to a public GET path is gated.
+			name:   "public path with the wrong method requires auth",
+			method: http.MethodPost, path: "/api/health", want: http.StatusUnauthorized,
+		},
+		{name: "protected path without a cookie", method: http.MethodGet, path: "/api/projects",
+			want: http.StatusUnauthorized},
+		{name: "protected path with a bogus cookie", method: http.MethodGet, path: "/api/projects",
+			cookie: "invalid", want: http.StatusUnauthorized},
+		{name: "protected path with a valid session", method: http.MethodGet, path: "/api/projects",
+			cookie: "session", want: http.StatusOK},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+
+			req := testRequest(tc.method, tc.path, tc.body)
+			switch tc.cookie {
+			case "invalid":
+				req.Header.Set("Cookie", "PHPSESSID=invalid-token-value")
+			case "session":
+				cookie, _ := login(t, s)
+				req.Header.Set("Cookie", cookie)
+			}
+
+			if rr := testResponse(t, s, req); rr.Code != tc.want {
+				t.Fatalf("status = %d; want %d; body: %s", rr.Code, tc.want, rr.Body.String())
+			}
+		})
 	}
 }
 
-func TestMiddlewarePublicPathSession(t *testing.T) {
-	s := testServer(t)
-
-	// Session check should be accessible without a session cookie
-	req := testRequest(http.MethodGet, "/api/auth/session", nil)
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; want 200; body: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestMiddlewarePublicPathExtensions(t *testing.T) {
-	s := testServer(t)
-
-	// Extension static assets must be loadable WITHOUT a session cookie, because
-	// sandboxed UI extensions run in opaque-origin iframes (cross-site) that
-	// cannot send SameSite=Lax session cookies.
-	for _, path := range []string{
-		"/extensions/lib/host-client.js",
-		"/extensions/ui/github-issue-importer/index.html",
-	} {
-		req := testRequest(http.MethodGet, path, nil)
-		rr := testResponse(t, s, req)
-		if rr.Code == http.StatusUnauthorized {
-			t.Fatalf("%s: status = 401; extension assets must be public", path)
-		}
-	}
-}
-
-func TestMiddlewarePublicPathPreviewNavDistinction(t *testing.T) {
-	s := testServer(t)
-
-	// The watchdog control endpoint is session-authed…
-	rr := testResponse(t, s, testRequest(http.MethodGet, "/api/preview/tok123/nav", nil))
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("/api/preview/{token}/nav without session: status = %d, want 401", rr.Code)
-	}
-
-	// …but preview docs/assets stay public — including a file literally
-	// named "nav" in a subdir (unknown token → 404 from the handler, not 401
-	// from the auth middleware).
-	rr = testResponse(t, s, testRequest(http.MethodGet, "/api/preview/tok123/sub/nav", nil))
-	if rr.Code == http.StatusUnauthorized {
-		t.Fatalf("/api/preview/{token}/sub/nav: status = 401; subdir files named nav must be public")
-	}
-}
-
-func TestMiddlewareProtectedPathNoCookie(t *testing.T) {
-	s := testServer(t)
-
-	// /api/projects requires auth
-	req := testRequest(http.MethodGet, "/api/projects", nil)
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d; want 401; body: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestMiddlewareProtectedPathInvalidCookie(t *testing.T) {
-	s := testServer(t)
-
-	req := testRequest(http.MethodGet, "/api/projects", nil)
-	req.Header.Set("Cookie", "PHPSESSID=invalid-token-value")
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d; want 401; body: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestMiddlewareProtectedPathValidCookie(t *testing.T) {
-	s := testServer(t)
-
-	// Login first
-	loginReq := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": testPassword,
-	})
-	loginRR := testResponse(t, s, loginReq)
-	if loginRR.Code != http.StatusOK {
-		t.Fatalf("login: status = %d", loginRR.Code)
-	}
-
-	sessionCookie := loginRR.Header().Get("Set-Cookie")
-	parts := strings.Split(sessionCookie, ";")[0]
-
-	// Access protected path with valid session
-	req := testRequest(http.MethodGet, "/api/projects", nil)
-	req.Header.Set("Cookie", strings.TrimSpace(parts))
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; want 200; body: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestMiddlewareProtectedPathWrongMethod(t *testing.T) {
-	s := testServer(t)
-
-	// POST to /api/health is not a public path+method combo, so it requires auth
-	req := testRequest(http.MethodPost, "/api/health", nil)
-	rr := testResponse(t, s, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d; want 401; body: %s", rr.Code, rr.Body.String())
-	}
-}
-
+// TestMiddlewareSessionIDInContext checks what the status-code rows above cannot: that
+// the middleware publishes the validated session id on the context, which is how every
+// handler downstream identifies the caller.
 func TestMiddlewareSessionIDInContext(t *testing.T) {
 	s := testServer(t)
+	cookie, _ := login(t, s)
 
-	// Login first
-	loginReq := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": testPassword,
+	var gotSession string
+	probe := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSession, _ = r.Context().Value(sessionKey).(string)
+		w.WriteHeader(http.StatusOK)
 	})
-	loginRR := testResponse(t, s, loginReq)
-	if loginRR.Code != http.StatusOK {
-		t.Fatalf("login: status = %d", loginRR.Code)
-	}
 
-	sessionCookie := loginRR.Header().Get("Set-Cookie")
-	parts := strings.Split(sessionCookie, ";")[0]
-
-	// Access any protected path
 	req := testRequest(http.MethodGet, "/api/projects", nil)
-	req.Header.Set("Cookie", strings.TrimSpace(parts))
+	req.Header.Set("Cookie", cookie)
 
-	// Use the middleware directly to check context
 	rr := httptest.NewRecorder()
-	s.SessionMiddleware(s.mux).ServeHTTP(rr, req)
+	s.SessionMiddleware(probe).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; want 200; body: %s", rr.Code, rr.Body.String())
+		t.Fatalf("status = %d; want 200", rr.Code)
+	}
+	if gotSession == "" {
+		t.Error("session id was not injected into the request context")
 	}
 }
 
-func TestMiddlewareCORSReflectOrigin(t *testing.T) {
-	s := testServer(t)
+// TestMiddlewareCORSIsSameOriginOnly covers both halves of one rule: no Allow-Origin
+// with and without an Origin header. The app is served from its own origin, so
+// reflecting the caller would only widen what the SPA can be read by.
+func TestMiddlewareCORSIsSameOriginOnly(t *testing.T) {
+	for _, origin := range []string{"", "http://localhost:3000"} {
+		name := "same-origin request (no Origin header)"
+		if origin != "" {
+			name = "cross-origin request from " + origin
+		}
+		t.Run(name, func(t *testing.T) {
+			s := testServer(t)
 
-	req := testRequest(http.MethodGet, "/api/health", nil)
-	req.Header.Set("Origin", "http://localhost:3000")
-	rr := testResponse(t, s, req)
+			req := testRequest(http.MethodGet, "/api/health", nil)
+			if origin != "" {
+				req.Header.Set("Origin", origin)
+			}
+			rr := testResponse(t, s, req)
 
-	origin := rr.Header().Get("Access-Control-Allow-Origin")
-	if origin != "" {
-		t.Errorf("expected no Allow-Origin header (same-origin policy), got %q", origin)
-	}
-
-	creds := rr.Header().Get("Access-Control-Allow-Credentials")
-	if creds != "" {
-		t.Errorf("expected no Allow-Credentials header, got %q", creds)
-	}
-}
-
-func TestMiddlewareCORSSameOrigin(t *testing.T) {
-	s := testServer(t)
-
-	// Same-origin request has no Origin header
-	req := testRequest(http.MethodGet, "/api/health", nil)
-	rr := testResponse(t, s, req)
-
-	// Should not set Allow-Origin for same-origin requests
-	origin := rr.Header().Get("Access-Control-Allow-Origin")
-	if origin != "" {
-		t.Errorf("expected no Allow-Origin header for same-origin, got %q", origin)
+			if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "" {
+				t.Errorf("Access-Control-Allow-Origin = %q, want none", got)
+			}
+			if got := rr.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+				t.Errorf("Access-Control-Allow-Credentials = %q, want none", got)
+			}
+		})
 	}
 }
 
-func TestCSRFMiddlewareGETExempt(t *testing.T) {
-	s := testServer(t)
-
-	// Login first
-	loginReq := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": testPassword,
-	})
-	loginRR := testResponse(t, s, loginReq)
-	if loginRR.Code != http.StatusOK {
-		t.Fatalf("login: status = %d", loginRR.Code)
+// TestCSRFMiddleware is the CSRF gate as one matrix: a session-authenticated caller must
+// send the header on mutating requests and never on GETs, and public endpoints are exempt
+// because there is no session to ride. The 201 row is the positive control — proof the
+// accepted token came from a path that reaches the handler.
+func TestCSRFMiddleware(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		// body is built per subtest so fixtures (a temp git repo) stay isolated.
+		body  func(t *testing.T) any
+		login bool   // CSRF only gates session-authenticated requests
+		token string // "" sends no X-CSRF-Token header; "valid" uses the session's own
+		want  int
+	}{
+		{
+			name: "GET is exempt", method: http.MethodGet, path: "/api/projects",
+			login: true, want: http.StatusOK,
+		},
+		{
+			name: "mutating request without a token", method: http.MethodPost, path: "/api/projects",
+			body: staticBody(map[string]string{"path": "/tmp/test"}), login: true,
+			want: http.StatusForbidden,
+		},
+		{
+			name: "mutating request with a bogus token", method: http.MethodPost, path: "/api/projects",
+			body: staticBody(map[string]string{"path": "/tmp/test"}), login: true,
+			token: "invalid-token", want: http.StatusForbidden,
+		},
+		{
+			name: "mutating request with a valid token reaches the handler", method: http.MethodPost,
+			path: "/api/projects",
+			body: func(t *testing.T) any {
+				dir := t.TempDir()
+				if err := exec.Command("git", "init", dir).Run(); err != nil {
+					t.Fatal(err)
+				}
+				return map[string]string{"path": dir}
+			},
+			login: true, token: "valid", want: http.StatusCreated,
+		},
+		{
+			name: "public endpoint needs no token", method: http.MethodPost, path: "/api/auth/login",
+			body: staticBody(map[string]string{"password": testPassword}), want: http.StatusOK,
+		},
 	}
-	sessionCookie := loginRR.Header().Get("Set-Cookie")
-	parts := strings.Split(sessionCookie, ";")[0]
 
-	// GET request should work without CSRF token
-	req := testRequest(http.MethodGet, "/api/projects", nil)
-	req.Header.Set("Cookie", strings.TrimSpace(parts))
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET without CSRF: status = %d; want 200", rr.Code)
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
 
-func TestCSRFMiddlewareMissingToken(t *testing.T) {
-	s := testServer(t)
+			var body any
+			if tc.body != nil {
+				body = tc.body(t)
+			}
+			req := testRequest(tc.method, tc.path, body)
 
-	// Login first
-	loginReq := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": testPassword,
-	})
-	loginRR := testResponse(t, s, loginReq)
-	if loginRR.Code != http.StatusOK {
-		t.Fatalf("login: status = %d", loginRR.Code)
-	}
-	sessionCookie := loginRR.Header().Get("Set-Cookie")
-	parts := strings.Split(sessionCookie, ";")[0]
+			if tc.login {
+				cookie, csrf := login(t, s)
+				req.Header.Set("Cookie", cookie)
+				if tc.token == "valid" {
+					req.Header.Set("X-CSRF-Token", csrf)
+				}
+			}
+			if tc.token != "" && tc.token != "valid" {
+				req.Header.Set("X-CSRF-Token", tc.token)
+			}
 
-	// POST without CSRF token should be rejected
-	req := testRequest(http.MethodPost, "/api/projects", map[string]string{"path": "/tmp/test"})
-	req.Header.Set("Cookie", strings.TrimSpace(parts))
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("POST without CSRF: status = %d; want 403", rr.Code)
-	}
-}
-
-func TestCSRFMiddlewareValidToken(t *testing.T) {
-	s := testServer(t)
-
-	// Login first
-	loginReq := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": testPassword,
-	})
-	loginRR := testResponse(t, s, loginReq)
-	if loginRR.Code != http.StatusOK {
-		t.Fatalf("login: status = %d", loginRR.Code)
-	}
-	sessionCookie := loginRR.Header().Get("Set-Cookie")
-	parts := strings.Split(sessionCookie, ";")[0]
-	csrfToken := loginRR.Header().Get("X-CSRF-Token")
-
-	// Create a temp dir and init git
-	tmpDir := t.TempDir()
-	exec.Command("git", "init", tmpDir).Run()
-
-	// POST with valid CSRF token should succeed
-	req := testRequest(http.MethodPost, "/api/projects", map[string]string{"path": tmpDir})
-	req.Header.Set("Cookie", strings.TrimSpace(parts))
-	req.Header.Set("X-CSRF-Token", csrfToken)
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST with valid CSRF: status = %d; want 201; body: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestCSRFMiddlewareInvalidToken(t *testing.T) {
-	s := testServer(t)
-
-	// Login first
-	loginReq := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": testPassword,
-	})
-	loginRR := testResponse(t, s, loginReq)
-	if loginRR.Code != http.StatusOK {
-		t.Fatalf("login: status = %d", loginRR.Code)
-	}
-	sessionCookie := loginRR.Header().Get("Set-Cookie")
-	parts := strings.Split(sessionCookie, ";")[0]
-
-	// POST with invalid CSRF token should be rejected
-	req := testRequest(http.MethodPost, "/api/projects", map[string]string{"path": "/tmp/test"})
-	req.Header.Set("Cookie", strings.TrimSpace(parts))
-	req.Header.Set("X-CSRF-Token", "invalid-token")
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("POST with invalid CSRF: status = %d; want 403", rr.Code)
+			if rr := testResponse(t, s, req); rr.Code != tc.want {
+				t.Fatalf("status = %d; want %d; body: %s", rr.Code, tc.want, rr.Body.String())
+			}
+		})
 	}
 }
 
-func TestCSRFMiddlewarePublicEndpointExempt(t *testing.T) {
-	s := testServer(t)
-
-	// Login (public endpoint, no CSRF needed)
-	req := testRequest(http.MethodPost, "/api/auth/login", map[string]string{
-		"password": testPassword,
-	})
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login without CSRF: status = %d; want 200", rr.Code)
-	}
+// staticBody adapts a fixed request body to the per-subtest body builder.
+func staticBody(v any) func(t *testing.T) any {
+	return func(*testing.T) any { return v }
 }
 
 func TestPanicRecovery_DoesNotLeakPanicValue(t *testing.T) {

@@ -37,61 +37,35 @@ func shellEchoArgs(command string) (string, error) {
 	return string(out), err
 }
 
-// TestGitAuthorFlagCmd_Empty verifies that when no author identity is configured
-// (the current default state), the flag command is empty so git falls back to
-// its .gitconfig defaults.
-func TestGitAuthorFlagCmd_Empty(t *testing.T) {
-	origName, origEmail := git.GitAuthorName, git.GitAuthorEmail
-	git.GitAuthorName = ""
-	git.GitAuthorEmail = ""
-	defer func() { git.GitAuthorName, git.GitAuthorEmail = origName, origEmail }()
-
-	got := gitAuthorFlagCmd()
-	if got != "" {
-		t.Fatalf("expected empty flagCmd when identity unset, got %q", got)
+// TestGitAuthorFlagCmd covers the display form of the commit-identity flags used in status
+// output. It is a pure formatter over the two globals, and the rows that matter are the
+// partial ones: an identity with only a name or only an email must render just the flag it
+// has (git would otherwise be told about an empty identity), and no identity at all must
+// render nothing rather than a dangling "-c".
+func TestGitAuthorFlagCmd(t *testing.T) {
+	cases := []struct {
+		name  string
+		who   string
+		email string
+		want  string
+	}{
+		{name: "full identity", who: "Test Author", email: "test@example.com",
+			want: "'-c' 'user.name=Test Author' '-c' 'user.email=test@example.com'"},
+		{name: "name only", who: "Only Name", email: "", want: "'-c' 'user.name=Only Name'"},
+		{name: "email only", who: "", email: "only@x.com", want: "'-c' 'user.email=only@x.com'"},
+		{name: "identity unset", who: "", email: "", want: ""},
 	}
-}
 
-// TestGitAuthorFlagCmd_Format verifies the flag command produces properly
-// shell-quoted -c pairs for each configured identity component.
-func TestGitAuthorFlagCmd_Format(t *testing.T) {
-	origName, origEmail := git.GitAuthorName, git.GitAuthorEmail
-	git.GitAuthorName = "Test Author"
-	git.GitAuthorEmail = "test@example.com"
-	defer func() { git.GitAuthorName, git.GitAuthorEmail = origName, origEmail }()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			origName, origEmail := git.GitAuthorName, git.GitAuthorEmail
+			t.Cleanup(func() { git.GitAuthorName, git.GitAuthorEmail = origName, origEmail })
+			git.GitAuthorName, git.GitAuthorEmail = tc.who, tc.email
 
-	got := gitAuthorFlagCmd()
-	want := "'-c' 'user.name=Test Author' '-c' 'user.email=test@example.com'"
-	if got != want {
-		t.Fatalf("expected %q, got %q", want, got)
-	}
-}
-
-// TestGitAuthorFlagCmd_NameOnly verifies behavior with only the name set.
-func TestGitAuthorFlagCmd_NameOnly(t *testing.T) {
-	origName, origEmail := git.GitAuthorName, git.GitAuthorEmail
-	git.GitAuthorName = "Only Name"
-	git.GitAuthorEmail = ""
-	defer func() { git.GitAuthorName, git.GitAuthorEmail = origName, origEmail }()
-
-	got := gitAuthorFlagCmd()
-	want := "'-c' 'user.name=Only Name'"
-	if got != want {
-		t.Fatalf("expected %q, got %q", want, got)
-	}
-}
-
-// TestGitAuthorFlagCmd_EmailOnly verifies behavior with only the email set.
-func TestGitAuthorFlagCmd_EmailOnly(t *testing.T) {
-	origName, origEmail := git.GitAuthorName, git.GitAuthorEmail
-	git.GitAuthorName = ""
-	git.GitAuthorEmail = "only@x.com"
-	defer func() { git.GitAuthorName, git.GitAuthorEmail = origName, origEmail }()
-
-	got := gitAuthorFlagCmd()
-	want := "'-c' 'user.email=only@x.com'"
-	if got != want {
-		t.Fatalf("expected %q, got %q", want, got)
+			if got := gitAuthorFlagCmd(); got != tc.want {
+				t.Fatalf("gitAuthorFlagCmd() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

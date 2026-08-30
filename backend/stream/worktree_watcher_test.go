@@ -108,80 +108,75 @@ func TestWorktreeWatcherRetriesWhileInFlight(t *testing.T) {
 	}
 }
 
-func TestResolveGitIndexDir_Worktree(t *testing.T) {
-	dir := t.TempDir()
+// TestResolveGitIndexDir pins the only two answers this function may return: the gitdir
+// path for a worktree's .git POINTER FILE (so the watcher resolves the index the worktree
+// actually uses), and "" for everything that is not such a pointer — a real .git
+// directory, no .git at all, or a .git file with no gitdir line.
+func TestResolveGitIndexDir(t *testing.T) {
+	const worktreeGitdir = "/home/user/projects/myrepo/.git/worktrees/abc-123-def"
 
-	// Simulate a worktree .git file
-	gitFile := filepath.Join(dir, ".git")
-	gitdirPath := "/home/user/projects/myrepo/.git/worktrees/abc-123-def"
-	err := os.WriteFile(gitFile, []byte("gitdir: "+gitdirPath+"\n"), 0644)
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name string
+		// write lays out dir/.git before resolving; nil leaves the directory empty.
+		write func(t *testing.T, dir string)
+		want  string
+	}{
+		{
+			name:  "worktree pointer file",
+			write: gitFileWriter("gitdir: " + worktreeGitdir + "\n"),
+			want:  worktreeGitdir,
+		},
+		{
+			name:  "gitdir line surrounded by other lines",
+			write: gitFileWriter("# comment\ngitdir: /some/path/.git/worktrees/task-xyz\n# another comment\n"),
+			want:  "/some/path/.git/worktrees/task-xyz",
+		},
+		{
+			name:  "regular repository: .git is a directory",
+			write: mkdirGit,
+			want:  "",
+		},
+		{
+			name:  "git file with no gitdir line",
+			write: gitFileWriter("some random content\n"),
+			want:  "",
+		},
+		{
+			name:  "no .git at all",
+			write: nil,
+			want:  "",
+		},
 	}
 
-	result := resolveGitIndexDir(dir)
-	if result != gitdirPath {
-		t.Errorf("resolveGitIndexDir() = %q, want %q", result, gitdirPath)
-	}
-}
-
-func TestResolveGitIndexDir_RegularRepo(t *testing.T) {
-	dir := t.TempDir()
-
-	// Simulate a regular repo where .git is a directory
-	gitDir := filepath.Join(dir, ".git")
-	err := os.Mkdir(gitDir, 0755)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	result := resolveGitIndexDir(dir)
-	if result != "" {
-		t.Errorf("resolveGitIndexDir() = %q, want empty string (regular repo)", result)
-	}
-}
-
-func TestResolveGitIndexDir_NoGit(t *testing.T) {
-	dir := t.TempDir()
-
-	// No .git at all
-	result := resolveGitIndexDir(dir)
-	if result != "" {
-		t.Errorf("resolveGitIndexDir() = %q, want empty string (no .git)", result)
-	}
-}
-
-func TestResolveGitIndexDir_InvalidContent(t *testing.T) {
-	dir := t.TempDir()
-
-	// .git file with no gitdir: line
-	gitFile := filepath.Join(dir, ".git")
-	err := os.WriteFile(gitFile, []byte("some random content\n"), 0644)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	result := resolveGitIndexDir(dir)
-	if result != "" {
-		t.Errorf("resolveGitIndexDir() = %q, want empty string (no gitdir line)", result)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.write != nil {
+				tc.write(t, dir)
+			}
+			if got := resolveGitIndexDir(dir); got != tc.want {
+				t.Errorf("resolveGitIndexDir() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
-func TestResolveGitIndexDir_MultiLine(t *testing.T) {
-	dir := t.TempDir()
-
-	// .git file with extra lines before/after gitdir
-	gitFile := filepath.Join(dir, ".git")
-	gitdirPath := "/some/path/.git/worktrees/task-xyz"
-	content := "# comment\ngitdir: " + gitdirPath + "\n# another comment\n"
-	err := os.WriteFile(gitFile, []byte(content), 0644)
-	if err != nil {
-		t.Fatal(err)
+// gitFileWriter returns a fixture that writes content into dir/.git (a file, as git
+// leaves it in a linked worktree).
+func gitFileWriter(content string) func(t *testing.T, dir string) {
+	return func(t *testing.T, dir string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, ".git"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
+}
 
-	result := resolveGitIndexDir(dir)
-	if result != gitdirPath {
-		t.Errorf("resolveGitIndexDir() = %q, want %q", result, gitdirPath)
+// mkdirGit lays out a regular repository's .git directory.
+func mkdirGit(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -68,11 +68,29 @@ func TestTruncateForRegenerate(t *testing.T) {
 	}
 }
 
+// TestRemoveDuplicateUserMessage covers the de-duplication that stops an echoed user
+// message from being replayed to the LLM. It is deliberately conservative: only an exact
+// repeat is dropped, and the NEWEST copy is the one kept (that is the turn the user just
+// sent). The content-parts rows are the reason this is not a plain string compare —
+// identical text with a different image, a different part count, or a plain message next to
+// a ContentParts message are different user turns and must survive.
 func TestRemoveDuplicateUserMessage(t *testing.T) {
+	img := &types.ImageSource{Type: "base64", MediaType: "image/png", Data: "abc123"}
+	parts := func(text string, withImage bool) []types.ContentPart {
+		p := []types.ContentPart{{Type: "text", Text: text}}
+		if withImage {
+			p = append(p, types.ContentPart{Type: "image", ImageSource: img})
+		}
+		return p
+	}
+
 	tests := []struct {
 		name     string
 		input    []types.ChatMessage
 		expected int
+		// keptText, when set, asserts the surviving copy at keptIndex is that user message.
+		keptIndex int
+		keptText  string
 	}{
 		{
 			name: "removes first of two consecutive duplicate user messages",
@@ -81,7 +99,7 @@ func TestRemoveDuplicateUserMessage(t *testing.T) {
 				{Role: "user", Content: "hey"},
 				{Role: "user", Content: "hey"},
 			},
-			expected: 2, // [system, user("hey")] - keeps the newer one
+			expected: 2, keptIndex: 1, keptText: "hey",
 		},
 		{
 			name: "keeps messages when content differs",
@@ -90,7 +108,7 @@ func TestRemoveDuplicateUserMessage(t *testing.T) {
 				{Role: "user", Content: "hey"},
 				{Role: "user", Content: "hello"},
 			},
-			expected: 3, // no change - different content
+			expected: 3,
 		},
 		{
 			name: "no duplicate - returns unchanged",
@@ -101,13 +119,56 @@ func TestRemoveDuplicateUserMessage(t *testing.T) {
 			},
 			expected: 3,
 		},
+		{
+			name: "identical content parts are dropped",
+			input: []types.ChatMessage{
+				{Role: "system", Content: "system prompt"},
+				{Role: "user", ContentParts: parts("check this", true)},
+				{Role: "user", ContentParts: parts("check this", true)},
+			},
+			expected: 2,
+		},
+		{
+			name: "same image, different text is kept",
+			input: []types.ChatMessage{
+				{Role: "system", Content: "system prompt"},
+				{Role: "user", ContentParts: parts("check this", true)},
+				{Role: "user", ContentParts: parts("check that", true)},
+			},
+			expected: 3,
+		},
+		{
+			name: "one message carries an image the other does not",
+			input: []types.ChatMessage{
+				{Role: "system", Content: "system prompt"},
+				{Role: "user", ContentParts: parts("check this", false)},
+				{Role: "user", ContentParts: parts("check this", true)},
+			},
+			expected: 3,
+		},
+		{
+			name: "plain text next to content parts is kept",
+			input: []types.ChatMessage{
+				{Role: "system", Content: "system prompt"},
+				{Role: "user", Content: "hello"},
+				{Role: "user", ContentParts: parts("hello", true)},
+			},
+			expected: 3,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := removeDuplicateUserMessage(tt.input)
 			if len(result) != tt.expected {
-				t.Errorf("expected length %d, got %d", tt.expected, len(result))
+				t.Fatalf("kept %d of %d messages, want %d", len(result), len(tt.input), tt.expected)
+			}
+			if tt.keptText == "" {
+				return
+			}
+			if msg := result[tt.keptIndex]; msg.Role != "user" || msg.Content != tt.keptText {
+				t.Errorf("result[%d] = role=%q content=%q, want user %q",
+					tt.keptIndex, msg.Role, msg.Content, tt.keptText)
 			}
 		})
 	}

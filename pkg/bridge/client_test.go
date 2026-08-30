@@ -14,28 +14,6 @@ import (
 	"kanban/pkg/bridge/protocol"
 )
 
-// TestClientCompiles verifies that the Client type compiles with all expected methods.
-func TestClientCompiles(t *testing.T) {
-	// These would not compile if the methods don't exist
-	var c *Client
-	_ = func() {
-		_, _, _ = c.ReadFile(context.Background(), "path")
-		_, _ = c.WriteFile(context.Background(), "path", "content")
-		_, _ = c.EditFile(context.Background(), "path", []protocol.Edit{})
-		_, _ = c.Bash(context.Background(), "cmd", 5)
-		_ = c.Close()
-	}
-}
-
-// TestBashResultHolderCompiles verifies that BashResultHolder has expected methods.
-func TestBashResultHolderCompiles(t *testing.T) {
-	var b *BashResultHolder
-	_ = func() {
-		_ = b.Output()
-		_ = b.ExitCode()
-	}
-}
-
 // TestBashCancelRequest verifies that bash_cancel frames are constructed and parsed correctly.
 func TestBashCancelRequest(t *testing.T) {
 	msgID := uint32(42)

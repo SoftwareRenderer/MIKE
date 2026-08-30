@@ -13,6 +13,7 @@ import (
 	"kanban/backend/config"
 	"kanban/backend/git"
 	"kanban/backend/store"
+	"kanban/backend/testutil/testgit"
 	"kanban/backend/types"
 )
 
@@ -32,14 +33,7 @@ func mustRun(t *testing.T, dir, cmd string, args ...string) {
 // Used by tests that need git history (log, diff, etc.).
 func initGitRepo(t *testing.T, path string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(path, "README.md"), []byte("# Test\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	mustRun(t, path, "git", "init")
-	mustRun(t, path, "git", "config", "user.email", "test@test.com")
-	mustRun(t, path, "git", "config", "user.name", "Test")
-	mustRun(t, path, "git", "add", "README.md")
-	mustRun(t, path, "git", "commit", "-m", "Initial commit")
+	testgit.RepoAt(t, path)
 }
 
 // initGitRepoTemp creates a temp directory, initializes a bare git repo there
@@ -47,12 +41,7 @@ func initGitRepo(t *testing.T, path string) {
 // only need a git working tree for staging.
 func initGitRepoTemp(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	if out, err := exec.Command("git", "init", dir).CombinedOutput(); err != nil {
-		t.Fatalf("git init failed: %v: %s", err, out)
-	}
-	exec.Command("git", "-C", dir, "symbolic-ref", "HEAD", "refs/heads/main").Run()
-	return dir
+	return testgit.EmptyRepo(t)
 }
 
 // createFile creates a file with the given name and content inside repoPath.
@@ -180,24 +169,140 @@ func setupHandleLogProject(t *testing.T) (*GitHandler, *http.ServeMux) {
 	return h, newTestGitMux(h)
 }
 
-// --- HandleLog tests ---
-
-func TestHandleLog_BranchValidation_DashPrefix(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "log-proj", Name: "log-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
+// TestGitRefValidation is the ref-injection matrix for every git route that takes a ref:
+// project log/diff and task log/diff. A ref lands on a git command line, so two families
+// of value must be rejected before that happens — option-looking refs ("-foo",
+// "--format=json"), which git would parse as flags, and the rev-syntax characters git
+// itself would reinterpret ("~", "^", ":", ".."). Each target carries its own fixture
+// because the task routes resolve the ref inside a worktree that has to exist.
+//
+// The accepted side is covered separately (TestHandleLog_ValidBranch,
+// TestHandleDiff_ValidRefs, TestHandleTaskLog_ValidBranch, TestHandleTaskDiff_ValidRefs),
+// which also proves the 400s above come from validation and not from a broken route.
+func TestGitRefValidation(t *testing.T) {
+	targets := []struct {
+		name string
+		// setup builds the fixture and returns the mux plus a URL builder for one ref
+		// position (each route exposes its refs under different parameter names).
+		setup  func(t *testing.T) (mux *http.ServeMux, url func(param, value string) string)
+		params []string
+		// ref builds the value under test from a bare invalid character. The diff routes
+		// take full revs, so the character is embedded in a rev-looking string there.
+		ref func(ch string) string
+	}{
+		{
+			name: "project log",
+			setup: func(t *testing.T) (*http.ServeMux, func(string, string) string) {
+				_, mux := setupHandleLogProject(t)
+				return mux, func(_, value string) string {
+					return "/api/projects/log-char-proj/git/log?branch=" + value
+				}
+			},
+			params: []string{"branch"},
+			ref:    func(ch string) string { return ch },
+		},
+		{
+			name: "project diff",
+			setup: func(t *testing.T) (*http.ServeMux, func(string, string) string) {
+				h, s, _, _ := newTestGitHandler(t)
+				projPath := t.TempDir()
+				initGitRepo(t, projPath)
+				proj := &types.Project{ID: "refval-diff-proj", Name: "refval-diff-proj", Path: projPath}
+				if err := s.CreateProject(proj); err != nil {
+					t.Fatal(err)
+				}
+				return newTestGitMux(h), func(param, value string) string {
+					if param == "base" {
+						return "/api/projects/refval-diff-proj/git/diff?base=" + value + "&head=HEAD"
+					}
+					return "/api/projects/refval-diff-proj/git/diff?base=HEAD&head=" + value
+				}
+			},
+			params: []string{"base", "head"},
+			ref:    func(ch string) string { return "feat" + ch + "branch" },
+		},
+		{
+			name: "task log",
+			setup: func(t *testing.T) (*http.ServeMux, func(string, string) string) {
+				h, s, _, worktreesDir := newTestGitHandler(t)
+				projPath := t.TempDir()
+				initGitRepo(t, projPath)
+				proj := &types.Project{ID: "refval-tasklog-proj", Name: "refval-tasklog-proj", Path: projPath}
+				if err := s.CreateProject(proj); err != nil {
+					t.Fatal(err)
+				}
+				task := &types.Task{ID: "refval-tasklog-task", ProjectID: proj.ID,
+					Title: "log task", Status: "in_progress", Branch: "main"}
+				if err := s.CreateTask(task); err != nil {
+					t.Fatal(err)
+				}
+				createWorktreeAt(t, projPath, filepath.Join(worktreesDir, proj.ID, task.ID), "main")
+				return newTestGitMux(h), func(_, value string) string {
+					return "/api/projects/refval-tasklog-proj/tasks/refval-tasklog-task/git/log?branch=" + value
+				}
+			},
+			params: []string{"branch"},
+			ref:    func(ch string) string { return ch },
+		},
+		{
+			name: "task diff",
+			setup: func(t *testing.T) (*http.ServeMux, func(string, string) string) {
+				h, s, _, _ := newTestGitHandler(t)
+				projPath := t.TempDir()
+				initGitRepo(t, projPath)
+				proj := &types.Project{ID: "refval-taskdiff-proj", Name: "refval-taskdiff-proj", Path: projPath}
+				if err := s.CreateProject(proj); err != nil {
+					t.Fatal(err)
+				}
+				task := &types.Task{ID: "refval-taskdiff-task", ProjectID: proj.ID,
+					Title: "diff task", Status: "in_progress", Branch: "main"}
+				if err := s.CreateTask(task); err != nil {
+					t.Fatal(err)
+				}
+				return newTestGitMux(h), func(param, value string) string {
+					return "/api/projects/refval-taskdiff-proj/tasks/refval-taskdiff-task/diff?" + param + "=" + value
+				}
+			},
+			params: []string{"base", "head"},
+			ref:    func(ch string) string { return "feat" + ch + "branch" },
+		},
 	}
 
-	mux := newTestGitMux(h)
+	// The space is URL-encoded because that is how it arrives from a browser.
+	encoded := map[string]string{" ": "feat%20branch"}
 
-	// Dash-prefixed branch → 400
-	rr := doRequest(t, mux, "GET", "/api/projects/log-proj/git/log?branch=-foo")
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for dash-prefixed branch, got %d: %s", rr.Code, rr.Body.String())
+	for _, tgt := range targets {
+		t.Run(tgt.name, func(t *testing.T) {
+			mux, url := tgt.setup(t)
+
+			for _, param := range tgt.params {
+				// Dash-prefixed refs are sent verbatim — that is exactly the shape git would
+				// misread as an option.
+				for _, option := range []string{"-foo", "--format=json"} {
+					t.Run(param+"/"+option, func(t *testing.T) {
+						rr := doRequest(t, mux, "GET", url(param, option))
+						if rr.Code != http.StatusBadRequest {
+							t.Fatalf("%s=%q: status = %d, want 400; body: %s",
+								param, option, rr.Code, rr.Body.String())
+						}
+					})
+				}
+
+				for _, ch := range invalidBranchChars {
+					value, ok := encoded[ch]
+					if !ok {
+						value = tgt.ref(ch)
+					}
+					t.Run(param+"/"+strings.TrimSpace(ch), func(t *testing.T) {
+						rr := doRequest(t, mux, "GET", url(param, value))
+						if rr.Code != http.StatusBadRequest {
+							t.Fatalf("%s=%q: status = %d, want 400; body: %s",
+								param, value, rr.Code, rr.Body.String())
+						}
+					})
+				}
+			}
+		})
 	}
 }
 
@@ -236,46 +341,6 @@ func TestHandleLog_NoBranchDefaultsToHEAD(t *testing.T) {
 	rr := doRequest(t, mux, "GET", "/api/projects/log-proj-default/git/log")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 when branch param is absent (defaults to HEAD), got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-// --- HandleDiff tests ---
-
-func TestHandleDiff_BaseValidation_DashPrefix(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "diff-proj", Name: "diff-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := newTestGitMux(h)
-
-	// Dash-prefixed base → 400
-	rr := doRequest(t, mux, "GET", "/api/projects/diff-proj/git/diff?base=-foo&head=HEAD")
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for dash-prefixed base, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestHandleDiff_HeadValidation_DashPrefix(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "diff-proj-h", Name: "diff-proj-h", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := newTestGitMux(h)
-
-	// Dash-prefixed head → 400
-	rr := doRequest(t, mux, "GET", "/api/projects/diff-proj-h/git/diff?base=HEAD&head=-bar")
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for dash-prefixed head, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -405,42 +470,6 @@ func TestHandleProjectDiffFile_Content_Untracked(t *testing.T) {
 	}
 }
 
-// --- HandleTaskLog tests ---
-
-func TestHandleTaskLog_BranchValidation_DashPrefix(t *testing.T) {
-	h, s, wm, worktreesDir := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "tasklog-proj", Name: "tasklog-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	task := &types.Task{
-		ID:        "tasklog-task",
-		ProjectID: proj.ID,
-		Title:     "log task",
-		Status:    "in_progress",
-		Branch:    "main",
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatal(err)
-	}
-
-	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
-	createWorktreeAt(t, projPath, wtPath, "main")
-
-	mux := newTestGitMux(h)
-	_ = wm
-
-	// Dash-prefixed branch → 400
-	rr := doRequest(t, mux, "GET", "/api/projects/tasklog-proj/tasks/tasklog-task/git/log?branch=-foo")
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for dash-prefixed branch, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
 func TestHandleTaskLog_ValidBranch(t *testing.T) {
 	h, s, wm, worktreesDir := newTestGitHandler(t)
 
@@ -472,70 +501,6 @@ func TestHandleTaskLog_ValidBranch(t *testing.T) {
 	rr := doRequest(t, mux, "GET", "/api/projects/tasklog-proj-v/tasks/tasklog-task-v/git/log?branch=HEAD")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 for valid branch HEAD, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-// --- HandleTaskDiff tests ---
-
-func TestHandleTaskDiff_BaseValidation_DashPrefix(t *testing.T) {
-	h, s, wm, _ := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "taskdiff-proj", Name: "taskdiff-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	task := &types.Task{
-		ID:        "taskdiff-task",
-		ProjectID: proj.ID,
-		Title:     "diff task",
-		Status:    "in_progress",
-		Branch:    "main",
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := newTestGitMux(h)
-	_ = wm
-
-	// Dash-prefixed base → 400
-	rr := doRequest(t, mux, "GET", "/api/projects/taskdiff-proj/tasks/taskdiff-task/diff?base=-foo")
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for dash-prefixed base, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestHandleTaskDiff_HeadValidation_DashPrefix(t *testing.T) {
-	h, s, wm, _ := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "taskdiff-proj-h", Name: "taskdiff-proj-h", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	task := &types.Task{
-		ID:        "taskdiff-task-h",
-		ProjectID: proj.ID,
-		Title:     "diff task head",
-		Status:    "in_progress",
-		Branch:    "main",
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatal(err)
-	}
-
-	mux := newTestGitMux(h)
-	_ = wm
-
-	// Dash-prefixed head → 400
-	rr := doRequest(t, mux, "GET", "/api/projects/taskdiff-proj-h/tasks/taskdiff-task-h/diff?head=-bar")
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for dash-prefixed head, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -578,97 +543,6 @@ func TestHandleTaskDiff_ValidRefs(t *testing.T) {
 // -, _, ., /, +) are rejected with 400 Bad Request.
 
 var invalidBranchChars = []string{"~", "^", ":", "?", "*", "[", "\\", " ", "feat..branch"}
-
-func TestHandleLog_InvalidCharacters(t *testing.T) {
-	_, mux := setupHandleLogProject(t)
-	for _, ch := range invalidBranchChars {
-		url := "/api/projects/log-char-proj/git/log?branch=" + ch
-		if ch == " " {
-			url = "/api/projects/log-char-proj/git/log?branch=feat%20branch"
-		}
-		t.Run(ch, func(t *testing.T) {
-			rr := doRequest(t, mux, "GET", url)
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400 for invalid character %q, got %d: %s", ch, rr.Code, rr.Body.String())
-			}
-		})
-	}
-}
-
-func TestHandleDiff_InvalidCharacters(t *testing.T) {
-	h, s, _, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "diff-char-proj", Name: "diff-char-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-	mux := newTestGitMux(h)
-
-	for _, ch := range invalidBranchChars {
-		val := "feat" + ch + "branch"
-		if ch == " " {
-			val = "feat%20branch"
-		}
-		t.Run("base_"+ch, func(t *testing.T) {
-			url := "/api/projects/diff-char-proj/git/diff?base=" + val + "&head=HEAD"
-			rr := doRequest(t, mux, "GET", url)
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400 for invalid base char %q, got %d: %s", ch, rr.Code, rr.Body.String())
-			}
-		})
-		t.Run("head_"+ch, func(t *testing.T) {
-			url := "/api/projects/diff-char-proj/git/diff?base=HEAD&head=" + val
-			rr := doRequest(t, mux, "GET", url)
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400 for invalid head char %q, got %d: %s", ch, rr.Code, rr.Body.String())
-			}
-		})
-	}
-}
-
-func TestHandleTaskDiff_InvalidCharacters(t *testing.T) {
-	h, s, wm, _ := newTestGitHandler(t)
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "taskdiff-char-proj", Name: "taskdiff-char-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-	task := &types.Task{
-		ID:        "taskdiff-char-task",
-		ProjectID: proj.ID,
-		Title:     "char diff task",
-		Status:    "in_progress",
-		Branch:    "main",
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatal(err)
-	}
-	mux := newTestGitMux(h)
-	_ = wm
-
-	for _, ch := range invalidBranchChars {
-		val := "feat" + ch + "branch"
-		if ch == " " {
-			val = "feat%20branch"
-		}
-		t.Run("base_"+ch, func(t *testing.T) {
-			url := "/api/projects/taskdiff-char-proj/tasks/taskdiff-char-task/diff?base=" + val
-			rr := doRequest(t, mux, "GET", url)
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400 for invalid base char %q, got %d: %s", ch, rr.Code, rr.Body.String())
-			}
-		})
-		t.Run("head_"+ch, func(t *testing.T) {
-			url := "/api/projects/taskdiff-char-proj/tasks/taskdiff-char-task/diff?head=" + val
-			rr := doRequest(t, mux, "GET", url)
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400 for invalid head char %q, got %d: %s", ch, rr.Code, rr.Body.String())
-			}
-		})
-	}
-}
 
 // --- Dash-prefixed path staging tests ---
 // These tests verify that file paths starting with '-' are safely staged
@@ -774,51 +648,6 @@ func TestHandleStageFile_PathStartingWithDash(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected %q to be staged, got: %v", filename, files)
-}
-
-// --- HandleTaskLog invalid character tests ---
-// These mirror the HandleLog/HandleDiff invalid character tests for the
-// task-level log endpoint.
-
-func TestHandleTaskLog_InvalidCharacters(t *testing.T) {
-	h, s, wm, worktreesDir := newTestGitHandler(t)
-
-	projPath := t.TempDir()
-	initGitRepo(t, projPath)
-	proj := &types.Project{ID: "tasklog-char-proj", Name: "tasklog-char-proj", Path: projPath}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatal(err)
-	}
-
-	task := &types.Task{
-		ID:        "tasklog-char-task",
-		ProjectID: proj.ID,
-		Title:     "char log task",
-		Status:    "in_progress",
-		Branch:    "main",
-	}
-	if err := s.CreateTask(task); err != nil {
-		t.Fatal(err)
-	}
-
-	wtPath := filepath.Join(worktreesDir, proj.ID, task.ID)
-	createWorktreeAt(t, projPath, wtPath, "main")
-
-	mux := newTestGitMux(h)
-	_ = wm
-
-	for _, ch := range invalidBranchChars {
-		url := "/api/projects/tasklog-char-proj/tasks/tasklog-char-task/git/log?branch=" + ch
-		if ch == " " {
-			url = "/api/projects/tasklog-char-proj/tasks/tasklog-char-task/git/log?branch=feat%20branch"
-		}
-		t.Run(ch, func(t *testing.T) {
-			rr := doRequest(t, mux, "GET", url)
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400 for invalid character %q in task log branch, got %d: %s", ch, rr.Code, rr.Body.String())
-			}
-		})
-	}
 }
 
 func TestHandleTaskLog_BranchDefaultsToTaskBranch(t *testing.T) {

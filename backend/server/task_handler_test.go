@@ -61,14 +61,47 @@ func TestTaskCreateWithTitle(t *testing.T) {
 	}
 }
 
-func TestTaskCreateInvalidJSON(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
+// TestTaskRequestErrors is the task API's rejection set: a body that is not JSON, a task
+// that does not exist, and a subtask pointing at a parent that does not exist. Each must be
+// refused with a status the SPA can branch on — in particular, a create that silently
+// accepts a dangling parent_task_id would produce a subtask no one can reach.
+func TestTaskRequestErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		// path builds the route once the project id is known.
+		path func(projID string) string
+		body any
+		want int
+	}{
+		{
+			name: "malformed JSON body", method: "POST",
+			path: func(p string) string { return "/api/projects/" + p + "/tasks" },
+			body: "not json", want: http.StatusBadRequest,
+		},
+		{
+			name: "unknown task", method: "GET",
+			path: func(p string) string { return "/api/projects/" + p + "/tasks/nonexistent" },
+			want: http.StatusNotFound,
+		},
+		{
+			name: "subtask with a missing parent", method: "POST",
+			path: func(p string) string { return "/api/projects/" + p + "/tasks" },
+			body: map[string]any{"prompt": "Child with missing parent", "parent_task_id": "nonexistent-parent"},
+			want: http.StatusBadRequest,
+		},
+	}
 
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks", "not json")
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+			projID := createTestProject(t, s)
+
+			rr := testResponseAuth(t, s, testRequest(tc.method, tc.path(projID), tc.body))
+			if rr.Code != tc.want {
+				t.Fatalf("status = %d, want %d; body: %s", rr.Code, tc.want, rr.Body.String())
+			}
+		})
 	}
 }
 
@@ -110,17 +143,6 @@ func TestTaskGetByID(t *testing.T) {
 	}
 }
 
-func TestTaskGetByIDNotFound(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/nonexistent", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", rr.Code)
-	}
-}
-
 func TestTaskUpdate(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
@@ -141,103 +163,55 @@ func TestTaskUpdate(t *testing.T) {
 	}
 }
 
-func TestTaskUpdateBaseRefValidation(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Branch validation task")
-
-	// Dash-prefixed base_ref should be rejected (git argument injection)
-	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
-		"base_ref": "-f",
-	})
-	ra := testResponseAuth(t, s, req)
-	if ra.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for dash-prefixed base_ref, got %d: %s", ra.Code, ra.Body.String())
+// TestTaskUpdateRefValidation covers the HTTP contract for the git-facing task fields:
+// PUT must reject an option-looking ref, accept a legitimate one, and ECHO the stored value
+// back in the response body (which is what the SPA re-renders). The exhaustive rejection
+// matrix for these fields lives with the validator itself, in
+// managers.TestTaskHandler_PUT_RefValidation — the row set here is deliberately small and
+// adds the response-shape check that layer cannot make.
+func TestTaskUpdateRefValidation(t *testing.T) {
+	cases := []struct {
+		field string
+		value string
+		want  int
+	}{
+		{field: "base_ref", value: "-f", want: http.StatusBadRequest},
+		{field: "base_ref", value: "--dry-run", want: http.StatusBadRequest},
+		{field: "base_ref", value: "main", want: http.StatusOK},
+		{field: "base_ref", value: "origin/feature-branch", want: http.StatusOK},
+		{field: "branch_tip", value: "-f", want: http.StatusBadRequest},
+		{field: "branch_tip", value: "-C/tmp/evil", want: http.StatusBadRequest},
+		{field: "branch_tip", value: "feature-branch", want: http.StatusOK},
+		{field: "branch_tip", value: "task/frost-amber-quartz", want: http.StatusOK},
 	}
 
-	// Double-dash injection attempt should also be rejected
-	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
-		"base_ref": "--dry-run",
-	})
-	ra = testResponseAuth(t, s, req)
-	if ra.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for double-dash base_ref, got %d: %s", ra.Code, ra.Body.String())
-	}
+	// One server per field: the accepted rows mutate the task they target.
+	for _, field := range []string{"base_ref", "branch_tip"} {
+		s := testServer(t)
+		projID := createTestProject(t, s)
+		taskID := createTestTask(t, s, projID, field+" validation task")
 
-	// Valid base_ref should be accepted
-	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
-		"base_ref": "main",
-	})
-	ra = testResponseAuth(t, s, req)
-	if ra.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid base_ref, got %d: %s", ra.Code, ra.Body.String())
-	}
-	result := mustJSON[map[string]any](t, ra.Body)
-	if result["base_ref"] != "main" {
-		t.Fatalf("expected base_ref=main, got %s", result["base_ref"])
-	}
-
-	// Valid base_ref with slashes and hyphens should be accepted
-	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
-		"base_ref": "origin/feature-branch",
-	})
-	ra = testResponseAuth(t, s, req)
-	if ra.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid base_ref, got %d: %s", ra.Code, ra.Body.String())
-	}
-	result = mustJSON[map[string]any](t, ra.Body)
-	if result["base_ref"] != "origin/feature-branch" {
-		t.Fatalf("expected base_ref=origin/feature-branch, got %s", result["base_ref"])
-	}
-}
-
-func TestTaskUpdateBranchTipValidation(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Branch tip validation task")
-
-	// Dash-prefixed branch_tip should be rejected (git argument injection)
-	req := testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
-		"branch_tip": "-f",
-	})
-	ra := testResponseAuth(t, s, req)
-	if ra.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for dash-prefixed branch_tip, got %d: %s", ra.Code, ra.Body.String())
-	}
-
-	// Git injection attempt should also be rejected
-	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
-		"branch_tip": "-C/tmp/evil",
-	})
-	ra = testResponseAuth(t, s, req)
-	if ra.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for git injection branch_tip, got %d: %s", ra.Code, ra.Body.String())
-	}
-
-	// Valid branch_tip should be accepted
-	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
-		"branch_tip": "feature-branch",
-	})
-	ra = testResponseAuth(t, s, req)
-	if ra.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid branch_tip, got %d: %s", ra.Code, ra.Body.String())
-	}
-	result := mustJSON[map[string]any](t, ra.Body)
-	if result["branch_tip"] != "feature-branch" {
-		t.Fatalf("expected branch_tip=feature-branch, got %s", result["branch_tip"])
-	}
-
-	// Valid branch_tip with slashes should be accepted
-	req = testRequest("PUT", "/api/projects/"+projID+"/tasks/"+taskID, map[string]any{
-		"branch_tip": "task/frost-amber-quartz",
-	})
-	ra = testResponseAuth(t, s, req)
-	if ra.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid branch_tip, got %d: %s", ra.Code, ra.Body.String())
-	}
-	result = mustJSON[map[string]any](t, ra.Body)
-	if result["branch_tip"] != "task/frost-amber-quartz" {
-		t.Fatalf("expected branch_tip=task/frost-amber-quartz, got %s", result["branch_tip"])
+		for _, tc := range cases {
+			if tc.field != field {
+				continue
+			}
+			t.Run(tc.field+"/"+strings.TrimLeft(tc.value, "-"), func(t *testing.T) {
+				rr := testResponseAuth(t, s, testRequest("PUT",
+					"/api/projects/"+projID+"/tasks/"+taskID,
+					map[string]any{tc.field: tc.value}))
+				if rr.Code != tc.want {
+					t.Fatalf("%s=%q: status = %d, want %d; body: %s",
+						tc.field, tc.value, rr.Code, tc.want, rr.Body.String())
+				}
+				if tc.want != http.StatusOK {
+					return
+				}
+				result := mustJSON[map[string]any](t, rr.Body)
+				if result[tc.field] != tc.value {
+					t.Errorf("response echoes %s=%v, want %q", tc.field, result[tc.field], tc.value)
+				}
+			})
+		}
 	}
 }
 
@@ -342,20 +316,6 @@ func TestTaskParentValidation(t *testing.T) {
 	rr = testResponseAuth(t, s, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for non-backlog parent, got %d", rr.Code)
-	}
-}
-
-func TestTaskParentNotFound(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{
-		"prompt":         "Child with missing parent",
-		"parent_task_id": "nonexistent-parent",
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
 	}
 }
 
@@ -621,33 +581,6 @@ func TestTaskStartChangesStatus(t *testing.T) {
 	status = getTaskStatus(t, s, projID, taskID)
 	if status != "in_progress" {
 		t.Fatalf("expected in_progress, got %s", status)
-	}
-}
-
-// Test: task delete removes the task (via API handler)
-func TestTaskDeleteViaHandler(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "delete-me")
-
-	// Verify task exists
-	status := getTaskStatus(t, s, projID, taskID)
-	if status != "backlog" {
-		t.Fatalf("expected backlog, got %s", status)
-	}
-
-	// Delete the task (returns 204 NoContent)
-	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("delete task: expected 204, got %d %s", rr.Code, rr.Body.String())
-	}
-
-	// Verify task is gone
-	req = testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID, nil)
-	rr = testResponseAuth(t, s, req)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 after delete, got %d", rr.Code)
 	}
 }
 

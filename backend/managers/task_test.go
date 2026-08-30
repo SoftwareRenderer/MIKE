@@ -102,201 +102,78 @@ func setupTaskValidationProject(t *testing.T, h *TaskHandler, s *store.Store) {
 	}
 }
 
-// --- PUT handler branch validation tests ---
-// These tests verify that the PUT /api/projects/{projectID}/tasks/{taskID} handler
-// properly validates branch, base_ref, and branch_tip fields using ValidateBranchName
-// to prevent git argument injection.
-
-func TestTaskHandler_PUT_BranchValidation_DashPrefix(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-
-	// Dash-prefixed branch → 400
-	rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-		"branch": "-f",
-	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for dash-prefixed branch, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestTaskHandler_PUT_BranchValidation_DoubleDash(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-
-	// Double-dash branch → 400
-	rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-		"branch": "--format=json",
-	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for double-dash branch, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestTaskHandler_PUT_BranchValidation_Empty(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-
-	// Empty branch → 400
-	rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-		"branch": "",
-	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for empty branch, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestTaskHandler_PUT_BranchValidation_Valid(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-
-	// Valid branch → 200
-	rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-		"branch": "feature/my-branch",
-	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid branch, got %d: %s", rr.Code, rr.Body.String())
+// --- PUT handler git-ref validation ---
+//
+// TestTaskHandler_PUT_RefValidation is the whole validation matrix for the three
+// git-facing fields of PUT /api/projects/{projectID}/tasks/{taskID}. All three reach a
+// git command line, so each must be rejected before it becomes an argument: dash-prefixed
+// values (option injection), range/ref operators and spaces, and — for branch — the empty
+// string. The accepted rows close the loop by reading the value back off the stored task,
+// which is what separates "validated" from "silently dropped".
+func TestTaskHandler_PUT_RefValidation(t *testing.T) {
+	// stored reads a field back off the task so an accepted row can prove it landed.
+	stored := map[string]func(task *types.Task) string{
+		"branch":     func(task *types.Task) string { return task.Branch },
+		"base_ref":   func(task *types.Task) string { return task.BaseRef },
+		"branch_tip": func(task *types.Task) string { return task.BranchTip },
 	}
 
-	// Verify the branch was actually updated
-	task, err := s.GetTask("task-val-proj", "task-val-task")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if task.Branch != "feature/my-branch" {
-		t.Fatalf("expected branch 'feature/my-branch', got %q", task.Branch)
-	}
-}
+	cases := []struct {
+		field string
+		value string
+		want  int
+	}{
+		// branch: ValidateBranchName is the tighter of the two validators.
+		{"branch", "-f", http.StatusBadRequest},
+		{"branch", "--format=json", http.StatusBadRequest},
+		{"branch", "", http.StatusBadRequest},
+		{"branch", "feat~1", http.StatusBadRequest},
+		{"branch", "feat^head", http.StatusBadRequest},
+		{"branch", "feat:branch", http.StatusBadRequest},
+		{"branch", "feat branch", http.StatusBadRequest},
+		{"branch", "feat..branch", http.StatusBadRequest},
+		{"branch", "feature/my-branch", http.StatusOK},
 
-func TestTaskHandler_PUT_BranchValidation_InvalidChars(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
+		// base_ref: a rev, so ValidateGitRef applies.
+		{"base_ref", "-C/tmp/evil", http.StatusBadRequest},
+		{"base_ref", "feat~1", http.StatusBadRequest},
+		{"base_ref", "feat..branch", http.StatusBadRequest},
+		{"base_ref", "feat branch", http.StatusBadRequest},
+		{"base_ref", "main", http.StatusOK},
 
-	invalidBranches := []string{"feat~1", "feat^head", "feat:branch", "feat branch", "feat..branch"}
-	for _, branch := range invalidBranches {
-		t.Run(strings.ReplaceAll(branch, " ", "_"), func(t *testing.T) {
-			rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-				"branch": branch,
-			})
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400 for branch %q, got %d: %s", branch, rr.Code, rr.Body.String())
+		// branch_tip: a commit, still validated for the same reason.
+		{"branch_tip", "--dry-run", http.StatusBadRequest},
+		{"branch_tip", "abc~1", http.StatusBadRequest},
+		{"branch_tip", "abc..def", http.StatusBadRequest},
+		{"branch_tip", "abc def", http.StatusBadRequest},
+		{"branch_tip", "abc123def456", http.StatusOK},
+	}
+
+	slug := strings.NewReplacer("/", "_", " ", "_", "~", "_", "^", "_", ":", "_", "-", "dash-")
+
+	for _, tc := range cases {
+		t.Run(tc.field+"/"+slug.Replace(tc.value), func(t *testing.T) {
+			// A fresh store per row: rows stay independent, and the accepted write in a
+			// row cannot be masked by the row before it.
+			h, s, _ := newTestTaskHandler(t)
+			setupTaskValidationProject(t, h, s)
+
+			rr := doTaskRequest(t, newTaskMux(h), "PUT",
+				"/api/projects/task-val-proj/tasks/task-val-task",
+				map[string]string{tc.field: tc.value})
+			if rr.Code != tc.want {
+				t.Fatalf("%s=%q: status = %d, want %d; body: %s", tc.field, tc.value, rr.Code, tc.want, rr.Body.String())
 			}
-		})
-	}
-}
-
-// --- PUT handler base_ref validation tests ---
-
-func TestTaskHandler_PUT_BaseRefValidation_DashPrefix(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-
-	// Dash-prefixed base_ref → 400
-	rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-		"base_ref": "-C/tmp/evil",
-	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for dash-prefixed base_ref, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestTaskHandler_PUT_BaseRefValidation_Valid(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-
-	// Valid base_ref → 200
-	rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-		"base_ref": "main",
-	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid base_ref, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	task, err := s.GetTask("task-val-proj", "task-val-task")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if task.BaseRef != "main" {
-		t.Fatalf("expected base_ref 'main', got %q", task.BaseRef)
-	}
-}
-
-func TestTaskHandler_PUT_BaseRefValidation_InvalidChars(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-
-	invalidRefs := []string{"feat~1", "feat..branch", "feat branch"}
-	for _, ref := range invalidRefs {
-		t.Run(strings.ReplaceAll(ref, " ", "_"), func(t *testing.T) {
-			rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-				"base_ref": ref,
-			})
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400 for base_ref %q, got %d: %s", ref, rr.Code, rr.Body.String())
+			if tc.want != http.StatusOK {
+				return
 			}
-		})
-	}
-}
 
-// --- PUT handler branch_tip validation tests ---
-
-func TestTaskHandler_PUT_BranchTipValidation_DashPrefix(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-
-	// Dash-prefixed branch_tip → 400
-	rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-		"branch_tip": "--dry-run",
-	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for dash-prefixed branch_tip, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestTaskHandler_PUT_BranchTipValidation_Valid(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-
-	// Valid branch_tip (commit hash) → 200
-	rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-		"branch_tip": "abc123def456",
-	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 for valid branch_tip, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	task, err := s.GetTask("task-val-proj", "task-val-task")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if task.BranchTip != "abc123def456" {
-		t.Fatalf("expected branch_tip 'abc123def456', got %q", task.BranchTip)
-	}
-}
-
-func TestTaskHandler_PUT_BranchTipValidation_InvalidChars(t *testing.T) {
-	h, s, _ := newTestTaskHandler(t)
-	setupTaskValidationProject(t, h, s)
-	mux := newTaskMux(h)
-
-	invalidTips := []string{"abc~1", "abc..def", "abc def"}
-	for _, tip := range invalidTips {
-		t.Run(strings.ReplaceAll(tip, " ", "_"), func(t *testing.T) {
-			rr := doTaskRequest(t, mux, "PUT", "/api/projects/task-val-proj/tasks/task-val-task", map[string]string{
-				"branch_tip": tip,
-			})
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400 for branch_tip %q, got %d: %s", tip, rr.Code, rr.Body.String())
+			task, err := s.GetTask("task-val-proj", "task-val-task")
+			if err != nil {
+				t.Fatalf("get task: %v", err)
+			}
+			if got := stored[tc.field](task); got != tc.value {
+				t.Errorf("%s = %q after the accepted update, want %q", tc.field, got, tc.value)
 			}
 		})
 	}

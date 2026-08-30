@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -60,201 +61,101 @@ func TestAutoSummarizeThreshold_Roundtrip(t *testing.T) {
 	}
 }
 
-func TestHideModelBadge_UnsetDefault(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
+// TestUIFlagPreferences covers every *bool preference in the config in one place,
+// because they share one storage rule and its three failure modes:
+//
+//   - unset must stay nil, so /api/config OMITS the key and the client default applies;
+//   - true must round-trip;
+//   - an explicit false must come back PRESENT. Collapsing it to nil would quietly
+//     restore the behaviour the user just switched off, which is the bug each row below
+//     is written to catch.
+func TestUIFlagPreferences(t *testing.T) {
+	flags := []struct {
+		name string
+		set  func(cfg *types.Config, v *bool)
+		get  func(cfg *types.Config) *bool
+		// accessor is the read path some preferences expose; nil when there is none.
+		accessor func(cs *ConfigStore) bool
+	}{
+		{
+			name: "hide_model_badge",
+			set:  func(c *types.Config, v *bool) { c.HideModelBadge = v },
+			get:  func(c *types.Config) *bool { return c.HideModelBadge },
+		},
+		{
+			name:     "run_siblings_parallel",
+			set:      func(c *types.Config, v *bool) { c.RunSiblingsParallel = v },
+			get:      func(c *types.Config) *bool { return c.RunSiblingsParallel },
+			accessor: func(cs *ConfigStore) bool { return cs.GetRunSiblingsParallel() },
+		},
+		{
+			name: "sort_oldest_first",
+			set:  func(c *types.Config, v *bool) { c.SortOldestFirst = v },
+			get:  func(c *types.Config) *bool { return c.SortOldestFirst },
+		},
 	}
-	if cfg.HideModelBadge != nil {
-		t.Fatalf("expected nil HideModelBadge when unset, got %v", *cfg.HideModelBadge)
-	}
-}
 
-func TestHideModelBadge_RoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.HideModelBadge = ptrBool(true)
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.HideModelBadge == nil || !*read.HideModelBadge {
-		t.Fatalf("expected hide_model_badge=true after update, got %v", read.HideModelBadge)
-	}
-}
+	for _, f := range flags {
+		t.Run(f.name+" is unset and omitted from the response", func(t *testing.T) {
+			cs := testConfigStore(t)
+			cfg, err := cs.GetConfig()
+			if err != nil {
+				t.Fatalf("get config: %v", err)
+			}
+			if got := f.get(cfg); got != nil {
+				t.Fatalf("expected nil %s when unset, got %v", f.name, *got)
+			}
+			b, err := json.Marshal(cs.buildConfigResponse(cfg))
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			// Match the JSON key, not the bare name: the temp database path in this very
+			// response contains the subtest name, which mentions the key.
+			if strings.Contains(string(b), `"`+f.name+`":`) {
+				t.Fatalf("expected %q omitted from the response when nil, got %s", f.name, b)
+			}
+			if f.accessor != nil && f.accessor(cs) {
+				t.Errorf("accessor reported true while %s is unset", f.name)
+			}
+		})
 
-// An explicit false must round-trip as present (non-nil), not collapse to the
-// default (badge visible).
-func TestHideModelBadge_FalseRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.HideModelBadge = ptrBool(true)
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	cfg.HideModelBadge = ptrBool(false)
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.HideModelBadge == nil || *read.HideModelBadge {
-		t.Fatalf("expected hide_model_badge=false (present), got %v", read.HideModelBadge)
-	}
-}
+		t.Run(f.name+" round-trips true and an explicit false", func(t *testing.T) {
+			cs := testConfigStore(t)
+			// true → false → true also proves an explicit value overwrites the previous one.
+			for _, want := range []bool{true, false, true} {
+				cfg, err := cs.GetConfig()
+				if err != nil {
+					t.Fatalf("get config: %v", err)
+				}
+				f.set(cfg, ptrBool(want))
+				if err := cs.UpdateConfig(cfg); err != nil {
+					t.Fatalf("update config: %v", err)
+				}
 
-// A nil HideModelBadge must be omitted from the /api/config JSON.
-func TestHideModelBadge_OmittedWhenNil(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	b, err := json.Marshal(cs.buildConfigResponse(cfg))
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if strings.Contains(string(b), "hide_model_badge") {
-		t.Fatalf("expected hide_model_badge omitted from response when nil, got %s", b)
-	}
-}
+				read, err := cs.GetConfig()
+				if err != nil {
+					t.Fatalf("get config: %v", err)
+				}
+				got := f.get(read)
+				if got == nil {
+					t.Fatalf("%s=%t came back as nil (unset) — it must stay present", f.name, want)
+				}
+				if *got != want {
+					t.Fatalf("%s = %t, want %t", f.name, *got, want)
+				}
 
-func TestRunSiblingsParallel_UnsetDefault(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if cfg.RunSiblingsParallel != nil {
-		t.Fatalf("expected nil RunSiblingsParallel when unset, got %v", *cfg.RunSiblingsParallel)
-	}
-	if got := cs.GetRunSiblingsParallel(); got != false {
-		t.Fatalf("expected GetRunSiblingsParallel false when unset, got %v", got)
-	}
-}
-
-func TestRunSiblingsParallel_RoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.RunSiblingsParallel = ptrBool(true)
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.RunSiblingsParallel == nil || !*read.RunSiblingsParallel {
-		t.Fatalf("expected run_siblings_parallel=true after update, got %v", read.RunSiblingsParallel)
-	}
-	if got := cs.GetRunSiblingsParallel(); got != true {
-		t.Fatalf("expected GetRunSiblingsParallel true after update, got %v", got)
-	}
-}
-
-// An explicit false must round-trip as present (non-nil), not collapse to unset.
-func TestRunSiblingsParallel_FalseRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.RunSiblingsParallel = ptrBool(true)
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	cfg.RunSiblingsParallel = ptrBool(false)
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.RunSiblingsParallel == nil || *read.RunSiblingsParallel {
-		t.Fatalf("expected run_siblings_parallel=false (present), got %v", read.RunSiblingsParallel)
-	}
-	if got := cs.GetRunSiblingsParallel(); got != false {
-		t.Fatalf("expected GetRunSiblingsParallel false after update, got %v", got)
-	}
-}
-
-// A nil RunSiblingsParallel must be omitted from the /api/config JSON.
-func TestRunSiblingsParallel_OmittedWhenNil(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	b, err := json.Marshal(cs.buildConfigResponse(cfg))
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if strings.Contains(string(b), "run_siblings_parallel") {
-		t.Fatalf("expected run_siblings_parallel omitted from response when nil, got %s", b)
-	}
-}
-
-// Board sort direction: unset means the default (newest move on top).
-func TestSortOldestFirst_UnsetDefault(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if cfg.SortOldestFirst != nil {
-		t.Fatalf("expected nil SortOldestFirst when unset, got %v", *cfg.SortOldestFirst)
-	}
-	b, err := json.Marshal(cs.buildConfigResponse(cfg))
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if strings.Contains(string(b), "sort_oldest_first") {
-		t.Fatalf("expected sort_oldest_first omitted from response when nil, got %s", b)
-	}
-}
-
-// Both settings round-trip, including the explicit false (present, not unset).
-func TestSortOldestFirst_RoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	for _, want := range []bool{true, false, true} {
-		cfg, err := cs.GetConfig()
-		if err != nil {
-			t.Fatalf("get config: %v", err)
-		}
-		cfg.SortOldestFirst = ptrBool(want)
-		if err := cs.UpdateConfig(cfg); err != nil {
-			t.Fatalf("update config: %v", err)
-		}
-		read, err := cs.GetConfig()
-		if err != nil {
-			t.Fatalf("get config: %v", err)
-		}
-		if read.SortOldestFirst == nil || *read.SortOldestFirst != want {
-			t.Fatalf("expected sort_oldest_first=%t after update, got %v", want, read.SortOldestFirst)
-		}
-		b, err := json.Marshal(cs.buildConfigResponse(read))
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		if !strings.Contains(string(b), "\"sort_oldest_first\":"+strconv.FormatBool(want)) {
-			t.Fatalf("expected sort_oldest_first=%t in response, got %s", want, b)
-		}
+				b, err := json.Marshal(cs.buildConfigResponse(read))
+				if err != nil {
+					t.Fatalf("marshal: %v", err)
+				}
+				if wantJSON := `"` + f.name + `":` + strconv.FormatBool(want); !strings.Contains(string(b), wantJSON) {
+					t.Fatalf("expected %s in the response, got %s", wantJSON, b)
+				}
+				if f.accessor != nil && f.accessor(cs) != want {
+					t.Errorf("accessor = %t, want %t for %s", f.accessor(cs), want, f.name)
+				}
+			}
+		})
 	}
 }
 
@@ -885,246 +786,103 @@ func TestKeyboardShortcuts_UnsetDefault(t *testing.T) {
 	}
 }
 
-func TestKeyboardShortcuts_CustomRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
+// TestKeyboardShortcuts_RoundTrip covers every binding through the same two states,
+// because they all ride one JSON column and share the one bug worth guarding: an explicit
+// "" (disabled) must come back as "", not as nil — nil means "unset", which would hand
+// the user back the default binding they just switched off. hide_hints is a bool and is
+// covered next; the all-nil normalization is pinned by
+// TestKeyboardShortcuts_AllNilNormalizedToNil.
+func TestKeyboardShortcuts_RoundTrip(t *testing.T) {
+	bindings := []struct {
+		name string
+		// custom is a binding the frontend would never generate by default, so a
+		// round-trip that silently fell back to the default would be caught.
+		custom string
+		set    func(ks *types.KeyboardShortcuts, v *string)
+		get    func(ks *types.KeyboardShortcuts) *string
+	}{
+		{"create_task", "shift+k",
+			func(ks *types.KeyboardShortcuts, v *string) { ks.CreateTask = v },
+			func(ks *types.KeyboardShortcuts) *string { return ks.CreateTask }},
+		{"create_task_submit", "shift+enter",
+			func(ks *types.KeyboardShortcuts, v *string) { ks.CreateTaskSubmit = v },
+			func(ks *types.KeyboardShortcuts) *string { return ks.CreateTaskSubmit }},
+		{"open_terminal", "alt+shift+t",
+			func(ks *types.KeyboardShortcuts, v *string) { ks.OpenTerminal = v },
+			func(ks *types.KeyboardShortcuts) *string { return ks.OpenTerminal }},
+		{"start_task", "shift+enter",
+			func(ks *types.KeyboardShortcuts, v *string) { ks.StartTask = v },
+			func(ks *types.KeyboardShortcuts) *string { return ks.StartTask }},
+		{"toggle_fullscreen", "shift+alt+f",
+			func(ks *types.KeyboardShortcuts, v *string) { ks.ToggleFullscreen = v },
+			func(ks *types.KeyboardShortcuts) *string { return ks.ToggleFullscreen }},
 	}
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{CreateTask: ptr("shift+k")}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.CreateTask == nil || *read.KeyboardShortcuts.CreateTask != "shift+k" {
-		t.Fatalf("expected create_task=\"shift+k\", got %+v", read.KeyboardShortcuts)
+
+	for _, b := range bindings {
+		for _, mode := range []struct {
+			label string
+			value string
+		}{{"custom binding", b.custom}, {"disabled", ""}} {
+			t.Run(b.name+"/"+mode.label, func(t *testing.T) {
+				cs := testConfigStore(t)
+				cfg, err := cs.GetConfig()
+				if err != nil {
+					t.Fatalf("get config: %v", err)
+				}
+
+				// One binding per store: a lone field must survive on its own, which is
+				// what the normalization step gets wrong.
+				ks := &types.KeyboardShortcuts{}
+				b.set(ks, ptr(mode.value))
+				cfg.KeyboardShortcuts = ks
+				if err := cs.UpdateConfig(cfg); err != nil {
+					t.Fatalf("update config: %v", err)
+				}
+
+				read, err := cs.GetConfig()
+				if err != nil {
+					t.Fatalf("get config: %v", err)
+				}
+				if read.KeyboardShortcuts == nil {
+					t.Fatalf("%s=%q vanished: KeyboardShortcuts normalized to nil", b.name, mode.value)
+				}
+				got := b.get(read.KeyboardShortcuts)
+				if got == nil {
+					t.Fatalf("%s came back nil, want %q", b.name, mode.value)
+				}
+				if *got != mode.value {
+					t.Errorf("%s = %q, want %q", b.name, *got, mode.value)
+				}
+			})
+		}
 	}
 }
 
-func TestKeyboardShortcuts_DisabledRoundTrip(t *testing.T) {
+// TestKeyboardShortcutsHideHints covers the one boolean binding. Both values must come
+// back present: hide_hints=false is a real preference (show the hints), so normalizing
+// the struct to nil because it carries no key binding would drop it from API responses.
+func TestKeyboardShortcutsHideHints(t *testing.T) {
 	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	// Empty string means "disabled" — must round-trip as "" (not nil).
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{CreateTask: ptr("")}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.CreateTask == nil {
-		t.Fatalf("expected disabled create_task (empty string), got %+v", read.KeyboardShortcuts)
-	}
-	if *read.KeyboardShortcuts.CreateTask != "" {
-		t.Fatalf("expected empty string, got %q", *read.KeyboardShortcuts.CreateTask)
-	}
-}
+	for _, want := range []bool{true, false} {
+		cfg, err := cs.GetConfig()
+		if err != nil {
+			t.Fatalf("get config: %v", err)
+		}
+		cfg.KeyboardShortcuts = &types.KeyboardShortcuts{HideHints: ptrBool(want)}
+		if err := cs.UpdateConfig(cfg); err != nil {
+			t.Fatalf("update config: %v", err)
+		}
 
-func TestKeyboardShortcutsSubmit_CustomRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{CreateTaskSubmit: ptr("shift+enter")}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.CreateTaskSubmit == nil || *read.KeyboardShortcuts.CreateTaskSubmit != "shift+enter" {
-		t.Fatalf("expected create_task_submit=\"shift+enter\", got %+v", read.KeyboardShortcuts)
-	}
-}
-
-func TestKeyboardShortcutsSubmit_DisabledRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{CreateTaskSubmit: ptr("")}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.CreateTaskSubmit == nil || *read.KeyboardShortcuts.CreateTaskSubmit != "" {
-		t.Fatalf("expected disabled (empty string) create_task_submit, got %+v", read.KeyboardShortcuts)
-	}
-}
-
-func TestKeyboardShortcutsOpenTerminal_CustomRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{OpenTerminal: ptr("alt+shift+t")}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.OpenTerminal == nil || *read.KeyboardShortcuts.OpenTerminal != "alt+shift+t" {
-		t.Fatalf("expected open_terminal=\"alt+shift+t\", got %+v", read.KeyboardShortcuts)
-	}
-	if read.KeyboardShortcuts.CreateTask != nil || read.KeyboardShortcuts.CreateTaskSubmit != nil {
-		t.Fatalf("expected other bindings to stay nil, got %+v", read.KeyboardShortcuts)
-	}
-}
-
-func TestKeyboardShortcutsOpenTerminal_DisabledRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{OpenTerminal: ptr("")}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.OpenTerminal == nil || *read.KeyboardShortcuts.OpenTerminal != "" {
-		t.Fatalf("expected disabled (empty string) open_terminal, got %+v", read.KeyboardShortcuts)
-	}
-}
-
-func TestKeyboardShortcutsStartTask_CustomRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{StartTask: ptr("shift+enter")}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.StartTask == nil || *read.KeyboardShortcuts.StartTask != "shift+enter" {
-		t.Fatalf("expected start_task=\"shift+enter\", got %+v", read.KeyboardShortcuts)
-	}
-	if read.KeyboardShortcuts.CreateTask != nil || read.KeyboardShortcuts.CreateTaskSubmit != nil || read.KeyboardShortcuts.OpenTerminal != nil {
-		t.Fatalf("expected other bindings to stay nil, got %+v", read.KeyboardShortcuts)
-	}
-}
-
-func TestKeyboardShortcutsStartTask_DisabledRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{StartTask: ptr("")}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.StartTask == nil || *read.KeyboardShortcuts.StartTask != "" {
-		t.Fatalf("expected disabled (empty string) start_task, got %+v", read.KeyboardShortcuts)
-	}
-}
-
-func TestKeyboardShortcutsToggleFullscreen_CustomRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{ToggleFullscreen: ptr("shift+alt+f")}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.ToggleFullscreen == nil || *read.KeyboardShortcuts.ToggleFullscreen != "shift+alt+f" {
-		t.Fatalf("expected toggle_fullscreen=\"shift+alt+f\", got %+v", read.KeyboardShortcuts)
-	}
-	if read.KeyboardShortcuts.CreateTask != nil || read.KeyboardShortcuts.CreateTaskSubmit != nil || read.KeyboardShortcuts.OpenTerminal != nil || read.KeyboardShortcuts.StartTask != nil {
-		t.Fatalf("expected other bindings to stay nil, got %+v", read.KeyboardShortcuts)
-	}
-}
-
-func TestKeyboardShortcutsToggleFullscreen_DisabledRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{ToggleFullscreen: ptr("")}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.ToggleFullscreen == nil || *read.KeyboardShortcuts.ToggleFullscreen != "" {
-		t.Fatalf("expected disabled (empty string) toggle_fullscreen, got %+v", read.KeyboardShortcuts)
-	}
-}
-
-func TestKeyboardShortcutsHideHints_RoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{HideHints: ptrBool(true)}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.HideHints == nil || !*read.KeyboardShortcuts.HideHints {
-		t.Fatalf("expected hide_hints=true, got %+v", read.KeyboardShortcuts)
-	}
-}
-
-// A struct with only hide_hints set must NOT normalize to nil — otherwise the
-// preference vanishes from API responses.
-func TestKeyboardShortcutsHideHints_OnlyFieldStaysPresent(t *testing.T) {
-	cs := testConfigStore(t)
-	cfg, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	cfg.KeyboardShortcuts = &types.KeyboardShortcuts{HideHints: ptrBool(false)}
-	if err := cs.UpdateConfig(cfg); err != nil {
-		t.Fatalf("update config: %v", err)
-	}
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.HideHints == nil || *read.KeyboardShortcuts.HideHints {
-		t.Fatalf("expected hide_hints=false (present), got %+v", read.KeyboardShortcuts)
+		read, err := cs.GetConfig()
+		if err != nil {
+			t.Fatalf("get config: %v", err)
+		}
+		if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.HideHints == nil {
+			t.Fatalf("hide_hints=%t vanished (KeyboardShortcuts=%+v)", want, read.KeyboardShortcuts)
+		}
+		if *read.KeyboardShortcuts.HideHints != want {
+			t.Errorf("hide_hints = %t, want %t", *read.KeyboardShortcuts.HideHints, want)
+		}
 	}
 }
 
@@ -1148,62 +906,171 @@ func TestKeyboardShortcuts_AllNilNormalizedToNil(t *testing.T) {
 	}
 }
 
-func TestHandleConfig_KeyboardShortcutsRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
+// putConfig drives PUT /api/config with each body in order, failing if any is refused. The
+// sequences matter: the second PUT is what shows whether a field was reset or preserved.
+func putConfig(t *testing.T, cs *ConfigStore, bodies ...string) {
+	t.Helper()
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cs.HandleConfig(w, r)
 	}))
 	defer srv.Close()
 
-	// Seed a provider so we can verify partial updates don't clobber other keys.
-	seed := `{"providers":[{"id":1,"url":"http://neptune:8010/v1","concurrency":1,"models":[]}],"worker_provider":"1","worker_model":"m1","utility_provider":"1","utility_model":"m1"}`
-	req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/config", strings.NewReader(seed))
-	if err != nil {
-		t.Fatalf("build seed request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if resp, err := srv.Client().Do(req); err != nil {
-		t.Fatalf("seed config: %v", err)
-	} else {
+	for _, body := range bodies {
+		req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/config", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("build PUT request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatalf("put config: %v", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			t.Fatalf("PUT /api/config %s: status = %d, want 200", body, resp.StatusCode)
+		}
 		resp.Body.Close()
 	}
+}
 
-	// Partial PUT: only keyboard_shortcuts.
-	putBody := `{"keyboard_shortcuts":{"create_task":"control+k"}}`
-	req, err = http.NewRequest(http.MethodPut, srv.URL+"/api/config", strings.NewReader(putBody))
-	if err != nil {
-		t.Fatalf("build PUT request: %v", err)
+// TestHandleConfig_KeyboardShortcutsPut covers the three merge rules the PUT handler
+// implements for the shortcuts object, from the stored side:
+//
+//   - a binding is kept as sent, including the empty string, which means "disabled";
+//   - a binding ABSENT from the PUT body is reset to its default (nil), because the SPA
+//     always sends the full set — a partial body is a reset, not a patch;
+//   - so "c" then "" must land on disabled, not on the default.
+func TestHandleConfig_KeyboardShortcutsPut(t *testing.T) {
+	cases := []struct {
+		name   string
+		bodies []string
+		check  func(t *testing.T, ks *types.KeyboardShortcuts)
+	}{
+		{
+			name:   "custom binding is stored as sent",
+			bodies: []string{`{"keyboard_shortcuts":{"create_task":"shift+k"}}`},
+			check: func(t *testing.T, ks *types.KeyboardShortcuts) {
+				requireBinding(t, "create_task", ks, ptr("shift+k"))
+			},
+		},
+		{
+			name: "empty string disables rather than unsetting",
+			bodies: []string{
+				`{"keyboard_shortcuts":{"create_task":"c"}}`,
+				`{"keyboard_shortcuts":{"create_task":""}}`,
+			},
+			check: func(t *testing.T, ks *types.KeyboardShortcuts) {
+				requireBinding(t, "create_task", ks, ptr(""))
+			},
+		},
+		{
+			name: "bindings missing from the body reset to default",
+			bodies: []string{
+				`{"keyboard_shortcuts":{"create_task":"shift+k","create_task_submit":"shift+enter","open_terminal":"alt+shift+t"}}`,
+				`{"keyboard_shortcuts":{"create_task":"c"}}`,
+			},
+			check: func(t *testing.T, ks *types.KeyboardShortcuts) {
+				requireBinding(t, "create_task", ks, ptr("c"))
+				requireBinding(t, "create_task_submit", ks, nil)
+				requireBinding(t, "open_terminal", ks, nil)
+			},
+		},
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := srv.Client().Do(req)
-	if err != nil {
-		t.Fatalf("put config: %v", err)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := testConfigStore(t)
+			putConfig(t, cs, tc.bodies...)
+
+			read, err := cs.GetConfig()
+			if err != nil {
+				t.Fatalf("get config: %v", err)
+			}
+			if read.KeyboardShortcuts == nil {
+				t.Fatalf("shortcuts vanished after PUT %v", tc.bodies)
+			}
+			tc.check(t, read.KeyboardShortcuts)
+		})
 	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("PUT /api/config status = %d, want 200", resp.StatusCode)
+}
+
+// requireBinding asserts a binding's stored state: want nil means "unset" (absent from the
+// object), want non-nil means present with that exact value — including "".
+func requireBinding(t *testing.T, name string, ks *types.KeyboardShortcuts, want *string) {
+	t.Helper()
+
+	fields := map[string]*string{
+		"create_task":        ks.CreateTask,
+		"create_task_submit": ks.CreateTaskSubmit,
+		"open_terminal":      ks.OpenTerminal,
+		"start_task":         ks.StartTask,
+		"toggle_fullscreen":  ks.ToggleFullscreen,
 	}
-	resp.Body.Close()
+	got, ok := fields[name]
+	if !ok {
+		t.Fatalf("unknown binding %q", name)
+	}
+	switch {
+	case want == nil && got != nil:
+		t.Errorf("%s = %q, want unset (default)", name, *got)
+	case want != nil && got == nil:
+		t.Errorf("%s is unset, want %q", name, *want)
+	case want != nil && *got != *want:
+		t.Errorf("%s = %q, want %q", name, *got, *want)
+	}
+}
+
+// TestHandleConfig_KeyboardShortcutsWireFormat covers what the SPA actually reads back after
+// a partial PUT, which the stored-side table above cannot see:
+//
+//   - the bindings it sent come back by their JSON names;
+//   - a binding it did not send is OMITTED from the object (not null, not ""), so the client
+//     falls through to its own default instead of rendering an empty key;
+//   - touching keyboard_shortcuts must not clobber the rest of the config — the seeded
+//     provider and worker pair have to survive, because PUT is a partial update.
+func TestHandleConfig_KeyboardShortcutsWireFormat(t *testing.T) {
+	cs := testConfigStore(t)
+	putConfig(t, cs,
+		`{"providers":[{"id":1,"url":"http://neptune:8010/v1","concurrency":1,"models":[]}],"worker_provider":"1","worker_model":"m1","utility_provider":"1","utility_model":"m1"}`,
+		`{"keyboard_shortcuts":{"create_task":"control+k","create_task_submit":"meta+enter"}}`)
+
+	srv := httptest.NewServer(http.HandlerFunc(cs.HandleConfig))
+	defer srv.Close()
 
 	getResp, err := http.Get(srv.URL + "/api/config")
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
 	defer getResp.Body.Close()
+
 	var got struct {
 		KeyboardShortcuts *struct {
-			CreateTask *string `json:"create_task"`
+			CreateTask       *string `json:"create_task"`
+			CreateTaskSubmit *string `json:"create_task_submit"`
+			StartTask        *string `json:"start_task"`
 		} `json:"keyboard_shortcuts"`
 		WorkerProvider string `json:"worker_provider"`
 	}
-	if err := json.NewDecoder(getResp.Body).Decode(&got); err != nil {
+	body, err := io.ReadAll(getResp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("decode get config: %v", err)
 	}
-	if got.KeyboardShortcuts == nil || got.KeyboardShortcuts.CreateTask == nil || *got.KeyboardShortcuts.CreateTask != "control+k" {
-		t.Fatalf("expected keyboard_shortcuts.create_task=\"control+k\", got %+v", got.KeyboardShortcuts)
+
+	if got.KeyboardShortcuts == nil {
+		t.Fatalf("keyboard_shortcuts missing from the response: %s", body)
 	}
-	// Partial update must not clobber other config keys.
+	requireBinding(t, "create_task", &types.KeyboardShortcuts{CreateTask: got.KeyboardShortcuts.CreateTask}, ptr("control+k"))
+	requireBinding(t, "create_task_submit", &types.KeyboardShortcuts{CreateTaskSubmit: got.KeyboardShortcuts.CreateTaskSubmit}, ptr("meta+enter"))
+	requireBinding(t, "start_task", &types.KeyboardShortcuts{StartTask: got.KeyboardShortcuts.StartTask}, nil)
+	if strings.Contains(string(body), `"start_task"`) {
+		t.Errorf("unset binding must be omitted from the object, not sent as null: %s", body)
+	}
 	if got.WorkerProvider != "1" {
-		t.Fatalf("expected worker_provider preserved as \"1\", got %q", got.WorkerProvider)
+		t.Errorf("worker_provider = %q after a shortcuts-only PUT, want \"1\" (partial update must not clobber)", got.WorkerProvider)
 	}
 }
 
@@ -1235,132 +1102,6 @@ func TestHandleConfig_KeyboardShortcutsResetOmittedInResponse(t *testing.T) {
 	}
 	if _, ok := got["keyboard_shortcuts"]; ok {
 		t.Fatalf("expected keyboard_shortcuts omitted from PUT response after reset")
-	}
-}
-
-func TestHandleConfig_KeyboardShortcutsClear(t *testing.T) {
-	cs := testConfigStore(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cs.HandleConfig(w, r)
-	}))
-	defer srv.Close()
-
-	// Set a custom binding, then clear it ("" = disabled).
-	for _, body := range []string{
-		`{"keyboard_shortcuts":{"create_task":"c"}}`,
-		`{"keyboard_shortcuts":{"create_task":""}}`,
-	} {
-		req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/config", strings.NewReader(body))
-		if err != nil {
-			t.Fatalf("build PUT request: %v", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if resp, err := srv.Client().Do(req); err != nil {
-			t.Fatalf("put config: %v", err)
-		} else {
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("PUT /api/config status = %d, want 200", resp.StatusCode)
-			}
-			resp.Body.Close()
-		}
-	}
-
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.CreateTask == nil {
-		t.Fatalf("expected disabled (empty string) create_task, got %+v", read.KeyboardShortcuts)
-	}
-	if *read.KeyboardShortcuts.CreateTask != "" {
-		t.Fatalf("expected empty string, got %q", *read.KeyboardShortcuts.CreateTask)
-	}
-}
-
-func TestHandleConfig_KeyboardShortcutsSubmitRoundTrip(t *testing.T) {
-	cs := testConfigStore(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cs.HandleConfig(w, r)
-	}))
-	defer srv.Close()
-
-	req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/config", strings.NewReader(`{"keyboard_shortcuts":{"create_task_submit":"meta+enter"}}`))
-	if err != nil {
-		t.Fatalf("build PUT request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := srv.Client().Do(req)
-	if err != nil {
-		t.Fatalf("put config: %v", err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("PUT /api/config status = %d, want 200", resp.StatusCode)
-	}
-
-	getResp, err := http.Get(srv.URL + "/api/config")
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	defer getResp.Body.Close()
-	var got struct {
-		KeyboardShortcuts *struct {
-			CreateTask       *string `json:"create_task"`
-			CreateTaskSubmit *string `json:"create_task_submit"`
-		} `json:"keyboard_shortcuts"`
-	}
-	if err := json.NewDecoder(getResp.Body).Decode(&got); err != nil {
-		t.Fatalf("decode get config: %v", err)
-	}
-	if got.KeyboardShortcuts == nil || got.KeyboardShortcuts.CreateTaskSubmit == nil || *got.KeyboardShortcuts.CreateTaskSubmit != "meta+enter" {
-		t.Fatalf("expected create_task_submit=\"meta+enter\", got %+v", got.KeyboardShortcuts)
-	}
-	if got.KeyboardShortcuts.CreateTask != nil {
-		t.Fatalf("expected create_task omitted, got %q", *got.KeyboardShortcuts.CreateTask)
-	}
-}
-
-// The frontend contract: the Settings UI always sends BOTH bindings in the
-// save payload (absent = reset to default), so the replace semantics let
-// "Reset to default" work without a special clear token.
-func TestHandleConfig_KeyboardShortcutsReplaceSemantics(t *testing.T) {
-	cs := testConfigStore(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cs.HandleConfig(w, r)
-	}))
-	defer srv.Close()
-
-	for _, body := range []string{
-		`{"keyboard_shortcuts":{"create_task":"shift+k","create_task_submit":"shift+enter","open_terminal":"alt+shift+t"}}`,
-		`{"keyboard_shortcuts":{"create_task":"c"}}`, // no create_task_submit/open_terminal -> reset to default
-	} {
-		req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/config", strings.NewReader(body))
-		if err != nil {
-			t.Fatalf("build PUT request: %v", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if resp, err := srv.Client().Do(req); err != nil {
-			t.Fatalf("put config: %v", err)
-		} else {
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("PUT /api/config status = %d, want 200", resp.StatusCode)
-			}
-			resp.Body.Close()
-		}
-	}
-
-	read, err := cs.GetConfig()
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	if read.KeyboardShortcuts == nil || read.KeyboardShortcuts.CreateTask == nil || *read.KeyboardShortcuts.CreateTask != "c" {
-		t.Fatalf("expected create_task=\"c\", got %+v", read.KeyboardShortcuts)
-	}
-	if read.KeyboardShortcuts.CreateTaskSubmit != nil {
-		t.Fatalf("expected create_task_submit reset to default (nil), got %+v", read.KeyboardShortcuts.CreateTaskSubmit)
-	}
-	if read.KeyboardShortcuts.OpenTerminal != nil {
-		t.Fatalf("expected open_terminal reset to default (nil), got %+v", read.KeyboardShortcuts.OpenTerminal)
 	}
 }
 
