@@ -13,6 +13,11 @@ import {
     matchesCreateTaskSubmitKey,
     defaultStartTaskKey,
     effectiveStartTaskKey,
+    normalizeClick,
+    matchesClickBinding,
+    isBrowserLinkClick,
+    defaultMultiSelectClick,
+    effectiveMultiSelectClick,
     effectiveToggleFullscreenKey,
     fullscreenToggleTitle,
     shortcutHintsHidden,
@@ -32,6 +37,10 @@ afterEach(() => {
 
 function keyEvent(init: Partial<KeyboardEventInit> & { key: string }): KeyboardEvent {
     return new KeyboardEvent('keydown', { cancelable: true, ...init });
+}
+
+function clickEvent(init: Partial<MouseEventInit> & { button?: number } = {}): MouseEvent {
+    return new MouseEvent('click', { cancelable: true, button: 0, ...init });
 }
 
 describe('normalizeKey', () => {
@@ -111,6 +120,12 @@ describe('formatShortcut', () => {
 
     it('formats the default terminal combo', () => {
         expect(formatShortcut('control+`')).toBe('Ctrl+`');
+    });
+
+    it('formats click bindings with a readable mouse label', () => {
+        expect(formatShortcut('meta+click')).toBe('Cmd+Click');
+        expect(formatShortcut('control+click')).toBe('Ctrl+Click');
+        expect(formatShortcut('control+shift+click')).toBe('Ctrl+Shift+Click');
     });
 });
 
@@ -288,6 +303,95 @@ describe('effectiveStartTaskKey', () => {
 
     it('returns empty string when explicitly disabled', () => {
         expect(effectiveStartTaskKey({ keyboard_shortcuts: { start_task: '' } } as Config)).toBe('');
+    });
+});
+
+describe('normalizeClick', () => {
+    it('normalizes modifier clicks in canonical order', () => {
+        expect(normalizeClick(clickEvent({ ctrlKey: true }))).toBe('control+click');
+        expect(normalizeClick(clickEvent({ metaKey: true }))).toBe('meta+click');
+        expect(normalizeClick(clickEvent({ metaKey: true, shiftKey: true }))).toBe('meta+shift+click');
+        expect(normalizeClick(clickEvent({ altKey: true, shiftKey: true }))).toBe('shift+alt+click');
+    });
+
+    it('rejects an unmodified click — a bare click stays the element\u2019s own action', () => {
+        expect(normalizeClick(clickEvent())).toBeNull();
+    });
+
+    it('rejects non-primary buttons (middle click opens the browser tab)', () => {
+        expect(normalizeClick(clickEvent({ button: 1 }))).toBeNull();
+        expect(normalizeClick(clickEvent({ button: 1, ctrlKey: true }))).toBeNull();
+        expect(normalizeClick(clickEvent({ button: 2, metaKey: true }))).toBeNull();
+    });
+});
+
+describe('matchesClickBinding', () => {
+    it('matches the exact modifier set', () => {
+        expect(matchesClickBinding('meta+click', clickEvent({ metaKey: true }))).toBe(true);
+        expect(matchesClickBinding('control+click', clickEvent({ metaKey: true }))).toBe(false);
+        expect(matchesClickBinding('control+click', clickEvent())).toBe(false);
+    });
+
+    it('does not match when an extra modifier is held', () => {
+        expect(matchesClickBinding('control+click', clickEvent({ ctrlKey: true, shiftKey: true }))).toBe(false);
+        expect(matchesClickBinding('control+shift+click', clickEvent({ ctrlKey: true, shiftKey: true }))).toBe(true);
+    });
+
+    it('ignores non-primary buttons', () => {
+        expect(matchesClickBinding('control+click', clickEvent({ ctrlKey: true, button: 1 }))).toBe(false);
+    });
+
+    it('never matches a disabled binding or a keyboard binding', () => {
+        expect(matchesClickBinding('', clickEvent({ ctrlKey: true }))).toBe(false);
+        expect(matchesClickBinding('control+k', clickEvent({ ctrlKey: true }))).toBe(false);
+    });
+});
+
+describe('isBrowserLinkClick', () => {
+    it('leaves unbound modifier clicks to the browser (new tab / new window)', () => {
+        const binding = 'control+click';
+        expect(isBrowserLinkClick(clickEvent({ metaKey: true }), binding)).toBe(true);
+        expect(isBrowserLinkClick(clickEvent({ shiftKey: true }), binding)).toBe(true);
+        expect(isBrowserLinkClick(clickEvent({ altKey: true }), binding)).toBe(true);
+    });
+
+    it('keeps the bound combo for the app', () => {
+        expect(isBrowserLinkClick(clickEvent({ ctrlKey: true }), 'control+click')).toBe(false);
+        expect(isBrowserLinkClick(clickEvent({ ctrlKey: true }), '')).toBe(true);
+    });
+
+    it('keeps a plain click for the app', () => {
+        expect(isBrowserLinkClick(clickEvent(), 'control+click')).toBe(false);
+        expect(isBrowserLinkClick(clickEvent(), '')).toBe(false);
+    });
+});
+
+describe('defaultMultiSelectClick', () => {
+    it('is Cmd+Click on Mac, Ctrl+Click elsewhere', () => {
+        mockUserAgent(MAC_UA);
+        expect(defaultMultiSelectClick()).toBe('meta+click');
+        mockUserAgent(WIN_UA);
+        expect(defaultMultiSelectClick()).toBe('control+click');
+    });
+});
+
+describe('effectiveMultiSelectClick', () => {
+    it('falls back to the platform default when unset', () => {
+        mockUserAgent(MAC_UA);
+        expect(effectiveMultiSelectClick(null)).toBe('meta+click');
+        expect(effectiveMultiSelectClick(undefined)).toBe('meta+click');
+        expect(effectiveMultiSelectClick({} as Config)).toBe('meta+click');
+        expect(effectiveMultiSelectClick({ keyboard_shortcuts: {} } as Config)).toBe('meta+click');
+        mockUserAgent(WIN_UA);
+        expect(effectiveMultiSelectClick({} as Config)).toBe('control+click');
+    });
+
+    it('returns the custom binding when set', () => {
+        expect(effectiveMultiSelectClick({ keyboard_shortcuts: { multi_select_click: 'shift+click' } } as Config)).toBe('shift+click');
+    });
+
+    it('returns empty string when explicitly disabled', () => {
+        expect(effectiveMultiSelectClick({ keyboard_shortcuts: { multi_select_click: '' } } as Config)).toBe('');
     });
 });
 

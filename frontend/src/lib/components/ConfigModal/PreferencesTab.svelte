@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { DEFAULT_SHORTCUTS, normalizeKey, formatShortcut, defaultCreateTaskSubmitKey, defaultStartTaskKey } from '$lib/utils/keyboard';
+    import { DEFAULT_SHORTCUTS, normalizeKey, normalizeClick, formatShortcut, defaultCreateTaskSubmitKey, defaultStartTaskKey, defaultMultiSelectClick } from '$lib/utils/keyboard';
     import ToggleSwitch from '../ToggleSwitch.svelte';
 
     let {
@@ -8,6 +8,7 @@
         openTerminalKey = $bindable<string | undefined>(),
         startTaskKey = $bindable<string | undefined>(),
         toggleFullscreenKey = $bindable<string | undefined>(),
+        multiSelectClickKey = $bindable<string | undefined>(),
         hideHints = $bindable(false),
         hideModelBadge = $bindable(false),
         sortOldestFirst = $bindable(false),
@@ -18,13 +19,15 @@
         openTerminalKey?: string | undefined;
         startTaskKey?: string | undefined;
         toggleFullscreenKey?: string | undefined;
+        multiSelectClickKey?: string | undefined;
         hideHints?: boolean;
         hideModelBadge?: boolean;
         sortOldestFirst?: boolean;
         onDirty?: () => void;
     } = $props();
 
-    // One row per shortcut; the submit default is platform-aware (Cmd+Enter on Mac).
+    // One row per shortcut; the submit and multi-select defaults are platform-aware
+    // (Cmd on Mac, Ctrl elsewhere).
     const rows = $derived([
         {
             id: 'create_task' as const,
@@ -32,6 +35,7 @@
             desc: 'Opens the create-task dialog on the project board',
             value: createTaskKey,
             def: DEFAULT_SHORTCUTS.create_task,
+            click: false,
         },
         {
             id: 'create_task_submit' as const,
@@ -39,6 +43,7 @@
             desc: 'Creates the task inside the create-task dialog',
             value: createTaskSubmitKey,
             def: defaultCreateTaskSubmitKey(),
+            click: false,
         },
         {
             id: 'open_terminal' as const,
@@ -46,6 +51,7 @@
             desc: 'Opens the terminal panel on pages with a terminal button',
             value: openTerminalKey,
             def: DEFAULT_SHORTCUTS.open_terminal,
+            click: false,
         },
         {
             id: 'start_task' as const,
@@ -53,6 +59,7 @@
             desc: 'Starts the task in the task view while the Start Task button is shown',
             value: startTaskKey,
             def: defaultStartTaskKey(),
+            click: false,
         },
         {
             id: 'toggle_fullscreen' as const,
@@ -60,10 +67,21 @@
             desc: 'Maximizes or minimizes the focused area (chat, diff, editor, terminal)',
             value: toggleFullscreenKey,
             def: DEFAULT_SHORTCUTS.toggle_fullscreen,
+            click: false,
+        },
+        {
+            id: 'multi_select_click' as const,
+            name: 'Multi-Select Cards',
+            desc: 'Modifier+Click to select multiple task cards',
+            value: multiSelectClickKey,
+            def: defaultMultiSelectClick(),
+            click: true,
         },
     ]);
 
     let capturingId = $state<string | null>(null);
+    /** The row currently capturing a binding — tells a mouse row from a keyboard row. */
+    const capturingRow = $derived(rows.find(r => r.id === capturingId));
     let invalidFlash = $state(false);
     let invalidTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -73,6 +91,7 @@
         else if (id === 'open_terminal') openTerminalKey = value;
         else if (id === 'start_task') startTaskKey = value;
         else if (id === 'toggle_fullscreen') toggleFullscreenKey = value;
+        else if (id === 'multi_select_click') multiSelectClickKey = value;
         onDirty?.();
     }
 
@@ -82,9 +101,20 @@
         invalidFlash = false;
     }
 
+    function flashInvalid() {
+        invalidFlash = true;
+        if (invalidTimer) clearTimeout(invalidTimer);
+        invalidTimer = setTimeout(() => {
+            invalidFlash = false;
+            invalidTimer = undefined;
+        }, 1500);
+    }
+
     $effect(() => {
         const id = capturingId;
         if (!id) return;
+        // This row binds a mouse combo, so it also captures mousedown and refuses keys.
+        const clickRow = capturingRow?.click === true;
         const handleKeydown = (e: KeyboardEvent) => {
             e.preventDefault();
             e.stopPropagation();
@@ -92,22 +122,37 @@
                 capturingId = null;
                 return;
             }
+            if (clickRow) {
+                flashInvalid();
+                return;
+            }
             const normalized = normalizeKey(e);
             if (!normalized) {
-                invalidFlash = true;
-                if (invalidTimer) clearTimeout(invalidTimer);
-                invalidTimer = setTimeout(() => {
-                    invalidFlash = false;
-                    invalidTimer = undefined;
-                }, 1500);
+                flashInvalid();
+                return;
+            }
+            assign(id, normalized);
+            capturingId = null;
+        };
+        const handleMousedown = (e: MouseEvent) => {
+            // The row's own controls must stay usable while capturing: clicking the chip
+            // again cancels, Reset/Clear still work.
+            if ((e.target as HTMLElement | null)?.closest?.('.key-chip, .shortcut-action')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const normalized = normalizeClick(e);
+            if (!normalized) {
+                flashInvalid();
                 return;
             }
             assign(id, normalized);
             capturingId = null;
         };
         window.addEventListener('keydown', handleKeydown, true);
+        if (clickRow) window.addEventListener('mousedown', handleMousedown, true);
         return () => {
             window.removeEventListener('keydown', handleKeydown, true);
+            window.removeEventListener('mousedown', handleMousedown, true);
             if (invalidTimer) clearTimeout(invalidTimer);
         };
     });
@@ -148,16 +193,18 @@
                     class:invalid={invalidFlash}
                     onclick={() => startCapture(row.id)}
                     aria-label={`${row.name} shortcut: ${capturingId === row.id ? 'capturing' : row.value === '' ? 'disabled' : formatShortcut(row.value ?? row.def)}. Click to reassign.`}
-                    title={capturingId === row.id ? 'Press any key (Escape to cancel)' : 'Click to reassign'}
+                    title={capturingId === row.id
+                        ? (row.click ? 'Click anywhere with a modifier held (Escape to cancel)' : 'Press any key (Escape to cancel)')
+                        : 'Click to reassign'}
                 >
-                    {capturingId === row.id ? 'Press a key...' : row.value === '' ? 'None' : formatShortcut(row.value ?? row.def)}
+                    {capturingId === row.id ? (row.click ? 'Now modifier+click...' : 'Press a key...') : row.value === '' ? 'None' : formatShortcut(row.value ?? row.def)}
                 </button>
             </div>
         </div>
     {/each}
 
     {#if invalidFlash}
-        <p class="invalid-hint" role="alert">Invalid key — use a letter or a modifier combo.</p>
+        <p class="invalid-hint" role="alert">{capturingRow?.click ? 'Invalid combo — hold Ctrl, Cmd, Shift or Alt and click.' : 'Invalid key — use a letter or a modifier combo.'}</p>
     {/if}
 </section>
 

@@ -44,13 +44,19 @@
     } = $props();
 
     /** Arrows on project items: Up/Down select prev/next (click + wrap); Right/Left jump to the first board/done card. */
-    function handleProjectItemKeydown(e: KeyboardEvent, idx: number) {
+    function handleProjectItemKeydown(e: KeyboardEvent, idx: number, p: Project) {
+        // role="button" promises Space activates; a native anchor only does that for Enter.
+        if (e.key === ' ') {
+            e.preventDefault();
+            if (!p.cloning) onSelectProject(p);
+            return;
+        }
         if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
         if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
         const current = e.currentTarget;
         if (!(current instanceof Element)) return;
         const nav = current.closest('nav.project-list');
-        const items = Array.from(nav?.querySelectorAll<HTMLButtonElement>('button.project-item') ?? []);
+        const items = Array.from(nav?.querySelectorAll<HTMLElement>('.project-item') ?? []);
         if (!items.length || idx >= items.length) return;
         e.preventDefault();
         e.stopPropagation();
@@ -78,6 +84,21 @@
         const counts = projectCounts[projectId];
         return !!counts && (counts.in_progress > 0 || counts.review > 0);
     };
+
+    /**
+     * Deep link to a project, so the browser can open it in a new tab. Same param order
+     * as `updateUrl` (App.svelte), so an opened tab restores the same board.
+     */
+    const projectHref = (p: Project) => `${location.pathname}?project=${encodeURIComponent(p.id)}`;
+
+    /** An unmodified click navigates in-app; a modifier click is the browser's (new tab/window). */
+    function handleProjectClick(e: MouseEvent, p: Project) {
+        // A cloning row renders no href, so there is nothing to open either way.
+        if (p.cloning) return;
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        onSelectProject(p);
+    }
 </script>
 
 <aside id="sidebar" class="sidebar" class:collapsed={collapsed && !isMobile} class:mobile-open={isMobile && mobileMenuOpen} aria-label="Sidebar">
@@ -96,11 +117,14 @@
         {#each sortedProjects as p, i (p.id)}
             <div class="project-item-wrapper" class:active={currentProject?.id === p.id} class:has-review={projectCounts[p.id]?.review > 0}>
                 <div class="project-item-content">
-                    <button
+                    <a
                         class="project-item"
                         class:cloning={p.cloning}
-                        onkeydown={(e) => handleProjectItemKeydown(e, i)}
-                        onclick={() => { if (!p.cloning) onSelectProject(p); }}
+                        href={p.cloning ? undefined : projectHref(p)}
+                        role="button"
+                        tabindex="0"
+                        onkeydown={(e) => handleProjectItemKeydown(e, i, p)}
+                        onclick={(e) => handleProjectClick(e, p)}
                         aria-busy={p.cloning ? 'true' : undefined}
                         title={p.cloning ? `Cloning repository… (${p.cloneProgress ?? 0}%)` : projectCounts[p.id]?.review > 0 ? `${p.name} - ${projectCounts[p.id].review} task${projectCounts[p.id].review === 1 ? '' : 's'} available for review` : `Open project: ${p.name}${p.sandbox_enabled ? ' (sandboxed)' : ''}`}
                     >
@@ -141,7 +165,7 @@
                                 {/if}
                             </span>
                         {/if}
-                    </button>
+                    </a>
                 </div>
                 {#if (isMobile || !collapsed) && !p.cloning}
                 <button
@@ -299,12 +323,12 @@
         gap: 6px;
         padding: 10px 12px;
         width: 100%;
-        background: none;
-        border: none;
         border-radius: var(--radius-sm);
         color: var(--color-text-primary);
         cursor: pointer;
         font-size: 0.9375rem;
+        /* The row is an anchor now, so drop the UA link styling. */
+        text-decoration: none;
         text-align: left;
         transition: all 0.15s ease;
         min-width: 0;

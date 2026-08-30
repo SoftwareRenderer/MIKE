@@ -9,6 +9,7 @@
     import Card from './Card.svelte';
     import { moveTask, updateTask, stopTask, resumeTask, deleteTask, commitAndDone, getQueuedTaskIds, getQueuedDeleteTaskIds, onQueueChanged } from '$lib/api';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
+    import { effectiveMultiSelectClick, matchesClickBinding, isBrowserLinkClick } from '$lib/utils/keyboard';
     import commitPushIcon from '$lib/assets/icons/commit-push.svg?raw';
     import Icon from './Icon.svelte';
     import { fade, slide } from 'svelte/transition';
@@ -215,7 +216,9 @@
         mouseDownPos = null;
         // Skip if the click originated from a child button (progress bar, action icons, etc.)
         const target = e.target as HTMLElement;
-        if (target.closest('button, input, a, select, .card-edit-panel')) return;
+        const inner = target.closest('button, input, a, select, .card-edit-panel');
+        // The card's own overlay link is the card, not inner UI: a click on it opens the task.
+        if (inner && inner !== cardLinkEl) return;
         // Skip if a long-press multi-select was triggered (mobile)
         if (longPressTriggered) {
             longPressTriggered = false;
@@ -225,8 +228,10 @@
         if (isMobileCtx.isMobile && multiSelect && multiSelect.hasSelection) {
             return;
         }
-        // Ctrl/Cmd + Click: toggle multi-select (with descendants)
-        if (multiSelect && (e.ctrlKey || e.metaKey)) {
+        // Modifier+Click (Settings → Preferences) multi-selects, with descendants.
+        // Only the bound modifier is claimed, so the others still open a new tab.
+        if (multiSelect && matchesClickBinding(multiSelectClick, e)) {
+            e.preventDefault();
             e.stopPropagation();
             toggleWithDescendants(task.id);
             return;
@@ -235,13 +240,42 @@
         if (onSelect) { onSelect(task); } else { appStore.selectedTask = task; uiStore.showCardDetail = true; }
     }
 
+    /**
+     * Deep link to this task, in the param order `updateUrl` writes (App.svelte), so a
+     * tab opened from the card restores what a click would have shown. Empty = no link.
+     */
+    let cardHref = $derived(
+        projectId ? `${location.pathname}?project=${encodeURIComponent(projectId)}&task=${encodeURIComponent(task.id)}` : ''
+    );
+
+    /** The card's full-cover link element (styled by .card-open-link). */
+    let cardLinkEl: HTMLAnchorElement | null = $state(null);
+
+    /** The configured modifier+Click that multi-selects cards (live, so Settings changes apply). */
+    const multiSelectClick = $derived(effectiveMultiSelectClick(appStore.config));
+
+    /**
+     * The card's link overlay takes the browser's own link clicks. Ordinary clicks are
+     * the app's, so their navigation is cancelled — except a modifier click the
+     * multi-select binding doesn't claim, which must survive to open a new tab.
+     */
+    function handleCardLinkClick(e: MouseEvent) {
+        // The card root must not handle this click a second time.
+        e.stopPropagation();
+        if (isBrowserLinkClick(e, multiSelectClick)) return;
+        e.preventDefault();
+        handleCardClick(e);
+    }
+
     // Touch handlers for mobile long-press multi-select
     // First selection requires long-press; subsequent taps toggle without long-press
     function handleTouchStart(e: TouchEvent) {
         if (!multiSelect || !isMobileCtx.isMobile) return;
         // Skip if touching a button or interactive element
         const target = e.target as HTMLElement;
-        if (target.closest('button, input, a, select, .card-edit-panel')) return;
+        const inner = target.closest('button, input, a, select, .card-edit-panel');
+        // The overlay link counts as card body, so long-press still works on it.
+        if (inner && inner !== cardLinkEl) return;
         longPressTriggered = false;
         // Only require long-press when nothing is selected yet
         if (!multiSelect.hasSelection) {
@@ -789,6 +823,20 @@
                 {/if}
             </div>
         </div>
+    {#if cardHref}
+        <!-- Covers the card so the browser offers its link menu (right-click → open in a
+             new tab, middle click). aria-hidden keeps the card the accessible control;
+             draggable=false keeps the card the drag source. -->
+        <a
+            class="card-open-link"
+            href={cardHref}
+            bind:this={cardLinkEl}
+            onclick={handleCardLinkClick}
+            aria-hidden="true"
+            tabindex="-1"
+            draggable="false"
+        ></a>
+    {/if}
     {#if statusBadge || modelBadge.text || subtaskProgress}
         <div class="badges-row">
             {#if statusBadge}
@@ -880,7 +928,9 @@
         pointer-events: none;
         z-index: 1;
     }
-    .card.queued > * {
+    /* The overlay is excluded: at z-index 2 it would tie with .card-title and, being later
+       in the DOM, cover the action buttons. */
+    .card.queued > :not(.card-open-link) {
         position: relative;
         z-index: 2;
     }
@@ -960,6 +1010,15 @@
     .card:active {
         cursor: grabbing;
     }
+    /* The card's link overlay: covers the card so a right-click anywhere on it opens the
+       link menu. Interactive descendants stay above it (z-index 2). */
+    .card-open-link {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        border-radius: inherit;
+        cursor: inherit;
+    }
     .card-title {
         display: flex;
         align-items: center;
@@ -999,6 +1058,9 @@
         position: absolute;
         top: 0;
         right: 0;
+        /* Above the link overlay. `.card-title` stays unlifted on purpose, so the
+           overlay still covers the title text — only the buttons sit above it. */
+        z-index: 2;
         display: flex;
         align-items: center;
         gap: 2px;
@@ -1167,6 +1229,8 @@
         margin-top: 8px;
         padding: 0 6px;
         border: none;
+        position: relative;
+        z-index: 2;
         border-radius: var(--radius-sm);
         background: var(--color-surface-3);
         cursor: pointer;
@@ -1227,6 +1291,8 @@
         display: flex;
         flex-direction: column;
         gap: 6px;
+        position: relative;
+        z-index: 2;
     }
     .subtask-list :global(.card) {
         background: var(--color-surface-1);

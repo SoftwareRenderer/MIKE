@@ -102,7 +102,7 @@ type Config struct {
 // KeyboardShortcuts holds user-customizable keyboard shortcut bindings.
 // A nil binding means "use the default"; "" means disabled. Values are
 // normalized: modifiers in fixed order (control, meta, shift, alt) joined
-// with "+" then the key (e.g. "c", "shift+k").
+// with "+" then the key, which may be the pseudo-key "click" ("meta+click").
 type KeyboardShortcuts struct {
 	// CreateTask opens the create-task dialog on the project board.
 	CreateTask *string `json:"create_task,omitempty"`
@@ -115,6 +115,10 @@ type KeyboardShortcuts struct {
 	// ToggleFullscreen maximizes or minimizes the focused area (chat, diff,
 	// file editor, terminal panel) in the task view / explorer views.
 	ToggleFullscreen *string `json:"toggle_fullscreen,omitempty"`
+	// MultiSelectClick is the modifier+click combo that toggles task-card
+	// multi-select (e.g. "meta+click"). Other modifier clicks on a card are left
+	// to the browser, which opens the card's link in a new tab or window.
+	MultiSelectClick *string `json:"multi_select_click,omitempty"`
 	// HideHints hides the keycap hints on shortcut buttons (tooltips stay).
 	HideHints *bool `json:"hide_hints,omitempty"`
 }

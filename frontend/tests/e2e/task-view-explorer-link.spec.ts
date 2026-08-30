@@ -16,13 +16,13 @@ test.describe('Task View Explorer Link', () => {
     // the selection can be mid-switch and the board can re-render under the
     // click. The global-setup project always has tasks, so this is also the
     // only board where the "first card" below is guaranteed to exist.
-    const projectBtn = page.locator('button.project-item').filter({
+    const projectRow = page.locator('.project-item').filter({
       has: page.locator('span.project-name', { hasText: /^test-project$/ }),
     });
-    if ((await projectBtn.count()) === 0) {
+    if ((await projectRow.count()) === 0) {
       return; // no test project — nothing to test
     }
-    await projectBtn.click();
+    await projectRow.click();
     await page.waitForSelector('.card', { timeout: 10000 });
 
     // If no cards exist, skip (nothing to test)
