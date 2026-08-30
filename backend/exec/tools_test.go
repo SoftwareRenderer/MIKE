@@ -1105,159 +1105,71 @@ func TestExecuteTool_Bash_FailedWithANSI(t *testing.T) {
 
 // --- stripANSI Tests ---
 
-func TestStripANSI_Empty(t *testing.T) {
-	got := stripANSI("")
-	if got != "" {
-		t.Errorf("stripANSI(\"\") = %q, want \"\"", got)
+// TestStripANSI is one table over every escape shape a real terminal emits, because the
+// function is a single pure scanner and each shape is one more branch of it: SGR colours
+// (including 256-colour and 24-bit), cursor movement, erase-line, OSC window titles with
+// both terminators, single-byte escapes, truncated sequences at end of string, and the
+// things that must SURVIVE — tabs, CRs, newlines and non-ASCII text. Progress bars and
+// test-runner output are the real inputs, so both the noise and the payload come from there.
+func TestStripANSI(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty", in: "", want: ""},
+		{name: "no ANSI", in: "hello world\nline two", want: "hello world\nline two"},
+		{
+			name: "bold and colour", // \x1b[1m bold, \x1b[31m red, \x1b[0m reset
+			in:   "\x1b[1m\x1b[31mERROR\x1b[0m", want: "ERROR",
+		},
+		{
+			name: "vitest banner", // real-world: \x1b[1m\x1b[30m\x1b[46m RUN \x1b[49m\x1b[39m\x1b[22m \x1b[36mv4.1.10
+			in:   "\x1b[1m\x1b[30m\x1b[46m RUN \x1b[49m\x1b[39m\x1b[22m \x1b[36mv4.1.10", want: " RUN  v4.1.10",
+		},
+		{
+			name: "multiple lines",
+			in:   "\x1b[32mPASS\x1b[0m test1\n\x1b[31mFAIL\x1b[0m test2\nplain line",
+			want: "PASS test1\nFAIL test2\nplain line",
+		},
+		{name: "OSC title terminated by BEL", in: "\x1b]0;My Title\x07hello", want: "hello"},
+		{name: "OSC title terminated by ST", in: "\x1b]0;Title\x1b\\hello", want: "hello"},
+		{
+			name: "single-byte escapes", // \x1bH home, \x1bM reverse index
+			in:   "\x1bH\x1bMstart", want: "start",
+		},
+		{name: "truncated sequence at end", in: "hello\x1b[31", want: "hello"},
+		{name: "bare escape at end", in: "hello\x1b", want: "hello"},
+		{
+			name: "cursor movement", // \x1b[2A up 2, \x1b[10C forward 10
+			in:   "\x1b[2Aline1\x1b[10Cline2", want: "line1line2",
+		},
+		{
+			name: "mixed npm output",
+			in:   "\x1b[1;34mnpm\x1b[0m run \x1b[1mtest\x1b[0m\n\x1b[32m✓\x1b[0m passed\n\x1b[33m⚠\x1b[0m warning",
+			want: "npm run test\n✓ passed\n⚠ warning",
+		},
+		{
+			name: "non-ANSI specials are preserved",
+			in:   "tab\there\nnewline\r\r\nunicode: \u00e9\u00e8\u00ea",
+			want: "tab\there\nnewline\r\r\nunicode: \u00e9\u00e8\u00ea",
+		},
+		{name: "256-colour CSI", in: "\x1b[38;5;196mred\x1b[0m", want: "red"},
+		{name: "24-bit colour CSI", in: "\x1b[38;2;255;128;0morange\x1b[0m", want: "orange"},
+		{name: "256-colour background", in: "\x1b[48;5;27mhighlighted\x1b[0m", want: "highlighted"},
+		{name: "erase line", in: "\x1b[2Kprogress: 50%", want: "progress: 50%"},
+		{
+			name: "progress bar keeps its carriage return",
+			in:   "\x1b[2K\r\x1b[32m✓\x1b[0m done", want: "\r✓ done",
+		},
 	}
-}
 
-func TestStripANSI_NoANSI(t *testing.T) {
-	got := stripANSI("hello world\nline two")
-	if got != "hello world\nline two" {
-		t.Errorf("stripANSI() = %q, want unchanged", got)
-	}
-}
-
-func TestStripANSI_BoldAndColor(t *testing.T) {
-	// \x1b[1m = bold, \x1b[31m = red, \x1b[0m = reset
-	got := stripANSI("\x1b[1m\x1b[31mERROR\x1b[0m")
-	want := "ERROR"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_VitestStyle(t *testing.T) {
-	// Real-world example: \x1b[1m\x1b[30m\x1b[46m RUN \x1b[49m\x1b[39m\x1b[22m \x1b[36mv4.1.10
-	got := stripANSI("\x1b[1m\x1b[30m\x1b[46m RUN \x1b[49m\x1b[39m\x1b[22m \x1b[36mv4.1.10")
-	want := " RUN  v4.1.10"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_MultipleLines(t *testing.T) {
-	got := stripANSI("\x1b[32mPASS\x1b[0m test1\n\x1b[31mFAIL\x1b[0m test2\nplain line")
-	want := "PASS test1\nFAIL test2\nplain line"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_OSCSequence(t *testing.T) {
-	// OSC sequence: \x1b]0;Terminal Title\x07
-	got := stripANSI("\x1b]0;My Title\x07hello")
-	want := "hello"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_OSCWithST(t *testing.T) {
-	// OSC with \x1b\\ string terminator
-	got := stripANSI("\x1b]0;Title\x1b\\hello")
-	want := "hello"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_SingleByteEscape(t *testing.T) {
-	// \x1bH = home cursor, \x1bM = reverse index
-	got := stripANSI("\x1bH\x1bMstart")
-	want := "start"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_TrailingEscape(t *testing.T) {
-	// Escape sequence at end of string with no final byte
-	got := stripANSI("hello\x1b[31")
-	want := "hello"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_BareEscape(t *testing.T) {
-	// Just an ESC character at end
-	got := stripANSI("hello\x1b")
-	want := "hello"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_CursorMovement(t *testing.T) {
-	// \x1b[2A = cursor up 2, \x1b[10C = cursor forward 10
-	got := stripANSI("\x1b[2Aline1\x1b[10Cline2")
-	want := "line1line2"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_MixedContent(t *testing.T) {
-	got := stripANSI("\x1b[1;34mnpm\x1b[0m run \x1b[1mtest\x1b[0m\n\x1b[32m✓\x1b[0m passed\n\x1b[33m⚠\x1b[0m warning")
-	want := "npm run test\n✓ passed\n⚠ warning"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_PreserveSpecialChars(t *testing.T) {
-	// Non-ANSI special characters should be preserved
-	got := stripANSI("tab\there\nnewline\r\r\nunicode: \u00e9\u00e8\u00ea")
-	want := "tab\there\nnewline\r\r\nunicode: \u00e9\u00e8\u00ea"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_ComplexCSI(t *testing.T) {
-	// CSI with intermediate bytes: \x1b[38;5;196m (256-color red)
-	got := stripANSI("\x1b[38;5;196mred\x1b[0m")
-	want := "red"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_24BitColor(t *testing.T) {
-	// \x1b[38;2;255;128;0m (24-bit RGB)
-	got := stripANSI("\x1b[38;2;255;128;0morange\x1b[0m")
-	want := "orange"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_BackgroundColor(t *testing.T) {
-	// \x1b[48;5;27m (256-color background)
-	got := stripANSI("\x1b[48;5;27mhighlighted\x1b[0m")
-	want := "highlighted"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_EraseLine(t *testing.T) {
-	// \x1b[2K = erase entire line
-	got := stripANSI("\x1b[2Kprogress: 50%")
-	want := "progress: 50%"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
-	}
-}
-
-func TestStripANSI_CarriageReturn(t *testing.T) {
-	// ANSI codes mixed with carriage returns (common in progress bars)
-	got := stripANSI("\x1b[2K\r\x1b[32m✓\x1b[0m done")
-	want := "\r✓ done"
-	if got != want {
-		t.Errorf("stripANSI() = %q, want %q", got, want)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stripANSI(tc.in); got != tc.want {
+				t.Errorf("stripANSI(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 

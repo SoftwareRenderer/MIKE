@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"kanban/backend/testutil/testgit"
 	"kanban/backend/tls"
 	"kanban/backend/types"
 )
@@ -206,39 +207,23 @@ func createTestProject(t *testing.T, s *Server) string {
 	return result["id"].(string)
 }
 
-// initGitRepo initializes a directory as a git repository.
+// initGitRepo initializes a directory as a git repository with one committed file.
+// The subject is "Initial": divergence_baseline_test.go identifies the root commit by it.
 func initGitRepo(t *testing.T, path string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(path, "README.md"), []byte("# Test\n"), 0o644); err != nil {
-		t.Fatalf("write README: %v", err)
-	}
-	mustRunGit(t, path, "init")
-	mustRunGit(t, path, "config", "user.email", "test@test.com")
-	mustRunGit(t, path, "config", "user.name", "Test")
-	mustRunGit(t, path, "add", "README.md")
-	mustRunGit(t, path, "commit", "-m", "Initial")
+	testgit.RepoAtMessage(t, path, "Initial")
 }
 
 // mustRunGit runs a git command and fails the test on error.
 func mustRunGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %s: %v", args, string(out), err)
-	}
+	testgit.Git(t, dir, args...)
 }
 
 // mustRunGitOutput runs a git command and returns its stdout, failing on error.
 func mustRunGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git %s: %s: %v", args, string(out), err)
-	}
-	return strings.TrimSpace(string(out))
+	return testgit.GitOutput(t, dir, args...)
 }
 
 // createTestTask creates a task via the API and returns its ID.

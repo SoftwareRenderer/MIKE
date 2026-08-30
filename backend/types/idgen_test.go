@@ -32,63 +32,19 @@ func TestTaskWordsNoDuplicates(t *testing.T) {
 	}
 }
 
-func TestTaskWordsAllLowercase(t *testing.T) {
-	for _, w := range taskWords {
-		if w != strings.ToLower(w) {
-			t.Errorf("word not lowercase: %q", w)
-		}
-	}
-}
-
-func TestTaskWordsAllNonEmpty(t *testing.T) {
+// TestTaskWordsAreUsableInIDParts covers both shape rules at once: every word has to
+// survive being embedded in a URL, a git branch name and a worktree path, so a word
+// that is empty or carries uppercase (or anything else outside [a-z]) is a bug in the
+// dictionary rather than in the generator.
+func TestTaskWordsAreUsableInIDParts(t *testing.T) {
 	for _, w := range taskWords {
 		if w == "" {
 			t.Error("found empty string in taskWords")
 		}
-	}
-}
-
-func TestGenerateTaskID(t *testing.T) {
-	id := GenerateTaskID()
-	parts := splitID(t, id, 3)
-	for _, part := range parts {
-		if !contains(taskWords, part) {
-			t.Errorf("task ID part %q not in taskWords", part)
+		if w != strings.ToLower(w) {
+			t.Errorf("word not lowercase: %q", w)
 		}
 	}
-}
-
-func TestGenerateThreadID(t *testing.T) {
-	id := GenerateThreadID()
-	parts := splitID(t, id, 2)
-	for _, part := range parts {
-		if !contains(taskWords, part) {
-			t.Errorf("thread ID part %q not in taskWords", part)
-		}
-	}
-}
-
-func splitID(t *testing.T, id string, expectedParts int) []string {
-	t.Helper()
-	parts := split(id, "-")
-	if len(parts) != expectedParts {
-		t.Fatalf("expected %d parts in %q, got %d", expectedParts, id, len(parts))
-	}
-	return parts
-}
-
-func split(s, sep string) []string {
-	// simple split to avoid importing strings in helpers
-	var parts []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == sep[0] {
-			parts = append(parts, s[start:i])
-			start = i + 1
-		}
-	}
-	parts = append(parts, s[start:])
-	return parts
 }
 
 func contains(slice []string, item string) bool {
@@ -116,6 +72,9 @@ func TestIDGenerationUsesCryptoRand(t *testing.T) {
 	}
 }
 
+// TestGenerateTaskIDFormat is the shape check for both generators: word count, the
+// [a-z]+-(...)+ pattern, and dictionary membership — 500 draws each rather than the
+// single draw the removed per-generator tests used, which could only ever pass.
 func TestGenerateTaskIDFormat(t *testing.T) {
 	taskIDPattern := regexp.MustCompile(`^[a-z]+-[a-z]+-[a-z]+$`)
 	threadIDPattern := regexp.MustCompile(`^[a-z]+-[a-z]+$`)

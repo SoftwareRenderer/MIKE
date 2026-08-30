@@ -14,272 +14,11 @@ import (
 	"github.com/coder/websocket"
 )
 
-// assertFlatJSON verifies that a JSON frame is flat (no double-encoded data field).
-// It checks that the given key exists and is an object (not a string).
-func assertFlatJSON(t *testing.T, frame []byte, typeKey, dataKey string, expectedType string) map[string]any {
-	t.Helper()
-	var msg map[string]any
-	if err := json.Unmarshal(frame, &msg); err != nil {
-		t.Fatalf("unmarshal frame: %v: %s", err, string(frame))
-	}
-	if msg[typeKey] != expectedType {
-		t.Fatalf("expected %s=%s, got %v: %s", typeKey, expectedType, msg[typeKey], string(frame))
-	}
-	if dataKey != "" {
-		data, ok := msg[dataKey]
-		if !ok {
-			t.Fatalf("expected '%s' field in message: %s", dataKey, string(frame))
-		}
-		if _, ok := data.(map[string]any); !ok {
-			t.Fatalf("expected '%s' to be an object (not double-encoded), got %T: %s", dataKey, data, string(frame))
-		}
-	}
-	return msg
-}
-
-// TestTaskUpdatedWireFormat verifies that a task_updated event serializes as
-// flat JSON so the client can access msg.task directly (not msg.data.task).
-func TestTaskUpdatedWireFormat(t *testing.T) {
-	task := &types.Task{
-		ID:        "test-task",
-		ProjectID: "test-project",
-		Title:     "Test task",
-		Status:    "backlog",
-	}
-	frame, err := json.Marshal(map[string]any{
-		"type": "task_updated",
-		"task": task,
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	msg := assertFlatJSON(t, frame, "type", "task", "task_updated")
-	taskData := msg["task"].(map[string]any)
-	if taskData["id"] != "test-task" {
-		t.Fatalf("expected task.id=test-task, got %v", taskData["id"])
-	}
-}
-
-// TestTaskEventWireFormat verifies that a task_event serializes as flat JSON
-// with type, task_id, event, and data at the top level.
-func TestTaskEventWireFormat(t *testing.T) {
-	payload := map[string]any{
-		"type":    "task_event",
-		"task_id": "test-task",
-		"event":   "token",
-		"data":    map[string]string{"text": "hello"},
-	}
-	frame, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	msg := assertFlatJSON(t, frame, "type", "data", "task_event")
-	if msg["task_id"] != "test-task" {
-		t.Fatalf("expected task_id=test-task, got %v", msg["task_id"])
-	}
-	if msg["event"] != "token" {
-		t.Fatalf("expected event=token, got %v", msg["event"])
-	}
-	dataMap := msg["data"].(map[string]any)
-	if dataMap["text"] != "hello" {
-		t.Fatalf("expected data.text=hello, got %v", dataMap["text"])
-	}
-}
-
-// TestCommitStatusWireFormat verifies commit_status is flat JSON.
-func TestCommitStatusWireFormat(t *testing.T) {
-	frame, err := json.Marshal(map[string]string{
-		"type":    "commit_status",
-		"task_id": "test-task",
-		"status":  "queued",
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	msg := assertFlatJSON(t, frame, "type", "", "commit_status")
-	if msg["task_id"] != "test-task" {
-		t.Fatalf("expected task_id=test-task, got %v", msg["task_id"])
-	}
-	if msg["status"] != "queued" {
-		t.Fatalf("expected status=queued, got %v", msg["status"])
-	}
-}
-
-// TestProjectCountsWireFormat verifies project_counts is flat JSON.
-func TestProjectCountsWireFormat(t *testing.T) {
-	counts := map[string]any{
-		"test-project": map[string]any{
-			"backlog":     1,
-			"in_progress": 2,
-			"review":      0,
-			"completed":   3,
-		},
-	}
-	frame, err := json.Marshal(map[string]any{
-		"type": "project_counts",
-		"data": counts,
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	msg := assertFlatJSON(t, frame, "type", "data", "project_counts")
-	dataMap := msg["data"].(map[string]any)
-	projCounts := dataMap["test-project"].(map[string]any)
-	if projCounts["backlog"].(float64) != 1 {
-		t.Fatalf("expected backlog=1, got %v", projCounts["backlog"])
-	}
-}
-
-// TestBranchWireFormat verifies project_branch is flat JSON.
-func TestBranchWireFormat(t *testing.T) {
-	frame, err := json.Marshal(map[string]any{
-		"type":   "project_branch",
-		"branch": "main",
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	msg := assertFlatJSON(t, frame, "type", "", "project_branch")
-	if msg["branch"] != "main" {
-		t.Fatalf("expected branch=main, got %v", msg["branch"])
-	}
-}
-
-// TestBoardRefreshWireFormat verifies board_refresh is flat JSON.
-func TestBoardRefreshWireFormat(t *testing.T) {
-	frame, err := json.Marshal(map[string]string{"type": "board_refresh"})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	msg := assertFlatJSON(t, frame, "type", "", "board_refresh")
-	_ = msg
-}
-
-// TestTaskDeletedWireFormat verifies task_deleted is flat JSON.
-func TestTaskDeletedWireFormat(t *testing.T) {
-	frame, err := json.Marshal(map[string]any{
-		"type":    "task_deleted",
-		"task_id": "test-task",
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	msg := assertFlatJSON(t, frame, "type", "", "task_deleted")
-	if msg["task_id"] != "test-task" {
-		t.Fatalf("expected task_id=test-task, got %v", msg["task_id"])
-	}
-}
-
-// TestOldStyleBroken verifies that the old WSMessage-wrapped approach
-// placed task inside msg.data instead of msg.task (regression reference).
-func TestOldStyleBroken(t *testing.T) {
-	// This is what the OLD code did: wrap in {Type, Data: json.Marshal(payload)}.
-	// The envelope is declared here on purpose — production sends flat frames,
-	// so this shape exists only to pin down the regression it guards against.
-	payload, _ := json.Marshal(map[string]any{
-		"type": "task_updated",
-		"task": map[string]string{"id": "test-task"},
-	})
-	oldStyle := struct {
-		Type string          `json:"type"`
-		Data json.RawMessage `json:"data"`
-	}{Type: "task_updated", Data: payload}
-	frame, _ := json.Marshal(oldStyle)
-
-	// The old style produces: {"type":"task_updated","data":{"type":"task_updated","task":{...}}}
-	// Client checks msg.task which is undefined (task is inside msg.data)
-	var msg map[string]any
-	json.Unmarshal(frame, &msg)
-
-	// Old style: msg.task is undefined, task is at msg.data.task
-	if _, ok := msg["task"]; ok {
-		t.Fatal("old-style should NOT have top-level 'task' field")
-	}
-	data, ok := msg["data"].(map[string]any)
-	if !ok {
-		t.Fatal("old-style should have 'data' as object")
-	}
-	if _, ok := data["task"]; !ok {
-		t.Fatal("old-style should have task nested inside data")
-	}
-	// This confirms the old approach was broken: client expected msg.task but got msg.data.task
-}
-
-// TestClientParseTaskUpdated verifies the client can parse a task_updated frame.
-func TestClientParseTaskUpdated(t *testing.T) {
-	frame, _ := json.Marshal(map[string]any{
-		"type": "task_updated",
-		"task": map[string]any{
-			"id":         "test-task",
-			"title":      "Test",
-			"status":     "backlog",
-			"project_id": "test-project",
-		},
-	})
-
-	// Simulate client-side parsing (matches frontend api.ts logic)
-	var msg map[string]any
-	if err := json.Unmarshal(frame, &msg); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	// Client checks: if (msg.type === 'task_updated') callbacks.onTaskUpdated(msg.task)
-	if msg["type"] != "task_updated" {
-		t.Fatalf("expected type=task_updated, got %v", msg["type"])
-	}
-	task, ok := msg["task"]
-	if !ok {
-		t.Fatal("client expects msg.task to exist")
-	}
-	taskMap, ok := task.(map[string]any)
-	if !ok {
-		t.Fatalf("client expects msg.task to be an object, got %T", task)
-	}
-	if taskMap["id"] != "test-task" {
-		t.Fatalf("client expects msg.task.id=test-task, got %v", taskMap["id"])
-	}
-}
-
-// TestClientParseTaskEvent verifies the client can parse a task_event frame.
-func TestClientParseTaskEvent(t *testing.T) {
-	frame, _ := json.Marshal(map[string]any{
-		"type":    "task_event",
-		"task_id": "test-task",
-		"event":   "token",
-		"data":    map[string]string{"text": "hello"},
-	})
-
-	// Simulate client-side parsing (matches frontend api.ts logic)
-	var msg map[string]any
-	if err := json.Unmarshal(frame, &msg); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	// Client checks: if (msg.type === 'task_event') callbacks.onTaskEvent(msg.task_id, {type: msg.event, data: msg.data})
-	if msg["type"] != "task_event" {
-		t.Fatalf("expected type=task_event, got %v", msg["type"])
-	}
-	if msg["task_id"] != "test-task" {
-		t.Fatalf("client expects msg.task_id=test-task, got %v", msg["task_id"])
-	}
-	if msg["event"] != "token" {
-		t.Fatalf("client expects msg.event=token, got %v", msg["event"])
-	}
-	dataMap, ok := msg["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("client expects msg.data to be an object, got %T", msg["data"])
-	}
-	if dataMap["text"] != "hello" {
-		t.Fatalf("client expects msg.data.text=hello, got %v", dataMap["text"])
-	}
-}
+// --- Live WebSocket frame-shape helpers ---
+//
+// Wire-format assertions belong here, on frames the production manager put on the
+// wire. A test that marshals its own literal map and unmarshals it again only proves
+// encoding/json works, so it stays green no matter what the server starts sending.
 
 // --- Live WebSocket subscription helpers ---
 //
@@ -355,6 +94,27 @@ func (fs *frameStream) await(t *testing.T, window time.Duration, pred func(map[s
 	}
 }
 
+// awaitFrame returns the first frame matching pred, failing after window. Use it when
+// the assertion is about the frame's contents; await is enough for delivery counts.
+func (fs *frameStream) awaitFrame(t *testing.T, window time.Duration, pred func(map[string]any) bool, what string) map[string]any {
+	t.Helper()
+	deadline := time.NewTimer(window)
+	defer deadline.Stop()
+	for {
+		select {
+		case frame, ok := <-fs.frames:
+			if !ok {
+				t.Fatalf("%s: connection closed", what)
+			}
+			if pred(frame) {
+				return frame
+			}
+		case <-deadline.C:
+			t.Fatalf("%s: nothing matching within %v", what, window)
+		}
+	}
+}
+
 // quietWindow fails if any frame matching pred arrives within window — the
 // negative half of a delivery assertion. Callers must have proven the client is
 // live beforehand, or "nothing arrived" proves nothing.
@@ -408,6 +168,108 @@ func isTaskEventFor(taskID, text string) func(map[string]any) bool {
 		data, _ := frame["data"].(map[string]any)
 		return data["text"] == text
 	}
+}
+
+// isType reports a frame predicate matching one frame type.
+func isType(typ string) func(map[string]any) bool {
+	return func(frame map[string]any) bool { return frame["type"] == typ }
+}
+
+// decodeFrame unmarshals a frame a production path produced and checks the one thing
+// the client contract depends on: the type sits at the top level. Payload shape is
+// then checked per frame with requireField.
+func decodeFrame(t *testing.T, frame []byte) map[string]any {
+	t.Helper()
+	var msg map[string]any
+	if err := json.Unmarshal(frame, &msg); err != nil {
+		t.Fatalf("unmarshal frame: %v: %s", err, frame)
+	}
+	if msg["type"] == nil {
+		t.Fatalf("frame has no top-level type: %s", frame)
+	}
+	return msg
+}
+
+// requireField fails unless field holds a JSON object. The client reads msg.data and
+// msg.task as objects, which is exactly what a double-encoded payload (a JSON string
+// in place of the object) breaks — the original bug these frames are tested against.
+func requireField(t *testing.T, frame map[string]any, field string) map[string]any {
+	t.Helper()
+	obj, ok := frame[field].(map[string]any)
+	if !ok {
+		t.Fatalf("client reads msg.%s as an object, got %T: %v", field, frame[field], frame[field])
+	}
+	return obj
+}
+
+// TestBroadcastFramesAreFlat asserts the shape of the frames the manager actually
+// writes to a subscribed client. Every frame carries its type at the top level and its
+// payload as a JSON object (or flat sibling fields) — never an envelope whose data was
+// marshalled a second time, which is what made the browser's msg.task / msg.task_id
+// lookups come back undefined.
+func TestBroadcastFramesAreFlat(t *testing.T) {
+	_, s, _, wm, _ := setupDoneSnapshotTest(t)
+	asm := NewAppStreamManager(s, wm)
+	t.Cleanup(asm.Close)
+
+	// These are setupDoneSnapshotTest's own IDs: the initial-data burst (used below as
+	// the subscription sync point) resolves a real branch, so the project has to exist.
+	const projectID, taskID = "proj-1", "task-1"
+
+	c := dialStream(t, asm)
+	c.sendSubscription(t, "subscribe_project", projectID, "")
+	// subscribe_project ends with an initial-data burst whose last frame is
+	// project_branch; reading up to it proves the server applied this subscription
+	// (frames arrive in order per connection), so every broadcast below is delivered
+	// to a subscriber that already exists — and cannot race the server's read loop.
+	c.await(t, 5*time.Second, isType("project_branch"), 1, "project subscriber initial data")
+
+	t.Run("board_refresh", func(t *testing.T) {
+		asm.Broadcast(projectID)
+		frame := c.awaitFrame(t, 5*time.Second, isType("board_refresh"), "board_refresh frame")
+		if frame["data"] != nil {
+			t.Errorf("board_refresh carries no payload, got data=%v", frame["data"])
+		}
+	})
+
+	t.Run("task_updated", func(t *testing.T) {
+		asm.BroadcastTaskUpdated(projectID, &types.Task{ID: taskID, ProjectID: projectID, Title: "Flat", Status: "backlog"})
+		frame := c.awaitFrame(t, 5*time.Second, isType("task_updated"), "task_updated frame")
+		task := requireField(t, frame, "task")
+		if task["id"] != taskID {
+			t.Errorf("msg.task.id = %v, want %s", task["id"], taskID)
+		}
+	})
+
+	t.Run("project_counts", func(t *testing.T) {
+		asm.BroadcastProjectCounts()
+		frame := c.awaitFrame(t, 5*time.Second, isType("project_counts"), "project_counts frame")
+		requireField(t, frame, "data")
+	})
+
+	t.Run("commit_status", func(t *testing.T) {
+		asm.BroadcastCommitStatus(projectID, taskID, "committed")
+		frame := c.awaitFrame(t, 5*time.Second, isType("commit_status"), "commit_status frame")
+		if frame["task_id"] != taskID || frame["status"] != "committed" {
+			t.Errorf("commit_status = task_id:%v status:%v, want %s/committed", frame["task_id"], frame["status"], taskID)
+		}
+	})
+
+	t.Run("project_branch", func(t *testing.T) {
+		asm.BroadcastBranch(projectID, "task/flat")
+		frame := c.awaitFrame(t, 5*time.Second, isType("project_branch"), "project_branch frame")
+		if frame["branch"] != "task/flat" {
+			t.Errorf("msg.branch = %v, want task/flat", frame["branch"])
+		}
+	})
+
+	t.Run("task_deleted", func(t *testing.T) {
+		asm.BroadcastTaskDeleted(projectID, taskID)
+		frame := c.awaitFrame(t, 5*time.Second, isType("task_deleted"), "task_deleted frame")
+		if frame["task_id"] != taskID {
+			t.Errorf("msg.task_id = %v, want %s", frame["task_id"], taskID)
+		}
+	})
 }
 
 // TestTaskEventDelivery verifies task event delivery is gated by the task
@@ -480,14 +342,12 @@ func TestSandboxStatsTaskEventPayload(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	msg := assertFlatJSON(t, frame, "type", "data", "task_event")
-	if msg["task_id"] != "test-task" {
-		t.Fatalf("expected task_id=test-task, got %v", msg["task_id"])
+	msg := decodeFrame(t, frame)
+	// What the client reads: msg.type / msg.task_id / msg.event beside msg.data.
+	if msg["type"] != "task_event" || msg["task_id"] != "test-task" || msg["event"] != "sandbox_stats" {
+		t.Fatalf("frame = %s, want a flat task_event for test-task", frame)
 	}
-	if msg["event"] != "sandbox_stats" {
-		t.Fatalf("expected event=sandbox_stats, got %v", msg["event"])
-	}
-	data := msg["data"].(map[string]any)
+	data := requireField(t, msg, "data")
 	if data["running"] != true || data["memory_current_mb"] != float64(412) ||
 		data["memory_limit_mb"] != float64(1024) || data["memory_peak_mb"] != float64(512) ||
 		data["oom_kills"] != float64(1) {
@@ -524,11 +384,11 @@ func TestLatestSandboxStatsFrame(t *testing.T) {
 	if gotProject != "proj-x" || gotTask != "task-y" {
 		t.Fatalf("provider called with (%q, %q), want (\"proj-x\", \"task-y\")", gotProject, gotTask)
 	}
-	msg := assertFlatJSON(t, frame, "type", "data", "task_event")
+	msg := decodeFrame(t, frame)
 	if msg["event"] != "sandbox_stats" {
 		t.Fatalf("expected event=sandbox_stats, got %v", msg["event"])
 	}
-	data := msg["data"].(map[string]any)
+	data := requireField(t, msg, "data")
 	if data["running"] != true || data["memory_current_mb"] != float64(100) || data["memory_limit_mb"] != float64(512) {
 		t.Fatalf("unexpected stats payload: %v", data)
 	}

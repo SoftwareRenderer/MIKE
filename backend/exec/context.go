@@ -919,9 +919,12 @@ func collectToolIDs(msgs []*types.ChatMessage) map[string]bool {
 	return ids
 }
 
-// ExtractCommitContext extracts the first user message, ALL assistant messages that
-// contain a request_review tool call, and the last relevant assistant message from a
-// conversation, along with their tool results.
+// ExtractCommitContext extracts the first user message and ALL assistant messages that
+// contain a request_review tool call, along with those assistants' tool results.
+// Nothing else is included: working turns (and their tool results) are visible in the
+// diff, so the commit generator gets the task prompt plus what the agent itself
+// claimed it had done when it asked for review. A conversation with no request_review
+// therefore yields only the task prompt.
 func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
 	var firstUser *types.ChatMessage
 	var requestReviews []*types.ChatMessage // all request_review assistant messages, chronological

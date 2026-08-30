@@ -187,58 +187,6 @@ func TestAgentRunner_Prompt(t *testing.T) {
 	}
 }
 
-// TestAgentRunner_EventChan verifies events are received from the adapter.
-func TestAgentRunner_EventChan(t *testing.T) {
-	adapter := newMockAdapter()
-	// Set up a parse response for a known input
-	testEvents := []agent.Event{
-		{Type: agent.EventTypeToken, Text: "hello"},
-		{Type: agent.EventTypeReasoning, Thinking: "let me think"},
-	}
-	adapter.SetParseResponse("test-input", testEvents)
-	// Use a subprocess that outputs known data
-	adapter.SetSubprocessConfig(agent.SubprocessConfig{
-		Binary: "echo",
-		Args:   []string{"test-input"},
-	})
-
-	RegisterAdapterFactory("test-events", func() agent.AgentAdapter { return adapter })
-
-	ext := &extensions.Extension{
-		Name: "test-events",
-		Type: extensions.ExtensionTypeAgent,
-		Manifest: extensions.ExtensionManifest{
-			Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}},
-		},
-	}
-
-	runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
-	if err != nil {
-		t.Fatalf("NewAgentRunner: %v", err)
-	}
-	defer runner.Close()
-
-	// Wait for events with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	eventReceived := false
-	for {
-		select {
-		case event := <-runner.EventChan():
-			if event.Type == agent.EventTypeToken && event.Text == "hello" {
-				eventReceived = true
-			}
-		case <-ctx.Done():
-			goto done
-		}
-	}
-done:
-	if !eventReceived {
-		t.Log("note: event may not arrive if subprocess exited before adapter parsed output")
-	}
-}
-
 // TestAgentRunner_Close verifies graceful shutdown.
 func TestAgentRunner_Close(t *testing.T) {
 	adapter := newMockAdapter()
@@ -706,5 +654,85 @@ func TestSubprocessConfig_Serialization(t *testing.T) {
 	}
 	if len(decoded.Args) != len(cfg.Args) {
 		t.Errorf("Args len = %d, want %d", len(decoded.Args), len(cfg.Args))
+	}
+}
+
+// --- Channel teardown regression (panic: close of closed channel) ---
+
+// newTeardownRunner builds a runner with just the channels wired up: these tests are
+// about channel teardown and late dispatch, not the subprocess.
+func newTeardownRunner() *AgentRunner {
+	return &AgentRunner{
+		eventChan: make(chan agent.Event, 1),
+		done:      make(chan struct{}),
+	}
+}
+
+// TestCloseChannels_IdempotentUnderConcurrentTeardown pins the fix for a panic that
+// killed the whole process: Close() and readOutput's defer each tested r.done and then
+// closed both channels themselves, and that test-then-close is not atomic — two
+// teardowns racing through it closed the same channel twice. A panic in any of these
+// goroutines takes the test binary down, which is the failure being asserted.
+func TestCloseChannels_IdempotentUnderConcurrentTeardown(t *testing.T) {
+	for i := 0; i < 500; i++ {
+		r := newTeardownRunner()
+
+		var wg sync.WaitGroup
+		for g := 0; g < 4; g++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				r.closeChannels()
+			}()
+		}
+		wg.Wait()
+
+		select {
+		case <-r.done:
+		default:
+			t.Fatal("done must be closed after teardown")
+		}
+		if _, ok := <-r.eventChan; ok {
+			t.Fatal("eventChan must be closed after teardown")
+		}
+	}
+}
+
+// TestDispatchEventAfterCloseDoesNotPanic covers the other half of the same teardown:
+// an event the reader was still holding when the channels went down is dropped rather
+// than sent.
+func TestDispatchEventAfterCloseDoesNotPanic(t *testing.T) {
+	r := newTeardownRunner()
+	r.closeChannels()
+
+	// Must not panic with "send on closed channel".
+	r.dispatchEvent(context.Background(), agent.Event{Type: agent.EventTypeToken, Text: "late"})
+}
+
+// TestAgentRunner_CloseWhileReaderActive exercises the real lifecycle: the subprocess
+// has output in flight (so readOutput is parsing and dispatching) at the exact moment
+// Close() runs — the interleaving that used to panic.
+func TestAgentRunner_CloseWhileReaderActive(t *testing.T) {
+	for i := 0; i < 25; i++ {
+		adapter := newMockAdapter()
+		adapter.SetSubprocessConfig(agent.SubprocessConfig{Binary: "echo", Args: []string{"line"}})
+		adapter.SetParseResponse("line\n", []agent.Event{
+			{Type: agent.EventTypeToken, Text: "a"},
+			{Type: agent.EventTypeToken, Text: "b"},
+		})
+		RegisterAdapterFactory("test-teardown-race", func() agent.AgentAdapter { return adapter })
+
+		ext := &extensions.Extension{
+			Name:     "test-teardown-race",
+			Type:     extensions.ExtensionTypeAgent,
+			Manifest: extensions.ExtensionManifest{Capabilities: &extensions.Capabilities{Agent: &extensions.AgentConfig{}}},
+		}
+
+		runner, err := NewAgentRunner(context.Background(), ext, nil, "test-task", t.TempDir(), "session", false)
+		if err != nil {
+			t.Fatalf("NewAgentRunner: %v", err)
+		}
+		// No drain of EventChan: closing over a full buffer is the interesting case.
+		runner.Close()
 	}
 }
