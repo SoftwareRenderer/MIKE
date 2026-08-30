@@ -177,4 +177,43 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
         await expect(page.locator('.panel-title:has-text("Changes")')).toBeVisible();
         await expect(page.locator('.panel-commit-btn')).toBeVisible();
     });
+
+    test('Pull/Push/Commit group is right-aligned, and shares the "Changes" row on mobile', async ({ page }) => {
+        const panel = page.locator('.git-status-panel');
+        const overlaps = (a: { y: number; height: number }, b: { y: number; height: number }) =>
+            a.y < b.y + b.height && b.y < a.y + b.height;
+        /** Distance from the group's right edge to the header's right edge. */
+        const rightGap = (header: Box, group: Box) =>
+            header.x + header.width - (group.x + group.width);
+
+        // --- Desktop: one row, action group hugging the right edge ---
+        const header = await panel.locator('.panel-header').boundingBox();
+        const actions = await panel.locator('.panel-actions').boundingBox();
+        const selectors = await panel.locator('.commit-selectors').boundingBox();
+        expect(header && actions && selectors).toBeTruthy();
+        // Header padding is 10px; nothing may overflow the header.
+        expect(rightGap(header!, actions!)).toBeGreaterThanOrEqual(0);
+        expect(rightGap(header!, actions!)).toBeLessThanOrEqual(12);
+        expect(overlaps(actions!, selectors!)).toBe(true);
+
+        // --- Mobile: actions stay on the "Changes" row, selectors drop below ---
+        await page.setViewportSize({ width: 420, height: 900 });
+        await page.reload();
+        await expect(panel.locator('.panel-title:has-text("Changes")')).toBeVisible({ timeout: 15000 });
+
+        const mHeader = await panel.locator('.panel-header').boundingBox();
+        const mTitle = await panel.locator('.panel-title').boundingBox();
+        const mActions = await panel.locator('.panel-actions').boundingBox();
+        const mSelectors = await panel.locator('.commit-selectors').boundingBox();
+        expect(mHeader && mTitle && mActions && mSelectors).toBeTruthy();
+
+        // Same line as the title, still flush right.
+        expect(overlaps(mActions!, mTitle!)).toBe(true);
+        expect(rightGap(mHeader!, mActions!)).toBeGreaterThanOrEqual(0);
+        expect(rightGap(mHeader!, mActions!)).toBeLessThanOrEqual(12);
+        // The commit comparison selectors moved to their own row underneath.
+        expect(mSelectors!.y).toBeGreaterThanOrEqual(mActions!.y + mActions!.height - 1);
+    });
 });
+
+type Box = { x: number; y: number; width: number; height: number };

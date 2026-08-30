@@ -931,39 +931,42 @@
             {#if compareLoading}Loading commit diff{:else if compareError}Diff error: {compareError}{:else if compareDiff.length > 0}Showing diff with {compareDiff.length} file{compareDiff.length !== 1 ? 's' : ''}{/if}
         </div>
 
-        <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? 'Pulling…' : 'Pull from remote'} aria-label="Pull from remote">
-            {#if pulling}
-                <span class="mini-spinner" aria-hidden="true"></span>
-            {:else}
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M8 3v7M5 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <!-- Pull / Push / Commit — pinned to the right edge of the header -->
+        <div class="panel-actions">
+            <button class="panel-icon-btn" onclick={handlePull} disabled={pulling || pushing} title={pulling ? 'Pulling…' : 'Pull from remote'} aria-label="Pull from remote">
+                {#if pulling}
+                    <span class="mini-spinner" aria-hidden="true"></span>
+                {:else}
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M8 3v7M5 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                {/if}
+            </button>
+            <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? 'Pushing…' : 'Push to remote'} aria-label="Push to remote">
+                {#if pushing}
+                    <span class="mini-spinner" aria-hidden="true"></span>
+                {:else}
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M8 10V3M5 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                {/if}
+            </button>
+            <button
+                class="panel-commit-btn"
+                disabled={stagedEntries.length === 0}
+                onclick={openCommitDialog}
+                title={stagedEntries.length > 0 ? 'Commit staged changes' : 'Nothing staged to commit'}
+                aria-label={stagedEntries.length > 0 ? 'Commit staged changes' : 'Nothing staged to commit'}
+            >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                    <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/>
+                    <path d="M5.5 8l2 2 3.5-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-            {/if}
-        </button>
-        <button class="panel-icon-btn" onclick={handlePush} disabled={pulling || pushing} title={pushing ? 'Pushing…' : 'Push to remote'} aria-label="Push to remote">
-            {#if pushing}
-                <span class="mini-spinner" aria-hidden="true"></span>
-            {:else}
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M8 10V3M5 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                </svg>
-            {/if}
-        </button>
-        <button
-            class="panel-commit-btn"
-            disabled={stagedEntries.length === 0}
-            onclick={openCommitDialog}
-            title={stagedEntries.length > 0 ? 'Commit staged changes' : 'Nothing staged to commit'}
-            aria-label={stagedEntries.length > 0 ? 'Commit staged changes' : 'Nothing staged to commit'}
-        >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2"/>
-                <path d="M5.5 8l2 2 3.5-4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span>Commit</span>
-        </button>
+                <span>Commit</span>
+            </button>
+        </div>
     </div>
 
     {#if loading}
@@ -1184,6 +1187,14 @@
         display: flex;
         align-items: center;
         gap: 4px;
+        flex-shrink: 0;
+    }
+    /* Pull / Push / Commit — always pinned to the right end of the header row */
+    .panel-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: auto;
         flex-shrink: 0;
     }
     .commit-arrow-icon {
@@ -1632,6 +1643,19 @@
         .panel-commit-btn {
             padding: 8px 14px;
             min-height: 44px;
+        }
+        /* Header: the actions share the "Changes" row (right-aligned), the
+           commit comparison selectors drop to their own full-width row. */
+        .panel-actions {
+            order: 1;
+        }
+        .commit-selectors {
+            order: 2;
+            flex-basis: 100%;
+        }
+        .commit-selector {
+            flex: 1;
+            min-width: 0;
         }
     }
 </style>
