@@ -1,7 +1,8 @@
 /**
  * Keyboard shortcut utilities.
  * Normalized form: modifiers in the fixed order control, meta, shift, alt
- * joined with "+" then the key (e.g. "c", "shift+k", "control+k").
+ * joined with "+" then the key (e.g. "c", "shift+k", "control+k"). A key may
+ * also be the pseudo-key "click" for mouse bindings (e.g. "meta+click").
  * Binding semantics: undefined = default, "" = disabled, non-empty = custom.
  */
 import type { Config } from '$lib/types';
@@ -36,8 +37,12 @@ const MODIFIER_KEYS = new Set([
     'capslock', 'numlock', 'scrolllock',
 ]);
 
+/** Pseudo-key used by mouse bindings (e.g. `meta+click` = Cmd+Click). */
+export const CLICK_KEY = 'click';
+
 const KEY_LABELS: Record<string, string> = {
     ' ': 'Space',
+    [CLICK_KEY]: 'Click',
     enter: 'Enter',
     tab: 'Tab',
     backspace: 'Backspace',
@@ -61,13 +66,18 @@ export function normalizeKey(e: KeyboardEvent): string | null {
     return RESERVED_COMBOS.has(combo) ? null : combo;
 }
 
-function buildCombo(e: KeyboardEvent, key: string): string {
+/** Modifier names held on a keyboard or mouse event, in canonical order. */
+function modifierParts(e: MouseEvent | KeyboardEvent): string[] {
     const parts: string[] = [];
     if (e.ctrlKey) parts.push('control');
     if (e.metaKey) parts.push('meta');
     if (e.shiftKey) parts.push('shift');
     if (e.altKey) parts.push('alt');
-    return [...parts, key].join('+');
+    return parts;
+}
+
+function buildCombo(e: KeyboardEvent, key: string): string {
+    return [...modifierParts(e), key].join('+');
 }
 
 /** Format a normalized shortcut for display: `c` → `C`, `shift+k` → `Shift+K`. */
@@ -90,11 +100,7 @@ export function parseShortcut(key: string): { modifiers: Set<string>; key: strin
 export function matchShortcut(key: string, e: KeyboardEvent): boolean {
     if (!key) return false;
     const { modifiers, key: expectedKey } = parseShortcut(key);
-    const actual = new Set<string>();
-    if (e.ctrlKey) actual.add('control');
-    if (e.metaKey) actual.add('meta');
-    if (e.shiftKey) actual.add('shift');
-    if (e.altKey) actual.add('alt');
+    const actual = new Set<string>(modifierParts(e));
     if (expectedKey !== e.key.toLowerCase()) return false;
     if (modifiers.size !== actual.size) return false;
     for (const m of modifiers) {
@@ -121,6 +127,49 @@ export function defaultStartTaskKey(): string {
 /** Resolve the effective start-task binding: the stored value if set, else the platform default. */
 export function effectiveStartTaskKey(config: Config | null | undefined): string {
     return config?.keyboard_shortcuts?.start_task ?? defaultStartTaskKey();
+}
+
+/** Convert a mouse event to a normalized click binding (e.g. `meta+click`), or null when it isn't one. */
+export function normalizeClick(e: MouseEvent): string | null {
+    // Middle/right clicks belong to the browser.
+    if (e.button !== 0) return null;
+    const parts = modifierParts(e);
+    // A bare click is the element's own action, never a binding.
+    if (parts.length === 0) return null;
+    return [...parts, CLICK_KEY].join('+');
+}
+
+/** True when a mouse event matches a click binding exactly (same modifier set, primary button). */
+export function matchesClickBinding(binding: string, e: MouseEvent): boolean {
+    if (!binding) return false;
+    if (e.button !== 0) return false;
+    const { modifiers, key } = parseShortcut(binding);
+    if (key !== CLICK_KEY) return false;
+    const actual = new Set<string>(modifierParts(e));
+    if (modifiers.size !== actual.size) return false;
+    for (const m of modifiers) {
+        if (!actual.has(m)) return false;
+    }
+    return true;
+}
+
+/**
+ * True when the browser should keep the click (its link opens in a new tab/window):
+ * a modifier is held that the binding doesn't claim. Never `preventDefault()` one.
+ */
+export function isBrowserLinkClick(e: MouseEvent, binding: string): boolean {
+    const hasModifier = e.ctrlKey || e.metaKey || e.shiftKey || e.altKey;
+    return hasModifier && !matchesClickBinding(binding, e);
+}
+
+/** Platform default for the card multi-select click: Cmd+Click on Mac, Ctrl+Click elsewhere. */
+export function defaultMultiSelectClick(): string {
+    return isMac() ? 'meta+click' : 'control+click';
+}
+
+/** Resolve the effective multi-select click binding: the stored value if set, else the platform default (`""` = disabled). */
+export function effectiveMultiSelectClick(config: Config | null | undefined): string {
+    return config?.keyboard_shortcuts?.multi_select_click ?? defaultMultiSelectClick();
 }
 
 /** Resolve the effective toggle-fullscreen binding: the default when unset, `""` when disabled. */

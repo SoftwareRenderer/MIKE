@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { apiPutConfig, apiGetConfig, waitForConfig } from './helpers';
+import { apiPutConfig, apiGetConfig, waitForConfig, getProjectId, createTaskViaApi } from './helpers';
 
 // Keyboard shortcut preferences (Settings → Preferences). The create-task
 // shortcut defaults to "C"; can be rebound, reset, or cleared. Bindings
@@ -21,6 +21,8 @@ const FULLSCREEN_CHIP = `${FULLSCREEN_ROW} button.key-chip`;
 const TERMINAL_RESET = `${TERMINAL_ROW} button[aria-label="Reset to default"]`;
 const TERMINAL_CLEAR = `${TERMINAL_ROW} button[aria-label="Clear shortcut"]`;
 const FULLSCREEN_RESET = `${FULLSCREEN_ROW} button[aria-label="Reset to default"]`;
+const MULTI_ROW = '.shortcut-row[data-shortcut="multi_select_click"]';
+const MULTI_CHIP = `${MULTI_ROW} button.key-chip`;
 const RESET_BTN = `${CREATE_ROW} button[aria-label="Reset to default"]`;
 const CLEAR_BTN = `${CREATE_ROW} button[aria-label="Clear shortcut"]`;
 const SAVE_BTN = 'button.btn-primary[title="Save settings"]';
@@ -435,6 +437,61 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await page.keyboard.press('Control+ArrowUp');
         await page.locator(TERMINAL_CLOSE).click();
         await expect(page.locator(TERMINAL_PANEL)).not.toBeVisible({ timeout: 5000 });
+
+        // Restore the default for other suites
+        await resetShortcuts(page);
+    });
+
+    test('rebinding the multi-select click frees Ctrl+Click for the browser', async ({ page, context }) => {
+        await resetShortcuts(page);
+        await page.reload();
+        await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
+
+        // A card to click on
+        const projectId = await getProjectId(page);
+        const taskId = await createTaskViaApi(page, projectId, `multi-rebind-${Date.now()}`);
+        const card = page.locator(`.card[data-task-id="${taskId}"]`);
+        await expect(card).toBeVisible({ timeout: 5000 });
+
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        // Platform default (Chromium here is Linux): Ctrl+Click.
+        await expect(page.locator(MULTI_CHIP)).toHaveText(/Click$/);
+
+        // Capturing needs a modifier+click; Escape cancels, a bare click is refused.
+        await page.locator(MULTI_CHIP).click();
+        await expect(page.locator(MULTI_CHIP)).toHaveText('Now modifier+click...');
+        await page.keyboard.press('Escape');
+        await expect(page.locator(MULTI_CHIP)).not.toHaveText('Now modifier+click...');
+
+        await page.locator(MULTI_CHIP).click();
+        await page.locator('.config-modal .section-label').first().click({ modifiers: ['Shift'] });
+        await expect(page.locator(MULTI_CHIP)).toHaveText('Shift+Click');
+
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+        await waitForConfig(page, c => c.keyboard_shortcuts?.multi_select_click === 'shift+click');
+
+        // Shift+Click now selects cards…
+        await card.locator('.card-title-text').click({ modifiers: ['Shift'] });
+        await expect(card).toHaveClass(/multi-selected/, { timeout: 5000 });
+        await page.keyboard.press('Escape');
+
+        // …and Ctrl+Click is the browser's again: it opens the card in a new tab.
+        const popupPromise = context.waitForEvent('page', { timeout: 10000 });
+        await card.locator('.card-title-text').click({ modifiers: ['Control'] });
+        const tab = await popupPromise;
+        expect(tab.url()).toContain(`task=${taskId}`);
+        await tab.close();
+
+        // Reset returns the binding (and Ctrl+Click) to the default
+        await page.locator(SETTINGS_BTN).first().click();
+        await page.locator(PREFERENCES_TAB).click();
+        await page.locator(`${MULTI_ROW} button[aria-label="Reset to default"]`).click();
+        await expect(page.locator(MULTI_CHIP)).toHaveText(/Click$/);
+        await page.locator(SAVE_BTN).click();
+        await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
+        await waitForConfig(page, c => c.keyboard_shortcuts?.multi_select_click === undefined);
 
         // Restore the default for other suites
         await resetShortcuts(page);

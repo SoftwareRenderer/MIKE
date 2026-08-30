@@ -92,7 +92,7 @@ describe('Sidebar project stats', () => {
         const { container } = renderSidebar({ backlog: 0, in_progress: 0, review: 1 });
 
         expect(container.querySelector('.project-item-wrapper.has-review')).toBeTruthy();
-        const title = container.querySelector('button.project-item')?.getAttribute('title') ?? '';
+        const title = container.querySelector('.project-item')?.getAttribute('title') ?? '';
         expect(title).toContain('available for review');
     });
 });
