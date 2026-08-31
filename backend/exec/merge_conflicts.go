@@ -57,8 +57,8 @@ func GetConflictedFiles(dir string) []string {
 		for line := range strings.SplitSeq(string(out), "\n") {
 			line = strings.TrimSpace(line)
 			if len(line) >= 4 && strings.ContainsRune(line[:2], 'U') {
-				f := strings.TrimSpace(line[3:])
-				if f != "" && addIfNew(f, seen, &files) {
+				if f := strings.TrimSpace(line[3:]); f != "" {
+					files = addUnique(files, seen, f)
 				}
 			}
 		}
@@ -70,8 +70,8 @@ func GetConflictedFiles(dir string) []string {
 		cmd.Dir = dir
 		if out, err := cmd.Output(); err == nil {
 			for line := range strings.SplitSeq(string(out), "\n") {
-				f := strings.TrimSpace(line)
-				if f != "" && addIfNew(f, seen, &files) {
+				if f := strings.TrimSpace(line); f != "" {
+					files = addUnique(files, seen, f)
 				}
 			}
 		}
@@ -80,14 +80,14 @@ func GetConflictedFiles(dir string) []string {
 	return files
 }
 
-// addIfNew adds f to files if not already present, tracked in seen.
-func addIfNew(f string, seen map[string]struct{}, files *[]string) bool {
+// addUnique appends f to files unless seen already holds it, recording it in
+// seen. Dedup only — callers must not care whether f was new.
+func addUnique(files []string, seen map[string]struct{}, f string) []string {
 	if _, ok := seen[f]; ok {
-		return false
+		return files
 	}
 	seen[f] = struct{}{}
-	*files = append(*files, f)
-	return true
+	return append(files, f)
 }
 
 // getAllConflictsResolved checks whether ALL conflicted files have been
@@ -292,6 +292,34 @@ func (te *TaskExecutor) persistAndBroadcastMergeMessage(taskID, threadID, conten
 	}
 }
 
+// stageResolvedConflicts stages every file git reports as resolved (conflict
+// markers gone) back into the index. Returns false, logging the reason, when
+// staging fails. Nothing recorded as resolved stages nothing and still counts as
+// success — it is the commit below that records the resolution.
+func (te *TaskExecutor) stageResolvedConflicts(taskID, worktreePath string) bool {
+	conflictedFiles := GetResolvedConflictedFiles(worktreePath)
+	if len(conflictedFiles) == 0 {
+		return true
+	}
+	addArgs := append([]string{"add"}, conflictedFiles...)
+	if err := te.gitRun(worktreePath, addArgs...); err != nil {
+		log.Printf("[merge] task=%s git add failed: %v", taskID, err)
+		return false
+	}
+	return true
+}
+
+// commitMergeConflictResolution records a conflict resolution as a commit. Both
+// resolution paths (LLM loop and agent loop) commit here so the resolution
+// message and author stay identical.
+func (te *TaskExecutor) commitMergeConflictResolution(taskID, worktreePath string) bool {
+	if err := te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
+		log.Printf("[merge] task=%s git commit failed: %v", taskID, err)
+		return false
+	}
+	return true
+}
+
 // commitConflictResolution stages resolved conflicted files, commits the
 // resolution, drops the stale stash, clears the merge conflict flag, and
 // attempts the final merge. Returns (commitOK, refreshedTask).
@@ -306,14 +334,7 @@ func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath
 
 	if isMergeInProgress(worktreePath) {
 		// Sync-merge conflict: worktree has MERGE_HEAD with conflict markers.
-		conflictedFiles := GetResolvedConflictedFiles(worktreePath)
-		if len(conflictedFiles) > 0 {
-			addArgs := append([]string{"add"}, conflictedFiles...)
-			if err := te.gitRun(worktreePath, addArgs...); err != nil {
-				log.Printf("[merge] task=%s git add failed: %v", taskID, err)
-				commitOK = false
-			}
-		}
+		commitOK = te.stageResolvedConflicts(taskID, worktreePath)
 	} else {
 		// Final-merge conflict: worktree has no MERGE_HEAD.
 		checkCmd := osexec.Command("git", "diff", "--quiet")
@@ -332,10 +353,7 @@ func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath
 	}
 
 	if commitOK {
-		if err := te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
-			log.Printf("[merge] task=%s git commit failed: %v", taskID, err)
-			commitOK = false
-		}
+		commitOK = te.commitMergeConflictResolution(taskID, worktreePath)
 	}
 
 	if commitOK {

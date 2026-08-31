@@ -517,7 +517,7 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 				continue
 			}
 			taskID := strings.TrimPrefix(branch, "task/")
-			if !activeSet[taskID] && !activeBranchSet[branch] && !slugPrefixes[taskBranchSlugPrefix(branch)] {
+			if !activeSet[taskID] && !activeBranchSet[branch] && !slugPrefixes[types.TaskBranchSlugPrefix(branch)] {
 				if dryRun {
 					log.Printf("[gc] would delete orphaned branch %s in project %s", branch, p.Name)
 				} else {
@@ -594,19 +594,6 @@ func (wm *WorktreeManager) GarbageCollect(dryRun bool) (int, error) {
 	return removed, nil
 }
 
-// taskBranchSlugRe matches a titled task's Main branch name: task/<slug>-<random6>.
-var taskBranchSlugRe = regexp.MustCompile(`^(task/.+)-[a-z0-9]{6}$`)
-
-// taskBranchSlugPrefix returns the slug prefix ("task/<slug>-") of a slug-named
-// task branch, or "" if the branch is not slug-named (e.g. task/<taskID>).
-func taskBranchSlugPrefix(branch string) string {
-	m := taskBranchSlugRe.FindStringSubmatch(branch)
-	if len(m) >= 2 {
-		return m[1] + "-"
-	}
-	return ""
-}
-
 // branchExistsInProject reports whether a git branch exists in a project's repo.
 func (wm *WorktreeManager) branchExistsInProject(projectID, branch string) bool {
 	_, err := wm.GitRunInProjectOutput(projectID, "rev-parse", "--verify", "--quiet", branch)
@@ -618,16 +605,16 @@ func (wm *WorktreeManager) branchExistsInProject(projectID, branch string) bool 
 // canonical branch is missing, recover the slug branch. Falls back to canonicalBranch.
 func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonicalBranch string) string {
 	if canonicalBranch == "" {
-		canonicalBranch = "task/" + taskID
+		canonicalBranch = types.TaskBranchPrefix + taskID
 	}
 	if wm.branchExistsInProject(projectID, canonicalBranch) {
 		return canonicalBranch
 	}
-	slug := slugifyBranchTitle(title)
+	slug := types.SlugifyBranchName(title)
 	if slug == "" {
 		return canonicalBranch
 	}
-	prefix := "task/" + slug + "-"
+	prefix := types.TaskBranchPrefix + slug + "-"
 	out, err := wm.GitRunInProjectOutput(projectID, "branch", "--list", prefix+"*")
 	if err != nil {
 		return canonicalBranch
@@ -661,29 +648,12 @@ func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonical
 	return best
 }
 
-// slugifyBranchTitle converts a task title into a git branch slug, mirroring the
-// executor's slugifyBranchName so the GC recognizes a titled task's Main branch.
-func slugifyBranchTitle(title string) string {
-	s := strings.ToLower(title)
-	var result []rune
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			result = append(result, r)
-		} else if len(result) > 0 && result[len(result)-1] != '-' {
-			result = append(result, '-')
-		}
-	}
-	out := strings.Trim(string(result), "-")
-	const slugMax = 50 - len("task/") // maxBranchName - len("task/")
-	if len(out) > slugMax {
-		out = out[:slugMax]
-	}
-	return out
-}
-
 // taskSlugPrefixSet returns a set of task-branch slug prefixes ("task/<slug>-")
 // for all active titled tasks in a project, so the GC can recognize and keep a
 // titled task's slug-named Main branch even when a fork is the active branch.
+// The slug comes from types.SlugifyBranchName — the SAME function the executor
+// used to name the branch. If the two ever diverged, the GC would stop
+// recognizing a live branch and delete it.
 func taskSlugPrefixSet(store *store.Store, projectID string) map[string]bool {
 	set := make(map[string]bool)
 	tasks, err := store.GetTasksByProject(projectID)
@@ -691,9 +661,8 @@ func taskSlugPrefixSet(store *store.Store, projectID string) map[string]bool {
 		return set
 	}
 	for i := range tasks {
-		slug := slugifyBranchTitle(tasks[i].Title)
-		if slug != "" {
-			set["task/"+slug+"-"] = true
+		if slug := types.SlugifyBranchName(tasks[i].Title); slug != "" {
+			set[types.TaskBranchPrefix+slug+"-"] = true
 		}
 	}
 	return set
@@ -881,19 +850,13 @@ type UntrackedFile struct {
 	OrigAdded int      `json:"orig_added,omitempty"` // original line count before truncation
 }
 
-// DiffRow represents a single line in a parsed diff.
+// DiffRow represents a single line in a parsed diff. Word-level inline
+// highlighting is NOT modelled here: the frontend derives those segments itself
+// from paired removed/added rows (see frontend/src/lib/utils/diff-parser.ts).
 type DiffRow struct {
-	LineNumber *int                `json:"lineNumber"` // null for non-code rows
-	Variant    string              `json:"variant"`    // "context", "added", "removed"
-	Text       string              `json:"text"`       // empty string for blank lines; absent when segments present
-	Segments   []InlineDiffSegment `json:"segments,omitempty"`
-}
-
-// InlineDiffSegment represents a word-level diff segment within a line.
-type InlineDiffSegment struct {
-	Key  string `json:"key"`
-	Text string `json:"text"`
-	Tone string `json:"tone"` // "added", "removed", "context"
+	LineNumber *int   `json:"lineNumber"` // null for non-code rows
+	Variant    string `json:"variant"`    // "context", "added", "removed"
+	Text       string `json:"text"`       // empty string for blank lines
 }
 
 // TrackedDiffFile holds the parsed diff for a single tracked file.

@@ -504,6 +504,88 @@ func TestHandleTaskLog_ValidBranch(t *testing.T) {
 	}
 }
 
+// TestHandleTaskLog_FullSharesProjectResponse locks the ?full=1 shape that
+// HandleLog and HandleTaskLog now produce from one code path
+// (writeFullGitLog): every commit field, the body between the BODY markers,
+// hasMore paging and the current branch. The task endpoint had no full=1
+// coverage before, so this is what proves the shared implementation still
+// serves a worktree exactly like a project checkout.
+func TestHandleTaskLog_FullSharesProjectResponse(t *testing.T) {
+	h, s, _, worktreesDir := newTestGitHandler(t)
+
+	projPath := t.TempDir()
+	initGitRepo(t, projPath)
+	// A second commit with a multi-line body exercises the %b extraction.
+	createFile(t, projPath, "second.go", "package main\n")
+	mustRun(t, projPath, "git", "add", "second.go")
+	mustRun(t, projPath, "git", "commit", "-m", "Add second file", "-m", "Body line one\nBody line two")
+
+	proj := &types.Project{ID: "tasklogfull-proj", Name: "tasklogfull-proj", Path: projPath}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatal(err)
+	}
+	task := &types.Task{
+		ID:        "tasklogfull-task",
+		ProjectID: proj.ID,
+		Title:     "log full",
+		Status:    "in_progress",
+		Branch:    "main",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	createWorktreeAt(t, projPath, filepath.Join(worktreesDir, proj.ID, task.ID), "main")
+
+	mux := newTestGitMux(h)
+
+	rr := doRequest(t, mux, "GET", "/api/projects/tasklogfull-proj/tasks/tasklogfull-task/git/log?full=1&limit=1")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("task full log: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var taskLog types.GitLogResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &taskLog); err != nil {
+		t.Fatalf("decode task full log: %v (%s)", err, rr.Body.String())
+	}
+	if len(taskLog.Commits) != 1 {
+		t.Fatalf("expected 1 commit with limit=1, got %d", len(taskLog.Commits))
+	}
+	if !taskLog.HasMore {
+		t.Error("expected has_more=true when more commits exist than the limit")
+	}
+	top := taskLog.Commits[0]
+	if top.Hash == "" || top.Short == "" || top.Author == "" || top.Date == "" {
+		t.Errorf("expected hash/short/author/date populated, got %+v", top)
+	}
+	if top.Subject != "Add second file" {
+		t.Errorf("subject = %q, want %q", top.Subject, "Add second file")
+	}
+	if !strings.Contains(top.Body, "Body line one") || !strings.Contains(top.Body, "Body line two") {
+		t.Errorf("body = %q, want both body lines", top.Body)
+	}
+	if len(top.Parents) != 1 {
+		t.Errorf("expected 1 parent on the second commit, got %v", top.Parents)
+	}
+	if taskLog.CurrentBranch == "" {
+		t.Error("expected current_branch to be resolved in the worktree")
+	}
+
+	// The project endpoint reads the same repo and must agree exactly.
+	rr2 := doRequest(t, mux, "GET", "/api/projects/tasklogfull-proj/git/log?full=1&limit=1")
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("project full log: expected 200, got %d: %s", rr2.Code, rr2.Body.String())
+	}
+	var projLog types.GitLogResponse
+	if err := json.Unmarshal(rr2.Body.Bytes(), &projLog); err != nil {
+		t.Fatalf("decode project full log: %v (%s)", err, rr2.Body.String())
+	}
+	if len(projLog.Commits) != 1 || projLog.Commits[0].Hash != top.Hash {
+		t.Errorf("project log top commit = %+v, want same hash as task log (%s)", projLog.Commits, top.Hash)
+	}
+	if projLog.HasMore != taskLog.HasMore {
+		t.Errorf("project has_more=%v, task has_more=%v — must agree", projLog.HasMore, taskLog.HasMore)
+	}
+}
+
 func TestHandleTaskDiff_ValidRefs(t *testing.T) {
 	h, s, wm, worktreesDir := newTestGitHandler(t)
 

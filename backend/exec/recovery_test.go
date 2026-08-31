@@ -355,11 +355,11 @@ func TestRecoverBridgeForTask_MaxAttemptsLatch(t *testing.T) {
 	if state.bridgeRecoveryAttempts != 1 {
 		t.Errorf("attempts = %d, want 1", state.bridgeRecoveryAttempts)
 	}
-	if !te.recoverBridgeForTask(f, setup, state, "img", nil, "", nil) {
-		// attempt 2 fails
+	if te.recoverBridgeForTask(f, setup, state, "img", nil, "", nil) {
+		t.Error("expected recovery attempt 2 to fail")
 	}
-	if !te.recoverBridgeForTask(f, setup, state, "img", nil, "", nil) {
-		// attempt 3 fails
+	if te.recoverBridgeForTask(f, setup, state, "img", nil, "", nil) {
+		t.Error("expected recovery attempt 3 to fail")
 	}
 	if state.bridgeRecoveryAttempts != 3 {
 		t.Errorf("attempts = %d, want 3", state.bridgeRecoveryAttempts)
