@@ -23,7 +23,7 @@ import (
 type Config struct {
 	CertFile string
 	KeyFile  string
-	CAFile string
+	CAFile   string
 }
 
 const (
@@ -372,15 +372,18 @@ func parseKeyPEM(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 	return x509.ParseECPrivateKey(block.Bytes)
 }
 
-// sameNames compares two DNS name sets, ignoring order and duplicates.
-func sameNames(a, b []string) bool {
+// sameSet reports whether a and b hold the same distinct elements, ignoring
+// order and duplicates. key maps an element to its comparable identity, so each
+// caller decides what "the same name" means (net.IP needs it to ignore the
+// 4- vs 16-byte representation of IPv4).
+func sameSet[T any](a, b []T, key func(T) string) bool {
 	setA := make(map[string]bool, len(a))
 	for _, v := range a {
-		setA[v] = true
+		setA[key(v)] = true
 	}
 	setB := make(map[string]bool, len(b))
 	for _, v := range b {
-		setB[v] = true
+		setB[key(v)] = true
 	}
 	if len(setA) != len(setB) {
 		return false
@@ -393,24 +396,13 @@ func sameNames(a, b []string) bool {
 	return true
 }
 
+// sameNames compares two DNS name sets, ignoring order and duplicates.
+func sameNames(a, b []string) bool {
+	return sameSet(a, b, func(s string) string { return s })
+}
+
 // sameIPs compares two IP sets, ignoring order, duplicates and the 4- vs
 // 16-byte representation of IPv4 addresses.
 func sameIPs(a, b []net.IP) bool {
-	setA := make(map[string]bool, len(a))
-	for _, v := range a {
-		setA[v.String()] = true
-	}
-	setB := make(map[string]bool, len(b))
-	for _, v := range b {
-		setB[v.String()] = true
-	}
-	if len(setA) != len(setB) {
-		return false
-	}
-	for v := range setA {
-		if !setB[v] {
-			return false
-		}
-	}
-	return true
+	return sameSet(a, b, net.IP.String)
 }

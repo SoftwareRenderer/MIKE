@@ -43,31 +43,26 @@ func (s *Store) CreateProject(p *types.Project) error {
 		}
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO projects (id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, sandbox_forward_ports, sandbox_mounts, sandbox_envs, sandbox_capabilities, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), B2I(p.SandboxEnabled), B2I(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), memoryLimit, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
 	)
 	return err
 }
 
-// GetProject retrieves a project by ID.
-func (s *Store) GetProject(id string) (*types.Project, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.queryProject(id)
-}
+// projectColumns lists the projects table columns in the exact order scanProject
+// reads them. Keep the two in step — a SELECT built from anything else will scan
+// silently wrong values, not fail.
+const projectColumns = `id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, sandbox_forward_ports, sandbox_mounts, sandbox_envs, sandbox_capabilities, created_at, updated_at`
 
-func (s *Store) queryProject(id string) (*types.Project, error) {
-	var p types.Project
+// scanProject reads one project row from either a *sql.Row or an *sql.Rows cursor
+// and applies the column conventions (NULL-able text columns collapse to "",
+// 0/1 integers to bools, JSON columns unmarshal best-effort).
+func scanProject(s scanner, p *types.Project) error {
 	var originBranch, sandboxImage, sandboxDockerfilePath, forwardPortsJSON, mountsJSON, envsJSON, capsJSON sql.NullString
 	var sandboxEnabled, sandboxNetworkIsolation int
 	var createdAt, updatedAt string
-	err := s.db.QueryRow(`SELECT id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, sandbox_forward_ports, sandbox_mounts, sandbox_envs, sandbox_capabilities, created_at, updated_at FROM projects WHERE id = ?`, id).
-		Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &p.SandboxMemoryLimit, &forwardPortsJSON, &mountsJSON, &envsJSON, &capsJSON, &createdAt, &updatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("project not found")
-		}
-		return nil, err
+	if err := s.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &p.SandboxMemoryLimit, &forwardPortsJSON, &mountsJSON, &envsJSON, &capsJSON, &createdAt, &updatedAt); err != nil {
+		return err
 	}
 	p.OriginBranch = originBranch.String
 	p.SandboxEnabled = I2B(sandboxEnabled)
@@ -88,6 +83,26 @@ func (s *Store) queryProject(id string) (*types.Project, error) {
 	}
 	p.CreatedAt = scanTime(createdAt)
 	p.UpdatedAt = scanTime(updatedAt)
+	return nil
+}
+
+// GetProject retrieves a project by ID.
+func (s *Store) GetProject(id string) (*types.Project, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.queryProject(id)
+}
+
+// queryProject reads one project. Callers must hold s.mu.
+func (s *Store) queryProject(id string) (*types.Project, error) {
+	var p types.Project
+	err := scanProject(s.db.QueryRow(`SELECT `+projectColumns+` FROM projects WHERE id = ?`, id), &p)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("project not found")
+	}
+	if err != nil {
+		return nil, err
+	}
 	return &p, nil
 }
 
@@ -95,7 +110,7 @@ func (s *Store) queryProject(id string) (*types.Project, error) {
 func (s *Store) ListProjects() ([]types.Project, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(`SELECT id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_memory_limit, sandbox_forward_ports, sandbox_mounts, sandbox_envs, sandbox_capabilities, created_at, updated_at FROM projects ORDER BY created_at`)
+	rows, err := s.db.Query(`SELECT ` + projectColumns + ` FROM projects ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -103,31 +118,9 @@ func (s *Store) ListProjects() ([]types.Project, error) {
 	projects := []types.Project{}
 	for rows.Next() {
 		var p types.Project
-		var originBranch, sandboxImage, sandboxDockerfilePath, forwardPortsJSON, mountsJSON, envsJSON, capsJSON sql.NullString
-		var sandboxEnabled, sandboxNetworkIsolation int
-		var createdAt, updatedAt string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &p.SandboxMemoryLimit, &forwardPortsJSON, &mountsJSON, &envsJSON, &capsJSON, &createdAt, &updatedAt); err != nil {
+		if err := scanProject(rows, &p); err != nil {
 			return nil, err
 		}
-		p.OriginBranch = originBranch.String
-		p.SandboxEnabled = I2B(sandboxEnabled)
-		p.SandboxNetworkIsolation = I2B(sandboxNetworkIsolation)
-		p.SandboxImage = sandboxImage.String
-		p.SandboxDockerfilePath = sandboxDockerfilePath.String
-		if forwardPortsJSON.Valid && forwardPortsJSON.String != "" {
-			_ = json.Unmarshal([]byte(forwardPortsJSON.String), &p.ForwardPorts)
-		}
-		if mountsJSON.Valid && mountsJSON.String != "" {
-			_ = json.Unmarshal([]byte(mountsJSON.String), &p.SandboxMounts)
-		}
-		if envsJSON.Valid && envsJSON.String != "" {
-			_ = json.Unmarshal([]byte(envsJSON.String), &p.SandboxEnvs)
-		}
-		if capsJSON.Valid && capsJSON.String != "" {
-			_ = json.Unmarshal([]byte(capsJSON.String), &p.SandboxCapabilities)
-		}
-		p.CreatedAt = scanTime(createdAt)
-		p.UpdatedAt = scanTime(updatedAt)
 		projects = append(projects, p)
 	}
 	return projects, rows.Err()

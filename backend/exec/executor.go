@@ -2261,7 +2261,7 @@ func (te *TaskExecutor) branchExists(projectID, branchName string) bool {
 // pattern when the expected branch is missing. Returns the recovered branch
 // name (and updates the task in DB), or empty string if no match found.
 func (te *TaskExecutor) recoverMissingBranch(projectID, taskID, missingBranch string) string {
-	slugPrefix := extractSlugPrefix(missingBranch)
+	slugPrefix := types.TaskBranchSlugPrefix(missingBranch)
 	if slugPrefix == "" {
 		return ""
 	}
@@ -2320,26 +2320,6 @@ func (te *TaskExecutor) recoverMissingBranch(projectID, taskID, missingBranch st
 	return recovered
 }
 
-// extractSlugPrefix extracts the slug prefix from a branch name.
-// E.g. "task/count-hello-files-0a6zyr" → "task/count-hello-files-"
-// E.g. "task/frost-amber-quartz-abc123" → "task/frost-amber-quartz-"
-func extractSlugPrefix(branchName string) string {
-	if !strings.HasPrefix(branchName, "task/") {
-		return ""
-	}
-	// Find the last "-" followed by exactly 6 alphanumeric chars at the end.
-	// The branch name pattern is: task/<slug>-<random6>
-	re := regexp.MustCompile(`^(task/.+)-[a-z0-9]{6}$`)
-	m := re.FindStringSubmatch(branchName)
-	if len(m) >= 2 {
-		return m[1] + "-"
-	}
-	return ""
-}
-
-// maxBranchName is the maximum length for any git branch name.
-const maxBranchName = 50
-
 // randomSuffix generates a random alphanumeric string of length n.
 func randomSuffix(n int) string {
 	chars := "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -2351,26 +2331,28 @@ func randomSuffix(n int) string {
 	return string(b)
 }
 
+// randomSuffixLen is the random tail of a task branch name — see
+// types.TaskBranchSuffixLen, which the branch-name parser matches against it.
+const randomSuffixLen = types.TaskBranchSuffixLen
+
 // generateBranchName creates a unique git branch name for a task.
 // Uses a slugified title when possible (e.g. "task/fix-login-bug"),
 // falls back to the task ID (e.g. "task/frost-amber-quartz"),
 // and appends a short suffix if the branch already exists from a deleted task.
-// The total branch name (including prefix) is capped at 50 characters.
-const randomSuffixLen = 6
-
+// The total branch name (including prefix) is capped at types.MaxBranchName.
 func (te *TaskExecutor) generateBranchName(task *types.Task, taskID, projectID string) string {
-	baseName := fmt.Sprintf("task/%s", task.ID)
+	baseName := types.TaskBranchPrefix + task.ID
 	if !task.AutoMerge && task.Title != "" {
-		slug := slugifyBranchName(task.Title)
+		slug := types.SlugifyBranchName(task.Title)
 		if slug != "" {
-			baseName = "task/" + slug
+			baseName = types.TaskBranchPrefix + slug
 		}
 	}
 	// Always append random suffix to avoid collisions with stale branches.
 	// Truncate base to leave room for "-" + randomSuffixLen chars.
 	suffixSpace := 1 + randomSuffixLen // "-" + 6 chars
-	if len(baseName)+suffixSpace > maxBranchName {
-		baseName = baseName[:maxBranchName-suffixSpace]
+	if len(baseName)+suffixSpace > types.MaxBranchName {
+		baseName = baseName[:types.MaxBranchName-suffixSpace]
 	}
 	branchName := baseName + "-" + randomSuffix(randomSuffixLen)
 
@@ -2380,33 +2362,11 @@ func (te *TaskExecutor) generateBranchName(task *types.Task, taskID, projectID s
 	wtExists := wtErr == nil && wtStatErr == nil
 	if !wtExists && te.branchExists(projectID, branchName) {
 		extra := "-" + taskID[:8]
-		if len(branchName)+len(extra) <= maxBranchName {
+		if len(branchName)+len(extra) <= types.MaxBranchName {
 			branchName += extra
 		}
 	}
 	return branchName
-}
-
-// slugifyBranchName converts a task title into a git-friendly branch name slug.
-// E.g. "Fix login bug #123" -> "fix-login-bug-123"
-// The slug is capped so that "task/" + slug fits within maxBranchName (50 chars).
-func slugifyBranchName(title string) string {
-	s := strings.ToLower(title)
-	var result []rune
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			result = append(result, r)
-		} else if len(result) > 0 && result[len(result)-1] != '-' {
-			result = append(result, '-')
-		}
-	}
-	out := string(result)
-	out = strings.Trim(out, "-")
-	slugMax := maxBranchName - len("task/")
-	if len(out) > slugMax {
-		out = out[:slugMax]
-	}
-	return out
 }
 
 func agentSandboxHash(sb *types.AgentSandbox) string {
@@ -2467,6 +2427,11 @@ func (te *TaskExecutor) formatLSPDiagnostics(filePath string, diagnostics []LSPD
 }
 
 func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, taskID, filePath string) string {
+	// Bound this file's whole pass. Derived from the caller's ctx, so stopping the task
+	// ends it; given a deadline, so a silent language server cannot park this goroutine.
+	ctx, cancel := context.WithTimeout(ctx, lspDiagnosticsBudget)
+	defer cancel()
+
 	// Normalize sandbox path to relative path (e.g., /home/sandbox/temp/lsp_test.go -> lsp_test.go)
 	relPath := normalizePath(projectID, filePath)
 	if te.lspMgr == nil {
@@ -2491,7 +2456,7 @@ func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, ta
 		log.Printf("[lsp-diag] task=%s worktree path error: %v", taskID, err)
 		return ""
 	}
-	proc, err := te.lspMgr.GetOrCreate(worktreePath, lang, cfg)
+	proc, err := te.lspMgr.GetOrCreate(ctx, worktreePath, lang, cfg)
 	if err != nil {
 		log.Printf("[lsp-diag] task=%s GetOrCreate failed: %v", taskID, err)
 		return ""

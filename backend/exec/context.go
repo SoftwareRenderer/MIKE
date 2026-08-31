@@ -72,12 +72,12 @@ func contextTokensUsed(lc *loopContext) int {
 	return estimatePromptTokens(buildLLMContext(lc.messages))
 }
 
-// summarizeContext produces a compact summary of the conversation history.
+// summarizeContext produces a rolling summary of the conversation history.
 // Sends a non-streaming chat completion. Does not modify the messages slice.
 func (te *TaskExecutor) summarizeContext(ctx context.Context, messages []types.ChatMessage, serverURL, modelName, previousSummary string) (summarizeResult, error) {
 	oldLen := len(messages)
 
-	chatHistory := formatChatHistory(messages, previousSummary != "")
+	chatHistory := formatChatHistory(buildLLMContext(messages), previousSummary != "")
 	systemPrompt, userPrompt, err := prompts.RenderSummarizePrompt(prompts.SummarizeData{
 		ChatHistory:     chatHistory,
 		PreviousSummary: previousSummary,
@@ -182,13 +182,8 @@ func formatChatHistory(messages []types.ChatMessage, skipSummaryMsg bool) string
 			// Already incorporated into assistant line above
 			continue
 		case "advisory":
-			line := m.Content
-			if idx := strings.Index(line, "\n"); idx > 0 {
-				line = line[:idx]
-			}
-			sb.WriteString("Environment note: ")
-			sb.WriteString(line)
-			sb.WriteString("\n")
+            // LSP notes are noise for the summary
+			continue
 		case "user":
 			sb.WriteString("User: ")
 			sb.WriteString(m.Content)

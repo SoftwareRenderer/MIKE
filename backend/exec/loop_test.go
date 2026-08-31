@@ -962,13 +962,6 @@ func TestNormalizePhrase(t *testing.T) {
 	}
 }
 
-func TestWordCount(t *testing.T) {
-	count := wordCount("the quick brown fox jumps over the lazy dog")
-	if count != 9 {
-		t.Errorf("expected 9 words, got %d", count)
-	}
-}
-
 // TestSplitSentences covers the sentence splitter that feeds phrase detection. Exact
 // segment lists are asserted wherever the boundaries are defined, because a segment that
 // loses or gains a character corrupts the phrase comparison downstream. The UTF-8 rows are

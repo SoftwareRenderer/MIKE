@@ -63,7 +63,7 @@ func newMockProcessManager() *mockProcessManager {
 	}
 }
 
-func (m *mockProcessManager) GetOrCreate(workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error) {
+func (m *mockProcessManager) GetOrCreate(_ context.Context, workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := processKey(workspacePath, language)
