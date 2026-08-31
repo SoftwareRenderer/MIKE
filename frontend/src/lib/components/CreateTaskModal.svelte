@@ -18,7 +18,7 @@
     import FileMentionDropdown from './FileMentionDropdown.svelte';
     import ToggleSwitch from './ToggleSwitch.svelte';
     import ModeSelect from './ModeSelect.svelte';
-    import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
+    import { useFileMention } from '$lib/composables/use-file-mention.svelte';
     import { resolveWorker, getModelName } from '$lib/utils/providers';
     import { applyExploreModeRule } from '$lib/utils/explore-mode';
     import { matchesCreateTaskSubmitKey, effectiveCreateTaskSubmitKey, formatShortcut, shortcutHintsHidden } from '$lib/utils/keyboard';
@@ -109,14 +109,15 @@
         closeBranchDropdown();
     }
 
-    // @ file mention state
-    let mentionTrigger = $state<{ atIndex: number; query: string } | null>(null);
-    let mentionResults = $state<Array<{ path: string }>>([]);
-    let mentionPosition = $state<{ top: number; bottom: number; left: number; width: number } | null>(null);
-    let mentionActiveIndex = $state(0);
-    let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
     let promptTextarea: HTMLTextAreaElement | null = $state(null);
-    const MENTION_DEBOUNCE_MS = 150;
+
+    // @ file mention — shared state machine (see use-file-mention.svelte.ts)
+    const mention = useFileMention({
+        getProjectId: () => projectId,
+        getValue: () => prompt,
+        setValue: (v) => { prompt = v; },
+        getTextarea: () => promptTextarea,
+    });
 
     function handlePromptInput() {
         if (!isAgentSelected) {
@@ -126,94 +127,8 @@
         }
     }
 
-    function handleMentionInput() {
-        if (!promptTextarea) return;
-        const cursorPos = promptTextarea.selectionStart ?? 0;
-        const trigger = detectMentionAtCursor(prompt, cursorPos);
-
-        if (trigger) {
-            mentionTrigger = trigger;
-            mentionActiveIndex = 0;
-            const rect = getInputRect(promptTextarea);
-            mentionPosition = rect;
-
-            if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
-            mentionSearchTimer = setTimeout(() => {
-                searchFiles(trigger.query);
-            }, MENTION_DEBOUNCE_MS);
-        } else {
-            closeMention();
-        }
-    }
-
-    async function searchFiles(query: string) {
-        if (!projectId) return;
-        const params = new URLSearchParams({ q: query, project: projectId });
-        try {
-            const res = await fetch(`/api/fs/search?${params.toString()}`);
-            if (!res.ok) return;
-            const data = await res.json();
-            mentionResults = data.results || [];
-        } catch {
-            mentionResults = [];
-        }
-    }
-
-    function closeMention() {
-        mentionTrigger = null;
-        mentionResults = [];
-        mentionPosition = null;
-        mentionActiveIndex = 0;
-        if (mentionSearchTimer) {
-            clearTimeout(mentionSearchTimer);
-            mentionSearchTimer = null;
-        }
-    }
-
-    function handleMentionSelect(path: string) {
-        if (!mentionTrigger || !promptTextarea) return;
-        const { value: newValue, cursorPos } = insertMention(prompt, mentionTrigger.atIndex, mentionTrigger.query, path);
-        prompt = newValue;
-        closeMention();
-        requestAnimationFrame(() => {
-            if (promptTextarea) {
-                promptTextarea.focus();
-                promptTextarea.setSelectionRange(cursorPos, cursorPos);
-            }
-        });
-    }
-
-    function handleMentionClose() {
-        closeMention();
-        promptTextarea?.focus();
-    }
-
     function handlePromptKeydown(e: KeyboardEvent) {
-        if (mentionTrigger && mentionResults.length > 0) {
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                mentionActiveIndex = (mentionActiveIndex + 1) % mentionResults.length;
-                return;
-            }
-            if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                mentionActiveIndex = (mentionActiveIndex - 1 + mentionResults.length) % mentionResults.length;
-                return;
-            }
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (mentionActiveIndex >= 0 && mentionActiveIndex < mentionResults.length) {
-                    handleMentionSelect(mentionResults[mentionActiveIndex].path);
-                }
-                return;
-            }
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopPropagation();
-                closeMention();
-                return;
-            }
-        }
+        mention.handleKeydown(e);
     }
 
     async function handlePaste(e: ClipboardEvent) {
@@ -523,7 +438,7 @@
                 {/each}
             </div>
         {/if}
-        <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={() => { handlePromptInput(); handleMentionInput(); }} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
+        <textarea bind:this={promptTextarea} id="task-description" bind:value={prompt} placeholder="Describe the task the AI should execute..." rows="5" required aria-invalid={!!error} aria-describedby={error ? 'task-error' : undefined} oninput={() => { handlePromptInput(); mention.handleInput(); }} onkeydown={handlePromptKeydown} onpaste={handlePaste}></textarea>
         <!-- Anchor for sandboxed UI extensions (e.g. GitHub issue importer) -->
         <div bind:this={extAnchor} class="ext-anchor"></div>
     </label>
@@ -624,11 +539,11 @@
 
 <!-- @ file mention dropdown — must be outside BaseModal (floating element) -->
 <FileMentionDropdown
-    results={mentionResults}
-    position={mentionPosition}
-    activeIndex={mentionActiveIndex}
-    onSelect={handleMentionSelect}
-    onClose={handleMentionClose}
+    results={mention.results}
+    position={mention.position}
+    activeIndex={mention.activeIndex}
+    onSelect={(path) => mention.select(path)}
+    onClose={() => mention.handleClose()}
 />
 
 <style>

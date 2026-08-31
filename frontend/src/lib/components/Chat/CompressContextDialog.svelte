@@ -3,6 +3,7 @@
     import { dialogStore } from '$lib/stores';
     import BaseModal from '../BaseModal.svelte';
     import ContextDonut from './ContextDonut.svelte';
+    import { formatTokens, formatCost } from '$lib/utils/format';
 
     let open = $state(false);
     let confirmText = $state('Compress');
@@ -46,21 +47,6 @@
             e.preventDefault();
             handleConfirm();
         }
-    }
-
-    function formatTokens(n: number): string {
-        if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-        if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
-        return n.toString();
-    }
-
-    function formatCost(cost: number): string {
-        if (cost <= 0) return '';
-        const formatted = cost < 1 ? cost.toFixed(4) : cost.toFixed(2);
-        return '$' + Number(formatted).toLocaleString(undefined, {
-            minimumFractionDigits: cost < 1 ? 4 : 2,
-            maximumFractionDigits: cost < 1 ? 4 : 2,
-        });
     }
 
     $effect(() => {

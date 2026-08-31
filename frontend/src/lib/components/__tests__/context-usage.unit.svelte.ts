@@ -30,13 +30,16 @@ describe('ContextUsage rendering', () => {
     });
 
     it('formats tokens with K suffix for thousands', () => {
-        expect(source).toContain('1_000');
-        expect(source).toContain('K');
+        // Formatting moved to the shared module; behavior is pinned in
+        // src/lib/utils/__tests__/format.unit.ts
+        expect(source).toContain('formatTokens');
+        expect(source).toContain('$lib/utils/format');
     });
 
     it('formats tokens with M suffix for millions', () => {
-        expect(source).toContain('1_000_000');
-        expect(source).toContain('M');
+        const formatSrc = readFileSync(resolve(__dirname, '../../utils/format.ts'), 'utf-8');
+        expect(formatSrc).toContain('1_000_000');
+        expect(formatSrc).toContain('M');
     });
 
     it('no longer renders a linear usage bar', () => {
