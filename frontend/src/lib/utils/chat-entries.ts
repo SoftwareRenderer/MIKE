@@ -132,6 +132,30 @@ export function getCheckpointThreads(
     return checkpointThread;
 }
 
+/** Error event payload as it arrives on the WebSocket. */
+export interface ErrorEventData {
+    message_id?: string;
+    code?: string;
+    message?: string;
+}
+
+/** Normalize an error event payload for display. */
+export function errorFromEvent(data: ErrorEventData): { code: string; message: string } {
+    return { code: data.code || 'error', message: data.message || 'An error occurred' };
+}
+
+/**
+ * True when the error of this event is already on screen: either the stored row
+ * it belongs to is there (a replayed frame, or the copy loadHistory put there),
+ * or the identical error is what the last card already shows.
+ */
+export function isRepeatError(entries: ChatEntry[], data: ErrorEventData): boolean {
+    if (data.message_id && entries.some(e => e.id === data.message_id)) return true;
+    const { code, message } = errorFromEvent(data);
+    const last = entries[entries.length - 1];
+    return last?.role === 'error' && last.error?.code === code && last.content === message;
+}
+
 /**
  * Build checkpoint entries from DB messages.
  * Filters out title messages, restores error entries, merges tool calls,
@@ -177,6 +201,8 @@ export function buildEntriesFromMessages(
             const match = content.match(/^\[([^\]]+)\]\s*(.*)/);
             const code = match ? match[1] : 'error';
             const message = match ? match[2] : content;
+            // Older builds stored a "stopped" error row when a task was paused. Stopping
+            // is a normal state, so those rows are not failures and stay hidden.
             if (code === 'stopped') return null;
             return {
                 ...base, id: m.id, role: 'error' as const, content: message, isStreaming: false, createdAt: m.created_at,
@@ -249,10 +275,21 @@ export function buildEntriesFromMessages(
         };
     });
 
-    const validDbEntries = dbEntries.filter(e => e !== null) as ChatEntry[];
+    const validDbEntries = collapseRepeatErrors(dbEntries.filter(e => e !== null) as ChatEntry[]);
     const entries = mergeToolCallsIntoAssistant(validDbEntries);
 
     return { entries, checkpointHashes };
+}
+
+// collapseRepeatErrors drops an error entry that repeats the one right before it.
+// Databases written before the server became the only writer of errors hold one
+// copy of a failure per page view.
+function collapseRepeatErrors(entries: ChatEntry[]): ChatEntry[] {
+    return entries.filter((e, i) => {
+        if (e.role !== 'error') return true;
+        const prev = entries[i - 1];
+        return !(prev && prev.role === 'error' && prev.error?.code === e.error?.code && prev.content === e.content);
+    });
 }
 
 /**

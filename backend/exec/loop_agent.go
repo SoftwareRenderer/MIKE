@@ -208,7 +208,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 			}
 			log.Printf("[agent] task=%s startup event: %s", task.ID, event.Type)
 			if streamEvent := toStreamEvent(event, sandboxEnabled, runner); streamEvent.Type != "" {
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
+				te.sendAgentStreamEvent(projectID, task.ID, streamEvent)
 			}
 			switch event.Type {
 			case pkgagent.EventTypeStatus:
@@ -321,7 +321,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 
 			// Stream the event to frontend
 			if streamEvent := toStreamEvent(event, sandboxEnabled, runner); streamEvent.Type != "" {
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, streamEvent)
+				te.sendAgentStreamEvent(projectID, task.ID, streamEvent)
 			}
 
 			switch event.Type {
@@ -809,6 +809,15 @@ func buildContextReplay(messages []types.TaskMessage) string {
 
 	sb.WriteString("</conversation_history>")
 	return sb.String()
+}
+
+// sendAgentStreamEvent forwards an agent event to the client
+func (te *TaskExecutor) sendAgentStreamEvent(projectID, taskID string, event types.StreamEvent) {
+	if data, ok := event.Data.(map[string]string); ok && event.Type == types.WSTypeError {
+		te.persistAndSendError(taskID, data["message"], data["code"], false)
+		return
+	}
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, event)
 }
 
 // toStreamEvent converts a generic agent event to a Kanban StreamEvent for WebSocket broadcasting.
