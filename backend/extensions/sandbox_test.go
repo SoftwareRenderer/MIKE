@@ -694,16 +694,18 @@ func TestMountsCompatible_CustomMounts(t *testing.T) {
 	}
 
 	// Same project mounts, no custom mounts -> compatible.
-	if !sm.MountsCompatible("ext1", map[string]string{"/proj": "/mnt/proj"}, nil) {
-		t.Error("expected compatible with no custom mounts")
+	if ok, reason := sm.MountsCompatible("ext1", map[string]string{"/proj": "/mnt/proj"}, nil, nil); !ok {
+		t.Errorf("expected compatible with no custom mounts, got %q", reason)
 	}
 
 	// Same project mounts, but new custom mount -> NOT compatible (needs recreation).
 	newMounts := []types.SandboxMount{
 		{HostPath: "/tmp/node_modules", ContainerPath: "/mnt/proj/frontend/node_modules", Mode: "ro"},
 	}
-	if sm.MountsCompatible("ext1", map[string]string{"/proj": "/mnt/proj"}, newMounts) {
+	if ok, reason := sm.MountsCompatible("ext1", map[string]string{"/proj": "/mnt/proj"}, newMounts, nil); ok {
 		t.Error("expected incompatible when custom mounts are added")
+	} else if reason != "mounts changed" {
+		t.Errorf("reason = %q, want %q", reason, "mounts changed")
 	}
 
 	// State with custom mounts, same custom mounts -> compatible.
@@ -712,16 +714,70 @@ func TestMountsCompatible_CustomMounts(t *testing.T) {
 		mountedProjects: []string{"/proj"},
 		customMounts:    customMountSnapshot(newMounts),
 	}
-	if !sm.MountsCompatible("ext2", map[string]string{"/proj": "/mnt/proj"}, newMounts) {
-		t.Error("expected compatible with same custom mounts")
+	if ok, reason := sm.MountsCompatible("ext2", map[string]string{"/proj": "/mnt/proj"}, newMounts, nil); !ok {
+		t.Errorf("expected compatible with same custom mounts, got %q", reason)
 	}
 
 	// State with custom mounts, different custom mounts -> NOT compatible.
 	diffMounts := []types.SandboxMount{
 		{HostPath: "/other/node_modules", ContainerPath: "/mnt/proj/src/node_modules", Mode: "ro"},
 	}
-	if sm.MountsCompatible("ext2", map[string]string{"/proj": "/mnt/proj"}, diffMounts) {
+	if ok, _ := sm.MountsCompatible("ext2", map[string]string{"/proj": "/mnt/proj"}, diffMounts, nil); ok {
 		t.Error("expected incompatible when custom mounts differ")
+	}
+
+	// A different project set is its own reason — the container mounts every
+	// registered project, so a new project needs a new container.
+	if ok, reason := sm.MountsCompatible("ext2", map[string]string{"/proj": "/mnt/proj", "/proj2": "/mnt/proj2"}, newMounts, nil); ok {
+		t.Error("expected incompatible when the project set grows")
+	} else if reason != "project mounts changed" {
+		t.Errorf("reason = %q, want %q", reason, "project mounts changed")
+	}
+}
+
+// TestMountsCompatible_Envs: a container's environment is fixed at `podman create`,
+// so the envs an extension declares (manifest + user config) must recreate the
+// sandbox when they change. What a session *detected* at runtime is not in that
+// list: one workspace's module cache must never restart another's server.
+func TestMountsCompatible_Envs(t *testing.T) {
+	reg := NewRegistryClient()
+	sm := NewExtensionSandboxManager(reg, nil)
+
+	envs := []types.SandboxEnv{{Key: "GOCACHE", Value: "/tmp/gocache"}}
+	sm.states["ext-env"] = &extensionSandboxState{
+		containerName:   "test",
+		mountedProjects: []string{"/proj"},
+		envs:            envSnapshot(envs),
+	}
+
+	if ok, reason := sm.MountsCompatible("ext-env", map[string]string{"/proj": "/mnt/proj"}, nil, envs); !ok {
+		t.Errorf("identical envs reported incompatible: %q", reason)
+	}
+
+	// Same mounts, different env value -> incompatible, and it says so.
+	changed := []types.SandboxEnv{{Key: "GOCACHE", Value: "/somewhere/else"}}
+	if ok, reason := sm.MountsCompatible("ext-env", map[string]string{"/proj": "/mnt/proj"}, nil, changed); ok {
+		t.Error("expected incompatible when an extension env changes")
+	} else if reason != "envs changed" {
+		t.Errorf("reason = %q, want %q", reason, "envs changed")
+	}
+
+	// Same keys in a different order -> still compatible (order is not a change).
+	reordered := []types.SandboxEnv{{Key: "XDG_CACHE_HOME", Value: "/tmp/xdg"}, {Key: "GOCACHE", Value: "/tmp/gocache"}}
+	sm.states["ext-env2"] = &extensionSandboxState{
+		containerName:   "test",
+		mountedProjects: []string{"/proj"},
+		envs:            envSnapshot(reordered),
+	}
+	swapped := []types.SandboxEnv{{Key: "GOCACHE", Value: "/tmp/gocache"}, {Key: "XDG_CACHE_HOME", Value: "/tmp/xdg"}}
+	if ok, reason := sm.MountsCompatible("ext-env2", map[string]string{"/proj": "/mnt/proj"}, nil, swapped); !ok {
+		t.Errorf("env order must not count as a change: %q", reason)
+	}
+
+	// An env that exists only in the desired set (e.g. a detected value the
+	// container was never given) must not be compared here.
+	if ok, _ := sm.MountsCompatible("ext-none", map[string]string{"/proj": "/mnt/proj"}, nil, envs); ok {
+		t.Error("an uncreated sandbox must never report compatible")
 	}
 }
 
@@ -988,5 +1044,59 @@ func TestBuildExtensionCreateArgs_DeniedCapabilitiesAreSkipped(t *testing.T) {
 	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-cap-reject", "ubuntu:latest", nil, nil)
 	if added := capAdds(args); len(added) != 0 {
 		t.Errorf("denied/malformed capabilities reached the argument list: %v", added)
+	}
+}
+
+// mountArgs returns the "-v" bind specs from a podman create argument list.
+func mountArgs(args []string) []string {
+	var out []string
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-v" {
+			out = append(out, args[i+1])
+		}
+	}
+	return out
+}
+
+// TestBuildExtensionCreateArgs_ProjectConfiguredMountIsAlwaysReadOnly: the shared
+// LSP sandbox borrows the caches projects declare. A mount borrowed from a
+// project's Sandbox Configuration is read-only even when the stored config says
+// otherwise — the extension is not the party that decided that path exists.
+func TestBuildExtensionCreateArgs_ProjectConfiguredMountIsAlwaysReadOnly(t *testing.T) {
+	dir := t.TempDir()
+	projectCache := filepath.Join(dir, "go-cache")
+	appDir := filepath.Join(dir, "app")
+	for _, d := range []string{projectCache, appDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := newMountPolicyWithReadOnly([]string{appDir, projectCache}, []string{projectCache})
+
+	newExt := func(id, host string) *Extension {
+		return &Extension{ID: id, SandboxConfig: SandboxConfig{Mounts: []types.SandboxMount{
+			{HostPath: host, ContainerPath: "/borrowed", Mode: "rw"},
+		}}}
+	}
+
+	borrowed, _ := buildExtensionCreateArgs(newExt("ext-borrow", projectCache), "kanban-ext-ext-borrow", "ubuntu:latest", nil, policy)
+	mounts := mountArgs(borrowed)
+	if len(mounts) != 1 {
+		t.Fatalf("borrowed mount produced %v, want one -v spec", mounts)
+	}
+	if !strings.HasSuffix(mounts[0], ",ro") {
+		t.Errorf("borrowed mount %q must be pinned read-only", mounts[0])
+	}
+
+	owned, _ := buildExtensionCreateArgs(newExt("ext-owned", appDir), "kanban-ext-ext-owned", "ubuntu:latest", nil, policy)
+	mounts = mountArgs(owned)
+	if len(mounts) != 1 || !strings.HasSuffix(mounts[0], ",rw") {
+		t.Errorf("app-owned mount %v should keep the requested rw mode", mounts)
+	}
+
+	// No policy at all: nothing is inside an empty allowlist, so nothing is mounted.
+	skipped, _ := buildExtensionCreateArgs(newExt("ext-none", projectCache), "kanban-ext-ext-none", "ubuntu:latest", nil, nil)
+	if mounts := mountArgs(skipped); len(mounts) != 0 {
+		t.Errorf("a nil policy must mount nothing, got %v", mounts)
 	}
 }

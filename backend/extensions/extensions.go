@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"kanban/backend/types"
 )
@@ -336,6 +337,103 @@ type SandboxConfig struct {
 	Mounts           []types.SandboxMount `json:"mounts,omitempty"`
 	Envs             []types.SandboxEnv   `json:"envs,omitempty"`
 	Capabilities     []string             `json:"capabilities,omitempty"`
+
+	// Detect asks the workspace's own sandbox where a language keeps the code it
+	// resolves. Core runs the command and never learns what the answer means — it
+	// only checks that the answer names a directory the user already configured.
+	Detect []DetectProbe `json:"detect,omitempty"`
+	// Environment says how to tell whether this server can answer *at all* in this
+	// workspace (a dependency root that is missing, a cache that is cold). When it
+	// cannot, the listed diagnostic codes are the server guessing, and core does not
+	// forward them to the model.
+	Environment *EnvironmentGate `json:"environment,omitempty"`
+	// ReloadFiles are workspace-relative paths whose change means the language
+	// server has to re-read the project (a go.mod, a lockfile). A server sees no
+	// file-watch events through a bind mount, so the turn's changed-file list is
+	// what tells us.
+	ReloadFiles []string `json:"reload_files,omitempty"`
+}
+
+// CommandRef is a manifest-declared command. Core never runs it on the host: a
+// probe runs in a sandbox, either the task's (Detect) or the extension's own
+// (EnvironmentGate.Check).
+type CommandRef struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+	// TimeoutSeconds bounds one run. 0 means the default; every value is clamped
+	// so a manifest cannot stall a turn.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+}
+
+// Timeout returns the declared bound, clamped to (0, max]. A manifest that
+// declares nothing gets def, and nothing declared may outrank max.
+func (c CommandRef) Timeout(def, max time.Duration) time.Duration {
+	if c.TimeoutSeconds <= 0 {
+		return def
+	}
+	t := time.Duration(c.TimeoutSeconds) * time.Second
+	if t > max {
+		return max
+	}
+	return t
+}
+
+// Argv is the command line to run, command first. Returns false when no command
+// is declared, so a half-written manifest is skipped instead of run empty.
+func (c CommandRef) Argv() ([]string, bool) {
+	if strings.TrimSpace(c.Command) == "" {
+		return nil, false
+	}
+	return append([]string{c.Command}, c.Args...), true
+}
+
+// DetectProbe is one detection question asked of the task sandbox, plus what to
+// do with the answer. Envs values may use the {value} placeholder, replaced by
+// the probe's answer (trimmed, single line) — the only way a detected path can
+// reach a language server.
+type DetectProbe struct {
+	CommandRef `json:",inline"`
+	// ID names the probe in logs. Optional; defaults to the command.
+	ID string `json:"id,omitempty"`
+	// Envs are the assignments the answer produces, e.g. GOMODCACHE={value}.
+	Envs []types.SandboxEnv `json:"envs,omitempty"`
+}
+
+// LogID is the identifier to use in log lines for this probe.
+func (d DetectProbe) LogID() string {
+	if d.ID != "" {
+		return d.ID
+	}
+	return d.Command
+}
+
+// EnvironmentGate describes the health check for a language server's workspace,
+// and what to do with the noise it produces when the workspace cannot be
+// resolved. Codes are opaque strings: core compares them to the diagnostic's
+// `code` and knows nothing about what any of them mean.
+type EnvironmentGate struct {
+	// Check runs inside the extension's own sandbox, in the workspace it is
+	// answering for.
+	Check CommandRef `json:"check"`
+	// SuppressCodes are diagnostic codes that only mean "I could not load the
+	// project" — dropped when Check says the environment is unusable.
+	SuppressCodes []string `json:"suppress_codes,omitempty"`
+	// Note is one sentence shown to the user instead of the suppressed noise.
+	Note string `json:"note,omitempty"`
+}
+
+// Suppresses reports whether a diagnostic code is one this gate hides while the
+// environment is unhealthy.
+func (g *EnvironmentGate) Suppresses(code string) bool {
+	if g == nil || code == "" {
+		return false
+	}
+	for _, c := range g.SuppressCodes {
+		if c == code {
+			return true
+		}
+	}
+	return false
 }
 
 // lspSandboxFromManifest returns the LSP capability's sandbox config, or nil.
@@ -362,6 +460,11 @@ func sandboxConfigFromManifest(m *SandboxConfig) SandboxConfig {
 	sc.Envs = m.Envs
 	sc.ForwardPorts = m.ForwardPorts
 	sc.Capabilities = m.Capabilities
+	// Probe declarations are manifest data, not user config: they travel with the
+	// stored record so the runtime can act on them without re-reading the manifest.
+	sc.Detect = m.Detect
+	sc.Environment = m.Environment
+	sc.ReloadFiles = m.ReloadFiles
 	return sc
 }
 

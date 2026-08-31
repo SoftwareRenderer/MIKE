@@ -118,6 +118,29 @@ type BashParams struct {
 // LSPParams holds the parsed parameters for an LSP request.
 type LSPParams struct {
 	Raw     json.RawMessage `json:"raw"`               // raw JSON-RPC message
-	Command string          `json:"command,omitempty"` // LSP server command (first request only)
-	Args    []string        `json:"args,omitempty"`    // LSP server args (first request only)
+	Command string          `json:"command,omitempty"` // LSP server command (start request only)
+	Args    []string        `json:"args,omitempty"`    // LSP server args (start request only)
+
+	// Session addresses one LSP server session within this connection. The
+	// sandbox is shared by every project, so a session — not the container — is
+	// the per-workspace unit: each session is its own process with its own env.
+	// Empty means the legacy single session, so a stale bridge that ignores
+	// these fields still works for one workspace.
+	Session string `json:"session,omitempty"`
+	// Env is extra KEY=VALUE assignments for the session's process, applied on
+	// top of the container's own environment. Never the host's environment.
+	Env []string `json:"env,omitempty"`
+	// Stop asks the agent to terminate the addressed session instead of
+	// starting or forwarding. A bool rather than a new method ID: 0x05-0x08 are
+	// retired and must stay that way.
+	Stop bool `json:"stop,omitempty"`
+}
+
+// LSPNotification wraps an LSP server notification forwarded by the agent, so
+// the host can attribute it to the session (and therefore the workspace) that
+// owns it. Without this, publishDiagnostics from one project is served to
+// another with the wrong URI translation.
+type LSPNotification struct {
+	Session string          `json:"session,omitempty"`
+	Raw     json.RawMessage `json:"raw"`
 }

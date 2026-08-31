@@ -15,12 +15,12 @@ import (
 
 // handler manages request dispatch for a single client connection.
 type handler struct {
-	mu        sync.Mutex
-	bashProcs map[uint32]*bashProc // msgID → running bash process
-	lsp       *lspState            // LSP server state (one per connection)
-	writeMu   sync.Mutex           // serializes all writes to conn (bash streaming + dispatch + read loop)
-	closed    atomic.Bool          // set true when connection is torn down (atomic: accessed from readLoop + close)
-	fileLocks sync.Map             // path → *sync.Mutex, prevents concurrent read-modify-write on same file
+	mu          sync.Mutex
+	bashProcs   map[uint32]*bashProc // msgID → running bash process
+	lspSessions map[string]*lspState // session id → language server session (one per workspace)
+	writeMu     sync.Mutex           // serializes all writes to conn (bash streaming + dispatch + read loop)
+	closed      atomic.Bool          // set true when connection is torn down (atomic: accessed from readLoop + close)
+	fileLocks   sync.Map             // path → *sync.Mutex, prevents concurrent read-modify-write on same file
 }
 
 // lockFile returns a lock for the given file path and an unlock function.
@@ -79,7 +79,8 @@ func (bp *bashProc) pid() int {
 
 func newHandler() *handler {
 	h := &handler{
-		bashProcs: make(map[uint32]*bashProc),
+		bashProcs:   make(map[uint32]*bashProc),
+		lspSessions: make(map[string]*lspState),
 	}
 	h.closed.Store(true) // set to false by caller when connection is ready
 	return h
@@ -118,6 +119,13 @@ func (h *handler) close() {
 	for id, bp := range h.bashProcs {
 		bp.kill()
 		delete(h.bashProcs, id)
+	}
+	// Terminate every language server owned by this connection
+	for id, st := range h.lspSessions {
+		if st != nil && st.session != nil {
+			st.session.close()
+		}
+		delete(h.lspSessions, id)
 	}
 	h.mu.Unlock()
 }

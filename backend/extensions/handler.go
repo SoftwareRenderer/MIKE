@@ -62,6 +62,18 @@ type ExtensionHandler struct {
 	inFlightOps        *inFlight
 	onImageUpdated     func(extID string) // callback after successful image update
 	onExtensionChanged func()             // callback after any extension change (enable/disable/create/delete)
+	// environmentStatus reports whether an extension's language server can resolve
+	// the workspaces it is currently serving. Set by the server, which is where the
+	// LSP manager lives; the extensions package stays independent of it.
+	environmentStatus func(extID string) *EnvironmentStatus
+}
+
+// EnvironmentStatus is the runtime answer to "can this extension actually serve
+// a workspace?". When it cannot, its diagnostics are guesses and core withholds
+// them — so the manifest's own sentence is what the user is shown instead.
+type EnvironmentStatus struct {
+	Healthy bool   `json:"healthy"`
+	Note    string `json:"note,omitempty"`
 }
 
 // ExtensionConfig holds configuration for the extension handler.
@@ -131,6 +143,13 @@ func (h *ExtensionHandler) SetOnImageUpdated(fn func(extID string)) {
 // SetOnExtensionChanged sets a callback invoked after any extension state change.
 func (h *ExtensionHandler) SetOnExtensionChanged(fn func()) {
 	h.onExtensionChanged = fn
+}
+
+// SetEnvironmentStatus wires the runtime "can it resolve the project" report for
+// language-server extensions, so Settings → Extensions can say in one sentence
+// why diagnostics are being withheld instead of showing nothing at all.
+func (h *ExtensionHandler) SetEnvironmentStatus(fn func(extID string) *EnvironmentStatus) {
+	h.environmentStatus = fn
 }
 
 // mountPolicy returns the host-mount allowlist an extension sandbox is held to:
@@ -1417,6 +1436,11 @@ type ExtensionResponse struct {
 	Repo            string               `json:"repo,omitempty"`
 	Commit          string               `json:"commit,omitempty"`
 	Author          string               `json:"author,omitempty"`
+	// Environment is the runtime "can this extension resolve the workspace it is
+	// serving" report, present for a language-server extension that declares an
+	// environment check. When it says unhealthy, core is withholding that
+	// extension's unresolvable diagnostics — the note is what the user should see.
+	Environment *EnvironmentStatus `json:"environment,omitempty"`
 }
 
 // ExtensionUpdate describes an available update.
@@ -1485,6 +1509,9 @@ func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]Extens
 		BuiltAt:         ext.BuiltAt,
 		Repo:            ext.Repo,
 		Commit:          ext.Commit,
+	}
+	if h.environmentStatus != nil {
+		resp.Environment = h.environmentStatus(ext.ID)
 	}
 	// Local (filesystem) extensions have a concrete on-disk path. For an
 	// author-namespaced extension that is <extensions>/<author>/<name>; an

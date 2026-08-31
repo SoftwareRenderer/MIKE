@@ -41,12 +41,46 @@ export function hasNetworkCapability(capabilities?: Record<string, any> | null):
 }
 
 /**
+ * True when an LSP extension declares a sandbox probe: a command it asks the
+ * project's *own* sandbox, to find where that language keeps the code it resolves
+ * (a Go module cache, a node_modules root).
+ *
+ * The probe never runs on the host — it runs in the container the project already
+ * runs in, reads one short answer, and can only ever name a directory the user
+ * already configured as a mount. It is still a command the extension wrote, so
+ * the install review says so in plain words instead of shipping it silently.
+ *
+ * Reads both shapes: a registry entry carries the `sandbox_probe` marker the
+ * index generator derives, an installed extension carries the manifest's own
+ * `sandbox.detect` list.
+ */
+export function hasSandboxProbe(capabilities?: Record<string, any> | null): boolean {
+    const lspCaps = capabilities?.lsp;
+    if (!lspCaps) return false;
+    return lspCaps.sandbox_probe === true || (lspCaps.sandbox?.detect?.length ?? 0) > 0;
+}
+
+export const SANDBOX_PROBE_PERMISSION = 'lsp.sandboxProbe';
+
+export const SANDBOX_PROBE_INFO = {
+    label: 'Looks for the project’s code packages',
+    description:
+        'Runs one short command inside this project’s own sandbox to find where the language keeps ' +
+        'the packages it already downloaded, so the editor can resolve imports. It never runs on ' +
+        'your computer, and it can only use a folder you already shared with the sandbox.',
+};
+
+/**
  * True when an install warrants a pre-install review dialog: the entry
- * declares the `network` capability, or at least one sandbox-escaping
- * permission.
+ * declares the `network` capability, at least one sandbox-escaping
+ * permission, or an LSP sandbox probe.
  */
 export function requiresInstallReview(entry: { capabilities?: Record<string, any> | null }): boolean {
-    return hasNetworkCapability(entry.capabilities) || hasDangerousPermissions((entry.capabilities?.ui?.permissions ?? []) as string[]);
+    return (
+        hasNetworkCapability(entry.capabilities) ||
+        hasDangerousPermissions((entry.capabilities?.ui?.permissions ?? []) as string[]) ||
+        hasSandboxProbe(entry.capabilities)
+    );
 }
 
 /**
