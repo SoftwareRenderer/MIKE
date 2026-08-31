@@ -1335,9 +1335,9 @@ func TestCreate_PlanModeReadonlyMount(t *testing.T) {
 	}
 }
 
-// TestForwardPortSpecIsLoopbackOnly pins the L3 fix: a forwarded container port
-// is published on loopback only. An unprefixed "<hostPort>:<containerPort>" spec
-// binds every interface, exposing the sandbox's listener on the LAN.
+// TestForwardPortSpecIsLoopbackOnly: a forwarded container port is published on
+// loopback only. An unprefixed "<hostPort>:<containerPort>" spec binds every
+// interface, exposing the sandbox's listener on the LAN.
 func TestForwardPortSpecIsLoopbackOnly(t *testing.T) {
 	for _, tc := range []struct{ hostPort, containerPort int }{
 		{41234, 9999},

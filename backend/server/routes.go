@@ -126,11 +126,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/commit", s.taskHandler.HandleCommitAndDone)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/terminal", s.terminalMgr.HandleTerminal)
 
-	// Task messages
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/messages", s.handleTaskMessages)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/messages/{messageID}", s.handleTaskMessageByID)
 
-	// Task threads
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/threads", s.handleThreads)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/threads/fork", s.handleThreadFork)
 	s.mux.HandleFunc("/api/projects/{projectID}/tasks/{taskID}/threads/switch", s.handleThreadSwitch)

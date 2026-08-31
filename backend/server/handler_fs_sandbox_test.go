@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,14 +20,19 @@ func sandboxFSProject(t *testing.T, s *Server, id, name, path string, sandboxEna
 	return p
 }
 
-// fsReq builds a request carrying the optional project query param, as the
-// fs handlers see it.
-func fsReq(projectID string) *http.Request {
-	q := url.Values{}
-	if projectID != "" {
-		q.Set("project", projectID)
+// fsProject loads a project created by sandboxFSProject, the way the fs
+// handlers see it — validateFSPath takes the project the handler already
+// loaded, not the request.
+func fsProject(t *testing.T, s *Server, projectID string) *types.Project {
+	t.Helper()
+	if projectID == "" {
+		return nil // directory-picker flow: no project constraint
 	}
-	return httptest.NewRequest(http.MethodGet, "/api/fs?"+q.Encode(), nil)
+	p, err := s.store.GetProject(projectID)
+	if err != nil {
+		t.Fatalf("get project %s: %v", projectID, err)
+	}
+	return p
 }
 
 // TestValidateFSPathSandboxMountScoping verifies that /home/sandbox/* client
@@ -74,7 +78,7 @@ func TestValidateFSPathSandboxMountScoping(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := s.validateFSPath(tt.path, fsReq(tt.projectID))
+			_, err := s.validateFSPath(fsProject(t, s, tt.projectID), tt.path)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateFSPath(%q, project=%q) error = %v, wantErr %v", tt.path, tt.projectID, err, tt.wantErr)
 			}
@@ -94,9 +98,9 @@ func TestValidateFSPathWorkspaceDir(t *testing.T) {
 		t.Skip("workspace dir not set")
 	}
 	dir := t.TempDir()
-	_ = sandboxFSProject(t, s, "plain", "plainproj", filepath.Join(dir, "repo-plain"), false)
+	plain := sandboxFSProject(t, s, "plain", "plainproj", filepath.Join(dir, "repo-plain"), false)
 
-	if err := s.validateFSPath(filepath.Join(cfg.WorkspaceDir, "projid", "taskid", "f.go"), fsReq("plain")); err != nil {
+	if _, err := s.validateFSPath(plain, filepath.Join(cfg.WorkspaceDir, "projid", "taskid", "f.go")); err != nil {
 		t.Errorf("workspace worktree path rejected: %v", err)
 	}
 }
@@ -106,14 +110,14 @@ func TestValidateFSPathWorkspaceDir(t *testing.T) {
 func TestValidateFSPathCraftedProjectName(t *testing.T) {
 	s := testServer(t)
 	dir := t.TempDir()
-	_ = sandboxFSProject(t, s, "evil", "a/../../b", filepath.Join(dir, "repo-evil"), true)
+	evil := sandboxFSProject(t, s, "evil", "a/../../b", filepath.Join(dir, "repo-evil"), true)
 
-	// The un-cleaned mount string is /home/sandbox/a/../../b; the cleaned
-	// client path /home/sandbox/whatever must not match it.
-	if err := s.validateFSPath("/home/sandbox/b/x", fsReq("evil")); err == nil {
+	// MountPath cleans, so the mount is /home/b — neither the cleaned path it
+	// implies nor a lookalike under the mount root may be accepted.
+	if _, err := s.validateFSPath(evil, "/home/sandbox/b/x"); err == nil {
 		t.Error("crafted project name widened the allow-set: /home/sandbox/b/x was accepted")
 	}
-	if err := s.validateFSPath("/home/sandbox/a/../../b/x", fsReq("evil")); err == nil {
+	if _, err := s.validateFSPath(evil, "/home/sandbox/a/../../b/x"); err == nil {
 		// Cleaned to /home/b/x — not under /home/sandbox, so it must fail
 		// the project-root/workspace checks.
 		t.Error("crafted project name widened the allow-set: dotdot mount path was accepted")

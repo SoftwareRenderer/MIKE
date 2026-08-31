@@ -10,9 +10,6 @@ package exec
 // conversation, (b) made summarization the one call whose input was never compressed,
 // and (c) guaranteed failure on a utility model with a smaller window — including the
 // manual /summarize path, leaving the task unsummarizable.
-//
-// Also covered: environment notes (advisories) must survive into the summary, because
-// rolling summarization makes the summary the only copy carried forward.
 
 import (
 	"context"
