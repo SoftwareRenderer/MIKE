@@ -11,9 +11,11 @@ package exec
 // command line.
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"kanban/backend/git"
 	"kanban/backend/lsp"
@@ -23,6 +25,14 @@ import (
 // round trip, so a turn that touched dozens of files diagnoses the first N and leaves the
 // rest for a later turn instead of stalling this one.
 const maxDiagnosticFilesPerPass = 8
+
+// lspDiagnosticsPassBudget bounds one turn-boundary pass, lspDiagnosticsBudget one file
+// in it. This runs on the task's executor goroutine, so a language server that stops
+// answering has to slow the turn down, never wedge it.
+const (
+	lspDiagnosticsPassBudget = 45 * time.Second
+	lspDiagnosticsBudget     = 20 * time.Second
+)
 
 // noteTouchedFile records a path a tool wrote or edited. Order is kept so the advisory
 // reads in the order the model worked.
@@ -130,15 +140,19 @@ func (te *TaskExecutor) collectTurnDiagnostics(setup *taskExecSetup, lc *loopCon
 	if len(files) == 0 {
 		return
 	}
+	// One budget for the pass, so eight slow files cannot add up to a stalled turn.
+	ctx, cancel := context.WithTimeout(setup.ctx, lspDiagnosticsPassBudget)
+	defer cancel()
+
 	var blocks []string
 	hits := 0
 	for _, file := range files {
 		select {
-		case <-setup.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
-		hint := te.triggerLSPDiagnostics(setup.ctx, setup.projectID, setup.task.ID, file)
+		hint := te.triggerLSPDiagnostics(ctx, setup.projectID, setup.task.ID, file)
 		if hint == "" {
 			continue
 		}

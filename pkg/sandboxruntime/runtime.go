@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // imageRefPattern matches valid OCI/Docker image references.
@@ -71,12 +72,8 @@ func ValidateImageRef(image string) error {
 	return nil
 }
 
-// ValidateImageRef rejects image references that are invalid OCI image characters.
-// This prevents references like "-v /etc:/host" or "$(rm -rf /)" from being
-// passed to podman as if they were flags.
-//
-// This method is retained for backward compatibility and delegates to the package
-// -level ValidateImageRef function.
+// ValidateImageRef is the Runtime-bound form of the package-level ValidateImageRef
+// — same rules, same single implementation.
 func (r *Runtime) ValidateImageRef(image string) error {
 	return ValidateImageRef(image)
 }
@@ -149,6 +146,65 @@ func (r *Runtime) cleanOverlayMergedDirs() {
 			_ = os.RemoveAll(filepath.Join(mergedDir, f.Name()))
 		}
 	}
+}
+
+// staleCleanupTimeout bounds the startup sweep for containers left behind by a
+// previous run. A wedged podman must never block server startup.
+const staleCleanupTimeout = 15 * time.Second
+
+// GVisorAvailable reports whether gVisor (runsc) and podman are both usable, and
+// logs what it found under logTag.
+//
+// This is the ONE gVisor availability probe in the codebase. The task sandbox
+// manager and the extension sandbox manager used to carry separate probes — one
+// of which skipped the `runsc --version` check — so the two could disagree about
+// whether the host can run a gVisor container at all. Both now call here, and
+// both fail closed the same way.
+func GVisorAvailable(logTag string) bool {
+	if _, err := exec.LookPath("runsc"); err != nil {
+		log.Printf("[%s] runsc not found in PATH: %v", logTag, err)
+		return false
+	}
+	out, err := exec.Command("runsc", "--version").CombinedOutput()
+	if err != nil {
+		log.Printf("[%s] runsc version check failed: %v (%s)", logTag, err, out)
+		return false
+	}
+	log.Printf("[%s] runsc version: %s", logTag, strings.TrimSpace(string(out)))
+	if _, err := exec.LookPath("podman"); err != nil {
+		log.Printf("[%s] podman not found in PATH: %v", logTag, err)
+		return false
+	}
+	return true
+}
+
+// CleanupStaleContainers force-removes every container whose name matches
+// podman's nameFilter (a regex, so a bare prefix like "kanban-sandbox-" matches
+// all of that family's containers). It is best-effort and time-bounded, and
+// returns the names actually removed.
+//
+// Both sandbox managers need this on startup — a container left by a crashed run
+// holds the name its replacement needs — so the list/parse/remove loop exists
+// once, here.
+func (r *Runtime) CleanupStaleContainers(logTag, nameFilter string) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), staleCleanupTimeout)
+	defer cancel()
+
+	out, err := r.PodmanExecContext(ctx, "ps", "-a", "--filter", "name="+nameFilter, "--format", "{{.Names}}")
+	if err != nil {
+		log.Printf("[%s] startup: failed to list stale containers: %v", logTag, err)
+		return nil
+	}
+	var removed []string
+	for _, name := range strings.Fields(strings.TrimSpace(string(out))) {
+		if rmErr := r.RemoveContainer(name); rmErr != nil {
+			log.Printf("[%s] startup: failed to remove stale container %s: %v", logTag, name, rmErr)
+			continue
+		}
+		log.Printf("[%s] startup: removed stale container %s", logTag, name)
+		removed = append(removed, name)
+	}
+	return removed
 }
 
 // ContainerExists checks if a container with the given name exists.

@@ -578,45 +578,9 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 }
 
 func TestSlugifyBranchName_NormalTitle(t *testing.T) {
-	slug := slugifyBranchName("Fix login bug #123")
+	slug := types.SlugifyBranchName("Fix login bug #123")
 	if slug != "fix-login-bug-123" {
 		t.Errorf("expected 'fix-login-bug-123', got %q", slug)
-	}
-}
-
-func TestSlugifyBranchName_AllSpecialChars(t *testing.T) {
-	if slug := slugifyBranchName("###"); slug != "" {
-		t.Errorf("expected empty string, got %q", slug)
-	}
-}
-
-func TestSlugifyBranchName_AllHyphens(t *testing.T) {
-	if slug := slugifyBranchName("---"); slug != "" {
-		t.Errorf("expected empty string, got %q", slug)
-	}
-}
-
-// TestSlugifyBranchName_NeverStartsWithHyphen verifies that slugifyBranchName
-// can never produce a slug starting with '-', preventing Git argument injection.
-func TestSlugifyBranchName_NeverStartsWithHyphen(t *testing.T) {
-	inputs := []string{
-		"-fix login", // starts with hyphen
-		"  -fix",     // whitespace then hyphen
-		"---fix",     // multiple hyphens
-		"-123",       // hyphen then digits
-		"---",        // all hyphens
-		"-",          // single hyphen
-		"-a-b-c",     // hyphen-separated
-		"Fix login",  // normal title
-		"123 fix",    // starts with digit
-		"!!!fix!!!",  // special chars
-		"",           // empty
-	}
-	for _, input := range inputs {
-		slug := slugifyBranchName(input)
-		if len(slug) > 0 && slug[0] == '-' {
-			t.Errorf("slugifyBranchName(%q) = %q starts with hyphen", input, slug)
-		}
 	}
 }
 
@@ -651,21 +615,12 @@ func TestGenerateBranchName_UsesSlugForNormalTitle(t *testing.T) {
 func TestGenerateBranchName_MaxLength(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
 	taskID := "frost-amber-quartz"
-	// Title that slugifies to more than 45 chars (maxBranchName - len("task/"))
+	// Title that slugifies to more than 45 chars (types.BranchSlugMaxLen)
 	longTitle := "Fix a very long bug description that exceeds the maximum allowed branch name length limit"
 	task := &types.Task{ID: taskID, ProjectID: projectID, Title: longTitle}
 	branchName := te.generateBranchName(task, taskID, projectID)
-	if len(branchName) > maxBranchName {
-		t.Errorf("branch name len = %d (%q), want <= %d", len(branchName), branchName, maxBranchName)
-	}
-}
-
-func TestSlugifyBranchName_MaxLength(t *testing.T) {
-	// Title that slugifies to more than 45 chars
-	longTitle := "Fix a very long bug description that exceeds the maximum allowed branch name length limit"
-	slug := slugifyBranchName(longTitle)
-	if len(slug) > maxBranchName-len("task/") {
-		t.Errorf("slug len = %d (%q), want <= %d", len(slug), slug, maxBranchName-len("task/"))
+	if len(branchName) > types.MaxBranchName {
+		t.Errorf("branch name len = %d (%q), want <= %d", len(branchName), branchName, types.MaxBranchName)
 	}
 }
 

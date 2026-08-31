@@ -1464,3 +1464,38 @@ func TestMessageCreateRejectsOversizedContent(t *testing.T) {
 		t.Fatalf("expected 413 for oversized content, got %d", rr.Code)
 	}
 }
+
+// Deleting a message older than the summary must not take the summary with it: it is
+// what the turns before it are remembered by, and losing it while those rows survive
+// reinstates the whole pre-summary history into the LLM context. Store-level coverage
+// lives in backend/store; this is the endpoint the UI actually calls.
+func TestDeleteBeforeSummarizationKeepsSummary(t *testing.T) {
+	s := testServer(t)
+	projID := createTestProject(t, s)
+	taskID := createTestTask(t, s, projID, "Summary survives cascade")
+
+	base := time.Now().UTC().Add(-time.Minute)
+	seedMessage(t, s, projID, taskID, &types.TaskMessage{
+		ID: "msg-old", Role: "user", Content: "oldest request", CreatedAt: base,
+	})
+	seedMessage(t, s, projID, taskID, &types.TaskMessage{
+		ID: "sum-1", Role: "summarization", Content: "summary of msg-old", CreatedAt: base.Add(time.Second),
+	})
+	seedMessage(t, s, projID, taskID, &types.TaskMessage{
+		ID: "msg-new", Role: "user", Content: "newest request", CreatedAt: base.Add(2 * time.Second),
+	})
+
+	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
+		"message_id": "msg-old",
+	})
+	if rr := testResponseAuth(t, s, req); rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	if _, err := s.store.GetTaskMessageByID("sum-1"); err != nil {
+		t.Fatalf("summary row was swept by a cascade targeting an older message: %v", err)
+	}
+	if _, err := s.store.GetTaskMessageByID("msg-new"); err == nil {
+		t.Fatal("message after the target should have been deleted")
+	}
+}

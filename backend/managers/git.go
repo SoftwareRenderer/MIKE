@@ -75,6 +75,104 @@ func (h *GitHandler) GetDiffManifest(taskID, baseRef string) (any, error) {
 	return buildDiffManifest(taskDiff, stagedPaths, baseRef), nil
 }
 
+// fullLogFormat is the git log pretty-format writeFullGitLog parses: one header
+// line of pipe-separated fields, then the body between the BODY/END markers.
+const fullLogFormat = `--format=%H|%h|%s|%aN|%aI|%P%n---BODY---%n%b%n---END---`
+
+// writeFullGitLog writes the extended commit log for dir — the ?full=1 shape:
+// every commit with author/date/parents/body, plus the current branch, the
+// origin tip and a hasMore flag. Both log endpoints (a project checkout and a
+// task worktree) answer ?full=1 with exactly this, so it lives here once.
+//
+// Their NON-full responses are deliberately NOT shared: the project endpoint
+// returns decorated `git log --oneline --decorate` lines (Short + the whole
+// decorated remainder, honouring ?offset), while the task endpoint returns
+// structured %H|%h|%s rows and ignores ?offset. Callers validate branch and path
+// before coming here.
+func (h *GitHandler) writeFullGitLog(w http.ResponseWriter, dir, branch, path string, limit, offset int) {
+	args := []string{"-C", dir, "log"}
+	if offset > 0 {
+		args = append(args, "--skip", strconv.Itoa(offset))
+	}
+	if limit > 0 {
+		// Fetch one extra commit to detect whether more exist.
+		args = append(args, "-n", strconv.Itoa(limit+1))
+	}
+	args = append(args, fullLogFormat, branch)
+	if path != "" {
+		args = append(args, "--", path)
+	}
+	out, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
+		return
+	}
+
+	var commits []types.GitCommit
+	for _, block := range strings.Split(string(out), "---END---") {
+		block = strings.TrimSpace(block)
+		if block == "" {
+			continue
+		}
+		blockLines := strings.SplitN(block, "\n", 2)
+		parts := strings.SplitN(blockLines[0], "|", 6)
+		if len(parts) < 5 {
+			continue
+		}
+		commit := types.GitCommit{
+			Hash:    parts[0],
+			Short:   parts[1],
+			Subject: parts[2],
+			Author:  parts[3],
+			Date:    parts[4],
+		}
+		if len(parts) == 6 && parts[5] != "" {
+			commit.Parents = strings.Fields(parts[5])
+		}
+		// The body is everything after the "---BODY---" marker line.
+		if len(blockLines) > 1 {
+			rest := blockLines[1]
+			if strings.HasPrefix(rest, "---BODY---\n") {
+				rest = strings.TrimPrefix(rest, "---BODY---\n")
+			} else if strings.HasPrefix(rest, "---BODY---") {
+				rest = ""
+			}
+			commit.Body = strings.TrimSpace(rest)
+		}
+		commits = append(commits, commit)
+	}
+
+	currentBranch := h.getCurrentBranch(dir)
+
+	// Attach local branch names to the commits they point at.
+	branchMap := h.getBranchMap(dir)
+	for i := range commits {
+		if branches, ok := branchMap[commits[i].Hash]; ok {
+			commits[i].Branches = branches
+		}
+	}
+
+	// originTip is where origin/<current-branch> points.
+	originTip := ""
+	if currentBranch != "" && currentBranch != "HEAD" {
+		originTip = h.getOriginTip(dir, currentBranch)
+	}
+
+	// Drop the extra commit fetched only to detect hasMore.
+	hasMore := false
+	if limit > 0 && len(commits) > limit {
+		hasMore = true
+		commits = commits[:limit]
+	}
+
+	httputil.JSONResponse(w, http.StatusOK, types.GitLogResponse{
+		Commits:       commits,
+		CurrentBranch: currentBranch,
+		OriginTip:     originTip,
+		HasMore:       hasMore,
+	})
+}
+
 // HandleLog returns commit log for a project.
 // With ?full=1 query param, returns extended fields: hash, author, date, parents, branches.
 // Also includes current_branch and origin_tip metadata.
@@ -109,94 +207,7 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
 	if full {
-		args := []string{"-C", project.Path, "log"}
-		if offset > 0 {
-			args = append(args, "--skip", strconv.Itoa(offset))
-		}
-		if limit > 0 {
-			// Fetch one extra to detect if more commits exist
-			args = append(args, "-n", strconv.Itoa(limit+1))
-		}
-		args = append(args, "--format=%H|%h|%s|%aN|%aI|%P%n---BODY---%n%b%n---END---", branch)
-		if path != "" {
-			args = append(args, "--", path)
-		}
-		c := exec.Command("git", args...)
-		out, err := c.CombinedOutput()
-		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
-			return
-		}
-		blocks := strings.Split(string(out), "---END---")
-		var commits []types.GitCommit
-		for _, block := range blocks {
-			block = strings.TrimSpace(block)
-			if block == "" {
-				continue
-			}
-			blockLines := strings.SplitN(block, "\n", 2)
-			parts := strings.SplitN(blockLines[0], "|", 6)
-			if len(parts) < 5 {
-				continue
-			}
-			commit := types.GitCommit{
-				Hash:    parts[0],
-				Short:   parts[1],
-				Subject: parts[2],
-				Author:  parts[3],
-				Date:    parts[4],
-			}
-			if len(parts) == 6 && parts[5] != "" {
-				commit.Parents = strings.Fields(parts[5])
-			}
-			// Extract body from the rest of the block
-			if len(blockLines) > 1 {
-				rest := blockLines[1]
-				// Remove "---BODY---" prefix and leading blank line
-				if strings.HasPrefix(rest, "---BODY---\n") {
-					rest = strings.TrimPrefix(rest, "---BODY---\n")
-				} else if strings.HasPrefix(rest, "---BODY---") {
-					rest = ""
-				}
-				commit.Body = strings.TrimSpace(rest)
-			}
-			commits = append(commits, commit)
-		}
-
-		// Resolve current branch name
-		currentBranch := h.getCurrentBranch(project.Path)
-
-		// Build branch-to-commit mapping from local refs
-		branchMap := h.getBranchMap(project.Path)
-
-		// Attach branch names to commits
-		for i := range commits {
-			if branches, ok := branchMap[commits[i].Hash]; ok {
-				commits[i].Branches = branches
-			}
-		}
-
-		// Get origin tip (where origin/<current-branch> points)
-		originTip := ""
-		if currentBranch != "" && currentBranch != "HEAD" {
-			originTip = h.getOriginTip(project.Path, currentBranch)
-		}
-
-		// Trim extra commit used to detect if more exist
-		hasMore := false
-		if limit > 0 && len(commits) > limit {
-			hasMore = true
-			commits = commits[:limit]
-		}
-
-		resp := types.GitLogResponse{
-			Commits:       commits,
-			CurrentBranch: currentBranch,
-			OriginTip:     originTip,
-			HasMore:       hasMore,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		h.writeFullGitLog(w, project.Path, branch, path, limit, offset)
 		return
 	}
 
@@ -227,8 +238,7 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 		commit := types.GitCommit{Short: parts[0], Subject: parts[1]}
 		commits = append(commits, commit)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(commits)
+	httputil.JSONResponse(w, http.StatusOK, commits)
 }
 
 // getCurrentBranch returns the name of the currently checked-out branch.
@@ -271,7 +281,25 @@ func (h *GitHandler) getOriginTip(path, branch string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// HandleBranches lists branches for a project.
+// gitBranchNames runs a git branch listing in dir and returns one entry per
+// non-empty output line (git pads refname:short output, hence the trim). Both
+// branch endpoints share this; they differ only in the subcommand — a project
+// lists remote refs too (-a), a task worktree only its local branches.
+func gitBranchNames(dir string, args ...string) ([]string, error) {
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+	var branches []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			branches = append(branches, line)
+		}
+	}
+	return branches, nil
+}
+
+// HandleBranches lists all branches of a project, local and remote.
 func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
@@ -279,18 +307,10 @@ func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	c := exec.Command("git", "-C", project.Path, "branch", "-a", "--format=%(refname:short)")
-	out, err := c.CombinedOutput()
+	branches, err := gitBranchNames(project.Path, "branch", "-a", "--format=%(refname:short)")
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git branches failed: %v", err))
 		return
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	var branches []string
-	for _, line := range lines {
-		if line = strings.TrimSpace(line); line != "" {
-			branches = append(branches, line)
-		}
 	}
 	httputil.JSONResponse(w, http.StatusOK, branches)
 }
@@ -1201,6 +1221,50 @@ func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request)
 	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "reset"})
 }
 
+// stageOrUnstage applies one file's staged state in dir and returns the action
+// name for the response body. Both stage endpoints (a task worktree and the
+// project checkout) do exactly this; they differ only in which directory they
+// target and which mutex their caller holds.
+//
+// Every path goes to git after `--`, so a path starting with '-' (e.g. "-f") can
+// never be parsed as an option. On failure the error is written to w and false is
+// returned, so callers just return.
+func (h *GitHandler) stageOrUnstage(w http.ResponseWriter, dir, path string, stage bool) bool {
+	if stage {
+		// git add records a deletion too, so a staged delete survives the round trip.
+		out, err := exec.Command("git", "-C", dir, "add", "--", path).CombinedOutput()
+		if err != nil {
+			log.Printf("git add failed: %v: %s", err, out)
+			httputil.JSONError(w, http.StatusInternalServerError, "git add failed")
+			return false
+		}
+		return true
+	}
+
+	// git reset HEAD -- <path> makes the index match HEAD again.
+	out, err := exec.Command("git", "-C", dir, "reset", "HEAD", "--", path).CombinedOutput()
+	if err != nil {
+		log.Printf("git reset failed: %v: %s", err, out)
+		httputil.JSONError(w, http.StatusInternalServerError, "git reset failed")
+		return false
+	}
+	// Content is gone from disk but was tracked: bring it back from HEAD. A file
+	// that was staged and then deleted exists in no commit, so git fails here —
+	// that is the expected outcome and the error is deliberately ignored.
+	if _, statErr := os.Stat(filepath.Join(dir, path)); os.IsNotExist(statErr) {
+		_, _ = exec.Command("git", "-C", dir, "checkout", "HEAD", "--", path).CombinedOutput()
+	}
+	return true
+}
+
+// stageActionName is the "action" field both stage endpoints report.
+func stageActionName(stage bool) string {
+	if stage {
+		return "staged"
+	}
+	return "unstaged"
+}
+
 // HandleStageFile stages or unstages a single file in the task's worktree.
 // POST /api/projects/{projectID}/tasks/{taskID}/diff/stage
 // Body: {"path": "file.c", "stage": true}
@@ -1243,44 +1307,10 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusNotFound, "worktree not found")
 		return
 	}
-	fullPath := filepath.Join(worktreePath, req.Path)
-
-	if req.Stage {
-		// Stage the file: git add -- <path>
-		// Use -- to separate options from the path argument, preventing
-		// paths starting with '-' (e.g. "-f") from being interpreted as flags.
-		// For deleted files, git add records the deletion.
-		cmd := exec.Command("git", "-C", worktreePath, "add", "--", req.Path)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("git add failed: %v: %s", err, out)
-			httputil.JSONError(w, http.StatusInternalServerError, "git add failed")
-			return
-		}
-	} else {
-		// Unstage the file: git reset HEAD <path>
-		// This restores the working tree to match the index (restores deleted content too).
-		cmd := exec.Command("git", "-C", worktreePath, "reset", "HEAD", "--", req.Path)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("git reset failed: %v: %s", err, out)
-			httputil.JSONError(w, http.StatusInternalServerError, "git reset failed")
-			return
-		}
-		// If the file was newly added (not previously tracked), remove it from the index.
-		// git reset HEAD on a new file doesn't delete it from disk, which is correct.
-		// But we also need to handle the case where the file was deleted and staged.
-		// git checkout -- <path> restores the working tree from the index.
-		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-			// File was deleted — restore from index (HEAD)
-			cmd = exec.Command("git", "-C", worktreePath, "checkout", "HEAD", "--", req.Path)
-			if err := cmd.Run(); err != nil {
-				// File might not be in HEAD (new file that was staged then deleted).
-				// This is expected — just skip silently.
-				_ = err
-			}
-		}
+	if !h.stageOrUnstage(w, worktreePath, req.Path, req.Stage) {
+		return
 	}
-
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "action": map[bool]string{true: "staged", false: "unstaged"}[req.Stage]})
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "action": stageActionName(req.Stage)})
 }
 
 // HandleProjectStageFile stages or unstages a single file in the project repo.
@@ -1307,27 +1337,10 @@ func (h *GitHandler) HandleProjectStageFile(w http.ResponseWriter, r *http.Reque
 		mu.Lock()
 		defer mu.Unlock()
 	}
-	if req.Stage {
-		cmd := exec.Command("git", "-C", project.Path, "add", "--", req.Path)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("git add failed: %v: %s", err, out)
-			httputil.JSONError(w, http.StatusInternalServerError, "git add failed")
-			return
-		}
-	} else {
-		cmd := exec.Command("git", "-C", project.Path, "reset", "HEAD", "--", req.Path)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("git reset failed: %v: %s", err, out)
-			httputil.JSONError(w, http.StatusInternalServerError, "git reset failed")
-			return
-		}
-		// Restore deleted file from HEAD if it no longer exists on disk
-		fullPath := filepath.Join(project.Path, req.Path)
-		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-			exec.Command("git", "-C", project.Path, "checkout", "HEAD", "--", req.Path).CombinedOutput()
-		}
+	if !h.stageOrUnstage(w, project.Path, req.Path, req.Stage) {
+		return
 	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "action": map[bool]string{true: "staged", false: "unstaged"}[req.Stage]})
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "action": stageActionName(req.Stage)})
 }
 
 // HandleProjectCommit commits staged changes in the project repo.
@@ -1406,85 +1419,7 @@ func (h *GitHandler) HandleTaskLog(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
 	if full {
-		args := []string{"-C", worktreePath, "log"}
-		if offset > 0 {
-			args = append(args, "--skip", strconv.Itoa(offset))
-		}
-		if limit > 0 {
-			args = append(args, "-n", strconv.Itoa(limit+1))
-		}
-		args = append(args, "--format=%H|%h|%s|%aN|%aI|%P%n---BODY---%n%b%n---END---", branch)
-		c := exec.Command("git", args...)
-		out, err := c.CombinedOutput()
-		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git log failed: %v", err))
-			return
-		}
-		blocks := strings.Split(string(out), "---END---")
-		var commits []types.GitCommit
-		for _, block := range blocks {
-			block = strings.TrimSpace(block)
-			if block == "" {
-				continue
-			}
-			blockLines := strings.SplitN(block, "\n", 2)
-			parts := strings.SplitN(blockLines[0], "|", 6)
-			if len(parts) < 5 {
-				continue
-			}
-			commit := types.GitCommit{
-				Hash:    parts[0],
-				Short:   parts[1],
-				Subject: parts[2],
-				Author:  parts[3],
-				Date:    parts[4],
-			}
-			if len(parts) == 6 && parts[5] != "" {
-				commit.Parents = strings.Fields(parts[5])
-			}
-			if len(blockLines) > 1 {
-				rest := blockLines[1]
-				if strings.HasPrefix(rest, "---BODY---\n") {
-					rest = strings.TrimPrefix(rest, "---BODY---\n")
-				} else if strings.HasPrefix(rest, "---BODY---") {
-					rest = ""
-				}
-				commit.Body = strings.TrimSpace(rest)
-			}
-			commits = append(commits, commit)
-		}
-
-		// Resolve current branch name
-		currentBranch := h.getCurrentBranch(worktreePath)
-
-		// Build branch-to-commit mapping from local refs
-		branchMap := h.getBranchMap(worktreePath)
-
-		for i := range commits {
-			if branches, ok := branchMap[commits[i].Hash]; ok {
-				commits[i].Branches = branches
-			}
-		}
-
-		// Get origin tip
-		originTip := ""
-		if currentBranch != "" && currentBranch != "HEAD" {
-			originTip = h.getOriginTip(worktreePath, currentBranch)
-		}
-
-		hasMore := false
-		if limit > 0 && len(commits) > limit {
-			hasMore = true
-			commits = commits[:limit]
-		}
-
-		resp := types.GitLogResponse{
-			Commits:       commits,
-			CurrentBranch: currentBranch,
-			OriginTip:     originTip,
-			HasMore:       hasMore,
-		}
-		httputil.JSONResponse(w, http.StatusOK, resp)
+		h.writeFullGitLog(w, worktreePath, branch, "", limit, offset)
 		return
 	}
 
@@ -1531,18 +1466,10 @@ func (h *GitHandler) HandleTaskBranches(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	c := exec.Command("git", "-C", worktreePath, "branch", "--format=%(refname:short)")
-	out, err := c.CombinedOutput()
+	branches, err := gitBranchNames(worktreePath, "branch", "--format=%(refname:short)")
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git branch failed: %v", err))
 		return
-	}
-	var branches []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			branches = append(branches, line)
-		}
 	}
 	httputil.JSONResponse(w, http.StatusOK, branches)
 }
