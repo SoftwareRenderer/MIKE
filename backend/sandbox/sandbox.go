@@ -31,10 +31,61 @@ const (
 	BaseImage = "docker.io/library/ubuntu:latest"
 	// SkillsMount is where the prompts/skills/ directory is bind-mounted read-only.
 	SkillsMount = "/mnt/skills"
+	// MountRoot is where a project's worktree is bind-mounted inside its
+	// container. Build paths with MountPath, never by hand — the fs API's
+	// containment check compares against this same value.
+	MountRoot = "/home/sandbox"
 	// livenessTTL is how long to cache the result of a container liveness check.
 	// Avoids expensive podman inspect calls on every FS operation.
 	livenessTTL = 5 * time.Minute
 )
+
+// MountPath is the in-container path of projectName's worktree. The result is
+// cleaned, so a project name stored before ValidateProjectName rejected ".."
+// segments cannot move the mount outside MountRoot.
+func MountPath(projectName string) string {
+	return filepath.Join(MountRoot, projectName)
+}
+
+// TrimMountPrefix maps a container path under the project's mount to the same
+// path relative to the mount ("." for the mount root itself). ok is false when
+// p is not under that mount.
+func TrimMountPrefix(projectName, p string) (rel string, ok bool) {
+	mount := MountPath(projectName)
+	clean := filepath.Clean(p)
+	switch {
+	case clean == mount:
+		return ".", true
+	case strings.HasPrefix(clean, mount+string(filepath.Separator)):
+		return clean[len(mount)+1:], true
+	default:
+		return "", false
+	}
+}
+
+// ContainerToHost translates a path inside the project's sandbox mount to the
+// matching host path under worktreePath. ok is false when p is not under the
+// mount, i.e. the caller already holds a host path.
+func ContainerToHost(worktreePath, projectName, p string) (string, bool) {
+	rel, ok := TrimMountPrefix(projectName, p)
+	if !ok {
+		return "", false
+	}
+	if rel == "." {
+		return filepath.Clean(worktreePath), true
+	}
+	return filepath.Join(worktreePath, rel), true
+}
+
+// HostToContainer translates a host path under worktreePath to where the same
+// file sits under the project's sandbox mount.
+func HostToContainer(worktreePath, projectName, p string) string {
+	rel, err := filepath.Rel(filepath.Clean(worktreePath), filepath.Clean(p))
+	if err != nil {
+		return MountPath(projectName)
+	}
+	return filepath.Join(MountPath(projectName), rel)
+}
 
 // SandboxOpts holds the configuration for sandbox container creation and execution.
 type SandboxOpts struct {
@@ -48,6 +99,49 @@ type SandboxOpts struct {
 	SandboxEnvs      []types.SandboxEnv
 	Capabilities     []string
 	PlanMode         bool
+}
+
+// shellTERM is what an attached terminal reports. It belongs to the terminal
+// session, not to the sandbox, so it is set on the shell's own exec.
+const shellTERM = "xterm-256color"
+
+// containerEnvArgs returns the -e flags for a sandbox container: the variables
+// configured for it and nothing else. An agent extension's envs come first, so
+// the project's own Sandbox Configuration wins on a key clash (podman takes the
+// last -e).
+//
+// The hardcoded TERM and PATH this replaced were a bug: -e overrides the image's
+// own ENV, so a custom image's PATH was thrown away.
+func containerEnvArgs(taskID string, opts SandboxOpts) []string {
+	var args []string
+	add := func(source string, envs []types.SandboxEnv) {
+		for _, e := range envs {
+			if e.Key == "" {
+				continue
+			}
+			args = append(args, "-e", e.Key+"="+e.Value)
+			// Values are never logged — they are routinely API keys and tokens.
+			log.Printf("[sandbox] task=%s setting %s env %s", taskID, source, e.Key)
+		}
+	}
+	if opts.AgentSandbox != nil {
+		add("agent", opts.AgentSandbox.Envs)
+	}
+	add("sandbox", opts.SandboxEnvs)
+	return args
+}
+
+// shellExecArgs builds the podman arguments for an interactive shell. TERM is set
+// here, on the session holding the TTY; the container itself carries only what
+// was configured for it.
+func shellExecArgs(containerName, mountPath, shell string) []string {
+	return []string{
+		"exec", "-it",
+		"-e", "TERM=" + shellTERM,
+		"-w", mountPath,
+		containerName,
+		shell,
+	}
 }
 
 // agentConn holds the pipes to a running agent process.
@@ -161,7 +255,7 @@ func forwardPortSpec(hostPort, containerPort int) string {
 //   - Git Metadata: If project.Path is non-empty and .git/ exists, it is mounted read-only at the
 //     same absolute path to allow git to resolve refs, objects, and worktree metadata.
 //   - Agent Sandbox: If opts.AgentSandbox is provided, its mounts and envs are applied
-//     (default: /root/.config/agent) and HOME is set to /root.
+//     (default: /root/.config/agent).
 //   - Skills: If skillsDir is non-empty, it is bind-mounted read-only at SkillsMount.
 //   - Custom: Any additional mounts in opts.SandboxMounts are added after the standard mounts.
 //
@@ -169,16 +263,16 @@ func forwardPortSpec(hostPort, containerPort int) string {
 //   - Image: Uses opts.BaseImage if provided, otherwise defaults to BaseImage constant.
 //   - Network: Created with --network none if networkIsolation is true.
 //   - Memory: Created with --memory=<limit>M if memoryLimit > 0.
-//   - Environment: User-defined environment variables in opts.SandboxEnvs are set via -e flags.
+//   - Environment: Only what was configured — the project's Sandbox Configuration
+//     plus an agent extension's envs (see containerEnvArgs). PATH and everything
+//     else stay as the image sets them.
 //
 // Networking:
 //   - Port Forwarding: for each entry in opts.ForwardPorts an ephemeral host port is
 //     auto-assigned via net.Listen(":0") and mapped to the container port, bound to
 //     loopback only (127.0.0.1).
 //
-// Returns:
-//   - (assignedPorts, nil) on success, where assignedPorts lists the host→container mappings.
-//   - (nil, error) on failure.
+// assignedPorts lists the host→container port mappings; it is nil on failure.
 func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Project, opts SandboxOpts) ([]types.AssignedPort, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -206,7 +300,6 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	}
 	containerName := fmt.Sprintf("%s-%s", ContainerNamePrefix, safeID)
 
-	// Check if container already exists
 	exists, err := sm.rt.ContainerExists(containerName)
 	if err != nil {
 		return nil, fmt.Errorf("check container: %w", err)
@@ -219,13 +312,11 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		}
 	}
 
-	// Resolve worktree to absolute path
 	absWorktree, err := filepath.Abs(worktreePath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve worktree path: %w", err)
 	}
-	// Compute mount path: /home/sandbox/<project-name>
-	mountPath := "/home/sandbox/" + projectName
+	mountPath := MountPath(projectName)
 
 	// Resolve agent binary path (required)
 	agentPath, err := sm.rt.GetAgentBinaryPath()
@@ -261,10 +352,9 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	if opts.PlanMode {
 		worktreeMode = "ro"
 	}
+	// No -e here: the container's environment comes from containerEnvArgs below.
 	createArgs = append(createArgs,
 		"-v", absWorktree+":"+mountPath+":rprivate,"+worktreeMode,
-		"-e", "TERM=xterm-256color",
-		"-e", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 	)
 	if opts.NetworkIsolation {
 		createArgs = append(createArgs, "--network", "none")
@@ -276,7 +366,6 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 			log.Printf("[sandbox] task=%s skipping invalid container port: %d", taskID, pf.ContainerPort)
 			continue
 		}
-		// Auto-assign an available ephemeral host port
 		ln, err := net.Listen("tcp", ":0")
 		if err != nil {
 			log.Printf("[sandbox] task=%s failed to assign host port for container port %d: %v", taskID, pf.ContainerPort, err)
@@ -303,7 +392,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		}
 	}
 
-	// Agent sandbox mounts and envs (only when an agent extension is configured)
+	// Agent sandbox mounts (only when an agent extension is configured). Its
+	// envs go through containerEnvArgs below, with the rest.
 	if opts.AgentSandbox != nil {
 		for _, m := range opts.AgentSandbox.Mounts {
 			if m.HostPath == "" || m.ContainerPath == "" {
@@ -322,13 +412,6 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 				"-v", absHost+":"+m.ContainerPath+":rprivate,"+mountMode,
 			)
 			log.Printf("[sandbox] task=%s mounting agent sandbox %s -> %s (%s)", taskID, absHost, m.ContainerPath, mountMode)
-		}
-		for _, e := range opts.AgentSandbox.Envs {
-			if e.Key != "" {
-				createArgs = append(createArgs, "-e", e.Key+"="+e.Value)
-				// Don't log env values — they may contain API keys, tokens, or other secrets.
-				log.Printf("[sandbox] task=%s setting agent env %s", taskID, e.Key)
-			}
 		}
 	}
 
@@ -369,13 +452,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		log.Printf("[sandbox] task=%s mounting %s -> %s (%s)", taskID, hostPath, m.ContainerPath, mode)
 	}
 
-	// Environment variables (user-configured per-project)
-	for _, e := range opts.SandboxEnvs {
-		if e.Key != "" {
-			createArgs = append(createArgs, "-e", e.Key+"="+e.Value)
-			log.Printf("[sandbox] task=%s setting env %s", taskID, e.Key)
-		}
-	}
+	// Environment: exactly what was configured for this sandbox.
+	createArgs = append(createArgs, containerEnvArgs(taskID, opts)...)
 
 	// Container entrypoint: just sleep (agent is started via podman exec)
 	createArgs = append(createArgs, image,
@@ -395,15 +473,11 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		return nil, fmt.Errorf("copy agent to container: %w (%s)", cpErr, cpOut)
 	}
 
-	// Start the container (needed for exec sessions)
-	// --runtime-flag ignore-cgroups=true: required for rootless gVisor (no cgroup
-	// access). Same runsc boolean flag as the bare --runtime-flag=ignore-cgroups the
-	// create path below passes; the two spellings are equivalent. overlay2=root:self
-	// is not repeated here — it governs the writable rootfs, set where the container
-	// is created.
+	// Start the container (needed for exec sessions). ignore-cgroups is a podman
+	// global option, so it precedes the subcommand; the create path spells it
+	// --runtime-flag=ignore-cgroups, which is equivalent.
 	startOut, err := sm.podmanExec("--runtime-flag", "ignore-cgroups=true", "start", containerName)
 	if err != nil {
-		// Clean up on start failure
 		_, _ = sm.podmanExec("rm", "-f", containerName)
 		return nil, fmt.Errorf("start container: %w (%s)", err, startOut)
 	}
@@ -420,15 +494,13 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	}
 
 	// Start agent in container via podman exec (stdin/stdout protocol)
-	// --runtime-flag ignore-cgroups=true: see the start call above — a podman global
-	// option, so it must precede the `exec` subcommand.
+	// ignore-cgroups must precede `exec` — it is a podman global option.
 	agentCmd := exec.Command(
 		"podman", "--runtime-flag", "ignore-cgroups=true",
 		"exec", "-i", "-w", mountPath, containerName,
 		"/sandbox-bridge",
 	)
 
-	// Create pipes for communication with the agent
 	stdin, err := agentCmd.StdinPipe()
 	if err != nil {
 		_, _ = sm.podmanExec("rm", "-f", containerName)
@@ -481,7 +553,6 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 		return "", fmt.Errorf("no sandbox container for task %s", taskID)
 	}
 
-	// Build exec arguments
 	execArgs := []string{
 		"exec",
 	}
@@ -493,7 +564,6 @@ func (sm *SandboxManager) execInternal(taskID, command string, stdin []byte, env
 		containerName,
 	)
 
-	// Add environment variables
 	for _, e := range env {
 		execArgs = append(execArgs, "-e", e)
 	}
@@ -569,7 +639,7 @@ func (sm *SandboxManager) ensureProjectContainer(taskID string, project *types.P
 	if err != nil {
 		return fmt.Errorf("resolve project path: %w", err)
 	}
-	mountPath := "/home/sandbox/" + project.Name
+	mountPath := MountPath(project.Name)
 	sm.mu.Lock()
 	containerName := sm.active[taskID]
 	sm.mu.Unlock()
@@ -660,21 +730,16 @@ func (sm *SandboxManager) startShell(taskID, worktreePath string, project *types
 	// Start podman exec with PTY
 	// -i: keep STDIN open
 	// -t: allocate a pseudo-TTY
-	cmd := exec.Command(
-		"podman", "exec", "-it",
-		"-w", mountPath,
-		containerName,
-		shell,
-	)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd := exec.Command("podman", shellExecArgs(containerName, mountPath, shell)...)
+	// No cmd.Env: podman needs the server's own environment (rootless storage keys
+	// off HOME / XDG_*), and none of it reaches the container — podman exec
+	// inherits the container's environment unless -e says otherwise.
 
-	// Start with PTY
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 40, Cols: 120})
 	if err != nil {
 		return nil, nil, fmt.Errorf("start shell: %w", err)
 	}
 
-	// Set non-blocking mode on the PTY
 	syscall.SetNonblock(int(ptmx.Fd()), true)
 
 	sp := &ShellProcess{
@@ -1071,7 +1136,6 @@ func (sm *SandboxManager) BuildImageWithOptions(projectName, dockerfilePath stri
 		return err
 	}
 
-	// Read the Dockerfile
 	content, err := os.ReadFile(dockerfilePath)
 	if err != nil {
 		return fmt.Errorf("read dockerfile: %w", err)

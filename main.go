@@ -83,7 +83,6 @@ func main() {
 	// Database path (derived from data-dir)
 	dbPath := filepath.Join(effectiveDataDir, "kanban.db")
 
-	// Frontend dist
 	frontendDist := os.Getenv("MIKE_FRONTEND_DIST")
 	if frontendDist == "" {
 		frontendDist = "./frontend/dist"
@@ -100,7 +99,6 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	// Warn on weak secrets
 	for _, name := range crypto.WarnWeakSecrets() {
 		log.Printf("⚠ WARNING: %s is less than 8 characters. A stronger secret is recommended for production use.", name)
 	}

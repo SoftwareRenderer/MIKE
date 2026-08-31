@@ -424,3 +424,390 @@ func TestFSReadRefInTaskWorktree(t *testing.T) {
 		}
 	}
 }
+
+// --- Symlink containment (security regression) --------------------------------
+//
+// A sandboxed task writes through the rw bind mount, so it can plant a symlink in
+// the worktree that resolves against the host. The fs handlers must resolve links,
+// re-check containment, and open the resolved path.
+
+// fsSymlinkProject creates a non-sandboxed project at <base>/repo with one
+// regular file, plus <base>/outside (the escape target) holding a secret, and a
+// symlink inside the repo pointing at it.
+func fsSymlinkProject(t *testing.T, s *Server, id string) (repo, outside, secret, link string) {
+	t.Helper()
+	base := t.TempDir()
+	repo = filepath.Join(base, "repo")
+	outside = filepath.Join(base, "outside")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret = filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("host secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "ok.txt"), []byte("inside content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link = filepath.Join(repo, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.CreateProject(&types.Project{ID: id, Name: "FS Symlink Project", Path: repo}); err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+func TestFSReadRejectsSymlinkEscape(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	repo, _, secret, link := fsSymlinkProject(t, s, "fs-link-read")
+
+	rr := fsReadAt(t, s, cookie, csrf, "fs-link-read", filepath.Join(link, "secret.txt"), "")
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("read through a symlink: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "host secret") {
+		t.Error("escaped the project root: outside content was returned")
+	}
+
+	// The containment check must not break ordinary in-project reads.
+	rr = fsReadAt(t, s, cookie, csrf, "fs-link-read", filepath.Join(repo, "ok.txt"), "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "inside content") {
+		t.Fatalf("ordinary in-project read broken: %d %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(secret); err != nil {
+		t.Fatalf("fixture disappeared: %v", err)
+	}
+}
+
+func TestFSListRejectsSymlinkEscape(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	_, _, _, link := fsSymlinkProject(t, s, "fs-link-list")
+
+	q := url.Values{"path": {link}, "project": {"fs-link-list"}, "files": {"1"}}
+	req := testRequest(http.MethodGet, "/api/fs?"+q.Encode(), nil)
+	withAuthCSRF(req, cookie, csrf)
+	rr := testResponse(t, s, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("listing a symlinked directory: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "secret.txt") {
+		t.Error("escaped the project root: outside directory was listed")
+	}
+}
+
+func TestFSWriteRejectsSymlinkEscape(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	repo, outside, _, link := fsSymlinkProject(t, s, "fs-link-write")
+
+	// A path whose existing components traverse the link.
+	q := url.Values{"project": {"fs-link-write"}}
+	req := testRequest(http.MethodPost, "/api/fs/write?"+q.Encode(), map[string]string{
+		"path":    filepath.Join(link, "evil.txt"),
+		"content": "pwned",
+	})
+	withAuthCSRF(req, cookie, csrf)
+	if rr := testResponse(t, s, req); rr.Code != http.StatusBadRequest {
+		t.Fatalf("write through a symlink: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(outside, "evil.txt")); err == nil {
+		t.Error("escaped the project root: file written outside")
+	}
+
+	// The final component being a DANGLING symlink (target does not exist yet)
+	// must be rejected too — writing through it would create the target.
+	dangling := filepath.Join(repo, "dangling")
+	if err := os.Symlink(filepath.Join(outside, "new.txt"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	req = testRequest(http.MethodPost, "/api/fs/write?"+q.Encode(), map[string]string{
+		"path":    dangling,
+		"content": "pwned",
+	})
+	withAuthCSRF(req, cookie, csrf)
+	if rr := testResponse(t, s, req); rr.Code != http.StatusBadRequest {
+		t.Fatalf("write to a dangling symlink: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(outside, "new.txt")); err == nil {
+		t.Error("escaped the project root: dangling-symlink write created its target")
+	}
+
+	// Ordinary in-project writes (including new files in new subdirs) still work.
+	req = testRequest(http.MethodPost, "/api/fs/write?"+q.Encode(), map[string]string{
+		"path":    filepath.Join(repo, "sub", "new.txt"),
+		"content": "fine",
+	})
+	withAuthCSRF(req, cookie, csrf)
+	if rr := testResponse(t, s, req); rr.Code != http.StatusOK {
+		t.Fatalf("ordinary in-project write broken: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestFSMkdirRejectsSymlinkEscape(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	_, outside, _, link := fsSymlinkProject(t, s, "fs-link-mkdir")
+
+	q := url.Values{"project": {"fs-link-mkdir"}}
+	req := testRequest(http.MethodPost, "/api/fs/mkdir?"+q.Encode(), map[string]string{
+		"path": filepath.Join(link, "newdir"),
+	})
+	withAuthCSRF(req, cookie, csrf)
+	if rr := testResponse(t, s, req); rr.Code != http.StatusBadRequest {
+		t.Fatalf("mkdir through a symlink: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(outside, "newdir")); err == nil {
+		t.Error("escaped the project root: directory created outside")
+	}
+}
+
+// TestFSSearchSkipsSymlinks: content search walks the host tree, so it must
+// never open a symlinked file — its target resolves against the host and would
+// leak (or match) content from outside the search root.
+func TestFSSearchSkipsSymlinks(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	// The fixture itself is the point: a symlink inside the search root.
+	fsSymlinkProject(t, s, "fs-link-search")
+
+	search := func(q string) string {
+		t.Helper()
+		v := url.Values{"project": {"fs-link-search"}, "q": {q}, "content": {"1"}}
+		req := testRequest(http.MethodGet, "/api/fs/search?"+v.Encode(), nil)
+		withAuthCSRF(req, cookie, csrf)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("search %q: %d %s", q, rr.Code, rr.Body.String())
+		}
+		return rr.Body.String()
+	}
+
+	if got := search("host secret"); strings.Contains(got, "host secret") || strings.Contains(got, "link/") || strings.Contains(got, "link\"") {
+		t.Errorf("content search followed a symlink out of the root: %s", got)
+	}
+	// In-tree search keeps working.
+	if got := search("inside content"); !strings.Contains(got, "ok.txt") {
+		t.Errorf("ordinary content search broken: %s", got)
+	}
+}
+
+// TestFSInitGitRejectsPathOutsideProject (security): POST /api/fs/init-git with
+// a project context must stay inside the project/workspace like every other fs
+// endpoint. Before the fix the handler ran `git init` and wrote README.md at
+// any absolute path the client named.
+func TestFSInitGitRejectsPathOutsideProject(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	base := t.TempDir()
+	projDir := filepath.Join(base, "project")
+	outside := filepath.Join(base, "elsewhere")
+	for _, d := range []string{projDir, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.store.CreateProject(&types.Project{ID: "fs-initgit", Name: "FS InitGit Project", Path: projDir}); err != nil {
+		t.Fatal(err)
+	}
+
+	initGit := func(path string) *httptest.ResponseRecorder {
+		req := testRequest(http.MethodPost, "/api/fs/init-git?project=fs-initgit", map[string]string{"path": path})
+		withAuthCSRF(req, cookie, csrf)
+		return testResponse(t, s, req)
+	}
+
+	if rr := initGit(outside); rr.Code != http.StatusBadRequest {
+		t.Fatalf("init-git outside the project: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if git.IsGitRepo(outside) {
+		t.Error("git init ran outside the project root")
+	}
+
+	// A symlink inside the project that leads outside is rejected as well.
+	link := filepath.Join(projDir, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if rr := initGit(link); rr.Code != http.StatusBadRequest {
+		t.Fatalf("init-git through a symlink: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if git.IsGitRepo(outside) {
+		t.Error("git init escaped through a symlink")
+	}
+
+	// The in-project flow keeps working.
+	t.Setenv("GIT_AUTHOR_NAME", "Test Author")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	sub := filepath.Join(projDir, "subdir")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if rr := initGit(sub); rr.Code != http.StatusOK {
+		t.Fatalf("in-project init-git broken: %d %s", rr.Code, rr.Body.String())
+	}
+	if !git.IsGitRepo(sub) {
+		t.Error("in-project git init did not create a repository")
+	}
+}
+
+// --- Listing badges and search matching --------------------------------------
+
+// TestFSListGitBadge: the per-entry repository badge, now without a `git
+// rev-parse` per entry. An entry qualifies when the listed directory is inside a
+// repository (rev-parse walks up, so that covers every entry) or carries a .git
+// of its own — a nested repository or a linked worktree.
+func TestFSListGitBadge(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	base := t.TempDir()
+
+	// A directory that is NOT a repository, holding a plain subdirectory and a
+	// nested repository.
+	plain := filepath.Join(base, "workspace")
+	nested := filepath.Join(plain, "nested")
+	inside := filepath.Join(plain, "plaindir")
+	for _, d := range []string{nested, inside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A real repository, whose ordinary subdirectory must still read as being
+	// inside one.
+	repo := filepath.Join(base, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, "internal"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{nested, repo} {
+		if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil {
+			t.Fatalf("git init %s: %v: %s", dir, err, out)
+		}
+	}
+	for _, p := range []struct{ id, name, path string }{
+		{"fs-badge-plain", "FS Badge Plain", plain},
+		{"fs-badge-repo", "FS Badge Repo", repo},
+	} {
+		if err := s.store.CreateProject(&types.Project{ID: p.id, Name: p.name, Path: p.path}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	type listEntry struct {
+		Name      string `json:"name"`
+		IsGitRepo bool   `json:"isGitRepo"`
+	}
+	type listResp struct {
+		IsGitRepo bool        `json:"isGitRepo"`
+		Entries   []listEntry `json:"entries"`
+	}
+
+	// list returns the badge for the listed directory itself under the "" key.
+	list := func(projectID, path string) map[string]bool {
+		t.Helper()
+		q := url.Values{"path": {path}, "project": {projectID}}
+		req := testRequest(http.MethodGet, "/api/fs?"+q.Encode(), nil)
+		withAuthCSRF(req, cookie, csrf)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("list %s: %d %s", path, rr.Code, rr.Body.String())
+		}
+		var resp listResp
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode listing: %v", err)
+		}
+		badges := map[string]bool{"": resp.IsGitRepo}
+		for _, e := range resp.Entries {
+			badges[e.Name] = e.IsGitRepo
+		}
+		return badges
+	}
+
+	badges := list("fs-badge-plain", plain)
+	if badges[""] {
+		t.Error("a plain directory reported as a repository")
+	}
+	if !badges["nested"] {
+		t.Error("nested repository not badged — carrying a .git must count")
+	}
+	if badges["plaindir"] {
+		t.Error("a plain subdirectory of a non-repository was badged")
+	}
+
+	badges = list("fs-badge-repo", repo)
+	if !badges[""] {
+		t.Error("repository root not badged")
+	}
+	if !badges["internal"] {
+		t.Error("a subdirectory inside a repository must stay badged (rev-parse walks up)")
+	}
+}
+
+// TestFSSearchFilenameRegex: the filename-mode pattern, now compiled once per
+// request. A valid pattern filters; an invalid one matches nothing but still
+// returns success.
+func TestFSSearchFilenameRegex(t *testing.T) {
+	s := testServer(t)
+	cookie, csrf := loginTestCSRF(t, s)
+	base := t.TempDir()
+	for name, content := range map[string]string{"a.go": "package a\n", "b.txt": "hello\n"} {
+		if err := os.WriteFile(filepath.Join(base, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.store.CreateProject(&types.Project{ID: "fs-rx", Name: "FS Regex Project", Path: base}); err != nil {
+		t.Fatal(err)
+	}
+
+	type searchResp struct {
+		Results []struct {
+			Path string `json:"path"`
+		} `json:"results"`
+	}
+
+	search := func(q string) (int, []string) {
+		t.Helper()
+		v := url.Values{"project": {"fs-rx"}, "q": {q}, "regex": {"1"}}
+		req := testRequest(http.MethodGet, "/api/fs/search?"+v.Encode(), nil)
+		withAuthCSRF(req, cookie, csrf)
+		rr := testResponse(t, s, req)
+		if rr.Code != http.StatusOK {
+			return rr.Code, nil
+		}
+		var resp searchResp
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode search response: %v", err)
+		}
+		paths := make([]string, 0, len(resp.Results))
+		for _, r := range resp.Results {
+			paths = append(paths, r.Path)
+		}
+		return rr.Code, paths
+	}
+
+	code, paths := search(`\.go$`)
+	if code != http.StatusOK {
+		t.Fatalf("valid pattern: expected 200, got %d", code)
+	}
+	if len(paths) != 1 || paths[0] != "a.go" {
+		t.Errorf("regex filename search matched %v, want exactly [a.go]", paths)
+	}
+
+	// An unbalanced paren is not a valid pattern: the request still succeeds
+	// and nothing matches.
+	code, paths = search(`(`)
+	if code != http.StatusOK {
+		t.Fatalf("invalid pattern: expected 200 with no matches, got %d", code)
+	}
+	if len(paths) != 0 {
+		t.Errorf("invalid pattern matched %v, want no results", paths)
+	}
+}

@@ -532,7 +532,6 @@ func (c *Client) Bash(ctx context.Context, command string, timeout int64) (*Bash
 						return
 					}
 				}
-				// Parse bash chunk
 				chunkData, err := protocol.ParseBashChunk(chunk.Payload)
 				if err != nil {
 					continue

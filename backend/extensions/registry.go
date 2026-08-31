@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"kanban/backend/git"
 	"kanban/pkg/sandboxruntime"
 )
 
@@ -248,26 +250,46 @@ func newPermissions(installed, remote *Capabilities) []string {
 }
 
 // commitHashRe matches a full hex commit hash: 40-char (SHA-1) or 64-char
-// (SHA-256). Both SHA-1 and SHA-256 object-format repos are supported, so both
-// hash lengths are accepted.
-var commitHashRe = regexp.MustCompile(`^[0-9a-fA-F]{40}|[0-9a-fA-F]{64}$`)
+// (SHA-256), since both object formats are supported. Both alternatives are
+// anchored — an unanchored alternation would accept 40 hex characters followed by
+// anything, which is not a pinned revision.
+var commitHashRe = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 
 // validateGitSource validates a git repo URL and pinned commit for the
-// commit-verified install path. The repo must not start with a dash (to
-// prevent it being parsed as a git flag) and the commit must be a full 40-char
-// SHA-1 or 64-char SHA-256 hex hash so only an exact, content-addressed
-// revision is installed.
+// commit-verified install path.
+//
+// The repo is registry content and the clone runs on the host, so it must pass
+// the same gate as a user-supplied project clone (git.ValidateCloneURL) — see
+// extCloneArgs for what a helper transport would do. The commit must be a full
+// hex hash, so only an exact, content-addressed revision is installed.
 func validateGitSource(repo, commit string) error {
-	if repo == "" {
-		return fmt.Errorf("repo is required")
-	}
-	if strings.HasPrefix(repo, "-") {
-		return fmt.Errorf("repo must not start with a dash: %q", repo)
+	if err := git.ValidateCloneURL(repo); err != nil {
+		return fmt.Errorf("repo %q: %w", repo, err)
 	}
 	if !commitHashRe.MatchString(commit) {
 		return fmt.Errorf("commit must be a full 40-char SHA-1 or 64-char SHA-256 hex hash: %q", commit)
 	}
 	return nil
+}
+
+// extCloneArgs builds the clone argv for an extension checkout: the transport
+// fence first (it must reach the process that parses the URL), then this flow's
+// flags. repo must already have passed validateGitSource.
+func extCloneArgs(repo, dst string) []string {
+	return append(git.CloneProtocolArgs(), "clone", "-q", "--no-checkout", repo, dst)
+}
+
+// gitErrorOutput summarises git output for an error returned to the caller: one
+// line, bounded. The full output is logged; a client gets enough to act on
+// ("repository not found", "transport not allowed") without this becoming a
+// channel for whatever a subprocess printed.
+func gitErrorOutput(out []byte) string {
+	const max = 300
+	line := strings.Join(strings.Fields(string(out)), " ")
+	if len(line) > max {
+		return line[:max] + "…"
+	}
+	return line
 }
 
 // validateSubdir rejects paths that would escape the checkout root.
@@ -309,9 +331,14 @@ func (rc *RegistryClient) CheckoutExtension(repo, commit, subdir, destDir string
 	// branch or tag is present. The pinned commit must therefore be on a
 	// permanent ref.
 	srcDir := filepath.Join(tmp, "src")
-	cloneCmd := exec.Command("git", "clone", "-q", "--no-checkout", repo, srcDir)
+	cloneCmd := exec.Command("git", extCloneArgs(repo, srcDir)...)
+	// The fence in the argv is half of it: GIT_ALLOW_PROTOCOL is enforced by git
+	// itself whatever the host's git config says, and GIT_TERMINAL_PROMPT=0 stops
+	// a credential prompt hanging the install request. See git.CloneEnv.
+	cloneCmd.Env = git.CloneEnv()
 	if out, err := cloneCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("clone %s: %w (output: %s)", repo, err, strings.TrimSpace(string(out)))
+		log.Printf("[extensions] clone %s failed: %v: %s", repo, err, out)
+		return fmt.Errorf("clone %s: %w (output: %s)", repo, err, gitErrorOutput(out))
 	}
 
 	checkoutCmd := exec.Command("git", "-C", srcDir, "checkout", "-q", commit)

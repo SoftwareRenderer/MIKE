@@ -59,6 +59,25 @@ func (cs *ConfigStore) SetWorkspaceDirOverride(dir string) {
 	cs.workspaceDirOverride = dir
 }
 
+// WorkspaceDir returns the effective worktrees directory: the startup override
+// (--worktrees-dir / MIKE_WORKTREES_DIR) else the default, made absolute.
+// GetConfig computes the same value, but reading the config row costs a dozen
+// SQLite reads plus a provider JSON parse, so callers that only need this
+// directory (fs-API containment, preview resolution) use this instead.
+func (cs *ConfigStore) WorkspaceDir() string {
+	dir := cs.workspaceDirOverride
+	if dir == "" {
+		dir = DefaultWorkspaceDir
+	}
+	// Resolve a relative path so callers can compare it against absolute ones.
+	if !filepath.IsAbs(dir) {
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
+	}
+	return dir
+}
+
 // SetAgentRegistry wires the agent registry so dynamically-discovered agent
 // providers (e.g. agent://pi → 'Pi Coding Agent') are included in the
 // config API response without being persisted to the database.
@@ -183,16 +202,8 @@ func NewConfigStore(store *store.Store, dbPath, version string) *ConfigStore {
 // API keys are decrypted from the DB before returning.
 func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	// Workspace dir is set at startup via CLI flag / env var — not persisted.
-	workspaceDir := cs.workspaceDirOverride
-	if workspaceDir == "" {
-		workspaceDir = DefaultWorkspaceDir
-	}
-	// Resolve relative paths to absolute so the frontend can display them correctly
-	if !filepath.IsAbs(workspaceDir) {
-		if abs, err := filepath.Abs(workspaceDir); err == nil {
-			workspaceDir = abs
-		}
-	}
+	// WorkspaceDir() is that same computation without the config-row reads.
+	workspaceDir := cs.WorkspaceDir()
 	providersRaw, err := cs.store.GetConfigValue("providers")
 	if err != nil {
 		return nil, err

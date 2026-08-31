@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/fsutil"
+	"kanban/backend/sandbox"
 	"kanban/backend/types"
 )
 
@@ -516,15 +518,15 @@ func (s *Server) resolvePreviewAsset(baseDir, rel string) (string, error) {
 	cleaned := filepath.Clean("/" + filepath.ToSlash(rel))
 	candidate := filepath.Join(baseDir, cleaned)
 
-	base, err := filepath.EvalSymlinks(baseDir)
+	base, err := fsutil.ResolveSymlinks(baseDir)
 	if err != nil {
 		return "", err
 	}
-	target, err := filepath.EvalSymlinks(candidate)
+	target, err := fsutil.ResolveSymlinks(candidate)
 	if err != nil {
 		return "", err
 	}
-	if target != base && !strings.HasPrefix(target, base+string(os.PathSeparator)) {
+	if !fsutil.Inside(target, []string{base}) {
 		return "", errors.New("path escapes preview directory")
 	}
 	return target, nil
@@ -552,15 +554,8 @@ func (s *Server) resolveWorktreeForFile(project *types.Project, taskID, path str
 		worktreePath = project.Path
 	}
 	if project.SandboxEnabled {
-		mountPath := "/home/sandbox/" + project.Name
-		cleanPath := filepath.Clean(path)
-		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
-			rel := cleanPath[len(mountPath):]
-			if rel == "" {
-				path = worktreePath
-			} else {
-				path = filepath.Join(worktreePath, rel)
-			}
+		if host, ok := sandbox.ContainerToHost(worktreePath, project.Name, path); ok {
+			path = host
 		}
 	}
 	return worktreePath, path, nil
@@ -586,11 +581,9 @@ func (s *Server) resolveFSFilePath(projectID, taskID, filePath string) (worktree
 		hostPath = filepath.Join(worktreePath, hostPath)
 	}
 
-	cfg, _ := s.configStore.GetConfig()
-	workspaceDir := ""
-	if cfg != nil && cfg.WorkspaceDir != "" {
-		workspaceDir = filepath.Clean(cfg.WorkspaceDir)
-	}
+	// Only the workspace dir is needed here; GetConfig would read the whole
+	// config row (a dozen-plus SQLite reads) to produce it.
+	workspaceDir := filepath.Clean(s.configStore.WorkspaceDir())
 	cleanPath := filepath.Clean(hostPath)
 	cleanRoot := filepath.Clean(project.Path)
 	cleanWorktree := filepath.Clean(worktreePath)
