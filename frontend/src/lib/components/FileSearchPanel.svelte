@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
+    import { escapeHtml } from '$lib/utils/format';
 
     interface SearchResult {
         path: string;
@@ -127,11 +128,6 @@
     function handleResultClick(result: SearchResult) {
         const fullPath = rootPath ? rootPath + '/' + result.path : result.path;
         onFileSelected(fullPath, result.line || undefined);
-    }
-
-    /** Escape special HTML characters for safe insertion */
-    function escapeHtml(s: string): string {
-        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     /** Highlight matching text in a line of content */

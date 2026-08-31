@@ -1,5 +1,6 @@
 import { ViewPlugin, ViewUpdate, EditorView } from '@codemirror/view';
 import { StateEffect, StateField } from '@codemirror/state';
+import { escapeHtml } from '$lib/utils/format';
 
 /** A raw declaration scope range (LSP symbol) before nesting depth is assigned. */
 export interface ScopeRange {
@@ -196,11 +197,6 @@ export function getHeaderLineHtml(view: EditorView, header: SectionHeader): stri
     }
 
     return escapeHtml(indent) + escapeHtml(plain);
-}
-
-/** Escape HTML special characters. */
-function escapeHtml(text: string): string {
-    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 /**

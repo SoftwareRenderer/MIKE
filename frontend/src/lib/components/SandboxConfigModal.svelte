@@ -11,8 +11,13 @@
     import shieldOffIcon from '$lib/assets/icons/shield-off.svg?raw';
     import BaseModal from './BaseModal.svelte';
 import ToggleSwitch from './ToggleSwitch.svelte';
-    import DockerfilePicker from './DockerfilePicker.svelte';
-    import DirectoryPicker from './DirectoryPicker.svelte';
+    import PathPicker from './PathPicker.svelte';
+
+    /** Files the Dockerfile picker lists and accepts. */
+    function isDockerfile(name: string): boolean {
+        const lower = name.toLowerCase();
+        return lower === 'dockerfile' || lower.endsWith('.dockerfile');
+    }
 
     let { project, inProgressCount: initialInProgressCount, onClose, onSaved }: {
         project: Project;
@@ -1305,11 +1310,11 @@ import ToggleSwitch from './ToggleSwitch.svelte';
 {/snippet}
 
 {#if showDockerfilePicker}
-    <DockerfilePicker initialPath={project.path} onClose={handleDockerfilePickerClose} onSelect={handleDockerfileSelected} />
+    <PathPicker title="Select Dockerfile" initialPath={project.path} emptyLabel="No Dockerfiles found in this directory" selectTitle="Select this Dockerfile" fileFilter={isDockerfile} onClose={handleDockerfilePickerClose} onSelect={handleDockerfileSelected} />
 {/if}
 
 {#if showDirectoryPicker}
-    <DirectoryPicker initialPath="/home" onClose={() => showDirectoryPicker = false} onSelect={(path: string) => { newMountHostPath = path; showDirectoryPicker = false; }} />
+    <PathPicker title="Select Directory" initialPath="/home" emptyLabel="No subdirectories in this path" selectTitle="Select this directory" onClose={() => showDirectoryPicker = false} onSelect={(path: string) => { newMountHostPath = path; showDirectoryPicker = false; }} />
 {/if}
 
 <style>

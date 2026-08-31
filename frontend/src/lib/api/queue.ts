@@ -636,14 +636,6 @@ async function commitAndDoneRaw(projectId: string, taskId: string, commitMessage
     return res.json();
 }
 
-async function getCommitPreviewRaw(projectId: string, taskId: string): Promise<{ commit_message: string; author_name: string; author_email: string; merge_target: string }> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/commit-preview`, {
-        method: 'GET',
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to get commit preview');
-    return res.json();
-}
-
 async function clearDoneTasksRaw(projectId: string): Promise<{ deleted: number }> {
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/done`, { method: 'DELETE' });
     if (!res.ok) throw await apiError(res, 'Failed to clear done tasks');
@@ -827,13 +819,11 @@ export {
     deleteTaskRaw,
     moveTaskRaw,
     commitAndDoneRaw,
-    getCommitPreviewRaw,
     clearDoneTasksRaw,
     initTaskRaw,
     startTaskRaw,
     startSubtaskRaw,
     stopTaskRaw,
-    retryTaskRaw,
     resumeTaskRaw,
     sendTaskMessageRaw,
     createTaskMessageRaw,
@@ -841,7 +831,6 @@ export {
     deleteTaskMessageRaw,
     updateTaskMessageRaw,
     resetWorktreeRaw,
-    reloadPromptsRaw,
     updateConfigRaw,
     switchTaskThreadRaw,
     forkTaskThreadRaw,
