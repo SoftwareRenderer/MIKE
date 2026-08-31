@@ -313,3 +313,74 @@ func TestValidateDockerfilePath(t *testing.T) {
 		})
 	}
 }
+
+// TestGVisorAvailable_FalseWithoutRunsc pins the fail-closed path: with a PATH
+// that has no runsc, the probe must report unavailable rather than assuming it.
+// Both sandbox managers now share this probe, so a false here means neither will
+// attempt a gVisor container.
+func TestGVisorAvailable_FalseWithoutRunsc(t *testing.T) {
+	empty := t.TempDir()
+	t.Setenv("PATH", empty)
+
+	if GVisorAvailable("test") {
+		t.Error("GVisorAvailable = true with an empty PATH, want false")
+	}
+}
+
+// TestGVisorAvailable_FalseWhenVersionCheckFails covers the second gate: runsc
+// present but unusable. This is the check the extension sandbox manager used to
+// skip, so the two managers could disagree about a broken install.
+func TestGVisorAvailable_FalseWhenVersionCheckFails(t *testing.T) {
+	bin := t.TempDir()
+	// A runsc that exists but always fails its --version call.
+	writeStub(t, filepath.Join(bin, "runsc"), "#!/bin/sh\nexit 1\n")
+	t.Setenv("PATH", bin)
+
+	if GVisorAvailable("test") {
+		t.Error("GVisorAvailable = true when `runsc --version` fails, want false")
+	}
+}
+
+// TestGVisorAvailable_TrueWithRunscAndPodman pins the success path, including the
+// requirement that podman is present too — runsc alone is not enough.
+func TestGVisorAvailable_TrueWithRunscAndPodman(t *testing.T) {
+	bin := t.TempDir()
+	writeStub(t, filepath.Join(bin, "runsc"), "#!/bin/sh\necho 'runsc version test'\n")
+	writeStub(t, filepath.Join(bin, "podman"), "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", bin)
+
+	if !GVisorAvailable("test") {
+		t.Error("GVisorAvailable = false with stub runsc+podman, want true")
+	}
+}
+
+// TestGVisorAvailable_FalseWithoutPodman: runsc healthy, podman missing.
+func TestGVisorAvailable_FalseWithoutPodman(t *testing.T) {
+	bin := t.TempDir()
+	writeStub(t, filepath.Join(bin, "runsc"), "#!/bin/sh\necho 'runsc version test'\n")
+	t.Setenv("PATH", bin)
+
+	if GVisorAvailable("test") {
+		t.Error("GVisorAvailable = true with no podman, want false")
+	}
+}
+
+// TestCleanupStaleContainers_UnreachablePodmanIsBestEffort: the startup sweep
+// must swallow a broken podman (returns nothing, does not panic) rather than
+// block or crash server startup.
+func TestCleanupStaleContainers_UnreachablePodmanIsBestEffort(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no podman on PATH
+
+	rt := NewRuntime()
+	if got := rt.CleanupStaleContainers("test", "kanban-sandbox-"); got != nil {
+		t.Errorf("CleanupStaleContainers = %v with no podman, want nil", got)
+	}
+}
+
+// writeStub creates an executable script at path with the given contents.
+func writeStub(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatalf("write stub %s: %v", path, err)
+	}
+}

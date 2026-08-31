@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -114,7 +115,7 @@ func clientIP(r *http.Request) string {
 	if trustProxy() {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			// X-Forwarded-For can contain multiple IPs; the first is the original client
-			if idx := indexByte(xff, ','); idx >= 0 {
+			if idx := strings.IndexByte(xff, ','); idx >= 0 {
 				return xff[:idx]
 			}
 			return xff
@@ -126,15 +127,6 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
-}
-
-func indexByte(s string, b byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
 }
 
 // defaultLoginRateLimit is the login budget per client IP per minute, used when

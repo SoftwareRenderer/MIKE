@@ -51,8 +51,8 @@ func (d *blockDetector) check(text string) bool {
 // to detect exact repetition in real-time.
 type phraseDetector struct {
 	seen    map[string]int // phrase -> occurrence count
-	pending string        // incomplete sentence waiting for more text
-	fired   bool          // already triggered for this response
+	pending string         // incomplete sentence waiting for more text
+	fired   bool           // already triggered for this response
 }
 
 // minPhraseWords is the minimum word count for a phrase to be tracked.
@@ -115,7 +115,7 @@ func (d *phraseDetector) check(newText string) bool {
 
 	for i := 0; i < completeCount; i++ {
 		phrase := normalizePhrase(segments[i])
-		if phrase == "" || wordCount(phrase) < minPhraseWords {
+		if phrase == "" || len(strings.Fields(phrase)) < minPhraseWords {
 			continue
 		}
 
@@ -157,10 +157,10 @@ func splitSentences(text string) []string {
 		if isSentenceEnd(r) && i+1 < n {
 			next := runes[i+1]
 			// Boundary: punctuation followed by whitespace or uppercase
-			if isWhitespace(next) || (next >= 'A' && next <= 'Z') {
+			if unicode.IsSpace(next) || (next >= 'A' && next <= 'Z') {
 				// Consume trailing whitespace as delimiter
 				i++
-				for i < n && isWhitespace(runes[i]) {
+				for i < n && unicode.IsSpace(runes[i]) {
 					i++
 				}
 				segments = append(segments, current.String())
@@ -211,17 +211,7 @@ func normalizePhrase(s string) string {
 	return strings.Join(fields, " ")
 }
 
-// wordCount counts the number of words in a phrase.
-func wordCount(s string) int {
-	return len(strings.Fields(s))
-}
-
 // isSentenceEnd checks if a rune is sentence-ending punctuation.
 func isSentenceEnd(r rune) bool {
 	return r == '.' || r == '!' || r == '?'
-}
-
-// isWhitespace checks if a rune is whitespace.
-func isWhitespace(r rune) bool {
-	return unicode.IsSpace(r)
 }

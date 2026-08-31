@@ -14,20 +14,20 @@ func (s *Store) CreateThread(th *types.TaskThread) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
-		`INSERT INTO task_threads (id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, worktree_stash_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO task_threads (`+threadColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		th.ID, th.TaskID, ptrStr(th.ParentThreadID), th.Name, B2I(th.IsActive), ptrStr(th.GitBranch), ptrStr(th.CheckpointMessageID), ptrTime(th.CheckpointMessageTime), ptrStr(th.CheckpointCommitHash), ptrStr(th.WorktreeStashHash), th.CreatedAt.Format(time.RFC3339),
 	)
 	return err
 }
 
-// GetThreadsByTask returns all threads for a task ordered by creation time.
-func (s *Store) GetThreadsByTask(taskID string) ([]types.TaskThread, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	rows, err := s.db.Query(
-		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, worktree_stash_hash, created_at FROM task_threads WHERE task_id = ? ORDER BY created_at ASC`,
-		taskID,
-	)
+// threadColumns lists the task_threads columns in the exact order scanTaskThread
+// reads them. Keep the two in step (see projectColumns for why that matters).
+const threadColumns = `id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, worktree_stash_hash, created_at`
+
+// queryThreads reads every thread matching a `WHERE <where>` clause. Callers must
+// hold s.mu.
+func (s *Store) queryThreads(where string, args ...any) ([]types.TaskThread, error) {
+	rows, err := s.db.Query(`SELECT `+threadColumns+` FROM task_threads WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -43,16 +43,19 @@ func (s *Store) GetThreadsByTask(taskID string) ([]types.TaskThread, error) {
 	return threads, rows.Err()
 }
 
+// GetThreadsByTask returns all threads for a task ordered by creation time.
+func (s *Store) GetThreadsByTask(taskID string) ([]types.TaskThread, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.queryThreads(`task_id = ? ORDER BY created_at ASC`, taskID)
+}
+
 // GetThread retrieves a single thread by ID.
 func (s *Store) GetThread(threadID string) (*types.TaskThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	row := s.db.QueryRow(
-		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, worktree_stash_hash, created_at FROM task_threads WHERE id = ?`,
-		threadID,
-	)
 	var th types.TaskThread
-	err := scanTaskThread(row, &th)
+	err := scanTaskThread(s.db.QueryRow(`SELECT `+threadColumns+` FROM task_threads WHERE id = ?`, threadID), &th)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("thread not found")
 	}
@@ -83,23 +86,7 @@ func (s *Store) SetActiveThread(threadID string) error {
 func (s *Store) GetThreadsByCheckpointMessageID(messageID string) ([]types.TaskThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(
-		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, worktree_stash_hash, created_at FROM task_threads WHERE checkpoint_message_id = ?`,
-		messageID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	threads := []types.TaskThread{}
-	for rows.Next() {
-		var th types.TaskThread
-		if err := scanTaskThread(rows, &th); err != nil {
-			return nil, err
-		}
-		threads = append(threads, th)
-	}
-	return threads, rows.Err()
+	return s.queryThreads(`checkpoint_message_id = ?`, messageID)
 }
 
 // DeleteThread removes a thread from the database.
@@ -143,23 +130,7 @@ func (s *Store) UpdateThreadWorktreeStashHash(threadID, hash string) error {
 func (s *Store) GetThreadsByCheckpointMessageTime(messageTime string) ([]types.TaskThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(
-		`SELECT id, task_id, parent_thread_id, name, is_active, git_branch, checkpoint_message_id, checkpoint_message_time, checkpoint_commit_hash, worktree_stash_hash, created_at FROM task_threads WHERE checkpoint_message_time = ?`,
-		messageTime,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	threads := []types.TaskThread{}
-	for rows.Next() {
-		var th types.TaskThread
-		if err := scanTaskThread(rows, &th); err != nil {
-			return nil, err
-		}
-		threads = append(threads, th)
-	}
-	return threads, rows.Err()
+	return s.queryThreads(`checkpoint_message_time = ?`, messageTime)
 }
 
 // copyMsg holds the fields needed to copy a message.
