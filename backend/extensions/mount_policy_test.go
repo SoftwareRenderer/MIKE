@@ -51,9 +51,9 @@ func TestValidateContainerPath(t *testing.T) {
 	}
 }
 
-// TestValidateContainerPath_BlocksWithoutSpecChars proves the L4 fix: the two
-// characters that can rewrite a podman `-v` spec (':' and ',') can never appear
-// in a container path, so no user-supplied value can change the mount mode.
+// TestValidateContainerPath_BlocksWithoutSpecChars: ':' and ',' are the two characters
+// that can rewrite a podman `-v` spec, so they are refused anywhere in a container
+// path — a user value can never change the mount mode.
 func TestValidateContainerPath_BlocksWithoutSpecChars(t *testing.T) {
 	for _, p := range []string{"/x:rw", "/x,rw", "/x:ro,", "/x:,ro"} {
 		err := ValidateContainerPath(p)
@@ -381,5 +381,31 @@ func TestHasDotDotSegment(t *testing.T) {
 		if hasDotDotSegment(p) {
 			t.Errorf("hasDotDotSegment(%q) = true, want false", p)
 		}
+	}
+}
+
+// TestValidateHostPath_RejectsDanglingSymlink: a host path that is a symlink to a
+// target that does not exist yet cannot be checked against the roots, so it is
+// refused rather than binding wherever the link later points.
+func TestValidateHostPath_RejectsDanglingSymlink(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "root")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(filepath.Join(base, "not-created-yet", "payload"), link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	p := policyWith(root)
+	if _, err := p.ValidateHostPath(link); err == nil {
+		t.Error("a dangling symlink accepted as a mount host path")
+	}
+
+	// A mount path that simply does not exist yet (podman creates it) stays
+	// allowed — only the symlink is refused.
+	if _, err := p.ValidateHostPath(filepath.Join(root, "new", "data")); err != nil {
+		t.Errorf("not-yet-existing mount under an allowed root = %v, want nil", err)
 	}
 }

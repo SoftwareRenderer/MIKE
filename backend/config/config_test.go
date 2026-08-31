@@ -1143,3 +1143,38 @@ func TestGetModelReasoningEffort(t *testing.T) {
 
 func ptr(s string) *string { return &s }
 func ptrBool(b bool) *bool { return &b }
+
+// TestWorkspaceDirMatchesGetConfig: the cheap accessor fs-path checks use must
+// agree with the value GetConfig publishes, or the fs handlers would jail paths to
+// a different directory than the one the app shows and writes to.
+func TestWorkspaceDirMatchesGetConfig(t *testing.T) {
+	for _, override := range []string{"", t.TempDir()} {
+		cs := testConfigStore(t)
+		if override != "" {
+			cs.SetWorkspaceDirOverride(override)
+		}
+		read, err := cs.GetConfig()
+		if err != nil {
+			t.Fatalf("get config: %v", err)
+		}
+		got := cs.WorkspaceDir()
+		if got != read.WorkspaceDir {
+			t.Errorf("WorkspaceDir() = %q, GetConfig().WorkspaceDir = %q (override %q)", got, read.WorkspaceDir, override)
+		}
+		if !filepath.IsAbs(got) {
+			t.Errorf("WorkspaceDir() = %q, want absolute — callers compare it against absolute paths", got)
+		}
+	}
+}
+
+// TestWorkspaceDirRelativeOverrideIsAbsolute: a relative override is made
+// absolute, because callers compare it against absolute paths.
+func TestWorkspaceDirRelativeOverrideIsAbsolute(t *testing.T) {
+	cs := testConfigStore(t)
+	cs.SetWorkspaceDirOverride(".relative-worktrees")
+	got := cs.WorkspaceDir()
+	want, _ := filepath.Abs(".relative-worktrees")
+	if got != want {
+		t.Errorf("WorkspaceDir() = %q, want %q", got, want)
+	}
+}

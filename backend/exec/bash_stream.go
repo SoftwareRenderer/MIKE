@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"kanban/backend/agent"
 )
 
 // Bounds for flushing a finished command's output; mirrors pkg/bridge/agent/bash.go.
@@ -149,6 +151,13 @@ loop:
 // execCommandStream runs a shell command directly (no sandbox) in dir, returns its
 // combined output, and forwards it line by line to onLine (may be nil).
 //
+// The command gets the allowlisted environment only (agent.SafeAgentEnv): these
+// commands are LLM-driven (prompt injection lifts instructions out of repo
+// content) and run on the host for sandbox-disabled projects, so the server
+// environment — above all MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY — must
+// never reach them. GIT_TERMINAL_PROMPT=0 keeps an injected git transfer from
+// blocking on a credential prompt until the tool timeout kills it.
+//
 // timeout is seconds and is enforced: the whole process group is killed when it
 // expires and the error says so. A command that detaches a child returns as soon as
 // the command itself exits — the detached child is left running on purpose.
@@ -159,6 +168,8 @@ func execCommandStream(ctx context.Context, dir, command string, timeout int64, 
 
 	c := exec.CommandContext(runCtx, "bash", "-c", command)
 	c.Dir = dir
+	// See the doc comment above: allowlisted env only, never the server's own.
+	c.Env = agent.SafeAgentEnv("GIT_TERMINAL_PROMPT=0")
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Kill the group, not just bash. The error is swallowed on purpose: exec turns a
 	// Cancel error into the Wait error, hiding the result of a process that had

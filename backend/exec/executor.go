@@ -679,19 +679,15 @@ func (te *TaskExecutor) StartSubtask(projectID, subtaskID string, autostarted bo
 	return te.StartTask(projectID, subtaskID, autostarted)
 }
 
-// EnsureParentBranch creates the parent task's git branch if it doesn't exist yet.
-// This is called when a subtask is being prepared for execution and the parent
-// hasn't started (parent.Branch == ""). The parent's branch is needed as the
-// merge target when the subtask completes with auto_merge enabled.
+// EnsureParentBranch creates the parent task's branch when the parent has not started
+// yet (parent.Branch == ""). The branch is the merge target once a subtask finishes
+// with auto_merge.
 //
-// A full worktree is created for the parent (not just a bare branch) so that
-// when the parent eventually starts, prepareTaskExecution finds the worktree
-// already exists and reuses it. The worktree is created from HEAD (origin).
+// A full worktree is created, not a bare branch, so that when the parent eventually
+// starts, prepareTaskExecution finds the worktree and reuses it.
 //
-// The parent's status is NOT changed — it stays in its current column (e.g.,
-// backlog) while subtasks run. Only the branch field is set.
-//
-// If the parent already has a branch, this is a no-op.
+// The parent's status is NOT changed — it stays in its column (e.g. backlog) while
+// subtasks run; only Branch is set. A parent that already has a branch is left alone.
 func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task) error {
 	project, err := te.store.GetProject(projectID)
 	if err != nil {
@@ -1731,13 +1727,13 @@ func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMs
 	return nil
 }
 
-// syncTargetIntoTask merges the target branch into the task's branch (in the task's worktree)
-// when the target has new commits since the task branch diverged. This catches conflicts early
-// while the LLM still has full context of the task's changes.
+// syncTargetIntoTask merges the target branch into the task's branch (in the task's
+// worktree) when the target has new commits since the task diverged, so conflicts
+// surface while the LLM still has the task's changes in context.
 //
-// Returns nil on success (clean merge or no new commits) or when merge_conflict state is entered.
-// The caller (MergeBranch) should check task.ExecutionState after return — if it is
-// "merge_conflict", the final merge should be skipped.
+// Returns nil on a clean merge, when there is nothing to merge, or when merge_conflict
+// state was entered. MergeBranch must check task.ExecutionState afterwards and skip the
+// final merge on "merge_conflict".
 func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
 	// Serialize against the task's own tool execution.
 	te.GetWorktreeMu(taskID).Lock()
@@ -1876,7 +1872,6 @@ func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) 
 	cmd := osexec.Command("git", "rev-parse", "--verify", "--quiet", taskBranch)
 	cmd.Dir = project.Path
 	if err := cmd.Run(); err != nil {
-		// Branch missing
 		recovered := te.recoverMissingBranch(projectID, taskID, taskBranch)
 		if recovered != "" {
 			taskBranch = recovered
@@ -2145,12 +2140,10 @@ func (te *TaskExecutor) mergeInto(projectID, dir, targetBranch, taskBranch, task
 		}()
 	}
 
-	// Checkout target branch
 	if err := te.worktreeMgr.GitRunInDir(dir, "checkout", "-f", targetBranch); err != nil {
 		return fmt.Errorf("checkout target branch %s: %w", targetBranch, err)
 	}
 
-	// Merge the task branch
 	mergeOut, mergeErr := te.worktreeMgr.GitRunInDirOutput(dir, "merge", taskBranch, "--no-edit")
 	if mergeErr != nil {
 		// Merge conflict — detect, set flag for LLM resolution, then abort
@@ -2191,7 +2184,7 @@ func composeSystemPrompt(task *types.Task, worktreePath, projectName string, san
 	cwd := worktreePath
 	skillsMount := ""
 	if sandboxEnabled {
-		cwd = "/home/sandbox/" + projectName
+		cwd = sandboxmgr.MountPath(projectName)
 		skillsMount = sandboxmgr.SkillsMount
 	}
 	return llama.BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, task.OperatingMode)
@@ -2311,7 +2304,6 @@ func (te *TaskExecutor) recoverMissingBranch(projectID, taskID, missingBranch st
 		}
 	}
 
-	// Update the task's branch in DB.
 	if err := te.store.SetTaskBranch(taskID, projectID, recovered); err != nil {
 		log.Printf("[merge] task=%s failed to update branch from %q to %q: %v", taskID, missingBranch, recovered, err)
 		return ""

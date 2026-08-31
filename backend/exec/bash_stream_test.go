@@ -192,3 +192,27 @@ func TestExecuteTool_Bash_DirectTimeout(t *testing.T) {
 		t.Errorf("expected a timeout message, got %q", result)
 	}
 }
+
+// Regression (security): host-mode tool commands are LLM-driven, so they get the
+// allowlisted environment — the server's MIKE_* secrets must never reach them
+// (a prompt-injected `curl …?d=$(env)` would otherwise exfiltrate the master
+// password and the key that decrypts every stored provider key).
+func TestExecCommandStream_EnvIsAllowlisted(t *testing.T) {
+	t.Setenv("MIKE_LOGIN_PASSWORD", "s3cret-master-password")
+	t.Setenv("MIKE_ENCRYPTION_KEY", "s3cret-encryption-key")
+
+	out, err := execCommandStream(context.Background(), t.TempDir(),
+		"echo pw=[${MIKE_LOGIN_PASSWORD}] key=[${MIKE_ENCRYPTION_KEY}] path=[${#PATH}] prompt=[${GIT_TERMINAL_PROMPT}]",
+		10, nil)
+	if err != nil {
+		t.Fatalf("execCommandStream: %v (%s)", err, out)
+	}
+	if strings.Contains(out, "s3cret") {
+		t.Errorf("server secret leaked into the tool environment: %q", out)
+	}
+	// PATH is allowlisted (binaries must resolve) and the credential-prompt
+	// guard is passed through as an extra.
+	if strings.Contains(out, "path=[0]") || !strings.Contains(out, "prompt=[0]") {
+		t.Errorf("allowlisted env incomplete (want non-empty PATH and GIT_TERMINAL_PROMPT=0): %q", out)
+	}
+}
