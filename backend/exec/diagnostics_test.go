@@ -200,8 +200,13 @@ func TestFormatChatHistory_RendersAdvisoryAsEnvironmentNote(t *testing.T) {
 	if strings.Contains(out, "User: LSP diagnostics") {
 		t.Fatalf("advisory attributed to the user:\n%s", out)
 	}
-	if strings.Contains(out, "undefined: foo") {
-		t.Fatalf("the whole block should not reach the summarizer, only its first line:\n%s", out)
+	// The findings themselves must reach the summarizer. Truncating to the first line
+	// handed it nothing but the header ("…(1 file with findings):"), and because
+	// summarization is rolling — each pass folds the previous summary plus the newer
+	// messages — that header was the only copy carried into every later summary.
+	// The note is deliberately carried in whole; summarize_rolling_test.go pins that.
+	if !strings.Contains(out, "undefined: foo") {
+		t.Fatalf("the findings must reach the summarizer:\n%s", out)
 	}
 }
 
