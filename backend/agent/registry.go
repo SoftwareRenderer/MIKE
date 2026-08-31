@@ -177,7 +177,6 @@ func (r *AgentRegistry) GetAgentSandbox(agentName string) *types.AgentSandbox {
 		}
 	}
 
-	// Return nil if no mounts
 	if len(sb.Mounts) == 0 {
 		return nil
 	}

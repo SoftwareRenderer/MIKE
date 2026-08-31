@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"kanban/backend/extensions"
+	kanban_sandbox "kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/types"
 	sandbox "kanban/pkg/bridge"
@@ -567,7 +568,6 @@ func (m *ExtensionLSPManager) Release(workspacePath, language string) {
 		cancel()
 	}
 
-	// Release the sandbox
 	m.extSandbox.Release(sc.extensionID)
 
 	log.Printf("[lsp] released extension sandbox for workspace=%s lang=%s", workspacePath, language)
@@ -945,7 +945,7 @@ func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath string, projectMo
 			continue
 		}
 		ownsWorkspace := strings.HasPrefix(absWorkspace, absPath+string(filepath.Separator)) || absWorkspace == absPath
-		taskRoot := "/home/sandbox/" + project.Name
+		taskRoot := kanban_sandbox.MountPath(project.Name)
 
 		for _, mo := range project.SandboxMounts {
 			if strings.TrimSpace(mo.HostPath) == "" || strings.TrimSpace(mo.ContainerPath) == "" {
@@ -970,7 +970,6 @@ func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath string, projectMo
 // the sandbox client, sends the request with URI translation, and returns
 // the raw JSON response. Returns an error if no LSP extension handles the file.
 func (m *ExtensionLSPManager) LSPRequest(workspacePath, filePath, method string, params any) (json.RawMessage, error) {
-	// Look up the extension by file path
 	ext, err := m.lookupExtensionByFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("no LSP extension for file %q: %w", filePath, err)

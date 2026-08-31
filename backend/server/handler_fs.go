@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"kanban/backend/fsutil"
 	"kanban/backend/git"
 	"kanban/backend/prompts"
 	"kanban/backend/sandbox"
@@ -42,7 +43,6 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 	}
 	taskID := r.URL.Query().Get("task")
 
-	// Sandbox availability check (required but don't exec inside sandbox)
 	if project.SandboxEnabled {
 		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
 			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
@@ -56,12 +56,15 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusNotFound, "task worktree not found")
 		return
 	}
-	// Validate path is within allowed project root
-	if err := s.validateFSPath(path, r); err != nil {
+	// Validate against the project root. The returned path is symlink-resolved and
+	// is the one to open; the git-ref read below keeps the lexical path, which is
+	// safe because `git show ref:relpath` reads the object database, never a link.
+	hostPath, err := s.validateFSPath(project, path)
+	if err != nil {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Optional: read file at a specific git ref (e.g. HEAD) instead of working tree
+	// Read from a git ref (e.g. HEAD) instead of the working tree.
 	ref := r.URL.Query().Get("ref")
 	// The ref is client-supplied and lands inside a `git show <ref>:<path>` argument,
 	// so it must never be usable as an option — "--output=/tmp/pwn" is accepted by
@@ -102,7 +105,7 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Host filesystem (worktree is bind-mounted into sandbox)
 		// Check if path exists and is a regular file
-		info, statErr := os.Stat(path)
+		info, statErr := os.Stat(hostPath)
 		if statErr != nil {
 			if os.IsNotExist(statErr) {
 				JSONError(w, http.StatusNotFound, safeNotFoundError())
@@ -115,7 +118,7 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusBadRequest, "path is a directory")
 			return
 		}
-		content, readErr = os.ReadFile(path)
+		content, readErr = os.ReadFile(hostPath)
 		if readErr != nil {
 			log.Printf("fs read failed: %v", readErr)
 			JSONError(w, http.StatusInternalServerError, "failed to read file")
@@ -200,7 +203,6 @@ func parseUnifiedDiff(diff string) map[int][]string {
 		}
 
 		if strings.HasPrefix(line, "+") {
-			// Added line
 			if pendingRemovals > 0 {
 				// Paired with a removal → modified
 				markers[newLine+1] = append(markers[newLine+1], "modified")
@@ -211,11 +213,10 @@ func parseUnifiedDiff(diff string) map[int][]string {
 			newLine++
 			hunkNewPos++
 		} else if strings.HasPrefix(line, "-") {
-			// Removed line
 			pendingRemovals++
 			hunkOldPos++
 		} else {
-			// Context line (starts with " ")
+			// context line
 			if pendingRemovals > 0 {
 				// Removals followed by context — mark removed on the line before
 				if newLine > 0 {
@@ -263,7 +264,6 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "path is required")
 		return
 	}
-	// Limit file size to 1MB
 	if len(req.Content) > 1_000_000 {
 		JSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 1MB)")
 		return
@@ -279,7 +279,6 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	taskID := r.URL.Query().Get("task")
 
-	// Determine worktree path (host filesystem)
 	var worktreePath string
 	if taskID != "" {
 		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
@@ -291,29 +290,24 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 	} else {
 		worktreePath = project.Path
 	}
-	// Sandbox availability check (required but don't exec inside sandbox)
 	if project.SandboxEnabled {
 		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
 			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
 			return
 		}
 		// Translate sandbox path to host path
-		mountPath := "/home/sandbox/" + project.Name
-		cleanPath := filepath.Clean(req.Path)
-		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
-			rel := cleanPath[len(mountPath):]
-			if rel == "" {
-				req.Path = worktreePath
-			} else {
-				req.Path = filepath.Join(worktreePath, rel)
-			}
+		if host, ok := sandbox.ContainerToHost(worktreePath, project.Name, req.Path); ok {
+			req.Path = host
 		}
 	}
-	// Validate path is within allowed project root
-	if err := s.validateFSPath(req.Path, r); err != nil {
+	// Operate on the symlink-resolved path validateFSPath returns; writing through
+	// a link planted in the project would land wherever it points.
+	resolvedPath, err := s.validateFSPath(project, req.Path)
+	if err != nil {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	req.Path = resolvedPath
 	// Host filesystem (worktree is bind-mounted into sandbox)
 	dir := filepath.Dir(req.Path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -342,7 +336,6 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	project, _ := s.optionalProject(r)
 	taskID := r.URL.Query().Get("task")
 
-	// Determine worktree path (host filesystem)
 	var worktreePath string
 	if taskID != "" {
 		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
@@ -354,12 +347,15 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	} else if project != nil {
 		worktreePath = project.Path
 	}
-	// Validate path is within allowed worktree root
+	// Use the form validateFSPath returns for the host listing below, so a
+	// symlinked directory cannot expose anything outside the root.
 	if worktreePath != "" {
-		if err := s.validateFSPath(path, r); err != nil {
+		resolved, err := s.validateFSPath(project, path)
+		if err != nil {
 			JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		path = resolved
 	}
 
 	type fsEntry struct {
@@ -383,16 +379,9 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
 			return
 		}
-		// Convert path to sandbox path (accept both host and sandbox paths)
-		mountPath := "/home/sandbox/" + project.Name
-		cleanPath := filepath.Clean(path)
-		var sandboxPath string
-		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
-			sandboxPath = cleanPath
-		} else {
-			relPath, _ := filepath.Rel(worktreePath, cleanPath)
-			sandboxPath = filepath.Join(mountPath, relPath)
-		}
+		// Accepts both host and container paths.
+		mountPath := sandbox.MountPath(project.Name)
+		sandboxPath := fsSandboxPath(worktreePath, project, path)
 		// Single command: ls -pA marks dirs with trailing /, one entry per line
 		opts := s.fsSandboxConfig(project)
 		var output string
@@ -407,11 +396,9 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		// Return sandbox path in result
 		result.Path = sandboxPath
-		// Note: IsGitRepo not needed for in-project browser (BranchFileBrowser doesn't use it)
+		// IsGitRepo is unused by the in-sandbox browser.
 
-		// Add ".." entry when not at mount root
 		if sandboxPath != mountPath {
 			parent := filepath.Dir(sandboxPath)
 			result.Entries = append(result.Entries, fsEntry{Name: "..", IsDir: true, Path: parent})
@@ -428,7 +415,6 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			if !includeFiles && !isDir {
 				continue
 			}
-			// Return sandbox path in entry
 			sandboxFullPath := filepath.Join(sandboxPath, name)
 			result.Entries = append(result.Entries, fsEntry{Name: name, IsDir: isDir, Path: sandboxFullPath})
 		}
@@ -446,6 +432,11 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// One git process for the directory itself answers it for every entry too:
+	// `git rev-parse` walks up the tree, so if this directory is inside a
+	// repository so is everything in it. Otherwise an entry qualifies only by
+	// carrying a .git of its own, which is a stat. (A rev-parse per entry cost
+	// 200+ git processes for a 200-directory listing.)
 	isGit := git.IsGitRepo(path)
 	result.IsGitRepo = isGit
 
@@ -464,7 +455,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 			Name:      e.Name(),
 			IsDir:     e.IsDir(),
 			Path:      fullPath,
-			IsGitRepo: git.IsGitRepo(fullPath),
+			IsGitRepo: isGit || git.HasGitDir(fullPath),
 		})
 	}
 
@@ -507,7 +498,6 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	wholeWord := r.URL.Query().Get("word") == "1"
 	useRegex := r.URL.Query().Get("regex") == "1"
 
-	// For content search, compile regex upfront if needed
 	var contentRe *regexp.Regexp
 	if searchContent && useRegex && q != "" {
 		flags := ""
@@ -522,14 +512,13 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Resolve search root from project or task worktree
+	// Resolve the search root.
 	var searchRoot string
 	var project *types.Project
 	var err error
 
 	if taskID != "" {
-		// Search within task worktree.
-		// Verify the task belongs to this project first.
+		// The task must exist and belong to this project.
 		project, err = s.store.GetProject(projectID)
 		if err != nil {
 			JSONError(w, http.StatusNotFound, "project not found")
@@ -547,19 +536,15 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusNotFound, "failed to resolve worktree path")
 			return
 		}
-		// Worktree path is derived from server-side config — no need for client-side path validation.
-		// Just ensure it's under the workspace directory.
+		// The path is server-derived; only check it stays under the workspace dir.
 		searchRoot = filepath.Clean(searchRoot)
-		cfg, cfgErr := s.configStore.GetConfig()
-		if cfgErr == nil && cfg.WorkspaceDir != "" {
-			cleanWT := filepath.Clean(cfg.WorkspaceDir)
-			if !strings.HasPrefix(searchRoot, cleanWT+string(os.PathSeparator)) && searchRoot != cleanWT {
+		if cleanWT := s.configStore.WorkspaceDir(); cleanWT != "" {
+			if !strings.HasPrefix(searchRoot, cleanWT+string(filepath.Separator)) && searchRoot != cleanWT {
 				JSONError(w, http.StatusForbidden, "worktree path outside allowed workspace")
 				return
 			}
 		}
 	} else {
-		// Search within project root
 		project, err = s.store.GetProject(projectID)
 		if err != nil {
 			JSONError(w, http.StatusNotFound, "project not found")
@@ -567,12 +552,13 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		searchRoot = project.Path
 		searchRoot = filepath.Clean(searchRoot)
-		if err := s.validateFSPath(searchRoot, r); err != nil {
+		resolved, err := s.validateFSPath(project, searchRoot)
+		if err != nil {
 			JSONError(w, http.StatusForbidden, err.Error())
 			return
 		}
+		searchRoot = resolved
 	}
-	// Sandbox availability check (required but don't exec inside sandbox)
 	if project != nil && project.SandboxEnabled {
 		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
 			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
@@ -580,7 +566,6 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Result limit: 50 for content search, 10 for filename-only
 	resultLimit := 10
 	if searchContent {
 		resultLimit = 50
@@ -593,31 +578,37 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	var results []searchResult
 
-	// Check that the search root exists
 	if _, statErr := os.Stat(searchRoot); statErr != nil {
 		log.Printf("fs search root stat failed: %v", statErr)
 		JSONError(w, http.StatusNotFound, "search root does not exist")
 		return
 	}
 
-	// Helper: check if filename/relative path matches query
+	// Compiled once for the whole walk, not per file. An invalid pattern matches
+	// nothing rather than failing the request.
+	var filenameRe *regexp.Regexp
+	if useRegex && q != "" {
+		flags := ""
+		if !matchCase {
+			flags = "(?i)"
+		}
+		if re, reErr := regexp.Compile(flags + q); reErr == nil {
+			filenameRe = re
+		}
+	}
+
 	filenameMatch := func(rel string) bool {
 		if q == "" {
 			return true
 		}
 		if useRegex {
-			flags := ""
-			if !matchCase {
-				flags = "(?i)"
-			}
-			re, err := regexp.Compile(flags + q)
-			if err != nil {
-				return false
+			if filenameRe == nil {
+				return false // invalid pattern
 			}
 			if wholeWord {
-				return re.MatchString("\b" + rel + "\b")
+				return filenameRe.MatchString("\b" + rel + "\b")
 			}
-			return re.MatchString(rel)
+			return filenameRe.MatchString(rel)
 		}
 		checkStr := rel
 		searchStr := q
@@ -633,14 +624,13 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 					return true
 				}
 			}
-			// Also check if any word in the path matches
-			// For simplicity, treat the whole relative path as words separated by /_.-\n
+			// A whole word must equal one path segment.
 			return false
 		}
 		return strings.Contains(checkStr, searchStr)
 	}
 
-	// Recursively walk and collect matching files (worktree is bind-mounted into sandbox)
+	// Host walk: the worktree is bind-mounted into the sandbox, so it sees the same files.
 	err = filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries
@@ -650,7 +640,12 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		// Skip hidden files/dirs (starting with .)
+		// WalkDir reports a link without following it, so both linked files and
+		// linked directories land here; opening one would read through the host.
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+
 		if strings.HasPrefix(d.Name(), ".") {
 			if d.IsDir() {
 				return filepath.SkipDir
@@ -658,7 +653,6 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		// Skip ignored directories
 		if git.ShouldIgnorePath(rel) {
 			if d.IsDir() {
 				return filepath.SkipDir
@@ -670,13 +664,12 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		// Content search: search all files' contents (filename filter doesn't apply)
+		// Content search ignores the filename filter.
 		if searchContent {
 			searchContentInFile(path, q, matchCase, wholeWord, useRegex, contentRe, func(lineNum int, lineText string) {
 				results = append(results, searchResult{Path: rel, Line: lineNum, Text: lineText})
 			})
 		} else if filenameMatch(rel) {
-			// Filename-only search
 			results = append(results, searchResult{Path: rel})
 		}
 
@@ -713,7 +706,7 @@ func searchContentInFile(path, q string, matchCase, wholeWord, useRegex bool, co
 	}
 	defer f.Close()
 
-	// Check for binary content: read first 8KB and look for null bytes
+	// Binary sniff: a null byte in the first 8KB means the file is skipped.
 	buf := make([]byte, 8192)
 	n, _ := f.Read(buf)
 	if n > 0 {
@@ -724,7 +717,6 @@ func searchContentInFile(path, q string, matchCase, wholeWord, useRegex bool, co
 		}
 	}
 
-	// Seek back to start and read line by line
 	f.Seek(0, io.SeekStart)
 	scanner := bufio.NewScanner(f)
 	lineNum := 0
@@ -745,9 +737,7 @@ func matchLine(line, q string, matchCase, wholeWord, useRegex bool, contentRe *r
 	}
 	if useRegex && contentRe != nil {
 		if wholeWord {
-			// For regex with whole word, wrap the pattern with \b
-			// Since contentRe is already compiled, we need a different approach.
-			// We'll do a simple word-boundary check around each match.
+			// contentRe is already compiled, so check word boundaries around each match.
 			matches := contentRe.FindAllStringIndex(line, -1)
 			for _, m := range matches {
 				beforeOK := m[0] == 0 || !isWordChar(line[m[0]-1])
@@ -761,7 +751,7 @@ func matchLine(line, q string, matchCase, wholeWord, useRegex bool, contentRe *r
 		return contentRe.MatchString(line)
 	}
 	if useRegex {
-		// Fallback if contentRe is nil (shouldn't happen, but be safe)
+		// contentRe is only compiled for content search.
 		flags := ""
 		if !matchCase {
 			flags = "(?i)"
@@ -780,7 +770,6 @@ func matchLine(line, q string, matchCase, wholeWord, useRegex bool, contentRe *r
 		searchStr = strings.ToLower(searchStr)
 	}
 	if wholeWord {
-		// Find all occurrences and check word boundaries
 		idx := 0
 		for idx <= len(checkLine)-len(searchStr) {
 			pos := strings.Index(checkLine[idx:], searchStr)
@@ -822,48 +811,73 @@ func (s *Server) optionalProject(r *http.Request) (*types.Project, error) {
 	return project, nil
 }
 
-// validateFSPath ensures the path is within the project root or workspace
-func (s *Server) validateFSPath(path string, r *http.Request) error {
-	project, err := s.optionalProject(r)
-	if err != nil {
-		return err
+// fsSandboxPath returns the in-container path for p, which may arrive either as
+// a host path under the worktree or as a container path under the project's mount.
+func fsSandboxPath(worktreePath string, project *types.Project, p string) string {
+	clean := filepath.Clean(p)
+	if _, ok := sandbox.TrimMountPrefix(project.Name, clean); ok {
+		return clean // already a container path
 	}
+	return sandbox.HostToContainer(worktreePath, project.Name, clean)
+}
+
+// validateFSPath checks a path against the project root (or the workspace dir)
+// and returns the form that is safe to open. The caller passes the project the
+// handler already loaded. Callers MUST open the returned path, not the one they
+// passed in.
+//
+// The lexical prefix check alone is not containment: a symlink inside the project
+// resolves against the host, and a sandboxed task writes through an rw bind mount,
+// so it can plant `link -> /etc` in the worktree. The path is therefore resolved
+// and containment re-checked against the resolved roots.
+func (s *Server) validateFSPath(project *types.Project, path string) (string, error) {
 	if project == nil {
-		return nil // no project constraint
+		return path, nil // no project constraint
 	}
-	// Clean the path
 	cleanPath := filepath.Clean(path)
 	cleanRoot := filepath.Clean(project.Path)
 
-	// Sandbox mount path
-	if strings.HasPrefix(cleanPath, "/home/sandbox/") {
-		mountPath := "/home/sandbox/" + project.Name
-		if project.SandboxEnabled && (cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator))) {
-			return nil
+	// A container path is accepted only inside this project's mount.
+	if strings.HasPrefix(cleanPath, sandbox.MountRoot+string(filepath.Separator)) {
+		if project.SandboxEnabled {
+			if _, ok := sandbox.TrimMountPrefix(project.Name, cleanPath); ok {
+				return cleanPath, nil
+			}
 		}
-		return fmt.Errorf("path outside allowed project directory")
+		return "", fmt.Errorf("path outside allowed project directory")
 	}
 
-	cfg, cfgErr := s.configStore.GetConfig()
-	var workspaceDir string
-	if cfgErr == nil && cfg.WorkspaceDir != "" {
-		workspaceDir = filepath.Clean(cfg.WorkspaceDir)
-	}
+	// WorkspaceDir() avoids the config-row reads GetConfig would do for one path.
+	workspaceDir := s.configStore.WorkspaceDir()
 
-	// Host path: allow if within project root or workspace directory
-	if strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator)) || cleanPath == cleanRoot {
-		return nil
+	// Host path: allow if within project root or workspace directory…
+	roots := []string{cleanRoot}
+	if workspaceDir != "" {
+		roots = append(roots, workspaceDir)
 	}
-	if workspaceDir != "" && (strings.HasPrefix(cleanPath, workspaceDir+string(os.PathSeparator)) || cleanPath == workspaceDir) {
-		return nil
+	if !fsutil.Inside(cleanPath, roots) {
+		return "", fmt.Errorf("path outside allowed project directory")
 	}
-	return fmt.Errorf("path outside allowed project directory")
+	// …then again for the resolved form, against the resolved roots. The lexical
+	// roots stay in the list so a root that itself sits behind a link still works.
+	resolved, err := fsutil.ResolveSymlinks(cleanPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve path: %w", err)
+	}
+	check := append([]string{}, roots...)
+	for _, root := range roots {
+		if rr, err := filepath.EvalSymlinks(root); err == nil {
+			check = append(check, filepath.Clean(rr))
+		}
+	}
+	if !fsutil.Inside(resolved, check) {
+		return "", fmt.Errorf("path resolves outside allowed project directory")
+	}
+	return resolved, nil
 }
 
-// resolveGitIdentity checks git identity from multiple sources in priority order:
-// 1. GIT_COMMITTER_NAME/EMAIL env vars
-// 2. GIT_AUTHOR_NAME/EMAIL env vars
-// 3. git config --global fallback
+// resolveGitIdentity reads the commit identity from git's environment
+// (GIT_COMMITTER_* first, then GIT_AUTHOR_*), then from the global git config.
 func resolveGitIdentity() (name, email string) {
 	// Standard git env vars (GIT_COMMITTER takes precedence over GIT_AUTHOR)
 	if name == "" {
@@ -882,7 +896,6 @@ func resolveGitIdentity() (name, email string) {
 		return name, email
 	}
 
-	// Fall back to git config --global
 	if name == "" {
 		if out, err := exec.Command("git", "config", "--global", "user.name").CombinedOutput(); err == nil {
 			name = strings.TrimSpace(string(out))
@@ -915,6 +928,18 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// With a project context the path is jailed to it (or the workspace dir) like
+	// every other fs endpoint; before this the handler ran `git init` and wrote
+	// README.md at any absolute path the client named. The no-project
+	// directory-picker flow stays unconstrained, as in handleFSMkdir.
+	if project != nil {
+		resolved, err := s.validateFSPath(project, req.Path)
+		if err != nil {
+			JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		req.Path = resolved
+	}
 
 	// Enforce sandbox if enabled — no fallback to host
 	if project != nil && project.SandboxEnabled {
@@ -922,26 +947,20 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
 			return
 		}
-		// Initialize git repo inside the sandbox
-		mountPath := "/home/sandbox/" + project.Name
-		relPath, _ := filepath.Rel(project.Path, req.Path)
-		sandboxPath := filepath.Join(mountPath, relPath)
+		sandboxPath := fsSandboxPath(project.Path, project, req.Path)
 
 		// Resolve sandbox config once, reuse for both calls
 		opts := s.fsSandboxConfig(project)
 
-		// Check if already a git repo
 		_, gitErr := s.sandboxMgr.ExecProject(project, "git -C "+shellQuote(sandboxPath)+" rev-parse --git-dir 2>/dev/null", opts)
 		if gitErr == nil {
 			JSONError(w, http.StatusBadRequest, "path is already a git repository")
 			return
 		}
 
-		// Create README.md content
 		readmeContent := "# " + filepath.Base(req.Path) + "\n"
 		encoded := base64.StdEncoding.EncodeToString([]byte(readmeContent))
 
-		// Resolve git identity for the sandbox commit (env vars > git config)
 		name, email := resolveGitIdentity()
 		if name == "" || email == "" {
 			JSONError(w, http.StatusBadRequest, "git user.name and user.email are not set — set GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL, or run: git config --global user.name '<value>'")
@@ -952,7 +971,6 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		git.GitAuthorEmail = email
 
 		// git init + create README + add + commit in single command
-		// Use -c flags to override the commit author identity (if configured in git package)
 		flagCmd := gitAuthorFlagCmd()
 		_, err := s.sandboxMgr.ExecProjectWithInput(project,
 			"git -C "+shellQuote(sandboxPath)+" init && "+
@@ -968,7 +986,6 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Host filesystem (no project or sandbox disabled)
-	// Initialize git repo on host
 	info, err := os.Stat(req.Path)
 	if err != nil {
 		JSONError(w, http.StatusBadRequest, "path does not exist: "+err.Error())
@@ -983,7 +1000,6 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check that git identity is available (env vars or git config)
 	name, email := resolveGitIdentity()
 	if name == "" {
 		JSONError(w, http.StatusBadRequest, "git user.name is not set — set GIT_AUTHOR_NAME, or run: git config --global user.name '<value>'")
@@ -994,28 +1010,23 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// git init
 	cmd := exec.Command("git", "-C", req.Path, "init")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git init failed: %s", out))
 		return
 	}
 
-	// Create README.md
 	readmePath := filepath.Join(req.Path, "README.md")
 	if err := os.WriteFile(readmePath, []byte("# "+filepath.Base(req.Path)+"\n"), 0644); err != nil {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("create README.md: %v", err))
 		return
 	}
 
-	// git add + commit
 	cmd = exec.Command("git", "-C", req.Path, "add", "README.md")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git add failed: %s", out))
 		return
 	}
-	// Use the resolved identity from resolveGitIdentity() directly in the commit args.
-	// (resolveGitIdentity already validated that name and email are non-empty above.)
 	commitArgs := []string{"-C", req.Path, "-c", "user.name=" + name, "-c", "user.email=" + email, "commit", "-m", "Initial commit"}
 	cmd = exec.Command("git", commitArgs...)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -1047,7 +1058,6 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 	taskID := r.URL.Query().Get("task")
 
-	// Determine worktree path (host filesystem)
 	var worktreePath string
 	if taskID != "" {
 		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
@@ -1066,18 +1076,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
 			return
 		}
-		// Create directory inside the sandbox
-		mountPath := "/home/sandbox/" + project.Name
-		cleanPath := filepath.Clean(req.Path)
-		var sandboxPath string
-		if cleanPath == mountPath || strings.HasPrefix(cleanPath, mountPath+string(os.PathSeparator)) {
-			// req.Path is already a sandbox path — use it directly
-			sandboxPath = cleanPath
-		} else {
-			// req.Path is a host path — convert to sandbox path
-			relPath, _ := filepath.Rel(worktreePath, cleanPath)
-			sandboxPath = filepath.Join(mountPath, relPath)
-		}
+		sandboxPath := fsSandboxPath(worktreePath, project, req.Path)
 		sandboxParent := filepath.Dir(sandboxPath)
 
 		// Combined check + mkdir in single command
@@ -1108,8 +1107,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		case "OK":
 			// success
 		default:
-			// mkdir may have succeeded despite unexpected output (e.g. shell banners)
-			// Verify the directory actually exists before reporting an error
+			// Odd output (e.g. a shell banner) can still mean success — verify first.
 			var checkOut string
 			var checkErr error
 			checkCmd := "test -d " + shellQuote(sandboxPath) + " && echo EXISTS"
@@ -1133,12 +1131,13 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	// Project-scoped mkdir must stay within the project (or workspace); the
 	// no-project directory-picker flow intentionally has no constraint.
 	if project != nil {
-		if err := s.validateFSPath(req.Path, r); err != nil {
+		resolved, err := s.validateFSPath(project, req.Path)
+		if err != nil {
 			JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		req.Path = resolved
 	}
-	// Check parent exists
 	parent := filepath.Dir(req.Path)
 	info, err := os.Stat(parent)
 	if err != nil || !info.IsDir() {
@@ -1146,7 +1145,6 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check target doesn't already exist
 	if _, err := os.Stat(req.Path); err == nil {
 		JSONError(w, http.StatusBadRequest, "path already exists")
 		return
@@ -1160,9 +1158,9 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
 }
 
-// resolveSandboxConfig resolves the full sandbox configuration for a project.
-// Returns the image to use and all sandbox settings needed for ExecProject/ExecProjectWithInput.
-// The caller is responsible for ensuring the image is available (pull/build).
+// resolveSandboxConfig returns the image a project's sandbox runs: the image built
+// from its Dockerfile, its configured image, or BaseImage.
+// The caller must ensure that image is available (pull/build).
 func (s *Server) resolveSandboxConfig(project *types.Project) string {
 	imageToUse := ""
 	if project.SandboxDockerfilePath != "" {
@@ -1191,7 +1189,7 @@ func (s *Server) fsSandboxConfig(project *types.Project) sandbox.SandboxOpts {
 	}
 }
 
-// gitAuthorFlagCmd builds a shell-safe command fragment
+// gitAuthorFlagCmd quotes git.GitAuthorFlags() into a fragment for a sandbox shell command.
 func gitAuthorFlagCmd() string {
 	flags := git.GitAuthorFlags()
 	var parts []string

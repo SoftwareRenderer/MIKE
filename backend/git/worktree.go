@@ -651,9 +651,9 @@ func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonical
 // taskSlugPrefixSet returns a set of task-branch slug prefixes ("task/<slug>-")
 // for all active titled tasks in a project, so the GC can recognize and keep a
 // titled task's slug-named Main branch even when a fork is the active branch.
-// The slug comes from types.SlugifyBranchName — the SAME function the executor
-// used to name the branch. If the two ever diverged, the GC would stop
-// recognizing a live branch and delete it.
+// The slug comes from types.SlugifyBranchName — the same function the executor used
+// to name the branch. If the two diverged, the GC would stop recognizing a live
+// branch and delete it.
 func taskSlugPrefixSet(store *store.Store, projectID string) map[string]bool {
 	set := make(map[string]bool)
 	tasks, err := store.GetTasksByProject(projectID)
@@ -679,7 +679,6 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 		return 0
 	}
 
-	// Get all active task IDs
 	activeTaskIDs, err := wm.store.GetAllTaskIDs()
 	if err != nil {
 		log.Printf("[prune] error getting task IDs: %v", err)
@@ -700,7 +699,6 @@ func (wm *WorktreeManager) PruneOrphanedBranches(projectID string) int {
 		activeBranchSet[b] = true
 	}
 
-	// Get all active thread IDs
 	activeThreadIDs, err := wm.store.GetAllThreadIDs()
 	if err != nil {
 		log.Printf("[prune] error getting thread IDs: %v", err)
@@ -2396,4 +2394,17 @@ func IsGitRepo(path string) bool {
 	cmd := exec.Command("git", "-C", path, "rev-parse", "--git-dir")
 	cmd.Dir = path
 	return cmd.Run() == nil
+}
+
+// HasGitDir reports whether path carries a .git entry of its own — a repository
+// root, a linked worktree (where .git is a file), or a submodule checkout. One
+// stat instead of a `git rev-parse` process, for callers that check many entries.
+//
+// Narrower than IsGitRepo on purpose: rev-parse walks up the tree, so it also
+// says yes to a plain subdirectory of a repository. Ask that question once for
+// the directory being listed — when it is yes, every entry is inside the same
+// repository.
+func HasGitDir(path string) bool {
+	_, err := os.Lstat(filepath.Join(path, ".git"))
+	return err == nil
 }

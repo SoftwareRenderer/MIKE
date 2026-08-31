@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"kanban/backend/fsutil"
 	"kanban/backend/types"
 )
 
@@ -185,28 +186,12 @@ func ValidateContainerPath(containerPath string) error {
 	return nil
 }
 
-// resolvePath symlink-resolves p. If p (or a component of it) does not exist
-// yet, the nearest existing ancestor is resolved and the rest re-joined, so a
-// symlink on the existing part of the path is still followed.
+// resolvePath resolves a mount's host path with the shared fsutil rule, which —
+// unlike a bare ancestor walk — rejects a dangling symlink standing where the
+// path would be created. Binding that path would bind wherever the link points,
+// and the target does not exist yet, so it cannot be checked.
 func resolvePath(p string) (string, error) {
-	clean := filepath.Clean(p)
-	var missing []string
-	cur := clean
-	for {
-		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
-			out := resolved
-			for i := len(missing) - 1; i >= 0; i-- {
-				out = filepath.Join(out, missing[i])
-			}
-			return filepath.Clean(out), nil
-		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			return "", fmt.Errorf("no existing ancestor of %q can be resolved", p)
-		}
-		missing = append(missing, filepath.Base(cur))
-		cur = parent
-	}
+	return fsutil.ResolveSymlinks(p)
 }
 
 // insideAny reports whether the resolved path is one of roots or below it.

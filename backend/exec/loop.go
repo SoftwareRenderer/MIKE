@@ -1642,8 +1642,13 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 	}
 }
 
-// sendAndPersistError sends an error via WebSocket and persists it.
+// sendAndPersistError reports an error that ends the current run.
 func (te *TaskExecutor) sendAndPersistError(taskID, message, code string) {
+	te.persistAndSendError(taskID, message, code, true)
+}
+
+// persistAndSendError stores the error and streams it with the stored row's id
+func (te *TaskExecutor) persistAndSendError(taskID, message, code string, turnOver bool) {
 	task, _ := te.store.GetTaskByID(taskID)
 	errMsg := &types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, Role: "error",
@@ -1651,10 +1656,18 @@ func (te *TaskExecutor) sendAndPersistError(taskID, message, code string) {
 	}
 	if task != nil {
 		errMsg.ThreadID = task.CurrentThreadID
-		te.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeError, Data: map[string]string{"message": message, "code": code}})
 	}
 	if err := te.store.CreateTaskMessage(errMsg); err != nil {
 		log.Printf("[error-persist] task=%s failed to persist error: %v", taskID, err)
+	}
+	if task == nil {
+		return
+	}
+	te.appStreamMgr.SendTaskEvent(task.ProjectID, taskID, types.StreamEvent{Type: types.WSTypeError, Data: map[string]string{
+		"message": message, "code": code, "message_id": errMsg.ID,
+	}})
+	if turnOver {
+		te.appStreamMgr.ClearTaskBuffer(task.ProjectID, taskID)
 	}
 }
 

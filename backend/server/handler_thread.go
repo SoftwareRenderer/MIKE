@@ -69,7 +69,6 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 
-	// Delete messages for this thread
 	_, err = s.store.Exec(`DELETE FROM task_messages WHERE thread_id = ?`, req.ThreadID)
 	if err != nil {
 		JSONError(w, http.StatusInternalServerError, err.Error())
@@ -81,7 +80,6 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 	if deletedThread != nil {
 		deletedBranch = deletedThread.GitBranch
 	}
-	// Delete the thread
 	_, err = s.store.Exec(`DELETE FROM task_threads WHERE id = ?`, req.ThreadID)
 	if err != nil {
 		JSONError(w, http.StatusInternalServerError, err.Error())
@@ -166,7 +164,6 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stop executor if running
 	if task.ExecutionState == "running" {
 		_ = s.executor.StopTask(taskID)
 		task.ExecutionState = "idle"
@@ -233,7 +230,6 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Update task's current_thread_id
 	task.CurrentThreadID = req.ThreadID
 	task.UpdatedAt = time.Now().UTC()
 	if err := s.store.UpdateTask(task); err != nil {
@@ -397,12 +393,10 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		// Stop the current executor so the next run loads the forked context.
 		_ = s.executor.StopTask(taskID)
 	}
-	// Set new thread as active
 	if err := s.store.SetActiveThread(newThreadID); err != nil {
 		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Update task's current_thread_id
 	task.CurrentThreadID = newThreadID
 	task.UpdatedAt = now
 	if err := s.store.UpdateTask(task); err != nil {
@@ -415,7 +409,6 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	s.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeThreadSwitch, Data: map[string]string{"thread_id": newThreadID, "task_id": taskID}})
 	// Send fresh diff so the Changes panel reflects the forked branch
 	s.broadcastTaskDiff(taskID)
-	// Generate checkpoint label for the fork point message.
 	s.generateCheckpointLabelForFork(r.Context(), taskID, projectID, req.FromMessageID)
 	JSONResponse(w, http.StatusCreated, newThread)
 }
