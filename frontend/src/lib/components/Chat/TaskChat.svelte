@@ -389,7 +389,10 @@
         loadHistory,
         updateActiveThread,
         updateThreadUrl,
-        createTaskMessage: (p, t, r, c) => createTaskMessage(p, t, r, c).then(() => {}),
+        onNewError: () => {
+            isRegenerating = false;
+            connected = false;
+        },
     });
 
     /** Wrapper around stream handler with component-specific echo logic. */
@@ -425,12 +428,7 @@
                 return;
             }
         }
-        // Handle error event side effects (isRegenerating, connected)
-        if (event.type === 'error') {
-            isRegenerating = false;
-            connected = false;
-        }
-        _handleStreamEvent(event, suppressEvents, projectId, taskId);
+        _handleStreamEvent(event, suppressEvents);
     }
 
     /** Update providers from the app store (reacts to settings changes). */

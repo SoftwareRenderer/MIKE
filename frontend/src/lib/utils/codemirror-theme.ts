@@ -2,7 +2,7 @@ import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 
-export const darkHighlight = HighlightStyle.define([
+const darkHighlight = HighlightStyle.define([
     { tag: tags.keyword, color: '#F97583' },
     { tag: tags.constant(tags.keyword), color: '#79C0FF' },
     { tag: tags.function(tags.variableName), color: '#D2A8FF' },
@@ -182,7 +182,7 @@ export const darkSyntax = syntaxHighlighting(darkHighlight);
 
 // --- Light theme ---
 
-export const lightHighlight = HighlightStyle.define([
+const lightHighlight = HighlightStyle.define([
     { tag: tags.keyword, color: '#CF222E' },
     { tag: tags.constant(tags.keyword), color: '#0550AE' },
     { tag: tags.function(tags.variableName), color: '#8250DF' },
