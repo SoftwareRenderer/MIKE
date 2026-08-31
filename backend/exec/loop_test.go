@@ -489,6 +489,15 @@ type taskStreamFrame struct {
 // subscription was applied — plus a short drain for the replayed frames.
 func taskStreamFrames(t *testing.T, asm *stream.AppStreamManager, projectID, taskID string) []taskStreamFrame {
 	t.Helper()
+	return taskStreamFramesDuring(t, asm, projectID, taskID, nil)
+}
+
+// taskStreamFramesDuring captures what a task subscriber receives while act runs.
+// act starts only once the subscription is known to be live, and frames replayed
+// before it are dropped, so the result is exactly what the task emitted during
+// act. A nil act captures only the buffer replay.
+func taskStreamFramesDuring(t *testing.T, asm *stream.AppStreamManager, projectID, taskID string, act func()) []taskStreamFrame {
+	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
 	defer srv.Close()
@@ -511,10 +520,12 @@ func taskStreamFrames(t *testing.T, asm *stream.AppStreamManager, projectID, tas
 	}
 
 	const flushText = "__stream_capture_flush__"
-	asm.SendTaskEvent(projectID, taskID, types.StreamEvent{
-		Type: types.WSTypeToken,
-		Data: map[string]string{"text": flushText},
-	})
+	sendFlush := func() {
+		asm.SendTaskEvent(projectID, taskID, types.StreamEvent{
+			Type: types.WSTypeToken,
+			Data: map[string]string{"text": flushText},
+		})
+	}
 
 	// readOne classifies the next frame. A read whose context expired closes the
 	// connection (coder/websocket semantics), so it ends the capture.
@@ -540,31 +551,46 @@ func taskStreamFrames(t *testing.T, asm *stream.AppStreamManager, projectID, tas
 		return frame, readFrame
 	}
 
-	var frames []taskStreamFrame
-	for {
-		frame, outcome := readOne(ctx)
-		switch outcome {
-		case readFrame:
-			frames = append(frames, frame)
-		case readSkip:
-			continue
-		case readClosed:
-			return frames
-		case readFlush:
-			// The replay goroutine writes the whole buffer under one writeMu hold,
-			// but it can lose that race to the flush event's write. Drain briefly so
-			// a late replay still lands before the capture ends.
-			for {
-				drainCtx, cancelDrain := context.WithTimeout(ctx, 500*time.Millisecond)
-				late, lateOutcome := readOne(drainCtx)
-				cancelDrain()
-				if lateOutcome != readFrame {
+	capture := func(drain bool) []taskStreamFrame {
+		var frames []taskStreamFrame
+		for {
+			frame, outcome := readOne(ctx)
+			switch outcome {
+			case readFrame:
+				frames = append(frames, frame)
+			case readSkip:
+				continue
+			case readClosed:
+				return frames
+			case readFlush:
+				if !drain {
 					return frames
 				}
-				frames = append(frames, late)
+				// The replay goroutine writes the whole buffer under one writeMu hold,
+				// but it can lose that race to the flush event's write. Drain briefly so
+				// a late replay still lands before the capture ends. The drain read runs
+				// on a short deadline, which closes the connection, so it is the last read.
+				for {
+					drainCtx, cancelDrain := context.WithTimeout(ctx, 500*time.Millisecond)
+					late, lateOutcome := readOne(drainCtx)
+					cancelDrain()
+					if lateOutcome != readFrame {
+						return frames
+					}
+					frames = append(frames, late)
+				}
 			}
 		}
 	}
+
+	sendFlush()
+	if act == nil {
+		return capture(true)
+	}
+	capture(false) // the flush arriving proves the subscription is live
+	act()
+	sendFlush()
+	return capture(true)
 }
 
 // findTaskStreamEvent returns the first captured frame for the named event.

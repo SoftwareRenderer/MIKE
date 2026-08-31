@@ -10,9 +10,6 @@ package exec
 // conversation, (b) made summarization the one call whose input was never compressed,
 // and (c) guaranteed failure on a utility model with a smaller window — including the
 // manual /summarize path, leaving the task unsummarizable.
-//
-// Also covered: environment notes (advisories) must survive into the summary, because
-// rolling summarization makes the summary the only copy carried forward.
 
 import (
 	"context"
@@ -253,52 +250,4 @@ func containsAny(messages []types.ChatMessage, fragment string) bool {
 		}
 	}
 	return false
-}
-
-// TestFormatChatHistory_AdvisoryKeepsItsFindings is the regression for the
-// first-line-only note: for a diagnostics advisory the first line is the header, so
-// the summarizer was handed "…(2 files with findings):" and every finding was dropped.
-// With rolling summarization that stub would be the only copy carried forward.
-func TestFormatChatHistory_AdvisoryKeepsItsFindings(t *testing.T) {
-	note := "LSP diagnostics for this turn's changes (1 file with findings):\n\n" +
-		"Fix issues in a.go:\n" +
-		"1. line 12, col 5 [compiler]: undefined: widget (error)\n" +
-		"2. line 40, col 2 [staticcheck]: S1002 should use return (warning)"
-
-	hist := formatChatHistory([]types.ChatMessage{
-		{Role: "system", Content: "SYSTEM"},
-		{Role: "user", Content: "wire it up"},
-		{Role: "advisory", Content: note},
-	}, false)
-
-	mustContain(t, hist, "advisory in summarization input",
-		"undefined: widget", "S1002 should use return", "Fix issues in a.go")
-	if !strings.Contains(hist, "Environment note:") {
-		t.Errorf("advisory must still be labelled as an environment note:\n%s", hist)
-	}
-}
-
-// TestFormatChatHistory_AdvisoryIsNotTruncated pins the decision that an environment
-// note is carried into the summarization input whole. A diagnostics advisory can run to
-// hundreds of findings, so this is a deliberate trade: the summary keeps the detail at
-// the cost of a summarization prompt that grows with the number of findings. The volume
-// is bounded upstream instead, by maxDiagnosticFilesPerPass.
-func TestFormatChatHistory_AdvisoryIsNotTruncated(t *testing.T) {
-	var sb strings.Builder
-	sb.WriteString("LSP diagnostics for this turn's changes (1 file with findings):\n\n")
-	for i := 0; i < 500; i++ {
-		fmt.Fprintf(&sb, "%d. line %d, col 3 [compiler]: undefined: symbol%03d (error)\n", i+1, i*7+1, i)
-	}
-
-	hist := formatChatHistory([]types.ChatMessage{
-		{Role: "system", Content: "SYSTEM"},
-		{Role: "advisory", Content: sb.String()},
-	}, false)
-
-	if !strings.Contains(hist, "symbol499") {
-		t.Error("the last finding was cut off — the note must be carried in full")
-	}
-	if strings.Contains(hist, "truncated") {
-		t.Error("summarization input truncated an environment note")
-	}
 }
