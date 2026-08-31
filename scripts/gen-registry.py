@@ -100,10 +100,15 @@ def simplify_capabilities(manifest_caps):
     Only fields surfaced in the capabilities modal are kept:
       - ui:      injection_points ("Modifies") and permissions ("Permissions")
       - network: allowed_domains ("Allowed domains")
-      - lsp:   language ("Language") and extensions ("File extensions")
+      - lsp:   language ("Language"), extensions ("File extensions"), and what an
+               install review has to disclose: sandbox_probe (this extension asks
+               the project's own sandbox where its code packages live) and
+               environment_note (the one sentence shown when the server cannot
+               resolve a workspace)
       - css/agent: no detail rows, so an empty config is enough
     Everything else (command, args, headers, wasm_module, ...) lives in the
-    manifest and is intentionally omitted here.
+    manifest and is intentionally omitted here. The two lsp additions are the
+    exception because consent has to be visible *before* the manifest is fetched.
     """
     if not isinstance(manifest_caps, dict):
         return {}
@@ -128,6 +133,12 @@ def simplify_capabilities(manifest_caps):
                 kept['language'] = value['language']
             if value.get('extensions'):
                 kept['extensions'] = value['extensions']
+            sandbox = value.get('sandbox') or {}
+            if sandbox.get('detect'):
+                kept['sandbox_probe'] = True
+            note = (sandbox.get('environment') or {}).get('note')
+            if note:
+                kept['environment_note'] = note
             if kept:
                 result['lsp'] = kept
         elif key in ('css', 'agent'):

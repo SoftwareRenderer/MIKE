@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"kanban/backend/crypto"
@@ -154,6 +155,29 @@ func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
 	for _, p := range projects {
 		if p.Path != "" {
 			paths = append(paths, p.Path)
+		}
+	}
+	return paths, nil
+}
+
+// ListProjectSandboxMountPaths returns the host paths every project declares in
+// its Sandbox Configuration. They belong to the user's own setup — the task
+// sandbox already bind-mounts them — so the LSP sandbox may borrow them too, but
+// read-only: see MountPolicy.ForceReadOnly.
+func (es *ExtensionStore) ListProjectSandboxMountPaths() ([]string, error) {
+	if es == nil || es.db == nil {
+		return nil, nil
+	}
+	projects, err := es.db.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range projects {
+		for _, m := range p.SandboxMounts {
+			if host := strings.TrimSpace(m.HostPath); host != "" {
+				paths = append(paths, host)
+			}
 		}
 	}
 	return paths, nil

@@ -68,6 +68,13 @@ type extensionSandboxState struct {
 	// extension's SandboxConfig.Mounts, used to detect when custom mounts
 	// (e.g. a node_modules mount) have changed and the container needs recreation.
 	customMounts []string
+	// envs is the sorted list of "KEY=VALUE" assignments the extension's own
+	// config put into the container. A container's environment is fixed at
+	// creation, so a manifest/config env change needs a recreate. Values a
+	// *session* discovered at runtime (a language's dependency cache) are never
+	// in here — they belong to one workspace's server process, not to the shared
+	// container, and must not be able to restart everyone else's.
+	envs []string
 }
 
 // NewExtensionSandboxManager creates a new ExtensionSandboxManager.
@@ -133,13 +140,21 @@ func (sm *ExtensionSandboxManager) SetWorkspaceDir(dir string) {
 
 // MountPolicy returns the host-mount allowlist for extension sandboxes: the
 // workspace dir, the registered project paths, the extensions dir, the system
-// temp dir and the EnvMountRoots extras. Built on demand so new projects apply
-// without a restart.
+// temp dir, the EnvMountRoots extras, and the host paths projects declare in
+// their own Sandbox Configuration. The last group is allowed but pinned read-only:
+// it exists so a language server can read the same caches its workspace reads
+// without any project handing an extension a writable host directory. Built on
+// demand so new projects apply without a restart.
+//
+// The install-time and settings-time validators (ExtensionHandler.mountPolicy)
+// deliberately do NOT get these roots: an extension may not ask for a path the
+// user configured for a project, only the sandbox runtime lends it.
 func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
 	var (
 		workspaceDir  string
 		extensionsDir string
 		projectPaths  []string
+		projectMounts []string
 	)
 	if sm != nil {
 		workspaceDir = sm.workspaceDir
@@ -149,8 +164,15 @@ func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
 			log.Printf("[ext-sandbox] WARNING: cannot list project paths for the mount allowlist: %v", err)
 			projectPaths = nil
 		}
+		if projectMounts, err = sm.store.ListProjectSandboxMountPaths(); err != nil {
+			log.Printf("[ext-sandbox] WARNING: cannot list project sandbox mounts for the mount allowlist: %v", err)
+			projectMounts = nil
+		}
 	}
-	return newMountPolicy(mountRoots(extensionsDir, workspaceDir, projectPaths))
+	return newMountPolicyWithReadOnly(
+		append(mountRoots(extensionsDir, workspaceDir, projectPaths), projectMounts...),
+		projectMounts,
+	)
 }
 
 // extensionMemoryLimit resolves the memory limit (MB) for an extension's
@@ -238,8 +260,11 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 			log.Printf("[ext-sandbox] ext=%s SKIPPED mount (container %q): %v", ext.ID, m.ContainerPath, err)
 			continue
 		}
+		// Read-only unless the caller asked for write access to a path the app owns.
+		// A path that only exists because a user configured it for a project stays
+		// read-only no matter what mode was requested.
 		mode := "ro"
-		if m.Mode == "rw" {
+		if m.Mode == "rw" && !policy.ForceReadOnly(resolved) {
 			mode = "rw"
 		}
 		createArgs = append(createArgs,
@@ -342,7 +367,7 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 
 	log.Printf("[ext-sandbox] ext=%s created and started container %s (mounts: %d projects)", ext.ID, containerName, len(projectMounts))
 
-	// Snapshot of the extension's custom mounts for compatibility checks.
+	// Snapshot of the extension's custom mounts and own envs for compatibility checks.
 	customMounts := customMountSnapshot(ext.SandboxConfig.Mounts)
 
 	// Store state
@@ -354,6 +379,7 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		projectMounts:   projectMounts,
 		mountedProjects: mountedProjects,
 		customMounts:    customMounts,
+		envs:            envSnapshot(ext.SandboxConfig.Envs),
 	}
 
 	return nil, nil
@@ -665,13 +691,48 @@ func customMountSnapshot(mounts []types.SandboxMount) []string {
 	return snap
 }
 
-// MountsCompatible checks if the current sandbox mounts match the desired set.
-// Returns true if the mounted projects and custom extension mounts match,
-// false if the container needs recreation.
-func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[string]string, desiredCustom []types.SandboxMount) bool {
-	state := sm.states[extID]
-	if state == nil {
+// envSnapshot returns a sorted "KEY=VALUE" list of the extension's own container
+// environment, suitable for equality comparison.
+func envSnapshot(envs []types.SandboxEnv) []string {
+	if len(envs) == 0 {
+		return nil
+	}
+	snap := make([]string, len(envs))
+	for i, e := range envs {
+		snap[i] = e.Key + "=" + e.Value
+	}
+	sort.Strings(snap)
+	return snap
+}
+
+// equalStrings reports whether two sorted snapshots are identical.
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
 		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// MountsCompatible checks whether a live sandbox still matches what the caller
+// would create. It returns false plus a human-readable reason when the container
+// must be recreated — a different project set, different mounts, or different
+// extension-declared envs (a container's env is fixed at `podman create`).
+//
+// desiredEnvs is the extension's *own* env list (manifest + user config) only.
+// Per-session values detected at runtime are deliberately not part of this
+// comparison: they address one workspace's language server, and letting them in
+// would make one project's module cache restart every other project's server.
+func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[string]string, desiredCustom []types.SandboxMount, desiredEnvs []types.SandboxEnv) (bool, string) {
+	sm.mu.Lock()
+	state := sm.states[extID]
+	sm.mu.Unlock()
+	if state == nil {
+		return false, "no sandbox"
 	}
 	// Compare sorted lists of project host paths
 	desiredSorted := make([]string, 0, len(desired))
@@ -679,25 +740,18 @@ func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[st
 		desiredSorted = append(desiredSorted, p)
 	}
 	sort.Strings(desiredSorted)
-	if len(desiredSorted) != len(state.mountedProjects) {
-		return false
-	}
-	for i := range desiredSorted {
-		if desiredSorted[i] != state.mountedProjects[i] {
-			return false
-		}
+	if !equalStrings(desiredSorted, state.mountedProjects) {
+		return false, "project mounts changed"
 	}
 	// Compare custom extension mounts (e.g. node_modules)
-	desiredCustomSnap := customMountSnapshot(desiredCustom)
-	if len(desiredCustomSnap) != len(state.customMounts) {
-		return false
+	if !equalStrings(customMountSnapshot(desiredCustom), state.customMounts) {
+		return false, "mounts changed"
 	}
-	for i := range desiredCustomSnap {
-		if desiredCustomSnap[i] != state.customMounts[i] {
-			return false
-		}
+	// Compare the extension's own container env
+	if !equalStrings(envSnapshot(desiredEnvs), state.envs) {
+		return false, "envs changed"
 	}
-	return true
+	return true, ""
 }
 
 // ListRunning returns all running extension sandboxes with their status.

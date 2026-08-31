@@ -6,6 +6,8 @@ import {
     sortPermissions,
     hasNetworkCapability,
     requiresInstallReview,
+    hasSandboxProbe,
+    SANDBOX_PROBE_INFO,
 } from '../extension-permissions';
 
 describe('isDangerousPermission (sandbox-escaping permissions only)', () => {
@@ -158,5 +160,54 @@ describe('requiresInstallReview (network capability OR dangerous permissions)', 
 
     it('does not treat a legacy "proxy" key as the network capability', () => {
         expect(requiresInstallReview({ capabilities: { proxy: { allowed_domains: ['x.dev'] } } })).toBe(false);
+    });
+});
+
+describe('hasSandboxProbe (an LSP extension asking the project sandbox)', () => {
+    it('is true for a registry entry carrying the derived marker', () => {
+        expect(hasSandboxProbe({ lsp: { language: 'go', sandbox_probe: true } })).toBe(true);
+    });
+
+    it('is true for an installed manifest declaring detect', () => {
+        expect(
+            hasSandboxProbe({
+                lsp: { language: 'go', sandbox: { detect: [{ command: 'go', args: ['env', 'GOMODCACHE'] }] } },
+            }),
+        ).toBe(true);
+    });
+
+    it('is false for an LSP extension that declares no probe', () => {
+        expect(hasSandboxProbe({ lsp: { language: 'go', sandbox: { envs: [] } } })).toBe(false);
+        expect(hasSandboxProbe({ lsp: { language: 'go', sandbox: { detect: [] } } })).toBe(false);
+        expect(hasSandboxProbe({ lsp: { language: 'go' } })).toBe(false);
+    });
+
+    it('is false without lsp capabilities, or with none at all', () => {
+        expect(hasSandboxProbe({ network: { allowed_domains: ['x.dev'] } })).toBe(false);
+        expect(hasSandboxProbe({})).toBe(false);
+        expect(hasSandboxProbe(null)).toBe(false);
+        expect(hasSandboxProbe(undefined)).toBe(false);
+    });
+
+    it('does not treat a probe marker of another type as its own', () => {
+        expect(hasSandboxProbe({ lsp: { sandbox_probe: 'yes' } })).toBe(false);
+    });
+
+    it('is disclosed to the user in plain words before install', () => {
+        // The whole reason for the review: a command the extension wrote runs
+        // somewhere, and the sentence has to say where and why.
+        expect(SANDBOX_PROBE_INFO.label.length).toBeGreaterThan(0);
+        expect(SANDBOX_PROBE_INFO.description).toMatch(/sandbox/i);
+        expect(SANDBOX_PROBE_INFO.description).toMatch(/never runs on/i);
+    });
+});
+
+describe('requiresInstallReview also covers an LSP sandbox probe', () => {
+    it('is true when the only thing to disclose is the probe', () => {
+        expect(requiresInstallReview({ capabilities: { lsp: { sandbox_probe: true } } })).toBe(true);
+    });
+
+    it('stays false for an ordinary language server', () => {
+        expect(requiresInstallReview({ capabilities: { lsp: { language: 'go', extensions: ['.go'] } } })).toBe(false);
     });
 });

@@ -2426,6 +2426,109 @@ func (te *TaskExecutor) formatLSPDiagnostics(filePath string, diagnostics []LSPD
 	return header + "\n" + strings.Join(issues, "\n")
 }
 
+// lspHandshake performs the LSP initialize/initialized exchange for a workspace
+// session and reports whether the server is ready to take document requests.
+//
+// It is called once per session, not once per file: `initialize` is a per-process
+// request, and gopls answers a second one with an error — after which the server
+// that is answering has never been told which workspace it is looking at.
+func (te *TaskExecutor) lspHandshake(ctx context.Context, proc *lsp.LSPProcess, subCh chan json.RawMessage, worktreePath, lang string, cfg *lsp.ServerConfig, taskID string) bool {
+	// Step 1: LSP initialize (required before any textDocument requests)
+	initReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"processId":        os.Getpid(),
+			"clientInfo":       map[string]any{"name": "kanban-lsp-diag", "version": "1.0"},
+			"rootUri":          "file://" + worktreePath,
+			"workspaceFolders": []map[string]any{{"uri": "file://" + worktreePath, "name": "workspace"}},
+			"capabilities": map[string]any{
+				"textDocument": map[string]any{
+					"publishDiagnostics": map[string]any{
+						"relatedInformation": true,
+						"tagSupport":         map[string]any{"valueSet": []int{1, 2}},
+					},
+				},
+				"workspace": map[string]any{
+					"workspaceFolders": true,
+				},
+			},
+		},
+	}
+	// Merge server-specific init params overrides (e.g., tsserver.path for TypeScript)
+	if cfg.InitParamsOverride != nil {
+		params := initReq["params"].(map[string]any)
+		for k, v := range cfg.InitParamsOverride {
+			if existing, ok := params[k].(map[string]any); ok {
+				if override, ok := v.(map[string]any); ok {
+					for ok2, ov := range override {
+						existing[ok2] = ov
+					}
+				} else {
+					params[k] = v
+				}
+			} else {
+				params[k] = v
+			}
+		}
+	}
+	initMsg, _ := json.Marshal(initReq)
+	if err := te.lspMgr.SendToServer(proc, initMsg); err != nil {
+		log.Printf("[lsp-diag] task=%s initialize failed: %v", taskID, err)
+		return false
+	}
+
+	// Wait for initialize response
+	initTimer := time.After(10 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-initTimer:
+			log.Printf("[lsp-diag] task=%s initialize timeout", taskID)
+			return false
+		case raw, ok := <-subCh:
+			if !ok {
+				return false
+			}
+			var resp struct {
+				JSONRPC string `json:"jsonrpc"`
+				ID      *int   `json:"id"`
+				Result  any    `json:"result"`
+				Error   *struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(raw, &resp); err != nil {
+				continue
+			}
+			if resp.ID != nil && *resp.ID == 1 {
+				if resp.Error != nil {
+					log.Printf("[lsp-diag] task=%s initialize error: %s", taskID, resp.Error.Message)
+					return false
+				}
+				log.Printf("[lsp-diag] task=%s initialize successful", taskID)
+				goto initialized
+			}
+		}
+	}
+initialized:
+	// Step 2: Send initialized notification (fire-and-forget, no response expected)
+	initNotif := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "initialized",
+		"params":  map[string]any{},
+	}
+	initNotifMsg, _ := json.Marshal(initNotif)
+	if err := te.lspMgr.LSPNotify(proc, initNotifMsg); err != nil {
+		log.Printf("[lsp-diag] task=%s initialized notification failed: %v", taskID, err)
+		return false
+	}
+	return true
+}
+
 func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, taskID, filePath string) string {
 	// Bound this file's whole pass. Derived from the caller's ctx, so stopping the task
 	// ends it; given a deadline, so a silent language server cannot park this goroutine.
@@ -2471,98 +2574,15 @@ func (te *TaskExecutor) triggerLSPDiagnostics(ctx context.Context, projectID, ta
 	absPath := filepath.Join(worktreePath, relPath)
 	uri := "file://" + absPath
 
-	// Step 1: LSP initialize handshake (required before any textDocument requests)
-	initReq := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "initialize",
-		"params": map[string]any{
-			"processId":        os.Getpid(),
-			"clientInfo":       map[string]any{"name": "kanban-lsp-diag", "version": "1.0"},
-			"rootUri":          "file://" + worktreePath,
-			"workspaceFolders": []map[string]any{{"uri": "file://" + worktreePath, "name": "workspace"}},
-			"capabilities": map[string]any{
-				"textDocument": map[string]any{
-					"publishDiagnostics": map[string]any{
-						"relatedInformation": true,
-						"tagSupport":         map[string]any{"valueSet": []int{1, 2}},
-					},
-				},
-				"workspace": map[string]any{
-					"workspaceFolders": true,
-				},
-			},
-		},
-	}
-	// Merge server-specific init params overrides (e.g., tsserver.path for TypeScript)
-	if cfg.InitParamsOverride != nil {
-		params := initReq["params"].(map[string]any)
-		for k, v := range cfg.InitParamsOverride {
-			if existing, ok := params[k].(map[string]any); ok {
-				if override, ok := v.(map[string]any); ok {
-					for ok2, ov := range override {
-						existing[ok2] = ov
-					}
-				} else {
-					params[k] = v
-				}
-			} else {
-				params[k] = v
-			}
-		}
-	}
-	initMsg, _ := json.Marshal(initReq)
-	if err := te.lspMgr.SendToServer(proc, initMsg); err != nil {
-		log.Printf("[lsp-diag] task=%s initialize failed: %v", taskID, err)
-		return ""
-	}
-
-	// Wait for initialize response
-	initTimer := time.After(10 * time.Second)
-	for {
-		select {
-		case <-ctx.Done():
+	// Step 1: LSP initialize handshake (required before any textDocument requests).
+	// Skipped when this session is already initialized: `initialize` is per-process,
+	// and a server that is asked twice answers the second request with an error and
+	// never learns about this workspace again.
+	if !te.lspMgr.SessionInitialized(worktreePath, lang) {
+		if !te.lspHandshake(ctx, proc, subCh, worktreePath, lang, cfg, taskID) {
 			return ""
-		case <-initTimer:
-			log.Printf("[lsp-diag] task=%s initialize timeout", taskID)
-			return ""
-		case raw, ok := <-subCh:
-			if !ok {
-				return ""
-			}
-			var resp struct {
-				JSONRPC string `json:"jsonrpc"`
-				ID      *int   `json:"id"`
-				Result  any    `json:"result"`
-				Error   *struct {
-					Code    int    `json:"code"`
-					Message string `json:"message"`
-				} `json:"error"`
-			}
-			if err := json.Unmarshal(raw, &resp); err != nil {
-				continue
-			}
-			if resp.ID != nil && *resp.ID == 1 {
-				if resp.Error != nil {
-					log.Printf("[lsp-diag] task=%s initialize error: %s", taskID, resp.Error.Message)
-					return ""
-				}
-				log.Printf("[lsp-diag] task=%s initialize successful", taskID)
-				goto initialized
-			}
 		}
-	}
-initialized:
-	// Step 2: Send initialized notification (fire-and-forget, no response expected)
-	initNotif := map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "initialized",
-		"params":  map[string]any{},
-	}
-	initNotifMsg, _ := json.Marshal(initNotif)
-	if err := te.lspMgr.LSPNotify(proc, initNotifMsg); err != nil {
-		log.Printf("[lsp-diag] task=%s initialized notification failed: %v", taskID, err)
-		return ""
+		te.lspMgr.MarkSessionInitialized(worktreePath, lang)
 	}
 
 	// Step 3: Read file content and send didOpen (fire-and-forget notification)
@@ -2571,7 +2591,6 @@ initialized:
 		log.Printf("[lsp-diag] task=%s ReadFile failed: %v", taskID, err)
 		return ""
 	}
-
 	didOpen := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "textDocument/didOpen",
@@ -2619,7 +2638,15 @@ initialized:
 			if envelope.Method != "textDocument/publishDiagnostics" || envelope.Params.Uri != uri {
 				continue
 			}
-			errMsg := te.formatLSPDiagnostics(relPath, envelope.Params.Diagnostics)
+			// A server that cannot load the project answers with confident guesses
+			// about it. Drop those before they reach the model; keep everything else.
+			env := te.lspMgr.Environment(worktreePath, relPath)
+			findings := filterUnresolvable(env, envelope.Params.Diagnostics)
+			if len(findings) < len(envelope.Params.Diagnostics) {
+				log.Printf("[lsp-diag] task=%s suppressed %d unresolvable finding(s): %s", taskID,
+					len(envelope.Params.Diagnostics)-len(findings), env.Note)
+			}
+			errMsg := te.formatLSPDiagnostics(relPath, findings)
 			if errMsg != "" {
 				log.Printf("[lsp-diag] task=%s diagnostic hint: %s", taskID, errMsg)
 				return errMsg

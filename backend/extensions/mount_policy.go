@@ -55,14 +55,19 @@ var deniedCapabilities = map[string]string{
 // empty allowlist.
 type MountPolicy struct {
 	roots []string
+	// readOnlyRoots are roots the sandbox may read but never write. They are the
+	// host paths a project's own Sandbox Configuration declares — borrowed so a
+	// language server can see the same caches its workspace sees (a Go module
+	// cache, a node_modules bind) — and a third-party extension must never be able
+	// to turn one of them into a writable host directory.
+	readOnlyRoots []string
 }
 
-// newMountPolicy builds a policy from raw root paths. Each is made absolute and
-// symlink-resolved (a root that does not exist yet keeps its cleaned absolute
-// form) so it matches the resolved form of a candidate path. Blanks and
-// duplicates are dropped.
-func newMountPolicy(roots []string) *MountPolicy {
-	p := &MountPolicy{}
+// normalizeRoots makes each root absolute, symlink-resolved and cleaned, dropping
+// blanks and duplicates, so a candidate path is compared against the same form it
+// will be resolved to.
+func normalizeRoots(roots []string) []string {
+	out := make([]string, 0, len(roots))
 	seen := map[string]bool{}
 	for _, raw := range roots {
 		raw = strings.TrimSpace(raw)
@@ -83,9 +88,22 @@ func newMountPolicy(roots []string) *MountPolicy {
 			continue
 		}
 		seen[abs] = true
-		p.roots = append(p.roots, abs)
+		out = append(out, abs)
 	}
-	return p
+	return out
+}
+
+// newMountPolicy builds a policy from raw root paths. Each is made absolute and
+// symlink-resolved (a root that does not exist yet keeps its cleaned absolute
+// form) so it matches the resolved form of a candidate path.
+func newMountPolicy(roots []string) *MountPolicy {
+	return &MountPolicy{roots: normalizeRoots(roots)}
+}
+
+// newMountPolicyWithReadOnly is newMountPolicy plus the subset of those roots that
+// may only ever be bind-mounted read-only.
+func newMountPolicyWithReadOnly(roots, readOnlyRoots []string) *MountPolicy {
+	return &MountPolicy{roots: normalizeRoots(roots), readOnlyRoots: normalizeRoots(readOnlyRoots)}
 }
 
 // Roots returns a copy of the policy's allowlist roots.
@@ -191,17 +209,33 @@ func resolvePath(p string) (string, error) {
 	}
 }
 
-// insideRoot reports whether the resolved path is one of the roots or below it.
-func (p *MountPolicy) insideRoot(resolved string) bool {
-	if p == nil {
-		return false
-	}
-	for _, root := range p.roots {
+// insideAny reports whether the resolved path is one of roots or below it.
+func insideAny(resolved string, roots []string) bool {
+	for _, root := range roots {
 		if resolved == root || strings.HasPrefix(resolved, root+string(filepath.Separator)) {
 			return true
 		}
 	}
 	return false
+}
+
+// insideRoot reports whether the resolved path is one of the roots or below it.
+func (p *MountPolicy) insideRoot(resolved string) bool {
+	if p == nil {
+		return false
+	}
+	return insideAny(resolved, p.roots)
+}
+
+// ForceReadOnly reports whether a host path comes from a project's Sandbox
+// Configuration rather than from the app's own roots, in which case the mount is
+// read-only whatever the caller asked for. Call it with a resolved path (see
+// ValidateHostPath).
+func (p *MountPolicy) ForceReadOnly(resolved string) bool {
+	if p == nil {
+		return true
+	}
+	return insideAny(resolved, p.readOnlyRoots)
 }
 
 // ValidateHostPath checks a mount's host path: absolute, no ".." segment, and

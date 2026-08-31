@@ -179,7 +179,10 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 
 	extRegistry := extensions.NewRegistryClient()
 	s.extSandboxMgr = extensions.NewExtensionSandboxManager(extRegistry, s.extStore)
-	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store)
+	s.extLSPMgr = lsp.NewExtensionLSPManager(s.extStore, s.extSandboxMgr, store) // A language extension may ask where the workspace keeps the code it resolves.
+	// That question is answered inside the task's own container — never on the host
+	// — so the LSP manager needs the task sandbox manager as its prober.
+	s.extLSPMgr.SetTaskProber(sandbox.NewTaskProbe(s.sandboxMgr))
 
 	// Provider request adapter — enabled `llm` extensions map MIKE's requests
 	// to provider-specific formats. Mappings come from each extension's
@@ -215,7 +218,16 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	// Bootstrap built-in extensions
 	// (Removed built-in bootstrapping to decouple extensions from core)
 	s.extHandler = extensions.NewExtensionHandler(s.extStore, s.extSandboxMgr, extRegistry, extCfg)
-
+	// Settings → Extensions shows one honest sentence when a language server cannot
+	// resolve the project it is serving — the state behind diagnostics core
+	// deliberately withheld rather than forwarded as fact.
+	s.extHandler.SetEnvironmentStatus(func(extID string) *extensions.EnvironmentStatus {
+		healthy, note := s.extLSPMgr.EnvironmentSummary(extID)
+		if healthy || note == "" {
+			return nil
+		}
+		return &extensions.EnvironmentStatus{Healthy: false, Note: note}
+	})
 	// LSP handler for language server WebSocket bridging
 	// Use extension-based registry and manager for dynamic LSP discovery
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)

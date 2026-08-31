@@ -63,6 +63,7 @@ type SandboxManager struct {
 	rt            *sandboxruntime.Runtime
 	active        map[string]string          // taskID -> containerName
 	mountPaths    map[string]string          // taskID -> mount path inside container
+	worktreePaths map[string]string          // taskID -> host worktree path mounted at mountPaths[taskID]
 	agents        map[string]*agentConn      // taskID -> agent pipes + process
 	clients       map[string]*sandbox.Client // taskID -> agent client (cached)
 	livenessCache map[string]time.Time       // taskID -> last time running was confirmed
@@ -77,6 +78,7 @@ func NewSandboxManager() *SandboxManager {
 		rt:            rt,
 		active:        make(map[string]string),
 		mountPaths:    make(map[string]string),
+		worktreePaths: make(map[string]string),
 		agents:        make(map[string]*agentConn),
 		clients:       make(map[string]*sandbox.Client),
 		livenessCache: make(map[string]time.Time),
@@ -451,6 +453,10 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 
 	sm.active[taskID] = containerName
 	sm.mountPaths[taskID] = mountPath
+	// The host side of the workspace bind mount, recorded so a caller holding a
+	// host workspace path (the executor, a language extension's probe) can find
+	// the container that already has it mounted.
+	sm.worktreePaths[taskID] = filepath.Clean(worktreePath)
 	sm.agents[taskID] = &agentConn{cmd: agentCmd, stdin: stdin, stdout: stdout}
 
 	log.Printf("[sandbox] task=%s agent ready", taskID)
@@ -801,6 +807,7 @@ func (sm *SandboxManager) Stop(taskID string) error {
 	}
 	delete(sm.livenessCache, taskID)
 	delete(sm.cgroupDirs, taskID)
+	delete(sm.worktreePaths, taskID)
 	sm.mu.Unlock()
 
 	// Close agent client
