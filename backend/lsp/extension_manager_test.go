@@ -1,7 +1,9 @@
 package lsp
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -309,9 +311,44 @@ func TestExtensionLSPManager_GetOrCreate_NoExtension(t *testing.T) {
 	sandbox := extensions.NewExtensionSandboxManager(reg, store)
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
-	_, err := mgr.GetOrCreate("/tmp/workspace", "go", nil)
+	_, err := mgr.GetOrCreate(context.Background(), "/tmp/workspace", "go", nil)
 	if err == nil {
 		t.Error("GetOrCreate() = nil, want error (no extension)")
+	}
+}
+
+// TestExtensionLSPManager_GetOrCreate_ContextCancelled: a cancelled caller must not go
+// on creating sandboxes and starting servers for a caller that already left.
+func TestExtensionLSPManager_GetOrCreate_ContextCancelled(t *testing.T) {
+	store := testExtensionStore(t)
+	if err := store.InitSchema(); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	// Installed, so only the cancelled context can fail this call.
+	ext := makeTestLSPExt("typescript", "typescript")
+	if err := store.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	reg := extensions.NewRegistryClient()
+	sandbox := extensions.NewExtensionSandboxManager(reg, store)
+	mgr := NewExtensionLSPManager(store, sandbox, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetOrCreate(ctx, "/tmp/workspace", "typescript", nil)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("GetOrCreate() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetOrCreate ignored a cancelled context")
 	}
 }
 

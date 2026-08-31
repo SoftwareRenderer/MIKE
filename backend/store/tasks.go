@@ -49,40 +49,33 @@ func (s *Store) CreateTask(t *types.Task) error {
 	return err
 }
 
-// GetTask retrieves a task by project and task ID.
+// GetTask retrieves a task by ID within a project.
 func (s *Store) GetTask(projectID, taskID string) (*types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.queryTask(projectID, taskID)
+	return s.queryTask(`id = ? AND project_id = ?`, taskID, projectID)
 }
 
 // GetTaskByID retrieves a task by its ID alone (without project ID).
 func (s *Store) GetTaskByID(taskID string) (*types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	row := s.db.QueryRow(
-		`SELECT `+taskColumns+` FROM tasks WHERE id = ?`,
-		taskID,
-	)
-	var t types.Task
-	err := scanTask(row, &t)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("task not found")
-	}
-	return &t, err
+	return s.queryTask(`id = ?`, taskID)
 }
 
-func (s *Store) queryTask(projectID, taskID string) (*types.Task, error) {
-	row := s.db.QueryRow(
-		`SELECT `+taskColumns+` FROM tasks WHERE id = ? AND project_id = ?`,
-		taskID, projectID,
-	)
+// queryTask reads a single task matched by `WHERE <where>`. Callers must hold
+// s.mu. sql.ErrNoRows is mapped to a plain "task not found": every caller treats
+// a missing row the same way, and doing it here keeps the two readers identical.
+func (s *Store) queryTask(where string, args ...any) (*types.Task, error) {
 	var t types.Task
-	err := scanTask(row, &t)
+	err := scanTask(s.db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE `+where, args...), &t)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("task not found")
 	}
-	return &t, err
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
 }
 
 // GetTasksByProject returns all tasks for a project, newest created first. The board
@@ -90,14 +83,13 @@ func (s *Store) queryTask(projectID, taskID string) (*types.Task, error) {
 func (s *Store) GetTasksByProject(projectID string) ([]types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.queryTasksByProject(projectID)
+	return s.queryTasks(`project_id = ? ORDER BY created_at DESC, rowid DESC`, projectID)
 }
 
-func (s *Store) queryTasksByProject(projectID string) ([]types.Task, error) {
-	rows, err := s.db.Query(
-		`SELECT `+taskColumns+` FROM tasks WHERE project_id = ? ORDER BY created_at DESC, rowid DESC`,
-		projectID,
-	)
+// queryTasks reads every task matched by `WHERE <where>` (which may carry its own
+// ORDER BY). Callers must hold s.mu.
+func (s *Store) queryTasks(where string, args ...any) ([]types.Task, error) {
+	rows, err := s.db.Query(`SELECT `+taskColumns+` FROM tasks WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -119,22 +111,7 @@ func (s *Store) queryTasksByProject(projectID string) ([]types.Task, error) {
 func (s *Store) GetInFlightTasks() ([]types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(
-		`SELECT ` + taskColumns + ` FROM tasks WHERE execution_state IN ('running', 'pulling_image')`,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	tasks := []types.Task{}
-	for rows.Next() {
-		var t types.Task
-		if err := scanTask(rows, &t); err != nil {
-			return nil, err
-		}
-		tasks = append(tasks, t)
-	}
-	return tasks, rows.Err()
+	return s.queryTasks(`execution_state IN ('running', 'pulling_image')`)
 }
 
 // GetPendingIdleTasks returns the tasks shown as "In Progress + Pending". Nothing may rest
@@ -143,22 +120,7 @@ func (s *Store) GetInFlightTasks() ([]types.Task, error) {
 func (s *Store) GetPendingIdleTasks() ([]types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(
-		`SELECT ` + taskColumns + ` FROM tasks WHERE status = 'in_progress' AND execution_state = 'idle' ORDER BY updated_at ASC`,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	tasks := []types.Task{}
-	for rows.Next() {
-		var t types.Task
-		if err := scanTask(rows, &t); err != nil {
-			return nil, err
-		}
-		tasks = append(tasks, t)
-	}
-	return tasks, rows.Err()
+	return s.queryTasks(`status = 'in_progress' AND execution_state = 'idle' ORDER BY updated_at ASC`)
 }
 
 // UpdateTaskSessionCost updates only the session_cost of a task. Targeted
@@ -385,23 +347,7 @@ func (s *Store) GetAllTaskBranches() ([]string, error) {
 func (s *Store) GetChildren(taskID string) ([]types.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(
-		`SELECT `+taskColumns+` FROM tasks WHERE parent_task_id = ? ORDER BY created_at DESC, rowid DESC`,
-		taskID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	tasks := []types.Task{}
-	for rows.Next() {
-		var t types.Task
-		if err := scanTask(rows, &t); err != nil {
-			return nil, err
-		}
-		tasks = append(tasks, t)
-	}
-	return tasks, rows.Err()
+	return s.queryTasks(`parent_task_id = ? ORDER BY created_at DESC, rowid DESC`, taskID)
 }
 
 // GetAllDescendants recursively returns all descendant tasks (children, grandchildren, etc.).

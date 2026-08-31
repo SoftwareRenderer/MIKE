@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -25,6 +26,10 @@ type ServerConfig struct {
 	Language           string         // language identifier, e.g., "go", "typescript"
 	InitParamsOverride map[string]any // merged into initialize params sent to server
 }
+
+// lspStartTimeout bounds `lsp_start`. The bridge answers as soon as it has spawned the
+// server, so this only ever waits on a bridge that stopped answering.
+const lspStartTimeout = 30 * time.Second
 
 // ExtensionLSPManager manages LSP processes through extension sandboxes.
 // It implements the lspManager interface and uses the extension system
@@ -193,7 +198,12 @@ func (m *ExtensionLSPManager) GetRegistry() *ExtensionRegistry {
 
 // GetOrCreate gets or creates an LSP connection for the given workspace and language.
 // It looks up the matching extension by file extension and starts the LSP server in the sandbox.
-func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error) {
+// ctx bounds creation, including `lsp_start` — see lspStartTimeout.
+func (m *ExtensionLSPManager) GetOrCreate(ctx context.Context, workspacePath, language string, cfg *ServerConfig) (*LSPProcess, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	workspaceKey := processKey(workspacePath, language)
 
 	m.mu.Lock()
@@ -232,7 +242,6 @@ func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *S
 
 	// Start (or restart) the LSP server process in the sandbox.
 	// Always called — the agent restarts the LSP if already running.
-	ctx := context.Background()
 	lspConfig := ext.Manifest.Capabilities.GetLSP()
 	if lspConfig == nil {
 		return nil, fmt.Errorf("extension %s has no LSP config", ext.Name)
@@ -241,7 +250,9 @@ func (m *ExtensionLSPManager) GetOrCreate(workspacePath, language string, cfg *S
 	command := lspConfig.Command
 	args := lspConfig.Args
 
-	if err := bridgeClient.LSPStart(ctx, command, args); err != nil {
+	startCtx, cancelStart := context.WithTimeout(ctx, lspStartTimeout)
+	defer cancelStart()
+	if err := bridgeClient.LSPStart(startCtx, command, args); err != nil {
 		return nil, fmt.Errorf("start LSP server in sandbox: %w", err)
 	}
 
@@ -422,7 +433,22 @@ func (m *ExtensionLSPManager) LSPNotify(process *LSPProcess, msg json.RawMessage
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	return sc.bridgeClient.LSPNotify(ctx, translated)
+	if err := sc.bridgeClient.LSPNotify(ctx, translated); err != nil {
+		// Drop the client so the next call reconnects, as in SendToServer.
+		m.mu.Lock()
+		if sc2, ok2 := m.clients[workspaceKey]; ok2 && sc2 == sc {
+			delete(m.clients, workspaceKey)
+		}
+		m.mu.Unlock()
+		// A stalled write means the bridge stopped reading. Closing it makes the next
+		// GetOrCreate start a fresh bridge: extension sandboxes get new pipes.
+		if errors.Is(err, sandbox.ErrWriteStalled) {
+			log.Printf("[lsp] bridge write stalled for workspace=%s lang=%s, retiring client", process.Workspace, process.Language)
+			_ = sc.bridgeClient.Close()
+		}
+		return fmt.Errorf("notify LSP server: %w", err)
+	}
+	return nil
 }
 
 // ServerMessageCh returns a channel that receives messages from LSP servers.
@@ -599,7 +625,10 @@ func (m *ExtensionLSPManager) LSPRequest(workspacePath, filePath, method string,
 		if err != nil {
 			return nil, fmt.Errorf("create sandbox: %w", err)
 		}
-		if err := bridgeClient.LSPStart(context.Background(), lspCfg.Command, lspCfg.Args); err != nil {
+		startCtx, cancelStart := context.WithTimeout(context.Background(), lspStartTimeout)
+		err = bridgeClient.LSPStart(startCtx, lspCfg.Command, lspCfg.Args)
+		cancelStart()
+		if err != nil {
 			return nil, fmt.Errorf("start LSP server: %w", err)
 		}
 		// Forward notifications from this sandbox

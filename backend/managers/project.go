@@ -779,24 +779,9 @@ func repoNameFromGitURL(gitURL string) (string, error) {
 // generateProjectID generates a project ID from path (basename or slugified).
 func generateProjectID(path string, existingIDs []string) string {
 	base := filepath.Base(path)
-	if !slicesContains(existingIDs, base) {
+	if !slices.Contains(existingIDs, base) {
 		return base
 	}
-	// Collision — slugify the full path
-	slug := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			return r
-		}
-		return '-'
-	}, path)
-	// Collapse multiple dashes and trim leading/trailing dashes
-	for strings.Contains(slug, "--") {
-		slug = strings.ReplaceAll(slug, "--", "-")
-	}
-	slug = strings.Trim(slug, "-")
-	return strings.ToLower(slug)
-}
-
-func slicesContains(slice []string, s string) bool {
-	return slices.Contains(slice, s)
+	// Collision — slug the full path so colliding basenames stay distinguishable.
+	return types.Slugify(path, 0)
 }

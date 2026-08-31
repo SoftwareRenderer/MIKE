@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"kanban/backend/agent"
-	"kanban/backend/git"
 	"kanban/backend/prompts"
 	"kanban/backend/stream"
 	"kanban/backend/types"
@@ -509,20 +508,14 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 	if task.AutoCommit {
 		if task.HasMergeConflict {
 			log.Printf("[agent] task=%s agent finished resolving conflicts, committing resolution", task.ID)
-			conflictedFiles := GetResolvedConflictedFiles(worktreePath)
-			commitOK := true
-			if len(conflictedFiles) > 0 {
-				addArgs := append([]string{"add"}, conflictedFiles...)
-				if err := te.gitRun(worktreePath, addArgs...); err != nil {
-					log.Printf("[agent] task=%s git add failed: %v", task.ID, err)
-					commitOK = false
-				}
-			}
+			// Same stage + commit steps the LLM loop runs (commitConflictResolution).
+			// What deliberately differs is the stash: this flow POPS it, because the
+			// agent keeps working on this turn and CommitAndMerge runs next, while the
+			// LLM loop DROPS it (its pre-sync edits are already committed, so popping
+			// would re-apply them as unstaged changes).
+			commitOK := te.stageResolvedConflicts(task.ID, worktreePath)
 			if commitOK {
-				if err := te.gitRun(worktreePath, append(git.GitAuthorFlags(), "commit", "-m", "Resolve merge conflicts")...); err != nil {
-					log.Printf("[agent] task=%s git commit failed: %v", task.ID, err)
-					commitOK = false
-				}
+				commitOK = te.commitMergeConflictResolution(task.ID, worktreePath)
 			}
 			if commitOK {
 				log.Printf("[agent] task=%s conflict resolution committed", task.ID)
