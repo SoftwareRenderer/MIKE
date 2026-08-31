@@ -4,7 +4,7 @@
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
-    import { isDangerousPermission, requiresInstallReview, sortPermissions } from '$lib/utils/extension-permissions';
+    import { isDangerousPermission, requiresInstallReview, sortPermissions, hasSandboxProbe, SANDBOX_PROBE_INFO } from '$lib/utils/extension-permissions';
     import { effectiveConfigFields, initialEditConfig, HOST_OWNED_LSP_CONFIG_KEY, type ConfigField } from '$lib/utils/extension-config';
     import { memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { orderBrowseEntries } from '$lib/composables/use-browse-order';
@@ -786,6 +786,14 @@
                                     <ToggleSwitch class="card-toggle" checked={ext.enabled} onChange={() => handleToggleEnabled(ext.id, !ext.enabled)} />
                                 </div>
                             </div>
+                            {#if ext.environment && !ext.environment.healthy}
+                                <!-- One honest sentence for the state behind the diagnostics core
+                                     withheld: the server could not resolve this project, so its
+                                     "package not found" answers were never facts about the code. -->
+                                <div class="ext-env-note" role="status">
+                                    <span class="ext-env-note-text">{ext.environment.note || 'This language server cannot resolve the project it is serving, so its unresolved-import diagnostics are being withheld.'}</span>
+                                </div>
+                            {/if}
                             {#if buildProgress[ext.name]}
                                 {@const bp = buildProgress[ext.name]}
                                 <div class="ext-build" class:ext-build-error={!!bp.error}>
@@ -1116,6 +1124,12 @@
                         {/if}
                     </div>
                 {/if}
+                {#if hasSandboxProbe(pendingInstall.entry.capabilities)}
+                    <div class="cap-permission">
+                        <span class="cap-permission-name">{SANDBOX_PROBE_INFO.label}</span>
+                        <span class="cap-permission-desc">{SANDBOX_PROBE_INFO.description}</span>
+                    </div>
+                {/if}
                 {#each pendingPerms as perm}
                     {@const info = PERMISSION_DESCRIPTIONS[perm]}
                     <div class="cap-permission">
@@ -1301,6 +1315,23 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+
+    /* The withheld-diagnostics state, in the extension's own words (its manifest
+       note). Wraps on purpose: it is a sentence to read, not a status to ellipsize. */
+    .ext-env-note {
+        margin: 0 0 0.75rem;
+        padding: 0.4rem 0.6rem;
+        border-left: 2px solid var(--color-status-yellow, #f0c000);
+        background: rgba(240, 192, 0, 0.07);
+        border-radius: 0 4px 4px 0;
+    }
+
+    .ext-env-note-text {
+        display: block;
+        font-size: 0.75rem;
+        line-height: 1.45;
+        color: var(--color-text-secondary);
     }
 
     .error-banner {

@@ -533,6 +533,18 @@ export interface ExtensionSandboxConfig {
     mounts?: SandboxMount[];
     envs?: SandboxEnv[];
     capabilities?: string[];
+    /**
+     * Commands this extension asks the project's own sandbox, to find where that
+     * language keeps the code it resolves (`{value}` in `envs` is the answer).
+     * Runs inside the sandbox — never on the host — and can only ever name a
+     * directory the user already mounted.
+     */
+    detect?: { id?: string; command: string; args?: string[]; timeout_seconds?: number; envs?: SandboxEnv[] }[];
+    /** How the extension checks that it can resolve a workspace at all, and which
+     *  diagnostic codes mean "could not load" when it cannot. */
+    environment?: { check: { command: string; args?: string[]; timeout_seconds?: number }; suppress_codes?: string[]; note?: string };
+    /** Workspace files whose change makes the language server re-read the project. */
+    reload_files?: string[];
 }
 
 export interface Extension {
@@ -556,6 +568,14 @@ export interface Extension {
     built_at: string;
     repo?: string;
     commit?: string;
+    /**
+     * Runtime report for a language-server extension that declares an environment
+     * check: can it actually resolve the workspace it is serving? When it cannot,
+     * the server withholds that extension's unresolvable diagnostics instead of
+     * reporting them as errors in the user's code — `note` is the sentence that
+     * stands in for them. Absent for every other extension, and while healthy.
+     */
+    environment?: { healthy: boolean; note?: string };
 }
 
 export interface RegistryEntry {

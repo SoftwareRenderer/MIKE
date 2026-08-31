@@ -44,8 +44,8 @@ type Client struct {
 	readDone chan struct{}
 	closed   bool
 	// lspNotificationCh receives LSP server notifications (e.g., publishDiagnostics)
-	// forwarded from the sandbox bridge.
-	lspNotificationCh chan json.RawMessage
+	// forwarded from the sandbox bridge, attributed to the session that produced them.
+	lspNotificationCh chan protocol.LSPNotification
 }
 
 // pendingReq tracks an in-flight request.
@@ -80,7 +80,7 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser) *Client {
 		conn:              conn,
 		pending:           make(map[uint32]*pendingReq),
 		readDone:          make(chan struct{}),
-		lspNotificationCh: make(chan json.RawMessage, 64),
+		lspNotificationCh: make(chan protocol.LSPNotification, 64),
 	}
 	c.nextID.Store(1)
 	go c.readLoop()
@@ -118,9 +118,22 @@ func (c *Client) readDoneClosed() bool {
 }
 
 // LSPNotificationCh returns a channel that receives LSP server notifications
-// (e.g., publishDiagnostics) forwarded from the sandbox bridge.
-func (c *Client) LSPNotificationCh() <-chan json.RawMessage {
+// (e.g., publishDiagnostics) forwarded from the sandbox bridge, each attributed
+// to the session (workspace) whose server produced it.
+func (c *Client) LSPNotificationCh() <-chan protocol.LSPNotification {
 	return c.lspNotificationCh
+}
+
+// decodeLSPNotification unwraps a forwarded notification. A bridge that does not
+// know about sessions sends the bare JSON-RPC message; that still has to reach
+// somebody, so it arrives with an empty session id for the caller to attribute
+// (or drop) rather than being guessed at here.
+func decodeLSPNotification(payload []byte) protocol.LSPNotification {
+	var env protocol.LSPNotification
+	if err := json.Unmarshal(payload, &env); err == nil && env.Raw != nil {
+		return env
+	}
+	return protocol.LSPNotification{Raw: payload}
 }
 
 // nextMsgID returns the next unique message ID.
@@ -231,8 +244,9 @@ func (c *Client) readLoop() {
 
 		// Handle LSP notifications (e.g., publishDiagnostics)
 		if frame.Type == protocol.TypeNotification && frame.MsgID == 0 {
+			notif := decodeLSPNotification(frame.Payload)
 			select {
-			case c.lspNotificationCh <- frame.Payload:
+			case c.lspNotificationCh <- notif:
 			default:
 				log.Printf("[sandbox/client] lsp notification channel full")
 			}
@@ -553,14 +567,15 @@ func (c *Client) Bash(ctx context.Context, command string, timeout int64) (*Bash
 	return holder, nil
 }
 
-// LSPSend sends a raw JSON-RPC message to the LSP server and waits for the response.
-// The raw parameter is the raw JSON-RPC message bytes.
+// LSPSend sends a raw JSON-RPC message to one LSP session and waits for the
+// response. The raw parameter is the raw JSON-RPC message bytes.
+// An empty session addresses the legacy single session.
 // Returns the raw JSON-RPC response bytes.
-func (c *Client) LSPSend(ctx context.Context, raw json.RawMessage) ([]byte, error) {
+func (c *Client) LSPSend(ctx context.Context, session string, raw json.RawMessage) ([]byte, error) {
 	ctx, cancel := lspCallCtx(ctx)
 	defer cancel()
 
-	params, _ := json.Marshal(protocol.LSPParams{Raw: raw})
+	params, _ := json.Marshal(protocol.LSPParams{Raw: raw, Session: session})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodLSP, params)
 
 	final, _, err := c.waitForCtx(ctx, frame, 0)
@@ -573,14 +588,15 @@ func (c *Client) LSPSend(ctx context.Context, raw json.RawMessage) ([]byte, erro
 	return final.Payload, nil
 }
 
-// LSPNotify sends a raw JSON-RPC notification to the LSP server without waiting for a response.
-// Use this for notifications (messages without an 'id' field) like initialized, didOpen, etc.
+// LSPNotify sends a raw JSON-RPC notification to one LSP session without waiting
+// for a response. Use this for notifications (messages without an 'id' field)
+// like initialized, didOpen, etc.
 // ctx bounds the write, which is the only thing here that can block.
-func (c *Client) LSPNotify(ctx context.Context, raw json.RawMessage) error {
+func (c *Client) LSPNotify(ctx context.Context, session string, raw json.RawMessage) error {
 	ctx, cancel := lspCallCtx(ctx)
 	defer cancel()
 
-	params, _ := json.Marshal(protocol.LSPParams{Raw: raw})
+	params, _ := json.Marshal(protocol.LSPParams{Raw: raw, Session: session})
 	// Same payload format as NewRequest: [method:1][reserved:1][jsonLen:4][json:params]
 	payload := make([]byte, 2+4+len(params))
 	payload[0] = protocol.MethodLSP
@@ -591,14 +607,36 @@ func (c *Client) LSPNotify(ctx context.Context, raw json.RawMessage) error {
 	return c.writeFrameCtx(ctx, frame)
 }
 
-// LSPStart starts the LSP server process inside the sandbox.
-// Command and args specify the LSP server to start.
+// LSPStart starts one LSP server session inside the sandbox. Several sessions
+// coexist in one sandbox — the container is shared by every project, the process
+// is not — so `session` addresses the workspace this server belongs to and `env`
+// (KEY=VALUE) applies to that process alone, on top of the container's own
+// environment. Starting a session replaces only a previous session with the same id.
 // Communication is over stdin/stdout with Content-Length framing.
-func (c *Client) LSPStart(ctx context.Context, command string, args []string) error {
+func (c *Client) LSPStart(ctx context.Context, session, command string, args, env []string) error {
 	ctx, cancel := lspCallCtx(ctx)
 	defer cancel()
 
-	params, _ := json.Marshal(protocol.LSPParams{Command: command, Args: args})
+	params, _ := json.Marshal(protocol.LSPParams{Command: command, Args: args, Session: session, Env: env})
+	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodLSP, params)
+
+	final, _, err := c.waitForCtx(ctx, frame, 0)
+	if err != nil {
+		return err
+	}
+	if final.Type == protocol.TypeError {
+		return errors.New(final.ErrorMsg())
+	}
+	return nil
+}
+
+// LSPStop terminates one LSP session. The sandbox and every other session in it
+// keep running — releasing one workspace must not evict another's server.
+func (c *Client) LSPStop(ctx context.Context, session string) error {
+	ctx, cancel := lspCallCtx(ctx)
+	defer cancel()
+
+	params, _ := json.Marshal(protocol.LSPParams{Session: session, Stop: true})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodLSP, params)
 
 	final, _, err := c.waitForCtx(ctx, frame, 0)

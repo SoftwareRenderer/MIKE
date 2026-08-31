@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"kanban/backend/extensions"
 	"kanban/backend/store"
 	"kanban/backend/types"
+	sandbox "kanban/pkg/bridge"
+	"kanban/pkg/bridge/protocol"
 )
 
 func testExtensionStore(t *testing.T) *extensions.ExtensionStore {
@@ -696,11 +700,11 @@ func TestAdaptProjectMounts(t *testing.T) {
 	}
 
 	mgr := NewExtensionLSPManager(nil, nil, projStore)
-	wsContainer := "/mnt/flint"
+	projectMounts := map[string]string{projPath: "/mnt/MIKE"}
 
 	// All project mounts are adapted: project-relative paths remapped, global
 	// paths pass through, all forced to ro.
-	mounts := mgr.adaptProjectMounts(wsPath, wsContainer)
+	mounts := mgr.adaptProjectMounts(wsPath, projectMounts)
 	if len(mounts) != 3 {
 		t.Fatalf("adaptProjectMounts returned %d mounts, want 3", len(mounts))
 	}
@@ -734,7 +738,7 @@ func TestAdaptProjectMounts(t *testing.T) {
 
 	// No project store -> nil.
 	nilMgr := NewExtensionLSPManager(nil, nil, nil)
-	if got := nilMgr.adaptProjectMounts(wsPath, wsContainer); got != nil {
+	if got := nilMgr.adaptProjectMounts(wsPath, projectMounts); got != nil {
 		t.Errorf("adaptProjectMounts(nil projects) = %v, want nil", got)
 	}
 
@@ -755,8 +759,91 @@ func TestAdaptProjectMounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	emptyMgr := NewExtensionLSPManager(nil, nil, projStore2)
-	if got := emptyMgr.adaptProjectMounts(filepath.Join(root, "empty"), "/mnt/empty"); got != nil {
+	if got := emptyMgr.adaptProjectMounts(filepath.Join(root, "empty"), nil); got != nil {
 		t.Errorf("adaptProjectMounts(no mounts) = %v, want nil", got)
+	}
+}
+
+// TestAdaptProjectMountsUnionsProjects pins the shared-sandbox property: the
+// sandbox serves every project, so every project's *global* cache mount is
+// mirrored regardless of which workspace is open, while a project-relative mount
+// (a node_modules bind, which must sit inside the opened tree) is not dragged in
+// from an unrelated project. Duplicates collapse because podman rejects two mounts
+// on one destination.
+func TestAdaptProjectMountsUnionsProjects(t *testing.T) {
+	root := t.TempDir()
+	alphaPath := filepath.Join(root, "alpha")
+	betaPath := filepath.Join(root, "beta")
+	for _, p := range []string{alphaPath, betaPath} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	projStore, err := store.NewStore(filepath.Join(t.TempDir(), "proj.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { projStore.Close() })
+
+	if err := projStore.CreateProject(&types.Project{
+		ID: "alpha", Name: "alpha", Path: alphaPath,
+		SandboxMounts: []types.SandboxMount{
+			{HostPath: "/host/go-cache", ContainerPath: "/go", Mode: "rw"},
+			{HostPath: "/host/alpha-node", ContainerPath: "/home/sandbox/alpha/frontend/node_modules", Mode: "rw"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := projStore.CreateProject(&types.Project{
+		ID: "beta", Name: "beta", Path: betaPath,
+		SandboxMounts: []types.SandboxMount{
+			// Same host+destination as alpha's: must collapse to one mount.
+			{HostPath: "/host/go-cache", ContainerPath: "/go", Mode: "rw"},
+			{HostPath: "/host/beta-cache", ContainerPath: "/root/.cache", Mode: "rw"},
+			{HostPath: "/host/beta-node", ContainerPath: "/home/sandbox/beta/node_modules", Mode: "rw"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := NewExtensionLSPManager(nil, nil, projStore)
+	projectMounts := map[string]string{alphaPath: "/mnt/alpha", betaPath: "/mnt/beta"}
+
+	mounts := mgr.adaptProjectMounts(alphaPath, projectMounts)
+
+	byContainer := map[string]types.SandboxMount{}
+	for _, mo := range mounts {
+		if _, dup := byContainer[mo.ContainerPath]; dup {
+			t.Fatalf("duplicate destination %q in %v — podman would reject the container", mo.ContainerPath, mounts)
+		}
+		byContainer[mo.ContainerPath] = mo
+	}
+
+	// Both projects' global caches are present even though only alpha is open.
+	if got, ok := byContainer["/go"]; !ok {
+		t.Error("alpha's module cache mount missing")
+	} else if got.Mode != "ro" {
+		t.Errorf("/go mount is %q, want ro", got.Mode)
+	}
+	if got, ok := byContainer["/root/.cache"]; !ok {
+		t.Error("beta's global cache mount is missing while alpha is open; the shared sandbox must carry both")
+	} else if got.HostPath != "/host/beta-cache" || got.Mode != "ro" {
+		t.Errorf("beta cache mount = %+v, want /host/beta-cache ro", got)
+	}
+
+	// The open project's workspace-scoped mount lands inside its own tree.
+	if got, ok := byContainer["/mnt/alpha/frontend/node_modules"]; !ok {
+		t.Errorf("alpha's node_modules bind was not remapped into the workspace: %v", mounts)
+	} else if got.HostPath != "/host/alpha-node" {
+		t.Errorf("node_modules host = %q, want /host/alpha-node", got.HostPath)
+	}
+
+	// A different project's workspace-scoped mount must not be borrowed.
+	for container := range byContainer {
+		if strings.HasPrefix(container, "/mnt/alpha/node_modules") {
+			t.Errorf("beta's workspace-scoped mount leaked into alpha's tree: %v", container)
+		}
 	}
 }
 
@@ -821,5 +908,256 @@ func TestExtensionLSPManager_SandboxMemory_ClientWithoutSandbox(t *testing.T) {
 	stats := mgr.SandboxMemory("/tmp/workspace", "/tmp/workspace/main.go")
 	if stats == nil || stats.Running {
 		t.Errorf("SandboxMemory() = %+v, want Running=false (sandbox not created)", stats)
+	}
+}
+
+// --- Session attribution -----------------------------------------------------
+//
+// The extension sandbox is shared by every project, so one bridge connection
+// carries the notifications of several workspaces. Attribution is what stops one
+// project's diagnostics being served to another with the wrong URI translation.
+
+// quietBridgeClient returns a bridge client whose pipes are never used: these
+// tests only need a stable pointer to identify the connection a session lives on.
+func quietBridgeClient(t *testing.T) *sandbox.Client {
+	t.Helper()
+	stdinRead, stdinWrite := io.Pipe()   // the client writes into stdinWrite
+	stdoutRead, stdoutWrite := io.Pipe() // the client reads from stdoutRead
+	client := sandbox.NewClient(stdinWrite, stdoutRead)
+	t.Cleanup(func() {
+		_ = stdoutWrite.Close()
+		_ = stdinRead.Close()
+		_ = client.Close()
+	})
+	return client
+}
+
+func attribClient(bridge *sandbox.Client, hostPath string) *sandboxClient {
+	return &sandboxClient{
+		bridgeClient:  bridge,
+		workspace:     hostPath,
+		language:      "go",
+		extensionID:   "ext-go",
+		projectMounts: map[string]string{hostPath: "/mnt/" + filepath.Base(hostPath)},
+		session:       sessionFor(hostPath),
+	}
+}
+
+func TestSessionForIsStablePerWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	alpha := filepath.Join(dir, "alpha")
+	beta := filepath.Join(dir, "beta")
+
+	if got, want := sessionFor(alpha), sessionFor(alpha+"/"); got != want {
+		t.Errorf("sessionFor differs for the same workspace: %q vs %q", got, want)
+	}
+	if sessionFor(alpha) == sessionFor(beta) {
+		t.Error("two workspaces share a session id; their servers would be the same session")
+	}
+	if !strings.HasPrefix(sessionFor(alpha), "ws-") {
+		t.Errorf("session id %q does not look like a session id", sessionFor(alpha))
+	}
+}
+
+func diagnosticsFor(path string) json.RawMessage {
+	raw, _ := json.Marshal(map[string]any{
+		"method": "textDocument/publishDiagnostics",
+		"params": map[string]any{"uri": "file://" + path, "diagnostics": []any{}},
+	})
+	return raw
+}
+
+func TestRouteNotificationGoesToItsOwnWorkspace(t *testing.T) {
+	bridge := quietBridgeClient(t)
+	m := NewExtensionLSPManager(nil, nil, nil)
+	m.clients[processKey("/host/alpha", "go")] = attribClient(bridge, "/host/alpha")
+	m.clients[processKey("/host/beta", "go")] = attribClient(bridge, "/host/beta")
+
+	sub := m.Subscribe()
+	defer m.Unsubscribe(sub)
+
+	m.routeNotification(bridge, "ext-go", protocol.LSPNotification{
+		Session: sessionFor("/host/beta"),
+		Raw:     diagnosticsFor("/mnt/beta/main.go"),
+	})
+
+	select {
+	case got := <-sub:
+		if !strings.Contains(string(got), "file:///host/beta/main.go") {
+			t.Errorf("notification for beta was not translated with beta's mounts: %s", got)
+		}
+		if strings.Contains(string(got), "alpha") {
+			t.Errorf("beta's notification carried alpha's workspace: %s", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("attributed notification was never delivered")
+	}
+}
+
+func TestRouteNotificationNeverGuessedWhenUnattributed(t *testing.T) {
+	bridge := quietBridgeClient(t)
+	m := NewExtensionLSPManager(nil, nil, nil)
+	m.clients[processKey("/host/alpha", "go")] = attribClient(bridge, "/host/alpha")
+	m.clients[processKey("/host/beta", "go")] = attribClient(bridge, "/host/beta")
+
+	sub := m.Subscribe()
+	defer m.Unsubscribe(sub)
+
+	// A bridge older than sessions cannot say who published this, and two
+	// candidates could have: dropping it is the only honest option.
+	m.routeNotification(bridge, "ext-go", protocol.LSPNotification{Raw: diagnosticsFor("/mnt/alpha/main.go")})
+
+	select {
+	case got := <-sub:
+		t.Errorf("ambiguous notification was delivered to somebody: %s", got)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestRouteNotificationUnattributedNeedsOnlyOneCandidate(t *testing.T) {
+	bridge := quietBridgeClient(t)
+	m := NewExtensionLSPManager(nil, nil, nil)
+	m.clients[processKey("/host/alpha", "go")] = attribClient(bridge, "/host/alpha")
+
+	sub := m.Subscribe()
+	defer m.Unsubscribe(sub)
+
+	m.routeNotification(bridge, "ext-go", protocol.LSPNotification{Raw: diagnosticsFor("/mnt/alpha/main.go")})
+
+	select {
+	case got := <-sub:
+		if !strings.Contains(string(got), "file:///host/alpha/main.go") {
+			t.Errorf("single-candidate notification mistranslated: %s", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the only possible owner never received the notification")
+	}
+}
+
+func TestRouteNotificationIgnoresForeignSessions(t *testing.T) {
+	bridge := quietBridgeClient(t)
+	m := NewExtensionLSPManager(nil, nil, nil)
+	m.clients[processKey("/host/alpha", "go")] = attribClient(bridge, "/host/alpha")
+
+	sub := m.Subscribe()
+	defer m.Unsubscribe(sub)
+
+	// Nobody owns this session.
+	m.routeNotification(bridge, "ext-go", protocol.LSPNotification{
+		Session: sessionFor("/host/nowhere"), Raw: diagnosticsFor("/mnt/nowhere/main.go"),
+	})
+	// This session belongs to a workspace, but to a different extension's sandbox.
+	m.routeNotification(bridge, "ext-other", protocol.LSPNotification{
+		Session: sessionFor("/host/alpha"), Raw: diagnosticsFor("/mnt/alpha/main.go"),
+	})
+
+	select {
+	case got := <-sub:
+		t.Errorf("a notification with no owner here was delivered: %s", got)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// --- one initialize per session ---------------------------------------------
+//
+// A session is shared now: the editor's channel, a turn's diagnostics pass, and
+// an agent tool call all drive the same language-server process. That process
+// answers a second `initialize` with an error and never re-reads the workspace,
+// so the manager has to recognise the request and answer it itself.
+
+func TestIsInitializeRequest(t *testing.T) {
+	yes := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":"7","method":"initialize"}`,
+	}
+	no := []string{
+		`{"jsonrpc":"2.0","method":"initialized","params":{}}`,   // notification, safe to repeat
+		`{"jsonrpc":"2.0","id":2,"method":"textDocument/hover"}`, // a different request
+		`{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}`,  // a response
+		`{"jsonrpc":"2.0","id":null,"method":"initialize"}`,      // no id: not a request
+		`not json`,
+	}
+	for _, raw := range yes {
+		if !isInitializeRequest(json.RawMessage(raw)) {
+			t.Errorf("initialize not recognised: %s", raw)
+		}
+	}
+	for _, raw := range no {
+		if isInitializeRequest(json.RawMessage(raw)) {
+			t.Errorf("not an initialize request: %s", raw)
+		}
+	}
+}
+
+func TestReplayInitializeResponseCarriesTheAskingID(t *testing.T) {
+	cached := json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"hoverProvider":true}}}`)
+
+	// A numeric id stays numeric: an LSP client that sent 7 wants 7 back, not "7".
+	replayed := replayInitializeResponse(cached, json.RawMessage(`{"jsonrpc":"2.0","id":7,"method":"initialize"}`))
+	if string(replayed) == "" {
+		t.Fatal("a well-formed pair produced no replay")
+	}
+	var got struct {
+		ID     float64 `json:"id"`
+		Result struct {
+			Capabilities map[string]any `json:"capabilities"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(replayed, &got); err != nil {
+		t.Fatalf("replay is not valid JSON: %s", replayed)
+	}
+	if got.ID != 7 {
+		t.Errorf("replayed id = %v, want 7 (the first requester's id would route this to the wrong client)", got.ID)
+	}
+	if got.Result.Capabilities["hoverProvider"] != true {
+		t.Errorf("replay lost the capabilities: %s", replayed)
+	}
+
+	// A string id is preserved as a string.
+	stringID := replayInitializeResponse(cached, json.RawMessage(`{"jsonrpc":"2.0","id":"abc","method":"initialize"}`))
+	if !strings.Contains(string(stringID), `"id":"abc"`) {
+		t.Errorf("string id not preserved: %s", stringID)
+	}
+
+	// Garbage in, no replay: the caller forwards instead of inventing an answer.
+	for _, bad := range []string{`not json`, `{"jsonrpc":"2.0"}`, `{}`} {
+		if out := replayInitializeResponse(cached, json.RawMessage(bad)); out != nil {
+			t.Errorf("replayed from %q: %s", bad, out)
+		}
+	}
+	if out := replayInitializeResponse(json.RawMessage(`broken`), json.RawMessage(`{"id":3}`)); out != nil {
+		t.Errorf("replayed a corrupt cached response: %s", out)
+	}
+}
+
+func TestRememberInitResponseOnlyTrustsRealHandshakes(t *testing.T) {
+	mgr := NewExtensionLSPManager(nil, nil, nil)
+	key := processKey("/ws/one", "go")
+	sc := &sandboxClient{workspace: "/ws/one", language: "go", session: sessionFor("/ws/one")}
+	mgr.clients[key] = sc
+
+	if mgr.rememberInitResponse(key, sc, json.RawMessage(`{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"already initialized"}}`)) {
+		t.Error("an error response was remembered as the handshake")
+	}
+	if sc.initialized {
+		t.Error("a failed initialize marked the session initialized")
+	}
+
+	if !mgr.rememberInitResponse(key, sc, json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}`)) {
+		t.Fatal("a real handshake was not remembered")
+	}
+	if !sc.initialized || len(sc.initResponse) == 0 {
+		t.Fatalf("initialized=%v response=%q", sc.initialized, sc.initResponse)
+	}
+
+	// A recycled session (a different client under the same key) must not be
+	// written to by the previous process's answer.
+	replaced := &sandboxClient{workspace: "/ws/one", language: "go"}
+	mgr.clients[key] = replaced
+	if mgr.rememberInitResponse(key, sc, json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}`)) {
+		t.Error("a stale client wrote through the current one")
+	}
+	if replaced.initialized {
+		t.Error("the replacement session claims a handshake it never made")
 	}
 }

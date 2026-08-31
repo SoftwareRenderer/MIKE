@@ -449,7 +449,7 @@ func TestLSPNotifyAbandonsWedgedWrite(t *testing.T) {
 
 	raw := json.RawMessage(`{"jsonrpc":"2.0","method":"textDocument/didOpen"}`)
 	call := make(chan error, 1)
-	go func() { call <- client.LSPNotify(context.Background(), raw) }()
+	go func() { call <- client.LSPNotify(context.Background(), "ws-test", raw) }()
 
 	var err error
 	select {
@@ -479,7 +479,7 @@ func TestLSPNotifyCancellationKeepsClientUsable(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	call := make(chan error, 1)
-	go func() { call <- client.LSPNotify(ctx, json.RawMessage(`{"jsonrpc":"2.0","method":"x"}`)) }()
+	go func() { call <- client.LSPNotify(ctx, "ws-test", json.RawMessage(`{"jsonrpc":"2.0","method":"x"}`)) }()
 
 	time.Sleep(50 * time.Millisecond) // let the write get stuck
 	cancel()
@@ -526,7 +526,7 @@ func TestLSPStartBoundedWithoutCallerDeadline(t *testing.T) {
 
 	call := make(chan error, 1)
 	go func() {
-		call <- client.LSPStart(context.Background(), "typescript-language-server", nil)
+		call <- client.LSPStart(context.Background(), "ws-test", "typescript-language-server", nil, nil)
 	}()
 
 	var err error
@@ -580,4 +580,31 @@ func deadlineCtx(t *testing.T, d time.Duration) context.Context {
 	ctx, cancel := context.WithTimeout(context.Background(), d)
 	t.Cleanup(cancel)
 	return ctx
+}
+
+// TestDecodeLSPNotification pins the tolerant decode that lets a host running
+// sessions talk to a bridge that predates them: an enveloped frame is attributed,
+// a bare JSON-RPC frame from an older bridge is not guessed at, and neither is
+// dropped for being shaped differently.
+func TestDecodeLSPNotification(t *testing.T) {
+	cases := []struct {
+		name        string
+		payload     string
+		wantSession string
+	}{
+		{"enveloped", `{"session":"ws-1","raw":{"method":"win/notify"}}`, "ws-1"},
+		{"legacy bare frame", `{"jsonrpc":"2.0","method":"win/notify","params":{}}`, ""},
+		{"malformed", `not json at all`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := decodeLSPNotification([]byte(tc.payload))
+			if got.Session != tc.wantSession {
+				t.Errorf("session = %q, want %q", got.Session, tc.wantSession)
+			}
+			if len(got.Raw) == 0 {
+				t.Fatal("raw payload lost")
+			}
+		})
+	}
 }

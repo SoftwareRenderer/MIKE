@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -42,8 +43,15 @@ func (s *lspSession) isClosed() bool {
 
 // newLSPSession creates a new LSP session by starting the server process
 // and communicating over stdin/stdout with Content-Length framing.
-func newLSPSession(command string, args []string) (*lspSession, error) {
+// newLSPSession starts one language server process. env is applied on top of the
+// *container's* environment (image env plus the extension's own `-e` values) —
+// never the host's, which is what keeps a per-workspace GOMODCACHE from becoming
+// a host-environment leak.
+func newLSPSession(command string, args []string, env []string) (*lspSession, error) {
 	cmd := exec.Command(command, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -246,16 +254,54 @@ func (s *lspSession) close() {
 	}
 }
 
-// lspState tracks the LSP server for a connection.
+// lspState tracks one LSP server session of a bridge connection.
+//
+// The sandbox is shared by every project the user registers, so a connection can
+// hold several sessions at once — one per workspace — each its own process with
+// its own environment. `key` is the session id exactly as the host addressed it
+// (empty for a host that does not know about sessions), and is echoed back on
+// every notification so the host can attribute it.
 type lspState struct {
 	session *lspSession
+	key     string
 	command string   // LSP server command (for restarts)
 	args    []string // LSP server args (for restarts)
+	env     []string // LSP server env assignments (for restarts)
 }
 
-// handleLSP handles LSP requests by forwarding raw JSON-RPC to the LSP server.
-// The first request with a non-empty Command starts the LSP server.
-// Subsequent requests forward the raw JSON-RPC message.
+// sessionID normalizes a session id to its map key. The empty id is the legacy
+// single session, so a host that does not address sessions keeps working.
+func sessionID(id string) string {
+	if id == "" {
+		return "\x00legacy"
+	}
+	return id
+}
+
+// session returns the addressed session, or nil.
+func (h *handler) session(id string) *lspState {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lspSessions[sessionID(id)]
+}
+
+// stopSession terminates one session and forgets it, so a later request for the
+// same id starts a fresh server instead of reviving the old process.
+func (h *handler) stopSession(id string) {
+	h.mu.Lock()
+	st := h.lspSessions[sessionID(id)]
+	delete(h.lspSessions, sessionID(id))
+	h.mu.Unlock()
+	if st != nil && st.session != nil {
+		st.session.close()
+		log.Printf("lsp: session stopped")
+	}
+}
+
+// handleLSP handles LSP requests by forwarding raw JSON-RPC to the addressed
+// session. A request with a non-empty Command starts that session; a request
+// with Stop terminates it; anything else is forwarded to it. Sessions are
+// independent: starting one never touches another workspace's server.
 func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 	defer h.recoverPanic(conn, req.MsgID)
 	var p protocol.LSPParams
@@ -264,39 +310,53 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 		return
 	}
 
+	id := sessionID(p.Session)
+
+	if p.Stop {
+		h.stopSession(id)
+		_ = h.writeFrame(conn, protocol.NewResult(req.MsgID, json.RawMessage(`{"status":"stopped"}`)))
+		return
+	}
+
 	h.mu.Lock()
-	lsp := h.lsp
+	lsp := h.lspSessions[id]
 	h.mu.Unlock()
 
 	if p.Command != "" {
-		// LSPStart request: (re)start the LSP server.
-		// Always restart to get a fresh session for the new workspace.
-		cmd, args := p.Command, p.Args
-
-		// Close existing session if any
+		// LSPStart request: start this session, replacing only a previous session
+		// with the same id (e.g. after a recycle). Other workspaces are untouched.
 		if lsp != nil && lsp.session != nil {
 			lsp.session.close()
 		}
 
-		sess, err := newLSPSession(cmd, args)
+		sess, err := newLSPSession(p.Command, p.Args, p.Env)
 		if err != nil {
 			_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
 			return
 		}
 
+		st := &lspState{session: sess, key: p.Session, command: p.Command, args: p.Args, env: p.Env}
 		h.mu.Lock()
-		h.lsp = &lspState{session: sess, command: cmd, args: args}
+		h.lspSessions[id] = st
 		h.mu.Unlock()
 
-		// Start a goroutine to forward LSP notifications (e.g., publishDiagnostics) to the host.
+		// Forward this session's notifications (e.g., publishDiagnostics) to the
+		// host, attributed so they reach the workspace that owns them.
 		go func() {
 			for notif := range sess.outputCh {
+				payload, err := json.Marshal(protocol.LSPNotification{Session: st.key, Raw: notif})
+				if err != nil {
+					log.Printf("lsp: encode notification envelope: %v", err)
+					continue
+				}
 				notifFrame := &protocol.Frame{
 					MsgID:   0, // Notifications use MsgID 0
 					Type:    protocol.TypeNotification,
-					Payload: []byte(notif),
+					Payload: payload,
 				}
-				_ = protocol.WriteFrame(conn, notifFrame)
+				if err := h.writeFrame(conn, notifFrame); err != nil {
+					return // connection gone
+				}
 			}
 		}()
 
@@ -307,26 +367,27 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 	}
 
 	if lsp == nil || lsp.session == nil || lsp.session.isClosed() {
-		// LSPSend request but no session — try to auto-restart with stored command
-		cmd, args := "", []string{}
+		// LSPSend request but this session is gone — try to auto-restart it with
+		// the command and env it was started with. Only this id is recreated.
+		cmd, args, env := "", []string{}, []string(nil)
 		if lsp != nil && lsp.command != "" {
-			cmd, args = lsp.command, lsp.args
+			cmd, args, env = lsp.command, lsp.args, lsp.env
 		}
 		if cmd == "" {
 			_ = h.writeFrame(conn, protocol.NewError(req.MsgID, "lsp server not started"))
 			return
 		}
 
-		sess, err := newLSPSession(cmd, args)
+		sess, err := newLSPSession(cmd, args, env)
 		if err != nil {
 			_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
 			return
 		}
 
 		h.mu.Lock()
-		h.lsp = &lspState{session: sess, command: cmd, args: args}
-		lsp = h.lsp // update reference to new state
+		h.lspSessions[id] = &lspState{session: sess, key: p.Session, command: cmd, args: args, env: env}
 		h.mu.Unlock()
+		lsp = h.session(id)
 	}
 
 	// Forward raw JSON-RPC to LSP server
@@ -372,11 +433,11 @@ func (h *handler) handleLSPNotify(_ net.Conn, frame *protocol.Frame) {
 	}
 
 	h.mu.Lock()
-	lsp := h.lsp
+	lsp := h.lspSessions[sessionID(p.Session)]
 	h.mu.Unlock()
 
 	if lsp == nil || lsp.session == nil || lsp.session.isClosed() {
-		log.Printf("lsp: notification dropped — server not started")
+		log.Printf("lsp: notification dropped — session %q not started", p.Session)
 		return
 	}
 

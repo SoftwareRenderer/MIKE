@@ -85,7 +85,7 @@ export function load(taskId: string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	if err := client.LSPStart(ctx, tsserver, []string{"--stdio"}); err != nil {
+	if err := client.LSPStart(ctx, tssSession, tsserver, []string{"--stdio"}, nil); err != nil {
 		t.Fatalf("LSPStart failed: %v (bridge stderr: %s)", err, bridgeErr.String())
 	}
 
@@ -263,12 +263,17 @@ func findBridgeBinary(t *testing.T) string {
 	return tmp
 }
 
+// tssSession addresses this test's language-server session. The product derives
+// one per workspace; the bridge connection is shared, so the session — not the
+// connection — scopes the server.
+const tssSession = "ws-tsserver-integration"
+
 func sendLSPJSONRPC(ctx context.Context, client *bridge.Client, msg map[string]any) ([]byte, error) {
 	raw, err := json.Marshal(msg)
 	if err != nil {
 		return nil, err
 	}
-	return client.LSPSend(ctx, raw)
+	return client.LSPSend(ctx, tssSession, raw)
 }
 
 func requestLSP(ctx context.Context, client *bridge.Client, id int, method string, params map[string]any) ([]byte, error) {
@@ -286,7 +291,7 @@ func notifyLSP(ctx context.Context, t *testing.T, client *bridge.Client, method 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.LSPNotify(ctx, raw); err != nil {
+	if err := client.LSPNotify(ctx, tssSession, raw); err != nil {
 		t.Fatalf("notify %s: %v", method, err)
 	}
 }
