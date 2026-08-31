@@ -565,3 +565,110 @@ func TestGetLastMessageInThread(t *testing.T) {
 		t.Fatalf("thread filter broken: %+v err=%v", last, err)
 	}
 }
+
+// A summary row is not a turn of the conversation: it is what the turns before it are
+// remembered by, and it is the cut point the LLM context is built around. A cascade
+// that swept it used to leave the messages the summary replaced in place, so the next
+// rebuild had neither summary nor marker and reinstated the whole history at full size.
+func TestDeleteTaskMessagesAfter_PreservesSummarization(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	baseTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	seed := []struct {
+		id, role, content string
+	}{
+		{"msg-1", "user", "first request"},
+		{"msg-2", "assistant", "first work"},
+		{"sum-1", "summarization", "SUMMARY OF msg-1 and msg-2"},
+		{"msg-3", "user", "later request"},
+		{"msg-4", "assistant", "later work"},
+	}
+	for i, m := range seed {
+		msg := newMessage(m.id, "task-1", m.role, m.content)
+		msg.CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
+		if err := s.CreateTaskMessage(msg); err != nil {
+			t.Fatalf("create message: %v", err)
+		}
+	}
+
+	// Delete from the first user message onward: every conversation row goes, the
+	// summary survives standing in for what it summarized.
+	if err := s.DeleteTaskMessagesAfter("task-1", "msg-1", ""); err != nil {
+		t.Fatalf("delete messages after: %v", err)
+	}
+
+	remaining, err := s.GetTaskMessages("task-1", "")
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("expected only the summary row, got %d: %+v", len(remaining), remaining)
+	}
+	if remaining[0].ID != "sum-1" || remaining[0].Role != "summarization" {
+		t.Fatalf("expected the summarization row to survive, got %+v", remaining[0])
+	}
+}
+
+// Naming a summarization row as the target is supported and does remove it — the guard
+// above is only against collateral. A *later* summary is still collateral though, so it
+// survives while ordinary messages after the target go.
+func TestDeleteTaskMessagesAfter_TargetIsSummarization(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	baseTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	seed := []struct {
+		id, role string
+	}{
+		{"msg-1", "user"},
+		{"sum-1", "summarization"},
+		{"msg-2", "user"},
+		{"sum-2", "summarization"},
+		{"msg-3", "user"},
+	}
+	for i, m := range seed {
+		msg := newMessage(m.id, "task-1", m.role, "content "+m.id)
+		msg.CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
+		if err := s.CreateTaskMessage(msg); err != nil {
+			t.Fatalf("create message: %v", err)
+		}
+	}
+
+	if err := s.DeleteTaskMessagesAfter("task-1", "sum-1", ""); err != nil {
+		t.Fatalf("delete messages after: %v", err)
+	}
+
+	remaining, err := s.GetTaskMessages("task-1", "")
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	got := map[string]bool{}
+	for _, m := range remaining {
+		got[m.ID] = true
+	}
+	if got["sum-1"] {
+		t.Error("the targeted summary row should have been deleted")
+	}
+	if got["msg-2"] || got["msg-3"] {
+		t.Error("messages after the target should have been deleted")
+	}
+	if !got["msg-1"] {
+		t.Error("messages before the target must survive")
+	}
+	if !got["sum-2"] {
+		t.Error("a later summary is collateral and must survive")
+	}
+}
