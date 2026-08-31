@@ -1,7 +1,6 @@
 <script lang="ts">
     interface Props {
         variant: 'user' | 'assistant';
-        timestamp?: string;
         timestampTooltip?: string;
         timestampDisplay?: string;
         hasContent?: boolean;
@@ -15,7 +14,7 @@
         copied?: boolean;
     }
 
-    let { variant = 'assistant', timestamp, timestampTooltip, timestampDisplay, hasContent = true, isStreaming = false, isOptimistic = false, onCopy, onDelete, onEdit, onRegenerate, onFork, copied = false }: Props = $props();
+    let { variant = 'assistant', timestampTooltip, timestampDisplay, hasContent = true, isStreaming = false, isOptimistic = false, onCopy, onDelete, onEdit, onRegenerate, onFork, copied = false }: Props = $props();
 </script>
 
 <div class="message-actions" class:user-actions={variant === 'user'} class:assistant-actions={variant === 'assistant'}>

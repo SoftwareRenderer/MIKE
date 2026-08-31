@@ -3,7 +3,8 @@
     import type { DiffFile, DiffRow } from '$lib/types/diff';
     import { parseUnifiedDiff, buildSideBySideRows, truncatePath } from '$lib/utils/diff-parser';
     import type { SideBySideRow } from '$lib/utils/diff-parser';
-    import { highlightLinesAsync, escapeHtml } from '$lib/highlighter';
+    import { highlightLinesAsync } from '$lib/highlighter';
+    import { escapeHtml } from '$lib/utils/format';
 import { slide } from 'svelte/transition';
 
     interface Props {
