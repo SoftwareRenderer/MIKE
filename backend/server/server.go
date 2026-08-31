@@ -212,8 +212,8 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	// Wire worktree mutex so GitHandler can serialize per-task git operations.
 	s.gitHandler.SetWorktreeMutex(s.getWorktreeMutex)
 
-	// Bootstrap built-in extensions
-	// (Removed built-in bootstrapping to decouple extensions from core)
+	// s.gitHandler wires the worktree mutex in above; extensions are entirely
+	// registry-driven now — there is no built-in bootstrap step.
 	s.extHandler = extensions.NewExtensionHandler(s.extStore, s.extSandboxMgr, extRegistry, extCfg)
 
 	// LSP handler for language server WebSocket bridging
@@ -439,15 +439,16 @@ type hybridListener struct {
 
 // Accept hands net/http a connection whose protocol is already known.
 //
-// The first byte decides TLS vs plain HTTP, and net/http only looks at the concrete type
-// Accept returns, so that read cannot be deferred. It must not happen inside Accept
-// either: net/http accepts serially, so a peer that connects and sends nothing would
-// delay every later handshake, and its EOF or ECONNRESET would reach Serve as a dead
-// listener and end it.
+// The first byte decides TLS vs plain HTTP, and net/http only looks at the concrete
+// type Accept returns, so that read cannot be deferred — but it must not happen
+// inside Accept: net/http accepts serially, so a peer that connects and sends nothing
+// would delay every later handshake, and its EOF or ECONNRESET would reach Serve as a
+// dead listener and end it.
 //
 // So Accept never touches a socket — acceptLoop sniffs each connection in its own
 // goroutine and queues the result. No worker pool: a pool of N only moves the stall to
 // the Nth silent peer. Only the listener's own error is returned, since it is the only
+// one that can end Serve.
 // one that can end Serve.
 func (l *hybridListener) Accept() (net.Conn, error) {
 	select {

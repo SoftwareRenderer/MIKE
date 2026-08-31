@@ -635,3 +635,117 @@ func TestFetchChangelog_Missing(t *testing.T) {
 		t.Fatal("expected error fetching a missing changelog, got nil")
 	}
 }
+
+// --- Extension checkout: clone-source hardening ------------------------------
+//
+// The extension checkout clones registry content with the host's git, and the
+// clone's output goes into the install error. Without the shared clone gate, a
+// hostile index entry (`repo: "ext::sh -c 'env >&2'"`) would run a shell as the
+// server user — with MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY in its
+// environment — and echo it back to the client.
+
+func TestValidateGitSourceRejectsHostileRepos(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	tests := []struct {
+		name    string
+		repo    string
+		commit  string
+		wantErr bool
+	}{
+		{"https repo", "https://github.com/author/ext.git", sha, false},
+		{"ssh repo", "git@github.com:author/ext.git", sha, false},
+		{"scp-like no user", "github.com:author/ext.git", sha, false},
+		{"ext helper shell", "ext::sh -c 'id'", sha, true},
+		{"ext helper touch", "ext::touch /tmp/kanban-ext-pwn", sha, true},
+		{"fd helper", "fd::11", sha, true},
+		{"python helper", "python::Foo", sha, true},
+		{"flag injection upload-pack", "--upload-pack=touch /tmp/pwn", sha, true},
+		{"flag injection reference", "--reference=/etc", sha, true},
+		{"uppercase scheme", "HTTPS://example.com/r.git", sha, true}, // git's check is case-sensitive
+		{"disallowed scheme", "smb://host/share/repo", sha, true},
+		{"newline in repo", "https://example.com/r.git\n--upload-pack=x", sha, true},
+		{"nul in repo", "https://example.com/r.git\x00", sha, true},
+		{"empty repo", "", sha, true},
+		// The pinned commit must be exactly a full hash.
+		{"short commit", "https://example.com/r.git", "0123456", true},
+		{"hash with payload", "https://example.com/r.git", sha + "; rm -rf /", true},
+		{"64-char sha-256 hash", "https://example.com/r.git", sha + sha[:24], false},
+		{"80-char hash", "https://example.com/r.git", sha + sha, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateGitSource(tt.repo, tt.commit)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateGitSource(%q, %q) = %v, wantErr %v", tt.repo, tt.commit, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestCheckoutExtensionHelperTransportNeverExecutes: a hostile index entry is
+// refused and its payload never runs (no canary file), whatever the host's
+// protocol.ext.allow setting says.
+func TestCheckoutExtensionHelperTransportNeverExecutes(t *testing.T) {
+	rc := NewRegistryClient()
+	tmp := t.TempDir()
+	canary := filepath.Join(tmp, "pwned")
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+
+	if err := rc.CheckoutExtension("ext::sh -c 'touch "+canary+"'", sha, "", filepath.Join(tmp, "dest")); err == nil {
+		t.Fatal("hostile clone source accepted")
+	}
+	if _, err := os.Stat(canary); err == nil {
+		t.Fatal("ext:: payload executed — the clone source was not validated")
+	}
+
+	// A dash-leading source is refused the same way.
+	if err := rc.CheckoutExtension("--upload-pack=touch "+canary, sha, "", filepath.Join(tmp, "dest")); err == nil {
+		t.Error("flag-shaped clone source accepted")
+	}
+	if _, err := os.Stat(canary); err == nil {
+		t.Fatal("flag payload executed")
+	}
+}
+
+// TestExtCloneArgsFencesTransports: the protocol fence must precede the `clone`
+// subcommand, so it reaches the process that parses the source URL.
+func TestExtCloneArgsFencesTransports(t *testing.T) {
+	repo := "https://example.com/author/ext.git"
+	args := extCloneArgs(repo, "/tmp/dst")
+
+	cloneIdx := -1
+	for i, a := range args {
+		if a == "clone" {
+			cloneIdx = i
+			break
+		}
+	}
+	if cloneIdx < 1 {
+		t.Fatalf("no clone subcommand in %v", args)
+	}
+	fenced := false
+	for _, a := range args[:cloneIdx] {
+		if a == "protocol.ext.allow=never" {
+			fenced = true
+		}
+	}
+	if !fenced {
+		t.Errorf("protocol.ext.allow=never missing or set after `clone`: %v", args)
+	}
+	if args[len(args)-2] != repo {
+		t.Errorf("source must be an unmodified single argument, got %v", args)
+	}
+}
+
+// TestGitErrorOutputBounded: git output reaches the install error, so it is
+// summarised rather than forwarded whole.
+func TestGitErrorOutputBounded(t *testing.T) {
+	got := gitErrorOutput([]byte("fatal: could not read\nfrom remote\n"))
+	if got != "fatal: could not read from remote" {
+		t.Errorf("gitErrorOutput() = %q, want the single-line summary", got)
+	}
+	long := strings.Repeat("x", 5000)
+	if out := gitErrorOutput([]byte(long)); len(out) > 400 {
+		t.Errorf("gitErrorOutput did not bound a %d-byte output (got %d)", len(long), len(out))
+	}
+}

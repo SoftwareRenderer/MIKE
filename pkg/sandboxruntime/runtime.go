@@ -19,19 +19,13 @@ import (
 // subsequent characters be alphanumeric or one of / . _ - : @.
 var imageRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9/._:@-]*$`)
 
-// ValidateProjectName rejects project names that could cause issues when used
-// as part of container image names, mount paths, or shell commands.
+// ValidateProjectName rejects project names that would break a container image name,
+// a mount path, or a shell command: empty, a leading dash (flag injection), a control
+// character, a ".." segment (the name is interpolated into the mount path
+// /home/sandbox/<name>), or anything outside letters, digits, spaces and -_./.
 //
-// Rules:
-//   - Must not be empty
-//   - Must not start with a dash (prevents flag injection in podman commands)
-//   - Must not contain control characters (prevents newline/tab injection)
-//   - Only allows: letters, digits, spaces, hyphens, underscores, dots, and slashes
-//
-// This is defense-in-depth: project names flow into ProjectImageName() which
-// produces image refs for podman, and into mount paths. Even though downstream
-// functions validate their inputs, validating at creation/update is the
-// earliest point to reject bad data.
+// Names flow into ProjectImageName() and mount paths, so rejecting them here — the
+// earliest point — is worth doing even though downstream users validate too.
 func ValidateProjectName(name string) error {
 	if name == "" {
 		return fmt.Errorf("project name must not be empty")
@@ -51,17 +45,24 @@ func ValidateProjectName(name string) error {
 	if name[0] == '-' {
 		return fmt.Errorf("project name must not start with a dash")
 	}
+	// The name is interpolated into the container mount path
+	// (/home/sandbox/<name>), so a ".." segment would relocate the mount — and
+	// with it the read-write worktree bind — elsewhere in the container. Dots
+	// inside a segment ("my..project") stay fine; only whole segments count.
+	for _, seg := range strings.Split(name, "/") {
+		if seg == ".." {
+			return fmt.Errorf("project name must not contain '..' path segments")
+		}
+	}
 	return nil
 }
 
-// ValidateImageRef rejects image references that are invalid OCI image characters.
-// This prevents references like "-v /etc:/host" or "$(rm -rf /)" from being
-// passed to podman as if they were flags.
+// ValidateImageRef rejects image references with characters that are invalid in an OCI
+// image ref, so a reference like "-v /etc:/host" or "$(rm -rf /)" never reaches podman
+// as a flag.
 //
-// This is the single source of truth for image-reference validation across the
-// entire codebase. Both the sandbox Runtime method (below) and the extensions
-// RegistryClient delegate to this standalone function, eliminating duplicate
-// validation logic that could drift and create security gaps.
+// Single source of truth: the sandbox Runtime method and the extensions RegistryClient
+// both delegate here, so the two cannot drift into different rules.
 func ValidateImageRef(image string) error {
 	if image == "" {
 		return fmt.Errorf("image reference must not be empty")
@@ -155,11 +156,9 @@ const staleCleanupTimeout = 15 * time.Second
 // GVisorAvailable reports whether gVisor (runsc) and podman are both usable, and
 // logs what it found under logTag.
 //
-// This is the ONE gVisor availability probe in the codebase. The task sandbox
-// manager and the extension sandbox manager used to carry separate probes — one
-// of which skipped the `runsc --version` check — so the two could disagree about
-// whether the host can run a gVisor container at all. Both now call here, and
-// both fail closed the same way.
+// This is the only gVisor availability probe: the task sandbox manager and the
+// extension sandbox manager both call here, so they cannot disagree about whether
+// the host can run a gVisor container at all, and both fail closed the same way.
 func GVisorAvailable(logTag string) bool {
 	if _, err := exec.LookPath("runsc"); err != nil {
 		log.Printf("[%s] runsc not found in PATH: %v", logTag, err)
@@ -405,11 +404,9 @@ func ReadCgroupMemory(dir string) (CgroupMemory, error) {
 // needs --runtime-flag ignore-cgroups under rootless) does not apply the OCI
 // spec's linux.resources, so podman's --memory flag alone is never enforced.
 //
-// Writes memory.max = limitMB MiB. It also writes memory.swap.max = 0 on a
-// best-effort basis: without it, a host with swap reclaims overshoot into
-// swap instead of OOM-killing, turning the hard limit into a soft one.
-// Returns an error if the limit cannot be applied; the caller decides whether
-// to fail open (sandbox runs unlimited) or fail closed.
+// Writes memory.max = limitMB MiB, plus memory.swap.max = 0 best-effort: without it a
+// host with swap reclaims the overshoot instead of OOM-killing, turning the hard limit
+// into a soft one. On error the caller decides whether to fail open or closed.
 func (r *Runtime) ApplyMemoryLimit(name string, limitMB int) error {
 	if limitMB <= 0 {
 		return fmt.Errorf("memory limit must be positive, got %d", limitMB)
