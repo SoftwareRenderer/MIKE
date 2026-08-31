@@ -1,14 +1,16 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { ensureCsrfToken } from '$lib/api';
-    import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, clearEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
+    import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { EditorView } from 'codemirror';
     import { EditorState, Transaction, Compartment, StateField, StateEffect, RangeSet, Range, type Extension } from '@codemirror/state';
     import { keymap } from '@codemirror/view';
     import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
     import { bracketMatching, foldGutter, indentOnInput, foldKeymap, defaultHighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
     import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-    import { LSPClient, languageServerExtensions } from '@codemirror/lsp-client';
+    import { LSPClient, serverCompletion, signatureHelp, serverDiagnostics, formatKeymap, renameKeymap, findReferencesKeymap } from '@codemirror/lsp-client';
+    import { lspDefinitionActions } from '$lib/utils/lsp-hover-actions';
+    import { isInsideWorkspace, relativeToRoot, type DefinitionTarget } from '$lib/utils/lsp-definition';
     import { requestLSPChannel, createLSPNotificationHandlers, type VirtualTransport } from '$lib/utils/lsp-connection-manager';
     import { isLSPAvailable } from '$lib/utils/lsp-connection-manager';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
@@ -24,7 +26,7 @@
         return () => uiInjector.teardownSlot(INJECTION_POINTS.FILE_EDITOR, anchorEl);
     });
     import { highlightSelectionMatches } from '@codemirror/search';
-    import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, hoverTooltip, gutterLineClass, GutterMarker, Decoration, ViewPlugin, type ViewUpdate, type DecorationSet } from '@codemirror/view';
+    import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, gutterLineClass, GutterMarker, Decoration, ViewPlugin, type ViewUpdate, type DecorationSet } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
     import { darkTheme, darkSyntax, lightTheme, lightSyntax, isLightTheme } from '$lib/utils/codemirror-theme';
     import { stickyScroll, updateHeadersEffect, sectionHeadersField, buildSectionHeaders, type SectionHeader } from '$lib/utils/sticky-scroll';
@@ -511,63 +513,10 @@
             ]),
             isLightTheme() ? lightTheme : darkTheme,
             isLightTheme() ? lightSyntax : darkSyntax,
-            hoverTooltip(async (view, pos) => {
-                if (!lspClient || !fileUri) return null;
-
-                // Create DOM immediately — button hidden until LSP confirms a valid definition
-                const dom = document.createElement('div');
-                dom.className = 'lsp-def-tooltip';
-                const loadingEl = document.createElement('span');
-                loadingEl.className = 'lsp-def-loading';
-                loadingEl.textContent = '…';
-                dom.appendChild(loadingEl);
-                const btn = document.createElement('button');
-                btn.className = 'btn-go-def';
-                btn.style.display = 'none';
-                btn.textContent = 'Go to Definition';
-                dom.appendChild(btn);
-
-                // Fire LSP request in parallel — tooltip is already visible with loading placeholder
-                let isValid = false;
-                try {
-                    const result = await lspClient.request('textDocument/definition', {
-                        textDocument: { uri: fileUri },
-                        position: {
-                            line: view.state.doc.lineAt(pos).number - 1,
-                            character: pos - view.state.doc.lineAt(pos).from,
-                        },
-                    });
-                    if (result && (Array.isArray(result) ? result.length > 0 : result !== null)) {
-                        const locations = Array.isArray(result) ? result : [result];
-                        const firstLoc = locations[0];
-                        const uri = firstLoc && 'target' in firstLoc ? firstLoc.target?.uri : firstLoc?.uri;
-                        if (uri && uri.startsWith('file://')) {
-                            const defPath = uri.replace('file://', '');
-                            // Only valid if definition is within the project workspace
-                            isValid = lspWorkspaceRoot ? defPath.startsWith(lspWorkspaceRoot) : false;
-                        }
-                    }
-                } catch (e) {
-                    console.warn('[lsp] hover definition failed:', e);
-                }
-
-                if (!isValid) return null;
-
-                // Reveal the button, hide the loading placeholder
-                loadingEl.style.display = 'none';
-                btn.style.display = '';
-                btn.onclick = (e) => {
-                    e.stopPropagation();
-                    handleGoToDefinition(pos);
-                };
-
-                return {
-                    pos,
-                    above: true,
-                    arrows: true,
-                    create: () => ({ dom, pos }),
-                };
-            }),
+            // Hover documentation + "Go to Definition", and Ctrl/Cmd+Click. Both
+            // resolve the connection through LSPPlugin at use time, so they keep
+            // working across an LSP reconnect.
+            lspDefinitionActions({ canJump: canJumpTo, onJump: openDefinition }),
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
                     // Sync content first, then compute hasChanges vs disk
@@ -817,40 +766,58 @@
         }
     }
 
-    async function handleGoToDefinition(pos: number) {
-        if (!lspClient || !view) return;
-        try {
-            const result = await lspClient.request('textDocument/definition', {
-                textDocument: { uri: fileUri },
-                position: {
-                    line: view.state.doc.lineAt(pos).number - 1,
-                    character: pos - view.state.doc.lineAt(pos).from,
-                },
-            });
+    /**
+     * Whether a definition target lives inside the tree this editor is open on.
+     * A definition outside it (a module cache, another checkout) is not
+     * something the explorers can open.
+     */
+    function canJumpTo(target: DefinitionTarget): boolean {
+        return !!lspWorkspaceRoot && isInsideWorkspace(target.path, lspWorkspaceRoot);
+    }
 
-            if (result && (Array.isArray(result) ? result.length > 0 : result !== null)) {
-                const locations = Array.isArray(result) ? result : [result];
-                const loc = locations[0];
-                const location = loc && 'target' in loc ? loc.target : loc;
-                const uri = location?.uri;
-                const range = location?.range;
+    /**
+     * The path the explorer that owns this editor opens a file by — the same
+     * path space as this editor's own file. A sandboxed project addresses its
+     * files by the container mount (`/home/sandbox/<name>/…`) while the language
+     * server answers with host paths, so a definition's path has to be
+     * re-rooted or the explorer is handed a file it cannot see.
+     */
+    function explorerPathFor(target: DefinitionTarget): string {
+        const relative = relativeToRoot(target.path, lspWorkspaceRoot);
+        if (!relative) return target.path;
+        // An editor path this helper does not recognize (a diff editor's worktree
+        // path, say) is already in its explorer's space.
+        const ownRelative = toProjectRelative(filePath || '', projectPath || '');
+        if (!ownRelative || ownRelative === filePath || !filePath.endsWith(ownRelative)) return target.path;
+        return filePath.slice(0, filePath.length - ownRelative.length) + relative;
+    }
 
-                if (!uri || !uri.startsWith('file://') || !range) return;
-
-                const targetPath = uri.replace(/^file:\/\//, '');
-                const targetLine = range.start.line + 1;
-
-                if (targetPath === filePath) {
-                    jumpToLine(targetLine);
-                } else {
-                    window.dispatchEvent(new CustomEvent('open-file', {
-                        detail: { path: targetPath, line: targetLine },
-                    }));
-                }
-            }
-        } catch (e) {
-            console.warn('[lsp] go to definition failed:', e);
+    /**
+     * The single jump path — the hover card's button and Ctrl/Cmd+Click both
+     * land here, with the location the request already resolved (no second
+     * round trip, and no second, subtly different reading of the response).
+     *
+     * Same file → move the caret. Another file → hand it to the explorer that
+     * owns this editor: `taskId` marks a task-scoped jump (task explorer,
+     * including a jump out of the diff editor) as opposed to a project one, so
+     * a diff never opens the project's HEAD copy of a file.
+     */
+    function openDefinition(target: DefinitionTarget): void {
+        if (!view) return;
+        // lspFilePath is the host path the language server was given for this
+        // buffer, so it is the only comparison that survives sandbox mounts.
+        if (target.path === lspFilePath) {
+            jumpToLine(target.line);
+            view.focus();
+            return;
         }
+        if (!canJumpTo(target)) {
+            dialogStore.showToast(`Definition is outside this ${taskId ? 'task' : 'project'} workspace`, 'error');
+            return;
+        }
+        window.dispatchEvent(new CustomEvent('open-file', {
+            detail: { path: explorerPathFor(target), line: target.line, taskId },
+        }));
     }
 
     async function handleSave() {
@@ -1261,6 +1228,24 @@
         return filePath.startsWith('/') ? filePath : (projectPath + '/' + filePath);
     });
 
+    /**
+     * The LSP features this editor uses, listed instead of taking
+     * `languageServerExtensions()`. Two reasons:
+     *
+     *   • that bundle installs its own hover tooltip, and two hover sources on
+     *     one editor race to open, resize and close the same tooltip box under
+     *     the pointer — the card would shift out from under the click.
+     *     `lspDefinitionActions()` is now the only hover.
+     *   • its `jumpToDefinitionKeymap` binds F12, which belongs to the browser's
+     *     devtools; go-to-definition here is Ctrl/Cmd+Click.
+     */
+    const lspExtensions = [
+        serverCompletion(),
+        signatureHelp(),
+        serverDiagnostics(),
+        keymap.of([...formatKeymap, ...renameKeymap, ...findReferencesKeymap]),
+    ];
+
     // Initialize LSP after the file and editor are ready
     // Track extension manager state so this effect re-runs when extensions are loaded
     $effect(() => {
@@ -1321,7 +1306,7 @@
                 lspTransport = virtTransport;
 
                 lspClient = new LSPClient({
-                    extensions: languageServerExtensions(),
+                    extensions: lspExtensions,
                     rootUri: `file://${_wsRoot!}`,
                     notificationHandlers: createLSPNotificationHandlers((msg) => {
                         lspMessages = [...lspMessages.slice(-19), msg]; // keep last 20
@@ -1443,7 +1428,7 @@
                 lspTransport = virtTransport;
 
                 const newClient = new LSPClient({
-                    extensions: languageServerExtensions(),
+                    extensions: lspExtensions,
                     rootUri: `file://${_wsRoot!}`,
                     notificationHandlers: createLSPNotificationHandlers((msg) => {
                         lspMessages = [...lspMessages.slice(-19), msg]; // keep last 20
@@ -1682,35 +1667,6 @@
     .editor-wrapper {
         flex: 1;
         overflow: hidden;
-    }
-
-    :global(.lsp-def-tooltip) {
-        display: contents;
-    }
-    :global(.lsp-def-loading) {
-        color: var(--color-text-muted);
-        font-size: 0.75rem;
-        font-style: italic;
-        padding: 2px 6px;
-        user-select: none;
-    }
-    :global(.cm-tooltip .cm-tooltip-arrow) {
-        display: none;
-    }
-    :global(.btn-go-def) {
-        background: var(--color-accent);
-        color: white;
-        border: none;
-        border-radius: 3px;
-        padding: 2px 6px;
-        cursor: pointer;
-        font-size: 0.7rem;
-        font-weight: 600;
-        transition: opacity 0.15s;
-        margin-bottom: 6px;
-    }
-    :global(.btn-go-def:hover) {
-        opacity: 0.8;
     }
 
     .search-container {
