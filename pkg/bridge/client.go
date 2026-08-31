@@ -128,11 +128,55 @@ func (c *Client) nextMsgID() uint32 {
 	return c.nextID.Add(1) - 1
 }
 
+// maxLSPRoundTrip bounds every LSP call and notification write, even when the caller
+// passes a context with no deadline. A language server in the sandbox that stops
+// answering would otherwise park the caller forever, and the turn-boundary diagnostics
+// pass runs on the task's executor goroutine — so a parked call leaves the task
+// "running" with nothing left to cancel. Var so tests can shrink it.
+var maxLSPRoundTrip = 60 * time.Second
+
+// lspCallCtx bounds one LSP call. An earlier caller deadline is kept as-is.
+func lspCallCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if dl, ok := ctx.Deadline(); ok && time.Until(dl) <= maxLSPRoundTrip {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, maxLSPRoundTrip)
+}
+
 // writeFrame serializes writes to the underlying connection.
 func (c *Client) writeFrame(frame *protocol.Frame) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	return protocol.WriteFrame(c.conn, frame)
+}
+
+// ErrWriteStalled reports that a frame could not be handed to the bridge before the
+// deadline — the peer stopped reading. Callers decide whether to retire the client.
+var ErrWriteStalled = errors.New("bridge write stalled past its deadline")
+
+// writeFrameCtx writes one frame, giving up when ctx is done.
+//
+// Giving up does not close the connection, even though the abandoned Write keeps
+// writeMu until the peer drains. Closing would let a task sandbox build a second
+// client over the same pipes and interleave frames mid-frame, and EOF on the
+// bridge's stdin kills the `podman exec` that nothing restarts. Callers that can
+// reconnect — extension sandboxes, whose Start spawns a fresh bridge — retire the
+// client on ErrWriteStalled themselves.
+func (c *Client) writeFrameCtx(ctx context.Context, frame *protocol.Frame) error {
+	if ctx.Done() == nil {
+		return c.writeFrame(frame)
+	}
+	done := make(chan error, 1)
+	go func() { done <- c.writeFrame(frame) }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("%w: %w", ErrWriteStalled, ctx.Err())
+		}
+		return ctx.Err()
+	}
 }
 
 // readLoop reads frames from the connection and dispatches them to pending requests
@@ -223,7 +267,7 @@ func (c *Client) waitForCtx(ctx context.Context, frame *protocol.Frame, timeout 
 	c.pending[msgID] = p
 	c.mu.Unlock()
 
-	if err := c.writeFrame(frame); err != nil {
+	if err := c.writeFrameCtx(ctx, frame); err != nil {
 		c.cleanup(msgID)
 		return nil, nil, fmt.Errorf("send request: %w", err)
 	}
@@ -513,6 +557,9 @@ func (c *Client) Bash(ctx context.Context, command string, timeout int64) (*Bash
 // The raw parameter is the raw JSON-RPC message bytes.
 // Returns the raw JSON-RPC response bytes.
 func (c *Client) LSPSend(ctx context.Context, raw json.RawMessage) ([]byte, error) {
+	ctx, cancel := lspCallCtx(ctx)
+	defer cancel()
+
 	params, _ := json.Marshal(protocol.LSPParams{Raw: raw})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodLSP, params)
 
@@ -528,7 +575,11 @@ func (c *Client) LSPSend(ctx context.Context, raw json.RawMessage) ([]byte, erro
 
 // LSPNotify sends a raw JSON-RPC notification to the LSP server without waiting for a response.
 // Use this for notifications (messages without an 'id' field) like initialized, didOpen, etc.
-func (c *Client) LSPNotify(_ context.Context, raw json.RawMessage) error {
+// ctx bounds the write, which is the only thing here that can block.
+func (c *Client) LSPNotify(ctx context.Context, raw json.RawMessage) error {
+	ctx, cancel := lspCallCtx(ctx)
+	defer cancel()
+
 	params, _ := json.Marshal(protocol.LSPParams{Raw: raw})
 	// Same payload format as NewRequest: [method:1][reserved:1][jsonLen:4][json:params]
 	payload := make([]byte, 2+4+len(params))
@@ -537,13 +588,16 @@ func (c *Client) LSPNotify(_ context.Context, raw json.RawMessage) error {
 	binary.BigEndian.PutUint32(payload[2:6], uint32(len(params)))
 	copy(payload[6:], params)
 	frame := &protocol.Frame{MsgID: 0, Type: protocol.TypeNotification, Payload: payload}
-	return c.writeFrame(frame)
+	return c.writeFrameCtx(ctx, frame)
 }
 
 // LSPStart starts the LSP server process inside the sandbox.
 // Command and args specify the LSP server to start.
 // Communication is over stdin/stdout with Content-Length framing.
 func (c *Client) LSPStart(ctx context.Context, command string, args []string) error {
+	ctx, cancel := lspCallCtx(ctx)
+	defer cancel()
+
 	params, _ := json.Marshal(protocol.LSPParams{Command: command, Args: args})
 	frame := protocol.NewRequest(c.nextMsgID(), protocol.MethodLSP, params)
 
