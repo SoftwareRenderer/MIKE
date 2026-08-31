@@ -191,15 +191,15 @@ type ChatResponse struct {
 	Metrics        *VllmMetrics        `json:"metrics,omitempty"`
 }
 
-// VllmMetrics carries vLLM's server-side timings, sent on the final frame next
-// to usage. vLLM sends no timings block, so this is its only timing source:
-// time_to_first_token_ms is prompt processing, generation_time_ms is generation.
+// VllmMetrics carries the vLLM server-side timings the backend actually uses,
+// sent on the final frame next to usage. vLLM sends no timings block, so this is
+// its only timing source: time_to_first_token_ms is prompt processing,
+// generation_time_ms is generation. vLLM reports more (queue_time_ms,
+// mean_itl_ms, tokens_per_second); they are deliberately not captured — nothing
+// reads them, and this struct is never re-serialised to the client.
 type VllmMetrics struct {
 	TimeToFirstTokenMs float64 `json:"time_to_first_token_ms"`
 	GenerationTimeMs   float64 `json:"generation_time_ms"`
-	QueueTimeMs        float64 `json:"queue_time_ms"`
-	MeanItlMs          float64 `json:"mean_itl_ms"`
-	TokensPerSecond    float64 `json:"tokens_per_second"`
 }
 
 // StreamCallback is called for each streaming token/tool_call.

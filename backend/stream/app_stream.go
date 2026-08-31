@@ -55,10 +55,6 @@ func filterInternalPathsFromList(paths []string) []string {
 
 const maxFrameBufferSize = 256 * 1024 // 256KB
 
-func bytesContains(haystack, needle []byte) bool {
-	return bytes.Contains(haystack, needle)
-}
-
 const (
 	DefaultBufferSize = 5000
 )
@@ -404,9 +400,9 @@ func (asm *AppStreamManager) allClients() []*clientState {
 func (asm *AppStreamManager) writeFrame(targets []*clientState, frame []byte) {
 	for _, client := range targets {
 		client.writeMu.Lock()
-		if err := client.conn.Write(context.Background(), websocket.MessageText, frame); err != nil {
-			// Client disconnected; its read loop removes it from asm.clients.
-		}
+		// A write error means the client disconnected; its read loop removes it
+		// from asm.clients, so there is nothing to do here.
+		_ = client.conn.Write(context.Background(), websocket.MessageText, frame)
 		client.writeMu.Unlock()
 	}
 }
@@ -668,7 +664,7 @@ func (asm *AppStreamManager) bufferTask(taskKey string, frame []byte) {
 
 	// Pre-extract tool_id for O(1) dedup
 	var toolID string
-	if bytesContains(frame, toolCallMarker) {
+	if bytes.Contains(frame, toolCallMarker) {
 		toolID = extractToolID(frame)
 	}
 

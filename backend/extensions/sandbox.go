@@ -1,7 +1,6 @@
 package extensions
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -95,36 +94,17 @@ func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *Ext
 	return sm
 }
 
-// checkExtensionSandboxAvailable checks if gVisor and podman are available.
+// checkExtensionSandboxAvailable checks if gVisor and podman are available. Same
+// probe as the task sandbox manager — see sandboxruntime.GVisorAvailable.
 func checkExtensionSandboxAvailable() bool {
-	if _, err := exec.LookPath("runsc"); err != nil {
-		return false
-	}
-	if _, err := exec.LookPath("podman"); err != nil {
-		return false
-	}
-	return true
+	return sandboxruntime.GVisorAvailable("ext-sandbox")
 }
 
 // cleanupStaleContainers removes any kanban-ext-* containers left behind.
 // The list call is time-bounded: best-effort cleanup, and a wedged podman
 // must not block server startup.
 func (sm *ExtensionSandboxManager) cleanupStaleContainers() {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	out, err := sm.rt.PodmanExecContext(ctx, "ps", "-a", "--filter", fmt.Sprintf("name=%s-", ExtensionContainerPrefix), "--format", "{{.Names}}")
-	if err != nil {
-		log.Printf("[ext-sandbox] startup: failed to list stale containers: %v", err)
-		return
-	}
-	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		log.Printf("[ext-sandbox] startup: removing stale container %s", name)
-		_ = sm.rt.RemoveContainer(name)
-	}
+	sm.rt.CleanupStaleContainers("ext-sandbox", ExtensionContainerPrefix+"-")
 }
 
 // IsAvailable returns true if extension sandboxing is available.
@@ -331,22 +311,22 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	createArgs, mountedProjects := buildExtensionCreateArgs(ext, containerName, image, projectMounts, sm.MountPolicy())
 
 	// Create container
-	out, err := exec.Command("podman", createArgs...).CombinedOutput()
+	out, err := sm.rt.PodmanExec(createArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("create container %s: %w (output: %s)", containerName, err, string(out))
 	}
 
 	// Copy agent binary into container
-	cpOut, cpErr := exec.Command("podman", "cp", agentPath, containerName+":"+"/sandbox-bridge").CombinedOutput()
+	cpOut, cpErr := sm.rt.PodmanExec("cp", agentPath, containerName+":"+"/sandbox-bridge")
 	if cpErr != nil {
-		_, _ = exec.Command("podman", "rm", "-f", containerName).CombinedOutput()
+		_ = sm.rt.RemoveContainer(containerName)
 		return nil, fmt.Errorf("copy agent to container: %w (%s)", cpErr, cpOut)
 	}
 
 	// Start the container (needed for exec sessions)
-	startOut, err := exec.Command("podman", "--runtime-flag=overlay2=root:self", "--runtime-flag=ignore-cgroups", "start", containerName).CombinedOutput()
+	startOut, err := sm.rt.PodmanExec("--runtime-flag=overlay2=root:self", "--runtime-flag=ignore-cgroups", "start", containerName)
 	if err != nil {
-		_, _ = exec.Command("podman", "rm", "-f", containerName).CombinedOutput()
+		_ = sm.rt.RemoveContainer(containerName)
 		return nil, fmt.Errorf("start container: %w (%s)", err, startOut)
 	}
 
@@ -511,7 +491,7 @@ func (sm *ExtensionSandboxManager) stopLocked(extID string) {
 	}
 
 	// Stop container
-	_, _ = exec.Command("podman", "stop", "-t", "5", state.containerName).CombinedOutput()
+	_, _ = sm.rt.PodmanExec("stop", "-t", "5", state.containerName)
 
 	delete(sm.clients, extID)
 	delete(sm.refs, extID)

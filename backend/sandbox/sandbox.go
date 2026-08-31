@@ -3,7 +3,6 @@ package sandbox
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"log"
@@ -97,26 +96,9 @@ func NewSandboxManager() *SandboxManager {
 	return sm
 }
 
-// cleanupStaleContainers removes any kanban-sandbox-* containers left behind
+// cleanupStaleContainers removes any kanban-sandbox-* containers left behind.
 func (sm *SandboxManager) cleanupStaleContainers() {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	out, err := sm.rt.PodmanExecContext(ctx, "ps", "-a", "--filter", "name=kanban-sandbox-", "--format", "{{.Names}}")
-	if err != nil {
-		log.Printf("[sandbox] startup: failed to list stale containers: %v", err)
-		return
-	}
-	names := strings.Fields(strings.TrimSpace(string(out)))
-	if len(names) == 0 {
-		return
-	}
-	for _, name := range names {
-		if rmErr := sm.rt.RemoveContainer(name); rmErr != nil {
-			log.Printf("[sandbox] startup: failed to remove stale container %s: %v", name, rmErr)
-		} else {
-			log.Printf("[sandbox] startup: removed stale container %s", name)
-		}
-	}
+	sm.rt.CleanupStaleContainers("sandbox", ContainerNamePrefix+"-")
 }
 
 // IsAvailable returns true if gVisor (runsc) is installed and podman can use it.
@@ -124,26 +106,10 @@ func (sm *SandboxManager) IsAvailable() bool {
 	return sm.available
 }
 
-// checkAvailable verifies that runsc is installed and podman can use it.
+// checkAvailable verifies that runsc and podman are usable. The same probe backs
+// the extension sandbox manager — see sandboxruntime.GVisorAvailable.
 func (sm *SandboxManager) checkAvailable() bool {
-	// Check runsc binary exists
-	if _, err := exec.LookPath("runsc"); err != nil {
-		log.Printf("[sandbox] runsc not found in PATH: %v", err)
-		return false
-	}
-	// Check runsc version
-	out, err := exec.Command("runsc", "--version").CombinedOutput()
-	if err != nil {
-		log.Printf("[sandbox] runsc version check failed: %v (%s)", err, out)
-		return false
-	}
-	log.Printf("[sandbox] runsc version: %s", strings.TrimSpace(string(out)))
-	// Check podman exists
-	if _, err := exec.LookPath("podman"); err != nil {
-		log.Printf("[sandbox] podman not found in PATH: %v", err)
-		return false
-	}
-	return true
+	return sandboxruntime.GVisorAvailable("sandbox")
 }
 
 // podmanExec runs a podman command.
@@ -430,7 +396,11 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	}
 
 	// Start the container (needed for exec sessions)
-	// --runtime-flag ignore-cgroups=true is required for rootless gVisor
+	// --runtime-flag ignore-cgroups=true: required for rootless gVisor (no cgroup
+	// access). Same runsc boolean flag as the bare --runtime-flag=ignore-cgroups the
+	// create path below passes; the two spellings are equivalent. overlay2=root:self
+	// is not repeated here — it governs the writable rootfs, set where the container
+	// is created.
 	startOut, err := sm.podmanExec("--runtime-flag", "ignore-cgroups=true", "start", containerName)
 	if err != nil {
 		// Clean up on start failure
@@ -450,7 +420,8 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	}
 
 	// Start agent in container via podman exec (stdin/stdout protocol)
-	// --runtime-flag ignore-cgroups=true is required for rootless gVisor
+	// --runtime-flag ignore-cgroups=true: see the start call above — a podman global
+	// option, so it must precede the `exec` subcommand.
 	agentCmd := exec.Command(
 		"podman", "--runtime-flag", "ignore-cgroups=true",
 		"exec", "-i", "-w", mountPath, containerName,

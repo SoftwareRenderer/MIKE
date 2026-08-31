@@ -423,13 +423,9 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Start/stop sandbox based on enabled state
-	if req.Enabled {
-		ext, err := h.store.GetByID(id)
-		if err == nil && ext.IsLSP() {
-			// Will be started on first use (lazy start)
-		}
-	} else {
+	// Disabling stops the sandbox. Enabling needs nothing here: an LSP sandbox is
+	// started lazily on first use.
+	if !req.Enabled {
 		_ = h.sandbox.Stop(id)
 	}
 

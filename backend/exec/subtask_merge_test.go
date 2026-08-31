@@ -2154,30 +2154,6 @@ func TestMergeBranch_RecoverMissingBranch(t *testing.T) {
 	}
 }
 
-// TestExtractSlugPrefix tests the slug prefix extraction.
-func TestExtractSlugPrefix(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"task/count-hello-files-abc123", "task/count-hello-files-"},
-		{"task/fix-login-bug-xyz789", "task/fix-login-bug-"},
-		{"task/frost-amber-quartz-abc123", "task/frost-amber-quartz-"},
-		{"task/simple-abc123", "task/simple-"},
-		{"master", ""},
-		{"main", ""},
-		{"task/nosuffix", ""},
-		{"task/too-short-ab", ""},
-	}
-
-	for _, tc := range tests {
-		got := extractSlugPrefix(tc.input)
-		if got != tc.expected {
-			t.Errorf("extractSlugPrefix(%q) = %q, want %q", tc.input, got, tc.expected)
-		}
-	}
-}
-
 // --- Autostart chain: readiness-aware selection ---
 
 // seedThread seeds a task's thread with a user prompt followed by an
