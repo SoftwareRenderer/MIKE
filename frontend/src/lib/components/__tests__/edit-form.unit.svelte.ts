@@ -15,13 +15,15 @@ describe('EditForm rendering', () => {
 
     it('supports @ file mentions', () => {
         expect(source).toContain('FileMentionDropdown');
-        expect(source).toContain('mentionTrigger');
-        expect(source).toContain('detectMentionAtCursor');
+        expect(source).toContain('useFileMention');
     });
 
     it('delegates mention search with debounce', () => {
-        expect(source).toContain('MENTION_DEBOUNCE_MS');
-        expect(source).toContain('mentionSearchTimer');
+        // The state machine (debounce + /api/fs/search) lives in the shared composable
+        const composable = readFileSync(resolve(__dirname, '../../composables/use-file-mention.svelte.ts'), 'utf-8');
+        expect(source).toContain('mention.handleInput()');
+        expect(composable).toContain('MENTION_DEBOUNCE_MS');
+        expect(composable).toContain('/api/fs/search');
     });
 
     it('supports image attachments', () => {
@@ -50,8 +52,10 @@ describe('EditForm rendering', () => {
     });
 
     it('handles keyboard navigation for mentions', () => {
-        expect(source).toContain('mentionActiveIndex');
-        expect(source).toContain('insertMention');
+        const composable = readFileSync(resolve(__dirname, '../../composables/use-file-mention.svelte.ts'), 'utf-8');
+        expect(source).toContain('mention.handleKeydown(e)');
+        expect(composable).toContain('insertMention');
+        expect(composable).toContain('activeIndex');
     });
 
     it('initializes edit content from props', () => {

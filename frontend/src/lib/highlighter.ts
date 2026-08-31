@@ -1,6 +1,7 @@
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { syntaxTree, Language } from '@codemirror/language';
 import { HIGHLIGHT_CACHE_MAX } from '$lib/constants';
+import { escapeHtml } from '$lib/utils/format';
 
 /**
  * GitHub Dark highlighter — matches the DiffEditor's githubDarkHighlight colors.
@@ -114,22 +115,6 @@ async function loadLanguage(path: string): Promise<Language | null> {
 
     languageCache.set(ext, lang);
     return lang;
-}
-
-/**
- * Escape HTML special characters in a string.
- *
- * Quotes are included (matching the other escapeHtml copies) so the result is
- * safe in an attribute as well as a text node — callers build HTML strings that
- * carry `class="…"` attributes next to the escaped content.
- */
-export function escapeHtml(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
 }
 
 /** Simple LRU cache for highlight results (keyed by path + content hash). */

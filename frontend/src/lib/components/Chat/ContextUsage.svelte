@@ -1,5 +1,6 @@
 <script lang="ts">
     import ContextDonut from './ContextDonut.svelte';
+    import { formatTokens, formatCost } from '$lib/utils/format';
 
     interface Props {
         used?: number;
@@ -21,21 +22,6 @@
             ? `${formatTokens(used)} / ${formatTokens(limit)} tokens · ${percentage}%`
             : `${formatTokens(used)} tokens`
     );
-
-    function formatTokens(n: number): string {
-        if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-        if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
-        return n.toString();
-    }
-
-    function formatCost(cost: number): string {
-        if (cost <= 0) return '';
-        const formatted = cost < 1 ? cost.toFixed(4) : cost.toFixed(2);
-        return '$' + Number(formatted).toLocaleString(undefined, {
-            minimumFractionDigits: cost < 1 ? 4 : 2,
-            maximumFractionDigits: cost < 1 ? 4 : 2,
-        });
-    }
 
     async function handleClick() {
         if (!onSummarize) return;

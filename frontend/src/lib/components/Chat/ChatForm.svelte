@@ -4,7 +4,7 @@
     import ModelSelector from './ModelSelector.svelte';
     import ContextUsage from './ContextUsage.svelte';
     import FileMentionDropdown from '../FileMentionDropdown.svelte';
-    import { detectMentionAtCursor, insertMention, getInputRect } from '$lib/utils/file-mention';
+    import { useFileMention } from '$lib/composables/use-file-mention.svelte';
 
     interface ImageAttachment {
         file: File;
@@ -76,80 +76,16 @@
     let textareaEl: HTMLTextAreaElement | undefined;
     let fileInputEl: HTMLInputElement | undefined;
 
-    // @ file mention state
-    let mentionTrigger = $state<{ atIndex: number; query: string } | null>(null);
-    let mentionResults = $state<Array<{ path: string }>>([]);
-    let mentionPosition = $state<{ top: number; bottom: number; left: number; width: number } | null>(null);
-    let mentionActiveIndex = $state(0);
-    let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
-    const MENTION_DEBOUNCE_MS = 150;
-
-    function handleMentionInput() {
-        if (!textareaEl) return;
-        const cursorPos = textareaEl.selectionStart ?? 0;
-        const trigger = detectMentionAtCursor(value, cursorPos);
-
-        if (trigger) {
-            mentionTrigger = trigger;
-            mentionActiveIndex = 0;
-            // Position dropdown over the input area (chat-form-inner = textarea's parent)
-            const container = textareaEl.parentElement as HTMLElement;
-            const rect = getInputRect(container);
-            mentionPosition = rect;
-
-            // Debounced search
-            if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
-            mentionSearchTimer = setTimeout(() => {
-                searchFiles(trigger.query);
-            }, MENTION_DEBOUNCE_MS);
-        } else {
-            closeMention();
-        }
-    }
-
-    async function searchFiles(query: string) {
-        if (!projectId) return;
-        const params = new URLSearchParams({ q: query, project: projectId });
-        if (taskId) params.set('task', taskId);
-        try {
-            const res = await fetch(`/api/fs/search?${params.toString()}`);
-            if (!res.ok) return;
-            const data = await res.json();
-            mentionResults = data.results || [];
-        } catch {
-            mentionResults = [];
-        }
-    }
-
-    function closeMention() {
-        mentionTrigger = null;
-        mentionResults = [];
-        mentionPosition = null;
-        mentionActiveIndex = 0;
-        if (mentionSearchTimer) {
-            clearTimeout(mentionSearchTimer);
-            mentionSearchTimer = null;
-        }
-    }
-
-    function handleMentionSelect(path: string) {
-        if (!mentionTrigger || !textareaEl) return;
-        const { value: newValue, cursorPos } = insertMention(value, mentionTrigger.atIndex, mentionTrigger.query, path);
-        value = newValue;
-        closeMention();
-        // Restore cursor after reactive update
-        requestAnimationFrame(() => {
-            if (textareaEl) {
-                textareaEl.focus();
-                textareaEl.setSelectionRange(cursorPos, cursorPos);
-            }
-        });
-    }
-
-    function handleMentionClose() {
-        closeMention();
-        textareaEl?.focus();
-    }
+    // @ file mention — shared state machine (see use-file-mention.svelte.ts)
+    const mention = useFileMention({
+        getProjectId: () => projectId,
+        getTaskId: () => taskId,
+        getValue: () => value,
+        setValue: (v) => { value = v; },
+        getTextarea: () => textareaEl,
+        // Position dropdown over the input area (chat-form-inner = textarea's parent)
+        getPositionSource: () => textareaEl?.parentElement,
+    });
 
     export function focus() {
         textareaEl?.focus();
@@ -187,32 +123,7 @@
      * not this one (blur-first).
      */
     function handleKeydown(e: KeyboardEvent) {
-        // Handle @ mention dropdown navigation
-        if (mentionTrigger && mentionResults.length > 0) {
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                mentionActiveIndex = (mentionActiveIndex + 1) % mentionResults.length;
-                return;
-            }
-            if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                mentionActiveIndex = (mentionActiveIndex - 1 + mentionResults.length) % mentionResults.length;
-                return;
-            }
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (mentionActiveIndex >= 0 && mentionActiveIndex < mentionResults.length) {
-                    handleMentionSelect(mentionResults[mentionActiveIndex].path);
-                }
-                return;
-            }
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopPropagation();
-                closeMention();
-                return;
-            }
-        }
+        if (mention.handleKeydown(e)) return;
         if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
@@ -364,7 +275,7 @@
             aria-label="Message input"
             rows="1"
             onkeydown={handleKeydown}
-            oninput={(e) => { autoResize(); handleMentionInput(); }}
+            oninput={(e) => { autoResize(); mention.handleInput(); }}
             onfocus={handleFocus}
         ></textarea>
         <button type="button" class="btn-attach" onclick={() => fileInputEl?.click()} aria-label="Attach image" title="Attach image" disabled={disabled || isLoading}>
@@ -391,11 +302,11 @@
 
 <!-- @ file mention dropdown (rendered as portal overlay) -->
 <FileMentionDropdown
-    results={mentionResults}
-    position={mentionPosition}
-    activeIndex={mentionActiveIndex}
-    onSelect={handleMentionSelect}
-    onClose={handleMentionClose}
+    results={mention.results}
+    position={mention.position}
+    activeIndex={mention.activeIndex}
+    onSelect={(path) => mention.select(path)}
+    onClose={() => mention.handleClose()}
 />
 
 <style>

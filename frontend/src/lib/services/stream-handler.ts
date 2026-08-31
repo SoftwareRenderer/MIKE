@@ -3,6 +3,7 @@ import type { ChatEntry } from '$lib/types';
 import type { ToolCallInfo } from './stream-state.svelte';
 import { StreamState } from './stream-state.svelte';
 import { resolveLiveToolCall, type LiveToolCall } from '$lib/utils/tool-call-lookup';
+import { errorFromEvent, isRepeatError, type ErrorEventData } from '$lib/utils/chat-entries';
 
 /** Update context usage from accumulated token counts. */
 function updateContextUsed(s: typeof StreamState.prototype.state) {
@@ -33,7 +34,8 @@ export interface StreamHandlerCallbacks {
     loadHistory: (scrollAfter: boolean) => void;
     updateActiveThread: (threadId: string) => void;
     updateThreadUrl: (threadId: string) => void;
-    createTaskMessage: (projectId: string, taskId: string, role: string, content: string) => Promise<void>;
+    /** Reports a failure the client has not shown yet — never called for a replayed frame. */
+    onNewError: () => void;
 }
 
 /**
@@ -46,7 +48,7 @@ export interface StreamHandlerCallbacks {
  *   // In WebSocket onmessage: handleEvent(event);
  */
 export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallbacks) {
-    const { genId, scroll, markStreaming, markNotStreaming, onRefreshDiff, onThreadSwitch, loadHistory, updateActiveThread, updateThreadUrl, createTaskMessage } = cb;
+    const { genId, scroll, markStreaming, markNotStreaming, onRefreshDiff, onThreadSwitch, loadHistory, updateActiveThread, updateThreadUrl, onNewError } = cb;
     const s = stream.state;
 
     // rAF batching for scroll — coalesces rapid calls during token bursts
@@ -88,7 +90,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
         return s.entries[s.entries.length - 1]!;
     }
 
-    return function handleEvent(event: StreamEvent, suppressEvents: boolean, projectId: string, taskId: string) {
+    return function handleEvent(event: StreamEvent, suppressEvents: boolean) {
         switch (event.type) {
             case 'token': {
                 if (suppressEvents) break;
@@ -281,24 +283,23 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'error': {
+                const data = event.data as ErrorEventData;
+                // The server stores the error before sending it and names that row in the
+                // event, so a frame that was already drawn must not be drawn a second time.
+                if (isRepeatError(s.entries, data)) break;
+                onNewError();
                 stream.clearAwaiting();
                 markNotStreaming();
                 stream.closeCurrentAssistant();
-                const data = event.data as { message: string; code?: string };
-                const code = data.code || 'error';
+                const { code, message } = errorFromEvent(data);
                 // Sandbox setup failures (e.g. Dockerfile build) leave the progress box
                 // open — mark it done so the spinner stops and the error card stands out.
                 if (code === 'setup_failed') {
                     const buildEntry = s.entries.find(e => e.buildLog && !e.buildLog.done);
                     if (buildEntry && buildEntry.buildLog) buildEntry.buildLog.done = true;
                 }
-                if (code === 'ws_error' || code === 'stopped') break;
-                const message = data.message || 'An error occurred';
-                const entry: ChatEntry = { id: genId(), role: 'error', content: message, isStreaming: false, error: { code, message }, createdAt: new Date().toISOString() };
+                const entry: ChatEntry = { id: data.message_id || genId(), role: 'error', content: message, isStreaming: false, error: { code, message }, createdAt: new Date().toISOString() };
                 s.entries = [...s.entries, entry];
-                if (code !== 'ws_disconnected') {
-                    createTaskMessage(projectId, taskId, 'error', `[${code}] ${message}`).catch(() => {});
-                }
                 break;
             }
             case 'status': {

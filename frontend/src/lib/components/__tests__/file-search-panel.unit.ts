@@ -1,14 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { escapeHtml } from '$lib/utils/format';
 
 // Test the highlightMatch logic extracted from FileSearchPanel.svelte
 // These are pure functions so we can test them without rendering the component.
-
-function escapeHtml(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-}
 
 function highlightMatch(line: string, query: string, useRegex: boolean, matchCase: boolean): string {
     if (!query || !line) return escapeHtml(line);

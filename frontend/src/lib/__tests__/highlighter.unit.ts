@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { escapeHtml, getLanguageTreeFromView } from '$lib/highlighter';
+import { getLanguageTreeFromView } from '$lib/highlighter';
+import { escapeHtml } from '$lib/utils/format';
 
 // Mock a CodeMirror EditorView enough for the markdown fallback path,
 // which only needs state.doc.toString() and state.doc.lineAt().
