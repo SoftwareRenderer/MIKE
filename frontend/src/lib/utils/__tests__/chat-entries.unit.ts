@@ -514,6 +514,28 @@ describe('buildEntriesFromMessages', () => {
         expect(entries).toHaveLength(0);
     });
 
+    it('collapses repeated error rows into the first one', () => {
+        const messages = [
+            { id: 'u1', role: 'user', content: 'hello', created_at: '2025-01-01T00:00:00Z' },
+            { id: 'e1', role: 'error', content: '[llm_connection_failed] no route to host', created_at: '2025-01-01T00:00:01Z' },
+            { id: 'e2', role: 'error', content: '[llm_connection_failed] no route to host', created_at: '2025-01-01T00:00:02Z' },
+            { id: 'e3', role: 'error', content: '[llm_connection_failed] no route to host', created_at: '2025-01-01T00:00:03Z' },
+        ];
+        const { entries } = buildEntriesFromMessages(messages);
+        expect(entries.filter(e => e.role === 'error')).toHaveLength(1);
+        expect(entries.find(e => e.role === 'error')!.id).toBe('e1');
+    });
+
+    it('keeps an identical error separated by another message', () => {
+        const messages = [
+            { id: 'e1', role: 'error', content: '[llm_connection_failed] no route to host', created_at: '2025-01-01T00:00:01Z' },
+            { id: 'u1', role: 'user', content: 'try again', created_at: '2025-01-01T00:00:02Z' },
+            { id: 'e2', role: 'error', content: '[llm_connection_failed] no route to host', created_at: '2025-01-01T00:00:03Z' },
+        ];
+        const { entries } = buildEntriesFromMessages(messages);
+        expect(entries.filter(e => e.role === 'error')).toHaveLength(2);
+    });
+
     it('merges tool_call entries into preceding assistant', () => {
         const messages = [
             { id: 'a1', role: 'assistant', content: 'thinking', created_at: '2025-01-01T00:00:00Z' },

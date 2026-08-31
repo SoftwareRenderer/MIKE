@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -18,10 +19,20 @@ type providerState struct {
 // queueEntry represents a goroutine waiting for a provider slot or rate allowance.
 type queueEntry struct {
 	provider string
-	done     chan struct{} // receives when Release serves the entry; closed when cancelled
-	once     sync.Once     // ensures exactly one signal (serve or cancel)
-	// Set under lock by Release when it pre-counts the entry's slot.
+	done chan struct{}
+	once sync.Once
 	served bool
+	slotReturned bool
+}
+
+// errGateAbandoned reports that a waiter left the queue without ever holding a
+// slot. Reported as an error (never a nil grant) so a caller can never proceed
+// thinking it holds a slot it does not have.
+var errGateAbandoned = errors.New("concurrency gate: waiter abandoned without a slot")
+
+// newQueueEntry builds a waiter entry for a provider gate key.
+func newQueueEntry(provider string) *queueEntry {
+	return &queueEntry{provider: provider, done: make(chan struct{}, 1)}
 }
 
 // gateKey normalizes the provider URL (trailing slash) so URLs that differ
@@ -73,7 +84,7 @@ func (g *ConcurrencyGate) advanceWindowLocked(ps *providerState, maxRPS int, now
 }
 
 // frontUnservedIdxLocked returns the index of the first unserved,
-// non-cancelled entry for the provider, or -1. Caller must hold g.mu.
+// non-cancelled entry for the provider, or -1
 func (g *ConcurrencyGate) frontUnservedIdxLocked(providerURL string) int {
 	for i, e := range g.queue {
 		if e.provider != providerURL {
@@ -143,17 +154,14 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 	}
 
 	// Must wait — enqueue
-	entry := &queueEntry{provider: providerURL, done: make(chan struct{})}
+	entry := newQueueEntry(providerURL)
 	g.queue = append(g.queue, entry)
 	g.mu.Unlock()
 	if onEnqueued != nil {
 		onEnqueued(entry)
 	}
 
-	// Block until granted or cancelled; the grant condition is re-checked
-	// under lock after every wake. Only the front-most unserved waiter grants
-	// itself (FIFO); gotSignal ensures the Release handshake is consumed once.
-	var gotSignal bool
+	// Block until granted or cancelled
 	for {
 		g.mu.Lock()
 		idx := g.queueIndexLocked(entry)
@@ -161,32 +169,32 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 			served := entry.served
 			g.mu.Unlock()
 			if !served {
-				// Removed without being served — cancelled.
-				return entry, ctx.Err()
+				// Removed without being served — cancelled. Never report a grant
+				// we do not hold, even if the context has no error yet.
+				if err := ctx.Err(); err != nil {
+					return entry, err
+				}
+				return entry, errGateAbandoned
 			}
-			// Release pre-counted the slot. Wait out the rate window, then
-			// return success; consume the in-flight serve signal (if any) so
-			// Release is unblocked.
+			// Release pre-counted the slot for us. Wait out the rate window,
+			// then start — or hand the slot back if we are cancelled first.
 			for {
 				g.mu.Lock()
 				if !ps.nextAllowed.After(time.Now()) {
 					// Start consumes the rate allowance — advance the window.
 					g.advanceWindowLocked(ps, maxRPS, time.Now())
 					g.mu.Unlock()
-					if !gotSignal {
-						<-entry.done
-					}
 					return entry, nil
 				}
 				wait := time.Until(ps.nextAllowed)
 				g.mu.Unlock()
 				select {
 				case <-entry.done:
-					gotSignal = true
+					// Serve hint — the loop re-checks the window under lock.
 				case <-ctx.Done():
-					if !gotSignal {
-						<-entry.done // drain in-flight serve send so Release unblocks
-					}
+					// We hold a slot we will never use. Give it back, or the
+					// provider loses that capacity for the process lifetime.
+					g.abandonServedSlot(entry)
 					return entry, ctx.Err()
 				case <-time.After(wait):
 				}
@@ -215,17 +223,14 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 		timer := time.NewTimer(wait)
 		select {
 		case <-entry.done:
-			// Served by Release (or closed on cancel/Close) — re-check.
-			gotSignal = true
+			// Served by Release (or closed on cancel) — re-check under lock.
 		case <-ctx.Done():
 			timer.Stop()
 			entry.once.Do(func() { close(entry.done) })
 			g.cleanupEntry(entry)
-			// Drain an in-flight serve send so Release isn't blocked.
-			select {
-			case <-entry.done:
-			default:
-			}
+			// Release may already have pre-counted a slot for us and be on its
+			// way to (or already done with) the handoff. Return that slot.
+			g.abandonServedSlot(entry)
 			return entry, ctx.Err()
 		case <-timer.C:
 			// Rate window elapsed (or backoff) — re-check.
@@ -236,8 +241,7 @@ func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concu
 
 // Release returns a slot and serves the front waiter when the rate window is
 // open (pre-counting its slot); a rate-blocked waiter grants itself on its
-// rate timer. The signal is sent outside the lock so the waiter runs before
-// Release returns.
+// rate timer.
 func (g *ConcurrencyGate) Release(providerURL string) {
 	providerURL = gateKey(providerURL)
 	g.mu.Lock()
@@ -274,9 +278,16 @@ func (g *ConcurrencyGate) Release(providerURL string) {
 
 	g.mu.Unlock()
 
-	// Signal outside the lock: blocks until the waiter is scheduled.
+	// Signal outside the lock. The send is non-blocking (entry.done is
+	// buffered): the slot is already accounted for, and a waiter that cancelled
+	// first — closing the channel — must not be able to wedge this caller.
 	if signal != nil {
-		signal.once.Do(func() { signal.done <- struct{}{} })
+		signal.once.Do(func() {
+			select {
+			case signal.done <- struct{}{}:
+			default:
+			}
+		})
 	}
 }
 
@@ -346,4 +357,37 @@ func (g *ConcurrencyGate) cleanupEntry(entry *queueEntry) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.removeEntryLocked(entry)
+}
+
+// abandonServedSlot returns to the provider pool the slot that Release
+// pre-counted for entry when the waiter gives up on it (its context was
+// cancelled after the handoff was made, before the request started).
+//
+// Without this, every cancel that lands in the handoff window permanently
+// inflates ps.active: with concurrency 3, two of them leave a provider stuck
+// at one in-flight request for the lifetime of the process (only a restart
+// clears it). The release path also hands the slot to the next waiter.
+// No-op when Release never pre-counted a slot, or it was already returned.
+func (g *ConcurrencyGate) abandonServedSlot(entry *queueEntry) {
+	g.mu.Lock()
+	returnSlot := entry.served && !entry.slotReturned
+	if returnSlot {
+		entry.slotReturned = true
+	}
+	g.mu.Unlock()
+	if returnSlot {
+		g.Release(entry.provider)
+	}
+}
+
+// activeFor reports how many slots are currently held for a provider. A value
+// that stays above 0 while nothing is running means slots leaked.
+func (g *ConcurrencyGate) activeFor(providerURL string) int {
+	providerURL = gateKey(providerURL)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if ps, ok := g.providers[providerURL]; ok && ps.active > 0 {
+		return ps.active
+	}
+	return 0
 }
