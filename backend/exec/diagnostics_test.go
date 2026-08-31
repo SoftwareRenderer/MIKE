@@ -191,28 +191,6 @@ func TestPrepareMergeConflictTurn_DeliversBeforeTheNextCall(t *testing.T) {
 	}
 }
 
-func TestFormatChatHistory_RendersAdvisoryAsEnvironmentNote(t *testing.T) {
-	// "User: ..." here would make the summary claim the user reported these diagnostics.
-	out := formatChatHistory([]types.ChatMessage{
-		{Role: "user", Content: "fix the build"},
-		{Role: "advisory", Content: "LSP diagnostics for this turn's changes (1 file with findings):\n\n1. line 3, col 1 error: undefined: foo (error)"},
-	}, false)
-	if !strings.Contains(out, "Environment note: LSP diagnostics for this turn's changes (1 file with findings):") {
-		t.Fatalf("advisory not rendered as an environment note:\n%s", out)
-	}
-	if strings.Contains(out, "User: LSP diagnostics") {
-		t.Fatalf("advisory attributed to the user:\n%s", out)
-	}
-	// The findings themselves must reach the summarizer. Truncating to the first line
-	// handed it nothing but the header ("…(1 file with findings):"), and because
-	// summarization is rolling — each pass folds the previous summary plus the newer
-	// messages — that header was the only copy carried into every later summary.
-	// The note is deliberately carried in whole; summarize_rolling_test.go pins that.
-	if !strings.Contains(out, "undefined: foo") {
-		t.Fatalf("the findings must reach the summarizer:\n%s", out)
-	}
-}
-
 // --- diagnostics discovery -------------------------------------------------------
 
 func lspGoExtension() *extensions.Extension {

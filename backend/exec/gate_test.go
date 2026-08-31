@@ -691,3 +691,192 @@ func TestAcquire_RateLimit_ReleaseServeSpacing(t *testing.T) {
 	}
 	g.Release("http://p") // C
 }
+
+// TestAcquireRelease_CancelledAfterServeReturnsSlot covers a waiter that is
+// cancelled AFTER Release handed it a slot but before its request started - the
+// "user stops a Pending task" case on a provider with a rate limit set.
+//
+// Choreography (concurrency=2, 1 request/second, no timing luck involved):
+//  1. A takes a slot, closing the 1s rate window.
+//  2. D joins the queue and is held inside onEnqueued, i.e. at the instant
+//     after joining the queue and before its wait loop runs.
+//  3. The window opens; A releases, so Release pre-counts D's slot and hands
+//     over the serve signal.
+//  4. E takes the freed allowance, closing the window again.
+//  5. D finally waits out the window and is cancelled while waiting.
+//
+// D never issues a request, so its slot must return to the pool: afterwards
+// only E's slot is held (A's went to D and was abandoned with it). A leaked
+// slot here permanently shrinks the provider - twice, and a concurrency-3
+// provider serves one request at a time until the server restarts.
+func TestAcquireRelease_CancelledAfterServeReturnsSlot(t *testing.T) {
+	const url = "http://rate-limited:8080/v1"
+	g := NewConcurrencyGate()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if _, err := g.Acquire(ctx, url, 2, 1, nil); err != nil { // A
+		t.Fatalf("A acquire: %v", err)
+	}
+
+	releaseD := make(chan struct{})
+	started := make(chan struct{})
+	dCtx, dCancel := context.WithCancel(context.Background())
+	dResult := make(chan error, 1)
+	go func() {
+		_, err := g.Acquire(dCtx, url, 2, 1, func(*queueEntry) {
+			close(started)
+			<-releaseD // hold D at the moment it joins the queue
+		})
+		dResult <- err
+	}()
+	<-started
+
+	// Let the rate window open, then hand A's slot to D.
+	time.Sleep(1100 * time.Millisecond)
+	releaseDone := make(chan struct{})
+	go func() { g.Release(url); close(releaseDone) }()
+	time.Sleep(100 * time.Millisecond) // Release reaches the handoff
+
+	if _, err := g.Acquire(ctx, url, 2, 1, nil); err != nil { // E
+		t.Fatalf("E acquire: %v", err)
+	}
+
+	close(releaseD)
+	time.Sleep(100 * time.Millisecond) // D enters its rate wait
+	dCancel()
+
+	select {
+	case err := <-dResult:
+		if err == nil {
+			t.Fatal("waiter returned success after its context was cancelled")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled waiter never returned - it wedged on the Release handoff")
+	}
+	select {
+	case <-releaseDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Release never returned - wedged handing off to a cancelled waiter")
+	}
+
+	if active := g.activeFor(url); active != 1 {
+		t.Fatalf("active slots = %d, want 1: the cancelled waiter kept the slot Release pre-counted for it", active)
+	}
+}
+
+// TestAcquireRelease_CancelDuringHandoffDoesNotWedge hammers the window where a
+// queued waiter is cancelled exactly as Release hands it a slot. Neither side
+// may block: a blocked handoff wedges the releasing executor goroutine (that
+// task never finishes and never frees its slot) and the cancelled one.
+//
+// Which of the two ready select cases the runtime picks is not controllable, so
+// this is a race hammer rather than a deterministic repro (the deterministic one
+// is TestAcquireRelease_CancelledAfterServeReturnsSlot above). Pre-fix it wedged
+// about once in every hundred cycles, with both goroutines stuck for good.
+func TestAcquireRelease_CancelDuringHandoffDoesNotWedge(t *testing.T) {
+	const url = "http://handoff-race:8080/v1"
+	for i := 0; i < 60; i++ {
+		g := NewConcurrencyGate()
+		ctx, cancel := context.WithCancel(context.Background())
+		if _, err := g.Acquire(ctx, url, 1, 0, nil); err != nil {
+			t.Fatalf("iter %d: holder acquire: %v", i, err)
+		}
+
+		enqueued := make(chan struct{}, 1)
+		waiterCtx, waitCancel := context.WithCancel(context.Background())
+		result := make(chan error, 1)
+		go func() {
+			_, err := g.Acquire(waiterCtx, url, 1, 0, func(*queueEntry) { enqueued <- struct{}{} })
+			result <- err
+		}()
+		<-enqueued
+
+		releaseDone := make(chan struct{})
+		go func() { g.Release(url); close(releaseDone) }()
+		time.Sleep(time.Duration(i%5) * time.Millisecond) // land the cancel in the handoff
+		waitCancel()
+
+		select {
+		case <-result:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("iter %d: cancelled waiter wedged in the handoff", i)
+		}
+		select {
+		case <-releaseDone:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("iter %d: Release wedged handing off to a cancelled waiter", i)
+		}
+		cancel()
+	}
+}
+
+// TestConcurrencyGate_CapacitySurvivesCancelChurn is the reported symptom
+// written down: after many queued tasks are cancelled (stopped or re-pointed)
+// while a provider is saturated, a provider configured for concurrency 3 must
+// still be able to run 3 requests at once. Cancelling a waiter may never
+// shrink a provider's capacity.
+func TestConcurrencyGate_CapacitySurvivesCancelChurn(t *testing.T) {
+	const url = "http://churn:8080/v1"
+	g := NewConcurrencyGate()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Churn: one slot held, one waiter queued, the slot handed over and the
+	// waiter cancelled in the same instant. Every cycle must end with the
+	// provider holding no slots.
+	for cycle := 0; cycle < 60; cycle++ {
+		if _, err := g.Acquire(ctx, url, 1, 0, nil); err != nil {
+			t.Fatalf("cycle %d: holder acquire: %v", cycle, err)
+		}
+		wCtx, wCancel := context.WithCancel(ctx)
+		enqueued := make(chan struct{}, 1)
+		result := make(chan error, 1)
+		go func() {
+			_, err := g.Acquire(wCtx, url, 1, 0, func(*queueEntry) { enqueued <- struct{}{} })
+			result <- err
+		}()
+		<-enqueued
+
+		releaseDone := make(chan struct{})
+		go func() { g.Release(url); close(releaseDone) }()
+		time.Sleep(time.Duration(cycle%3) * time.Millisecond) // cancel inside the handoff
+		wCancel()
+
+		var err error
+		select {
+		case err = <-result:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("cycle %d: queued waiter wedged while being cancelled", cycle)
+		}
+		select {
+		case <-releaseDone:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("cycle %d: Release wedged handing off to a cancelled waiter", cycle)
+		}
+		if err == nil {
+			g.Release(url) // the waiter did get the slot and owns it
+		}
+		wCancel()
+		if active := g.activeFor(url); active != 0 {
+			t.Fatalf("cycle %d: %d slot(s) leaked - provider capacity shrinks over time", cycle, active)
+		}
+	}
+
+	// Capacity is still the configured 3, all at the same time.
+	start := make(chan struct{}, 3)
+	for k := 0; k < 3; k++ {
+		go func() {
+			if _, err := g.Acquire(ctx, url, 3, 0, nil); err == nil {
+				start <- struct{}{}
+			}
+		}()
+	}
+	for k := 0; k < 3; k++ {
+		select {
+		case <-start:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("only %d of 3 concurrent requests can start - the provider lost capacity", k)
+		}
+	}
+}
