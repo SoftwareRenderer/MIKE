@@ -193,3 +193,82 @@ func TestClone_Error(t *testing.T) {
 		t.Fatalf("error output does not mention the failure: %q", out)
 	}
 }
+
+// TestValidateCloneURL is the shared gate every clone of a caller-supplied source
+// passes through — project creation and an extension checkout alike.
+func TestValidateCloneURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		gitURL  string
+		wantErr bool
+	}{
+		// Accepted: network transports on the allowlist
+		{"https url", "https://github.com/user/repo.git", false},
+		{"https url no suffix", "http://example.com/repo", false},
+		{"http url", "http://example.com/repo", false},
+		{"ssh url", "ssh://git@example.com:22/repo.git", false},
+		{"git url", "git://example.com/repo.git", false},
+		{"uppercase scheme", "HTTPS://example.com/repo.git", true}, // git's allowlist is case-sensitive
+		// Accepted: scp-like SSH form (no scheme)
+		{"scp-like", "git@github.com:org/repo.git", false},
+		{"scp-like no user", "github.com:org/repo.git", false},
+		{"scp-like abs remote path", "deploy@build.example.com:/srv/git/repo.git", false},
+		// Accepted: local cloning is a documented, supported workflow
+		{"file scheme abs", "file:///tmp/local-repo", false},
+		{"bare absolute path", "/tmp/local-repo", false},
+		{"bare relative path", "repos/local-repo", false},
+		{"dot relative path", "./local-repo", false},
+		{"path with space", "/tmp/my repos/local-repo", false},
+		{"path with colon after slash", "/tmp/local:repo", false},
+		// Rejected: empty / argument injection
+		{"empty", "", true},
+		{"whitespace only", "   ", true},
+		{"leading dash short", "-f", true},
+		{"leading dash flag", "-evil-flag", true},
+		{"leading dash upload-pack", "--upload-pack=touch /tmp/pwn", true},
+		{"leading dash reference", "--reference=/etc", true},
+		// Rejected: remote-helper transports (`<helper>::<args>`)
+		{"ext shell", "ext::sh -c 'id'", true},
+		{"ext touch", "ext::touch /tmp/pwn", true},
+		{"fd helper", "fd::11", true},
+		{"python helper", "python::Foo", true},
+		{"rc helper", "rc::/etc/passwd", true},
+		// Rejected: schemes outside the allowlist
+		{"unknown scheme", "foo://x", true},
+		{"ext scheme form", "ext:///tmp/x", true},
+		{"smb scheme", "smb://host/share/repo", true},
+		// Rejected: malformed scp-like forms (the shape git treats as a remote)
+		{"scp-like with command", "git@host:sh -c 'id'", true},
+		{"scp-like double colon", "host::repo", true},
+		{"scp-like empty path", "git@host:", true},
+		{"scp-like space in host", "git@ho st:repo", true},
+		// Rejected: control characters
+		{"newline in url", "https://example.com/repo\nx", true},
+		{"nul in url", "https://example.com/repo\x00x", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateCloneURL(tt.gitURL)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateCloneURL(%q) = %v, wantErr %v", tt.gitURL, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateCloneURL_AllowlistMatchesCloneEnv keeps the two halves of the
+// clone restriction in sync: every scheme the validator accepts must also be one
+// git is told to allow, and no helper transport may appear in either.
+func TestValidateCloneURL_AllowlistMatchesCloneEnv(t *testing.T) {
+	for _, scheme := range CloneAllowedProtocols {
+		if err := ValidateCloneURL(scheme + "://example.com/repo.git"); err != nil {
+			t.Errorf("allowed protocol %q rejected by validateGitCloneURL: %v", scheme, err)
+		}
+	}
+	for _, helper := range []string{"ext", "fd", "python", "rc", "internal"} {
+		if err := ValidateCloneURL(helper + "::payload"); err == nil {
+			t.Errorf("helper transport %q accepted", helper)
+		}
+	}
+}

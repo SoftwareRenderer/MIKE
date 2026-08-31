@@ -934,7 +934,6 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Merge task branch
 	if mergeErr := h.executor.MergeBranch(projectID, taskID, task); mergeErr != nil {
 		log.Printf("[commit-and-done] task=%s merge failed: %v", taskID, mergeErr)
 		// Reload to check for merge conflict flag set by MergeBranch
@@ -1524,7 +1523,6 @@ func (h *TaskHandler) StartSubtask(projectID, subtaskID string, autostarted bool
 // columns → idle). Descendants that are not in-flight (pending subtasks) are
 // left untouched.
 func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
-	// Get all descendants
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
 		log.Printf("[stop-cascade] failed to get descendants of %s: %v", taskID, err)

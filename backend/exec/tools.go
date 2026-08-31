@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"kanban/backend/git"
+	kanban_sandbox "kanban/backend/sandbox"
 	"kanban/backend/types"
 	sandbox "kanban/pkg/bridge"
 	"kanban/pkg/bridge/protocol"
@@ -445,7 +446,6 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		b.WriteString(fileContent[prev:])
 		result := b.String()
 
-		// Write the result
 		if err := write(ctx, path, result); err != nil {
 			if recoverBridge(err.Error()) {
 				write = state.sandboxWrite
@@ -650,17 +650,8 @@ func normalizePath(projectName, path string) string {
 	if !filepath.IsAbs(cleaned) {
 		return cleaned
 	}
-	// Strip sandbox mount prefix: /home/sandbox/<projectName>/...
-	mountPath := "/home/sandbox/" + projectName
-	mountPrefix := mountPath + "/"
-	if cleaned == mountPath {
-		return "."
-	}
-	if strings.HasPrefix(cleaned, mountPrefix) {
-		rel := cleaned[len(mountPath):]
-		if len(rel) > 0 && rel[0] == os.PathSeparator {
-			rel = rel[1:]
-		}
+	// Strip sandbox mount prefix: /home/sandbox/<projectName>/…
+	if rel, ok := kanban_sandbox.TrimMountPrefix(projectName, cleaned); ok {
 		return rel
 	}
 	// Other absolute paths — os.Root treats them as relative to root

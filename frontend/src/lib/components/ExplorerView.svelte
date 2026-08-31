@@ -663,9 +663,10 @@
         window.addEventListener('open-file', handleOpenFile);
     });
 
-    /** open-file dispatch (diff view / search results) */
+    // open-file dispatch (go-to-definition / search results)
     function handleOpenFile(e: Event) {
-        const { path, line } = (e as CustomEvent).detail;
+        const { path, line, taskId } = (e as CustomEvent<{ path: string; line?: number; taskId?: string }>).detail;
+        if (taskId) return;
         handleFileSelected(path, line);
     }
 

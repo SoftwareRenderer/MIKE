@@ -264,7 +264,6 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN plan_mode INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN merge_on_commit INTEGER NOT NULL DEFAULT 1`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN merge_children INTEGER NOT NULL DEFAULT 1`)
-	// Rename merge_on_commit -> auto_merge, merge_children -> subtasks_auto_merge
 	_, _ = s.db.Exec(`ALTER TABLE tasks RENAME COLUMN merge_on_commit TO auto_merge`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks RENAME COLUMN merge_children TO subtasks_auto_merge`)
 	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN model_name TEXT DEFAULT NULL`)
@@ -306,7 +305,6 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_ref TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_commit TEXT DEFAULT NULL`)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN branch_tip TEXT DEFAULT NULL`)
-	// Rename status_state -> execution_state
 	_, _ = s.db.Exec(`ALTER TABLE tasks RENAME COLUMN status_state TO execution_state`)
 	// Runtime port mappings (ephemeral, cleared when task ends)
 	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN assigned_ports TEXT DEFAULT NULL`)

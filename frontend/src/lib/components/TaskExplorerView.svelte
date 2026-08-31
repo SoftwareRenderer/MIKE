@@ -501,27 +501,30 @@
         return parts[parts.length - 1] || '/';
     }
 
-    onMount(async () => {
-        // Initialize task worktree if not yet set up
-        if (!taskBranch) {
-            try {
-                await initTask(projectId, taskId);
-            } catch (e) {
-                console.error('[task-explorer] Failed to initialize task:', e);
-            }
-        }
-        loadCommits();
-        if (openFiles.length > 0) {
-            activeTab = 'editor';
-        }
+    onMount(() => {
         window.addEventListener('keydown', handleKeydown);
         window.addEventListener('open-file', handleOpenFile);
+        void (async () => {
+            // Initialize task worktree if not yet set up
+            if (!taskBranch) {
+                try {
+                    await initTask(projectId, taskId);
+                } catch (e) {
+                    console.error('[task-explorer] Failed to initialize task:', e);
+                }
+            }
+            loadCommits();
+            if (openFiles.length > 0) {
+                activeTab = 'editor';
+            }
+        })();
     });
 
-    /** open-file dispatch (diff view / search results) */
+    // open-file dispatch (go-to-definition / search results)
     function handleOpenFile(e: Event) {
-        const { path, line } = (e as CustomEvent).detail;
-        handleFileSelected(path, line);
+        const detail = (e as CustomEvent<{ path: string; line?: number; taskId?: string }>).detail;
+        if (detail.taskId && detail.taskId !== taskId) return;
+        handleFileSelected(detail.path, detail.line);
     }
 
     onDestroy(() => {
