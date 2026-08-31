@@ -40,9 +40,13 @@ describe('StatsModal', () => {
         const componentPath = resolve(__dirname, '../StatsModal.svelte');
         const source = readFileSync(componentPath, 'utf-8');
 
-        // The formatCost function should use Intl.NumberFormat with currency
-        expect(source).toContain("style: 'currency'");
-        expect(source).toContain("currency: 'USD'");
+        // Cost formatting moved to the shared module — StatsModal delegates to
+        // formatCost, which uses Intl.NumberFormat with currency (utils/format.ts)
+        expect(source).toContain('formatCost');
+        expect(source).toContain('$lib/utils/format');
+        const formatSrc = readFileSync(resolve(__dirname, '../../utils/format.ts'), 'utf-8');
+        expect(formatSrc).toContain("style: 'currency'");
+        expect(formatSrc).toContain("currency: 'USD'");
 
         // The summary should show total cost
         expect(source).toContain('total_cost');

@@ -89,17 +89,4 @@ export async function apiError(res: Response, defaultMsg: string): Promise<Error
     }
 }
 
-/**
- * Convenience wrapper for apiFetch to handle JSON requests and responses.
- */
-export async function apiRequest<T>(method: string, url: string, body?: any): Promise<T> {
-    const res = await apiFetch(`${API_BASE}${url}`, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) throw await apiError(res, 'API request failed');
-    return res.json();
-}
-
 export { API_BASE };

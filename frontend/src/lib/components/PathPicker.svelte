@@ -5,38 +5,58 @@
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
 
-    let { initialPath, onClose, onSelect }: {
+    interface Entry { name: string; isDir: boolean; path: string }
+
+    let { title, initialPath, emptyLabel, selectTitle, fileFilter, onClose, onSelect }: {
+        title: string;
         initialPath: string;
+        /** Shown when a directory lists nothing selectable. */
+        emptyLabel: string;
+        /** Tooltip on the footer Select button. */
+        selectTitle: string;
+        /**
+         * When provided, the picker runs in file mode: files matching this
+         * predicate are listed alongside directories and are the selectable
+         * entries. Without it the picker is directory-only and every loaded
+         * directory itself is the selection.
+         */
+        fileFilter?: (name: string) => boolean;
         onClose: () => void;
         onSelect: (path: string) => void;
     } = $props();
 
+    const fileMode = $derived(fileFilter !== undefined);
+
     let currentPath = $state('');
-    let entries = $state<{ name: string; isDir: boolean; path: string }[]>([]);
-    let selectedFile = $state<string | null>(null);
+    let entries = $state<Entry[]>([]);
+    /** Directory mode: the loaded directory; file mode: the picked file. */
+    let selected = $state<string | null>(null);
     let loading = $state(false);
     let error = $state('');
-
-    function isDockerfile(name: string): boolean {
-        const lower = name.toLowerCase();
-        return lower === 'dockerfile' || lower.endsWith('.dockerfile');
-    }
+    let parentPath = $derived(
+        currentPath && currentPath !== '/'
+            ? (() => {
+                const parts = currentPath.split('/').filter(Boolean);
+                parts.pop();
+                return parts.length === 0 ? '/' : '/' + parts.join('/');
+            })()
+            : null
+    );
 
     async function loadDir(path: string) {
         loading = true;
         error = '';
         currentPath = path;
-        selectedFile = null;
+        selected = fileMode ? null : path; // selecting the directory itself
         try {
-            const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}&files=1`);
+            const res = await fetch(`/api/fs?path=${encodeURIComponent(path)}${fileMode ? '&files=1' : ''}`);
             if (!res.ok) {
                 const err = await res.json();
                 throw new Error(err.error || 'Failed to read directory');
             }
             const data = await res.json();
-            // Filter: show directories and Dockerfile-matching files
-            entries = (data.entries || []).filter(
-                (e: { isDir: boolean; name: string }) => e.isDir || isDockerfile(e.name)
+            entries = (data.entries || []).filter((e: Entry) =>
+                e.isDir || (fileFilter && fileFilter(e.name))
             );
         } catch (e) {
             error = String(e);
@@ -46,17 +66,17 @@
         }
     }
 
-    function handleClick(entry: { isDir: boolean; path: string }) {
+    function handleClick(entry: Entry) {
         if (entry.isDir) {
             loadDir(entry.path);
         } else {
-            selectedFile = entry.path;
+            selected = entry.path;
         }
     }
 
     function handleSelect() {
-        if (selectedFile) {
-            onSelect(selectedFile);
+        if (selected) {
+            onSelect(selected);
         }
     }
 
@@ -78,16 +98,16 @@
 </script>
 
 {#snippet footer()}
-    <span class="current-path">{formatPath(currentPath)}</span>
+    <span class="current-path">{formatPath(selected ?? currentPath)}</span>
     <div class="footer-actions">
         <button type="button" class="btn-secondary" onclick={onClose} title="Cancel">Cancel</button>
-        <button type="button" class="btn-primary" onclick={handleSelect} disabled={!selectedFile} title="Select this Dockerfile">
+        <button type="button" class="btn-primary" onclick={handleSelect} disabled={!selected} title={selectTitle}>
             Select
         </button>
     </div>
 {/snippet}
 
-<BaseModal title="Select Dockerfile" width="560px" zIndex={1100} footer={footer} onClose={onClose}>
+<BaseModal {title} width="560px" zIndex={1100} footer={footer} onClose={onClose}>
     <!-- Path bar -->
     <div class="path-bar">
         <div class="path-bar-row">
@@ -100,21 +120,32 @@
                 bind:value={currentPath}
                 onkeydown={(e) => { if (e.key === 'Enter') handleInputChange(); }}
                 placeholder="Enter path or browse..."
-                aria-label="File path"
+                aria-label={fileMode ? 'File path' : 'Directory path'}
             />
         </div>
     </div>
 
-    {#if error}
-        <div class="error">{error}</div>
-    {/if}
-
     {#if loading}
         <div class="loading">Loading...</div>
     {:else}
-        <!-- File list -->
-        {#if entries.length === 0}
-            <div class="empty">No Dockerfiles found in this directory</div>
+        {#if error}
+            <div class="error">{error}</div>
+            {#if parentPath}
+                <button
+                    type="button"
+                    class="file-entry dir parent-entry"
+                    onclick={() => loadDir(parentPath)}
+                    aria-label="Go to parent directory"
+                    title="Go to parent directory"
+                >
+                    <span class="icon" aria-hidden="true">
+                        <Icon src={folderIcon} color="#6E7681" width={16} height={16} />
+                    </span>
+                    <span class="name">..</span>
+                </button>
+            {/if}
+        {:else if entries.length === 0}
+            <div class="empty">{emptyLabel}</div>
         {:else}
             <div class="file-list" role="list" aria-label="Directory contents">
                 {#each entries as entry}
@@ -122,7 +153,7 @@
                         type="button"
                         class="file-entry"
                         class:dir={entry.isDir}
-                        class:selected={selectedFile === entry.path}
+                        class:selected={selected === entry.path && fileMode}
                         onclick={() => handleClick(entry)}
                         aria-label={`${entry.isDir ? 'Folder' : 'File'}: ${entry.name}`}
                         title={`${entry.isDir ? 'Open folder' : 'Select file'}: ${entry.name}`}
@@ -244,6 +275,10 @@
     .file-entry.selected {
         background: var(--color-accent-dark);
         color: white;
+    }
+    .file-entry.parent-entry {
+        color: var(--color-text-secondary);
+        font-style: italic;
     }
     .icon {
         display: flex;
