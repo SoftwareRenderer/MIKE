@@ -1,13 +1,12 @@
 
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount, onDestroy, tick } from 'svelte';
     import { get } from 'svelte/store';
     import { appStore, uiStore, dialogStore, updateTaskInBoard } from '$lib/stores';
     import { wsConnection } from '$lib/stores/connection';
     import { sandboxStatsStore } from '$lib/stores/sandbox-stats.svelte';
     import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
-    import { getProjects, getBoard, getConfig, deleteProject, updateProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
-    import { toHomeRelative, getWorktreeDisplayPath } from '$lib/utils/path';
+    import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
     import { resolveBoardLandingColumn } from '$lib/utils/task-utils';
     import { getBoardCache, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache } from '$lib/storage';
@@ -393,6 +392,37 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         return () => window.removeEventListener('popstate', handlePopState);
     });
 
+    /**
+     * Put the task's explorer in the shared slot (the task view and both
+     * explorers occupy one place) and mirror it in the URL.
+     */
+    function openTaskExplorer(): void {
+        showExplorerViewVal = false;
+        showTaskExplorerVal = true;
+        updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer' }, false, true);
+    }
+
+    // Route a go-to-definition jump
+    async function routeDefinitionJump(event: Event): Promise<void> {
+        const detail = (event as CustomEvent<{ path: string; line?: number; taskId?: string }>).detail;
+        // Project jumps are heard by the project explorer, which owns the only
+        // editor that can issue one.
+        if (!detail?.taskId) return;
+        // Not the selected task — nothing here knows how to open that file.
+        if (detail.taskId !== appStore.selectedTask?.id) return;
+        // The task explorer is showing: its own listener already has this event.
+        if (showTaskExplorerVal) return;
+        openTaskExplorer();
+        await tick();
+        window.dispatchEvent(new CustomEvent('open-file', { detail }));
+    }
+
+    $effect(() => {
+        const handler = (event: Event) => void routeDefinitionJump(event);
+        window.addEventListener('open-file', handler);
+        return () => window.removeEventListener('open-file', handler);
+    });
+
     async function initializeAuthSession() {
         appStream = createAppStream({
             onProjectCounts: (counts) => {
@@ -404,10 +434,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 const deletions = tracked_del;
                 const stats: DiffStatsEntry = { hash: hash || '', files: files_n, additions, deletions, untracked_n: untracked_n || 0, file_hashes, removed_files, staged_paths, has_committed_changes, already_merged };
                 taskDiffStatsContext.update(map => ({ ...map, [task_id]: stats }));
-                // Done-task stats are immutable — persist them so the next
-                // (re)subscribe can declare them via known_stats and skip the
-                // re-send. updated_at comes from the board row, which is what
-                // the server compares against.
+                // persist dont-task stats
                 const t = tasks.find(x => x.id === task_id);
                 if (t && t.status === 'done' && currentProject && t.updated_at) {
                     const key = `${currentProject.id}:${task_id}`;
@@ -1344,7 +1371,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         updateUrl({ project: currentProject?.id, task: t.id }, true, true);
                         if (isMobileCtx.isMobile) cardDetailActiveTab = 'chat';
                         appStore.selectedTask = t;
-                    }} onRefreshBoard={() => refreshBoard()} onOpenTerminal={openTerminal} onOpenExplorer={() => { showTaskExplorerVal = true; updateUrl({ project: currentProject?.id, task: appStore.selectedTask?.id, view: 'task-explorer' }, false, true); }} />
+                    }} onRefreshBoard={() => refreshBoard()} onOpenTerminal={openTerminal} onOpenExplorer={openTaskExplorer} />
                 {:else}
                     <Board
                         {tasks}
