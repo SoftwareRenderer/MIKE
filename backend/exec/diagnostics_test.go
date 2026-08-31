@@ -1,13 +1,16 @@
 package exec
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"kanban/backend/config"
 	"kanban/backend/extensions"
+	"kanban/backend/git"
 	"kanban/backend/lsp"
 	"kanban/backend/store"
 	"kanban/backend/stream"
@@ -396,5 +399,108 @@ func TestAdvisoriesWrittenAfterToolRowsSurviveTheRebuild(t *testing.T) {
 	}
 	if toolMsgs != 2 || advisoryMsgs != 1 {
 		t.Fatalf("rebuilt tool=%d advisory=%d, want 2/1", toolMsgs, advisoryMsgs)
+	}
+}
+
+// wedgedLSPManager blocks in GetOrCreate until its context ends, recording that context.
+// This is what a bridge that accepts `lsp_start` and never answers looks like from here.
+type wedgedLSPManager struct {
+	lspManager
+	registry *lsp.ExtensionRegistry
+	gotCtx   chan context.Context
+}
+
+func (m *wedgedLSPManager) GetRegistry() *lsp.ExtensionRegistry { return m.registry }
+
+func (m *wedgedLSPManager) GetOrCreate(ctx context.Context, _, _ string, _ *lsp.ServerConfig) (*lsp.LSPProcess, error) {
+	select {
+	case m.gotCtx <- ctx:
+	default:
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// installTsLSPExtension makes the pass chase app.ts instead of filtering it out.
+func installTsLSPExtension(t *testing.T, s *store.Store) *lsp.ExtensionRegistry {
+	t.Helper()
+	es := extensions.NewExtensionStore(s)
+	if err := es.InitSchema(); err != nil {
+		t.Fatalf("init extension schema: %v", err)
+	}
+	ext := &extensions.Extension{
+		ID: "typescript", Name: "typescript", Version: "1.0.0",
+		Type: extensions.ExtensionTypeLSP, Enabled: true,
+		Manifest: extensions.ExtensionManifest{
+			DisplayName: "TypeScript LSP", Version: "1.0.0",
+			Capabilities: &extensions.Capabilities{
+				LSP: &extensions.LSPConfig{
+					Command:    "typescript-language-server",
+					Args:       []string{"--stdio"},
+					Extensions: []string{"ts"},
+					Language:   "typescript",
+				},
+			},
+		},
+	}
+	if err := es.Create(ext); err != nil {
+		t.Fatalf("create LSP extension: %v", err)
+	}
+	return lsp.NewExtensionRegistry(es)
+}
+
+// TestCollectTurnDiagnostics_BoundedAndCancellable: the pass runs on the executor
+// goroutine, so it must bound the context it hands down and end when the task stops.
+func TestCollectTurnDiagnostics_BoundedAndCancellable(t *testing.T) {
+	s := testStore(t)
+	reg := installTsLSPExtension(t, s)
+
+	// WorktreePath looks the task up in the store, so everything here shares s.
+	cs := config.NewConfigStore(s, "", "test")
+	cs.SetWorkspaceDirOverride(t.TempDir())
+	fake := &wedgedLSPManager{registry: reg, gotCtx: make(chan context.Context, 4)}
+	te := &TaskExecutor{
+		store:        s,
+		configStore:  cs,
+		appStreamMgr: newTestStreamMgr(s),
+		worktreeMgr:  git.NewWorktreeManager(s, cs),
+		lspMgr:       fake,
+	}
+
+	setup := diagTestSetup(t, s, "diag-proj", "diag-task")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	setup.ctx = ctx
+
+	lc := &loopContext{}
+	lc.noteTouchedFile("app.ts")
+
+	done := make(chan struct{})
+	go func() {
+		te.collectTurnDiagnostics(setup, lc)
+		close(done)
+	}()
+
+	var got context.Context
+	select {
+	case got = <-fake.gotCtx:
+	case <-time.After(10 * time.Second):
+		t.Fatal("diagnostics pass never reached GetOrCreate")
+	}
+
+	dl, ok := got.Deadline()
+	if !ok {
+		t.Fatal("GetOrCreate was handed a context with no deadline; a silent language server would park the executor forever")
+	}
+	if left := time.Until(dl); left > lspDiagnosticsBudget+5*time.Second {
+		t.Errorf("per-file deadline = %v, want at most %v", left, lspDiagnosticsBudget)
+	}
+
+	// Stopping the task has to end the pass, not leave it waiting on the sandbox.
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("collectTurnDiagnostics kept waiting after the task context was cancelled")
 	}
 }
