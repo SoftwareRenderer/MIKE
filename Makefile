@@ -38,6 +38,14 @@ test: test-go test-frontend ## Run all tests (Go unit + frontend unit)
 test-go: ## Run Go unit tests (~60s, parallel)
 	go test ./backend/... ./pkg/... -count=1 -parallel 8
 
+# The executor, the stream manager and the sandbox/terminal layers run ~120 detached
+# goroutines between them, which is exactly the shape where a race hides for months.
+# -parallel is lower than test-go because the race detector multiplies the work per
+# test, and the sandbox packages need a working podman + runsc on top of it.
+.PHONY: test-go-race
+test-go-race: ## Run Go unit tests under the race detector (~4min)
+	go test -race ./backend/... ./pkg/... -count=1 -parallel 4
+
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests (vitest, ~10s)
 	cd frontend && npm test

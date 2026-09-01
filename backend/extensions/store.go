@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"kanban/backend/crypto"
+	"kanban/backend/errs"
 	"kanban/backend/store"
+	"kanban/backend/types"
 )
 
 // encryptConfigValues encrypts sensitive config values based on the manifest's config_schema.
@@ -69,15 +71,35 @@ func decryptConfigValues(config map[string]any, schema *ConfigSchema) map[string
 	return result
 }
 
+// rawSQL is this package's whole database need. The extensions table is its schema, not the
+// store's, so it speaks SQL - but it must not inherit the store's typed accessors with it.
+type rawSQL interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// projectPaths is all this package needs from the project table: the workspace paths an
+// extension sandbox may mount.
+type projectPaths interface {
+	ListProjects() ([]types.Project, error)
+}
+
 // ExtensionStore provides access to the extensions table.
 type ExtensionStore struct {
-	db *store.Store
+	db       rawSQL
+	projects projectPaths
 }
 
 // NewExtensionStore creates a new ExtensionStore.
 func NewExtensionStore(s *store.Store) *ExtensionStore {
-	return &ExtensionStore{db: s}
+	return &ExtensionStore{db: s.RawSQL(), projects: s}
 }
+
+var (
+	_ rawSQL       = (*store.Store)(nil)
+	_ projectPaths = (*store.Store)(nil)
+)
 
 // InitSchema creates the extensions table if it doesn't exist.
 func (es *ExtensionStore) InitSchema() error {
@@ -143,10 +165,10 @@ func (es *ExtensionStore) List() ([]Extension, error) {
 // are part of the extension-sandbox mount allowlist (see MountPolicy): an
 // extension may mount what the app already mounts for its workspaces, nothing more.
 func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
-	if es == nil || es.db == nil {
+	if es == nil || es.projects == nil {
 		return nil, nil
 	}
-	projects, err := es.db.ListProjects()
+	projects, err := es.projects.ListProjects()
 	if err != nil {
 		return nil, err
 	}
@@ -194,11 +216,15 @@ func (es *ExtensionStore) GetByType(extType string) ([]Extension, error) {
 	return extensions, nil
 }
 
+// ErrExtensionNotFound is the extensions member of the errs.ErrNotFound family. GetByID
+// wraps it with the ID in the message, because callers display that.
+var ErrExtensionNotFound = fmt.Errorf("extension %w", errs.ErrNotFound)
+
 // GetByID retrieves an extension by ID.
 func (es *ExtensionStore) GetByID(id string) (*Extension, error) {
 	ext, err := es.queryOne(`WHERE id = ?`, id)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("extension not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrExtensionNotFound, id)
 	}
 	if err != nil {
 		return nil, err
@@ -212,7 +238,7 @@ func (es *ExtensionStore) GetByID(id string) (*Extension, error) {
 func (es *ExtensionStore) GetByAuthorName(author, name string) (*Extension, error) {
 	ext, err := es.queryOne(`WHERE author = ? AND name = ?`, author, name)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("extension not found: %s/%s", author, name)
+		return nil, fmt.Errorf("%w: %s/%s", ErrExtensionNotFound, author, name)
 	}
 	if err != nil {
 		return nil, err

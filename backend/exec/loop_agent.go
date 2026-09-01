@@ -456,9 +456,9 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	log.Printf("[agent] task=%s completed stopReason=%s duration=%s", task.ID, stopReason, duration)
 
 	task, _ = te.store.GetTaskByID(task.ID)
-	if task.ExecutionState == "running" {
-		task.ExecutionState = "failed"
-		task.Status = "review"
+	if task.ExecutionState == types.ExecStateRunning {
+		task.ExecutionState = types.ExecStateFailed
+		task.Status = types.StatusReview
 		task.Output = fmt.Sprintf("Agent process exited unexpectedly (stopReason=%s)", stopReason)
 		te.storeTask(task, projectID)
 	}
@@ -524,7 +524,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 				te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 			}
 			_ = te.store.SetTaskMergeConflict(task.ID, projectID, false)
-			task.ExecutionState = "idle"
+			task.ExecutionState = types.ExecStateIdle
 			_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
 		}
 		commitMsg := te.GenerateCommitMessage(context.Background(), task)
@@ -549,8 +549,8 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 		}
 		if mergeErr != nil {
 			log.Printf("[agent] task=%s merge failed, moving to review: %v", task.ID, mergeErr)
-			task.ExecutionState = "idle"
-			task.Status = "review"
+			task.ExecutionState = types.ExecStateIdle
+			task.Status = types.StatusReview
 			task.Output = "Merge failed: " + mergeErr.Error()
 			if te.sandboxMgr != nil {
 				_ = te.sandboxMgr.Stop(task.ID)
@@ -561,8 +561,8 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 		}
 		if !task.AutoMerge {
 			// Merge was skipped (auto_merge=false) — don't mark done
-			task.ExecutionState = "idle"
-			task.Status = "review"
+			task.ExecutionState = types.ExecStateIdle
+			task.Status = types.StatusReview
 			if te.sandboxMgr != nil {
 				_ = te.sandboxMgr.Stop(task.ID)
 			}
@@ -570,8 +570,8 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			*agentEnded = true
 			return
 		}
-		task.ExecutionState = "completed"
-		task.Status = "done"
+		task.ExecutionState = types.ExecStateCompleted
+		task.Status = types.StatusDone
 		if te.sandboxMgr != nil {
 			_ = te.sandboxMgr.Stop(task.ID)
 		}
@@ -585,23 +585,23 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 		_, task = te.commitConflictResolution(projectID, task.ID, worktreePath, task)
 		if task.HasMergeConflict {
 			log.Printf("[agent] task=%s merge still conflicted after agent ended", task.ID)
-			task.ExecutionState = "failed"
-			task.Status = "review"
+			task.ExecutionState = types.ExecStateFailed
+			task.Status = types.StatusReview
 			if te.sandboxMgr != nil {
 				_ = te.sandboxMgr.Stop(task.ID)
 			}
 			task.Output = fmt.Sprintf("Agent finished but merge still conflicted (%s)", stopReason)
 		} else if !task.AutoMerge {
 			// Merge was skipped (auto_merge=false) — don't mark done
-			task.ExecutionState = "idle"
-			task.Status = "review"
+			task.ExecutionState = types.ExecStateIdle
+			task.Status = types.StatusReview
 			if te.sandboxMgr != nil {
 				_ = te.sandboxMgr.Stop(task.ID)
 			}
 			task.Output = fmt.Sprintf("Agent finished (%s)", stopReason)
 		} else {
-			task.ExecutionState = "completed"
-			task.Status = "done"
+			task.ExecutionState = types.ExecStateCompleted
+			task.Status = types.StatusDone
 			if te.sandboxMgr != nil {
 				_ = te.sandboxMgr.Stop(task.ID)
 			}
@@ -613,8 +613,8 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 	}
 
 	if stopReason == "error" {
-		task.ExecutionState = "failed"
-		task.Status = "review"
+		task.ExecutionState = types.ExecStateFailed
+		task.Status = types.StatusReview
 		task.Output = fmt.Sprintf("Agent ended with error (stopReason=%s)", stopReason)
 		te.storeTask(task, projectID)
 		*agentEnded = true
@@ -622,16 +622,16 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 	}
 
 	if stopReason == "aborted" {
-		task.ExecutionState = "idle"
-		task.Status = "review"
+		task.ExecutionState = types.ExecStateIdle
+		task.Status = types.StatusReview
 		task.Output = "Agent was aborted"
 		te.storeTask(task, projectID)
 		*agentEnded = true
 		return
 	}
 
-	task.ExecutionState = "idle"
-	task.Status = "review"
+	task.ExecutionState = types.ExecStateIdle
+	task.Status = types.StatusReview
 	task.Output = fmt.Sprintf("Agent finished (%s)", stopReason)
 	te.storeTask(task, projectID)
 	// Don't set agentEnded = true — keep the event loop alive for follow-up messages.

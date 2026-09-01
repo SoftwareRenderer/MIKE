@@ -543,8 +543,8 @@ func TestHandleTerminal_RejectsTaskFromAnotherProject(t *testing.T) {
 	if err := s.CreateTask(&types.Task{
 		ID:             taskID,
 		ProjectID:      projID,
-		Status:         "backlog",
-		ExecutionState: "idle",
+		Status:         types.StatusBacklog,
+		ExecutionState: types.ExecStateIdle,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}); err != nil {
@@ -621,8 +621,8 @@ func TestHandleTerminal_OriginVerification(t *testing.T) {
 	taskID := "origin-task"
 	now := time.Now().UTC()
 	if err := s.CreateTask(&types.Task{
-		ID: taskID, ProjectID: projID, Status: "in_progress",
-		ExecutionState: "idle", CreatedAt: now, UpdatedAt: now,
+		ID: taskID, ProjectID: projID, Status: types.StatusInProgress,
+		ExecutionState: types.ExecStateIdle, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}

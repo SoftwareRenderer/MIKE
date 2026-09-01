@@ -1,8 +1,12 @@
+// Package server is the HTTP boundary: routing, session/CSRF middleware, host pinning, the
+// WebSocket hub, static serving of the built frontend, preview and file endpoints.
+// Handlers stay thin and delegate to backend/managers, backend/exec and backend/extensions.
 package server
 
 import (
 	"context"
 	stdtls "crypto/tls"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -33,9 +37,51 @@ import (
 	"kanban/backend/types"
 )
 
+// handlerStore is the persistence the HTTP handlers reach. It is wide because message
+// and thread editing talks to the store directly instead of through backend/managers, so
+// treat an addition here as that debt growing, not as a free method.
+type handlerStore interface {
+	ClearStaleSummarizing() error
+	ClearStaleTitleGenerating() error
+	Close() error
+	// DBStats returns the pool counters, which Shutdown logs.
+	DBStats() sql.DBStats
+	CopyMessagesToThread(sourceThreadID, targetThreadID, upToMessageID string) error
+	CreateTaskMessage(m *types.TaskMessage) error
+	CreateThread(th *types.TaskThread) error
+	DeleteOtherSessions(ctx context.Context, currentID string) (int, error)
+	DeleteSessionByID(ctx context.Context, id string) (bool, error)
+	DeleteTaskMessageByID(messageID string) error
+	DeleteTaskMessagesAfter(taskID, messageID, threadID string) error
+	DeleteThread(threadID string) error
+	DeleteThreadWithMessages(threadID string) (*types.TaskThread, error)
+	GetLastCommitHashBeforeMessage(messageID, threadID string) (string, error)
+	GetLastUserMessageInThread(threadID string) (string, error)
+	GetMessageCreatedAt(messageID string) (*time.Time, error)
+	GetProject(id string) (*types.Project, error)
+	GetTask(projectID, taskID string) (*types.Task, error)
+	GetTaskByID(taskID string) (*types.Task, error)
+	GetTaskMessageByID(messageID string) (*types.TaskMessage, error)
+	GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, error)
+	GetThread(threadID string) (*types.TaskThread, error)
+	GetThreadsByCheckpointMessageID(messageID string) ([]types.TaskThread, error)
+	GetThreadsByCheckpointMessageTime(messageTime string) ([]types.TaskThread, error)
+	GetThreadsByTask(taskID string) ([]types.TaskThread, error)
+	ListProjects() ([]types.Project, error)
+	ListSessions(ctx context.Context) ([]store.SessionInfo, error)
+	SetActiveThread(threadID string) error
+	SetTaskAssignedPorts(taskID, projectID string, ports []types.AssignedPort) error
+	UpdateTask(t *types.Task) error
+	UpdateTaskMessage(messageID, content string) error
+	UpdateTaskMessageCommitHash(messageID, hash string) error
+	UpdateThreadWorktreeStashHash(threadID, hash string) error
+}
+
+var _ handlerStore = (*store.Store)(nil)
+
 // Server is the main HTTP server.
 type Server struct {
-	store               *store.Store
+	store               handlerStore
 	configStore         *config.ConfigStore
 	sessionMgr          *auth.SessionManager
 	projectHandler      *managers.ProjectHandler
@@ -729,5 +775,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.loginLimiter != nil {
 		s.loginLimiter.Stop()
 	}
+	// Logged once on the way out: a zero wait count is the evidence the single-connection
+	// pool is not the constraint, and a large one is the trigger to widen it.
+	stats := s.store.DBStats()
+	log.Printf("database pool over this run: %d connection waits totalling %s (open=%d, inUse=%d, maxOpen=%d)",
+		stats.WaitCount, stats.WaitDuration.Round(time.Millisecond), stats.OpenConnections, stats.InUse, stats.MaxOpenConnections)
 	return s.store.Close()
 }

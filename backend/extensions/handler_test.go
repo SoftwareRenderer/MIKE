@@ -16,13 +16,29 @@ import (
 
 func testHandler(t *testing.T) *ExtensionHandler {
 	t.Helper()
-	store := testStore(t)
+	h, _ := testHandlerWithStore(t)
+	return h
+}
+
+// testHandlerWithStore is testHandler with the store handed back, for the tests
+// that need to break it (a handler answers 500 only when the store really fails).
+func testHandlerWithStore(t *testing.T) (*ExtensionHandler, *ExtensionStore) {
+	t.Helper()
+	extStore := testStore(t)
 	reg := NewRegistryClient()
 	cfg := &ExtensionConfig{
 		RegistryURL: "",
 	}
-	sandbox := NewExtensionSandboxManager(reg, store)
-	return NewExtensionHandler(store, sandbox, reg, cfg)
+	sandbox := NewExtensionSandboxManager(reg, extStore)
+	return NewExtensionHandler(extStore, sandbox, reg, cfg), extStore
+}
+
+// guardHolds reports whether the in-flight guard is held for name. The map is guarded by
+// inFlight.mu, so an observation has to take the lock.
+func guardHolds(g *inFlight, name string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.busy[name]
 }
 
 // readSSEEvents parses the SSE payloads written to a recorder body.
@@ -1696,8 +1712,13 @@ func TestHandleUpdateImage_StreamsProgress(t *testing.T) {
 	if last.Result == nil || last.Result.Name != "github-issue-importer" {
 		t.Fatal("expected result on done event")
 	}
-	// The in-flight guard must be released once the background update finishes.
-	if h.inFlightOps.busy["github-issue-importer"] {
+	// The guard is released by the worker's deferred call, which runs just after the last
+	// SSE event - so poll briefly rather than asserting on a race.
+	deadline := time.Now().Add(2 * time.Second)
+	for guardHolds(h.inFlightOps, "github-issue-importer") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if guardHolds(h.inFlightOps, "github-issue-importer") {
 		t.Error("in-flight guard not released after update completed")
 	}
 }

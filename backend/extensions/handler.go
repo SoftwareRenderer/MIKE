@@ -184,7 +184,7 @@ func (h *ExtensionHandler) HandleGet(w http.ResponseWriter, r *http.Request, id 
 
 	ext, err := h.store.GetByID(id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "extension not found")
+		httputil.Fail(w, err, "get extension", "extension not found")
 		return
 	}
 
@@ -201,7 +201,7 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 
 	ext, err := h.store.GetByID(id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "extension not found")
+		httputil.Fail(w, err, "get extension", "extension not found")
 		return
 	}
 
@@ -431,7 +431,7 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 
 	ext, err := h.store.GetByID(id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "extension not found")
+		httputil.Fail(w, err, "get extension", "extension not found")
 		return
 	}
 	statuses := h.sandbox.ListRunning()
@@ -1003,7 +1003,7 @@ func (h *ExtensionHandler) HandleSandboxLogs(w http.ResponseWriter, r *http.Requ
 
 	_, err := h.store.GetByID(id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "extension not found")
+		httputil.Fail(w, err, "get extension", "extension not found")
 		return
 	}
 
@@ -1030,7 +1030,7 @@ func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Requ
 
 	ext, err := h.store.GetByID(id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "extension not found")
+		httputil.Fail(w, err, "get extension", "extension not found")
 		return
 	}
 	if ext.InstallSource != "registry" {
@@ -1218,7 +1218,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 
 	ext, err := h.store.GetByID(id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "extension not found")
+		httputil.Fail(w, err, "get extension", "extension not found")
 		return
 	}
 	if !ext.Enabled {
@@ -1330,7 +1330,7 @@ func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, i
 // context (e.g. project/task), keeping the server feature-agnostic.
 func (h *ExtensionHandler) HandleStorage(w http.ResponseWriter, r *http.Request, id string) {
 	if _, err := h.store.GetByID(id); err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "extension not found")
+		httputil.Fail(w, err, "get extension", "extension not found")
 		return
 	}
 

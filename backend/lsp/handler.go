@@ -1,12 +1,17 @@
+// Package lsp connects the editor to language servers running in extension sandboxes: a
+// browser JSON-RPC WebSocket bridged onto the sandbox-bridge passthrough, the agent-facing
+// LSP tools, and extension-driven server discovery.
+// One language server per (workspace, language): a server has one root and only answers
+// about documents opened on its own connection.
 package lsp
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -666,7 +671,7 @@ func (h *LSPHandler) forwardRequest(ctx context.Context, session *ClientSession,
 	if err := h.manager.SendToServer(ctx, ws.process, remapped); err != nil {
 		log.Printf("[lsp] client %d: send to server failed: %v", session.clientID, err)
 		// If sandbox is stale, remove workspace entry so next message triggers reconnect
-		if strings.Contains(err.Error(), "stale") {
+		if errors.Is(err, errStaleClient) {
 			h.mu.Lock()
 			delete(h.workspaces, workspaceKey)
 			h.mu.Unlock()
@@ -717,7 +722,7 @@ func (h *LSPHandler) forwardRaw(ctx context.Context, session *ClientSession, msg
 
 	if err := h.manager.SendToServer(ctx, ws.process, msg); err != nil {
 		log.Printf("[lsp] client %d: forward raw failed: %v", session.clientID, err)
-		if strings.Contains(err.Error(), "stale") {
+		if errors.Is(err, errStaleClient) {
 			h.mu.Lock()
 			delete(h.workspaces, workspaceKey)
 			h.mu.Unlock()

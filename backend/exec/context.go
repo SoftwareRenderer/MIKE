@@ -182,7 +182,7 @@ func formatChatHistory(messages []types.ChatMessage, skipSummaryMsg bool) string
 			// Already incorporated into assistant line above
 			continue
 		case "advisory":
-            // LSP notes are noise for the summary
+			// LSP notes are noise for the summary
 			continue
 		case "user":
 			sb.WriteString("User: ")
@@ -389,14 +389,12 @@ func isLSPTool(name string) bool {
 	return inToolSet(name, lspTools)
 }
 
-// createCheckpoint checks for file changes after tool calls and creates a git stash snapshot.
-// Uses `git stash create` + `git stash store` to record a checkpoint WITHOUT removing changes
-// from the working tree — files stay visible in the filesystem.
-// Runs in a goroutine; acquires WorktreeMu to block the next turn's tool execution
-// until the snapshot is complete, preventing the checkpoint from capturing changes
-// from a subsequent turn.
-// Label generation is deferred to fork time (handleThreadFork).
-// newMessages contains only messages since the last checkpoint.
+// createCheckpoint records a git stash snapshot of the worktree after tool calls, using
+// `git stash create` + `git stash store` so the changes stay visible in the working tree.
+// It runs in a goroutine and holds WorktreeMu until the snapshot exists, so the next turn's
+// tools cannot start and have their changes captured in this checkpoint.
+// Labels are generated at fork time (handleThreadFork); newMessages holds only the messages
+// since the last checkpoint.
 func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID, worktreePath, threadID, assistantMsgID string, newMessages []types.ChatMessage, sandboxEnabled bool) {
 	// Check for file changes
 	statusOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "status", "--porcelain")
@@ -561,10 +559,9 @@ func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.Cha
 //   - roles no conversation understands (merge_resolution, legacy markers) are dropped.
 //
 // Both rebuild paths share it: the LLM context (buildMessagesFromDB) and the utility
-// prompts (BuildConversationFromTaskMessages). They used to be separate scans, and the one
-// that differed attached tool calls to whatever row happened to be adjacent — so any row
-// written between an assistant row and its tool_call rows (an LSP note used to be written
-// there) silently cost that turn its remaining calls and results.
+// prompts (BuildConversationFromTaskMessages). Attaching tool calls by adjacency instead of
+// by owner costs a turn its remaining calls whenever anything is written between an
+// assistant row and its tool_call rows.
 func groupTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
 	toolRows, totalToolRows := toolCallRowsByOwner(taskMsgs)
 	messages := make([]types.ChatMessage, 0, len(taskMsgs))
@@ -619,18 +616,15 @@ func groupTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
 	return messages
 }
 
-// toolCallRowsByOwner maps each assistant row's POSITION to the tool_call rows that belong
-// to it, in row order, and reports how many tool_call rows the rows contain in total (the
-// caller compares the two to log what could not be attached). A row recorded with
-// assistant_msg_id is resolved to that assistant's row; a row written before the column
-// existed attaches to the nearest preceding assistant — the same reading the old
-// contiguity scan made implicitly, but without its habit of stopping at the first
-// unrelated row. Rows that resolve to nothing (no owner id and no assistant above them, or
-// an owner that is not in this thread) are left out.
+// toolCallRowsByOwner maps each assistant row's POSITION to the tool_call rows that belong to
+// it, in row order, and reports the total number of tool_call rows (the caller compares the two
+// to log what could not be attached). A row carrying assistant_msg_id resolves to that
+// assistant; one written before the column existed attaches to the nearest preceding assistant.
+// Rows that resolve to nothing - no owner and no assistant above them, or an owner outside this
+// thread - are left out.
 //
-// Positions rather than message ids are the key because rows assembled by tests or older
-// writers may carry no id at all, and the grouping must degrade to adjacency, not to
-// "drop everything".
+// Positions, not message ids, are the key: rows from tests or older writers may carry no id at
+// all, and the grouping must degrade to adjacency rather than drop everything.
 func toolCallRowsByOwner(taskMsgs []types.TaskMessage) (map[int][]types.TaskMessage, int) {
 	idxByAssistantID := make(map[string]int)
 	total := 0

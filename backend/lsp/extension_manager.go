@@ -15,10 +15,14 @@ import (
 
 	"kanban/backend/extensions"
 	kanban_sandbox "kanban/backend/sandbox"
-	"kanban/backend/store"
 	"kanban/backend/types"
 	sandbox "kanban/pkg/bridge"
 )
+
+// errStaleClient marks a sandbox bridge connection that has outlived its process. The
+// handler drops the workspace entry on seeing it so the next request reconnects - match it
+// with errors.Is, since matching the text lets a reword disable the recovery.
+var errStaleClient = errors.New("stale")
 
 // ServerConfig holds the configuration for a single language server.
 type ServerConfig struct {
@@ -56,7 +60,7 @@ const lspInitReplyTimeout = 5 * time.Second
 type ExtensionLSPManager struct {
 	extStore   *extensions.ExtensionStore
 	extSandbox *extensions.ExtensionSandboxManager
-	projects   *store.Store
+	projects   projectPaths
 	mu         sync.Mutex
 	clients    map[string]*sandboxClient // workspaceKey → client state
 	// serverCh receives messages from all LSP servers (responses + notifications)
@@ -195,7 +199,13 @@ func translateURIsToHost(msg json.RawMessage, workspacePath string, projectMount
 }
 
 // NewExtensionLSPManager creates a new ExtensionLSPManager.
-func NewExtensionLSPManager(extStore *extensions.ExtensionStore, extSandbox *extensions.ExtensionSandboxManager, projects *store.Store) *ExtensionLSPManager {
+// projectPaths is the single thing the LSP manager needs from the project table: the
+// registered workspace paths, which bound which mount a language server may see.
+type projectPaths interface {
+	ListProjects() ([]types.Project, error)
+}
+
+func NewExtensionLSPManager(extStore *extensions.ExtensionStore, extSandbox *extensions.ExtensionSandboxManager, projects projectPaths) *ExtensionLSPManager {
 	return &ExtensionLSPManager{
 		extStore:    extStore,
 		extSandbox:  extSandbox,
@@ -483,7 +493,7 @@ func (m *ExtensionLSPManager) SendToServer(ctx context.Context, process *LSPProc
 	if sc == nil {
 		// Stale or dead — liveClient has retired it, giving the sandbox reference back, and the
 		// caller reconnects through GetOrCreate.
-		return fmt.Errorf("sandbox client stale for workspace=%s lang=%s", process.Workspace, process.Language)
+		return fmt.Errorf("sandbox client %w for workspace=%s lang=%s", errStaleClient, process.Workspace, process.Language)
 	}
 
 	// Translate file URIs from host path to container path
@@ -528,7 +538,7 @@ func (m *ExtensionLSPManager) LSPNotify(ctx context.Context, process *LSPProcess
 
 	sc := m.liveClient(workspaceKey, false)
 	if sc == nil {
-		return fmt.Errorf("sandbox client stale for workspace=%s lang=%s", process.Workspace, process.Language)
+		return fmt.Errorf("sandbox client %w for workspace=%s lang=%s", errStaleClient, process.Workspace, process.Language)
 	}
 
 	translated := translateURIsToContainer(msg, sc.workspace, sc.projectMounts)

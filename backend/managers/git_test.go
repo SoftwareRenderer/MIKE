@@ -232,7 +232,7 @@ func TestGitRefValidation(t *testing.T) {
 					t.Fatal(err)
 				}
 				task := &types.Task{ID: "refval-tasklog-task", ProjectID: proj.ID,
-					Title: "log task", Status: "in_progress", Branch: "main"}
+					Title: "log task", Status: types.StatusInProgress, Branch: "main"}
 				if err := s.CreateTask(task); err != nil {
 					t.Fatal(err)
 				}
@@ -255,7 +255,7 @@ func TestGitRefValidation(t *testing.T) {
 					t.Fatal(err)
 				}
 				task := &types.Task{ID: "refval-taskdiff-task", ProjectID: proj.ID,
-					Title: "diff task", Status: "in_progress", Branch: "main"}
+					Title: "diff task", Status: types.StatusInProgress, Branch: "main"}
 				if err := s.CreateTask(task); err != nil {
 					t.Fatal(err)
 				}
@@ -484,7 +484,7 @@ func TestHandleTaskLog_ValidBranch(t *testing.T) {
 		ID:        "tasklog-task-v",
 		ProjectID: proj.ID,
 		Title:     "log task valid",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 		Branch:    "main",
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -528,7 +528,7 @@ func TestHandleTaskLog_FullSharesProjectResponse(t *testing.T) {
 		ID:        "tasklogfull-task",
 		ProjectID: proj.ID,
 		Title:     "log full",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 		Branch:    "main",
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -600,7 +600,7 @@ func TestHandleTaskDiff_ValidRefs(t *testing.T) {
 		ID:        "taskdiff-task-v",
 		ProjectID: proj.ID,
 		Title:     "diff task valid",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 		Branch:    "main",
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -690,7 +690,7 @@ func TestHandleStageFile_PathStartingWithDash(t *testing.T) {
 	}
 
 	// Create the task. Status must not be "backlog" or "done".
-	task := &types.Task{ID: taskID, ProjectID: projID, Title: "test", Status: "in_progress"}
+	task := &types.Task{ID: taskID, ProjectID: projID, Title: "test", Status: types.StatusInProgress}
 	if err := s.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -746,7 +746,7 @@ func TestHandleTaskLog_BranchDefaultsToTaskBranch(t *testing.T) {
 		ID:        "tasklog-default-task",
 		ProjectID: proj.ID,
 		Title:     "default log task",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 		Branch:    "main",
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -836,7 +836,7 @@ func TestHandleTaskCheckout_DashPrefix(t *testing.T) {
 		ID:        "taskcheckout-task",
 		ProjectID: proj.ID,
 		Title:     "checkout task",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 		Branch:    "main",
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -878,7 +878,7 @@ func TestHandleTaskCheckout_ValidBranch(t *testing.T) {
 		ID:        "taskcheckout-valid-task",
 		ProjectID: proj.ID,
 		Title:     "valid checkout task",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 		Branch:    "main",
 	}
 	if err := s.CreateTask(task); err != nil {

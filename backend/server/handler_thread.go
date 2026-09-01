@@ -22,7 +22,7 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		threads, err := s.store.GetThreadsByTask(taskID)
 		if err != nil {
-			JSONError(w, http.StatusInternalServerError, err.Error())
+			Fail(w, err, "get threads", "task not found")
 			return
 		}
 		JSONResponse(w, http.StatusOK, threads)
@@ -44,7 +44,7 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 	// Validate task exists
 	task, err := s.store.GetTask(projectID, taskID)
 	if err != nil {
-		JSONError(w, http.StatusNotFound, "task not found")
+		Fail(w, err, "get task", "task not found")
 		return
 	}
 	// Can't delete the only thread (Main)
@@ -65,25 +65,20 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 	// Re-fetch task after acquiring lock — state may have changed.
 	task, err = s.store.GetTask(projectID, taskID)
 	if err != nil {
-		JSONError(w, http.StatusNotFound, "task not found")
+		Fail(w, err, "get task", "task not found")
 		return
 	}
 
-	_, err = s.store.Exec(`DELETE FROM task_messages WHERE thread_id = ?`, req.ThreadID)
+	// One store call: the messages and the thread row go together, and the deleted row
+	// tells us which branch to clean up afterwards.
+	deletedThread, err := s.store.DeleteThreadWithMessages(req.ThreadID)
 	if err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		Fail(w, err, "delete thread", "thread not found")
 		return
 	}
-	// Get the thread's git branch before deleting (needed for branch cleanup)
-	deletedThread, _ := s.store.GetThread(req.ThreadID)
 	deletedBranch := ""
 	if deletedThread != nil {
 		deletedBranch = deletedThread.GitBranch
-	}
-	_, err = s.store.Exec(`DELETE FROM task_threads WHERE id = ?`, req.ThreadID)
-	if err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
-		return
 	}
 	// If the deleted thread was the active one, switch to another
 	if task.CurrentThreadID == req.ThreadID {
@@ -129,7 +124,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	}
 	// Validate task exists (pre-lock check, re-fetched after lock below)
 	if _, err := s.store.GetTask(projectID, taskID); err != nil {
-		JSONError(w, http.StatusNotFound, "task not found")
+		Fail(w, err, "get task", "task not found")
 		return
 	}
 	// Validate thread exists and belongs to this task
@@ -149,7 +144,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	// Re-fetch task after acquiring lock — state may have changed.
 	task, err := s.store.GetTask(projectID, taskID)
 	if err != nil {
-		JSONError(w, http.StatusNotFound, "task not found")
+		Fail(w, err, "get task", "task not found")
 		return
 	}
 
@@ -164,9 +159,9 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if task.ExecutionState == "running" {
+	if task.ExecutionState == types.ExecStateRunning {
 		_ = s.executor.StopTask(taskID)
-		task.ExecutionState = "idle"
+		task.ExecutionState = types.ExecStateIdle
 		task.Output = ""
 	}
 	// Save worktree state and switch to target thread's branch.
@@ -227,13 +222,13 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	}
 	// Set new active thread
 	if err := s.store.SetActiveThread(req.ThreadID); err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		Fail(w, err, "set active thread", "thread not found")
 		return
 	}
 	task.CurrentThreadID = req.ThreadID
 	task.UpdatedAt = time.Now().UTC()
 	if err := s.store.UpdateTask(task); err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		Fail(w, err, "update task", "task not found")
 		return
 	}
 	// Broadcast updated task so frontend has new currentThreadID before diff loads
@@ -268,7 +263,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	}
 	// Validate task exists (pre-lock check, re-fetched after lock below)
 	if _, err := s.store.GetTask(projectID, taskID); err != nil {
-		JSONError(w, http.StatusNotFound, "task not found")
+		Fail(w, err, "get task", "task not found")
 		return
 	}
 	// Validate source thread exists
@@ -288,7 +283,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	// Re-fetch task after acquiring lock — state may have changed.
 	task, err := s.store.GetTask(projectID, taskID)
 	if err != nil {
-		JSONError(w, http.StatusNotFound, "task not found")
+		Fail(w, err, "get task", "task not found")
 		return
 	}
 
@@ -375,12 +370,12 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		newThread.Name = fmt.Sprintf("Fork #%d", len(threads)+1)
 	}
 	if err := s.store.CreateThread(newThread); err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		Fail(w, err, "create thread", "task not found")
 		return
 	}
 	// Copy messages from source thread up to and including the checkpoint.
 	if err := s.store.CopyMessagesToThread(req.FromThreadID, newThreadID, req.FromMessageID); err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		Fail(w, err, "copy thread messages", "thread not found")
 		return
 	}
 	// If new_content is provided, update the checkpoint message in the fork
@@ -394,13 +389,13 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		_ = s.executor.StopTask(taskID)
 	}
 	if err := s.store.SetActiveThread(newThreadID); err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		Fail(w, err, "set active thread", "thread not found")
 		return
 	}
 	task.CurrentThreadID = newThreadID
 	task.UpdatedAt = now
 	if err := s.store.UpdateTask(task); err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		Fail(w, err, "update task", "task not found")
 		return
 	}
 	// Broadcast updated task so frontend has new currentThreadID before diff loads

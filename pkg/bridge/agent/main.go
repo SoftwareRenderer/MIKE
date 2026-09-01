@@ -1,3 +1,7 @@
+// Command sandbox-bridge is the in-container half of the sandbox bridge. It runs as
+// /sandbox-bridge and services tool calls over the stdin/stdout of one "podman exec -i",
+// using the framing in pkg/bridge/protocol. No listener, no port: the process lives exactly
+// as long as the host-side exec. Logs go to stderr only - stdout is the protocol.
 package main
 
 import (

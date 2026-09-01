@@ -24,7 +24,7 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 		ProjectID:        projectID,
 		Title:            "Conflict Resolution Test",
 		Prompt:           "Resolve merge conflicts",
-		Status:           "in_progress",
+		Status:           types.StatusInProgress,
 		Branch:           "task/conflict-resolve",
 		BaseRef:          "master",
 		LlamaServerURL:   "http://localhost:8080",
@@ -32,7 +32,7 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create task branch with a change to shared.txt
 	runGit(t, repoDir, "checkout", "-b", "task/conflict-resolve")
@@ -106,7 +106,7 @@ func TestMergeConflictResolution_StagesOnlyConflictedFiles(t *testing.T) {
 	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
 
 	// 4. Clear merge conflict flag
-	_ = te.store.SetTaskMergeConflict(taskID, projectID, false)
+	_ = te.rawStore().SetTaskMergeConflict(taskID, projectID, false)
 
 	// --- Verify ---
 
@@ -164,7 +164,7 @@ func TestMergeConflictResolution_MultipleConflictedFiles(t *testing.T) {
 		ProjectID:        projectID,
 		Title:            "Multi Conflict Test",
 		Prompt:           "Resolve multiple merge conflicts",
-		Status:           "in_progress",
+		Status:           types.StatusInProgress,
 		Branch:           "task/multi-conflict",
 		BaseRef:          "master",
 		LlamaServerURL:   "http://localhost:8080",
@@ -172,7 +172,7 @@ func TestMergeConflictResolution_MultipleConflictedFiles(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create task branch with changes to multiple files
 	runGit(t, repoDir, "checkout", "-b", "task/multi-conflict")
@@ -256,7 +256,7 @@ func TestMergeConflictResolution_CommitMessage(t *testing.T) {
 		ProjectID:        projectID,
 		Title:            "Commit Message Test",
 		Prompt:           "Test commit message",
-		Status:           "in_progress",
+		Status:           types.StatusInProgress,
 		Branch:           "task/commit-msg",
 		BaseRef:          "master",
 		LlamaServerURL:   "http://localhost:8080",
@@ -264,7 +264,7 @@ func TestMergeConflictResolution_CommitMessage(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Set up conflict
 	runGit(t, repoDir, "checkout", "-b", "task/commit-msg")
@@ -318,7 +318,7 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 		ProjectID:        projectID,
 		Title:            "Full Flow Test",
 		Prompt:           "Full merge conflict flow",
-		Status:           "in_progress",
+		Status:           types.StatusInProgress,
 		Branch:           "task/full-flow",
 		BaseRef:          "master",
 		LlamaServerURL:   "http://localhost:8080",
@@ -328,7 +328,7 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 		AutoMerge:        true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create task branch with a change
 	runGit(t, repoDir, "checkout", "-b", "task/full-flow")
@@ -374,10 +374,10 @@ func TestMergeConflictResolution_WithFinalMerge(t *testing.T) {
 	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
 	_ = te.worktreeMgr.GitRunInDir(wtPath, "stash", "pop")
 	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
-	_ = te.store.SetTaskMergeConflict(taskID, projectID, false)
+	_ = te.rawStore().SetTaskMergeConflict(taskID, projectID, false)
 
 	// --- Attempt final merge (task branch into master) ---
-	task, _ = te.store.GetTaskByID(taskID)
+	task, _ = te.rawStore().GetTaskByID(taskID)
 	if task.HasMergeConflict {
 		t.Fatal("task should not have merge conflict after resolution")
 	}
@@ -410,7 +410,7 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 		ProjectID:        projectID,
 		Title:            "Stash Restore Test",
 		Prompt:           "Test stash restore",
-		Status:           "in_progress",
+		Status:           types.StatusInProgress,
 		Branch:           "task/stash-restore",
 		BaseRef:          "master",
 		LlamaServerURL:   "http://localhost:8080",
@@ -418,7 +418,7 @@ func TestMergeConflictResolution_StashRestored(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create task branch
 	runGit(t, repoDir, "checkout", "-b", "task/stash-restore")
@@ -499,7 +499,7 @@ func TestMergeConflictResolution_NoConflictedFilesAutoContinues(t *testing.T) {
 		ProjectID:        projectID,
 		Title:            "Auto Resolve Test",
 		Prompt:           "Test auto resolve",
-		Status:           "in_progress",
+		Status:           types.StatusInProgress,
 		Branch:           "task/auto-resolve",
 		BaseRef:          "master",
 		LlamaServerURL:   "http://localhost:8080",
@@ -507,7 +507,7 @@ func TestMergeConflictResolution_NoConflictedFilesAutoContinues(t *testing.T) {
 		HasMergeConflict: false,
 		CurrentThreadID:  "thread-1",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create task branch with a file
 	runGit(t, repoDir, "checkout", "-b", "task/auto-resolve")
@@ -534,7 +534,7 @@ func TestMergeConflictResolution_NoConflictedFilesAutoContinues(t *testing.T) {
 	}
 
 	// Verify no merge conflict flag
-	task, _ = te.store.GetTaskByID(taskID)
+	task, _ = te.rawStore().GetTaskByID(taskID)
 	if task.HasMergeConflict {
 		t.Error("should not have merge conflict flag for clean merge")
 	}
@@ -561,7 +561,7 @@ func TestMergeConflictResolution_UnresolvedSkipped(t *testing.T) {
 		ProjectID:        projectID,
 		Title:            "Unresolved Test",
 		Prompt:           "Test unresolved",
-		Status:           "in_progress",
+		Status:           types.StatusInProgress,
 		Branch:           "task/unresolved",
 		BaseRef:          "master",
 		LlamaServerURL:   "http://localhost:8080",
@@ -569,7 +569,7 @@ func TestMergeConflictResolution_UnresolvedSkipped(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create task branch with a change
 	runGit(t, repoDir, "checkout", "-b", "task/unresolved")
@@ -630,13 +630,13 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 		ProjectID:       projectID,
 		Title:           "Parent Task",
 		Prompt:          "Parent prompt",
-		Status:          "in_progress",
+		Status:          types.StatusInProgress,
 		Branch:          "task/" + parentID,
 		LlamaServerURL:  "http://localhost:8080",
 		ModelName:       "test-model",
 		CurrentThreadID: "thread-parent",
 	}
-	te.store.CreateTask(parent)
+	te.rawStore().CreateTask(parent)
 
 	// Create parent branch
 	runGit(t, repoDir, "checkout", "-b", "task/"+parentID)
@@ -658,14 +658,14 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 		ProjectID:       projectID,
 		Title:           "Subtask",
 		Prompt:          "Subtask prompt",
-		Status:          "in_progress",
+		Status:          types.StatusInProgress,
 		ParentTaskID:    parentID,
 		Branch:          "task/" + subtaskID,
 		LlamaServerURL:  "http://localhost:8080",
 		ModelName:       "test-model",
 		CurrentThreadID: "thread-subtask",
 	}
-	te.store.CreateTask(subtask)
+	te.rawStore().CreateTask(subtask)
 
 	// Create subtask branch from parent branch
 	runGitInDir(t, parentWtPath, "checkout", "-b", "task/"+subtaskID)
@@ -711,10 +711,10 @@ func TestMergeConflictResolution_SubtaskIntoParentBranch(t *testing.T) {
 	te.worktreeMgr.GetProjectStashMu(projectID).Lock()
 	_ = te.worktreeMgr.GitRunInDir(subtaskWtPath, "stash", "pop")
 	te.worktreeMgr.GetProjectStashMu(projectID).Unlock()
-	_ = te.store.SetTaskMergeConflict(subtaskID, projectID, false)
+	_ = te.rawStore().SetTaskMergeConflict(subtaskID, projectID, false)
 
 	// --- Merge subtask into parent branch ---
-	subtaskFromDB, _ := te.store.GetTaskByID(subtaskID)
+	subtaskFromDB, _ := te.rawStore().GetTaskByID(subtaskID)
 	err := te.MergeBranch(projectID, subtaskID, subtaskFromDB)
 	if err != nil {
 		t.Fatalf("MergeBranch failed: %v", err)
@@ -744,7 +744,7 @@ func TestMergeConflictResolution_PartialResolution_SkipsCommit(t *testing.T) {
 		ProjectID:        projectID,
 		Title:            "Partial Resolve Test",
 		Prompt:           "Resolve some conflicts",
-		Status:           "in_progress",
+		Status:           types.StatusInProgress,
 		Branch:           "task/partial-resolve",
 		BaseRef:          "master",
 		LlamaServerURL:   "http://localhost:8080",
@@ -752,7 +752,7 @@ func TestMergeConflictResolution_PartialResolution_SkipsCommit(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create task branch with changes to two files
 	runGit(t, repoDir, "checkout", "-b", "task/partial-resolve")
@@ -822,7 +822,7 @@ func TestMergeConflictResolution_CommitIsMergeCommit(t *testing.T) {
 		ProjectID:        projectID,
 		Title:            "Merge Commit Test",
 		Prompt:           "Test merge commit",
-		Status:           "in_progress",
+		Status:           types.StatusInProgress,
 		Branch:           "task/merge-commit",
 		BaseRef:          "master",
 		LlamaServerURL:   "http://localhost:8080",
@@ -830,7 +830,7 @@ func TestMergeConflictResolution_CommitIsMergeCommit(t *testing.T) {
 		HasMergeConflict: true,
 		CurrentThreadID:  "thread-1",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create task branch with a change
 	runGit(t, repoDir, "checkout", "-b", "task/merge-commit")
@@ -891,7 +891,7 @@ func TestCommitConflictResolution_DoesNotSweepUntrackedFiles(t *testing.T) {
 		ProjectID:        projectID,
 		Title:            "No Sweep Test",
 		Prompt:           "resolve conflicts",
-		Status:           "in_progress",
+		Status:           types.StatusInProgress,
 		Branch:           "task/no-sweep",
 		BaseRef:          "master",
 		LlamaServerURL:   "http://localhost:8080",
@@ -900,7 +900,7 @@ func TestCommitConflictResolution_DoesNotSweepUntrackedFiles(t *testing.T) {
 		AutoMerge:        true,
 		CurrentThreadID:  "thread-1",
 	}
-	if err := te.store.CreateTask(task); err != nil {
+	if err := te.rawStore().CreateTask(task); err != nil {
 		t.Fatal(err)
 	}
 

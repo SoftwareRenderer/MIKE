@@ -8,9 +8,8 @@ import (
 	"kanban/backend/types"
 )
 
-// Where a project's sandbox image comes from. Decided in one place because the executor, the two
-// terminal paths and the file-system handlers each used to decide it separately — and only some of
-// them made sure the image existed.
+// Where a project's sandbox image comes from. Decided in one place so the executor, the
+// terminal paths and the file-system handlers cannot disagree about whether it exists.
 const (
 	// ImageSourceDockerfile: the image is built from the project's Dockerfile.
 	ImageSourceDockerfile = "dockerfile"

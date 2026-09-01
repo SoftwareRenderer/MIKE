@@ -78,13 +78,13 @@ func rollingSetup(t *testing.T, llm *summaryLLM) (*TaskExecutor, *taskExecSetup,
 	t.Helper()
 	te := newTestExecutor(t)
 	te.gate = NewConcurrencyGate()
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-rolling-"+t.Name(), "Rolling Sum")
 
 	now := time.Now().UTC()
 	task := &types.Task{
 		ID: "roll-" + t.Name(), ProjectID: proj.ID, Title: "Rolling summary",
-		Status: "review", ExecutionState: "idle", OperatingMode: "act",
+		Status: types.StatusReview, ExecutionState: types.ExecStateIdle, OperatingMode: "act",
 		LlamaServerURL: llm.server.URL, ModelName: "test-model",
 		CurrentThreadID: "thread-1", CreatedAt: now, UpdatedAt: now,
 	}

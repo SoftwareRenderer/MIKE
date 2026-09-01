@@ -1,3 +1,8 @@
+// Package protocol defines the wire format shared by the host client and the in-container
+// agent: a 9-byte header (message ID, type, length) plus a typed payload, with chunk frames
+// streaming a body before its final result.
+// Method IDs are permanent. 0x05-0x08 were the shell methods and are retired - terminals do
+// not go through the bridge - so a stale agent gets "unknown method", not a wrong handler.
 package protocol
 
 import (

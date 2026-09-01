@@ -57,7 +57,7 @@ func newLSPTestExecutorWithMgr(t *testing.T, worktreePath string, exts ...*exten
 func TestLSPTools_NoLSPManager(t *testing.T) {
 	dir := t.TempDir()
 	te := newLSPTestExecutor(t, dir)
-	task := makeTestTaskLSP(t, te.store, "proj-lsp-1", "task-lsp-1")
+	task := makeTestTaskLSP(t, te.rawStore(), "proj-lsp-1", "task-lsp-1")
 
 	for _, tc := range []struct {
 		name string
@@ -83,7 +83,7 @@ func TestLSPTools_NoLSPManager(t *testing.T) {
 func TestLSPTools_MissingPath(t *testing.T) {
 	dir := t.TempDir()
 	te := newLSPTestExecutor(t, dir)
-	task := makeTestTaskLSP(t, te.store, "proj-lsp-2", "task-lsp-2")
+	task := makeTestTaskLSP(t, te.rawStore(), "proj-lsp-2", "task-lsp-2")
 
 	// lsp_references with no path
 	result, ok := te.executeTool(context.Background(), "lsp_references", map[string]any{
@@ -124,7 +124,7 @@ func TestLSPTools_ToolCallsDisabledForFile(t *testing.T) {
 
 	dir := t.TempDir()
 	te := newLSPTestExecutorWithMgr(t, dir, goExt)
-	task := makeTestTaskLSP(t, te.store, "proj-lsp-3", "task-lsp-3")
+	task := makeTestTaskLSP(t, te.rawStore(), "proj-lsp-3", "task-lsp-3")
 
 	// Create a Go file
 	goFile := filepath.Join(dir, "main.go")
@@ -221,8 +221,8 @@ func makeTestTaskLSP(t *testing.T, s *store.Store, projectID, taskID string) *ty
 		ProjectID:      projectID,
 		Title:          "Test Task",
 		Prompt:         "Test prompt",
-		Status:         "in_progress",
-		ExecutionState: "running",
+		Status:         types.StatusInProgress,
+		ExecutionState: types.ExecStateRunning,
 		LlamaServerURL: "http://test:8080",
 		ModelName:      "test-model",
 		OperatingMode:  "act",

@@ -301,6 +301,14 @@ func floatApprox(t *testing.T, got, want, tol float64) {
 // testProjectHandler creates a ProjectHandler with a temporary database for testing.
 func testProjectHandler(t *testing.T) (*ProjectHandler, string) {
 	t.Helper()
+	h, projID, _ := testProjectHandlerWithStore(t)
+	return h, projID
+}
+
+// testProjectHandlerWithStore also returns the store, for tests that seed tasks and
+// messages next to the project — h.store is the handler's narrow projectStore now.
+func testProjectHandlerWithStore(t *testing.T) (*ProjectHandler, string, *store.Store) {
+	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 	worktreesDir := filepath.Join(dir, "worktrees")
@@ -329,7 +337,7 @@ func testProjectHandler(t *testing.T) (*ProjectHandler, string) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	return h, "test-proj"
+	return h, "test-proj", s
 }
 
 // createTestTaskWithMessages creates a task with assistant messages for stats testing.
@@ -341,7 +349,7 @@ func createTestTaskWithMessages(t *testing.T, s *store.Store, projID, taskID, mo
 		ID:        taskID,
 		ProjectID: projID,
 		Title:     "test task",
-		Status:    "backlog",
+		Status:    types.StatusBacklog,
 	}
 	if err := s.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -527,10 +535,10 @@ func TestUpdateProjectRejectsUnqualifiedSandboxImage(t *testing.T) {
 }
 
 func TestApplyPricingBasic(t *testing.T) {
-	h, projID := testProjectHandler(t)
+	h, projID, s := testProjectHandlerWithStore(t)
 
 	// Create a task with messages
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
+	createTestTaskWithMessages(t, s, projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	// Set up provider with pricing (no power settings)
@@ -570,7 +578,7 @@ func TestApplyPricingWithPower(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
 	// Create a task with messages (5000ms predicted time)
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
+	createTestTaskWithMessages(t, h.rawStore(), projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	// Set up provider with pricing AND power settings
@@ -617,7 +625,7 @@ func TestApplyPricingWithPower(t *testing.T) {
 func TestApplyPricingPowerOnlyNoElectricity(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
+	createTestTaskWithMessages(t, h.rawStore(), projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	// Set up provider with power but NO electricity cost
@@ -661,7 +669,7 @@ func TestApplyPricingPowerOnlyNoElectricity(t *testing.T) {
 func TestApplyPricingAgentProviderSkipped(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "agent-model", "my-agent",
+	createTestTaskWithMessages(t, h.rawStore(), projID, "task-1", "agent-model", "my-agent",
 		1000, 500, 100, 1000, 5000)
 
 	// Set up agent provider with power settings (should be ignored)
@@ -702,11 +710,11 @@ func TestApplyPricingMultipleProviders(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
 	// Task 1: model-a from prov-x (with power)
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
+	createTestTaskWithMessages(t, h.rawStore(), projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	// Task 2: model-b from prov-y (no power)
-	createTestTaskWithMessages(t, h.store, projID, "task-2", "model-b", "2",
+	createTestTaskWithMessages(t, h.rawStore(), projID, "task-2", "model-b", "2",
 		2000, 300, 200, 2000, 3000)
 
 	cfg, _ := h.configStore.GetConfig()
@@ -779,7 +787,7 @@ func TestApplyPricingMultipleProviders(t *testing.T) {
 func TestApplyPricingModelPricingOverride(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
+	createTestTaskWithMessages(t, h.rawStore(), projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	inputP := 6.0
@@ -825,7 +833,7 @@ func TestApplyPricingModelPricingOverride(t *testing.T) {
 func TestApplyPricingModelPowerOverride(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
+	createTestTaskWithMessages(t, h.rawStore(), projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	modelPower := 1000.0 // override: provider says 500W, model says 1000W
@@ -876,7 +884,7 @@ func TestApplyPricingModelPowerOverride(t *testing.T) {
 func TestApplyPricingModelPartialFallback(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
+	createTestTaskWithMessages(t, h.rawStore(), projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	cacheWriteP := 2.0 // model only sets cache write
@@ -919,7 +927,7 @@ func TestApplyPricingModelPartialFallback(t *testing.T) {
 func TestApplyPricingJSONSerialization(t *testing.T) {
 	h, projID := testProjectHandler(t)
 
-	createTestTaskWithMessages(t, h.store, projID, "task-1", "model-a", "1",
+	createTestTaskWithMessages(t, h.rawStore(), projID, "task-1", "model-a", "1",
 		1000, 500, 100, 1000, 5000)
 
 	cfg, _ := h.configStore.GetConfig()

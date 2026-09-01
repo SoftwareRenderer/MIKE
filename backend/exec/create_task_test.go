@@ -31,6 +31,13 @@ func testStore(t *testing.T) *store.Store {
 // newTestExecutor creates a TaskExecutor with a test store for testing create_task.
 func newTestExecutor(t *testing.T) *TaskExecutor {
 	t.Helper()
+	te, _ := newTestExecutorWithStore(t)
+	return te
+}
+
+// newTestExecutorWithStore also returns the store, for tests that seed rows themselves.
+func newTestExecutorWithStore(t *testing.T) (*TaskExecutor, *store.Store) {
+	t.Helper()
 	s := testStore(t)
 	appStreamMgr := stream.NewAppStreamManager(s, nil)
 	cs := config.NewConfigStore(s, "", "test")
@@ -40,7 +47,7 @@ func newTestExecutor(t *testing.T) *TaskExecutor {
 	_ = s.SetConfigValue("worker_model", "")
 	_ = s.SetConfigValue("utility_provider", "")
 	_ = s.SetConfigValue("utility_model", "")
-	return &TaskExecutor{
+	te := TaskExecutor{
 		store:        s,
 		appStreamMgr: appStreamMgr,
 		configStore:  cs,
@@ -48,10 +55,17 @@ func newTestExecutor(t *testing.T) *TaskExecutor {
 		taskGate:     NewConcurrencyGate(),
 		tasks:        make(map[string]*executionState),
 	}
+	return &te, s
+}
+
+// projectSeeder is what a fixture needs to put a project in the database: a real store or
+// an executor's narrower store field both satisfy it.
+type projectSeeder interface {
+	CreateProject(p *types.Project) error
 }
 
 // createProject creates a project in the store for testing.
-func createProject(t *testing.T, s *store.Store, id, name string) *types.Project {
+func createProject(t *testing.T, s projectSeeder, id, name string) *types.Project {
 	t.Helper()
 	now := time.Now().UTC()
 	p := &types.Project{
@@ -68,7 +82,7 @@ func createProject(t *testing.T, s *store.Store, id, name string) *types.Project
 }
 
 // createParentTask creates a parent task in the store for testing.
-func createParentTask(t *testing.T, s *store.Store, id, projectID string, status string) *types.Task {
+func createParentTask(t *testing.T, s *store.Store, id, projectID string, status types.Status) *types.Task {
 	t.Helper()
 	// Ensure project exists
 	createProject(t, s, projectID, projectID)
@@ -79,7 +93,7 @@ func createParentTask(t *testing.T, s *store.Store, id, projectID string, status
 		Title:          "Parent Task",
 		Prompt:         "Parent prompt",
 		Status:         status,
-		ExecutionState: "idle",
+		ExecutionState: types.ExecStateIdle,
 		LlamaServerURL: "http://test:8080",
 		ModelName:      "test-model",
 		AutoCommit:     true,
@@ -95,7 +109,7 @@ func createParentTask(t *testing.T, s *store.Store, id, projectID string, status
 
 func TestHandleCreateTask_Basic(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-1", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-task-1", "proj-1", "backlog")
 
 	result, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
@@ -120,7 +134,7 @@ func TestHandleCreateTask_Basic(t *testing.T) {
 
 	// Verify task was created in store
 	childID := resp["task_id"]
-	child, err := te.store.GetTaskByID(childID)
+	child, err := te.rawStore().GetTaskByID(childID)
 	if err != nil {
 		t.Fatalf("get created task: %v", err)
 	}
@@ -136,14 +150,14 @@ func TestHandleCreateTask_Basic(t *testing.T) {
 	if child.ProjectID != "proj-1" {
 		t.Errorf("expected project_id 'proj-1', got %q", child.ProjectID)
 	}
-	if child.Status != "backlog" {
+	if child.Status != types.StatusBacklog {
 		t.Errorf("expected status 'backlog', got %q", child.Status)
 	}
 }
 
 func TestHandleCreateTask_InheritsSettings(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-2", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-task-2", "proj-1", "backlog")
 
 	_, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
@@ -155,7 +169,7 @@ func TestHandleCreateTask_InheritsSettings(t *testing.T) {
 	}
 
 	// Get the child task
-	children, _ := te.store.GetChildren("parent-task-2")
+	children, _ := te.rawStore().GetChildren("parent-task-2")
 	if len(children) != 1 {
 		t.Fatalf("expected 1 child, got %d", len(children))
 	}
@@ -178,7 +192,7 @@ func TestHandleCreateTask_InheritsSettings(t *testing.T) {
 
 func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-3", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-task-3", "proj-1", "backlog")
 
 	// Create first child under parent
 	result1, err := te.handleCreateTask(map[string]any{
@@ -210,7 +224,7 @@ func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 	level2ID := resp2["task_id"]
 
 	// Verify nesting
-	level2, err := te.store.GetTaskByID(level2ID)
+	level2, err := te.rawStore().GetTaskByID(level2ID)
 	if err != nil {
 		t.Fatalf("get level 2 task: %v", err)
 	}
@@ -224,7 +238,7 @@ func TestHandleCreateTask_NestedSubtask(t *testing.T) {
 
 func TestHandleCreateTask_CreatesThread(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-4", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-task-4", "proj-1", "backlog")
 
 	result, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
@@ -240,7 +254,7 @@ func TestHandleCreateTask_CreatesThread(t *testing.T) {
 	childID := resp["task_id"]
 
 	// Verify thread was created
-	threads, err := te.store.GetThreadsByTask(childID)
+	threads, err := te.rawStore().GetThreadsByTask(childID)
 	if err != nil {
 		t.Fatalf("get threads: %v", err)
 	}
@@ -257,7 +271,7 @@ func TestHandleCreateTask_CreatesThread(t *testing.T) {
 
 func TestHandleCreateTask_CreatesPromptMessage(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-5", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-task-5", "proj-1", "backlog")
 
 	result, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
@@ -273,8 +287,8 @@ func TestHandleCreateTask_CreatesPromptMessage(t *testing.T) {
 	childID := resp["task_id"]
 
 	// Verify prompt message was created
-	task, _ := te.store.GetTaskByID(childID)
-	messages, err := te.store.GetTaskMessages(childID, task.CurrentThreadID)
+	task, _ := te.rawStore().GetTaskByID(childID)
+	messages, err := te.rawStore().GetTaskMessages(childID, task.CurrentThreadID)
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}
@@ -291,7 +305,7 @@ func TestHandleCreateTask_CreatesPromptMessage(t *testing.T) {
 
 func TestHandleCreateTask_MissingTitle(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-6", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-task-6", "proj-1", "backlog")
 
 	_, err := te.handleCreateTask(map[string]any{
 		"prompt": "Test prompt",
@@ -307,7 +321,7 @@ func TestHandleCreateTask_MissingTitle(t *testing.T) {
 
 func TestHandleCreateTask_MissingPrompt(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-7", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-task-7", "proj-1", "backlog")
 
 	_, err := te.handleCreateTask(map[string]any{
 		"title": "Task without prompt",
@@ -323,7 +337,7 @@ func TestHandleCreateTask_MissingPrompt(t *testing.T) {
 
 func TestHandleCreateTask_ParentNotFound(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-8", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-task-8", "proj-1", "backlog")
 
 	_, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
@@ -341,7 +355,7 @@ func TestHandleCreateTask_ParentNotFound(t *testing.T) {
 
 func TestHandleCreateTask_ParentNotInBacklog(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-9", "proj-1", "done")
+	parent := createParentTask(t, te.rawStore(), "parent-task-9", "proj-1", "done")
 
 	_, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
@@ -359,7 +373,7 @@ func TestHandleCreateTask_ParentNotInBacklog(t *testing.T) {
 
 func TestHandleCreateTask_AllowsInProgressParent(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-10", "proj-1", "in_progress")
+	parent := createParentTask(t, te.rawStore(), "parent-task-10", "proj-1", "in_progress")
 
 	result, err := te.handleCreateTask(map[string]any{
 		"title":          "Child Task",
@@ -382,7 +396,7 @@ func TestHandleCreateTask_AllowsInProgressParent(t *testing.T) {
 
 func TestHandleCreateTask_MultipleSubtasks(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-11", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-task-11", "proj-1", "backlog")
 
 	// Create multiple subtasks under parent
 	for i := 1; i <= 3; i++ {
@@ -405,7 +419,7 @@ func TestHandleCreateTask_MultipleSubtasks(t *testing.T) {
 	}
 
 	// Verify all 3 children exist
-	children, err := te.store.GetChildren("parent-task-11")
+	children, err := te.rawStore().GetChildren("parent-task-11")
 	if err != nil {
 		t.Fatalf("get children: %v", err)
 	}
@@ -416,7 +430,7 @@ func TestHandleCreateTask_MultipleSubtasks(t *testing.T) {
 
 func TestHandleCreateTask_TitleWithSpecialChars(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-task-12", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-task-12", "proj-1", "backlog")
 
 	result, err := te.handleCreateTask(map[string]any{
 		"title":          `Task with "quotes" and \backslash`,
@@ -439,7 +453,7 @@ func TestHandleCreateTask_TitleWithSpecialChars(t *testing.T) {
 
 func TestTaskComplete_PlanMode_RequiresSubtasks(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "plan-task-1", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "plan-task-1", "proj-1", "backlog")
 
 	// Try to complete without subtasks (empty state)
 	state := &executionState{createdIDs: nil}
@@ -457,7 +471,7 @@ func TestTaskComplete_PlanMode_RequiresSubtasks(t *testing.T) {
 
 func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "plan-parent-1", "proj-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "plan-parent-1", "proj-1", "backlog")
 
 	// Create a subtask via handleCreateTask
 	state := &executionState{}
@@ -480,7 +494,7 @@ func TestTaskComplete_PlanMode_AllowsWithSubtasks(t *testing.T) {
 	}
 
 	// Reload parent
-	parent, _ = te.store.GetTask("proj-1", "plan-parent-1")
+	parent, _ = te.rawStore().GetTask("proj-1", "plan-parent-1")
 
 	// Try to complete with subtask
 	result2, ok := te.executeTool(context.Background(), "request_review", map[string]any{
@@ -504,8 +518,8 @@ func seedCreateTaskHistory(t *testing.T, s *store.Store, planTaskID, threadID, c
 		ProjectID:      "proj-1",
 		Title:          title,
 		Prompt:         "Seeded child prompt",
-		Status:         "backlog",
-		ExecutionState: "idle",
+		Status:         types.StatusBacklog,
+		ExecutionState: types.ExecStateIdle,
 		ParentTaskID:   planTaskID,
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -543,15 +557,15 @@ func seedCreateTaskHistory(t *testing.T, s *store.Store, planTaskID, threadID, c
 
 func TestTaskComplete_PlanMode_CountsHistoryCreateTask(t *testing.T) {
 	te := newTestExecutor(t)
-	plan := createParentTask(t, te.store, "plan-task-h1", "proj-1", "backlog")
+	plan := createParentTask(t, te.rawStore(), "plan-task-h1", "proj-1", "backlog")
 
 	// Simulate a previous execution: a Main thread with a successful
 	// create_task tool call, and the child task on the board.
 	thread := &types.TaskThread{ID: "thread-h1", TaskID: plan.ID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}
-	if err := te.store.CreateThread(thread); err != nil {
+	if err := te.rawStore().CreateThread(thread); err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	seedCreateTaskHistory(t, te.store, plan.ID, "thread-h1", "call-h1", "child-h1", "Seeded Child", true)
+	seedCreateTaskHistory(t, te.rawStore(), plan.ID, "thread-h1", "call-h1", "child-h1", "Seeded Child", true)
 
 	// Fresh execution state — nothing created in this execution.
 	state := &executionState{}
@@ -563,12 +577,12 @@ func TestTaskComplete_PlanMode_CountsHistoryCreateTask(t *testing.T) {
 
 func TestTaskComplete_PlanMode_HistoryFailedCreateTaskDoesNotCount(t *testing.T) {
 	te := newTestExecutor(t)
-	plan := createParentTask(t, te.store, "plan-task-h2", "proj-1", "backlog")
+	plan := createParentTask(t, te.rawStore(), "plan-task-h2", "proj-1", "backlog")
 	thread := &types.TaskThread{ID: "thread-h2", TaskID: plan.ID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}
-	if err := te.store.CreateThread(thread); err != nil {
+	if err := te.rawStore().CreateThread(thread); err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	seedCreateTaskHistory(t, te.store, plan.ID, "thread-h2", "call-h2", "child-h2", "Seeded Child", false)
+	seedCreateTaskHistory(t, te.rawStore(), plan.ID, "thread-h2", "call-h2", "child-h2", "Seeded Child", false)
 
 	state := &executionState{}
 	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{"summary": "Plan complete"}, "", plan, state, nil)
@@ -582,20 +596,20 @@ func TestTaskComplete_PlanMode_HistoryFailedCreateTaskDoesNotCount(t *testing.T)
 
 func TestPlanCreatedTaskIDs_MergesHistoryAndState(t *testing.T) {
 	te := newTestExecutor(t)
-	plan := createParentTask(t, te.store, "plan-task-h4", "proj-1", "backlog")
+	plan := createParentTask(t, te.rawStore(), "plan-task-h4", "proj-1", "backlog")
 	thread := &types.TaskThread{ID: "thread-h4", TaskID: plan.ID, Name: "Main", IsActive: true, CreatedAt: time.Now().UTC()}
-	if err := te.store.CreateThread(thread); err != nil {
+	if err := te.rawStore().CreateThread(thread); err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	seedCreateTaskHistory(t, te.store, plan.ID, "thread-h4", "call-h4a", "child-a", "Child A", true)
-	seedCreateTaskHistory(t, te.store, plan.ID, "thread-h4", "call-h4b", "child-b", "Child B", true)
+	seedCreateTaskHistory(t, te.rawStore(), plan.ID, "thread-h4", "call-h4a", "child-a", "Child A", true)
+	seedCreateTaskHistory(t, te.rawStore(), plan.ID, "thread-h4", "call-h4b", "child-b", "Child B", true)
 	// Non-create_task tool call in history — must be ignored.
 	nonCreate, _ := json.Marshal(map[string]any{
 		"tool_id": "call-h4c", "tool_name": "write_file", "tool_display_name": "Write",
 		"args": map[string]any{"path": "x.go"}, "raw_args": `{"path":"x.go"}`, "sandbox": false,
 	})
 	res, _ := json.Marshal(map[string]any{"output": "ok", "success": true, "duration": 1})
-	if err := te.store.CreateTaskMessage(&types.TaskMessage{
+	if err := te.rawStore().CreateTaskMessage(&types.TaskMessage{
 		ID: "seeded-call-h4c", TaskID: plan.ID, ThreadID: "thread-h4", Role: "tool_call",
 		ToolCalls: string(nonCreate), ToolResult: string(res), CreatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -637,7 +651,7 @@ func TestHandleCreateTask_UsesConfigDefaultsForAutoMerge(t *testing.T) {
 	autoMerge := true
 	subtasksAutoMerge := true
 	te := newTestExecutorWithConfig(t, autoMerge, subtasksAutoMerge)
-	parent := createParentTask(t, te.store, "parent-auto-merge", "proj-am", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-auto-merge", "proj-am", "backlog")
 
 	// Create an independent task (no parent_task_id)
 	result, err := te.handleCreateTask(map[string]any{
@@ -650,7 +664,7 @@ func TestHandleCreateTask_UsesConfigDefaultsForAutoMerge(t *testing.T) {
 
 	var resp map[string]string
 	json.Unmarshal([]byte(result), &resp)
-	task, err := te.store.GetTaskByID(resp["task_id"])
+	task, err := te.rawStore().GetTaskByID(resp["task_id"])
 	if err != nil {
 		t.Fatalf("get created task: %v", err)
 	}
@@ -672,9 +686,9 @@ func TestHandleCreateTask_SubtaskInheritsSubtasksAutoMergeAsAutoMerge(t *testing
 	// Config defaults: autoMerge=false, subtasksAutoMerge=true
 	te := newTestExecutorWithConfig(t, false, true)
 	// Parent has subtasks_auto_merge=true (from config or explicit)
-	parent := createParentTask(t, te.store, "parent-inherit-am", "proj-inh", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-inherit-am", "proj-inh", "backlog")
 	parent.SubtasksAutoMerge = true
-	_ = te.store.UpdateTask(parent)
+	_ = te.rawStore().UpdateTask(parent)
 
 	// Create a subtask under this parent
 	result, err := te.handleCreateTask(map[string]any{
@@ -688,7 +702,7 @@ func TestHandleCreateTask_SubtaskInheritsSubtasksAutoMergeAsAutoMerge(t *testing
 
 	var resp map[string]string
 	json.Unmarshal([]byte(result), &resp)
-	child, err := te.store.GetTaskByID(resp["task_id"])
+	child, err := te.rawStore().GetTaskByID(resp["task_id"])
 	if err != nil {
 		t.Fatalf("get created task: %v", err)
 	}
@@ -710,7 +724,7 @@ func TestHandleCreateTask_SubtaskInheritsSubtasksAutoMergeAsAutoMerge(t *testing
 func TestHandleCreateTask_NoConfigDefaults_UsesZeroValues(t *testing.T) {
 	// Config with defaults disabled
 	te := newTestExecutorWithConfig(t, false, false)
-	parent := createParentTask(t, te.store, "parent-no-defaults", "proj-nd", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-no-defaults", "proj-nd", "backlog")
 
 	result, err := te.handleCreateTask(map[string]any{
 		"title":  "Task",
@@ -722,7 +736,7 @@ func TestHandleCreateTask_NoConfigDefaults_UsesZeroValues(t *testing.T) {
 
 	var resp map[string]string
 	json.Unmarshal([]byte(result), &resp)
-	task, err := te.store.GetTaskByID(resp["task_id"])
+	task, err := te.rawStore().GetTaskByID(resp["task_id"])
 	if err != nil {
 		t.Fatalf("get created task: %v", err)
 	}
@@ -738,22 +752,22 @@ func TestHandleCreateTask_NoConfigDefaults_UsesZeroValues(t *testing.T) {
 
 func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
 	te := newTestExecutor(t)
-	createProject(t, te.store, "proj-1", "proj-1")
+	createProject(t, te.rawStore(), "proj-1", "proj-1")
 	now := time.Now().UTC()
 	task := &types.Task{
 		ID:             "standard-task-1",
 		ProjectID:      "proj-1",
 		Title:          "Standard Task",
 		Prompt:         "Standard prompt",
-		Status:         "in_progress",
-		ExecutionState: "running",
+		Status:         types.StatusInProgress,
+		ExecutionState: types.ExecStateRunning,
 		LlamaServerURL: "http://test:8080",
 		ModelName:      "test-model",
 		OperatingMode:  "act",
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	if err := te.store.CreateTask(task); err != nil {
+	if err := te.rawStore().CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
@@ -771,7 +785,7 @@ func TestTaskComplete_StandardMode_NoValidation(t *testing.T) {
 // are included in the result string returned to the LLM (not silently dropped).
 func TestExecuteTool_CreateTask_ErrorFeedback(t *testing.T) {
 	te := newTestExecutor(t)
-	parent := createParentTask(t, te.store, "parent-feedback", "proj-fb", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-feedback", "proj-fb", "backlog")
 
 	// Missing title — error message must be in result string
 	result, ok := te.executeTool(context.Background(), "create_task", map[string]any{
@@ -809,7 +823,7 @@ func TestExecuteTool_CreateTask_ErrorFeedback(t *testing.T) {
 	}
 
 	// Parent not in backlog — error message must be in result string
-	doneParent := createParentTask(t, te.store, "done-parent", "proj-fb-done", "done")
+	doneParent := createParentTask(t, te.rawStore(), "done-parent", "proj-fb-done", "done")
 	result, ok = te.executeTool(context.Background(), "create_task", map[string]any{
 		"title":          "Child Task",
 		"prompt":         "Test prompt",

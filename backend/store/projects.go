@@ -3,7 +3,6 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"time"
 
@@ -98,7 +97,7 @@ func (s *Store) queryProject(id string) (*types.Project, error) {
 	var p types.Project
 	err := scanProject(s.db.QueryRow(`SELECT `+projectColumns+` FROM projects WHERE id = ?`, id), &p)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("project not found")
+		return nil, ErrProjectNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -255,18 +254,21 @@ func (s *Store) GetAllProjectCounts() map[string]types.ProjectCounts {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var projectID, status string
+		var projectID string
+		// Typed as Status so the switch below cannot drift from the column values;
+		// Scan assigns it through reflection on the underlying string kind.
+		var status types.Status
 		var count int
 		if err := rows.Scan(&projectID, &status, &count); err != nil {
 			continue
 		}
 		c := counts[projectID]
 		switch status {
-		case "backlog":
+		case types.StatusBacklog:
 			c.Backlog = count
-		case "in_progress":
+		case types.StatusInProgress:
 			c.InProgress = count
-		case "review":
+		case types.StatusReview:
 			c.Review = count
 		}
 		counts[projectID] = c

@@ -10,9 +10,17 @@ import (
 	"kanban/backend/types"
 )
 
+// boardStore is the board's whole persistence need: one project and its cards.
+type boardStore interface {
+	GetProject(id string) (*types.Project, error)
+	GetTasksByProject(projectID string) ([]types.Task, error)
+}
+
+var _ boardStore = (*store.Store)(nil)
+
 // BoardHandler handles board-level operations.
 type BoardHandler struct {
-	store          *store.Store
+	store          boardStore
 	boardStreamMgr *stream.AppStreamManager
 	configStore    *config.ConfigStore
 	sandboxMgr     sandboxOps
@@ -33,7 +41,7 @@ func (h *BoardHandler) HandleBoard(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 
 	if _, err := h.store.GetProject(projectID); err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 

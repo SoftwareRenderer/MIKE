@@ -1,24 +1,17 @@
 // Package testgit builds throwaway git repositories for tests.
 //
-// It exists because every package that touches git (managers, server, stream, exec, lsp)
-// grew its own copy of "init a repo, commit one file, run a command, fail the test on
-// error". The helpers here are byte-for-byte the commands those copies ran, so switching a
-// suite over changes nothing about the fixtures it produces.
+// Every package that touches git (managers, server, stream, exec, lsp) grew its own copy of
+// "init a repo, commit one file, run a command, fail the test on error"; these helpers run
+// the same commands, so switching a suite over changes no fixture.
 //
-// Two things are deliberate:
+//   - Every command carries an explicit identity (-c user.name / -c user.email): a real
+//     `git commit` fails with "Committer identity unknown" where no global identity exists,
+//     and a test must not depend on the developer's config.
+//   - Init does NOT rename the initial branch - it stays the machine's init.defaultBranch.
+//     Suites that follow with `git worktree add -B main` create main rather than move it, so
+//     pinning it here would break them. Need a branch, create it.
 //
-//   - Every command carries an explicit identity (-c user.name / -c user.email) in addition
-//     to any local config. A test that shells out to a real `git commit` used to fail with
-//     "Committer identity unknown" on a machine without a global git identity — including CI
-//     and a fresh checkout. Tests must not depend on the developer's config.
-//
-// Note that Init does NOT rename the initial branch: it stays whatever the machine's
-// init.defaultBranch says. Suites that then do `git worktree add -B main …` depend on that
-// (they create main rather than move it), so pinning it here would break them. A test that
-// needs a specific branch name should create it explicitly.
-//
-// This is a test-only package: nothing under backend/ or pkg/ (other than _test files) may
-// import it.
+// Test-only: nothing under backend/ or pkg/ outside _test files may import it.
 package testgit
 
 import (

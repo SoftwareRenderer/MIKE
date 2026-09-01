@@ -1,3 +1,6 @@
+// Package crypto encrypts secrets kept in the database (provider API keys) with
+// AES-256-GCM, keyed from MIKE_ENCRYPTION_KEY. Refusing to run without a key is the
+// server's decision, not this package's.
 package crypto
 
 import (

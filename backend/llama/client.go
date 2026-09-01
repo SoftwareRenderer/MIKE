@@ -1,3 +1,6 @@
+// Package llama is the OpenAI-compatible chat client: streaming and non-streaming
+// completion, tool definitions (standard, plan, explore) and usage stats. Everything the
+// model understands is described here; backend/exec decides when to call it.
 package llama
 
 import (

@@ -29,11 +29,11 @@ func TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False(t *testing.
 	// Config defaults: auto_merge=true — but the parent explicitly disallows
 	// subtask auto-merge.
 	te := newTestExecutorWithConfig(t, true, true)
-	parent := createParentTask(t, te.store, "parent-nest-1", "proj-nest-1", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-nest-1", "proj-nest-1", "backlog")
 	parent.SubtasksAutoMerge = false
-	_ = te.store.UpdateTask(parent)
+	_ = te.rawStore().UpdateTask(parent)
 
-	editTaskTarget(t, te.store, "proj-nest-1", "target-nest-1", true, true, true, "")
+	editTaskTarget(t, te.rawStore(), "proj-nest-1", "target-nest-1", true, true, true, "")
 
 	_, err := te.handleEditTask(map[string]any{
 		"task_id":        "target-nest-1",
@@ -43,7 +43,7 @@ func TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False(t *testing.
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByID("target-nest-1")
+	updated, err := te.rawStore().GetTaskByID("target-nest-1")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -66,11 +66,11 @@ func TestHandleEditTask_NestingRespectsParentSubtasksAutoMerge_False(t *testing.
 func TestHandleEditTask_NestingInheritsSubtasksAutoMergeTrue(t *testing.T) {
 	// Config defaults: auto_merge=false — but the parent allows subtask auto-merge.
 	te := newTestExecutorWithConfig(t, false, false)
-	parent := createParentTask(t, te.store, "parent-nest-2", "proj-nest-2", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-nest-2", "proj-nest-2", "backlog")
 	parent.SubtasksAutoMerge = true
-	_ = te.store.UpdateTask(parent)
+	_ = te.rawStore().UpdateTask(parent)
 
-	editTaskTarget(t, te.store, "proj-nest-2", "target-nest-2", false, false, false, "")
+	editTaskTarget(t, te.rawStore(), "proj-nest-2", "target-nest-2", false, false, false, "")
 
 	_, err := te.handleEditTask(map[string]any{
 		"task_id":        "target-nest-2",
@@ -80,7 +80,7 @@ func TestHandleEditTask_NestingInheritsSubtasksAutoMergeTrue(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByID("target-nest-2")
+	updated, err := te.rawStore().GetTaskByID("target-nest-2")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -98,13 +98,13 @@ func TestHandleEditTask_NestingInheritsSubtasksAutoMergeTrue(t *testing.T) {
 func TestHandleEditTask_UnnestResetsToConfigDefaults(t *testing.T) {
 	// Config defaults: auto_merge=true, subtasks_auto_merge=false.
 	te := newTestExecutorWithConfig(t, true, false)
-	parent := createParentTask(t, te.store, "parent-unnest-3", "proj-unnest-3", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-unnest-3", "proj-unnest-3", "backlog")
 	parent.SubtasksAutoMerge = false
-	_ = te.store.UpdateTask(parent)
+	_ = te.rawStore().UpdateTask(parent)
 
 	// Subtask with auto_merge=false (inherited from parent's disallow) and its
 	// own subtasks_auto_merge=true.
-	editTaskTarget(t, te.store, "proj-unnest-3", "target-unnest-3", false, false, true, "parent-unnest-3")
+	editTaskTarget(t, te.rawStore(), "proj-unnest-3", "target-unnest-3", false, false, true, "parent-unnest-3")
 
 	_, err := te.handleEditTask(map[string]any{
 		"task_id":        "target-unnest-3",
@@ -114,7 +114,7 @@ func TestHandleEditTask_UnnestResetsToConfigDefaults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByID("target-unnest-3")
+	updated, err := te.rawStore().GetTaskByID("target-unnest-3")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -137,13 +137,13 @@ func TestHandleEditTask_UnnestResetsToConfigDefaults(t *testing.T) {
 // auto_merge override untouched.
 func TestHandleEditTask_UnchangedParentDoesNotClobberAutoMerge(t *testing.T) {
 	te := newTestExecutorWithConfig(t, true, true)
-	parent := createParentTask(t, te.store, "parent-same-4", "proj-same-4", "backlog")
+	parent := createParentTask(t, te.rawStore(), "parent-same-4", "proj-same-4", "backlog")
 	parent.SubtasksAutoMerge = false
-	_ = te.store.UpdateTask(parent)
+	_ = te.rawStore().UpdateTask(parent)
 
 	// Subtask whose auto_merge was explicitly overridden to true despite the
 	// parent disallowing subtask auto-merge.
-	editTaskTarget(t, te.store, "proj-same-4", "target-same-4", true, true, true, "parent-same-4")
+	editTaskTarget(t, te.rawStore(), "proj-same-4", "target-same-4", true, true, true, "parent-same-4")
 
 	_, err := te.handleEditTask(map[string]any{
 		"task_id":        "target-same-4",
@@ -153,7 +153,7 @@ func TestHandleEditTask_UnchangedParentDoesNotClobberAutoMerge(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByID("target-same-4")
+	updated, err := te.rawStore().GetTaskByID("target-same-4")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -168,10 +168,10 @@ func TestHandleEditTask_UnchangedParentDoesNotClobberAutoMerge(t *testing.T) {
 func TestHandleEditTask_UnnestWhenAlreadyIndependent(t *testing.T) {
 	// Config defaults: auto_merge=false.
 	te := newTestExecutorWithConfig(t, false, false)
-	createProject(t, te.store, "proj-ind-5", "proj-ind-5")
-	editTaskTarget(t, te.store, "proj-ind-5", "target-ind-5", true, true, true, "")
+	createProject(t, te.rawStore(), "proj-ind-5", "proj-ind-5")
+	editTaskTarget(t, te.rawStore(), "proj-ind-5", "target-ind-5", true, true, true, "")
 
-	current, err := te.store.GetTaskByID("target-ind-5")
+	current, err := te.rawStore().GetTaskByID("target-ind-5")
 	if err != nil {
 		t.Fatalf("get current task: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestHandleEditTask_UnnestWhenAlreadyIndependent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByID("target-ind-5")
+	updated, err := te.rawStore().GetTaskByID("target-ind-5")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -196,10 +196,10 @@ func TestHandleEditTask_UnnestWhenAlreadyIndependent(t *testing.T) {
 // title leaves auto-merge fields untouched.
 func TestHandleEditTask_TitleOnlyEditKeepsAutoMerge(t *testing.T) {
 	te := newTestExecutorWithConfig(t, false, false)
-	createProject(t, te.store, "proj-title-6", "proj-title-6")
-	editTaskTarget(t, te.store, "proj-title-6", "target-title-6", true, true, true, "")
+	createProject(t, te.rawStore(), "proj-title-6", "proj-title-6")
+	editTaskTarget(t, te.rawStore(), "proj-title-6", "target-title-6", true, true, true, "")
 
-	current, err := te.store.GetTaskByID("target-title-6")
+	current, err := te.rawStore().GetTaskByID("target-title-6")
 	if err != nil {
 		t.Fatalf("get current task: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestHandleEditTask_TitleOnlyEditKeepsAutoMerge(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	updated, err := te.store.GetTaskByID("target-title-6")
+	updated, err := te.rawStore().GetTaskByID("target-title-6")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}
@@ -227,11 +227,11 @@ func TestHandleEditTask_TitleOnlyEditKeepsAutoMerge(t *testing.T) {
 // non-backlog parent is rejected and auto-merge fields are left untouched.
 func TestHandleEditTask_NonBacklogParentRejected(t *testing.T) {
 	te := newTestExecutorWithConfig(t, true, true)
-	parent := createParentTask(t, te.store, "parent-nb-7", "proj-nb-7", "in_progress")
+	parent := createParentTask(t, te.rawStore(), "parent-nb-7", "proj-nb-7", "in_progress")
 	parent.SubtasksAutoMerge = false
-	_ = te.store.UpdateTask(parent)
+	_ = te.rawStore().UpdateTask(parent)
 
-	editTaskTarget(t, te.store, "proj-nb-7", "target-nb-7", true, true, true, "")
+	editTaskTarget(t, te.rawStore(), "proj-nb-7", "target-nb-7", true, true, true, "")
 
 	_, err := te.handleEditTask(map[string]any{
 		"task_id":        "target-nb-7",
@@ -241,7 +241,7 @@ func TestHandleEditTask_NonBacklogParentRejected(t *testing.T) {
 		t.Fatal("expected error for non-backlog parent")
 	}
 
-	updated, err := te.store.GetTaskByID("target-nb-7")
+	updated, err := te.rawStore().GetTaskByID("target-nb-7")
 	if err != nil {
 		t.Fatalf("get updated task: %v", err)
 	}

@@ -54,12 +54,41 @@ func (s *Store) GetThreadsByTask(taskID string) ([]types.TaskThread, error) {
 func (s *Store) GetThread(threadID string) (*types.TaskThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.getThreadLocked(threadID)
+}
+
+// getThreadLocked reads one thread assuming the caller already holds the lock.
+// sync.RWMutex is not reentrant, so a method that holds it must call this instead.
+func (s *Store) getThreadLocked(threadID string) (*types.TaskThread, error) {
 	var th types.TaskThread
 	err := scanTaskThread(s.db.QueryRow(`SELECT `+threadColumns+` FROM task_threads WHERE id = ?`, threadID), &th)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("thread not found")
+		return nil, ErrThreadNotFound
 	}
 	return &th, err
+}
+
+// DeleteThreadWithMessages removes a thread and its messages as one locked sequence, and
+// returns the deleted row (nil, nil if there was nothing to delete).
+// The row is read first and returned so the caller can clean up the git branch it names.
+// Deleting an absent thread is not an error: the endpoint may be replayed.
+func (s *Store) DeleteThreadWithMessages(threadID string) (*types.TaskThread, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	thread, err := s.getThreadLocked(threadID)
+	if err == ErrThreadNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.db.Exec(`DELETE FROM task_messages WHERE thread_id = ?`, threadID); err != nil {
+		return nil, fmt.Errorf("delete thread messages: %w", err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM task_threads WHERE id = ?`, threadID); err != nil {
+		return nil, fmt.Errorf("delete thread: %w", err)
+	}
+	return thread, nil
 }
 
 // SetActiveThread marks a thread as active and deactivates all other threads for the same task.

@@ -20,6 +20,9 @@ import (
 var (
 	JSONResponse = httputil.JSONResponse
 	JSONError    = httputil.JSONError
+	// Fail answers a domain error with the status the error declares, so a store
+	// fault is never reported to the browser as "not found".
+	Fail = httputil.Fail
 )
 
 // Paths that don't require authentication.

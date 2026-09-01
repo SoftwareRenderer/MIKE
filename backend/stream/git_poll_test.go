@@ -344,8 +344,8 @@ func TestGitPollerDetectsChanges(t *testing.T) {
 		ProjectID:      projID,
 		Title:          "Test task",
 		Prompt:         "Test prompt",
-		Status:         "in_progress",
-		ExecutionState: "running",
+		Status:         types.StatusInProgress,
+		ExecutionState: types.ExecStateRunning,
 		Branch:         branchName,
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -434,8 +434,8 @@ func TestWorktreeWatcherMultiTask(t *testing.T) {
 			ProjectID:      projID,
 			Title:          "Test task " + taskID,
 			Prompt:         "Test prompt",
-			Status:         "in_progress",
-			ExecutionState: "running",
+			Status:         types.StatusInProgress,
+			ExecutionState: types.ExecStateRunning,
 			Branch:         branchName,
 		}
 		if err := s.CreateTask(task); err != nil {
@@ -546,8 +546,8 @@ func TestWorktreeWatcherWorkerPoolBounds(t *testing.T) {
 		ProjectID:      projID,
 		Title:          "Test task",
 		Prompt:         "Test prompt",
-		Status:         "in_progress",
-		ExecutionState: "running",
+		Status:         types.StatusInProgress,
+		ExecutionState: types.ExecStateRunning,
 		Branch:         branchName,
 	}
 	if err := s.CreateTask(task); err != nil {

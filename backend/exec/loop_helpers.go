@@ -18,13 +18,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// storeTask writes task back to the DB, preserving the fields the executor
-// does not own: Title and TitleGenerating belong to the task handlers (user
-// edits, async title generation), so a full-row write from the executor's
-// start-time copy would clobber a title that changed while the task was
-// queued or running. Refresh them from the DB first.
-//
-// It cannot start a run; use storeTaskClaiming for that (see Store.UpdateTask).
+// storeTask writes task back, preserving fields the executor does not own: Title and
+// TitleGenerating belong to the task handlers, so a full-row write from the executor's
+// start-time copy would clobber a title changed while the task was queued or running.
+// It cannot start a run; use storeTaskClaiming (see Store.UpdateTask).
 func (te *TaskExecutor) storeTask(task *types.Task, projectID string) error {
 	return te.storeTaskWith(task, projectID, false)
 }
@@ -56,16 +53,12 @@ func (te *TaskExecutor) persistTaskClaiming(setup *taskExecSetup) {
 	te.storeTaskClaiming(setup.task, setup.projectID)
 }
 
-// startGateQueuePoller runs the 1-second queue-status poller used while a
-// caller waits for a gate slot (per-LLM-request gate in the loop, task gate
-// on start/resume/switch). It sends the caller's own queue position and
-// estimated wait to the task stream every second.
+// startGateQueuePoller reports queue position and estimated wait once a second while a
+// caller waits for a gate slot (the per-request gate in the loop, the task gate on start).
 //
-// The returned onEnqueued callback must be passed to gate.Acquire: it hands
-// the caller's queue entry to the poller (via a channel — race-free) as soon
-// as the caller is enqueued, so the reported position is the caller's own
-// rather than the total waiter count. Close the returned done channel to
-// stop the poller.
+// The returned onEnqueued callback must be passed to gate.Acquire: it hands the caller's
+// queue entry to the poller over a channel as soon as it is enqueued, so the position
+// reported is the caller's own and not the total waiter count. Close done to stop it.
 func (te *TaskExecutor) startGateQueuePoller(gate *ConcurrencyGate, providerURL, projectID, taskID string, ctx context.Context) (onEnqueued func(*queueEntry), done chan struct{}) {
 	entries := make(chan *queueEntry, 1)
 	done = make(chan struct{})
@@ -102,17 +95,17 @@ func (te *TaskExecutor) startGateQueuePoller(gate *ConcurrencyGate, providerURL,
 
 // applyStopTransition transitions an in-flight task row out of its running state
 func applyStopTransition(task *types.Task) bool {
-	if task.ExecutionState != "running" && task.ExecutionState != "pulling_image" {
+	if task.ExecutionState != types.ExecStateRunning && task.ExecutionState != types.ExecStatePullingImage {
 		return false
 	}
 	switch task.Status {
-	case "in_progress":
-		task.ExecutionState = "paused"
+	case types.StatusInProgress:
+		task.ExecutionState = types.ExecStatePaused
 		task.Output = "Paused by user"
-	case "done":
-		task.ExecutionState = "completed"
+	case types.StatusDone:
+		task.ExecutionState = types.ExecStateCompleted
 	default:
-		task.ExecutionState = "idle"
+		task.ExecutionState = types.ExecStateIdle
 	}
 	task.UpdatedAt = time.Now().UTC()
 	return true
@@ -159,12 +152,14 @@ func waitForExecutorExit(taskID string, state *executionState, timeout time.Dura
 }
 
 // sendStopStatusEvent sends the WS status event that tells task subscribers the executor exited
-func (te *TaskExecutor) sendStopStatusEvent(projectID, taskID, state string) {
+func (te *TaskExecutor) sendStopStatusEvent(projectID, taskID string, state types.ExecutionState) {
 	activity := "Task stopped"
-	if state == "paused" {
+	if state == types.ExecStatePaused {
 		activity = "Task paused by user"
 	}
-	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": state, "activity": activity}})
+	// The WebSocket frame carries a plain string; the conversion is written out so the
+	// boundary between the typed state and the wire form stays visible.
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": string(state), "activity": activity}})
 }
 
 // persistStopTransition applies the stop transition
@@ -172,7 +167,7 @@ func (te *TaskExecutor) persistStopTransition(task *types.Task) bool {
 	// Only the paused transition carries user-visible output text; idle and
 	// completed keep the row's previous output.
 	var output *string
-	if task.ExecutionState == "paused" {
+	if task.ExecutionState == types.ExecStatePaused {
 		o := task.Output
 		output = &o
 	}
@@ -325,7 +320,7 @@ func (te *TaskExecutor) computeTaskDiffStats(projectID, taskID string) *stream.D
 	}
 	baseRef, _ := te.worktreeMgr.ResolveDiffBaseline(taskID, te.worktreeMgr.ResolveTaskBaseline(project.Path, project.OriginBranch, task), task.Branch, forkBranch)
 	headRef := ""
-	if task.Status == "done" {
+	if task.Status == types.StatusDone {
 		headRef = task.BranchTip
 		if headRef == "" {
 			headRef = task.Branch
@@ -383,15 +378,11 @@ func extractPrevSummary(messages []types.ChatMessage) string {
 	return ""
 }
 
-// maybeAutoSummarize runs summarization if the current context usage is approaching
-// the window limit. It is invoked immediately after an assistant message is appended,
-// so it triggers right when context crosses the threshold (no waiting for the task to
-// transition to idle). applySummarization sets/clears the Summarizing flag, which shows
-// the spinner in the UI, and installs the new summary into the system prompt so the
-// next LLM call carries it.
-//
-// When injectProceed is true and summarization succeeds, a persisted "Proceed" user
-// message is appended to the context to the next LLM call.
+// maybeAutoSummarize summarizes when context usage approaches the window limit. It runs
+// right after an assistant message is appended, so it fires as the threshold is crossed
+// instead of waiting for the task to go idle.
+// If injectProceed is set and summarization succeeds, a persisted "Proceed" user message is
+// appended for the next call.
 func (te *TaskExecutor) maybeAutoSummarize(setup *taskExecSetup, lc *loopContext, activeModel string, injectProceed bool) {
 	if lc.contextWindow == nil {
 		return
@@ -422,12 +413,10 @@ const (
 // advisory is a note about the workspace that the model must see but the user never
 // said: LSP diagnostics after an edit, the instructions for resolving a merge conflict.
 //
-// These used to be smuggled into the conversation as user messages, which cost three
-// things: a fake user bubble in the transcript, a summarizer that believed the user had
-// said it, and — because the row was written in the middle of the turn's tool_call rows —
-// the tail of that turn's tool calls and results on every rebuild. Advisories are
-// therefore buffered during tool execution and delivered by flushAdvisories once the
-// turn's own messages are in the conversation.
+// Never store one as a user message: it fakes a user bubble, the summarizer believes the
+// user said it, and a row written among the turn's tool_call rows costs that turn its
+// remaining calls on every rebuild. They are buffered during tool execution and delivered
+// by flushAdvisories once the turn's own messages are in the conversation.
 type advisory struct {
 	kind     string // advisoryDiagnostics | advisoryMergeConflict — how the UI titles the note
 	severity string // mirrors TaskMessage.Severity: "" (default), "info", "error" — drives emphasis
@@ -478,11 +467,10 @@ func (te *TaskExecutor) flushAdvisories(setup *taskExecSetup, lc *loopContext) {
 // resets the turn state around it: the loop detector forgets the history (conflict work
 // repeating is expected, not a loop) and the half-built assistant/tool buffers are dropped.
 //
-// The note is flushed, not merely queued. Every caller continues straight into the next
-// LLM call, and a note still sitting in the queue would then arrive one call late — the
-// model would resolve the conflict before ever being told which files conflict. It is also
-// the full text that gets persisted, so a run restarted mid-conflict rebuilds the same
-// instructions instead of the terse marker row the old code wrote and the rebuild skipped.
+// The note is flushed, not queued: every caller goes straight into the next LLM call, so a
+// queued note would arrive one call late and the model would resolve a conflict before being
+// told which files conflict. The full text is persisted, so a run restarted mid-conflict
+// rebuilds the same instructions rather than a marker row.
 func (te *TaskExecutor) prepareMergeConflictTurn(setup *taskExecSetup, lc *loopContext, conflictedFiles []string) {
 	prompt, err := prompts.RenderMergeConflictPrompt(prompts.MergeConflictData{
 		TaskBranch:      setup.task.Branch,
@@ -522,12 +510,10 @@ func (te *TaskExecutor) injectProceedMessage(setup *taskExecSetup, lc *loopConte
 	})
 }
 
-// setSystemPrompt installs prompt as the conversation's system message and returns
-// the conversation. Index 0 is the system message in every path that builds one
-// (buildMessagesFromDB), so the normal case is an in-place replace that shifts no
-// message indices. Prepending is the defensive fallback: keeping the summary is worth
-// more than the off-by-one it introduces, and it only ever grows the slice, so no
-// index-based reader (lc.checkpointIdx) can run past the end.
+// setSystemPrompt installs prompt as the system message and returns the conversation.
+// Index 0 is the system message wherever one is built, so the normal case is an in-place
+// replace. Prepending is the fallback: keeping the summary outweighs the index shift, and
+// only growing the slice means no index-based reader (lc.checkpointIdx) runs past the end.
 func setSystemPrompt(messages []types.ChatMessage, prompt string) []types.ChatMessage {
 	if len(messages) > 0 && messages[0].Role == "system" {
 		messages[0].Content = prompt
@@ -537,23 +523,18 @@ func setSystemPrompt(messages []types.ChatMessage, prompt string) []types.ChatMe
 	return append([]types.ChatMessage{{Role: "system", Content: prompt}}, messages...)
 }
 
-// applySummarization runs summarization, persists the summary, installs it into the
-// system prompt, and broadcasts the event. It returns the conversation for the next
-// LLM call and the installed summary; the summary is "" when summarization failed and
-// the caller's messages came back untouched.
+// applySummarization summarizes, persists the summary, installs it in the system prompt and
+// broadcasts the event. It returns the conversation for the next call and the installed
+// summary, which is "" if summarization failed and the messages came back untouched.
 //
-// The summary row is persisted BEFORE anything is published, so a server restart at
-// any point resumes with it: a fresh process rebuilds the conversation with
-// buildMessagesFromDB, which embeds the newest summarization row into its system
-// prompt. The live run needs the same treatment, because buildLLMContext sends
-// messages[0] verbatim and drops the summarization marker together with every message
-// the summary replaced — without the refresh below the new summary never reaches the
-// model until something happens to re-sync from the DB.
+// The summary row is persisted before anything is published, so a restart at any point
+// resumes with it: a fresh process embeds the newest summarization row in its system prompt.
+// The live run needs the same refresh, because buildLLMContext sends messages[0] verbatim
+// and drops the marker along with the rows the summary replaced.
 //
-// The prompt is rewritten in place rather than rebuilt from the DB: the in-memory
-// conversation is a superset of the persisted one (loop hints, the merge-conflict
-// instruction prompt), and buildMessagesFromDB deliberately skips rows the LLM still
-// needs mid-turn.
+// The prompt is rewritten in place, not rebuilt from the DB: the in-memory conversation is a
+// superset of the persisted one (loop hints, conflict instructions), and buildMessagesFromDB
+// skips rows the LLM still needs mid-turn.
 func (te *TaskExecutor) applySummarization(setup *taskExecSetup, ctx context.Context, messages []types.ChatMessage, serverURL, modelName string, resultCh chan error) ([]types.ChatMessage, string) {
 	task := setup.task
 	taskID := setup.task.ID
@@ -655,13 +636,11 @@ func userMessageToChatMessage(um stream.UserMessage) types.ChatMessage {
 	return types.ChatMessage{Role: "user", Content: um.Content}
 }
 
-// handleLoopDetected processes a detected loop: increments the consecutive loop counter,
-// checks if max consecutive loops are reached (returns true if task should terminate),
-// injects a hint message, and notifies the frontend.
-// If target is non-empty, it is included in the hint (used for tool loops).
-// If exploreMode is true, loop hints are suppressed (no hint injection, no streak tracking).
-// Plan mode also suppresses hints — reading files and making statements is normal planning behavior.
-// On valid turn (via recordTurn), loopStreak is reset to 0.
+// handleLoopDetected counts a detected loop, returns true when the consecutive maximum is
+// reached and the task should terminate, otherwise injects a hint and notifies the frontend.
+// A non-empty target is named in the hint (tool loops).
+// Explore mode suppresses hints entirely; plan mode does too - reading files and making
+// statements is normal planning behaviour. A valid turn resets the streak (recordTurn).
 func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID string, detector *loopDetector, loopType LoopType, target string, messages *[]types.ChatMessage, exploreMode bool) bool {
 	// In exploration/plan mode, suppress all loop hints — let the LLM freely explore / plan
 	if exploreMode || task.IsPlanMode() {
@@ -671,8 +650,8 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 
 	detector.loopStreak++
 	if detector.loopStreak >= maxLoopHints {
-		task.ExecutionState = "failed"
-		task.Status = "review"
+		task.ExecutionState = types.ExecStateFailed
+		task.Status = types.StatusReview
 		task.Output = "Model stuck in loop (max hints exhausted)"
 		te.storeTask(task, projectID)
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -708,11 +687,11 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	return false // continue
 }
 
-// sandboxCreateOpts is the sandbox configuration for creating (or recreating) setup's container on
-// the given image, in the given operating mode. One builder because four paths create this container
-// (start, plan/build-mode switch, agent config change, bridge recovery) and each used to re-spell
-// the same ten fields, so a new field was easily missed in one of them. Only the image comes from
-// the caller, because only it knows what EnsureImageForProject settled on.
+// sandboxCreateOpts is the sandbox configuration for creating (or recreating) setup's
+// container on the given image, in the given operating mode. Four paths create this
+// container (start, plan/build-mode switch, agent config change, bridge recovery) and share
+// it, so a new field cannot be set in three of them. Only the image comes from the caller -
+// only EnsureImageForProject knows what it settled on.
 func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, planMode bool) kanban_sandbox.SandboxOpts {
 	return kanban_sandbox.SandboxOpts{
 		BaseImage:        image,

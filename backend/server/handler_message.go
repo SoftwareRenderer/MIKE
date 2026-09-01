@@ -27,14 +27,14 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		// If delete_single is true, only remove that one message (e.g., dismissing an error).
 		if req.DeleteSingle {
 			if err := s.store.DeleteTaskMessageByID(req.MessageID); err != nil {
-				JSONError(w, http.StatusInternalServerError, err.Error())
+				Fail(w, err, "delete message", "message not found")
 				return
 			}
 			// Notify running executor to reset loop detector and re-sync messages.
 			// Only when actively running — waking an idle executor triggers an unwanted LLM call.
 			if s.executor != nil {
 				task, _ := s.store.GetTask(projectID, taskID)
-				if task != nil && task.ExecutionState == "running" {
+				if task != nil && task.ExecutionState == types.ExecStateRunning {
 					s.executor.NotifyContextChanged(projectID, taskID)
 				}
 			}
@@ -53,7 +53,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		// Use the message's own thread_id so deletion targets the correct thread
 		// even if the task's active thread has switched since the message was created.
 		if err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID, msgThreadID); err != nil {
-			JSONError(w, http.StatusInternalServerError, err.Error())
+			Fail(w, err, "delete messages", "message not found")
 			return
 		}
 		// Fetch task early to check execution state for executor notification.
@@ -63,7 +63,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		// Skip when executor is idle — waking it would trigger an unwanted LLM call.
 		// (The non-blocking select before each LLM call in the active loop already
 		// picks up context changes via NotifyContextChanged when the agent is running.)
-		if !req.Regenerate && s.executor != nil && task != nil && task.ExecutionState == "running" {
+		if !req.Regenerate && s.executor != nil && task != nil && task.ExecutionState == types.ExecStateRunning {
 			s.executor.NotifyContextChanged(projectID, taskID)
 		}
 		// Clear buffered task events so reconnecting clients don't replay
@@ -111,7 +111,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if err := s.store.CreateTaskMessage(&msg); err != nil {
-			JSONError(w, http.StatusInternalServerError, err.Error())
+			Fail(w, err, "create message", "task not found")
 			return
 		}
 		JSONResponse(w, http.StatusCreated, msg)
@@ -129,7 +129,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	messages, err := s.store.GetTaskMessages(taskID, threadID)
 	if err != nil {
-		JSONError(w, http.StatusInternalServerError, err.Error())
+		Fail(w, err, "get messages", "task not found")
 		return
 	}
 	// Suppress write_file content args, reasoning_content, and bash tool results unless full=1
@@ -167,7 +167,7 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("full") == "1" {
 			msg, err := s.store.GetTaskMessageByID(messageID)
 			if err != nil {
-				JSONError(w, http.StatusNotFound, err.Error())
+				Fail(w, err, "get message", "message not found")
 				return
 			}
 			JSONResponse(w, http.StatusOK, msg)
@@ -206,7 +206,7 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Content != "" {
 			if err := s.store.UpdateTaskMessage(messageID, req.Content); err != nil {
-				JSONError(w, http.StatusInternalServerError, err.Error())
+				Fail(w, err, "update message", "message not found")
 				return
 			}
 		}

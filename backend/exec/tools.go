@@ -679,7 +679,7 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		if err != nil {
 			return "", fmt.Errorf("parent task %s not found", actualParentID)
 		}
-		if parentTask.Status != "backlog" && parentTask.Status != "in_progress" {
+		if parentTask.Status != types.StatusBacklog && parentTask.Status != types.StatusInProgress {
 			return "", fmt.Errorf("parent task %s is not in backlog or in_progress (status: %s)", actualParentID, parentTask.Status)
 		}
 	}
@@ -700,8 +700,8 @@ func (te *TaskExecutor) handleCreateTask(args map[string]any, parent *types.Task
 		ProjectID:                 parent.ProjectID,
 		Title:                     title,
 		Prompt:                    prompt,
-		Status:                    "backlog",
-		ExecutionState:            "idle",
+		Status:                    types.StatusBacklog,
+		ExecutionState:            types.ExecStateIdle,
 		LlamaServerURL:            parent.LlamaServerURL,
 		ModelName:                 parent.ModelName,
 		ReasoningEffort:           parent.ReasoningEffort,
@@ -842,7 +842,7 @@ func (te *TaskExecutor) handleViewTasks(currentTask *types.Task) (string, error)
 
 	var summaries []taskSummary
 	for _, t := range tasks {
-		if t.Status == "backlog" {
+		if t.Status == types.StatusBacklog {
 			summaries = append(summaries, taskSummary{
 				ID:           t.ID,
 				Title:        t.Title,
@@ -892,7 +892,7 @@ func (te *TaskExecutor) handleEditTask(args map[string]any, currentTask *types.T
 	}
 
 	// Must be in backlog status
-	if target.Status != "backlog" {
+	if target.Status != types.StatusBacklog {
 		return "", fmt.Errorf("task %s is not in backlog (status: %s). Only backlog tasks can be edited", taskID, target.Status)
 	}
 
@@ -903,7 +903,7 @@ func (te *TaskExecutor) handleEditTask(args map[string]any, currentTask *types.T
 			if err != nil {
 				return "", fmt.Errorf("parent task %s not found", parentTaskID)
 			}
-			if parent.Status != "backlog" {
+			if parent.Status != types.StatusBacklog {
 				return "", fmt.Errorf("parent task %s is not in backlog (status: %s). Parent must be a backlog task", parentTaskID, parent.Status)
 			}
 			// Only re-derive auto-merge when the parent actually changes

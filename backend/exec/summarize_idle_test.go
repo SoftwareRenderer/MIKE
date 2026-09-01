@@ -109,7 +109,7 @@ func waitForCondition(timeout time.Duration, cond func() bool) bool {
 func summarizeIdleSetup(t *testing.T, projID, projName, taskID string, serverURL string) (*TaskExecutor, *taskExecSetup) {
 	t.Helper()
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, projID, projName)
 
 	task := &types.Task{
@@ -117,8 +117,8 @@ func summarizeIdleSetup(t *testing.T, projID, projName, taskID string, serverURL
 		ProjectID:       proj.ID,
 		Title:           "Sum task",
 		Prompt:          "Do something",
-		Status:          "backlog",
-		ExecutionState:  "idle",
+		Status:          types.StatusBacklog,
+		ExecutionState:  types.ExecStateIdle,
 		LlamaServerURL:  serverURL,
 		ModelName:       "test-model",
 		OperatingMode:   "act",
@@ -206,8 +206,8 @@ func TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage(t *testing.T)
 		t.Fatalf("timed out waiting for first LLM request")
 	}
 	waitFor(t, 10*time.Second, "task to reach review/idle after first response", func() bool {
-		got, err := te.store.GetTaskByID(taskID)
-		return err == nil && got != nil && got.Status == "review" && got.ExecutionState == "idle"
+		got, err := te.rawStore().GetTaskByID(taskID)
+		return err == nil && got != nil && got.Status == types.StatusReview && got.ExecutionState == types.ExecStateIdle
 	})
 
 	// Manual summarize request with NO queued user message.
@@ -232,16 +232,16 @@ func TestExecuteTask_ManualSummarize_StaysIdleWithoutQueuedMessage(t *testing.T)
 	}
 
 	// Task must still be review/idle.
-	got, err := te.store.GetTaskByID(taskID)
+	got, err := te.rawStore().GetTaskByID(taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if got.Status != "review" || got.ExecutionState != "idle" {
+	if got.Status != types.StatusReview || got.ExecutionState != types.ExecStateIdle {
 		t.Fatalf("task should remain review/idle after summarization, got status=%q state=%q", got.Status, got.ExecutionState)
 	}
 
 	// The summary must be persisted, and the summarization endpoint must have been hit.
-	msgs, _ := te.store.GetTaskMessages(taskID, "thread-1")
+	msgs, _ := te.rawStore().GetTaskMessages(taskID, "thread-1")
 	hasSummary := false
 	for _, m := range msgs {
 		if m.Role == "summarization" {
@@ -289,13 +289,13 @@ func TestExecuteTask_ManualSummarize_StartsWithQueuedMessage(t *testing.T) {
 		t.Fatalf("timed out waiting for first LLM request")
 	}
 	waitFor(t, 10*time.Second, "task to reach review/idle after first response", func() bool {
-		got, err := te.store.GetTaskByID(taskID)
-		return err == nil && got != nil && got.Status == "review" && got.ExecutionState == "idle"
+		got, err := te.rawStore().GetTaskByID(taskID)
+		return err == nil && got != nil && got.Status == types.StatusReview && got.ExecutionState == types.ExecStateIdle
 	})
 
 	// Queue a new user message (persisted in the DB exactly as HandleSend does,
 	// before the executor is notified) and request summarization.
-	if err := te.store.CreateTaskMessage(&types.TaskMessage{
+	if err := te.rawStore().CreateTaskMessage(&types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, ThreadID: "thread-1",
 		Role: "user", Content: "Second message", CreatedAt: time.Now().UTC(),
 	}); err != nil {
