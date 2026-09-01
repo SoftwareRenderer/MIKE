@@ -67,3 +67,30 @@ func TestDecideDocSync(t *testing.T) {
 		})
 	}
 }
+
+func TestWireLanguageId(t *testing.T) {
+	tests := []struct {
+		name     string
+		language string
+		filePath string
+		want     string
+	}{
+		{"tsx is typescriptreact, not typescript", "typescript", "src/App.tsx", "typescriptreact"},
+		{"jsx is javascriptreact", "typescript", "src/App.jsx", "javascriptreact"},
+		{"plain ts", "typescript", "src/lib/util.ts", "typescript"},
+		{"mts and cts stay typescript", "typescript", "src/decls.d.mts", "typescript"},
+		{"js is javascript so tsserver stops type-checking it", "typescript", "legacy/app.js", "javascript"},
+		{"jsx upper case", "typescript", "src/APP.JSX", "javascriptreact"},
+		{"manifest language survives for an unknown extension", "typescript", "notes.txt", "typescript"},
+		{"other languages are untouched", "go", "main.go", "go"},
+		{"svelte is untouched", "svelte", "App.svelte", "svelte"},
+		{"no language at all is passed through", "", "main.go", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := wireLanguageId(tt.language, tt.filePath); got != tt.want {
+				t.Errorf("wireLanguageId(%q, %q) = %q, want %q", tt.language, tt.filePath, got, tt.want)
+			}
+		})
+	}
+}
