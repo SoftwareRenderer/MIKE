@@ -177,14 +177,35 @@ func GVisorAvailable(logTag string) bool {
 	return true
 }
 
-// CleanupStaleContainers force-removes every container whose name matches
-// podman's nameFilter (a regex, so a bare prefix like "kanban-sandbox-" matches
-// all of that family's containers). It is best-effort and time-bounded, and
-// returns the names actually removed.
+// SkipStartupCleanup reports whether the startup sweep over leftover sandbox containers
+// should be skipped. MIKE_SANDBOX_SKIP_STARTUP_CLEANUP is set by test binaries (see the
+// TestMain of the sandbox suites) so that running a unit test never reaches into the host
+// that happens to be running a server: without it, `go test ./backend/...` swept every
+// kanban-* container family on the machine, including the live server's language servers.
+func SkipStartupCleanup() bool {
+	return os.Getenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP") != ""
+}
+
+// staleContainerNames keeps the containers a startup sweep may reclaim: everything not running.
 //
-// Both sandbox managers need this on startup — a container left by a crashed run
-// holds the name its replacement needs — so the list/parse/remove loop exists
-// once, here.
+// The sweep matches a whole name family by prefix, so removing a running container takes a working
+// sandbox away from the server still talking to it; an unreadable state stays in the sweep, which
+// is what a half-dead name-holder looks like.
+func staleContainerNames(names []string, isRunning func(string) (bool, error)) []string {
+	var stale []string
+	for _, name := range names {
+		if running, err := isRunning(name); err == nil && running {
+			continue
+		}
+		stale = append(stale, name)
+	}
+	return stale
+}
+
+// CleanupStaleContainers force-removes every non-running container whose name matches podman's
+// nameFilter (a regex, so a bare prefix matches the whole family), best-effort and time-bounded.
+// Both sandbox managers need it on startup, so the loop exists once here; running containers stay,
+// per staleContainerNames.
 func (r *Runtime) CleanupStaleContainers(logTag, nameFilter string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), staleCleanupTimeout)
 	defer cancel()
@@ -195,7 +216,7 @@ func (r *Runtime) CleanupStaleContainers(logTag, nameFilter string) []string {
 		return nil
 	}
 	var removed []string
-	for _, name := range strings.Fields(strings.TrimSpace(string(out))) {
+	for _, name := range staleContainerNames(strings.Fields(strings.TrimSpace(string(out))), r.IsRunning) {
 		if rmErr := r.RemoveContainer(name); rmErr != nil {
 			log.Printf("[%s] startup: failed to remove stale container %s: %v", logTag, name, rmErr)
 			continue

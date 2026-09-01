@@ -434,3 +434,63 @@ func sanitizeManifestURLs(m *ExtensionManifest) {
 	m.Homepage = sanitizeURL(m.Homepage)
 	m.LicenseURL = sanitizeURL(m.LicenseURL)
 }
+
+// mergeManifestSandboxAdditions brings in what a manifest declares that the stored row does not
+// have yet — how an update delivers a sandbox declaration the installed commit did not ship.
+//
+// Everything merged was also editable through PUT /api/extensions/{id}, so the stored value wins
+// on a conflict, and the memory limit and network isolation are never touched at all.
+func mergeManifestSandboxAdditions(stored SandboxConfig, declared *SandboxConfig) SandboxConfig {
+	if declared == nil {
+		return stored
+	}
+	// Copy before appending: the stored slices are shared with the caller's extension record, and
+	// an append with spare capacity would write through to it. `before` in the update path is
+	// exactly such a copy.
+	stored.Envs = append([]types.SandboxEnv(nil), stored.Envs...)
+	stored.Mounts = append([]types.SandboxMount(nil), stored.Mounts...)
+	stored.ForwardPorts = append([]types.PortForward(nil), stored.ForwardPorts...)
+	stored.Capabilities = append([]string(nil), stored.Capabilities...)
+
+	haveEnv := make(map[string]bool, len(stored.Envs))
+	for _, e := range stored.Envs {
+		haveEnv[e.Key] = true
+	}
+	for _, e := range declared.Envs {
+		if !haveEnv[e.Key] {
+			haveEnv[e.Key] = true
+			stored.Envs = append(stored.Envs, e)
+		}
+	}
+	haveMount := make(map[string]bool, len(stored.Mounts))
+	for _, m := range stored.Mounts {
+		haveMount[m.ContainerPath] = true
+	}
+	for _, m := range declared.Mounts {
+		if !haveMount[m.ContainerPath] {
+			haveMount[m.ContainerPath] = true
+			stored.Mounts = append(stored.Mounts, m)
+		}
+	}
+	havePort := make(map[int]bool, len(stored.ForwardPorts))
+	for _, p := range stored.ForwardPorts {
+		havePort[p.ContainerPort] = true
+	}
+	for _, p := range declared.ForwardPorts {
+		if !havePort[p.ContainerPort] {
+			havePort[p.ContainerPort] = true
+			stored.ForwardPorts = append(stored.ForwardPorts, p)
+		}
+	}
+	haveCap := make(map[string]bool, len(stored.Capabilities))
+	for _, c := range stored.Capabilities {
+		haveCap[c] = true
+	}
+	for _, c := range declared.Capabilities {
+		if !haveCap[c] {
+			haveCap[c] = true
+			stored.Capabilities = append(stored.Capabilities, c)
+		}
+	}
+	return stored
+}

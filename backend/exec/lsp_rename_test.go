@@ -20,7 +20,7 @@ type fakeLSPManager struct {
 	lastParamsByMethod map[string]any
 }
 
-func (f *fakeLSPManager) LSPRequest(workspacePath, filePath, method string, params any) (json.RawMessage, error) {
+func (f *fakeLSPManager) LSPRequest(_ context.Context, workspacePath, filePath, method string, params any) (json.RawMessage, error) {
 	f.methods = append(f.methods, method)
 	if f.lastParamsByMethod == nil {
 		f.lastParamsByMethod = map[string]any{}

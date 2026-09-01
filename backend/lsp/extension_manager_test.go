@@ -698,11 +698,11 @@ func TestAdaptProjectMounts(t *testing.T) {
 	mgr := NewExtensionLSPManager(nil, nil, projStore)
 	wsContainer := "/mnt/flint"
 
-	// All project mounts are adapted: project-relative paths remapped, global
-	// paths pass through, all forced to ro.
+	// Every project mount is adapted: project-relative paths remapped, global paths pass
+	// through, all forced to ro — except one, which is refused below.
 	mounts := mgr.adaptProjectMounts(wsPath, wsContainer)
-	if len(mounts) != 3 {
-		t.Fatalf("adaptProjectMounts returned %d mounts, want 3", len(mounts))
+	if len(mounts) != 2 {
+		t.Fatalf("adaptProjectMounts returned %d mounts, want 2: %v", len(mounts), mounts)
 	}
 
 	// Project-relative mount: remapped from /home/sandbox/MIKE/ to /mnt/flint/.
@@ -726,10 +726,17 @@ func TestAdaptProjectMounts(t *testing.T) {
 		t.Errorf("go Mode = %q, want ro", goMount.Mode)
 	}
 
-	// Another global mount.
-	cacheMount := mounts[2]
-	if cacheMount.ContainerPath != "/root/.cache" {
-		t.Errorf("cache ContainerPath = %q, want /root/.cache", cacheMount.ContainerPath)
+	// A global mount onto gopls's own cache is not borrowed: it looks like the project's build
+	// cache, but borrowed mounts are read-only and a gopls with an unwritable cache publishes
+	// nothing for a file that does not parse.
+	for _, mo := range mounts {
+		if mo.ContainerPath == "/root/.cache" {
+			t.Errorf("cache mount was borrowed at %q: the server inside this sandbox cannot report anything",
+				mo.ContainerPath)
+		}
+		if mo.Mode != "ro" {
+			t.Errorf("%s -> %s Mode = %q, want ro", mo.HostPath, mo.ContainerPath, mo.Mode)
+		}
 	}
 
 	// No project store -> nil.
@@ -812,11 +819,7 @@ func TestExtensionLSPManager_SandboxMemory_ClientWithoutSandbox(t *testing.T) {
 	mgr := NewExtensionLSPManager(store, sandbox, nil)
 
 	// Inject a client whose extension sandbox was never created.
-	mgr.clients[processKey("/tmp/workspace", "go")] = &sandboxClient{
-		workspace:   "/tmp/workspace",
-		language:    "go",
-		extensionID: "gopls",
-	}
+	mgr.clients[processKey("/tmp/workspace", "go")] = newSandboxClient(nil, "/tmp/workspace", "go", "gopls", nil)
 
 	stats := mgr.SandboxMemory("/tmp/workspace", "/tmp/workspace/main.go")
 	if stats == nil || stats.Running {

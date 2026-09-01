@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -46,6 +47,8 @@ type mockProcessManager struct {
 	nextID    int
 	// sentMessages captures messages sent to the server (in order)
 	sentMessages []json.RawMessage
+	// sendErr, when set, is what every send to the server answers with.
+	sendErr error
 	// messageCh for delivering server responses
 	messageCh chan json.RawMessage
 }
@@ -95,11 +98,11 @@ func (m *mockProcessManager) Release(workspacePath, language string) {
 	}
 }
 
-func (m *mockProcessManager) SendToServer(process *LSPProcess, msg json.RawMessage) error {
+func (m *mockProcessManager) SendToServer(_ context.Context, process *LSPProcess, msg json.RawMessage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sentMessages = append(m.sentMessages, msg)
-	return nil
+	return m.sendErr
 }
 
 func (m *mockProcessManager) ServerMessageCh() <-chan json.RawMessage {
@@ -265,6 +268,38 @@ func subscribeClientDefault(t *testing.T, url, workspace, file string) *testClie
 	return subscribeClient(t, url, 1, workspace, file, "go")
 }
 
+// TestRequestIsAnsweredWhenItsServerIsGone: the browser gets an answer even when its language
+// server is gone, instead of waiting on a request nobody will answer. Logging the failure and
+// dropping the request also left the id mappings that route answers behind.
+func TestRequestIsAnsweredWhenItsServerIsGone(t *testing.T) {
+	mgr := newMockProcessManager()
+	mgr.sendErr = errors.New("sandbox client stale for workspace=/tmp/test-project lang=go")
+	reg := newTestRegistry()
+	handler := NewLSPHandler(reg, mgr)
+	defer handler.Close()
+
+	url := startTestServer(t, handler)
+	client := subscribeClientDefault(t, url, "/tmp/test-project", "main.go")
+
+	client.sendLSP(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      5,
+		"method":  "textDocument/completion",
+		"params":  map[string]any{"textDocument": map[string]any{"uri": "file:///main.go"}},
+	})
+
+	msg := client.receiveJSON(t)
+	if msg.ID == nil || msg.ID.String() != "5" {
+		t.Fatalf("the answer carried id=%v, want the client's own id 5", msg.ID)
+	}
+	if msg.Error == nil {
+		t.Fatalf("a request whose server was gone was answered without an error: %+v", msg)
+	}
+	if !strings.Contains(msg.Error.Message, "stale") {
+		t.Errorf("error message = %q, want the reason the send failed", msg.Error.Message)
+	}
+}
+
 func TestIDRemapping(t *testing.T) {
 	mgr := newMockProcessManager()
 	reg := newTestRegistry()
@@ -342,7 +377,6 @@ func TestInitializeCaching(t *testing.T) {
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "initialize",
-		"params":  map[string]any{"processId": 12345, "rootUri": "file:///tmp/test-project"},
 	})
 
 	time.Sleep(50 * time.Millisecond)
@@ -400,7 +434,6 @@ func TestInitializeCaching(t *testing.T) {
 		"jsonrpc": "2.0",
 		"id":      2,
 		"method":  "initialize",
-		"params":  map[string]any{"processId": 67890, "rootUri": "file:///tmp/test-project"},
 	})
 
 	time.Sleep(50 * time.Millisecond)
@@ -792,10 +825,8 @@ func TestMultiWorkspaceSingleConnection(t *testing.T) {
 }
 
 func TestRouteServerRequest(t *testing.T) {
-	// Server requests (has both id AND method) should not be logged as "unexpected".
-	// LSP servers can send requests like window/workDoneProgress that the client
-	// must respond to. We currently don't implement server request handling,
-	// but the message should be silently dropped rather than logged as an error.
+	// A server request (id and method, e.g. window/workDoneProgress) is unhandled and must be
+	// dropped silently rather than logged as an error.
 	mgr := newMockProcessManager()
 	reg := newTestRegistry()
 	handler := NewLSPHandler(reg, mgr)
@@ -886,7 +917,6 @@ func TestLSPReadyNotification(t *testing.T) {
 		"id":      1,
 		"method":  "initialize",
 		"params": map[string]any{
-			"processId":    12345,
 			"rootUri":      "file:///tmp/test-project",
 			"capabilities": map[string]any{},
 		},
@@ -957,7 +987,6 @@ func TestLSPReadyNotificationCachedResponse(t *testing.T) {
 		"id":      1,
 		"method":  "initialize",
 		"params": map[string]any{
-			"processId":    12345,
 			"rootUri":      "file:///tmp/test-project",
 			"capabilities": map[string]any{},
 		},
@@ -1005,7 +1034,6 @@ func TestLSPReadyNotificationCachedResponse(t *testing.T) {
 		"id":      2,
 		"method":  "initialize",
 		"params": map[string]any{
-			"processId":    99999,
 			"rootUri":      "file:///tmp/test-project",
 			"capabilities": map[string]any{},
 		},

@@ -15,16 +15,12 @@ import (
 	bridge "kanban/pkg/bridge"
 )
 
-// TestTSServerCrossFileViaBridge drives the real sandbox-bridge binary (host
-// process, stdin/stdout — the same client path the extension sandbox uses via
-// `podman exec`) and a real typescript-language-server through the product's
-// exact LSP request sequence (initialize params, single-file didOpen, then
-// definition/references/rename). It proves cross-file resolution is complete
-// for .ts/.js with the protocol the LSP manager sends.
+// TestTSServerCrossFileViaBridge drives the real sandbox-bridge binary (stdin/stdout, as in the
+// extension sandbox) and a real typescript-language-server through the product's request sequence,
+// to prove cross-file resolution for .ts/.js actually works.
 //
-// Skipped when typescript-language-server, or a typescript package it can resolve,
-// is not available. Locate the server with the MIKE_TSSERVER_BIN env var or on PATH,
-// and the typescript package with MIKE_TYPESCRIPT_DIR (see seedTypeScript).
+// Skipped without typescript-language-server (MIKE_TSSERVER_BIN or PATH) and a typescript package
+// it can resolve; see seedTypeScript.
 func TestTSServerCrossFileViaBridge(t *testing.T) {
 	tsserver := os.Getenv("MIKE_TSSERVER_BIN")
 	if tsserver == "" {
@@ -97,8 +93,7 @@ export function load(taskId: string) {
 		"id":      1,
 		"method":  "initialize",
 		"params": map[string]any{
-			"processId": os.Getpid(),
-			"rootUri":   uri(ws),
+			"rootUri": uri(ws),
 			"capabilities": map[string]any{
 				"textDocument": map[string]any{
 					"publishDiagnostics": map[string]any{"relatedInformation": true},
@@ -291,16 +286,11 @@ func notifyLSP(ctx context.Context, t *testing.T, client *bridge.Client, method 
 	}
 }
 
-// seedTypeScript links a typescript package into the test workspace so the language
-// server can actually start tsserver. typescript-language-server resolves typescript
-// from the workspace's node_modules first and only then from its own install tree,
-// where it is a peer dependency that a global install frequently does not have. When
-// nothing resolves it still answers initialize and then returns null/[] for every
-// request — indistinguishable from a cross-file resolution bug in the product.
+// seedTypeScript links a typescript package into the test workspace: typescript-language-server
+// looks in the workspace's node_modules first, and when nothing resolves it answers every request
+// with null/[] — indistinguishable from a product bug.
 //
-// Search order: MIKE_TYPESCRIPT_DIR, the server binary's own node_modules (following
-// the bin symlink), then this repo's frontend/node_modules. Skips the test when none
-// of them holds a tsserver.js.
+// Search order: MIKE_TYPESCRIPT_DIR, the server binary's own node_modules, frontend/node_modules.
 func seedTypeScript(t *testing.T, ws, tsserver string) {
 	t.Helper()
 
