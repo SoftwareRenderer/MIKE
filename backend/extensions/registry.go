@@ -21,11 +21,15 @@ import (
 // RegistryClient fetches extension metadata and manages container images.
 type RegistryClient struct {
 	httpClient *http.Client
+	// rt qualifies image refs before they reach podman and owns the local-storage probe, so this
+	// client doesn't re-implement either (see pkg/sandboxruntime/image_ref.go).
+	rt *sandboxruntime.Runtime
 }
 
 // NewRegistryClient creates a new RegistryClient.
 func NewRegistryClient() *RegistryClient {
 	return &RegistryClient{
+		rt: sandboxruntime.NewRuntime(),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			// Do not follow redirects
@@ -148,11 +152,25 @@ func (rc *RegistryClient) FetchDockerfile(url string) (string, error) {
 	return string(data), nil
 }
 
+// ExtensionImageRef is the image name an extension's own Dockerfile is built under. It is qualified
+// with the local registry because that is where podman stores a local build, and a short name would
+// put every later pull/exists/create through short-name resolution (see image_ref.go).
+func ExtensionImageRef(name, version string) string {
+	return sandboxruntime.QualifyLocalImageRef(fmt.Sprintf("kanban-ext-%s:%s", name, version))
+}
+
+// ValidateImage is the rule for an image reference someone else chose (a registry entry's image, a
+// project's configured sandbox image): it must name its registry.
+func (rc *RegistryClient) ValidateImage(imageRef string) error {
+	return sandboxruntime.ValidateConfiguredImageRef(imageRef)
+}
+
 // PullImage pulls an OCI image via podman.
 func (rc *RegistryClient) PullImage(imageRef string) error {
 	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
 		return err
 	}
+	imageRef = rc.rt.ResolveImageRef(imageRef)
 	cmd := exec.Command("podman", "pull", imageRef)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -166,6 +184,7 @@ func (rc *RegistryClient) BuildImageFromReader(dockerfileContent, imageRef strin
 	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
 		return err
 	}
+	imageRef = rc.rt.ResolveImageRef(imageRef)
 	// Write Dockerfile to temp dir and build from it
 	cmd := exec.Command("podman", "build", "-t", imageRef, "-f", "-", ".")
 	cmd.Stdin = strings.NewReader(dockerfileContent)
@@ -178,11 +197,7 @@ func (rc *RegistryClient) BuildImageFromReader(dockerfileContent, imageRef strin
 
 // ImageExists checks if an image is available locally via podman.
 func (rc *RegistryClient) ImageExists(imageRef string) bool {
-	if err := sandboxruntime.ValidateImageRef(imageRef); err != nil {
-		return false
-	}
-	cmd := exec.Command("podman", "image", "exists", imageRef)
-	return cmd.Run() == nil
+	return rc.rt.ImageExists(imageRef)
 }
 
 // semverRegex matches semantic version strings (major.minor.patch).

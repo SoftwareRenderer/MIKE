@@ -505,6 +505,40 @@ func TestBuildExtensionCreateArgs_KeepsHardeningFlags(t *testing.T) {
 	}
 }
 
+// An extension sandbox must never pull during `podman create`. `--pull=never` is a create flag, so
+// it comes after `create` and before the image reference.
+func TestBuildExtensionCreateArgs_NeverPullsImplicitly(t *testing.T) {
+	ext := &Extension{ID: "ext-pull-test"}
+	image := ExtensionImageRef("gopls", "1.0.0")
+	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-pull-test", image, nil, nil)
+
+	if !hasArgPair(args, "--pull", "never") {
+		t.Fatalf("args missing --pull never: %v", args)
+	}
+	createAt, pullAt, imageAt := -1, -1, -1
+	for i, a := range args {
+		switch a {
+		case "create":
+			if createAt == -1 {
+				createAt = i
+			}
+		case "--pull":
+			pullAt = i
+		case image:
+			imageAt = i
+		}
+	}
+	if createAt == -1 || pullAt == -1 || imageAt == -1 {
+		t.Fatalf("args missing create/--pull/image: %v", args)
+	}
+	if pullAt < createAt {
+		t.Errorf("--pull at %d precedes `create` at %d — podman would read it as a global flag: %v", pullAt, createAt, args)
+	}
+	if imageAt < pullAt {
+		t.Errorf("image ref at %d precedes --pull at %d: %v", imageAt, pullAt, args)
+	}
+}
+
 func TestBuildExtensionCreateArgs_MountsProjectsReadOnly(t *testing.T) {
 	ext := &Extension{ID: "ext-mount-test"}
 	projectMounts := map[string]string{
@@ -624,22 +658,38 @@ func TestFindLocalDockerfile(t *testing.T) {
 	}
 }
 
-func TestEnsureExtensionImage_NoDockerfileLeavesToPodman(t *testing.T) {
-	// When no local Dockerfile exists for the extension, ensureExtensionImage
-	// must return nil (letting podman pull a fully-qualified image normally)
-	// rather than erroring out.
+// With --pull=never, a missing image is built, pulled, or reported — never fetched during creation.
+// A "localhost/…" ref is a local build and must never be fetched.
+func TestPullsMissingRemoteImage(t *testing.T) {
+	tests := []struct {
+		image string
+		want  bool
+	}{
+		{"docker.io/library/ubuntu:24.04", true},
+		{"quay.io/o/r", true},
+		{"localhost:5000/team/img:1", true}, // a real registry on a port, not the local one
+		{"localhost/sandbox-mike", false},
+		{"localhost/kanban-ext-gopls:1.0.0", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := pullsMissingRemoteImage(tc.image); got != tc.want {
+			t.Errorf("pullsMissingRemoteImage(%q) = %v, want %v", tc.image, got, tc.want)
+		}
+	}
+}
+
+// A local-build ref that has gone missing (pruned image, no Dockerfile) must not be pulled: the
+// caller reports "image is not available locally" instead of podman retrying a registry.
+func TestEnsureExtensionImage_LocalBuildIsNeverPulled(t *testing.T) {
 	reg := NewRegistryClient()
 	sm := NewExtensionSandboxManager(reg, nil)
 	sm.extensionsDir = filepath.Join(t.TempDir(), "extensions")
 
-	ext := &Extension{
-		ID:   "ext-no-df",
-		Name: "some-pulled-image",
-	}
-	// ImageExists consults podman; use a fully-qualified ref that is guaranteed
-	// missing so the path exercises the "no Dockerfile -> return nil" branch.
-	if err := sm.ensureExtensionImage(ext, "docker.io/library/definitely-not-pulled:latest"); err != nil {
-		t.Errorf("ensureExtensionImage with no Dockerfile = %v, want nil (leave to podman)", err)
+	ext := &Extension{ID: "ext-no-df", Name: "some-local-build"}
+	missing := ExtensionImageRef("some-local-build", "9.9.9")
+	if err := sm.ensureExtensionImage(ext, missing); err != nil {
+		t.Errorf("ensureExtensionImage(%s) = %v, want nil — a local build is never pulled", missing, err)
 	}
 }
 

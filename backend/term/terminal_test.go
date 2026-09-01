@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,13 +57,14 @@ func newTestConn(t *testing.T) *websocket.Conn {
 
 // mockSandbox implements sandboxOps for testing without gVisor.
 type mockSandbox struct {
-	mu            sync.Mutex
-	available     bool
-	shells        map[string]*mockShell // taskID -> mockShell
-	stopped       map[string]bool       // taskIDs that had Stop() called
-	stopMu        sync.Mutex
-	imageReady    bool
-	buildImageErr error
+	mu        sync.Mutex
+	available bool
+	shells    map[string]*mockShell // taskID -> mockShell
+	stopped   map[string]bool       // taskIDs that had Stop() called
+	stopMu    sync.Mutex
+	// imageErr, when set, is what EnsureImageForProject reports.
+	imageErr      error
+	ensureCalls   int
 	startShellErr error
 }
 
@@ -72,10 +75,9 @@ type mockShell struct {
 
 func newMockSandbox(t *testing.T) *mockSandbox {
 	m := &mockSandbox{
-		available:  true,
-		shells:     make(map[string]*mockShell),
-		stopped:    make(map[string]bool),
-		imageReady: true,
+		available: true,
+		shells:    make(map[string]*mockShell),
+		stopped:   make(map[string]bool),
 	}
 	t.Cleanup(func() {
 		m.mu.Lock()
@@ -89,14 +91,20 @@ func newMockSandbox(t *testing.T) *mockSandbox {
 	return m
 }
 
-func (m *mockSandbox) IsAvailable() bool                { return m.available }
-func (m *mockSandbox) ImageReady(string) bool           { return m.imageReady }
-func (m *mockSandbox) ImageReadyForProject(string) bool { return m.imageReady }
-func (m *mockSandbox) BuildImage(string, string) error  { return m.buildImageErr }
-func (m *mockSandbox) BuildImageWithProgress(string, string, func(string)) error {
-	return m.buildImageErr
+func (m *mockSandbox) IsAvailable() bool { return m.available }
+
+// EnsureImageForProject stands in for the shared build/pull step: it reports imageErr when set, and
+// counts calls so a test can assert the image is prepared once per session.
+func (m *mockSandbox) EnsureImageForProject(project *types.Project, _ func(types.SandboxImageStatus)) (string, error) {
+	m.mu.Lock()
+	m.ensureCalls++
+	err := m.imageErr
+	m.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	return sandbox.ProjectImageName(project.Name), nil
 }
-func (m *mockSandbox) PullImageWithProgress(string, func(string)) error { return nil }
 
 func (m *mockSandbox) StartShell(taskID, worktreePath string, project *types.Project, opts sandbox.SandboxOpts) (*sandbox.ShellProcess, []types.AssignedPort, error) {
 	if m.startShellErr != nil {
@@ -160,6 +168,50 @@ func newTestConfigStore(t *testing.T) (*store.Store, *config.ConfigStore) {
 	cs := config.NewConfigStore(s, dbPath, "test")
 	cs.SetWorkspaceDirOverride(dir)
 	return s, cs
+}
+
+// A sandbox terminal must not open on a missing image: the user would get an empty shell whose
+// every command fails, so the failure is reported instead.
+func TestTerminalReportsImageFailure(t *testing.T) {
+	dir := t.TempDir()
+	s, cs := newTestConfigStore(t)
+	mock := newMockSandbox(t)
+	imageErr := errors.New("project Dockerfile /srv/Dockerfile is not readable: no such file or directory")
+	mock.imageErr = imageErr
+	tm := NewTerminalManager(s, cs, mock, nil)
+
+	proj := &types.Project{ID: "test-proj-image", Name: "Image Project", Path: dir, SandboxEnabled: true}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	sessionKey := "proj:" + proj.ID
+	sess, err := tm.getOrCreate(sessionKey, sessionKey, dir, proj.ID)
+	if err == nil {
+		t.Fatal("getOrCreate must fail when the project's sandbox image cannot be prepared")
+	}
+	if sess != nil {
+		t.Error("no session may be returned when the image failed")
+	}
+	if !strings.Contains(err.Error(), "not readable") {
+		t.Errorf("error = %v, want it to carry the image failure for the user", err)
+	}
+	if mock.ensureCalls != 1 {
+		t.Errorf("EnsureImageForProject called %d times, want 1", mock.ensureCalls)
+	}
+	mock.mu.Lock()
+	shells := len(mock.shells)
+	mock.mu.Unlock()
+	if shells != 0 {
+		t.Errorf("StartShell was attempted %d times despite the image failure", shells)
+	}
+
+	tm.mu.RLock()
+	_, registered := tm.sessions[sessionKey]
+	tm.mu.RUnlock()
+	if registered {
+		t.Error("no session may be registered when the image failed")
+	}
 }
 
 func TestProjectTerminalStopsContainerOnExit(t *testing.T) {

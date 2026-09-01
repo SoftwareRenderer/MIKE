@@ -18,6 +18,7 @@
     import CardDetail from './CardDetail.svelte';
     import { setAppStreamRef } from '$lib/stream-ref';
     import { extensionManager } from '$lib/services/extension-manager.svelte';
+    import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
     let TerminalPanelComponent: typeof import('./TerminalPanel.svelte').default | null = $state(null);
     let terminalLoading = $state(false);
     import CreateTaskModal from './CreateTaskModal.svelte';
@@ -550,6 +551,9 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onProjectPorts: (ports) => {
                 appStore.projectTerminalPorts = ports;
             },
+            onSandboxImageStatus: (status) => {
+                sandboxImageStatus.update(status);
+            },
             onExtensionChange: () => {
                 extensionManager.loadExtensions().catch(() => {});
             },
@@ -989,6 +993,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         const wasProjectSwitch = !!currentProject;
         const wasDifferentProject = !!currentProject && currentProject.id !== p.id;
         currentProject = p;
+        // Image progress belongs to the project it was sent for.
+        if (wasDifferentProject) sandboxImageStatus.clear();
         currentBranch = '';
         appStore.selectedProject = p;
         // Re-mount explorer view for the new project (only on project switch, not initial load)

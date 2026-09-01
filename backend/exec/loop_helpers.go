@@ -708,65 +708,66 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 	return false // continue
 }
 
+// sandboxCreateOpts is the sandbox configuration for creating (or recreating) setup's container on
+// the given image, in the given operating mode. One builder because four paths create this container
+// (start, plan/build-mode switch, agent config change, bridge recovery) and each used to re-spell
+// the same ten fields, so a new field was easily missed in one of them. Only the image comes from
+// the caller, because only it knows what EnsureImageForProject settled on.
+func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, planMode bool) kanban_sandbox.SandboxOpts {
+	return kanban_sandbox.SandboxOpts{
+		BaseImage:        image,
+		NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
+		MemoryLimit:      setup.sandboxOpts.MemoryLimit,
+		ForwardPorts:     setup.sandboxOpts.ForwardPorts,
+		AgentSandbox:     te.agentRegistry.GetAnyAgentSandbox(),
+		SkillsDir:        prompts.SkillsDir(),
+		SandboxMounts:    setup.sandboxOpts.SandboxMounts,
+		SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
+		Capabilities:     setup.sandboxOpts.Capabilities,
+		PlanMode:         planMode,
+	}
+}
+
 // setupSandbox creates or reuses a sandbox container and connects to the agent.
 // Returns the image used, the agent client, and any assigned ports.
 // The caller is responsible for creating callbacks from the agent client.
 func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *sandbox.Client, []types.AssignedPort, error) {
 	task := setup.task
 	projectID := setup.projectID
-	projectName := setup.project.Name
 	worktreePath := setup.worktreePath
-	sandboxOpts := setup.sandboxOpts
-	sandboxDockerfilePath := setup.sandboxDockerfilePath
 
 	if te.sandboxMgr == nil || !te.sandboxMgr.IsAvailable() {
 		return "", nil, nil, fmt.Errorf("gVisor not available")
 	}
 
-	imageToUse := ""
-	// Determine image to use: Dockerfile build takes precedence over pre-built image
-	if sandboxDockerfilePath != "" {
-		imageToUse = kanban_sandbox.ProjectImageName(projectName)
-		if !te.sandboxMgr.ImageReadyForProject(projectName) {
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "building_image", "activity": "Building sandbox image from Dockerfile"}})
-			if err := te.sandboxMgr.BuildImageWithProgress(projectName, sandboxDockerfilePath, func(line string) {
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
-			}); err != nil {
-				return "", nil, nil, fmt.Errorf("failed to build sandbox image: %w", err)
+	// Make the project's sandbox image exist, building it from its Dockerfile or pulling it. This
+	// is the one place a task's image is decided; the terminal and the explorer share the same build.
+	imageToUse, imgErr := te.sandboxMgr.EnsureImageForProject(setup.project, func(status types.SandboxImageStatus) {
+		switch status.Phase {
+		case types.SandboxImagePhaseBuilding, types.SandboxImagePhasePulling:
+			if status.Line != "" {
+				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{
+					Type: types.WSTypeBuildProgress, Data: map[string]string{"line": status.Line}})
+				return
 			}
-		}
-	} else {
-		imageToUse = sandboxOpts.BaseImage
-		if imageToUse == "" {
-			imageToUse = kanban_sandbox.BaseImage
-		}
-		if !te.sandboxMgr.ImageReady(imageToUse) {
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "pulling_image", "activity": "Pulling " + imageToUse}})
-			if err := te.sandboxMgr.PullImageWithProgress(imageToUse, func(line string) {
-				te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeBuildProgress, Data: map[string]string{"line": line}})
-			}); err != nil {
-				return "", nil, nil, fmt.Errorf("failed to pull sandbox image: %w", err)
+			activity := "Pulling " + status.Image
+			if status.Phase == types.SandboxImagePhaseBuilding {
+				activity = "Building sandbox image from Dockerfile"
 			}
+			// The phase doubles as the task state, which is what the card badge shows.
+			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{
+				Type: types.WSTypeStatus, Data: map[string]string{"state": status.Phase, "activity": activity}})
 		}
+	})
+	if imgErr != nil {
+		return "", nil, nil, fmt.Errorf("failed to prepare sandbox image: %w", imgErr)
 	}
 
 	// Reuse existing container (lazy-start). Create only if none exists or if stopped/crashed.
 	var assignedPorts []types.AssignedPort
 	if !te.sandboxMgr.ContainerIsRunning(task.ID) {
-		agentSandbox := te.agentRegistry.GetAnyAgentSandbox()
 		var createErr error
-		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, setup.project, kanban_sandbox.SandboxOpts{
-			BaseImage:        imageToUse,
-			NetworkIsolation: sandboxOpts.NetworkIsolation,
-			MemoryLimit:      sandboxOpts.MemoryLimit,
-			ForwardPorts:     sandboxOpts.ForwardPorts,
-			AgentSandbox:     agentSandbox,
-			SkillsDir:        prompts.SkillsDir(),
-			SandboxMounts:    sandboxOpts.SandboxMounts,
-			SandboxEnvs:      sandboxOpts.SandboxEnvs,
-			Capabilities:     sandboxOpts.Capabilities,
-			PlanMode:         task.IsPlanMode(),
-		})
+		assignedPorts, createErr = te.sandboxMgr.Create(task.ID, worktreePath, setup.project, te.sandboxCreateOpts(setup, imageToUse, task.IsPlanMode()))
 		if createErr != nil {
 			return "", nil, nil, fmt.Errorf("failed to create sandbox: %w", createErr)
 		}

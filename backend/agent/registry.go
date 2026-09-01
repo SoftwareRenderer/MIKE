@@ -238,8 +238,11 @@ func parseEnvObject(v any) (types.SandboxEnv, error) {
 // GetAnyAgentSandbox returns the sandbox config for the first enabled agent extension.
 // Used by sandbox terminals and FS operations that need to mount agent config
 // for any configured agent (not a specific task's agent).
-// Returns nil if no agent extension with a sandbox config is enabled.
+// Returns nil if no agent extension with a sandbox config is enabled, or if r is nil.
 func (r *AgentRegistry) GetAnyAgentSandbox() *types.AgentSandbox {
+	if r == nil {
+		return nil
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, name := range r.enabled {

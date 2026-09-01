@@ -383,7 +383,11 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 		mountPath := sandbox.MountPath(project.Name)
 		sandboxPath := fsSandboxPath(worktreePath, project, path)
 		// Single command: ls -pA marks dirs with trailing /, one entry per line
-		opts := s.fsSandboxConfig(project)
+		opts, optsErr := s.fsSandboxOpts(project)
+		if optsErr != nil {
+			JSONError(w, http.StatusBadGateway, optsErr.Error())
+			return
+		}
 		var output string
 		var err error
 		if taskID != "" {
@@ -950,7 +954,11 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		sandboxPath := fsSandboxPath(project.Path, project, req.Path)
 
 		// Resolve sandbox config once, reuse for both calls
-		opts := s.fsSandboxConfig(project)
+		opts, optsErr := s.fsSandboxOpts(project)
+		if optsErr != nil {
+			JSONError(w, http.StatusBadGateway, optsErr.Error())
+			return
+		}
 
 		_, gitErr := s.sandboxMgr.ExecProject(project, "git -C "+shellQuote(sandboxPath)+" rev-parse --git-dir 2>/dev/null", opts)
 		if gitErr == nil {
@@ -1080,7 +1088,11 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 		sandboxParent := filepath.Dir(sandboxPath)
 
 		// Combined check + mkdir in single command
-		opts := s.fsSandboxConfig(project)
+		opts, optsErr := s.fsSandboxOpts(project)
+		if optsErr != nil {
+			JSONError(w, http.StatusBadGateway, optsErr.Error())
+			return
+		}
 		cmd := "if [ ! -d " + shellQuote(sandboxParent) + "; then echo 'PARENT_MISSING'; " +
 			"elif [ -e " + shellQuote(sandboxPath) + "; then echo 'ALREADY_EXISTS'; " +
 			"else mkdir " + shellQuote(sandboxPath) + " && echo 'OK'; fi"
@@ -1158,26 +1170,25 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok", "path": req.Path})
 }
 
-// resolveSandboxConfig returns the image a project's sandbox runs: the image built
-// from its Dockerfile, its configured image, or BaseImage.
-// The caller must ensure that image is available (pull/build).
-func (s *Server) resolveSandboxConfig(project *types.Project) string {
-	imageToUse := ""
-	if project.SandboxDockerfilePath != "" {
-		imageToUse = sandbox.ProjectImageName(project.Name)
-	} else {
-		imageToUse = project.SandboxImage
-		if imageToUse == "" {
-			imageToUse = sandbox.BaseImage
+// fsSandboxOpts returns the sandbox config for FS operations, having made sure the project's image
+// exists. Opening an explorer is often the first thing that touches a project's image, and container
+// creation runs with --pull=never, so this is where the image arrives — and its output goes out over
+// the project's WebSocket channel, which is how the explorer can show progress while this request is
+// blocked on the build.
+func (s *Server) fsSandboxOpts(project *types.Project) (sandbox.SandboxOpts, error) {
+	image, err := s.sandboxMgr.EnsureImageForProject(project, func(status types.SandboxImageStatus) {
+		if s.appStreamMgr != nil {
+			s.appStreamMgr.SendProjectEvent(project.ID, types.StreamEvent{
+				Type: types.WSTypeSandboxImageStatus,
+				Data: status,
+			})
 		}
+	})
+	if err != nil {
+		return sandbox.SandboxOpts{}, err
 	}
-	return imageToUse
-}
-
-// fsSandboxConfig returns the full sandbox config for FS operations.
-func (s *Server) fsSandboxConfig(project *types.Project) sandbox.SandboxOpts {
 	return sandbox.SandboxOpts{
-		BaseImage:        s.resolveSandboxConfig(project),
+		BaseImage:        image,
 		NetworkIsolation: project.SandboxNetworkIsolation,
 		MemoryLimit:      project.SandboxMemoryLimit,
 		ForwardPorts:     project.ForwardPorts,
@@ -1186,7 +1197,7 @@ func (s *Server) fsSandboxConfig(project *types.Project) sandbox.SandboxOpts {
 		SandboxMounts:    project.SandboxMounts,
 		SandboxEnvs:      project.SandboxEnvs,
 		Capabilities:     project.SandboxCapabilities,
-	}
+	}, nil
 }
 
 // gitAuthorFlagCmd quotes git.GitAuthorFlags() into a fragment for a sandbox shell command.

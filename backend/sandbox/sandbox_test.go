@@ -457,6 +457,91 @@ func TestCreate_ValidImageRefPassesValidation(t *testing.T) {
 	}
 }
 
+// A missing sandbox image used to reach the user as "exit status 125 (short-name resolution
+// enforced but cannot prompt without a TTY)". With qualified refs and --pull=never it must be
+// named plainly, and fast — no retries against a guessed registry.
+// TestCreateContainerArgs pins the argument order: podman-global flags before `create`, `--pull
+// never` after it. Container creation must not fetch an image; the caller does that, visibly.
+func TestCreateContainerArgs(t *testing.T) {
+	args := createContainerArgs("kanban-sandbox-task-1", "/home/sandbox/proj")
+
+	indexOf := func(want string) int {
+		for i, a := range args {
+			if a == want {
+				return i
+			}
+		}
+		return -1
+	}
+	hasPair := func(flag, value string) bool {
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == flag && args[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !hasPair("--pull", "never") {
+		t.Fatalf("args missing --pull never: %v", args)
+	}
+	createAt, pullAt := indexOf("create"), indexOf("--pull")
+	if pullAt < createAt {
+		t.Errorf("--pull at %d precedes `create` at %d — podman reads it as a global flag: %v", pullAt, createAt, args)
+	}
+	if indexOf("--runtime-flag=overlay2=root:self") > createAt || indexOf("--runtime-flag=ignore-cgroups") > createAt {
+		t.Errorf("podman-global --runtime-flag must come before `create`: %v", args)
+	}
+	for _, pair := range [][2]string{{"--runtime", "runsc"}, {"--security-opt", "label=disable"},
+		{"--cap-drop", "ALL"}, {"--security-opt", "no-new-privileges"}, {"--workdir", "/home/sandbox/proj"},
+		{"--name", "kanban-sandbox-task-1"}} {
+		if !hasPair(pair[0], pair[1]) {
+			t.Errorf("args missing %s %s: %v", pair[0], pair[1], args)
+		}
+	}
+}
+
+func TestCreate_MissingImageIsActionable(t *testing.T) {
+	os.Setenv("MIKE_AGENT_PATH", findAgentBinary(t))
+	defer os.Unsetenv("MIKE_AGENT_PATH")
+
+	sm := NewSandboxManager()
+	if !sm.IsAvailable() {
+		t.Skip("gVisor not available, skipping integration test")
+	}
+
+	taskID := "test-missing-image-task"
+	missing := "localhost/kanban-does-not-exist-image:1"
+	if sm.ImageReady(missing) {
+		t.Skipf("%s unexpectedly exists locally", missing)
+	}
+
+	started := time.Now()
+	_, err := sm.Create(taskID, t.TempDir(), &types.Project{Name: "test-proj"}, SandboxOpts{BaseImage: missing})
+	elapsed := time.Since(started)
+	if err == nil {
+		_ = sm.Stop(taskID)
+		t.Fatal("expected an error creating a container from a missing image")
+	}
+	t.Cleanup(func() { _ = sm.Stop(taskID) })
+
+	if msg := err.Error(); !strings.Contains(msg, "is not available locally") {
+		t.Fatalf("error must name the condition and say what to do, got: %s", msg)
+	}
+	if msg := err.Error(); !strings.Contains(msg, missing) {
+		t.Fatalf("error must name the image %q, got: %s", missing, msg)
+	}
+	for _, masked := range []string{"short-name resolution", "cannot prompt", "exit status 125"} {
+		if strings.Contains(err.Error(), masked) {
+			t.Errorf("error still leaks podman's masked wording (%q): %s", masked, err)
+		}
+	}
+	// --pull=never: a missing image fails at once instead of trying registries.
+	if elapsed > 20*time.Second {
+		t.Errorf("missing image took %s to fail — that looks like registry retries", elapsed)
+	}
+}
+
 func TestContainerIsRunning_Cache(t *testing.T) {
 	sm := &SandboxManager{
 		active:        make(map[string]string),
@@ -601,12 +686,6 @@ func TestBuildImage(t *testing.T) {
 		_, _ = sm.podmanExec("rmi", ProjectImageName(projectName))
 	})
 
-	// Verify the image exists
-	if !sm.ImageReadyForProject(projectName) {
-		t.Fatal("expected built image to be ready")
-	}
-
-	// Verify image name follows expected pattern
 	expectedName := ProjectImageName(projectName)
 	if !sm.ImageReady(expectedName) {
 		t.Fatalf("expected image %q to exist", expectedName)
@@ -700,18 +779,27 @@ func TestBuildImageWithProgress_InvalidImageRef(t *testing.T) {
 
 func TestProjectImageName(t *testing.T) {
 	name := ProjectImageName("my-project")
-	if name != "sandbox-my-project" {
+	if name != "localhost/sandbox-my-project" {
 		t.Fatalf("unexpected image name: %q", name)
 	}
 	// Test with spaces
 	name2 := ProjectImageName("my project name")
-	if name2 != "sandbox-my-project-name" {
+	if name2 != "localhost/sandbox-my-project-name" {
 		t.Fatalf("unexpected image name with spaces: %q", name2)
 	}
 	// Test with slashes
 	name3 := ProjectImageName("my/project")
-	if name3 != "sandbox-my-project" {
+	if name3 != "localhost/sandbox-my-project" {
 		t.Fatalf("unexpected image name with slashes: %q", name3)
+	}
+	// A dotted project name still has to produce a qualified ref: "sandbox-getmike.dev" looks
+	// like a host but podman treats it as a short name.
+	name4 := ProjectImageName("getmike.dev")
+	if name4 != "localhost/sandbox-getmike.dev" {
+		t.Fatalf("unexpected image name for a dotted project: %q", name4)
+	}
+	if !sandboxruntime.IsQualifiedImageRef(name4) {
+		t.Fatalf("project image name %q is not fully qualified", name4)
 	}
 }
 

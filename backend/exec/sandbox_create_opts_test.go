@@ -1,0 +1,56 @@
+package exec
+
+import (
+	"testing"
+
+	kanban_sandbox "kanban/backend/sandbox"
+	"kanban/backend/types"
+)
+
+// The builder must carry every field the project configured — that is the failure it prevents, a
+// field present in one create path and missing in another.
+func TestSandboxCreateOpts_CarriesEveryConfiguredField(t *testing.T) {
+	setup := &taskExecSetup{
+		task:    &types.Task{ID: "brave-amber-quartz"},
+		project: &types.Project{ID: "proj-1", Name: "example.com"},
+		sandboxOpts: kanban_sandbox.SandboxOpts{
+			NetworkIsolation: true,
+			MemoryLimit:      2048,
+			ForwardPorts:     []types.PortForward{{ContainerPort: 3000}},
+			SandboxMounts:    []types.SandboxMount{{HostPath: "/tmp/data", ContainerPath: "/data", Mode: "ro"}},
+			SandboxEnvs:      []types.SandboxEnv{{Key: "FOO", Value: "bar"}},
+			Capabilities:     []string{"NET_RAW"},
+		},
+	}
+
+	opts := (&TaskExecutor{}).sandboxCreateOpts(setup, "localhost/sandbox-example.com", true)
+
+	if opts.BaseImage != "localhost/sandbox-example.com" {
+		t.Errorf("BaseImage = %q, want the image the caller passed in", opts.BaseImage)
+	}
+	if !opts.PlanMode {
+		t.Error("PlanMode = false, want the mode the caller passed in")
+	}
+	if !opts.NetworkIsolation {
+		t.Error("NetworkIsolation = false, want the project's setting")
+	}
+	if opts.MemoryLimit != 2048 {
+		t.Errorf("MemoryLimit = %d, want the project's limit", opts.MemoryLimit)
+	}
+	if len(opts.ForwardPorts) != 1 || opts.ForwardPorts[0].ContainerPort != 3000 {
+		t.Errorf("ForwardPorts = %+v, want the project's forwarded ports", opts.ForwardPorts)
+	}
+	if len(opts.SandboxMounts) != 1 || opts.SandboxMounts[0].ContainerPath != "/data" {
+		t.Errorf("SandboxMounts = %+v, want the project's mounts", opts.SandboxMounts)
+	}
+	if len(opts.SandboxEnvs) != 1 || opts.SandboxEnvs[0].Key != "FOO" {
+		t.Errorf("SandboxEnvs = %+v, want the project's envs", opts.SandboxEnvs)
+	}
+	if len(opts.Capabilities) != 1 || opts.Capabilities[0] != "NET_RAW" {
+		t.Errorf("Capabilities = %v, want the project's capabilities", opts.Capabilities)
+	}
+	// An executor with no agent registry mounts no agent sandbox — nil, not a panic.
+	if got := (&TaskExecutor{}).sandboxCreateOpts(setup, "img", false).AgentSandbox; got != nil {
+		t.Errorf("AgentSandbox = %+v, want nil without an agent registry", got)
+	}
+}
