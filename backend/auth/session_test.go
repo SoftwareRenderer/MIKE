@@ -15,6 +15,14 @@ import (
 
 func testManager(t *testing.T) *SessionManager {
 	t.Helper()
+	m, _ := testManagerWithStore(t)
+	return m
+}
+
+// testManagerWithStore also returns the store: a few tests inspect or backdate columns
+// directly, and raw SQL belongs in a fixture rather than in sessionStore's surface.
+func testManagerWithStore(t *testing.T) (*SessionManager, *store.Store) {
+	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 	s, err := store.NewStore(dbPath)
@@ -32,7 +40,7 @@ func testManager(t *testing.T) *SessionManager {
 	if err != nil {
 		t.Fatalf("create manager: %v", err)
 	}
-	return m
+	return m, s
 }
 
 // testIP / testUA are the client metadata Login records on a new session.
@@ -42,10 +50,10 @@ const (
 )
 
 // lastSeenOf reads the raw last_seen stamp of a session from the database.
-func lastSeenOf(t *testing.T, m *SessionManager, id string) int64 {
+func lastSeenOf(t *testing.T, db *store.Store, id string) int64 {
 	t.Helper()
 	var v int64
-	if err := m.store.QueryRow(`SELECT COALESCE(last_seen, 0) FROM sessions WHERE id = ?`, id).Scan(&v); err != nil {
+	if err := db.QueryRow(`SELECT COALESCE(last_seen, 0) FROM sessions WHERE id = ?`, id).Scan(&v); err != nil {
 		t.Fatalf("read last_seen for %s: %v", id, err)
 	}
 	return v
@@ -253,14 +261,14 @@ func TestLoginComparesPasswordDigests(t *testing.T) {
 
 // TestLoginRecordsIPAndUserAgent checks the metadata the Sessions UI shows.
 func TestLoginRecordsIPAndUserAgent(t *testing.T) {
-	m := testManager(t)
+	m, db := testManagerWithStore(t)
 
 	id, _, _, err := m.Login("test-password", "198.51.100.7", "Mozilla/5.0 (Test Browser)")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
 
-	list, err := m.store.ListSessions(context.Background())
+	list, err := db.ListSessions(context.Background())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -282,7 +290,7 @@ func TestLoginRecordsIPAndUserAgent(t *testing.T) {
 // minute — the store serialises on a single connection, so a write per request
 // would be a write per page render.
 func TestValidateThrottlesLastSeen(t *testing.T) {
-	m := testManager(t)
+	m, db := testManagerWithStore(t)
 	id, token, _, err := m.Login("test-password", testIP, testUA)
 	if err != nil {
 		t.Fatalf("login: %v", err)
@@ -290,7 +298,7 @@ func TestValidateThrottlesLastSeen(t *testing.T) {
 
 	backdate := func(secs int64) {
 		t.Helper()
-		if _, err := m.store.Exec(`UPDATE sessions SET last_seen = ? WHERE id = ?`, time.Now().Unix()-secs, id); err != nil {
+		if _, err := db.Exec(`UPDATE sessions SET last_seen = ? WHERE id = ?`, time.Now().Unix()-secs, id); err != nil {
 			t.Fatalf("backdate last_seen: %v", err)
 		}
 	}
@@ -300,7 +308,7 @@ func TestValidateThrottlesLastSeen(t *testing.T) {
 	if _, _, err := m.Validate(token); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	refreshed := lastSeenOf(t, m, id)
+	refreshed := lastSeenOf(t, db, id)
 	if time.Now().Unix()-refreshed > 5 {
 		t.Fatalf("last_seen not refreshed: %d (now %d)", refreshed, time.Now().Unix())
 	}
@@ -312,19 +320,19 @@ func TestValidateThrottlesLastSeen(t *testing.T) {
 			t.Fatalf("validate %d: %v", i, err)
 		}
 	}
-	if got := lastSeenOf(t, m, id); got != refreshed {
+	if got := lastSeenOf(t, db, id); got != refreshed {
 		t.Fatalf("last_seen rewritten within the throttle window: %d != %d", got, refreshed)
 	}
 
 	// Once the interval has passed, validation stamps again.
 	backdate(120)
-	if stale := lastSeenOf(t, m, id); time.Now().Unix()-stale < 60 {
+	if stale := lastSeenOf(t, db, id); time.Now().Unix()-stale < 60 {
 		t.Fatalf("backdate did not take effect: last_seen = %d", stale)
 	}
 	if _, _, err := m.Validate(token); err != nil {
 		t.Fatalf("validate after interval: %v", err)
 	}
-	if got := lastSeenOf(t, m, id); time.Now().Unix()-got > 5 {
+	if got := lastSeenOf(t, db, id); time.Now().Unix()-got > 5 {
 		t.Fatalf("last_seen was not restamped after the throttle window: %d (now %d)", got, time.Now().Unix())
 	}
 }

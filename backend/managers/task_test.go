@@ -94,7 +94,7 @@ func setupTaskValidationProject(t *testing.T, h *TaskHandler, s *store.Store) {
 		ID:        "task-val-task",
 		ProjectID: proj.ID,
 		Title:     "validation task",
-		Status:    "backlog",
+		Status:    types.StatusBacklog,
 		Branch:    "main",
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -335,7 +335,7 @@ func TestHandleCommitAndDone_ExcludesUnstagedFiles(t *testing.T) {
 		ProjectID:       projID,
 		Title:           "Commit and done unstaged",
 		Prompt:          "make changes",
-		Status:          "review",
+		Status:          types.StatusReview,
 		Branch:          "task/cdn-unstaged",
 		CurrentThreadID: "thread-cdn",
 	}
@@ -373,7 +373,7 @@ func TestHandleCommitAndDone_ExcludesUnstagedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if updated.Status != "done" {
+	if updated.Status != types.StatusDone {
 		t.Fatalf("task status = %q, want done", updated.Status)
 	}
 
@@ -464,8 +464,8 @@ func createParentWithSubtask(t *testing.T, s *store.Store, projectID string) (st
 		ProjectID:       projectID,
 		Title:           "Parent Auto Start",
 		Prompt:          "Parent prompt",
-		Status:          "backlog",
-		ExecutionState:  "idle",
+		Status:          types.StatusBacklog,
+		ExecutionState:  types.ExecStateIdle,
 		LlamaServerURL:  "http://localhost:8080",
 		ModelName:       "test-model",
 		OperatingMode:   "act",
@@ -482,8 +482,8 @@ func createParentWithSubtask(t *testing.T, s *store.Store, projectID string) (st
 		ProjectID:       projectID,
 		Title:           "Child Auto Start",
 		Prompt:          "Child prompt",
-		Status:          "backlog",
-		ExecutionState:  "idle",
+		Status:          types.StatusBacklog,
+		ExecutionState:  types.ExecStateIdle,
 		ParentTaskID:    parent.ID,
 		LlamaServerURL:  "http://localhost:8080",
 		ModelName:       "test-model",
@@ -541,7 +541,7 @@ func TestHandleStart_MarksSubtaskAutostarted(t *testing.T) {
 // createChainTask creates a task for chain tests. When seed is true, the
 // task's thread is seeded with a user + assistant message pair so StartTask
 // persists state and returns early without invoking the LLM.
-func createChainTask(t *testing.T, s *store.Store, projectID, id, title, status, execState, parentID, threadID string, seed bool) {
+func createChainTask(t *testing.T, s *store.Store, projectID, id, title string, status types.Status, execState types.ExecutionState, parentID, threadID string, seed bool) {
 	t.Helper()
 	now := time.Now().UTC()
 	task := &types.Task{
@@ -596,15 +596,15 @@ func TestHandleStart_MovesParentToInProgress(t *testing.T) {
 	}
 
 	parent, _ := s.GetTaskByID("par-mip")
-	if parent.Status != "in_progress" {
+	if parent.Status != types.StatusInProgress {
 		t.Errorf("parent should move to In Progress (started-but-pending), got %q", parent.Status)
 	}
-	if parent.ExecutionState != "idle" {
+	if parent.ExecutionState != types.ExecStateIdle {
 		t.Errorf("parent should stay pending (not running), got %q", parent.ExecutionState)
 	}
 
 	child, _ := s.GetTaskByID("child-mip")
-	if child.Status != "review" || child.ExecutionState != "idle" {
+	if child.Status != types.StatusReview || child.ExecutionState != types.ExecStateIdle {
 		t.Errorf("deepest subtask with nothing to run should wait in review: status=%q state=%q", child.Status, child.ExecutionState)
 	}
 	if !child.Autostarted {
@@ -628,7 +628,7 @@ func TestHandleStart_AllChildrenDoneStartsOwnExecution(t *testing.T) {
 	}
 
 	parent, _ := s.GetTaskByID("par-ad")
-	if parent.Status != "review" || parent.ExecutionState != "idle" {
+	if parent.Status != types.StatusReview || parent.ExecutionState != types.ExecStateIdle {
 		t.Errorf("parent with nothing to run should wait in review once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
 	}
 	if parent.Autostarted {
@@ -652,11 +652,11 @@ func TestHandleStart_BlockedChildrenStayPending(t *testing.T) {
 	}
 
 	parent, _ := s.GetTaskByID("par-blk")
-	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
+	if parent.Status != types.StatusInProgress || parent.ExecutionState != types.ExecStateIdle {
 		t.Errorf("parent should be started-but-pending: status=%q state=%q", parent.Status, parent.ExecutionState)
 	}
 	child, _ := s.GetTaskByID("child-blk")
-	if child.Status != "review" {
+	if child.Status != types.StatusReview {
 		t.Errorf("child should stay in review, got %q", child.Status)
 	}
 }
@@ -678,11 +678,11 @@ func TestHandleStartSubtask_WithChildren_StartsDeepestSubtask(t *testing.T) {
 	}
 
 	mid, _ := s.GetTaskByID("mid-nsp")
-	if mid.Status != "in_progress" || mid.ExecutionState != "idle" {
+	if mid.Status != types.StatusInProgress || mid.ExecutionState != types.ExecStateIdle {
 		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
 	}
 	leaf, _ := s.GetTaskByID("leaf-nsp")
-	if leaf.Status != "review" || leaf.ExecutionState != "idle" {
+	if leaf.Status != types.StatusReview || leaf.ExecutionState != types.ExecStateIdle {
 		t.Errorf("deepest descendant with nothing to run should wait in review: status=%q state=%q", leaf.Status, leaf.ExecutionState)
 	}
 	if !leaf.Autostarted {
@@ -707,11 +707,11 @@ func TestHandleMove_SubtaskWithChildren_StartsDeepestSubtask(t *testing.T) {
 	}
 
 	mid, _ := s.GetTaskByID("mid-msc")
-	if mid.Status != "in_progress" || mid.ExecutionState != "idle" {
+	if mid.Status != types.StatusInProgress || mid.ExecutionState != types.ExecStateIdle {
 		t.Errorf("mid subtask should be started-but-pending: status=%q state=%q", mid.Status, mid.ExecutionState)
 	}
 	leaf, _ := s.GetTaskByID("leaf-msc")
-	if leaf.Status != "review" || leaf.ExecutionState != "idle" {
+	if leaf.Status != types.StatusReview || leaf.ExecutionState != types.ExecStateIdle {
 		t.Errorf("deepest descendant with nothing to run should wait in review: status=%q state=%q", leaf.Status, leaf.ExecutionState)
 	}
 	if !leaf.Autostarted {
@@ -735,7 +735,7 @@ func TestHandleMove_ParentAllChildrenDone_StartsOwnExecution(t *testing.T) {
 	}
 
 	parent, _ := s.GetTaskByID("par-mad")
-	if parent.Status != "review" || parent.ExecutionState != "idle" {
+	if parent.Status != types.StatusReview || parent.ExecutionState != types.ExecStateIdle {
 		t.Errorf("parent with nothing to run should wait in review once all children are done: status=%q state=%q", parent.Status, parent.ExecutionState)
 	}
 }
@@ -755,7 +755,7 @@ func TestHandleMove_AwaitingUserLeafReturnsToReview(t *testing.T) {
 	}
 
 	leaf, _ := s.GetTaskByID("leaf-await")
-	if leaf.Status != "review" || leaf.ExecutionState != "idle" {
+	if leaf.Status != types.StatusReview || leaf.ExecutionState != types.ExecStateIdle {
 		t.Errorf("task awaiting the user must return to review, not sit Pending in In Progress: status=%q state=%q", leaf.Status, leaf.ExecutionState)
 	}
 	// the column really changed, so the card lands on top of review
@@ -788,7 +788,7 @@ func TestHandleMove_AwaitingUserParentKeepsDoneChildren(t *testing.T) {
 	}
 
 	parent, _ := s.GetTaskByID("par-await")
-	if parent.Status != "review" || parent.ExecutionState != "idle" {
+	if parent.Status != types.StatusReview || parent.ExecutionState != types.ExecStateIdle {
 		t.Errorf("parent with nothing to run should wait in review: status=%q state=%q", parent.Status, parent.ExecutionState)
 	}
 	for _, id := range []string{"child-await-done1", "child-await-done2"} {
@@ -796,7 +796,7 @@ func TestHandleMove_AwaitingUserParentKeepsDoneChildren(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get %s: %v", id, err)
 		}
-		if child.Status != "done" || child.ExecutionState != "completed" {
+		if child.Status != types.StatusDone || child.ExecutionState != types.ExecStateCompleted {
 			t.Errorf("%s must stay done/completed: status=%q state=%q", id, child.Status, child.ExecutionState)
 		}
 	}
@@ -820,20 +820,20 @@ func TestHandleMove_ParentWithGatedChildren_KeepsThemInPlace(t *testing.T) {
 	}
 
 	parent, _ := s.GetTaskByID("par-gate")
-	if parent.Status != "in_progress" || parent.ExecutionState != "idle" {
+	if parent.Status != types.StatusInProgress || parent.ExecutionState != types.ExecStateIdle {
 		t.Errorf("parent should stay started-but-pending: status=%q state=%q", parent.Status, parent.ExecutionState)
 	}
 	backlog, _ := s.GetTaskByID("child-gate-backlog")
 	// it followed its parent out of Backlog, then waited in review (nothing to run)
-	if backlog.Status != "review" {
+	if backlog.Status != types.StatusReview {
 		t.Errorf("backlog child should leave Backlog and wait in review (nothing to run): status=%q", backlog.Status)
 	}
 	review, _ := s.GetTaskByID("child-gate-review")
-	if review.Status != "review" {
+	if review.Status != types.StatusReview {
 		t.Errorf("review child must not be dragged into In Progress: status=%q", review.Status)
 	}
 	done, _ := s.GetTaskByID("child-gate-done")
-	if done.Status != "done" {
+	if done.Status != types.StatusDone {
 		t.Errorf("done child must not be dragged into In Progress: status=%q", done.Status)
 	}
 }
@@ -935,8 +935,8 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task.Status = "in_progress"
-	task.ExecutionState = "running"
+	task.Status = types.StatusInProgress
+	task.ExecutionState = types.ExecStateRunning
 	task.Branch = "task/" + taskID
 	// Stands in for a task start, which may claim the in-flight state.
 	if err := s.UpdateTaskClaimingExecution(task); err != nil {
@@ -961,7 +961,7 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 	if task.Title != "Generated Title" {
 		t.Fatalf("title not updated: %q (title_generating=%v)", task.Title, task.TitleGenerating)
 	}
-	if task.Status != "in_progress" || task.ExecutionState != "running" || task.Branch != "task/"+taskID {
+	if task.Status != types.StatusInProgress || task.ExecutionState != types.ExecStateRunning || task.Branch != "task/"+taskID {
 		t.Fatalf("title update clobbered task state: status=%s exec=%s branch=%q",
 			task.Status, task.ExecutionState, task.Branch)
 	}
@@ -971,12 +971,12 @@ func TestTitleGenerationDoesNotClobberTaskStatus(t *testing.T) {
 // subtasks, returning the parent. Used by the subtasksToStart tests.
 func createParallelTestParent(t *testing.T, s *store.Store, projID, parentID string) *types.Task {
 	t.Helper()
-	parent := &types.Task{ID: parentID, ProjectID: projID, Title: "Parent", Prompt: "parent prompt", Status: "in_progress"}
+	parent := &types.Task{ID: parentID, ProjectID: projID, Title: "Parent", Prompt: "parent prompt", Status: types.StatusInProgress}
 	if err := s.CreateTask(parent); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{parentID + "-a", parentID + "-b", parentID + "-c"} {
-		if err := s.CreateTask(&types.Task{ID: id, ProjectID: projID, Title: "sub", Prompt: "sub prompt", Status: "backlog", ParentTaskID: parent.ID}); err != nil {
+		if err := s.CreateTask(&types.Task{ID: id, ProjectID: projID, Title: "sub", Prompt: "sub prompt", Status: types.StatusBacklog, ParentTaskID: parent.ID}); err != nil {
 			t.Fatal(err)
 		}
 	}

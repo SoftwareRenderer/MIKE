@@ -23,7 +23,7 @@ func TestCreateAndGetTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if got.ID != "task-1" || got.ProjectID != "proj-1" || got.Status != "backlog" {
+	if got.ID != "task-1" || got.ProjectID != "proj-1" || got.Status != types.StatusBacklog {
 		t.Fatalf("unexpected task: %+v", got)
 	}
 }
@@ -149,8 +149,8 @@ func TestUpdateTask(t *testing.T) {
 	}
 
 	// Update status; starting a run claims the in-flight state.
-	task.Status = "in_progress"
-	task.ExecutionState = "running"
+	task.Status = types.StatusInProgress
+	task.ExecutionState = types.ExecStateRunning
 	if err := s.UpdateTaskClaimingExecution(task); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestUpdateTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if got.Status != "in_progress" || got.ExecutionState != "running" {
+	if got.Status != types.StatusInProgress || got.ExecutionState != types.ExecStateRunning {
 		t.Fatalf("unexpected status: %s, %s", got.Status, got.ExecutionState)
 	}
 }
@@ -184,11 +184,11 @@ func TestUpdateTaskExecutionState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if got.ExecutionState != "running" {
+	if got.ExecutionState != types.ExecStateRunning {
 		t.Fatalf("unexpected status state: %s", got.ExecutionState)
 	}
 	// Status should be unchanged
-	if got.Status != "backlog" {
+	if got.Status != types.StatusBacklog {
 		t.Fatalf("status should be unchanged: %s", got.Status)
 	}
 }
@@ -785,7 +785,7 @@ func TestUpdateTaskSameStatusKeepsMovedAt(t *testing.T) {
 	got.Title = "renamed"
 	got.Output = "some run output"
 	got.SessionCost = 1.25
-	got.ExecutionState = "running"
+	got.ExecutionState = types.ExecStateRunning
 	if err := s.UpdateTaskClaimingExecution(got); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
@@ -826,7 +826,7 @@ func TestUpdateTaskColumnChangeBumpsMovedAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	got.Status = "review"
+	got.Status = types.StatusReview
 	if err := s.UpdateTask(got); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
@@ -843,7 +843,7 @@ func TestUpdateTaskColumnChangeBumpsMovedAt(t *testing.T) {
 	}
 
 	// Moving again must advance it once more.
-	after.Status = "done"
+	after.Status = types.StatusDone
 	if err := s.UpdateTask(after); err != nil {
 		t.Fatalf("second update task: %v", err)
 	}
@@ -859,7 +859,7 @@ func TestUpdateTaskColumnChangeBumpsMovedAt(t *testing.T) {
 // --- execution_state ownership guard ---
 
 // newTaskInState creates a task row already sitting in the given execution state.
-func newTaskInState(t *testing.T, s *Store, id, projectID, status, execState string) {
+func newTaskInState(t *testing.T, s *Store, id, projectID string, status types.Status, execState types.ExecutionState) {
 	t.Helper()
 	task := newTask(id, projectID)
 	task.Status = status
@@ -878,9 +878,11 @@ func TestUpdateTaskGuardBlocksInFlightPromotion(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	for _, stored := range []string{"idle", "paused", "completed", "failed"} {
-		for _, wanted := range []string{"running", "pulling_image"} {
-			id := "task-" + stored + "-" + wanted
+	// Typed sets: the loop variables feed ExecutionState directly, so the values they
+	// range over cannot drift into a state the store does not know.
+	for _, stored := range []types.ExecutionState{"idle", "paused", "completed", "failed"} {
+		for _, wanted := range []types.ExecutionState{"running", "pulling_image"} {
+			id := "task-" + string(stored) + "-" + string(wanted)
 			newTaskInState(t, s, id, "proj-guard", "in_progress", stored)
 
 			got, err := s.GetTaskByID(id)
@@ -931,12 +933,12 @@ func TestUpdateTaskGuardAllowsOtherExecutionStateWrites(t *testing.T) {
 	if err := s.UpdateTask(got); err != nil {
 		t.Fatalf("re-write running: %v", err)
 	}
-	if after, _ := s.GetTaskByID("task-live"); after.ExecutionState != "running" {
+	if after, _ := s.GetTaskByID("task-live"); after.ExecutionState != types.ExecStateRunning {
 		t.Fatalf("running -> running: got %s", after.ExecutionState)
 	}
 
 	// Settling to any resting state works.
-	for _, want := range []string{"idle", "paused", "completed", "failed"} {
+	for _, want := range []types.ExecutionState{"idle", "paused", "completed", "failed"} {
 		got.ExecutionState = want
 		if err := s.UpdateTask(got); err != nil {
 			t.Fatalf("settle to %s: %v", want, err)
@@ -944,7 +946,7 @@ func TestUpdateTaskGuardAllowsOtherExecutionStateWrites(t *testing.T) {
 		if after, _ := s.GetTaskByID("task-live"); after.ExecutionState != want {
 			t.Fatalf("running -> %s: got %s", want, after.ExecutionState)
 		}
-		got.ExecutionState = "running"
+		got.ExecutionState = types.ExecStateRunning
 		if err := s.UpdateTaskClaimingExecution(got); err != nil {
 			t.Fatalf("re-claim running: %v", err)
 		}
@@ -965,8 +967,8 @@ func TestUpdateTaskClaimingExecutionPromotes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	got.Status = "in_progress"
-	got.ExecutionState = "running"
+	got.Status = types.StatusInProgress
+	got.ExecutionState = types.ExecStateRunning
 	if err := s.UpdateTaskClaimingExecution(got); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -974,10 +976,10 @@ func TestUpdateTaskClaimingExecutionPromotes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task after claim: %v", err)
 	}
-	if after.ExecutionState != "running" {
+	if after.ExecutionState != types.ExecStateRunning {
 		t.Fatalf("claiming write must promote to running, got %s", after.ExecutionState)
 	}
-	if got.ExecutionState != "running" {
+	if got.ExecutionState != types.ExecStateRunning {
 		t.Fatalf("in-memory copy must mirror the promoted state, got %s", got.ExecutionState)
 	}
 }
@@ -992,8 +994,8 @@ func TestSetTaskAssignedPortsIsTargeted(t *testing.T) {
 
 	past := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
 	task := newTask("task-ports", "proj-ports")
-	task.Status = "in_progress"
-	task.ExecutionState = "running"
+	task.Status = types.StatusInProgress
+	task.ExecutionState = types.ExecStateRunning
 	task.CreatedAt = past
 	task.UpdatedAt = past
 	task.MovedAt = past
@@ -1012,7 +1014,7 @@ func TestSetTaskAssignedPortsIsTargeted(t *testing.T) {
 	if len(after.AssignedPorts) != 1 || after.AssignedPorts[0].HostPort != 32100 || after.AssignedPorts[0].ContainerPort != 8080 {
 		t.Fatalf("assigned_ports not stored: %+v", after.AssignedPorts)
 	}
-	if after.ExecutionState != "running" || after.Status != "in_progress" {
+	if after.ExecutionState != types.ExecStateRunning || after.Status != types.StatusInProgress {
 		t.Fatalf("ports write changed run columns: %s/%s", after.Status, after.ExecutionState)
 	}
 	if !after.MovedAt.Equal(past) {
@@ -1033,7 +1035,7 @@ func TestSetTaskAssignedPortsIsTargeted(t *testing.T) {
 	if len(cleared.AssignedPorts) != 0 {
 		t.Fatalf("ports not cleared: %+v", cleared.AssignedPorts)
 	}
-	if cleared.ExecutionState != "running" {
+	if cleared.ExecutionState != types.ExecStateRunning {
 		t.Fatalf("clearing ports changed execution_state: %s", cleared.ExecutionState)
 	}
 

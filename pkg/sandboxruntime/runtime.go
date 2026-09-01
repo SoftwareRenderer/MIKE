@@ -1,3 +1,8 @@
+// Package sandboxruntime discovers and drives the container runtime the sandboxes need:
+// rootless podman with gVisor's runsc, where the sandbox-bridge binary is, and the startup
+// sweep that removes containers a previous process left behind.
+// Availability comes from one probe, so a task sandbox and an extension sandbox cannot
+// disagree about whether this host can run gVisor.
 package sandboxruntime
 
 import (
@@ -420,14 +425,13 @@ func ReadCgroupMemory(dir string) (CgroupMemory, error) {
 	return m, nil
 }
 
-// ApplyMemoryLimit enforces a hard memory limit on a running container by
-// writing directly into its cgroup. This is required because runsc (which
-// needs --runtime-flag ignore-cgroups under rootless) does not apply the OCI
-// spec's linux.resources, so podman's --memory flag alone is never enforced.
+// ApplyMemoryLimit enforces a hard memory limit on a running container by writing into its
+// cgroup. Necessary because runsc - which needs --runtime-flag ignore-cgroups under rootless -
+// ignores the OCI spec's linux.resources, so podman's --memory alone is never enforced.
 //
-// Writes memory.max = limitMB MiB, plus memory.swap.max = 0 best-effort: without it a
-// host with swap reclaims the overshoot instead of OOM-killing, turning the hard limit
-// into a soft one. On error the caller decides whether to fail open or closed.
+// Writes memory.max = limitMB MiB and, best-effort, memory.swap.max = 0: with swap available the
+// host reclaims the overshoot instead of OOM-killing, which makes the limit soft. On error the
+// caller decides whether to fail open or closed.
 func (r *Runtime) ApplyMemoryLimit(name string, limitMB int) error {
 	if limitMB <= 0 {
 		return fmt.Errorf("memory limit must be positive, got %d", limitMB)

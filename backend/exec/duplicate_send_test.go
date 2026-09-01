@@ -24,16 +24,16 @@ func seedReviewTask(t *testing.T, te *TaskExecutor, projectID, taskID, threadID 
 		ID:              taskID,
 		ProjectID:       projectID,
 		Prompt:          "Test task",
-		Status:          "review",
-		ExecutionState:  "idle",
+		Status:          types.StatusReview,
+		ExecutionState:  types.ExecStateIdle,
 		LlamaServerURL:  "http://localhost:8080/v1",
 		ModelName:       "test-model",
 		CurrentThreadID: threadID,
 	}
-	if err := te.store.CreateTask(task); err != nil {
+	if err := te.rawStore().CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := te.store.CreateThread(&types.TaskThread{ID: threadID, TaskID: taskID, IsActive: true}); err != nil {
+	if err := te.rawStore().CreateThread(&types.TaskThread{ID: threadID, TaskID: taskID, IsActive: true}); err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
 	base := time.Now().UTC().Add(-time.Duration(len(tail)) * time.Minute)
@@ -43,7 +43,7 @@ func seedReviewTask(t *testing.T, te *TaskExecutor, projectID, taskID, threadID 
 		if m.CreatedAt.IsZero() {
 			m.CreatedAt = base.Add(time.Duration(i) * time.Second)
 		}
-		if err := te.store.CreateTaskMessage(&m); err != nil {
+		if err := te.rawStore().CreateTaskMessage(&m); err != nil {
 			t.Fatalf("seed message %d: %v", i, err)
 		}
 	}
@@ -63,7 +63,7 @@ func sendUserMessage(t *testing.T, te *TaskExecutor, projectID, taskID, content 
 
 func countUserMessages(t *testing.T, te *TaskExecutor, taskID, threadID, content string) int {
 	t.Helper()
-	msgs, err := te.store.GetTaskMessages(taskID, threadID)
+	msgs, err := te.rawStore().GetTaskMessages(taskID, threadID)
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}
@@ -78,7 +78,7 @@ func countUserMessages(t *testing.T, te *TaskExecutor, taskID, threadID, content
 
 func taskRow(t *testing.T, te *TaskExecutor, projectID, taskID string) *types.Task {
 	t.Helper()
-	task, err := te.store.GetTask(projectID, taskID)
+	task, err := te.rawStore().GetTask(projectID, taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestHandleSend_RepeatedAnswerAfterAgentReply_IsDelivered(t *testing.T) {
 	}
 	waitForExecutor(t, te, taskID, true)
 
-	if task := taskRow(t, te, projectID, taskID); task.Status != "in_progress" {
+	if task := taskRow(t, te, projectID, taskID); task.Status != types.StatusInProgress {
 		t.Fatalf("delivered answer must start the task, status = %q, want in_progress", task.Status)
 	}
 }
@@ -170,7 +170,7 @@ func TestHandleSend_DoubleSubmit_IsDeduped_AndLeavesReview(t *testing.T) {
 	if exists {
 		t.Fatal("duplicate user message must not start an executor")
 	}
-	if task := taskRow(t, te, projectID, taskID); task.Status != "review" || task.ExecutionState != "idle" {
+	if task := taskRow(t, te, projectID, taskID); task.Status != types.StatusReview || task.ExecutionState != types.ExecStateIdle {
 		t.Fatalf("dropped duplicate moved the card: status=%q state=%q, want review/idle", task.Status, task.ExecutionState)
 	}
 }
@@ -193,7 +193,7 @@ func TestHandleSend_NewMessage_StillStartsExecutor(t *testing.T) {
 	}
 	waitForExecutor(t, te, taskID, true)
 
-	if task := taskRow(t, te, projectID, taskID); task.Status != "in_progress" {
+	if task := taskRow(t, te, projectID, taskID); task.Status != types.StatusInProgress {
 		t.Fatalf("status = %q, want in_progress", task.Status)
 	}
 }

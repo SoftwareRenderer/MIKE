@@ -1,3 +1,8 @@
+// Package git is the version-control layer: one worktree and branch per task, plus the
+// status, diff, stash, merge and checkpoint operations the UI needs.
+// Two invariants shape it: client refs are validated and then fenced with
+// --end-of-options, and clones are restricted to allowed transports by both our own check
+// and git's (clone.go).
 package git
 
 import (
@@ -151,9 +156,24 @@ func IsInternalFile(path string) bool {
 	return false
 }
 
+// worktreeStore is the ids and branches that tie a worktree to a task - the only
+// database access a git runner needs.
+type worktreeStore interface {
+	GetAllTaskBranches() ([]string, error)
+	GetAllTaskIDs() ([]string, error)
+	GetAllThreadIDs() ([]string, error)
+	GetProject(id string) (*types.Project, error)
+	GetTaskByID(taskID string) (*types.Task, error)
+	GetTasksByProject(projectID string) ([]types.Task, error)
+	ListProjects() ([]types.Project, error)
+	UpdateProjectOriginBranch(id string, branch string) error
+}
+
+var _ worktreeStore = (*store.Store)(nil)
+
 // WorktreeManager handles git worktree operations.
 type WorktreeManager struct {
-	store       *store.Store
+	store       worktreeStore
 	configStore *config.ConfigStore
 	worktreeMu  sync.Map // per-project mutex for worktree creation
 	stashMu     sync.Map // per-project mutex for stash operations
@@ -654,7 +674,7 @@ func (wm *WorktreeManager) ResolveMainBranch(projectID, taskID, title, canonical
 // The slug comes from types.SlugifyBranchName — the same function the executor used
 // to name the branch. If the two diverged, the GC would stop recognizing a live
 // branch and delete it.
-func taskSlugPrefixSet(store *store.Store, projectID string) map[string]bool {
+func taskSlugPrefixSet(store worktreeStore, projectID string) map[string]bool {
 	set := make(map[string]bool)
 	tasks, err := store.GetTasksByProject(projectID)
 	if err != nil {
@@ -793,7 +813,7 @@ func (wm *WorktreeManager) GitStatus(taskID string) (string, error) {
 	}
 
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return "", fmt.Errorf("worktree not found")
+		return "", ErrWorktreeNotFound
 	}
 
 	out, err := wm.gitRunOutput(worktreePath, "status", "--porcelain")
@@ -1408,7 +1428,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	}
 
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("worktree not found")
+		return nil, ErrWorktreeNotFound
 	}
 
 	// Reject invalid baseRef values (e.g. git error messages like "fatal: ...")
@@ -1950,7 +1970,7 @@ func (wm *WorktreeManager) GitRunInWorktree(taskID string, args ...string) error
 		return err
 	}
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return fmt.Errorf("worktree not found")
+		return ErrWorktreeNotFound
 	}
 	return wm.gitRun(worktreePath, args...)
 }
@@ -1962,7 +1982,7 @@ func (wm *WorktreeManager) GitRunInWorktreeOutput(taskID string, args ...string)
 		return "", err
 	}
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return "", fmt.Errorf("worktree not found")
+		return "", ErrWorktreeNotFound
 	}
 	return wm.gitRunOutput(worktreePath, args...)
 }
@@ -2045,7 +2065,7 @@ func (wm *WorktreeManager) GetTaskCommits(taskID, baseRef string) (*TaskCommitsR
 	}
 
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("worktree not found")
+		return nil, ErrWorktreeNotFound
 	}
 
 	result := &TaskCommitsResult{Commits: []TaskCommit{}}

@@ -20,9 +20,8 @@ import (
 	"kanban/pkg/agent"
 )
 
-// adapterRegistry holds registered adapter factories.
-// Production uses WASM loading; tests inject mock adapters via
-// RegisterAdapterFactory (defined in loader_test.go).
+// adapterRegistry holds registered adapter factories. Production loads WASM; tests
+// register mocks through RegisterAdapterFactory.
 var adapterRegistry = struct {
 	sync.RWMutex
 	factories map[string]agent.AdapterFactory
@@ -32,25 +31,18 @@ var adapterRegistry = struct {
 
 // wasmAdapter wraps a wazero-loaded WASI reactor module behind the AgentAdapter interface.
 //
-// Memory model (per wazero allocation/tinygo/greet.go pattern):
+// Memory model (the wazero tinygo/greet.go pattern):
 //
-//	Host → WASM (input): Host calls the module's Alloc(size) to obtain a linear
-//	  memory offset, writes data there via api.Memory.Write, then passes
-//	  (offset, size) as a `string` parameter to the exported function.
-//	  The Go compiler maps `string` → (i32 ptr, i32 len) automatically.
-//	  Pattern: Alloc → Write → Call → Free
+//	Host → WASM: call the module's Alloc(size), write the bytes there, and pass
+//	  (offset, size) as a `string` parameter - the Go compiler maps string to
+//	  (i32 ptr, i32 len). Alloc → Write → Call → Free.
+//	WASM → host: the module calls the host-imported store_result(data string),
+//	  which reads the string out of linear memory and delivers it on resultCh.
+//	  Safe because that callback fires synchronously, before fn.Call returns.
 //
-//	WASM → host (output): The module calls the host-imported
-//	  store_result(data string) callback, which reads the string from
-//	  linear memory and delivers it via resultCh. Safe because the
-//	  callback fires synchronously during fn.Call — before it returns.
-//
-// Concurrency: wazero modules and the WASM module's bump allocator (memOffset)
-// are NOT safe for concurrent use. All exported function calls must be
-// serialized via mu. This is critical because AgentRunner.readOutput calls
-// ParseOutput without holding r.mu, while Prompt/Compact/etc. call
-// EncodeCommand while holding r.mu — concurrent calls would corrupt the
-// bump allocator, overwrite resultCh, and crash the WASM module.
+// Every exported call must be serialized under mu: the module, its bump allocator (memOffset)
+// and the size-1 resultCh are not concurrency-safe, and AgentRunner.readOutput calls
+// ParseOutput *without* holding r.mu while Prompt/Compact call EncodeCommand holding it.
 type wasmAdapter struct {
 	mu       sync.Mutex
 	runtime  wazero.Runtime
@@ -209,14 +201,10 @@ func (a *wasmAdapter) freeString(ptr int32) {
 	}
 }
 
-// callFnStrings calls an exported WASM function with multiple string parameters.
-// Each string is allocated via the module's Alloc function, written to linear
-// memory, then passed as (ptr, length) parameters to the function.
-// Results are delivered via the store_result host callback and read via readResult.
-// ctx is used for cancellation of fn.Call and for waiting on the result callback.
-//
-// The mutex serializes all WASM calls because the module's bump allocator
-// (memOffset), resultCh (capacity 1), and wazero module are not concurrency-safe.
+// callFnStrings calls an exported WASM function with several string parameters: each is
+// allocated with the module's Alloc, written to linear memory, then passed as (ptr, len).
+// The result arrives through store_result (see readResult); ctx cancels fn.Call and the wait
+// for it. Callers must hold mu - see wasmAdapter.
 func (a *wasmAdapter) callFnStrings(ctx context.Context, name string, strs ...string) ([]byte, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -268,10 +256,9 @@ func (a *wasmAdapter) callFnStringsLocked(ctx context.Context, name string, strs
 }
 
 // readResult blocks until the store_result host callback delivers data or ctx is cancelled.
-// This is safe because store_result is called synchronously by the WASM
-// runtime during fn.Call — the callback fires before fn.Call returns.
-// If the WASM module fails to call store_result, ctx.Done() provides the
-// cancellation escape hatch (previously used context.Background() which never fires).
+// Safe because store_result is called synchronously by the WASM runtime during fn.Call:
+// the callback fires before fn.Call returns. If the module never calls it, ctx.Done() is
+// the way out.
 func (a *wasmAdapter) readResult(ctx context.Context) ([]byte, error) {
 	select {
 	case data := <-a.resultCh:

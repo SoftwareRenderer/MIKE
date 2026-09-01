@@ -6,16 +6,13 @@ import (
 	"strings"
 )
 
-// Podman must never be handed an unqualified ("short") image name. It picks a registry by asking
-// the user, and headless that fails:
+// Podman must never be handed an unqualified ("short") image name: it picks a registry by
+// asking the user, and headless that fails -
 //
 //	Error: short-name resolution enforced but cannot prompt without a TTY
 //
-// which is how "this image was never built" used to reach the user as exit status 125. "It usually
-// works" is not a rule either: busybox:latest resolves, library/busybox:1.36 does not.
-//
-// The helpers here are the single source of truth for that rule, and Runtime.ResolveImageRef is the
-// seam every image reference passes through on its way to podman.
+// "It usually works" is not a rule either (busybox:latest resolves, library/busybox:1.36
+// does not), so Runtime.ResolveImageRef is the seam every image reference passes through.
 
 // DefaultImageRegistry is the registry a docker-style short ref belongs to.
 const DefaultImageRegistry = "docker.io"

@@ -20,7 +20,9 @@ import (
 // mockSummarizeFlagLLM serves /models discovery, a non-streaming
 // summarization call held open until released (so the test can act while the
 // flag is set), and streaming chat completions (text-only responses).
-func mockSummarizeFlagLLM(release chan struct{}) *httptest.Server {
+// summarizeStarted signals that the summarization call arrived, which proves the handler
+// has already snapshotted the messages.
+func mockSummarizeFlagLLM(release chan struct{}, summarizeStarted chan struct{}) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/models" {
 			w.Header().Set("Content-Type", "application/json")
@@ -32,8 +34,11 @@ func mockSummarizeFlagLLM(release chan struct{}) *httptest.Server {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if !body.Stream {
-			// Non-streaming context summarization: hold the call open until
-			// the test releases it.
+			// Non-streaming context summarization: hold it open until released.
+			select {
+			case summarizeStarted <- struct{}{}:
+			default:
+			}
 			<-release
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"summary text"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
@@ -77,7 +82,8 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 	taskID := "test-sum-db-flag-task"
 
 	release := make(chan struct{})
-	server := mockSummarizeFlagLLM(release)
+	summarizeStarted := make(chan struct{})
+	server := mockSummarizeFlagLLM(release, summarizeStarted)
 	defer server.Close()
 
 	task := &types.Task{
@@ -85,8 +91,8 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 		ProjectID:       projectID,
 		Title:           "Sum db flag",
 		Prompt:          "Do something",
-		Status:          "backlog",
-		ExecutionState:  "idle",
+		Status:          types.StatusBacklog,
+		ExecutionState:  types.ExecStateIdle,
 		LlamaServerURL:  server.URL,
 		ModelName:       "test-model",
 		OperatingMode:   "act",
@@ -94,10 +100,10 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 		CreatedAt:       time.Now().UTC(),
 		UpdatedAt:       time.Now().UTC(),
 	}
-	if err := te.store.CreateTask(task); err != nil {
+	if err := te.rawStore().CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := te.store.CreateTaskMessage(&types.TaskMessage{
+	if err := te.rawStore().CreateTaskMessage(&types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, ThreadID: "thread-1",
 		Role: "user", Content: "Please do the thing", CreatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -117,15 +123,25 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 	// Wait for the summarization LLM call to be in flight, then verify the
 	// flag is set (the precondition the ordering fix must preserve).
 	waitFor(t, 10*time.Second, "flag to be set while summarization is in flight", func() bool {
-		got, err := te.store.GetTaskByID(taskID)
+		got, err := te.rawStore().GetTaskByID(taskID)
 		return err == nil && got != nil && got.Summarizing
 	})
-	// The mock holds the summarization call open until release is closed —
-	// it is still in flight here.
+	// The mock holds the summarization call open until release is closed, so it is still in
+	// flight here and the handler has already read its message snapshot.
+	//
+	// The message below must land after that snapshot: the timestamp fix-up moves only rows
+	// newer than the snapshot's newest message, so one already in the snapshot can never be
+	// re-sorted and buildLLMContext compresses it away. Waiting on the request rather than
+	// on the flag (which is set before the read) is what makes that ordering deterministic.
+	select {
+	case <-summarizeStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("summarization request never reached the LLM")
+	}
 
 	// Send a user message while the flag is set: HandleSend persists the
 	// message first, then ForwardUserMessage must block the lazy start.
-	if err := te.store.CreateTaskMessage(&types.TaskMessage{
+	if err := te.rawStore().CreateTaskMessage(&types.TaskMessage{
 		ID: uuid.New().String(), TaskID: taskID, ThreadID: "thread-1",
 		Role: "user", Content: "Message sent during summarization", CreatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -146,28 +162,31 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 	// Let the summarization complete; the blocked message must lazy-start
 	// the task.
 	close(release)
-	// Generous timeout: the lazy start performs real git worktree creation,
-	// which is slow under parallel test load.
-	waitFor(t, 30*time.Second, "executor to be lazy-started and running", func() bool {
-		te.taskMu.Lock()
-		_, exists := te.tasks[taskID]
-		te.taskMu.Unlock()
-		if !exists {
+	// Wait on what the turn leaves behind, not on ExecutionState: "running" is
+	// overwritten as soon as the turn ends, and this mock answers fast enough that a
+	// whole turn can fit between two polls. A persisted assistant message is monotone.
+	waitFor(t, 30*time.Second, "the blocked message to lazy-start a turn (assistant reply persisted)", func() bool {
+		msgs, err := te.rawStore().GetTaskMessages(taskID, "thread-1")
+		if err != nil {
 			return false
 		}
-		got, err := te.store.GetTaskByID(taskID)
-		return err == nil && got != nil && got.ExecutionState == "running"
+		for _, m := range msgs {
+			if m.Role == "assistant" {
+				return true
+			}
+		}
+		return false
 	})
 
 	// The regression: once the executor is running (it has already persisted
 	// its task copy at slot acquisition), the DB flag must be false — and it
 	// must NOT flip back to true from a stale in-memory copy.
 	waitFor(t, 5*time.Second, "flag to be cleared after summarization completes", func() bool {
-		got, err := te.store.GetTaskByID(taskID)
+		got, err := te.rawStore().GetTaskByID(taskID)
 		return err == nil && got != nil && !got.Summarizing
 	})
 	for i := 0; i < 60; i++ {
-		got, err := te.store.GetTaskByID(taskID)
+		got, err := te.rawStore().GetTaskByID(taskID)
 		if err == nil && got != nil && got.Summarizing {
 			t.Fatalf("summarizing flag was resurrected after summarization completed (stale executor write)")
 		}
@@ -175,7 +194,7 @@ func TestHandleSummarize_DBPath_ClearsFlagBeforeLazyStart(t *testing.T) {
 	}
 
 	// The summary must have been persisted.
-	msgs, err := te.store.GetTaskMessages(taskID, "thread-1")
+	msgs, err := te.rawStore().GetTaskMessages(taskID, "thread-1")
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}

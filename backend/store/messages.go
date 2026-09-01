@@ -130,6 +130,9 @@ func (s *Store) GetTaskMessageByID(messageID string) (*types.TaskMessage, error)
 	defer s.mu.RUnlock()
 	row := s.db.QueryRow(`SELECT `+taskMessageCols+` FROM task_messages WHERE id = ?`, messageID)
 	m, err := scanTaskMessage(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrMessageNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -266,10 +269,9 @@ func (s *Store) GetLastCommitHashBeforeMessage(messageID, threadID string) (stri
 	return hash, err
 }
 
-// FixPostSummaryTimestamps updates messages created between anchorTime
-// and summaryTime to sort after the summary. This fixes ordering for
-// messages sent during a summarization window, which have earlier
-// created_at than the summary but semantically belong after it.
+// FixPostSummaryTimestamps moves messages created between anchorTime and summaryTime to
+// sort after the summary: they were sent during the summarization window, so their
+// created_at predates the summary but they belong after it.
 func (s *Store) FixPostSummaryTimestamps(taskID, threadID string, anchorTime, summaryTime time.Time) error {
 	newTime := summaryTime.Add(time.Millisecond)
 	_, err := s.db.Exec(

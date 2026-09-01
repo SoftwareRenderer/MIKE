@@ -24,9 +24,34 @@ import (
 	"kanban/pkg/sandboxruntime"
 )
 
+// projectStore is the project lifecycle: creation, deletion, stats, sandbox columns.
+type projectStore interface {
+	CreateProject(p *types.Project) error
+	DeleteProject(id string) error
+	DeleteProjectStats(projectID, modelName, providerName string) error
+	GetAllProjectCounts() map[string]types.ProjectCounts
+	GetProject(id string) (*types.Project, error)
+	GetProjectStats(projectID string) (*types.ProjectStats, error)
+	GetTasksByProject(projectID string) ([]types.Task, error)
+	GetThreadsByTask(taskID string) ([]types.TaskThread, error)
+	ListProjects() ([]types.Project, error)
+	UpdateProject(id string, name string) (*types.Project, error)
+	UpdateProjectSandboxCapabilities(id string, capabilities []string) error
+	UpdateProjectSandboxDockerfilePath(id string, path string) error
+	UpdateProjectSandboxEnabled(id string, enabled bool) error
+	UpdateProjectSandboxEnvs(id string, envs []types.SandboxEnv) error
+	UpdateProjectSandboxForwardPorts(id string, ports []types.PortForward) error
+	UpdateProjectSandboxImage(id string, image string) error
+	UpdateProjectSandboxMemoryLimit(id string, limit int) error
+	UpdateProjectSandboxMounts(id string, mounts []types.SandboxMount) error
+	UpdateProjectSandboxNetworkIsolation(id string, enabled bool) error
+}
+
+var _ projectStore = (*store.Store)(nil)
+
 // ProjectHandler handles project CRUD operations.
 type ProjectHandler struct {
-	store       *store.Store
+	store       projectStore
 	configStore *config.ConfigStore
 	worktreeMgr *git.WorktreeManager
 	terminalMgr *term.TerminalManager
@@ -411,7 +436,7 @@ func (h *ProjectHandler) HandleSandboxBuild(w http.ResponseWriter, r *http.Reque
 	// Get the project to find the Dockerfile path
 	project, err := h.store.GetProject(id)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 	if project.SandboxDockerfilePath == "" {
@@ -483,7 +508,7 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		p, err := h.store.GetProject(id)
 		if err != nil {
-			httputil.JSONError(w, http.StatusNotFound, "project not found")
+			httputil.Fail(w, err, "get project", "project not found")
 			return
 		}
 		// Add active terminal ports from project-level terminal
@@ -619,7 +644,7 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		// Fetch latest state
 		p, err := h.store.GetProject(id)
 		if err != nil {
-			httputil.JSONError(w, http.StatusNotFound, "project not found")
+			httputil.Fail(w, err, "get project", "project not found")
 			return
 		}
 		httputil.JSONResponse(w, http.StatusOK, p)

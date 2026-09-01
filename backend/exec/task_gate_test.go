@@ -98,14 +98,14 @@ func (m *heldLLMMock) Handler() http.HandlerFunc {
 // wiring without going through the HTTP layer).
 func runExecTask(t *testing.T, te *TaskExecutor, proj *types.Project, taskID, serverURL, prompt string) *taskExecSetup {
 	t.Helper()
-	s := te.store
+	s := te.rawStore()
 	task := &types.Task{
 		ID:             taskID,
 		ProjectID:      proj.ID,
 		Title:          taskID,
 		Prompt:         prompt,
-		Status:         "backlog",
-		ExecutionState: "idle",
+		Status:         types.StatusBacklog,
+		ExecutionState: types.ExecStateIdle,
 		LlamaServerURL: serverURL,
 		ModelName:      "test-model",
 		OperatingMode:  "act",
@@ -162,7 +162,7 @@ func runExecTask(t *testing.T, te *TaskExecutor, proj *types.Project, taskID, se
 
 // waitTaskState polls the store until the task's (status, execution_state)
 // matches, or fails the test after 15s.
-func waitTaskState(t *testing.T, s *store.Store, taskID string, match func(status, execState string) bool) *types.Task {
+func waitTaskState(t *testing.T, s *store.Store, taskID string, match func(status types.Status, execState types.ExecutionState) bool) *types.Task {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	var task *types.Task
@@ -182,9 +182,9 @@ func waitTaskState(t *testing.T, s *store.Store, taskID string, match func(statu
 }
 
 var (
-	isRunning = func(st, es string) bool { return st == "in_progress" && es == "running" }
-	isPending = func(st, es string) bool { return st == "in_progress" && es == "idle" }
-	isIdle    = func(st, es string) bool { return st == "review" && es == "idle" }
+	isRunning = func(st types.Status, es types.ExecutionState) bool { return st == "in_progress" && es == "running" }
+	isPending = func(st types.Status, es types.ExecutionState) bool { return st == "in_progress" && es == "idle" }
+	isIdle    = func(st types.Status, es types.ExecutionState) bool { return st == "review" && es == "idle" }
 )
 
 // TestTaskGate_SecondTaskQueues verifies that with concurrency 1 (the default
@@ -193,7 +193,7 @@ var (
 // task runs, and picks up the slot as soon as the first task goes idle.
 func TestTaskGate_SecondTaskQueues(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-tg-queue", "TG Queue")
 
 	mock := newHeldLLMMock()
@@ -233,7 +233,7 @@ func TestTaskGate_SecondTaskQueues(t *testing.T) {
 // provider A's single slot is occupied.
 func TestTaskGate_PerProviderIsolation(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-tg-iso", "TG Isolation")
 
 	mockA := newHeldLLMMock()
@@ -272,14 +272,14 @@ func (emptyExtStore) GetByType(_ string) ([]ext.Extension, error) { return nil, 
 func TestTaskGate_AgentProviderBypasses(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
 	te.agentRegistry = agent.NewAgentRegistry(emptyExtStore{}, nil)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-tg-agent", "TG Agent")
 
 	runExecTask(t, te, proj, "tg-agent-1", "agent://pi", "task agent")
 
 	// The agent path fails fast (no extension registered) instead of queuing
 	// behind the LLM task gate.
-	waitTaskState(t, s, "tg-agent-1", func(st, es string) bool { return es == "failed" })
+	waitTaskState(t, s, "tg-agent-1", func(st types.Status, es types.ExecutionState) bool { return es == "failed" })
 	te.StopTask("tg-agent-1")
 }
 
@@ -288,7 +288,7 @@ func TestTaskGate_AgentProviderBypasses(t *testing.T) {
 // queued task there) and moves the task's slot to the new provider.
 func TestTaskGate_ProviderSwapFreesOldProvider(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-tg-swap", "TG Swap")
 
 	mockA := newHeldLLMMock()
@@ -337,7 +337,7 @@ func TestTaskGate_ProviderSwapFreesOldProvider(t *testing.T) {
 // same provider can start without queueing.
 func TestTaskSlotReleasedWhenIdle(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-tg-release", "TG Release")
 
 	mock := newHeldLLMMock()
@@ -372,7 +372,7 @@ func TestTaskSlotReleasedWhenIdle(t *testing.T) {
 // (ChatCompletion via RunWithGate) must queue until the slot is free.
 func TestUtilityCalls_RespectInFlightLimit(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-tg-util", "TG Utility")
 
 	mock := newHeldLLMMock()
@@ -423,12 +423,12 @@ func TestUtilityCalls_RespectInFlightLimit(t *testing.T) {
 // its start-time row copy.
 func TestPersistTaskPreservesTitle(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-tg-title", "TG Title")
 
 	task := &types.Task{
 		ID: "tg-title-1", ProjectID: proj.ID, Title: "first-line title",
-		Prompt: "first-line title", Status: "in_progress", ExecutionState: "running",
+		Prompt: "first-line title", Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -466,7 +466,7 @@ func TestPersistTaskPreservesTitle(t *testing.T) {
 // executor's turn-complete writes must not revert it.
 func TestTaskGate_TitleSurvivesExecutorWrites(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-tg-title2", "TG Title Run")
 
 	mock := newHeldLLMMock()

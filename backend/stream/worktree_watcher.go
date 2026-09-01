@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/types"
+
 	"github.com/fsnotify/fsnotify"
 	"kanban/backend/git"
 )
@@ -406,7 +408,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID, baseRef string
 
 	task, err := ww.worktreeMgr.GetTaskByID(taskID)
 	headRef := ""
-	if err == nil && task.Status == "done" {
+	if err == nil && task.Status == types.StatusDone {
 		headRef = task.BranchTip
 		if headRef == "" {
 			headRef = task.Branch

@@ -195,7 +195,7 @@ func TestGitAuthorFlagCmd_RoundTrip(t *testing.T) {
 func fsReadRefRepo(t *testing.T, s *Server, projectID string) (string, string, string) {
 	t.Helper()
 	repo := t.TempDir()
-	if err := s.store.CreateProject(&types.Project{
+	if err := s.rawStore().CreateProject(&types.Project{
 		ID:   projectID,
 		Name: "FS Ref Project",
 		Path: repo,
@@ -360,7 +360,7 @@ func TestFSReadRefInTaskWorktree(t *testing.T) {
 
 	repo := t.TempDir()
 	projID := "fs-ref-task"
-	if err := s.store.CreateProject(&types.Project{ID: projID, Name: "FS Ref Task Project", Path: repo}); err != nil {
+	if err := s.rawStore().CreateProject(&types.Project{ID: projID, Name: "FS Ref Task Project", Path: repo}); err != nil {
 		t.Fatal(err)
 	}
 	mustRunGit(t, repo, "init")
@@ -456,7 +456,7 @@ func fsSymlinkProject(t *testing.T, s *Server, id string) (repo, outside, secret
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.CreateProject(&types.Project{ID: id, Name: "FS Symlink Project", Path: repo}); err != nil {
+	if err := s.rawStore().CreateProject(&types.Project{ID: id, Name: "FS Symlink Project", Path: repo}); err != nil {
 		t.Fatal(err)
 	}
 	return
@@ -613,7 +613,7 @@ func TestFSInitGitRejectsPathOutsideProject(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.store.CreateProject(&types.Project{ID: "fs-initgit", Name: "FS InitGit Project", Path: projDir}); err != nil {
+	if err := s.rawStore().CreateProject(&types.Project{ID: "fs-initgit", Name: "FS InitGit Project", Path: projDir}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -696,7 +696,7 @@ func TestFSListGitBadge(t *testing.T) {
 		{"fs-badge-plain", "FS Badge Plain", plain},
 		{"fs-badge-repo", "FS Badge Repo", repo},
 	} {
-		if err := s.store.CreateProject(&types.Project{ID: p.id, Name: p.name, Path: p.path}); err != nil {
+		if err := s.rawStore().CreateProject(&types.Project{ID: p.id, Name: p.name, Path: p.path}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -763,7 +763,7 @@ func TestFSSearchFilenameRegex(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.store.CreateProject(&types.Project{ID: "fs-rx", Name: "FS Regex Project", Path: base}); err != nil {
+	if err := s.rawStore().CreateProject(&types.Project{ID: "fs-rx", Name: "FS Regex Project", Path: base}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -326,12 +326,12 @@ func TestHandleLoopDetected_IncrementsAndPreservesLoopStreak(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-streak", Name: "Streak Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := e.store.CreateProject(proj); err != nil {
+	if err := e.rawStore().CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := &types.Task{
 		ID: "task-streak", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
-		Status: "in_progress", ExecutionState: "running",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := e.store.CreateTask(task); err != nil {
@@ -371,13 +371,13 @@ func TestHandleLoopDetected_IdeationModeSuppressesHints(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-exploration", Name: "exploration", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	_ = e.store.CreateProject(proj)
+	_ = e.rawStore().CreateProject(proj)
 	task := &types.Task{
 		ID:            "task-exploration",
 		ProjectID:     proj.ID,
 		Title:         "Ideation task",
 		Prompt:        "Brainstorm",
-		Status:        "in_progress",
+		Status:        types.StatusInProgress,
 		OperatingMode: "explore",
 		CreatedAt:     now,
 		UpdatedAt:     now,
@@ -406,7 +406,7 @@ func TestHandleLoopDetected_IdeationModeSuppressesHints(t *testing.T) {
 	}
 	// Task should still be running
 	taskAfter, _ := e.store.GetTaskByID(task.ID)
-	if taskAfter.ExecutionState == "failed" {
+	if taskAfter.ExecutionState == types.ExecStateFailed {
 		t.Error("task should not be in failed state in explore mode")
 	}
 }
@@ -418,12 +418,12 @@ func TestHandleLoopDetected_HintBroadcastCarriesMessageID(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-hint-id", Name: "Hint ID Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := e.store.CreateProject(proj); err != nil {
+	if err := e.rawStore().CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := &types.Task{
 		ID: "task-hint-id", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
-		Status: "in_progress", ExecutionState: "running",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := e.store.CreateTask(task); err != nil {
@@ -608,12 +608,12 @@ func TestSendRetryHint_SystemRole(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-retry-hint", Name: "Retry Hint Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := e.store.CreateProject(proj); err != nil {
+	if err := e.rawStore().CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := &types.Task{
 		ID: "task-retry-hint", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
-		Status: "in_progress", ExecutionState: "running",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := e.store.CreateTask(task); err != nil {
@@ -1759,19 +1759,19 @@ func TestStopProjectTasks(t *testing.T) {
 
 	// Create project with unique path
 	proj := &types.Project{ID: "proj-test", Name: "Test Project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := te.store.CreateProject(proj); err != nil {
+	if err := te.rawStore().CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
 	// Create tasks in the project
-	task1 := createTaskInProject(t, te.store, proj.ID, "task-1")
-	task2 := createTaskInProject(t, te.store, proj.ID, "task-2")
+	task1 := createTaskInProject(t, te.rawStore(), proj.ID, "task-1")
+	task2 := createTaskInProject(t, te.rawStore(), proj.ID, "task-2")
 	// Task in a different project
 	otherProj := &types.Project{ID: "proj-other", Name: "Other Project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := te.store.CreateProject(otherProj); err != nil {
+	if err := te.rawStore().CreateProject(otherProj); err != nil {
 		t.Fatalf("create other project: %v", err)
 	}
-	_ = createTaskInProject(t, te.store, otherProj.ID, "task-other")
+	_ = createTaskInProject(t, te.rawStore(), otherProj.ID, "task-other")
 
 	// Simulate running executors for task1 and task2
 	ctx1, cancel1 := context.WithCancel(context.Background())
@@ -1810,12 +1810,12 @@ func TestStopProjectTasks(t *testing.T) {
 	}
 
 	// Verify task statuses were reset to idle
-	t1, _ := te.store.GetTaskByID(task1.ID)
-	if t1.ExecutionState != "idle" {
+	t1, _ := te.rawStore().GetTaskByID(task1.ID)
+	if t1.ExecutionState != types.ExecStateIdle {
 		t.Errorf("expected task1 execution_state='idle', got %q", t1.ExecutionState)
 	}
-	t2, _ := te.store.GetTaskByID(task2.ID)
-	if t2.ExecutionState != "idle" {
+	t2, _ := te.rawStore().GetTaskByID(task2.ID)
+	if t2.ExecutionState != types.ExecStateIdle {
 		t.Errorf("expected task2 execution_state='idle', got %q", t2.ExecutionState)
 	}
 }
@@ -1824,10 +1824,10 @@ func TestStopProjectTasks_NoRunningTasks(t *testing.T) {
 	te := newTestExecutor(t)
 	now := time.Now().UTC()
 	proj := &types.Project{ID: "proj-empty", Name: "Empty Project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := te.store.CreateProject(proj); err != nil {
+	if err := te.rawStore().CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	createTaskInProject(t, te.store, proj.ID, "idle-task")
+	createTaskInProject(t, te.rawStore(), proj.ID, "idle-task")
 
 	// No running executors
 	stopped := te.StopProjectTasks(proj.ID)
@@ -1840,17 +1840,17 @@ func TestStopProjectTasks_DoesNotAffectNonRunningTasks(t *testing.T) {
 	te := newTestExecutor(t)
 	now := time.Now().UTC()
 	proj := &types.Project{ID: "proj-mixed", Name: "Mixed Project", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := te.store.CreateProject(proj); err != nil {
+	if err := te.rawStore().CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
 	// Create a running task and a review task
-	runningTask := createTaskInProject(t, te.store, proj.ID, "running-task")
-	reviewTask := createTaskInProject(t, te.store, proj.ID, "review-task")
+	runningTask := createTaskInProject(t, te.rawStore(), proj.ID, "running-task")
+	reviewTask := createTaskInProject(t, te.rawStore(), proj.ID, "review-task")
 	// Move review task to review status
-	reviewTask.Status = "review"
-	reviewTask.ExecutionState = "idle"
-	_ = te.store.UpdateTask(reviewTask)
+	reviewTask.Status = types.StatusReview
+	reviewTask.ExecutionState = types.ExecStateIdle
+	_ = te.rawStore().UpdateTask(reviewTask)
 
 	// Only runningTask has an active executor
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1865,17 +1865,17 @@ func TestStopProjectTasks_DoesNotAffectNonRunningTasks(t *testing.T) {
 	}
 
 	// Verify running task was stopped and reset to idle
-	runningTaskAfter, _ := te.store.GetTaskByID(runningTask.ID)
-	if runningTaskAfter.ExecutionState != "idle" {
+	runningTaskAfter, _ := te.rawStore().GetTaskByID(runningTask.ID)
+	if runningTaskAfter.ExecutionState != types.ExecStateIdle {
 		t.Errorf("expected running task execution_state='idle', got %q", runningTaskAfter.ExecutionState)
 	}
 
 	// Verify review task was NOT modified
-	reviewTaskAfter, _ := te.store.GetTaskByID(reviewTask.ID)
-	if reviewTaskAfter.Status != "review" {
+	reviewTaskAfter, _ := te.rawStore().GetTaskByID(reviewTask.ID)
+	if reviewTaskAfter.Status != types.StatusReview {
 		t.Errorf("expected review task status='review', got %q", reviewTaskAfter.Status)
 	}
-	if reviewTaskAfter.ExecutionState != "idle" {
+	if reviewTaskAfter.ExecutionState != types.ExecStateIdle {
 		t.Errorf("expected review task execution_state='idle', got %q", reviewTaskAfter.ExecutionState)
 	}
 }
@@ -1889,8 +1889,8 @@ func createTaskInProject(t *testing.T, s *store.Store, projectID, taskID string)
 		ProjectID:      projectID,
 		Title:          "Test Task",
 		Prompt:         "Test prompt",
-		Status:         "backlog",
-		ExecutionState: "idle",
+		Status:         types.StatusBacklog,
+		ExecutionState: types.ExecStateIdle,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -2542,7 +2542,7 @@ func TestMaybeAutoSummarize_TriggersAboveThreshold(t *testing.T) {
 
 	te := newTestExecutor(t)
 	te.gate = NewConcurrencyGate()
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-sum-trigger", "Sum Trigger")
 
 	server := mockSummarizeLLM()
@@ -2553,8 +2553,8 @@ func TestMaybeAutoSummarize_TriggersAboveThreshold(t *testing.T) {
 		ID:              "sum-trigger-task",
 		ProjectID:       proj.ID,
 		Title:           "Sum task",
-		Status:          "review",
-		ExecutionState:  "idle",
+		Status:          types.StatusReview,
+		ExecutionState:  types.ExecStateIdle,
 		LlamaServerURL:  server.URL,
 		ModelName:       "test-model",
 		CurrentThreadID: "thread-1",
@@ -2625,7 +2625,7 @@ func TestMaybeAutoSummarize_InjectProceedWhenFeedingBack(t *testing.T) {
 
 	te := newTestExecutor(t)
 	te.gate = NewConcurrencyGate()
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-sum-proceed", "Sum Proceed")
 
 	server := mockSummarizeLLM()
@@ -2636,8 +2636,8 @@ func TestMaybeAutoSummarize_InjectProceedWhenFeedingBack(t *testing.T) {
 		ID:              "sum-proceed-task",
 		ProjectID:       proj.ID,
 		Title:           "Sum task",
-		Status:          "review",
-		ExecutionState:  "idle",
+		Status:          types.StatusReview,
+		ExecutionState:  types.ExecStateIdle,
 		LlamaServerURL:  server.URL,
 		ModelName:       "test-model",
 		CurrentThreadID: "thread-1",
@@ -2710,7 +2710,7 @@ func TestMaybeAutoSummarize_InjectProceedWhenFeedingBack(t *testing.T) {
 func TestMaybeAutoSummarize_NoTriggerBelowThreshold(t *testing.T) {
 	te := newTestExecutor(t)
 	te.gate = NewConcurrencyGate()
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-sum-notrigger", "Sum NoTrigger")
 
 	server := mockSummarizeLLM()
@@ -2720,8 +2720,8 @@ func TestMaybeAutoSummarize_NoTriggerBelowThreshold(t *testing.T) {
 	task := &types.Task{
 		ID:              "sum-notrigger-task",
 		ProjectID:       proj.ID,
-		Status:          "review",
-		ExecutionState:  "idle",
+		Status:          types.StatusReview,
+		ExecutionState:  types.ExecStateIdle,
 		LlamaServerURL:  server.URL,
 		ModelName:       "test-model",
 		CurrentThreadID: "thread-1",
@@ -2766,15 +2766,15 @@ func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
 
 	// Create project and task
 	proj := &types.Project{ID: "proj-reasoning", Name: "Reasoning Test", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := te.store.CreateProject(proj); err != nil {
+	if err := te.rawStore().CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := &types.Task{
 		ID: "task-reasoning", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
-		Status: "in_progress", ExecutionState: "running",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if err := te.store.CreateTask(task); err != nil {
+	if err := te.rawStore().CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
@@ -2806,8 +2806,8 @@ func TestLoopDetector_ReasoningOnlyIncrementsHintCount(t *testing.T) {
 	}
 
 	// Verify task was marked as failed
-	taskAfter, _ := te.store.GetTaskByID(task.ID)
-	if taskAfter.ExecutionState != "failed" {
+	taskAfter, _ := te.rawStore().GetTaskByID(task.ID)
+	if taskAfter.ExecutionState != types.ExecStateFailed {
 		t.Errorf("expected execution_state='failed', got %q", taskAfter.ExecutionState)
 	}
 }
@@ -2819,16 +2819,16 @@ func TestLoopDetector_ResetClearsStreak(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-reset-streak", Name: "Reset Streak", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := te.store.CreateProject(proj); err != nil {
+	if err := te.rawStore().CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 
 	task := &types.Task{
 		ID: "task-reset-streak", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
-		Status: "in_progress", ExecutionState: "running",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if err := te.store.CreateTask(task); err != nil {
+	if err := te.rawStore().CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 
@@ -2856,8 +2856,8 @@ func TestLoopDetector_ResetClearsStreak(t *testing.T) {
 		}
 	}
 	// Task should still be running (not failed from the old streak)
-	taskAfter, _ := te.store.GetTaskByID(task.ID)
-	if taskAfter.ExecutionState == "failed" {
+	taskAfter, _ := te.rawStore().GetTaskByID(task.ID)
+	if taskAfter.ExecutionState == types.ExecStateFailed {
 		t.Error("task should not be failed — reset cleared the old streak")
 	}
 }

@@ -16,12 +16,20 @@ import (
 
 func testConfigStore(t *testing.T) *ConfigStore {
 	t.Helper()
+	cs, _ := testConfigStoreWithStore(t)
+	return cs
+}
+
+// testConfigStoreWithStore also hands back the store, for the few tests that seed rows
+// directly — raw SQL belongs in a fixture, not in ConfigStore's surface.
+func testConfigStoreWithStore(t *testing.T) (*ConfigStore, *store.Store) {
+	t.Helper()
 	dir := t.TempDir()
 	db, err := store.NewStore(dir + "/test.db")
 	if err != nil {
 		t.Fatalf("create test store: %v", err)
 	}
-	return NewConfigStore(db, dir+"/test.db", "test")
+	return NewConfigStore(db, dir+"/test.db", "test"), db
 }
 
 func TestGetConfigDefaultWorkspaceDir(t *testing.T) {
@@ -358,7 +366,7 @@ func seedLegacyProviderRows(t *testing.T, cs *ConfigStore, providers []types.Pro
 	if err != nil {
 		t.Fatalf("marshal providers: %v", err)
 	}
-	if err := cs.store.SetConfigValue("providers", string(raw)); err != nil {
+	if err := cs.db.SetConfigValue("providers", string(raw)); err != nil {
 		t.Fatalf("seed providers: %v", err)
 	}
 }
@@ -410,7 +418,7 @@ func TestUpdateConfigNeverPersistsAgentProviders(t *testing.T) {
 	}
 
 	// The raw DB value must not contain the agent row either.
-	raw, err := cs.store.GetConfigValue("providers")
+	raw, err := cs.db.GetConfigValue("providers")
 	if err != nil {
 		t.Fatalf("get raw providers: %v", err)
 	}
@@ -580,24 +588,24 @@ func TestUpdateConfigAssignsProviderIDs(t *testing.T) {
 }
 
 func TestMigrateProviderIDs(t *testing.T) {
-	cs := testConfigStore(t)
+	cs, db := testConfigStoreWithStore(t)
 
 	// Seed legacy config directly (bypassing UpdateConfig, which assigns IDs):
 	// providers carry slug names and no IDs, worker/utility reference the slugs.
 	legacyJSON := `[{"name":"neptune-8010","kind":"llm","url":"http://neptune:8010/v1","concurrency":1,"models":[]},{"name":"other-9000","kind":"llm","url":"http://other:9000/v1","concurrency":1,"models":[]}]`
-	if err := cs.store.SetConfigValue("providers", legacyJSON); err != nil {
+	if err := cs.db.SetConfigValue("providers", legacyJSON); err != nil {
 		t.Fatalf("seed legacy providers: %v", err)
 	}
-	if err := cs.store.SetConfigValue("worker_provider", "neptune-8010"); err != nil {
+	if err := cs.db.SetConfigValue("worker_provider", "neptune-8010"); err != nil {
 		t.Fatalf("seed worker_provider: %v", err)
 	}
-	if err := cs.store.SetConfigValue("utility_provider", "other-9000"); err != nil {
+	if err := cs.db.SetConfigValue("utility_provider", "other-9000"); err != nil {
 		t.Fatalf("seed utility_provider: %v", err)
 	}
 	// Simulate existing message/token rows attributed to the legacy slugs.
-	cs.store.Exec(`INSERT INTO projects (id, name, path, created_at, updated_at) VALUES ('p1', 'proj', '/tmp/proj', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
-	cs.store.Exec(`INSERT INTO tasks (id, project_id, title, prompt, llama_server_url, model_name, created_at, updated_at) VALUES ('t1', 'p1', 'task', 'prompt', '', '', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
-	cs.store.Exec(`INSERT INTO task_messages (id, task_id, role, content, provider_name, created_at) VALUES ('m1', 't1', 'user', 'hi', 'neptune-8010', '2024-01-01T00:00:00Z')`)
+	db.Exec(`INSERT INTO projects (id, name, path, created_at, updated_at) VALUES ('p1', 'proj', '/tmp/proj', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
+	db.Exec(`INSERT INTO tasks (id, project_id, title, prompt, llama_server_url, model_name, created_at, updated_at) VALUES ('t1', 'p1', 'task', 'prompt', '', '', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
+	db.Exec(`INSERT INTO task_messages (id, task_id, role, content, provider_name, created_at) VALUES ('m1', 't1', 'user', 'hi', 'neptune-8010', '2024-01-01T00:00:00Z')`)
 
 	if err := cs.MigrateProviderIDs(); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -618,7 +626,7 @@ func TestMigrateProviderIDs(t *testing.T) {
 	}
 	// DB rows remapped to the ID.
 	var stored string
-	err = cs.store.QueryRow(`SELECT provider_name FROM task_messages WHERE id = 'm1'`).Scan(&stored)
+	err = db.QueryRow(`SELECT provider_name FROM task_messages WHERE id = 'm1'`).Scan(&stored)
 	if err != nil {
 		t.Fatalf("query row: %v", err)
 	}

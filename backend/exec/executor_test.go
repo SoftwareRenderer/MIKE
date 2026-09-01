@@ -99,13 +99,13 @@ func TestPrepareTaskExecution_PreservesBaseRefOnRestart(t *testing.T) {
 		ProjectID:      projectID,
 		Title:          "Test task",
 		Prompt:         "Test prompt",
-		Status:         "in_progress",
+		Status:         types.StatusInProgress,
 		BaseRef:        initialSHA,
 		Branch:         branchName,
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create the worktree (simulating it already exists from first run)
 	_, _, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName, "")
@@ -150,12 +150,12 @@ func TestPrepareTaskExecution_SetsBaseRefOnFirstRun(t *testing.T) {
 		ProjectID:      projectID,
 		Title:          "Test task",
 		Prompt:         "Test prompt",
-		Status:         "in_progress",
+		Status:         types.StatusInProgress,
 		Branch:         branchName,
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// prepareTaskExecution on first run (no existing worktree)
 	setup, err := te.prepareTaskExecution(projectID, taskID, "", "", true)
@@ -190,9 +190,9 @@ func TestInitTask_CreatesWorktree(t *testing.T) {
 		ProjectID: projectID,
 		Title:     "Test task",
 		Prompt:    "Test prompt",
-		Status:    "backlog",
+		Status:    types.StatusBacklog,
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Init the task
 	result, err := te.InitTask(projectID, taskID)
@@ -222,11 +222,11 @@ func TestInitTask_CreatesWorktree(t *testing.T) {
 	}
 
 	// Verify task status is unchanged (init should NOT move to in_progress)
-	reloaded, _ := te.store.GetTaskByID(taskID)
-	if reloaded.Status != "backlog" {
+	reloaded, _ := te.rawStore().GetTaskByID(taskID)
+	if reloaded.Status != types.StatusBacklog {
 		t.Errorf("Status should remain backlog after init, got %q", reloaded.Status)
 	}
-	if reloaded.ExecutionState == "running" {
+	if reloaded.ExecutionState == types.ExecStateRunning {
 		t.Errorf("ExecutionState should not be running after init, got %q", reloaded.ExecutionState)
 	}
 }
@@ -241,9 +241,9 @@ func TestInitTask_Idempotent(t *testing.T) {
 		ProjectID: projectID,
 		Title:     "Test task",
 		Prompt:    "Test prompt",
-		Status:    "backlog",
+		Status:    types.StatusBacklog,
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// First init
 	result1, err := te.InitTask(projectID, taskID)
@@ -263,7 +263,7 @@ func TestInitTask_Idempotent(t *testing.T) {
 	}
 
 	// Status should still be backlog
-	if result2.Status != "backlog" {
+	if result2.Status != types.StatusBacklog {
 		t.Errorf("Status should remain backlog after second init, got %q", result2.Status)
 	}
 }
@@ -279,11 +279,11 @@ func TestInitTask_ThenPrepareTaskExecution(t *testing.T) {
 		ProjectID:      projectID,
 		Title:          "Test task",
 		Prompt:         "Test prompt",
-		Status:         "backlog",
+		Status:         types.StatusBacklog,
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Init the task first
 	initResult, err := te.InitTask(projectID, taskID)
@@ -329,13 +329,13 @@ func TestHasRunningTasks_InProgress(t *testing.T) {
 		ID:        taskID,
 		ProjectID: projectID,
 		Title:     "Test task",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Manually add an entry to the tasks map (simulating a running executor)
 	ctx, cancel := context.WithCancel(context.Background())
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: "in_progress"}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: types.StatusInProgress}
 	t.Cleanup(func() { cancel() })
 
 	if !te.HasRunningTasks(projectID) {
@@ -351,13 +351,13 @@ func TestHasRunningTasks_BacklogStaleCleanup(t *testing.T) {
 		ID:        taskID,
 		ProjectID: projectID,
 		Title:     "Test task",
-		Status:    "backlog",
+		Status:    types.StatusBacklog,
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Manually add a stale entry to the tasks map (status != in_progress)
 	ctx, cancel := context.WithCancel(context.Background())
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: "backlog"}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: types.StatusBacklog}
 	t.Cleanup(func() { cancel() })
 
 	if te.HasRunningTasks(projectID) {
@@ -381,13 +381,13 @@ func TestHasRunningTasks_ReviewStaleCleanup(t *testing.T) {
 		ID:        taskID,
 		ProjectID: projectID,
 		Title:     "Test task",
-		Status:    "review",
+		Status:    types.StatusReview,
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Manually add a stale entry to the tasks map (status != in_progress)
 	ctx, cancel := context.WithCancel(context.Background())
-	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: "review"}
+	te.tasks[taskID] = &executionState{ctx: ctx, cancel: cancel, executorType: "llm", taskStatus: types.StatusReview}
 	t.Cleanup(func() { cancel() })
 
 	if te.HasRunningTasks(projectID) {
@@ -411,9 +411,9 @@ func TestHasRunningTasks_NotInMap(t *testing.T) {
 		ID:        taskID,
 		ProjectID: projectID,
 		Title:     "Test task",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Task is in DB with in_progress status but NOT in the tasks map
 	if te.HasRunningTasks(projectID) {
@@ -425,22 +425,22 @@ func TestHasRunningTasks_MixedTasks(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
 
 	// Task 1: in_progress + in map → considered running
-	task1 := &types.Task{ID: "task-a", ProjectID: projectID, Title: "A", Status: "in_progress"}
-	te.store.CreateTask(task1)
+	task1 := &types.Task{ID: "task-a", ProjectID: projectID, Title: "A", Status: types.StatusInProgress}
+	te.rawStore().CreateTask(task1)
 	ctx1, cancel1 := context.WithCancel(context.Background())
-	te.tasks["task-a"] = &executionState{ctx: ctx1, cancel: cancel1, executorType: "llm", taskStatus: "in_progress"}
+	te.tasks["task-a"] = &executionState{ctx: ctx1, cancel: cancel1, executorType: "llm", taskStatus: types.StatusInProgress}
 	t.Cleanup(func() { cancel1() })
 
 	// Task 2: backlog in map (taskStatus != in_progress) → not considered running
-	task2 := &types.Task{ID: "task-b", ProjectID: projectID, Title: "B", Status: "backlog"}
-	te.store.CreateTask(task2)
+	task2 := &types.Task{ID: "task-b", ProjectID: projectID, Title: "B", Status: types.StatusBacklog}
+	te.rawStore().CreateTask(task2)
 	ctx2, cancel2 := context.WithCancel(context.Background())
-	te.tasks["task-b"] = &executionState{ctx: ctx2, cancel: cancel2, executorType: "llm", taskStatus: "backlog"}
+	te.tasks["task-b"] = &executionState{ctx: ctx2, cancel: cancel2, executorType: "llm", taskStatus: types.StatusBacklog}
 	t.Cleanup(func() { cancel2() })
 
 	// Task 3: review + not in map → nothing to clean
-	task3 := &types.Task{ID: "task-c", ProjectID: projectID, Title: "C", Status: "review"}
-	te.store.CreateTask(task3)
+	task3 := &types.Task{ID: "task-c", ProjectID: projectID, Title: "C", Status: types.StatusReview}
+	te.rawStore().CreateTask(task3)
 
 	// Should return true because task-a has taskStatus=in_progress
 	if !te.HasRunningTasks(projectID) {
@@ -491,7 +491,7 @@ func TestCommitAndMerge_SerializesPerProject(t *testing.T) {
 		Branch:    branchName,
 		BaseRef:   "master",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create the worktree and make an initial commit
 	_, _, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName, "")
@@ -730,13 +730,13 @@ func TestForwardUserMessage_BlocksLazyStartDuringSummarize(t *testing.T) {
 		ID:             taskID,
 		ProjectID:      projectID,
 		Prompt:         "Test task",
-		Status:         "backlog",
-		ExecutionState: "idle",
+		Status:         types.StatusBacklog,
+		ExecutionState: types.ExecStateIdle,
 		LlamaServerURL: "http://localhost:8080/v1",
 		ModelName:      "test-model",
 		Summarizing:    true,
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Forward a user message — should NOT trigger lazy-start
 	te.ForwardUserMessage(projectID, taskID, stream.UserMessage{
@@ -777,9 +777,9 @@ func TestInitTask_ClearsOrphanedBranchOnWorktreeFailure(t *testing.T) {
 		ProjectID: projectID,
 		Title:     "Test task",
 		Prompt:    "Test prompt",
-		Status:    "backlog",
+		Status:    types.StatusBacklog,
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Corrupt the git repo so CreateWorktree will fail.
 	// SetTaskBranchIfEmpty runs first (DB-only), then CreateWorktree needs git.
@@ -791,7 +791,7 @@ func TestInitTask_ClearsOrphanedBranchOnWorktreeFailure(t *testing.T) {
 	}
 
 	// Branch should be cleared (not orphaned in DB)
-	reloaded, _ := te.store.GetTaskByID(taskID)
+	reloaded, _ := te.rawStore().GetTaskByID(taskID)
 	if reloaded.Branch != "" {
 		t.Fatalf("branch should be cleared after worktree failure, got %q", reloaded.Branch)
 	}

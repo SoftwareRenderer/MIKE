@@ -55,7 +55,7 @@ func setupCommitAndMergeTest(t *testing.T) (*TaskExecutor, string, string, strin
 		ProjectID: projectID,
 		Title:     "Test task",
 		Prompt:    "Test prompt",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 		Branch:    "task/test-task",
 		BaseRef:   "master",
 	}

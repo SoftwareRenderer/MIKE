@@ -1,3 +1,7 @@
+// Package store is the persistence layer: one SQLite database, its schema and migrations,
+// and the typed accessors for tasks, messages, threads, projects, sessions, stats, config.
+// The pool is pinned to one connection so the PRAGMAs apply everywhere; s.mu is the
+// serialisation point. Migrations probe before they ALTER (migrations.go).
 package store
 
 import (
@@ -102,21 +106,42 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// Exec runs a raw SQL statement with arguments.
+// RawSQL is the raw-SQL escape hatch: the three database primitives and nothing else.
+// It exists for packages that own their own tables - today only backend/extensions - and
+// going through it keeps raw SQL to one grep-able caller.
+type RawSQL interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// RawSQL returns the store as raw SQL access. It stays behind the store's lock on purpose:
+// several accessors hold that lock across statements in place of a transaction, and handing
+// out *sql.DB directly would let raw callers interleave with them.
+func (s *Store) RawSQL() RawSQL { return s }
+
+// DBStats returns the handle's counters as a value, so a caller cannot reach the handle.
+// WaitCount/WaitDuration say whether callers had to queue for the single connection - the
+// only wait here that a context could cut short.
+func (s *Store) DBStats() sql.DBStats {
+	return s.db.Stats()
+}
+
+// Exec runs a raw SQL statement. Outside the store it is reachable only through RawSQL.
 func (s *Store) Exec(query string, args ...any) (sql.Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.db.Exec(query, args...)
 }
 
-// Query runs a raw SQL query that returns rows.
+// Query runs a raw SQL query that returns rows. See Exec.
 func (s *Store) Query(query string, args ...any) (*sql.Rows, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.db.Query(query, args...)
 }
 
-// QueryRow runs a raw SQL query that returns a single row.
+// QueryRow runs a raw SQL query that returns a single row. See Exec.
 func (s *Store) QueryRow(query string, args ...any) *sql.Row {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -260,80 +285,88 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 	if err != nil {
 		return err
 	}
-	// Migrations for existing databases
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN plan_mode INTEGER NOT NULL DEFAULT 0`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN merge_on_commit INTEGER NOT NULL DEFAULT 1`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN merge_children INTEGER NOT NULL DEFAULT 1`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks RENAME COLUMN merge_on_commit TO auto_merge`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks RENAME COLUMN merge_children TO subtasks_auto_merge`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN model_name TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN prompt_tokens INTEGER DEFAULT 0`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN predicted_tokens INTEGER DEFAULT 0`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN prompt_ms INTEGER DEFAULT 0`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN predicted_ms INTEGER DEFAULT 0`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN duration INTEGER DEFAULT 0`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN tool_calls TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN tool_result TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN reasoning_content TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT NULL`)
+	// Migrations for existing databases. Each is probed first (migrations.go), so a
+	// logged failure is a real one; the CREATE TABLE above covers a fresh database.
+	//
+	// plan_mode is absent on purpose: plan mode is task.OperatingMode == "plan", and the
+	// column was neither written nor read. Databases that have it keep it.
+	// auto_merge arrived as merge_on_commit and was renamed, so only a database older
+	// than both names needs the add-then-rename.
+	if !s.hasColumn("tasks", "auto_merge") && !s.hasColumn("tasks", "merge_on_commit") {
+		s.addColumn("tasks", "merge_on_commit", "INTEGER NOT NULL DEFAULT 1")
+	}
+	s.renameColumn("tasks", "merge_on_commit", "auto_merge")
+	if !s.hasColumn("tasks", "subtasks_auto_merge") && !s.hasColumn("tasks", "merge_children") {
+		s.addColumn("tasks", "merge_children", "INTEGER NOT NULL DEFAULT 1")
+	}
+	s.renameColumn("tasks", "merge_children", "subtasks_auto_merge")
+	s.addColumn("task_messages", "model_name", "TEXT DEFAULT NULL")
+	s.addColumn("task_messages", "prompt_tokens", "INTEGER DEFAULT 0")
+	s.addColumn("task_messages", "predicted_tokens", "INTEGER DEFAULT 0")
+	s.addColumn("task_messages", "prompt_ms", "INTEGER DEFAULT 0")
+	s.addColumn("task_messages", "predicted_ms", "INTEGER DEFAULT 0")
+	s.addColumn("task_messages", "duration", "INTEGER DEFAULT 0")
+	s.addColumn("task_messages", "tool_calls", "TEXT DEFAULT NULL")
+	s.addColumn("task_messages", "tool_result", "TEXT DEFAULT NULL")
+	s.addColumn("task_messages", "reasoning_content", "TEXT DEFAULT NULL")
+	s.addColumn("tasks", "parent_task_id", "TEXT NULL")
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN title_generating INTEGER NOT NULL DEFAULT 0`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN cache_tokens INTEGER DEFAULT 0`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN is_loop_hint INTEGER NOT NULL DEFAULT 0`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN provider_name TEXT DEFAULT NULL`)
-	// Thread support migrations
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN current_thread_id TEXT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN thread_id TEXT NULL`)
+	s.addColumn("tasks", "title_generating", "INTEGER NOT NULL DEFAULT 0")
+	s.addColumn("task_messages", "cache_tokens", "INTEGER DEFAULT 0")
+	s.addColumn("task_messages", "is_loop_hint", "INTEGER NOT NULL DEFAULT 0")
+	s.addColumn("task_messages", "provider_name", "TEXT DEFAULT NULL")
+	// Thread support
+	s.addColumn("tasks", "current_thread_id", "TEXT NULL")
+	s.addColumn("task_messages", "thread_id", "TEXT NULL")
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id)`)
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_task_messages_thread ON task_messages(thread_id)`)
-	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN parent_thread_id TEXT NULL`)        // best-effort for existing tables
-	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_id TEXT NULL`)   // best-effort
-	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_message_time TEXT NULL`) // best-effort
-	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN checkpoint_commit_hash TEXT NULL`)  // best-effort
-	_, _ = s.db.Exec(`ALTER TABLE task_threads ADD COLUMN worktree_stash_hash TEXT NULL`)     // best-effort
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN reasoning_effort TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN origin_branch TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_enabled INTEGER NOT NULL DEFAULT 0`)
-	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_network_isolation INTEGER NOT NULL DEFAULT 0`)
-	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_image TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_dockerfile_path TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_memory_limit INTEGER NOT NULL DEFAULT 1024`)
-	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_forward_ports TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_mounts TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_envs TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE projects ADD COLUMN sandbox_capabilities TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_ref TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN base_commit TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN branch_tip TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks RENAME COLUMN status_state TO execution_state`)
+	s.addColumn("task_threads", "parent_thread_id", "TEXT NULL")
+	s.addColumn("task_threads", "checkpoint_message_id", "TEXT NULL")
+	s.addColumn("task_threads", "checkpoint_message_time", "TEXT NULL")
+	s.addColumn("task_threads", "checkpoint_commit_hash", "TEXT NULL")
+	s.addColumn("task_threads", "worktree_stash_hash", "TEXT NULL")
+	s.addColumn("tasks", "reasoning_effort", "TEXT DEFAULT NULL")
+	s.addColumn("projects", "origin_branch", "TEXT DEFAULT NULL")
+	s.addColumn("projects", "sandbox_enabled", "INTEGER NOT NULL DEFAULT 0")
+	s.addColumn("projects", "sandbox_network_isolation", "INTEGER NOT NULL DEFAULT 0")
+	s.addColumn("projects", "sandbox_image", "TEXT DEFAULT NULL")
+	s.addColumn("projects", "sandbox_dockerfile_path", "TEXT DEFAULT NULL")
+	s.addColumn("projects", "sandbox_memory_limit", "INTEGER NOT NULL DEFAULT 1024")
+	s.addColumn("projects", "sandbox_forward_ports", "TEXT DEFAULT NULL")
+	s.addColumn("projects", "sandbox_mounts", "TEXT DEFAULT NULL")
+	s.addColumn("projects", "sandbox_envs", "TEXT DEFAULT NULL")
+	s.addColumn("projects", "sandbox_capabilities", "TEXT DEFAULT NULL")
+	s.addColumn("tasks", "base_ref", "TEXT DEFAULT NULL")
+	s.addColumn("tasks", "base_commit", "TEXT DEFAULT NULL")
+	s.addColumn("tasks", "branch_tip", "TEXT DEFAULT NULL")
+	s.renameColumn("tasks", "status_state", "execution_state")
 	// Runtime port mappings (ephemeral, cleared when task ends)
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN assigned_ports TEXT DEFAULT NULL`)
+	s.addColumn("tasks", "assigned_ports", "TEXT DEFAULT NULL")
 	// File checkpoint tracking
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN git_commit_hash TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN attachments TEXT DEFAULT NULL`)
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN severity TEXT DEFAULT NULL`)
+	s.addColumn("task_messages", "git_commit_hash", "TEXT DEFAULT NULL")
+	s.addColumn("task_messages", "attachments", "TEXT DEFAULT NULL")
+	s.addColumn("task_messages", "severity", "TEXT DEFAULT NULL")
 	// The assistant message a tool_call row belongs to. Rebuilding the conversation used
 	// to rely on tool_call rows being contiguous with their assistant row, which any
 	// message written during tool execution (LSP diagnostics, merge-conflict notes)
 	// silently broke — dropping the rest of the turn's tool calls and results.
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN assistant_msg_id TEXT DEFAULT NULL`)
+	s.addColumn("task_messages", "assistant_msg_id", "TEXT DEFAULT NULL")
 	// Sub-classification of a row within its role — advisory rows carry "diagnostics" or
 	// "merge_conflict" so the transcript can title the note after a reload, not just live.
-	_, _ = s.db.Exec(`ALTER TABLE task_messages ADD COLUMN kind TEXT DEFAULT NULL`)
-	// Add cost column to cumulative token stats (idempotent — ALTER TABLE IF NOT EXISTS is not standard SQLite)
-	_, _ = s.db.Exec(`ALTER TABLE project_token_stats ADD COLUMN cost REAL NOT NULL DEFAULT 0`)
+	s.addColumn("task_messages", "kind", "TEXT DEFAULT NULL")
 	// Separate merge conflict flag so execution_state can stay "running"
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN has_merge_conflict INTEGER NOT NULL DEFAULT 0`)
+	s.addColumn("tasks", "has_merge_conflict", "INTEGER NOT NULL DEFAULT 0")
 	// Operating mode: act (default), plan, or explore
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN operating_mode TEXT NOT NULL DEFAULT 'act'`)
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN summarizing INTEGER NOT NULL DEFAULT 0`)
+	s.addColumn("tasks", "operating_mode", "TEXT NOT NULL DEFAULT 'act'")
+	s.addColumn("tasks", "summarizing", "INTEGER NOT NULL DEFAULT 0")
 	// Accumulated API cost (USD) for the last task run
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN session_cost REAL NOT NULL DEFAULT 0`)
+	s.addColumn("tasks", "session_cost", "REAL NOT NULL DEFAULT 0")
 	// Records whether the task execution was auto-started from a parent (sibling continuation)
-	_, _ = s.db.Exec(`ALTER TABLE tasks ADD COLUMN autostarted INTEGER NOT NULL DEFAULT 0`)
+	s.addColumn("tasks", "autostarted", "INTEGER NOT NULL DEFAULT 0")
 	// moved_at orders the board: it changes only when a task moves column (see UpdateTask).
-	// Backfilled from created_at on the first startup after the upgrade.
-	if _, err := s.db.Exec(`ALTER TABLE tasks ADD COLUMN moved_at TEXT NOT NULL DEFAULT ''`); err == nil {
+	// The backfill belongs to the moment the column first appears, so this one probes.
+	if !s.hasColumn("tasks", "moved_at") {
+		s.addColumn("tasks", "moved_at", "TEXT NOT NULL DEFAULT ''")
 		_, _ = s.db.Exec(`UPDATE tasks SET moved_at = created_at WHERE moved_at = ''`)
 	}
 	// Cumulative token stats table (survives task deletion)
@@ -352,6 +385,8 @@ CREATE INDEX IF NOT EXISTS idx_task_threads_task ON task_threads(task_id);
 			FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 		)
 	`)
+	// A project_token_stats table predating cost has none; CREATE TABLE cannot alter it.
+	s.addColumn("project_token_stats", "cost", "REAL NOT NULL DEFAULT 0")
 	// Cumulative task tracking table (survives task deletion)
 	_, _ = s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS project_token_tasks (

@@ -53,7 +53,7 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 	// (shared with /api/preview).
 	worktreePath, path, err := s.resolveWorktreeForFile(project, taskID, path)
 	if err != nil {
-		JSONError(w, http.StatusNotFound, "task worktree not found")
+		Fail(w, err, "resolve worktree", "task worktree not found")
 		return
 	}
 	// Validate against the project root. The returned path is symlink-resolved and
@@ -283,7 +283,7 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 	if taskID != "" {
 		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
 		if err != nil {
-			JSONError(w, http.StatusNotFound, "task worktree not found")
+			Fail(w, err, "resolve worktree", "task worktree not found")
 			return
 		}
 		worktreePath = wtPath
@@ -340,7 +340,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	if taskID != "" {
 		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
 		if err != nil {
-			JSONError(w, http.StatusNotFound, "task worktree not found")
+			Fail(w, err, "resolve worktree", "task worktree not found")
 			return
 		}
 		worktreePath = wtPath
@@ -525,19 +525,19 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 		// The task must exist and belong to this project.
 		project, err = s.store.GetProject(projectID)
 		if err != nil {
-			JSONError(w, http.StatusNotFound, "project not found")
+			Fail(w, err, "get project", "project not found")
 			return
 		}
 		task, taskErr := s.store.GetTask(projectID, taskID)
 		if taskErr != nil {
-			JSONError(w, http.StatusNotFound, "task not found")
+			Fail(w, taskErr, "get task", "task not found")
 			return
 		}
 		_ = task // task exists and belongs to project
 		searchRoot, err = s.executor.WorktreeMgr().WorktreePath(taskID)
 		if err != nil {
 			log.Printf("fs resolve worktree failed: %v", err)
-			JSONError(w, http.StatusNotFound, "failed to resolve worktree path")
+			Fail(w, err, "resolve worktree", "failed to resolve worktree path")
 			return
 		}
 		// The path is server-derived; only check it stays under the workspace dir.
@@ -551,7 +551,7 @@ func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	} else {
 		project, err = s.store.GetProject(projectID)
 		if err != nil {
-			JSONError(w, http.StatusNotFound, "project not found")
+			Fail(w, err, "get project", "project not found")
 			return
 		}
 		searchRoot = project.Path
@@ -932,10 +932,9 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// With a project context the path is jailed to it (or the workspace dir) like
-	// every other fs endpoint; before this the handler ran `git init` and wrote
-	// README.md at any absolute path the client named. The no-project
-	// directory-picker flow stays unconstrained, as in handleFSMkdir.
+	// With a project context the path is jailed to it (or the workspace dir) like every
+	// other fs endpoint. The no-project directory-picker flow stays unconstrained, as in
+	// handleFSMkdir.
 	if project != nil {
 		resolved, err := s.validateFSPath(project, req.Path)
 		if err != nil {
@@ -1070,7 +1069,7 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	if taskID != "" {
 		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
 		if err != nil {
-			JSONError(w, http.StatusNotFound, "task worktree not found")
+			Fail(w, err, "resolve worktree", "task worktree not found")
 			return
 		}
 		worktreePath = wtPath

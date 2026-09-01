@@ -1,3 +1,7 @@
+// Package types is the shared kernel: domain rows that double as API DTOs, request
+// payloads, the WebSocket vocabulary, and the rules every layer must agree on - Status and
+// ExecutionState, ref validation, branch slugging, crypto/rand task IDs.
+// Behavior belongs elsewhere; this is the vocabulary.
 package types
 
 import (
@@ -6,32 +10,32 @@ import (
 
 // Task represents a card on the Kanban board.
 type Task struct {
-	ID                        string `json:"id"`
-	ProjectID                 string `json:"project_id"`
-	Title                     string `json:"title"`
-	Prompt                    string `json:"prompt"`
-	Status                    string `json:"status"`
-	SessionID                 string `json:"session_id"`
-	Branch                    string `json:"branch"`
-	BaseRef                   string `json:"base_ref,omitempty"`
-	BaseCommit                string `json:"base_commit,omitempty"` // commit hash of base_ref at task start
-	BranchTip                 string `json:"branch_tip,omitempty"`  // commit hash at time of commit-and-done
-	Output                    string `json:"output"`
-	ExecutionState            string `json:"execution_state"`
-	HasMergeConflict          bool   `json:"has_merge_conflict"`
-	LlamaServerURL            string `json:"llama_server_url"`
-	ModelName                 string `json:"model_name"`
-	ReasoningEffort           string `json:"reasoning_effort"`
-	MaxConsecutiveFailedTurns int    `json:"max_consecutive_failed_turns"`
-	AutoCommit                bool   `json:"auto_commit"`
-	AutoMerge                 bool   `json:"auto_merge"`
-	SubtasksAutoMerge         bool   `json:"subtasks_auto_merge"` // parent-only: children inherit this as auto_merge
-	OperatingMode             string `json:"operating_mode"`      // "act" (default), "plan", or "explore"
-	ParentTaskID              string `json:"parent_task_id,omitempty"`
-	TitleGenerating           bool   `json:"title_generating"`
-	Summarizing               bool   `json:"summarizing"`
-	CurrentThreadID           string `json:"current_thread_id,omitempty"`
-	WorktreeExists            bool   `json:"worktree_exists"`
+	ID                        string         `json:"id"`
+	ProjectID                 string         `json:"project_id"`
+	Title                     string         `json:"title"`
+	Prompt                    string         `json:"prompt"`
+	Status                    Status         `json:"status"`
+	SessionID                 string         `json:"session_id"`
+	Branch                    string         `json:"branch"`
+	BaseRef                   string         `json:"base_ref,omitempty"`
+	BaseCommit                string         `json:"base_commit,omitempty"` // commit hash of base_ref at task start
+	BranchTip                 string         `json:"branch_tip,omitempty"`  // commit hash at time of commit-and-done
+	Output                    string         `json:"output"`
+	ExecutionState            ExecutionState `json:"execution_state"`
+	HasMergeConflict          bool           `json:"has_merge_conflict"`
+	LlamaServerURL            string         `json:"llama_server_url"`
+	ModelName                 string         `json:"model_name"`
+	ReasoningEffort           string         `json:"reasoning_effort"`
+	MaxConsecutiveFailedTurns int            `json:"max_consecutive_failed_turns"`
+	AutoCommit                bool           `json:"auto_commit"`
+	AutoMerge                 bool           `json:"auto_merge"`
+	SubtasksAutoMerge         bool           `json:"subtasks_auto_merge"` // parent-only: children inherit this as auto_merge
+	OperatingMode             string         `json:"operating_mode"`      // "act" (default), "plan", or "explore"
+	ParentTaskID              string         `json:"parent_task_id,omitempty"`
+	TitleGenerating           bool           `json:"title_generating"`
+	Summarizing               bool           `json:"summarizing"`
+	CurrentThreadID           string         `json:"current_thread_id,omitempty"`
+	WorktreeExists            bool           `json:"worktree_exists"`
 	// Autostarted records whether this execution was started autonomously
 	Autostarted bool      `json:"-"`
 	CreatedAt   time.Time `json:"created_at"`

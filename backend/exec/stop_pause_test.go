@@ -15,18 +15,18 @@ import (
 )
 
 // isPaused matches the new paused state: in the In Progress column, not running.
-var isPaused = func(st, es string) bool { return st == "in_progress" && es == "paused" }
+var isPaused = func(st types.Status, es types.ExecutionState) bool { return st == "in_progress" && es == "paused" }
 
 // --- applyStopTransition (pure helper) ---
 
 func TestApplyStopTransition(t *testing.T) {
 	cases := []struct {
 		name        string
-		status      string
-		execState   string
+		status      types.Status
+		execState   types.ExecutionState
 		wantChanged bool
-		wantExec    string
-		wantStatus  string
+		wantExec    types.ExecutionState
+		wantStatus  types.Status
 	}{
 		{"in_progress running -> paused", "in_progress", "running", true, "paused", "in_progress"},
 		{"in_progress pulling -> paused", "in_progress", "pulling_image", true, "paused", "in_progress"},
@@ -55,7 +55,7 @@ func TestApplyStopTransition(t *testing.T) {
 
 // --- StopTask with no live executor (stale state after restart/crash) ---
 
-func createTaskRow(t *testing.T, s *store.Store, id, projectID, status, execState string) *types.Task {
+func createTaskRow(t *testing.T, s *store.Store, id, projectID string, status types.Status, execState types.ExecutionState) *types.Task {
 	t.Helper()
 	now := time.Now().UTC()
 	task := &types.Task{
@@ -80,7 +80,7 @@ func createTaskRow(t *testing.T, s *store.Store, id, projectID, status, execStat
 // fix StopTask returned "task not running" and the task was stuck "Running".
 func TestStopStaleRunningTask(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-stop-stale", "Stop Stale")
 
 	createTaskRow(t, s, "stale-running", proj.ID, "in_progress", "running")
@@ -90,7 +90,7 @@ func TestStopStaleRunningTask(t *testing.T) {
 		t.Fatalf("StopTask on stale running task must not error (was 'task not running'): %v", err)
 	}
 	task := waitTaskState(t, s, "stale-running", isPaused)
-	if task.Status != "in_progress" {
+	if task.Status != types.StatusInProgress {
 		t.Fatalf("status = %s, want in_progress", task.Status)
 	}
 }
@@ -99,7 +99,7 @@ func TestStopStaleRunningTask(t *testing.T) {
 // In Progress column settles to idle (not paused) when stopped.
 func TestStopStaleNonInProgressTask(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-stop-stale-2", "Stop Stale 2")
 
 	createTaskRow(t, s, "stale-review", proj.ID, "review", "running")
@@ -127,7 +127,7 @@ func TestStopStaleMissingTask(t *testing.T) {
 // freed for the next task.
 func TestStopRunningTaskMidStream(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-stop-live", "Stop Live")
 
 	mock := newHeldLLMMock()
@@ -175,7 +175,7 @@ func TestStopRunningTaskMidStream(t *testing.T) {
 // worktree/HTTP plumbing that the lightweight test executor lacks.
 func startExecTaskExisting(t *testing.T, te *TaskExecutor, proj *types.Project, taskID, serverURL string) *taskExecSetup {
 	t.Helper()
-	task, err := te.store.GetTaskByID(taskID)
+	task, err := te.rawStore().GetTaskByID(taskID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -219,7 +219,7 @@ func startExecTaskExisting(t *testing.T, te *TaskExecutor, proj *types.Project, 
 // executor for it (what /resume does) and confirm it runs again.
 func TestPauseResumeCycle(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-pause-resume", "Pause Resume")
 
 	mock := newHeldLLMMock()
@@ -256,7 +256,7 @@ func TestPauseResumeCycle(t *testing.T) {
 // handleStopped reverted it to review+idle).
 func TestStopDoesNotClobberMovedTask(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-stop-clobber", "Stop Clobber")
 
 	mock := newHeldLLMMock()
@@ -270,8 +270,8 @@ func TestStopDoesNotClobberMovedTask(t *testing.T) {
 	// User moves the task to Done (HandleMove does this: status done +
 	// execution_state completed, then stops the executor).
 	fresh, _ := s.GetTaskByID("stop-clobber-1")
-	fresh.Status = "done"
-	fresh.ExecutionState = "completed"
+	fresh.Status = types.StatusDone
+	fresh.ExecutionState = types.ExecStateCompleted
 	if err := s.UpdateTask(fresh); err != nil {
 		t.Fatalf("move to done: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestStopDoesNotClobberMovedTask(t *testing.T) {
 
 	// Wait for the executor to exit (its deferred cancel handling runs
 	// handleCancelledTask, which must NOT rewrite the row).
-	waitTaskState(t, s, "stop-clobber-1", func(st, es string) bool {
+	waitTaskState(t, s, "stop-clobber-1", func(st types.Status, es types.ExecutionState) bool {
 		return st == "done" && es == "completed"
 	})
 	time.Sleep(500 * time.Millisecond) // give a (buggy) late write a chance to clobber
@@ -290,7 +290,7 @@ func TestStopDoesNotClobberMovedTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if final.Status != "done" || final.ExecutionState != "completed" {
+	if final.Status != types.StatusDone || final.ExecutionState != types.ExecStateCompleted {
 		t.Fatalf("task clobbered by executor exit: got %s/%s, want done/completed", final.Status, final.ExecutionState)
 	}
 }
@@ -302,7 +302,7 @@ func TestStopDoesNotClobberMovedTask(t *testing.T) {
 // are not in-flight are untouched.
 func TestRecoverStaleTasks(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-recover", "Recover")
 
 	createTaskRow(t, s, "rec-running", proj.ID, "in_progress", "running")
@@ -318,8 +318,8 @@ func TestRecoverStaleTasks(t *testing.T) {
 	waitTaskState(t, s, "rec-running", isPaused)
 	waitTaskState(t, s, "rec-pulling", isPaused)
 	waitTaskState(t, s, "rec-review", isIdle)
-	waitTaskState(t, s, "rec-backlog", func(st, es string) bool { return st == "backlog" && es == "idle" })
-	if idle := waitTaskState(t, s, "rec-idle", isPending); idle.ExecutionState != "idle" {
+	waitTaskState(t, s, "rec-backlog", func(st types.Status, es types.ExecutionState) bool { return st == "backlog" && es == "idle" })
+	if idle := waitTaskState(t, s, "rec-idle", isPending); idle.ExecutionState != types.ExecStateIdle {
 		t.Fatalf("rec-idle modified: %s", idle.ExecutionState)
 	}
 }
@@ -331,15 +331,15 @@ func TestRecoverStaleTasks(t *testing.T) {
 // row, and no "Pending" card for a conversation that is waiting on the user.
 func TestStartTaskAssistantLastSettleIdle(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
-	s := te.store
+	s := te.rawStore()
 
 	task := &types.Task{
 		ID:             "start-assistant-last",
 		ProjectID:      projectID,
 		Title:          "assistant last",
 		Prompt:         "prompt",
-		Status:         "review",
-		ExecutionState: "idle",
+		Status:         types.StatusReview,
+		ExecutionState: types.ExecStateIdle,
 		LlamaServerURL: "http://localhost:1",
 		ModelName:      "test-model",
 		CreatedAt:      time.Now().UTC(),
@@ -362,8 +362,8 @@ func TestStartTaskAssistantLastSettleIdle(t *testing.T) {
 		t.Fatalf("StartTask: %v", err)
 	}
 
-	task = waitTaskState(t, s, task.ID, func(st, es string) bool { return es == "idle" })
-	if task.Status != "review" {
+	task = waitTaskState(t, s, task.ID, func(st types.Status, es types.ExecutionState) bool { return es == "idle" })
+	if task.Status != types.StatusReview {
 		t.Fatalf("status = %s, want review (nothing to run — the agent waits for the user)", task.Status)
 	}
 	// No executor may remain registered.
@@ -383,7 +383,7 @@ func TestStartTaskAssistantLastSettleIdle(t *testing.T) {
 // the task stuck until a second Stop.
 func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-stop-ports", "Stop Ports")
 
 	mock := newHeldLLMMock()
@@ -394,13 +394,14 @@ func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
 	mock.waitForArrival(t, 1)
 	waitTaskState(t, s, "stop-ports-1", isRunning)
 
-	// A terminal session forwarded a port: the row and the executor's copy both
-	// carry it, which is what makes the exit path write.
+	// A terminal session forwarded a port. Terminals write the column directly, which
+	// is precisely the case the exit path must catch: the executor's own copy of the
+	// task never learns about it. (It used to be staged onto setup.task as well —
+	// that only worked because the test and the loop shared one struct.)
 	ports := []types.AssignedPort{{HostPort: 32145, ContainerPort: 3000}}
 	if err := s.SetTaskAssignedPorts("stop-ports-1", proj.ID, ports); err != nil {
 		t.Fatalf("assign ports: %v", err)
 	}
-	setup.task.AssignedPorts = ports
 
 	if err := te.StopTask("stop-ports-1"); err != nil {
 		t.Fatalf("StopTask: %v", err)
@@ -419,7 +420,7 @@ func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if got.ExecutionState != "paused" {
+	if got.ExecutionState != types.ExecStatePaused {
 		t.Fatalf("row right after StopTask: exec=%s, want paused", got.ExecutionState)
 	}
 
@@ -440,7 +441,7 @@ func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task after exit: %v", err)
 	}
-	if after.ExecutionState != "paused" {
+	if after.ExecutionState != types.ExecStatePaused {
 		t.Fatalf("executor exit resurrected the run: exec=%s", after.ExecutionState)
 	}
 }
@@ -449,7 +450,7 @@ func TestStopWithAssignedPortsLeavesTaskPaused(t *testing.T) {
 // write must not restart the run, but the resumed run's own claim must work.
 func TestStaleWriterCannotResurrectButRealClaimCan(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	s := te.store
+	s := te.rawStore()
 	proj := createProject(t, s, "proj-claim", "Claim")
 
 	mock := newHeldLLMMock()
@@ -475,20 +476,20 @@ func TestStaleWriterCannotResurrectButRealClaimCan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	stale.ExecutionState = "running"
+	stale.ExecutionState = types.ExecStateRunning
 	stale.Output = "written by a stale copy"
 	if err := s.UpdateTask(stale); err != nil {
 		t.Fatalf("stale write: %v", err)
 	}
 	// The struct mirrors what was stored instead of keeping its stale value.
-	if stale.ExecutionState != "paused" {
+	if stale.ExecutionState != types.ExecStatePaused {
 		t.Fatalf("in-memory copy after guarded write: exec=%s, want paused", stale.ExecutionState)
 	}
 	after, err := s.GetTaskByID("claim-1")
 	if err != nil {
 		t.Fatalf("get task after stale write: %v", err)
 	}
-	if after.ExecutionState != "paused" {
+	if after.ExecutionState != types.ExecStatePaused {
 		t.Fatalf("guarded UpdateTask resurrected the run: exec=%s", after.ExecutionState)
 	}
 	if after.Output != "written by a stale copy" {

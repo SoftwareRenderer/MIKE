@@ -1,3 +1,9 @@
+// Package sandbox owns the containers a task runs in: podman with the gVisor runsc
+// runtime, the container environment, loopback-bound port forwarding, interactive shells,
+// and the sandbox-bridge client.
+// There is no listener and no port for the bridge - a connection is one podman exec whose
+// lifetime is its consumer's. A sandbox is only created when gVisor is verified, with no
+// fallback to the host.
 package sandbox
 
 import (
@@ -105,13 +111,10 @@ type SandboxOpts struct {
 // session, not to the sandbox, so it is set on the shell's own exec.
 const shellTERM = "xterm-256color"
 
-// containerEnvArgs returns the -e flags for a sandbox container: the variables
-// configured for it and nothing else. An agent extension's envs come first, so
-// the project's own Sandbox Configuration wins on a key clash (podman takes the
-// last -e).
-//
-// The hardcoded TERM and PATH this replaced were a bug: -e overrides the image's
-// own ENV, so a custom image's PATH was thrown away.
+// containerEnvArgs returns the -e flags for a sandbox container: the variables configured
+// for it and nothing else. An agent extension's envs come first so the project's own
+// configuration wins on a clash (podman takes the last -e). Nothing is invented here: -e
+// overrides the image's ENV, so a hardcoded PATH would discard a custom image's one.
 func containerEnvArgs(taskID string, opts SandboxOpts) []string {
 	var args []string
 	add := func(source string, envs []types.SandboxEnv) {
@@ -253,9 +256,9 @@ func forwardPortSpec(hostPort, containerPort int) string {
 	return fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort)
 }
 
-// createContainerArgs is the fixed part of `podman create` for a task or project sandbox, before
-// any capability, mount, port or environment entry is appended. Extracted so the ordering is
-// testable: the global `--runtime-flag` options must precede `create`, `--pull` must follow it.
+// createContainerArgs is the fixed part of `podman create` for a task or project sandbox,
+// before any capability, mount, port or environment entry. Extracted so the ordering is
+// testable: the --runtime-flag options must precede `create`, --pull must follow it.
 //
 // --runtime-flag overlay2=root:self: use kernel overlay2 for writable rootfs
 // --runtime-flag ignore-cgroups: required for rootless gVisor (no cgroup access)
@@ -281,32 +284,24 @@ func createContainerArgs(containerName, mountPath string) []string {
 	}
 }
 
-// Create creates a gVisor sandbox container for a task
+// Create creates a gVisor sandbox container for a task.
 //
-// Filesystem Mounts:
-//   - Worktree: Bind-mounted at /home/sandbox/<project.Name>. Mode is read-only (ro) if planMode is true,
-//     otherwise read-write (rw).
-//   - Git Metadata: If project.Path is non-empty and .git/ exists, it is mounted read-only at the
-//     same absolute path to allow git to resolve refs, objects, and worktree metadata.
-//   - Agent Sandbox: If opts.AgentSandbox is provided, its mounts and envs are applied
-//     (default: /root/.config/agent).
-//   - Skills: If skillsDir is non-empty, it is bind-mounted read-only at SkillsMount.
-//   - Custom: Any additional mounts in opts.SandboxMounts are added after the standard mounts.
+// Mounts:
+//   - Worktree: /home/sandbox/<project.Name>, read-only in plan mode, read-write otherwise.
+//   - Git metadata: project.Path/.git mounted read-only at its own absolute path, so git
+//     can resolve refs, objects and worktree metadata.
+//   - Agent sandbox: opts.AgentSandbox mounts and envs (default /root/.config/agent).
+//   - Skills: skillsDir read-only at SkillsMount, when non-empty.
+//   - Custom: opts.SandboxMounts, appended after the standard mounts.
 //
-// Container Configuration:
-//   - Image: Uses opts.BaseImage if provided, otherwise defaults to BaseImage constant.
-//   - Network: Created with --network none if networkIsolation is true.
-//   - Memory: Created with --memory=<limit>M if memoryLimit > 0.
-//   - Environment: Only what was configured — the project's Sandbox Configuration
-//     plus an agent extension's envs (see containerEnvArgs). PATH and everything
-//     else stay as the image sets them.
+// Configuration: opts.BaseImage, else the BaseImage constant; --network none when
+// networkIsolation; --memory=<limit>M when memoryLimit > 0; environment limited to what was
+// configured (see containerEnvArgs) - PATH and the rest stay as the image sets them.
 //
-// Networking:
-//   - Port Forwarding: for each entry in opts.ForwardPorts an ephemeral host port is
-//     auto-assigned via net.Listen(":0") and mapped to the container port, bound to
-//     loopback only (127.0.0.1).
+// Port forwarding: each opts.ForwardPorts entry gets an ephemeral host port (net.Listen
+// ":0") mapped to the container port and bound to loopback.
 //
-// assignedPorts lists the host→container port mappings; it is nil on failure.
+// assignedPorts lists the host→container mappings; nil on failure.
 func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Project, opts SandboxOpts) ([]types.AssignedPort, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -1104,13 +1099,12 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 	return nil
 }
 
-// ProjectImageName returns the image name a project's Dockerfile image is built under, using a
+// ProjectImageName is the image name a project's Dockerfile image is built under, with a
 // sanitized project name for readability.
 //
 // It is qualified with the local registry on purpose: a project name may contain a dot, so
-// "sandbox-getmike.dev" looks like a host but is a short name to podman (see image_ref.go). And
-// `podman build -t sandbox-x` already stores the result as "localhost/sandbox-x", so this is the
-// name the image has always had in storage.
+// "sandbox-getmike.dev" looks like a host but is a short name to podman (see image_ref.go) -
+// and `podman build -t sandbox-x` stores the result as "localhost/sandbox-x" anyway.
 func ProjectImageName(projectName string) string {
 	safeName := strings.ReplaceAll(projectName, " ", "-")
 	safeName = strings.ReplaceAll(safeName, "/", "-")

@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"kanban/backend/errs"
 	"kanban/backend/fsutil"
 	"kanban/backend/sandbox"
 	"kanban/backend/types"
@@ -310,6 +311,12 @@ func (s *Server) HandlePreviewServe(w http.ResponseWriter, r *http.Request) {
 	if req.Project != "" || req.Path != "" {
 		worktreeRoot, dir, hostPath, err := s.resolveFSFilePath(req.Project, req.Task, req.Path)
 		if err != nil {
+			// A project or task that no longer exists is a 404; the other failures this
+			// resolver returns are the client's path being rejected, which stay 400.
+			if errs.IsNotFound(err) {
+				Fail(w, err, "resolve preview file", "project not found")
+				return
+			}
 			JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -570,11 +577,19 @@ func (s *Server) resolveFSFilePath(projectID, taskID, filePath string) (worktree
 	}
 	project, err := s.store.GetProject(projectID)
 	if err != nil {
-		return "", "", "", errors.New("project not found")
+		// Propagated as a classified not-found (message unchanged) rather than a fresh
+		// errors.New, so a caller can still tell "absent" from "database fault".
+		if errs.IsNotFound(err) {
+			return "", "", "", fmt.Errorf("project %w", errs.ErrNotFound)
+		}
+		return "", "", "", err
 	}
 	worktreePath, hostPath, err := s.resolveWorktreeForFile(project, taskID, filePath)
 	if err != nil {
-		return "", "", "", errors.New("task worktree not found")
+		if errs.IsNotFound(err) {
+			return "", "", "", fmt.Errorf("task worktree %w", errs.ErrNotFound)
+		}
+		return "", "", "", err
 	}
 	// Relative paths resolve against the worktree root defensively.
 	if !filepath.IsAbs(hostPath) {

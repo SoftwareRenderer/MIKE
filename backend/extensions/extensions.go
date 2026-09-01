@@ -1,3 +1,8 @@
+// Package extensions implements the extension system: agent, LSP and UI extensions -
+// their manifests, SQLite records, the registry client that pins them, the gVisor sandbox
+// they run in, and the REST API that drives them.
+// Privileges come from the manifest and are checked twice: on save/install, and again when
+// the sandbox is built (mount_policy.go).
 package extensions
 
 import (

@@ -101,7 +101,7 @@ func (s *SandboxStatsSampler) TickOnce() {
 		if err != nil || task == nil {
 			continue // project-level "proj:..." containers or unknown tasks
 		}
-		if task.Status != "in_progress" {
+		if task.Status != types.StatusInProgress {
 			continue // only update while the task is actually running
 		}
 		stats := s.source.GetMemoryStats(taskID)

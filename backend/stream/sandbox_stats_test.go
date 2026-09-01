@@ -67,7 +67,7 @@ func TestSandboxStatsSampler_PushOnChangeOnly(t *testing.T) {
 		},
 	}
 	tasks := fakeTaskLookup{
-		"task-1": {ID: "task-1", ProjectID: "proj-1", Status: "in_progress"},
+		"task-1": {ID: "task-1", ProjectID: "proj-1", Status: types.StatusInProgress},
 	}
 	b := &fakeBroadcaster{}
 	s := newTestSampler(source, tasks, b)
@@ -117,7 +117,7 @@ func TestSandboxStatsSampler_SkipsIdleAndUnknownTasks(t *testing.T) {
 		},
 	}
 	tasks := fakeTaskLookup{
-		"idle-task": {ID: "idle-task", ProjectID: "proj-1", Status: "review"},
+		"idle-task": {ID: "idle-task", ProjectID: "proj-1", Status: types.StatusReview},
 	} // "proj:proj-1" not in lookup → skipped
 	b := &fakeBroadcaster{}
 	s := newTestSampler(source, tasks, b)
@@ -139,7 +139,7 @@ func TestSandboxStatsSampler_LatestRetainedAfterIdle(t *testing.T) {
 		},
 	}
 	tasks := fakeTaskLookup{
-		"task-1": {ID: "task-1", ProjectID: "proj-1", Status: "in_progress"},
+		"task-1": {ID: "task-1", ProjectID: "proj-1", Status: types.StatusInProgress},
 	}
 	b := &fakeBroadcaster{}
 	s := newTestSampler(source, tasks, b)
@@ -150,7 +150,7 @@ func TestSandboxStatsSampler_LatestRetainedAfterIdle(t *testing.T) {
 	}
 
 	// Task goes idle: sampling stops but the most recent value is retained.
-	tasks["task-1"] = &types.Task{ID: "task-1", ProjectID: "proj-1", Status: "review"}
+	tasks["task-1"] = &types.Task{ID: "task-1", ProjectID: "proj-1", Status: types.StatusReview}
 	s.TickOnce()
 	if got := len(b.eventsSnapshot()); got != 1 {
 		t.Fatalf("idle tick: got %d events, want 1 (no new pushes)", got)
@@ -175,7 +175,7 @@ func TestSandboxStatsSampler_NotRunningSampledOnce(t *testing.T) {
 	// is pushed once, then not repeated.
 	source := &fakeStatsSource{ids: []string{"task-1"}} // no stats entry
 	tasks := fakeTaskLookup{
-		"task-1": {ID: "task-1", ProjectID: "proj-1", Status: "in_progress"},
+		"task-1": {ID: "task-1", ProjectID: "proj-1", Status: types.StatusInProgress},
 	}
 	b := &fakeBroadcaster{}
 	s := newTestSampler(source, tasks, b)

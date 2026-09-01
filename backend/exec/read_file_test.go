@@ -36,8 +36,8 @@ func makeTestTask(t *testing.T, s *store.Store, projectID, taskID string) *types
 		ProjectID:      projectID,
 		Title:          "Test Task",
 		Prompt:         "Test prompt",
-		Status:         "in_progress",
-		ExecutionState: "running",
+		Status:         types.StatusInProgress,
+		ExecutionState: types.ExecStateRunning,
 		LlamaServerURL: "http://test:8080",
 		ModelName:      "test-model",
 		OperatingMode:  "act",
@@ -53,7 +53,7 @@ func makeTestTask(t *testing.T, s *store.Store, projectID, taskID string) *types
 func TestReadFile_NoTruncation_SmallFile(t *testing.T) {
 	dir := t.TempDir()
 	te := newReadTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-1", "task-read-1")
+	task := makeTestTask(t, te.rawStore(), "proj-read-1", "task-read-1")
 
 	// Write a small file
 	content := "line 1\nline 2\nline 3\n"
@@ -80,7 +80,7 @@ func TestReadFile_NoTruncation_SmallFile(t *testing.T) {
 func TestReadFile_Truncation_LargeFile(t *testing.T) {
 	dir := t.TempDir()
 	te := newReadTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-2", "task-read-2")
+	task := makeTestTask(t, te.rawStore(), "proj-read-2", "task-read-2")
 
 	// Write a file larger than 50KB
 	lines := make([]string, 6000)
@@ -112,7 +112,7 @@ func TestReadFile_Truncation_LargeFile(t *testing.T) {
 func TestReadFile_Offset_AppliedBeforeTruncation(t *testing.T) {
 	dir := t.TempDir()
 	te := newReadTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-3", "task-read-3")
+	task := makeTestTask(t, te.rawStore(), "proj-read-3", "task-read-3")
 
 	// Write a file larger than 50KB with identifiable line content
 	totalLines := 8000
@@ -153,7 +153,7 @@ func TestReadFile_Offset_AppliedBeforeTruncation(t *testing.T) {
 func TestReadFile_OffsetAndLimit(t *testing.T) {
 	dir := t.TempDir()
 	te := newReadTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-4", "task-read-4")
+	task := makeTestTask(t, te.rawStore(), "proj-read-4", "task-read-4")
 
 	// Write a file with 100 lines
 	lines := make([]string, 100)
@@ -190,7 +190,7 @@ func TestReadFile_OffsetAndLimit(t *testing.T) {
 func TestReadFile_LimitOnly(t *testing.T) {
 	dir := t.TempDir()
 	te := newReadTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-5", "task-read-5")
+	task := makeTestTask(t, te.rawStore(), "proj-read-5", "task-read-5")
 
 	// Write a file with 50 lines
 	lines := make([]string, 50)
@@ -224,7 +224,7 @@ func TestReadFile_LimitOnly(t *testing.T) {
 func TestReadFile_OffsetPastEnd(t *testing.T) {
 	dir := t.TempDir()
 	te := newReadTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-6", "task-read-6")
+	task := makeTestTask(t, te.rawStore(), "proj-read-6", "task-read-6")
 
 	// Write a file with 10 lines
 	content := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n"
@@ -258,7 +258,7 @@ func TestReadFile_OffsetPastEnd(t *testing.T) {
 func TestReadFile_OffsetPastEnd_NoPanic(t *testing.T) {
 	dir := t.TempDir()
 	te := newReadTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-8", "task-read-8")
+	task := makeTestTask(t, te.rawStore(), "proj-read-8", "task-read-8")
 
 	// 194 lines exactly (matches the panic: len(lines) == 194).
 	lines := make([]string, 194)
@@ -286,7 +286,7 @@ func TestReadFile_OffsetPastEnd_NoPanic(t *testing.T) {
 func TestReadFile_OffsetValid_LimitClamped(t *testing.T) {
 	dir := t.TempDir()
 	te := newReadTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-9", "task-read-9")
+	task := makeTestTask(t, te.rawStore(), "proj-read-9", "task-read-9")
 
 	lines := make([]string, 100)
 	for i := range lines {
@@ -321,7 +321,7 @@ func TestReadFile_OffsetValid_LimitClamped(t *testing.T) {
 func TestReadFile_LimitOnly_Clamped(t *testing.T) {
 	dir := t.TempDir()
 	te := newReadTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-10", "task-read-10")
+	task := makeTestTask(t, te.rawStore(), "proj-read-10", "task-read-10")
 
 	lines := make([]string, 50)
 	for i := range lines {
@@ -349,7 +349,7 @@ func TestReadFile_LimitOnly_Clamped(t *testing.T) {
 func TestReadFile_OffsetAndLimit_AfterTruncationBoundary(t *testing.T) {
 	dir := t.TempDir()
 	te := newReadTestExecutor(t, dir)
-	task := makeTestTask(t, te.store, "proj-read-7", "task-read-7")
+	task := makeTestTask(t, te.rawStore(), "proj-read-7", "task-read-7")
 
 	// Write a file larger than 50KB
 	totalLines := 10000
