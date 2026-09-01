@@ -941,7 +941,7 @@ func (m *ExtensionLSPManager) ensureDocSync(ctx context.Context, sc *sandboxClie
 	action := decideDocSync(sc.openedFiles[uri], sc.openedFileContents[uri], string(content), sc.openedFileVersions[uri])
 	switch action.kind {
 	case "open":
-		if err := m.lspDidOpen(ctx, sc, uri, language, string(content), action.version); err != nil {
+		if err := m.lspDidOpen(ctx, sc, uri, wireLanguageId(language, filePath), string(content), action.version); err != nil {
 			return false, err
 		}
 	case "change":
@@ -955,6 +955,32 @@ func (m *ExtensionLSPManager) ensureDocSync(ctx context.Context, sc *sandboxClie
 	sc.openedFileContents[uri] = string(content)
 	sc.openedFileVersions[uri] = action.version
 	return true, nil
+}
+
+// jsTsLanguageIds maps a file extension to the LSP well-known languageId for the files
+// the TypeScript extension owns. The routing language cannot express this: one extension
+// serves ts, tsx, js and jsx under the single manifest language "typescript", and
+// typescript-language-server turns the wire languageId into a tsserver ScriptKind — only
+// the FIRST didOpen of a URI takes effect, so a ".tsx as typescript" here is a file that
+// answers every later request with a wall of "',' expected."
+var jsTsLanguageIds = map[string]string{
+	".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+	".jsx": "javascriptreact",
+	".ts":  "typescript", ".mts": "typescript", ".cts": "typescript",
+	".tsx": "typescriptreact",
+}
+
+// wireLanguageId is the languageId a didOpen should carry for this file. Every other
+// server (gopls, rust-analyzer, clangd) takes the language from the file name and ignores
+// this field, so only the TypeScript family needs the per-extension answer.
+func wireLanguageId(language, filePath string) string {
+	if !strings.EqualFold(language, "typescript") {
+		return language
+	}
+	if id, ok := jsTsLanguageIds[strings.ToLower(filepath.Ext(filePath))]; ok {
+		return id
+	}
+	return language
 }
 
 // lspDidOpen sends a textDocument/didOpen notification to the LSP server.

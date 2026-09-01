@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -22,14 +24,7 @@ import (
 // Skipped without typescript-language-server (MIKE_TSSERVER_BIN or PATH) and a typescript package
 // it can resolve; see seedTypeScript.
 func TestTSServerCrossFileViaBridge(t *testing.T) {
-	tsserver := os.Getenv("MIKE_TSSERVER_BIN")
-	if tsserver == "" {
-		var err error
-		tsserver, err = exec.LookPath("typescript-language-server")
-		if err != nil {
-			t.Skip("typescript-language-server not available (set MIKE_TSSERVER_BIN)")
-		}
-	}
+	tsserver := tsserverBinary(t)
 	bridgeBin := findBridgeBinary(t)
 
 	// ── Test workspace: two files in one tsconfig project ──
@@ -57,27 +52,8 @@ export function load(taskId: string) {
 `)
 
 	// ── Start the bridge (stdio mode, as in the extension sandbox) ──
-	bridgeCmd := exec.Command(bridgeBin)
-	bridgeCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	stdin, err := bridgeCmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := bridgeCmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
 	var bridgeErr bytes.Buffer
-	bridgeCmd.Stderr = &bridgeErr
-	if err := bridgeCmd.Start(); err != nil {
-		t.Skipf("cannot start sandbox-bridge (env limitation?): %v", err)
-	}
-	t.Cleanup(func() {
-		_ = syscall.Kill(-bridgeCmd.Process.Pid, syscall.SIGKILL)
-		_ = bridgeCmd.Wait()
-	})
-
-	client := bridge.NewClient(stdin, stdout)
+	client := startBridge(t, bridgeBin, &bridgeErr)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
@@ -87,27 +63,7 @@ export function load(taskId: string) {
 
 	uri := func(p string) string { return "file://" + p }
 
-	// Mirror lspInitialize: same initialize params the product sends.
-	initReq := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "initialize",
-		"params": map[string]any{
-			"rootUri": uri(ws),
-			"capabilities": map[string]any{
-				"textDocument": map[string]any{
-					"publishDiagnostics": map[string]any{"relatedInformation": true},
-					"hover":              map[string]any{"contentFormat": []string{"markdown", "plaintext"}},
-				},
-				"workspace": map[string]any{"workspaceFolders": true},
-			},
-			"workspaceFolders": []map[string]any{{"uri": uri(ws), "name": filepath.Base(ws)}},
-		},
-	}
-	if _, err := sendLSPJSONRPC(ctx, client, initReq); err != nil {
-		t.Fatalf("initialize failed: %v (bridge stderr: %s)", err, bridgeErr.String())
-	}
-	notifyLSP(ctx, t, client, "initialized", map[string]any{})
+	initializeServer(ctx, t, client, ws, &bridgeErr)
 
 	didOpen := func(p string) {
 		content, err := os.ReadFile(p)
@@ -239,6 +195,200 @@ export function reload(taskId: string) {
 	if got := strings.Count(string(refs2Envelope.Result), uri(chatPath)); got != 3 {
 		t.Errorf("after didChange re-sync, references should show 3 refs in chat.ts (import + 2 usages), got %d: %s", got, refs2Envelope.Result)
 	}
+}
+
+// TestTSServerWireLanguageIdOpensJsxFiles drives a real typescript-language-server through the
+// bridge and opens a .tsx and a .jsx file with the languageId the product puts on the wire.
+// The manifest language — "typescript", which is what routing keys on — is the wrong
+// ScriptKind for both: tsserver then parses JSX without the JSX grammar and answers with a
+// wall of "',' expected." for syntax the file never contained, and it keeps that verdict for
+// the URI because only the first didOpen of a file ever reaches it.
+func TestTSServerWireLanguageIdOpensJsxFiles(t *testing.T) {
+	tsserver := tsserverBinary(t)
+
+	ws := t.TempDir()
+	seedTypeScript(t, ws, tsserver)
+	src := filepath.Join(ws, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(ws, "tsconfig.json"), `{
+	"compilerOptions": {"target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx", "noEmit": true},
+	"include": ["src"]
+}`)
+	widget := filepath.Join(src, "Widget.tsx")
+	writeFile(t, widget, `type Props = { name: string };
+
+export function Widget({ name }: Props) {
+    const items: string[] = [name];
+    return <ul>{items.map(i => <li key={i}>{i}</li>)}</ul>;
+}
+`)
+	legacy := filepath.Join(src, "legacy.jsx")
+	writeFile(t, legacy, `export function Legacy(items) {
+    return <ul>{items.map(i => <li key={i}>{i}</li>)}</ul>;
+}
+`)
+
+	var bridgeErr bytes.Buffer
+	client := startBridge(t, findBridgeBinary(t), &bridgeErr)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	if err := client.LSPStart(ctx, tsserver, []string{"--stdio"}); err != nil {
+		t.Fatalf("LSPStart failed: %v (bridge stderr: %s)", err, bridgeErr.String())
+	}
+	initializeServer(ctx, t, client, ws, &bridgeErr)
+
+	// Only a grammar complaint is the failure under test, and only a published report makes
+	// the assertion non-vacuous. A temp workspace has no @types/react, so the JSX errors that
+	// prove the file WAS parsed as JSX are the fixture talking — they are expected, and asked
+	// for by name below.
+	var mu sync.Mutex
+	reports := map[string][]string{}
+	go func() {
+		for raw := range client.LSPNotificationCh() {
+			var msg struct {
+				Method string `json:"method"`
+				Params struct {
+					Uri         string `json:"uri"`
+					Diagnostics []struct {
+						Code    any    `json:"code"`
+						Message string `json:"message"`
+					} `json:"diagnostics"`
+				} `json:"params"`
+			}
+			if err := json.Unmarshal(raw, &msg); err != nil || msg.Method != "textDocument/publishDiagnostics" {
+				continue
+			}
+			var msgs []string
+			for _, d := range msg.Params.Diagnostics {
+				msgs = append(msgs, fmt.Sprintf("[%v] %s", d.Code, d.Message))
+			}
+			mu.Lock()
+			reports[msg.Params.Uri] = msgs
+			mu.Unlock()
+		}
+	}()
+
+	for _, path := range []string{widget, legacy} {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		notifyLSP(ctx, t, client, "textDocument/didOpen", map[string]any{
+			"textDocument": map[string]any{
+				"uri":        "file://" + path,
+				"languageId": wireLanguageId("typescript", path),
+				"version":    1,
+				"text":       string(content),
+			},
+		})
+	}
+
+	// A report per file: "no grammar complaints" is also what a server that never saw the
+	// file answers, so the test would pass vacuously without this.
+	waitReport := func(path string) []string {
+		t.Helper()
+		deadline := time.NewTimer(45 * time.Second)
+		defer deadline.Stop()
+		for {
+			uri := "file://" + path
+			mu.Lock()
+			msgs, reported := reports[uri]
+			mu.Unlock()
+			if reported {
+				return msgs
+			}
+			select {
+			case <-deadline.C:
+				t.Fatalf("nothing was ever published for %s — cannot tell a clean parse from an ignored file", path)
+			case <-ctx.Done():
+				t.Fatalf("waiting for diagnostics on %s: %v", path, ctx.Err())
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}
+
+	widgetMsgs := waitReport(widget)
+	all := append(append([]string{}, widgetMsgs...), waitReport(legacy)...)
+	for _, m := range all {
+		if strings.Contains(m, "expected") || strings.Contains(m, "can only be used in TypeScript files") {
+			t.Errorf("tsserver parsed a file with the wrong ScriptKind: %s", m)
+		}
+	}
+	// The other half of the verdict: tsserver only complains about JSX types once it has
+	// analyzed the file AS JSX. With the old id ("typescript", the manifest language) this
+	// file instead produced 15 × "',' expected." and no JSX diagnostic at all.
+	if !strings.Contains(strings.Join(widgetMsgs, "\n"), "JSX") {
+		t.Errorf("expected a JSX diagnostic (proof the .tsx was parsed with the JSX grammar); got %v", widgetMsgs)
+	}
+}
+
+// initializeServer sends the handshake the product sends (mirror of lspInitialize) plus the
+// "initialized" notification. typescript-language-server accepts no document — and publishes
+// no diagnostic — before it has been initialized, so every test that wants a server answer
+// starts here.
+func initializeServer(ctx context.Context, t *testing.T, client *bridge.Client, ws string, stderr *bytes.Buffer) {
+	t.Helper()
+	initReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"rootUri": "file://" + ws,
+			"capabilities": map[string]any{
+				"textDocument": map[string]any{
+					"publishDiagnostics": map[string]any{"relatedInformation": true},
+					"hover":              map[string]any{"contentFormat": []string{"markdown", "plaintext"}},
+				},
+				"workspace": map[string]any{"workspaceFolders": true},
+			},
+			"workspaceFolders": []map[string]any{{"uri": "file://" + ws, "name": filepath.Base(ws)}},
+		},
+	}
+	if _, err := sendLSPJSONRPC(ctx, client, initReq); err != nil {
+		t.Fatalf("initialize failed: %v (bridge stderr: %s)", err, stderr.String())
+	}
+	notifyLSP(ctx, t, client, "initialized", map[string]any{})
+}
+
+// tsserverBinary resolves a typescript-language-server to drive, or skips the test.
+func tsserverBinary(t *testing.T) string {
+	t.Helper()
+	if bin := os.Getenv("MIKE_TSSERVER_BIN"); bin != "" {
+		return bin
+	}
+	bin, err := exec.LookPath("typescript-language-server")
+	if err != nil {
+		t.Skip("typescript-language-server not available (set MIKE_TSSERVER_BIN)")
+	}
+	return bin
+}
+
+// startBridge runs the sandbox-bridge in stdio mode (as the extension sandbox does) and
+// returns the host side of its stdin/stdout. The process belongs to the test: it is killed
+// with the process group, so a language server spawned under it never outlives the run.
+func startBridge(t *testing.T, bridgeBin string, stderr *bytes.Buffer) *bridge.Client {
+	t.Helper()
+	cmd := exec.Command(bridgeBin)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start sandbox-bridge (env limitation?): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+	return bridge.NewClient(stdin, stdout)
 }
 
 // findBridgeBinary locates the sandbox-bridge binary: the repo's prebuilt

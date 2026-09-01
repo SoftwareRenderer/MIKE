@@ -40,19 +40,7 @@
     import { appStore, dialogStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
     import { reconcileExternalChange } from '$lib/utils/editor-merge';
-    import { javascript } from '@codemirror/lang-javascript';
-    import { python } from '@codemirror/lang-python';
-    import { go } from '@codemirror/lang-go';
-    import { json } from '@codemirror/lang-json';
-    import { markdown } from '@codemirror/lang-markdown';
-    import { rust } from '@codemirror/lang-rust';
-    import { cpp } from '@codemirror/lang-cpp';
-    import { php } from '@codemirror/lang-php';
-    import { sql } from '@codemirror/lang-sql';
-    import { html } from '@codemirror/lang-html';
-    import { css } from '@codemirror/lang-css';
-    import { svelte } from '@replit/codemirror-lang-svelte';
-    import { goTemplate } from '$lib/gotemplate';
+    import { getLanguageSupport, lspLanguageId } from '$lib/utils/editor-language';
     import { getLanguageTreeFromView } from '$lib/highlighter';
 
     let {
@@ -270,31 +258,6 @@
     let editorCreating = $state(false); // prevent race between loadFile() and $effect
     let gitGutterState: GitGutterState | null = null; // mutable ref for git gutter
 
-    function getLanguageSupport(path: string) {
-        const ext = path.split('.').pop()?.toLowerCase() || '';
-        const base = path.split('/').pop()?.toLowerCase() || '';
-        const extMap: Record<string, () => any> = {
-            js: javascript, mjs: javascript, cjs: javascript, jsx: javascript,
-            ts: javascript, tsx: javascript,
-            py: python,
-            go: go,
-            c: cpp, h: cpp,
-            cpp: cpp, cc: cpp, cxx: cpp,
-            rs: rust,
-            json: json,
-            md: markdown,
-            php: php,
-            sql: sql,
-            html: html, htm: html,
-            css: css, scss: css, sass: css, less: css,
-            svelte: svelte,
-            tmpl: goTemplate, gohtml: goTemplate,
-        };
-        if (base === 'dockerfile' || base === 'makefile' || base === 'cmakeLists.txt') return null;
-        const support = extMap[ext];
-        return support ? support() : null;
-    }
-
     async function extractSymbols() {
         if (!view) return;
         // LSP document symbols are the primary source for both the outline panel and the sticky-scroll headers.
@@ -318,7 +281,7 @@
                     lspClient.notification('textDocument/didOpen', {
                         textDocument: {
                             uri: fileUri,
-                            languageId: (lspLanguage || 'plaintext').toLowerCase(),
+                            languageId: lspLanguageId(filePath),
                             version: 0,
                             text: view.state.doc.toString(),
                         },
@@ -1338,7 +1301,7 @@
                 } catch {
                     /* server may not have the document */
                 }
-                // Derive language name from file extension
+                // Display name only — the protocol id comes from lspLanguageId() below
                 const ext = filePath.split('.').pop()?.toLowerCase() || '';
                 const langMap: Record<string, string> = {
                     go: 'Go', ts: 'TypeScript', tsx: 'TypeScript',
@@ -1355,7 +1318,7 @@
                 // Swap compartment: replace autocompletion() with LSP plugin
                 if (view && lspClient) {
                     view.dispatch({
-                        effects: lspCompartment.reconfigure(lspClient.plugin(fileUri)),
+                        effects: lspCompartment.reconfigure(lspClient.plugin(fileUri, lspLanguageId(filePath))),
                     });
                 }
                 // LSP just became available — refresh outline symbols and
@@ -1459,7 +1422,7 @@
                 // Re-attach plugin
                 if (_view && newClient) {
                     _view.dispatch({
-                        effects: lspCompartment.reconfigure(newClient.plugin(fileUri)),
+                        effects: lspCompartment.reconfigure(newClient.plugin(fileUri, lspLanguageId(filePath))),
                     });
                 }
             } catch (e) {
