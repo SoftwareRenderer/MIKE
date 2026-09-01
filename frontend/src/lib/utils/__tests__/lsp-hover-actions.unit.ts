@@ -5,10 +5,15 @@ import {
     sameToken,
     hoverDocsHTML,
     isJumpModifier,
+    resolveHoverTimings,
+    DEFAULT_HOVER_TIME,
+    DEFAULT_HOVER_GRACE,
+    HoverCard,
     type HoverEffect,
     type HoverInput,
     type HoverMachineState,
 } from '../lsp-hover-actions';
+import type { DefinitionTarget } from '../lsp-definition';
 import type { LSPPlugin } from '@codemirror/lsp-client';
 
 /**
@@ -280,5 +285,59 @@ describe('isJumpModifier', () => {
     it('leaves Shift and Alt to selection and multi-cursor', () => {
         expect(isJumpModifier(click({ ctrlKey: true, shiftKey: true }))).toBe(false);
         expect(isJumpModifier(click({ metaKey: true, altKey: true }))).toBe(false);
+    });
+});
+
+describe('resolveHoverTimings', () => {
+    it('waits half a second over the symbol before anything appears', () => {
+        // The complaint this pins down: a card that fires the moment the mouse
+        // crosses a symbol interrupts a read of the code.
+        expect(DEFAULT_HOVER_TIME).toBe(500);
+        expect(resolveHoverTimings({})).toEqual({ hoverTime: 500, graceMs: DEFAULT_HOVER_GRACE });
+    });
+
+    it('honours an explicit timing, including a zero delay', () => {
+        expect(resolveHoverTimings({ hoverTime: 0, graceMs: 120 })).toEqual({ hoverTime: 0, graceMs: 120 });
+    });
+});
+
+describe('HoverCard — where the button lives', () => {
+    const TARGET: DefinitionTarget = { path: '/repo/target.go', line: 3 };
+
+    it('keeps the action row out of the scrolling documentation body', () => {
+        const card = new HoverCard(() => {});
+        const body = card.dom.querySelector('.cm-lsp-action-card-body') as HTMLElement;
+        const row = card.dom.querySelector('.cm-lsp-action-row') as HTMLElement;
+        // The card caps itself and the body scrolls, so a row rendered *inside*
+        // the body would slide out of view with the documentation. As a sibling
+        // of a flex-shrink: 0 body it stays on the bottom edge.
+        expect(row.parentElement).toBe(card.dom);
+        expect(body.contains(row)).toBe(false);
+    });
+
+    it('shows the button only for a target, and jumps with it', () => {
+        const jumps: DefinitionTarget[] = [];
+        const card = new HoverCard(target => jumps.push(target));
+        const row = card.dom.querySelector('.cm-lsp-action-row') as HTMLElement;
+        const button = card.dom.querySelector('.cm-lsp-action-button') as HTMLButtonElement;
+
+        expect(row.hidden).toBe(true);
+        card.showAction(TARGET);
+        expect(row.hidden).toBe(false);
+
+        button.click();
+        expect(jumps).toEqual([TARGET]);
+    });
+
+    it('fills documentation without disturbing the action row', () => {
+        const card = new HoverCard(() => {});
+        card.showDocs('<p>docs</p>');
+        card.showAction(TARGET);
+        const docs = card.dom.querySelector('.cm-lsp-action-docs') as HTMLElement;
+        expect(docs.hidden).toBe(false);
+        expect(docs.innerHTML).toContain('docs');
+        expect(card.dom.querySelector('.cm-lsp-action-loading')!.hasAttribute('hidden')).toBe(true);
+        // Documentation grows inside the body, above the row — never next to it.
+        expect(card.dom.lastElementChild!.className).toContain('cm-lsp-action-row');
     });
 });
