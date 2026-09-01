@@ -9,7 +9,7 @@
  * answers, so the card also appears hundreds of milliseconds late, after the
  * pointer has already started moving. Here the open/close decision is ours:
  *
- *   • the card opens after `hoverTime` of stillness over an identifier;
+ *   • the card opens after `hoverTime` (500 ms) of stillness over an identifier;
  *   • it stays open while the pointer is on the identifier or inside the card,
  *     and for `graceMs` after it leaves both;
  *   • it re-targets (no close/re-open flicker) when the pointer moves to
@@ -197,7 +197,7 @@ export function hoverDocsHTML(plugin: LSPPlugin, hover: RawMarkup | null | undef
  * bottom edge anchored to the code line, so late-arriving documentation grows
  * upward and the button never moves out from under the pointer.
  */
-class HoverCard {
+export class HoverCard {
     readonly dom = document.createElement('div');
     private readonly loading: HTMLElement;
     private readonly docs: HTMLElement;
@@ -297,14 +297,29 @@ const hoverCardField = StateField.define<Tooltip | null>({
 });
 
 export interface LspHoverActionOptions {
-    /** Stillness, in ms, over an identifier before the card opens. Default 250. */
+    /** Stillness, in ms, over an identifier before the card opens. Default {@link DEFAULT_HOVER_TIME}. */
     hoverTime?: number;
-    /** How long the card survives after the pointer leaves it. Default 500. */
+    /** How long the card survives after the pointer leaves it. Default {@link DEFAULT_HOVER_GRACE}. */
     graceMs?: number;
     /** Whether a definition target can be jumped to from this editor. */
     canJump?: (target: DefinitionTarget) => boolean;
     /** Perform the jump. */
     onJump: (target: DefinitionTarget) => void;
+}
+
+// How long the pointer has to rest on an identifier before anything appears
+export const DEFAULT_HOVER_TIME = 500;
+
+// How long the card survives after the pointer leaves it and the identifier
+export const DEFAULT_HOVER_GRACE = 500;
+
+export function resolveHoverTimings(
+    options: Pick<LspHoverActionOptions, 'hoverTime' | 'graceMs'>,
+): { hoverTime: number; graceMs: number } {
+    return {
+        hoverTime: options.hoverTime ?? DEFAULT_HOVER_TIME,
+        graceMs: options.graceMs ?? DEFAULT_HOVER_GRACE,
+    };
 }
 
 interface ResolvedHover {
@@ -401,7 +416,7 @@ function fetchDefinition(plugin: LSPPlugin, token: CharRange, doc: Text): Promis
 // ─── View plugin ─────────────────────────────────────────────────────────────
 
 /** Options with the two timings resolved to their defaults. */
-type ResolvedHoverOptions = LspHoverActionOptions & Required<Pick<LspHoverActionOptions, 'hoverTime' | 'graceMs'>>;
+type ResolvedHoverOptions = LspHoverActionOptions & ReturnType<typeof resolveHoverTimings>;
 
 class LspHoverValue implements PluginValue {
     private machine: HoverMachineState = HOVER_IDLE;
@@ -631,11 +646,27 @@ const hoverCardTheme = EditorView.baseTheme({
         lineHeight: '1.45',
         pointerEvents: 'auto',
     },
-    '& .cm-lsp-action-card-body': { minWidth: '0' },
+    '& .cm-tooltip.cm-lsp-action-card': {
+        maxHeight: '240px',
+        overflow: 'hidden',
+    },
+    '& .cm-lsp-action-card-body': {
+        minWidth: '0',
+        minHeight: '0',
+        overflowY: 'auto',
+        overscrollBehavior: 'contain',
+    },
     '& .cm-lsp-action-loading': { color: 'var(--color-text-muted, #888)', padding: '1px 2px' },
     '& .cm-lsp-action-docs': { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
     '& .cm-lsp-action-docs pre': { margin: '2px 0', whiteSpace: 'pre-wrap' },
-    '& .cm-lsp-action-row': { marginTop: '4px' },
+    '& .cm-tooltip.cm-lsp-action-card hr': {
+        border: 'none',
+        borderTop: '1px solid var(--color-border)',
+        margin: '2px 0',
+    },
+    '& .cm-tooltip.cm-lsp-action-card hr:first-child': { marginTop: '0' },
+    '& .cm-tooltip.cm-lsp-action-card hr:last-child': { marginBottom: '0' },
+    '& .cm-lsp-action-row': { marginTop: '4px', flexShrink: 0 },
     '& .cm-lsp-action-button': {
         background: 'var(--color-accent, #4b6bfb)',
         color: '#fff',
@@ -657,11 +688,9 @@ const hoverCardTheme = EditorView.baseTheme({
  * `lspDefinitionActions`, which is this module's entry point.
  */
 function lspHoverActions(options: LspHoverActionOptions): Extension {
-    const resolved = {
-        hoverTime: options.hoverTime ?? 250,
-        graceMs: options.graceMs ?? 500,
-        canJump: options.canJump,
-        onJump: options.onJump,
+    const resolved: ResolvedHoverOptions = {
+        ...options,
+        ...resolveHoverTimings(options),
     };
     return [hoverCardField, ViewPlugin.define(view => new LspHoverValue(view, resolved)), hoverCardTheme];
 }
