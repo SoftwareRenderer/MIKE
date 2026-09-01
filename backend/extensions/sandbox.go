@@ -34,8 +34,7 @@ const (
 type ExtensionSandboxManager struct {
 	mu            sync.Mutex
 	rt            *sandboxruntime.Runtime
-	clients       map[string]*sandbox.Client        // extID -> bridge client
-	refs          map[string]int                    // extID -> active client count
+	refs          map[string]int                    // extID -> active bridge-connection count
 	states        map[string]*extensionSandboxState // extID -> runtime state
 	cgroupDirs    map[string]string                 // extID -> cached cgroup v2 memory dir
 	registry      *RegistryClient
@@ -48,8 +47,10 @@ type ExtensionSandboxManager struct {
 // extensionSandboxState tracks the runtime state of an extension sandbox.
 type extensionSandboxState struct {
 	containerName string
-	client        *sandbox.Client
-	agentCmd      *exec.Cmd // podman exec process
+	// sessions are the live bridge connections into this container, each with the `podman exec`
+	// behind it. There is no single "the" client: a language server belongs to one workspace, so
+	// every consumer gets its own connection and the agent keeps its session on that connection.
+	sessions      map[*sandbox.Client]*exec.Cmd
 	ports         []types.AssignedPort
 	createdAt     time.Time
 	lastCheckedAt time.Time
@@ -57,12 +58,8 @@ type extensionSandboxState struct {
 	// stopTimer fires after ExtensionStopGracePeriod when refcount hits 0.
 	// Cancelled if a new client connects before it fires.
 	stopTimer *time.Timer
-	// Project-based mount mapping for URI translation.
-	// Each registered project is mounted at /mnt/<project-dirname>.
-	// projectMounts maps host project path → container mount path.
-	projectMounts map[string]string
-	// mountedProjects is the sorted list of host paths that were mounted,
-	// used to detect when the project set has changed.
+	// mountedProjects is the sorted list of host project paths mounted into the container (each
+	// at /mnt/<project-dirname>); a change in this set means the container must be recreated.
 	mountedProjects []string
 	// customMounts is the sorted list of "host:container:mode" strings for the
 	// extension's SandboxConfig.Mounts, used to detect when custom mounts
@@ -75,7 +72,6 @@ func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *Ext
 	rt := sandboxruntime.NewRuntime()
 	sm := &ExtensionSandboxManager{
 		rt:            rt,
-		clients:       make(map[string]*sandbox.Client),
 		refs:          make(map[string]int),
 		states:        make(map[string]*extensionSandboxState),
 		cgroupDirs:    make(map[string]string),
@@ -89,8 +85,12 @@ func NewExtensionSandboxManager(reg *RegistryClient, store *ExtensionStore) *Ext
 	} else {
 		log.Println("[ext-sandbox] gVisor not available, extension sandboxing disabled")
 	}
-	// Clean up stale containers from previous runs
-	sm.cleanupStaleContainers()
+	// Clean up stale containers from previous runs — except when this process is a test binary
+	// that has no business touching the host's sandboxes (see SkipStartupCleanup), and except
+	// when there is no gVisor to sweep for in the first place.
+	if sm.available && !sandboxruntime.SkipStartupCleanup() {
+		sm.cleanupStaleContainers()
+	}
 	return sm
 }
 
@@ -100,9 +100,8 @@ func checkExtensionSandboxAvailable() bool {
 	return sandboxruntime.GVisorAvailable("ext-sandbox")
 }
 
-// cleanupStaleContainers removes any kanban-ext-* containers left behind.
-// The list call is time-bounded: best-effort cleanup, and a wedged podman
-// must not block server startup.
+// cleanupStaleContainers removes any kanban-ext-* containers left behind. The list call is
+// time-bounded: a wedged podman must not block server startup.
 func (sm *ExtensionSandboxManager) cleanupStaleContainers() {
 	sm.rt.CleanupStaleContainers("ext-sandbox", ExtensionContainerPrefix+"-")
 }
@@ -112,9 +111,8 @@ func (sm *ExtensionSandboxManager) IsAvailable() bool {
 	return sm.available
 }
 
-// SetExtensionsDir records the directory extension files are materialized in. It
-// is part of the mount allowlist, and findLocalDockerfile looks for a Dockerfile
-// there.
+// SetExtensionsDir records the directory extension files are materialized in: a mount-allowlist
+// root, and where findLocalDockerfile looks.
 func (sm *ExtensionSandboxManager) SetExtensionsDir(dir string) {
 	if strings.TrimSpace(dir) == "" {
 		return
@@ -131,10 +129,9 @@ func (sm *ExtensionSandboxManager) SetWorkspaceDir(dir string) {
 	sm.workspaceDir = dir
 }
 
-// MountPolicy returns the host-mount allowlist for extension sandboxes: the
-// workspace dir, the registered project paths, the extensions dir, the system
-// temp dir and the EnvMountRoots extras. Built on demand so new projects apply
-// without a restart.
+// MountPolicy returns the host-mount allowlist for extension sandboxes (workspace dir,
+// registered projects, extensions dir, temp dir, EnvMountRoots), built on demand so new projects
+// apply without a restart.
 func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
 	var (
 		workspaceDir  string
@@ -153,9 +150,8 @@ func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
 	return newMountPolicy(mountRoots(extensionsDir, workspaceDir, projectPaths))
 }
 
-// extensionMemoryLimit resolves the memory limit (MB) for an extension's
-// sandbox: the extension's configured value. 0 means no limit; negative
-// values are clamped to 0.
+// extensionMemoryLimit resolves the memory limit (MB) for an extension's sandbox: 0 means no
+// limit, negative values are clamped to 0.
 func extensionMemoryLimit(ext *Extension) int {
 	if ext.SandboxConfig.MemoryLimit < 0 {
 		return 0
@@ -163,18 +159,13 @@ func extensionMemoryLimit(ext *Extension) int {
 	return ext.SandboxConfig.MemoryLimit
 }
 
-// buildExtensionCreateArgs assembles the `podman create` argument list for an
-// extension sandbox container.
+// buildExtensionCreateArgs assembles the `podman create` args for an extension sandbox (always
+// `--network none`) and returns the mounted host project paths, so a mount-set change is
+// detectable later.
 //
-// Extension sandboxes always run with --network none.
-//
-// The mounts and capabilities that reach podman are re-validated here even though
-// the write paths (PUT /api/extensions/{id}, install) already reject them, so a
-// value stored before validation existed, or one from a manifest, is skipped and
-// logged instead of becoming a container argument. A nil policy permits no custom
+// Mounts and capabilities are re-validated here so a value stored before validation existed is
+// skipped and logged instead of becoming a container argument; a nil policy permits no custom
 // mount at all (fail closed).
-// Returns the create args and the sorted list of mounted host project paths
-// (used to detect mount-set changes).
 func buildExtensionCreateArgs(ext *Extension, containerName, image string, projectMounts map[string]string, policy *MountPolicy) ([]string, []string) {
 	// Container runs sleep infinity; sandbox-bridge is started via podman exec when needed.
 	createArgs := []string{
@@ -256,9 +247,8 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 	return createArgs, mountedProjects
 }
 
-// Create creates and starts a sandbox container for an extension.
-// The container runs sleep infinity; the sandbox-bridge is started via podman exec.
-// projectMounts maps host project paths to container mount paths (/mnt/<name>).
+// Create creates and starts an extension's sandbox container, which runs `sleep infinity`;
+// the bridge is started later per connection via `podman exec`.
 func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[string]string) ([]types.AssignedPort, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -330,10 +320,8 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		return nil, fmt.Errorf("start container: %w (%s)", err, startOut)
 	}
 
-	// Enforce the memory limit in the container's cgroup (runsc does not
-	// apply OCI resource limits itself — see sandboxruntime.ApplyMemoryLimit).
-	// Fail open: warn and continue if it cannot be applied. 0 = no limit: the
-	// container's cgroup is unlimited by default, so nothing to write.
+	// Enforce the memory limit in the container's cgroup — runsc does not apply OCI resource
+	// limits itself (see sandboxruntime.ApplyMemoryLimit). Fail open, and 0 needs no write.
 	if memLimit := extensionMemoryLimit(ext); memLimit > 0 {
 		if memErr := sm.rt.ApplyMemoryLimit(containerName, memLimit); memErr != nil {
 			log.Printf("[ext-sandbox] ext=%s WARNING: memory limit %dMB not enforced (cgroup write failed): %v", ext.ID, memLimit, memErr)
@@ -351,7 +339,6 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		createdAt:       time.Now(),
 		lastCheckedAt:   time.Now(),
 		isAlive:         true,
-		projectMounts:   projectMounts,
 		mountedProjects: mountedProjects,
 		customMounts:    customMounts,
 	}
@@ -359,9 +346,9 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	return nil, nil
 }
 
-// Start starts the sandbox-bridge agent in the extension container via podman exec.
-// The agent communicates over stdin/stdout.
-func (sm *ExtensionSandboxManager) Start(extID string) (*sandbox.Client, error) {
+// StartSession opens a dedicated bridge connection into a running extension sandbox and takes a
+// reference for the caller. The connection is the reference: ReleaseSession ends both together.
+func (sm *ExtensionSandboxManager) StartSession(extID string) (*sandbox.Client, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -370,100 +357,109 @@ func (sm *ExtensionSandboxManager) Start(extID string) (*sandbox.Client, error) 
 		return nil, fmt.Errorf("extension sandbox not created: %s", extID)
 	}
 
-	containerName := state.containerName
+	agentCmd, client, err := startBridgeLocked(state.containerName)
+	if err != nil {
+		return nil, err
+	}
+	if state.sessions == nil {
+		state.sessions = make(map[*sandbox.Client]*exec.Cmd)
+	}
+	state.sessions[client] = agentCmd
+	sm.refs[extID]++
+	sm.cancelStopLocked(extID, state, "session connected")
 
-	// Start agent in container via podman exec (stdin/stdout protocol)
+	log.Printf("[ext-sandbox] ext=%s started a bridge session in container %s (%d live)", extID, state.containerName, len(state.sessions))
+	return client, nil
+}
+
+// startBridgeLocked spawns `podman exec -i <container> /sandbox-bridge` and wraps its pipes in a
+// bridge client, recording nothing: the caller owns the process and must reap it.
+func startBridgeLocked(containerName string) (*exec.Cmd, *sandbox.Client, error) {
 	agentCmd := exec.Command(
 		"podman", "--runtime-flag=overlay2=root:self", "--runtime-flag=ignore-cgroups",
 		"exec", "-i", containerName,
 		"/sandbox-bridge",
 	)
 
-	// Create pipes for communication with the agent
 	stdin, err := agentCmd.StdinPipe()
 	if err != nil {
-		return nil, fmt.Errorf("create stdin pipe: %w", err)
+		return nil, nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
 	stdout, err := agentCmd.StdoutPipe()
 	if err != nil {
 		stdin.Close()
-		return nil, fmt.Errorf("create stdout pipe: %w", err)
+		return nil, nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
-	// Capture stderr for debugging
+	// The agent logs to stderr; keep it on the server's log.
 	agentCmd.Stderr = os.Stderr
 
 	if err := agentCmd.Start(); err != nil {
 		stdin.Close()
-		return nil, fmt.Errorf("start agent: %w", err)
+		return nil, nil, fmt.Errorf("start agent: %w", err)
 	}
 
-	// Create bridge client using stdin/stdout pipes
-	client := sandbox.NewClient(stdin, stdout)
-	sm.clients[extID] = client
-	state.client = client
-	state.agentCmd = agentCmd
-	sm.refs[extID] = 1
-	// Cancel any pending stop timer — a client has connected
-	if state.stopTimer != nil {
-		state.stopTimer.Stop()
-		state.stopTimer = nil
-		log.Printf("[ext-sandbox] ext=%s grace period cancelled (client connected)", extID)
-	}
-
-	log.Printf("[ext-sandbox] ext=%s started agent in container %s", extID, containerName)
-	return client, nil
+	return agentCmd, sandbox.NewClient(stdin, stdout), nil
 }
 
-// GetOrCreate starts the extension sandbox if not running, returns existing bridge client.
-func (sm *ExtensionSandboxManager) GetOrCreate(extID string) (*sandbox.Client, error) {
-	sm.mu.Lock()
-	client := sm.clients[extID]
-	if client != nil && client.IsAlive() {
-		sm.refs[extID]++
-		// Cancel any pending stop timer — a new client has connected
-		state := sm.states[extID]
-		if state != nil && state.stopTimer != nil {
-			state.stopTimer.Stop()
-			state.stopTimer = nil
-			log.Printf("[ext-sandbox] ext=%s grace period cancelled (client reconnected)", extID)
-		}
-		sm.mu.Unlock()
-		return client, nil
+// cancelStopLocked calls off a pending grace-period stop.
+func (sm *ExtensionSandboxManager) cancelStopLocked(extID string, state *extensionSandboxState, reason string) {
+	if state == nil || state.stopTimer == nil {
+		return
 	}
-	sm.mu.Unlock()
-
-	// Not running — caller needs to create and start
-	return nil, fmt.Errorf("extension sandbox not running: %s", extID)
+	state.stopTimer.Stop()
+	state.stopTimer = nil
+	log.Printf("[ext-sandbox] ext=%s grace period cancelled (%s)", extID, reason)
 }
 
-// Release decrements the refcount for an extension sandbox.
-// When refcount reaches zero, a grace period timer starts.
-// If no new client connects within the grace period, the sandbox is stopped.
-func (sm *ExtensionSandboxManager) Release(extID string) {
+// ReleaseSession closes one bridge connection and hands back the reference that came with it;
+// with none left, a grace period starts and the sandbox stops if nothing reconnects.
+//
+// It reports whether the sandbox still knew this connection — a late hand-back must not decrement
+// the count of a sandbox recreated behind the caller's back. The connection is closed either way.
+func (sm *ExtensionSandboxManager) ReleaseSession(extID string, client *sandbox.Client) bool {
+	if client == nil {
+		return false
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	sm.refs[extID]--
-	if sm.refs[extID] <= 0 {
-		// Cancel any existing timer (shouldn't happen, but be safe)
-		state := sm.states[extID]
-		if state != nil && state.stopTimer != nil {
-			state.stopTimer.Stop()
-		}
-		// Schedule delayed stop
-		state = sm.states[extID]
-		if state != nil {
-			state.stopTimer = time.AfterFunc(ExtensionStopGracePeriod, func() {
-				sm.mu.Lock()
-				defer sm.mu.Unlock()
-				// Only stop if refcount is still 0 (no reconnect during grace period)
-				if sm.refs[extID] <= 0 {
-					sm.stopLocked(extID)
-				}
-			})
-			log.Printf("[ext-sandbox] ext=%s entering %v grace period", extID, ExtensionStopGracePeriod)
-		}
+	state, ok := sm.states[extID]
+	if !ok {
+		_ = client.Close()
+		return false
 	}
+	agentCmd, known := state.sessions[client]
+	if !known {
+		_ = client.Close()
+		return false
+	}
+	delete(state.sessions, client)
+	_ = client.Close()
+	if agentCmd != nil && agentCmd.Process != nil {
+		_ = agentCmd.Process.Kill()
+		_ = agentCmd.Wait()
+	}
+
+	sm.refs[extID]--
+	if sm.refs[extID] > 0 {
+		return true
+	}
+	// A stop timer from an earlier release must not fire in the middle of this grace period.
+	if state.stopTimer != nil {
+		state.stopTimer.Stop()
+		state.stopTimer = nil
+	}
+	state.stopTimer = time.AfterFunc(ExtensionStopGracePeriod, func() {
+		sm.mu.Lock()
+		defer sm.mu.Unlock()
+		// Only stop if refcount is still 0 (no reconnect during grace period)
+		if sm.refs[extID] <= 0 {
+			sm.stopLocked(extID)
+		}
+	})
+	log.Printf("[ext-sandbox] ext=%s entering %v grace period", extID, ExtensionStopGracePeriod)
+	return true
 }
 
 // stopLocked stops an extension sandbox (must hold sm.mu).
@@ -479,21 +475,20 @@ func (sm *ExtensionSandboxManager) stopLocked(extID string) {
 		state.stopTimer = nil
 	}
 
-	// Kill the agent process
-	if state.agentCmd != nil && state.agentCmd.Process != nil {
-		_ = state.agentCmd.Process.Kill()
-		_ = state.agentCmd.Wait()
+	// End every bridge session. Closing the connection is what reaps the language server: the
+	// agent kills its own session when the connection goes.
+	for client, agentCmd := range state.sessions {
+		_ = client.Close()
+		if agentCmd != nil && agentCmd.Process != nil {
+			_ = agentCmd.Process.Kill()
+			_ = agentCmd.Wait()
+		}
 	}
-
-	// Close client
-	if state.client != nil {
-		_ = state.client.Close()
-	}
+	state.sessions = nil
 
 	// Stop container
 	_, _ = sm.rt.PodmanExec("stop", "-t", "5", state.containerName)
 
-	delete(sm.clients, extID)
 	delete(sm.refs, extID)
 	delete(sm.states, extID)
 	delete(sm.cgroupDirs, extID)
@@ -572,12 +567,10 @@ func (sm *ExtensionSandboxManager) ApplyMemoryLimit(extID string, limitMB int) e
 	return sm.rt.ApplyMemoryLimit(state.containerName, limitMB)
 }
 
-// GetMemoryStats returns the live memory usage of the extension's sandbox
-// container by reading its cgroup v2 memory controller. Returns zero stats
-// (Running: false) when the sandbox was never created, is not running, or
-// the cgroup cannot be read. The resolved cgroup directory is cached per
-// extension and invalidated when a read fails (cgroup gone — container
-// stopped or removed).
+// GetMemoryStats reads the extension sandbox's cgroup v2 memory controller, returning zero stats
+// (Running: false) when it was never created, isn't running, or can't be read.
+//
+// The resolved cgroup directory is cached per extension and invalidated on a failed read.
 func (sm *ExtensionSandboxManager) GetMemoryStats(extID string) *types.SandboxMemoryStats {
 	sm.mu.Lock()
 	state, ok := sm.states[extID]
@@ -612,10 +605,9 @@ func (sm *ExtensionSandboxManager) GetMemoryStats(extID string) *types.SandboxMe
 	return stats
 }
 
-// memoryStatsFromDir reads the cgroup v2 memory controller statistics from
-// dir and converts them to MB-granularity SandboxMemoryStats. A missing or
-// malformed memory.current is an error; the optional peak/max/events files
-// are tolerated (see sandboxruntime.ReadCgroupMemory).
+// memoryStatsFromDir reads cgroup v2 memory statistics from dir into MB-granularity
+// SandboxMemoryStats. Only a missing or malformed memory.current is an error; the optional
+// peak/max/events files are tolerated (see sandboxruntime.ReadCgroupMemory).
 func memoryStatsFromDir(dir string) (*types.SandboxMemoryStats, error) {
 	mem, err := sandboxruntime.ReadCgroupMemory(dir)
 	if err != nil {
@@ -665,9 +657,8 @@ func customMountSnapshot(mounts []types.SandboxMount) []string {
 	return snap
 }
 
-// MountsCompatible checks if the current sandbox mounts match the desired set.
-// Returns true if the mounted projects and custom extension mounts match,
-// false if the container needs recreation.
+// MountsCompatible reports whether the running sandbox's mounted projects and custom mounts
+// still match the desired set — if not, the container needs recreation.
 func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[string]string, desiredCustom []types.SandboxMount) bool {
 	state := sm.states[extID]
 	if state == nil {
@@ -756,10 +747,8 @@ func (sm *ExtensionSandboxManager) ensureExtensionImage(ext *Extension, image st
 	return nil
 }
 
-// findLocalDockerfile locates the Dockerfile for a locally-installed extension by
-// walking the extensions directory for a subdirectory whose basename matches the
-// extension name (extensions/<author>/<name>/Dockerfile). Returns "" if none is
-// found.
+// findLocalDockerfile walks the extensions directory for a subdirectory named after the
+// extension and returns its Dockerfile (extensions/<author>/<name>/Dockerfile), or "".
 func (sm *ExtensionSandboxManager) findLocalDockerfile(name string) (string, error) {
 	var found string
 	err := filepath.WalkDir(sm.extensionsDir, func(path string, d os.DirEntry, err error) error {

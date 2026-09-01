@@ -110,10 +110,8 @@ func TestApplyMemoryLimit_NotRunningIsNoOp(t *testing.T) {
 	}
 }
 
-// TestApplyMemoryLimit_RunningSandbox verifies the live-apply path against a
-// real gVisor container: the limit written at Create can be raised and
-// cleared in place (no container restart). Skipped without runsc/podman or
-// when the container cannot be created (e.g. offline image pull).
+// TestApplyMemoryLimit_RunningSandbox verifies against a real gVisor container that the limit
+// written at Create can be raised and cleared in place, with no container restart.
 func TestApplyMemoryLimit_RunningSandbox(t *testing.T) {
 	if !checkExtensionSandboxAvailable() {
 		t.Skip("gVisor (runsc) or podman not available")
@@ -231,81 +229,74 @@ func TestDestroy_NotCreated(t *testing.T) {
 	}
 }
 
-func TestGetOrCreate_NotRunning(t *testing.T) {
-	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
-	client, err := sm.GetOrCreate("nonexistent")
+func TestStartSession_UnknownSandbox(t *testing.T) {
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
+	client, err := sm.StartSession("nonexistent")
 	if err == nil {
-		t.Error("GetOrCreate(nonexistent) = nil, want error")
+		t.Error("StartSession(nonexistent) = nil, want error — a session needs a container to exec into")
 	}
 	if client != nil {
-		t.Error("GetOrCreate(nonexistent) returned non-nil client")
+		t.Error("StartSession(nonexistent) returned non-nil client")
 	}
 }
 
-func TestRelease_NotCreated(t *testing.T) {
-	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
-	// Should not panic
-	sm.Release("nonexistent")
+func TestReleaseSession_NotCreated(t *testing.T) {
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
+	// Must not panic, and must not credit a hand-back for a sandbox that was never created.
+	if sm.ReleaseSession("nonexistent", testBridgeClient(t)) {
+		t.Error("ReleaseSession credited a hand-back for a sandbox with no state")
+	}
 }
 
-func TestGracePeriod_TimerSetOnRelease(t *testing.T) {
-	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
+func TestGracePeriod_TimerSetOnLastSession(t *testing.T) {
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
 
-	// Manually set up state to simulate a running sandbox
 	extID := "test-grace-period"
-	sm.states[extID] = &extensionSandboxState{
-		containerName: "kanban-ext-test",
+	sm.mu.Lock()
+	sm.states[extID] = &extensionSandboxState{containerName: "kanban-ext-test"}
+	sm.mu.Unlock()
+
+	client := testBridgeClient(t)
+	registerSession(t, sm, extID, client)
+
+	// The last hand-back should arm the delayed stop.
+	if !sm.ReleaseSession(extID, client) {
+		t.Fatal("ReleaseSession refused the session it had registered")
 	}
-	sm.refs[extID] = 1
-
-	// Release to bring refcount to 0 — should set a timer
-	sm.Release(extID)
-
 	sm.mu.Lock()
 	state := sm.states[extID]
+	timer := (*time.Timer)(nil)
+	if state != nil {
+		timer = state.stopTimer
+	}
 	sm.mu.Unlock()
 
 	if state == nil {
-		t.Fatal("state should still exist during grace period")
+		t.Fatal("state should still exist during the grace period")
 	}
-	if state.stopTimer == nil {
-		t.Error("stopTimer should be set after Release with refcount 0")
+	if timer == nil {
+		t.Error("stopTimer should be set once the last session is handed back")
 	}
+	cancelGrace(t, sm, extID)
 }
 
 func TestGracePeriod_CancelledOnReconnect(t *testing.T) {
-	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
-
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
 	extID := "test-grace-reconnect"
 
-	// Simulate: sandbox was created, client connected (refs=1), then disconnected (refs=0, timer set)
-	sm.states[extID] = &extensionSandboxState{
-		containerName: "kanban-ext-test",
-	}
-	sm.refs[extID] = 0
+	sm.mu.Lock()
+	sm.states[extID] = &extensionSandboxState{containerName: "kanban-ext-test"}
+	sm.mu.Unlock()
 
-	// Manually set a timer to simulate grace period
 	done := make(chan struct{}, 1)
+	sm.mu.Lock()
 	sm.states[extID].stopTimer = time.AfterFunc(100*time.Millisecond, func() {
 		done <- struct{}{}
 	})
-
-	// Simulate client reconnecting via GetOrCreate
-	// GetOrCreate checks client.IsAlive() which we can't mock, so test the internal logic directly
-	sm.mu.Lock()
-	state := sm.states[extID]
-	if state != nil && state.stopTimer != nil {
-		state.stopTimer.Stop()
-		state.stopTimer = nil
-	}
-	sm.refs[extID]++
+	// What StartSession does when a connection arrives during the grace period.
+	sm.cancelStopLocked(extID, sm.states[extID], "session connected")
 	sm.mu.Unlock()
 
-	// Timer should be cancelled
 	select {
 	case <-done:
 		t.Error("timer should have been cancelled, but it fired")
@@ -315,22 +306,20 @@ func TestGracePeriod_CancelledOnReconnect(t *testing.T) {
 }
 
 func TestGracePeriod_TimerFiresAndStops(t *testing.T) {
-	reg := NewRegistryClient()
-	sm := NewExtensionSandboxManager(reg, nil)
-
+	sm := NewExtensionSandboxManager(NewRegistryClient(), nil)
 	extID := "test-grace-fires"
 	stopped := make(chan string, 1)
 
-	// Set up state with a mock stop by intercepting via refs
-	sm.states[extID] = &extensionSandboxState{
-		containerName: "kanban-ext-test",
-	}
-	sm.refs[extID] = 1
+	sm.mu.Lock()
+	sm.states[extID] = &extensionSandboxState{containerName: "kanban-ext-test"}
+	sm.mu.Unlock()
 
-	// Release to trigger grace period timer
-	sm.Release(extID)
+	client := testBridgeClient(t)
+	registerSession(t, sm, extID, client)
+	sm.ReleaseSession(extID, client)
 
-	// Replace the timer with a short one for testing
+	// Replace the 15-minute timer with a short one carrying the same body: stop only while the
+	// refcount is still zero.
 	sm.mu.Lock()
 	state := sm.states[extID]
 	if state != nil && state.stopTimer != nil {
@@ -347,7 +336,6 @@ func TestGracePeriod_TimerFiresAndStops(t *testing.T) {
 	}
 	sm.mu.Unlock()
 
-	// Wait for timer to fire
 	select {
 	case id := <-stopped:
 		if id != extID {
@@ -550,9 +538,8 @@ func TestBuildExtensionCreateArgs_EntrypointAndImage(t *testing.T) {
 }
 
 func TestBuildExtensionCreateArgs_ClearsImageEntrypoint(t *testing.T) {
-	// Images that ship an ENTRYPOINT (e.g. alpine/git -> ["git"]) would
-	// otherwise treat the keep-alive command as a subcommand and exit
-	// immediately. An empty --entrypoint tells podman to clear it.
+	// An image with an ENTRYPOINT (e.g. alpine/git -> ["git"]) would treat the keep-alive command
+	// as a subcommand and exit, so an empty --entrypoint clears it.
 	ext := &Extension{ID: "ext-entrypoint-clear-test"}
 	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-entrypoint-clear-test", "docker.io/alpine/git:latest", nil, nil)
 

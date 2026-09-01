@@ -17,9 +17,8 @@ import (
 	"kanban/pkg/bridge/protocol"
 )
 
-// lspSession tracks a running LSP server process.
-// Communication is always over stdin/stdout with Content-Length framing
-// (the standard LSP transport protocol).
+// lspSession is one language server process started on this connection, spoken to over
+// stdin/stdout with Content-Length framing (the standard LSP transport).
 type lspSession struct {
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
@@ -97,6 +96,10 @@ func (s *lspSession) readLoop() {
 			close(ch)
 			delete(s.pending, id)
 		}
+		// Closing outputCh ends the goroutine that forwards this session's notifications to the
+		// host. Without it that goroutine blocks on the channel for the life of the bridge — one
+		// leaked goroutine and one unread buffer per language server ever started.
+		close(s.outputCh)
 		s.pendingMu.Unlock()
 	}()
 
@@ -249,13 +252,26 @@ func (s *lspSession) close() {
 // lspState tracks the LSP server for a connection.
 type lspState struct {
 	session *lspSession
-	command string   // LSP server command (for restarts)
-	args    []string // LSP server args (for restarts)
+	command string   // LSP server command this session was started with
+	args    []string // LSP server args this session was started with
 }
 
-// handleLSP handles LSP requests by forwarding raw JSON-RPC to the LSP server.
-// The first request with a non-empty Command starts the LSP server.
-// Subsequent requests forward the raw JSON-RPC message.
+// argsEqual reports whether two argument lists are identical, so a repeated start is recognised
+// as the same server.
+func argsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// handleLSP starts this connection's language server (a request carrying a non-empty Command)
+// and otherwise forwards raw JSON-RPC to it.
 func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 	defer h.recoverPanic(conn, req.MsgID)
 	var p protocol.LSPParams
@@ -269,14 +285,20 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 	h.mu.Unlock()
 
 	if p.Command != "" {
-		// LSPStart request: (re)start the LSP server.
-		// Always restart to get a fresh session for the new workspace.
-		cmd, args := p.Command, p.Args
-
-		// Close existing session if any
-		if lsp != nil && lsp.session != nil {
-			lsp.session.close()
+		// The session belongs to this connection: the same server again is idempotent, a
+		// different one is refused. Replacing a server out from under the holder that handshaked
+		// with it leaves that holder talking to a process that never saw `initialize`.
+		if lsp != nil && lsp.session != nil && !lsp.session.isClosed() {
+			if lsp.command == p.Command && argsEqual(lsp.args, p.Args) {
+				_ = h.writeFrame(conn, protocol.NewResult(req.MsgID, json.RawMessage(`{"status":"started"}`)))
+				return
+			}
+			_ = h.writeFrame(conn, protocol.NewError(req.MsgID,
+				fmt.Sprintf("lsp session on this connection is running %q; %q needs its own connection", lsp.command, p.Command)))
+			return
 		}
+
+		cmd, args := p.Command, p.Args
 
 		sess, err := newLSPSession(cmd, args)
 		if err != nil {
@@ -288,15 +310,15 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 		h.lsp = &lspState{session: sess, command: cmd, args: args}
 		h.mu.Unlock()
 
-		// Start a goroutine to forward LSP notifications (e.g., publishDiagnostics) to the host.
+		// Forward notifications (e.g. publishDiagnostics) to the host through h.writeFrame, like
+		// every other writer: a raw WriteFrame here can land in the middle of a bash output frame.
 		go func() {
 			for notif := range sess.outputCh {
-				notifFrame := &protocol.Frame{
+				_ = h.writeFrame(conn, &protocol.Frame{
 					MsgID:   0, // Notifications use MsgID 0
 					Type:    protocol.TypeNotification,
 					Payload: []byte(notif),
-				}
-				_ = protocol.WriteFrame(conn, notifFrame)
+				})
 			}
 		}()
 
@@ -307,26 +329,10 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 	}
 
 	if lsp == nil || lsp.session == nil || lsp.session.isClosed() {
-		// LSPSend request but no session — try to auto-restart with stored command
-		cmd, args := "", []string{}
-		if lsp != nil && lsp.command != "" {
-			cmd, args = lsp.command, lsp.args
-		}
-		if cmd == "" {
-			_ = h.writeFrame(conn, protocol.NewError(req.MsgID, "lsp server not started"))
-			return
-		}
-
-		sess, err := newLSPSession(cmd, args)
-		if err != nil {
-			_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
-			return
-		}
-
-		h.mu.Lock()
-		h.lsp = &lspState{session: sess, command: cmd, args: args}
-		lsp = h.lsp // update reference to new state
-		h.mu.Unlock()
+		// Refuse, do not restart: a server restarted here never saw `initialize`, so it answers a
+		// document with a warning about itself. Starting one is the host's decision.
+		_ = h.writeFrame(conn, protocol.NewError(req.MsgID, "lsp server not started"))
+		return
 	}
 
 	// Forward raw JSON-RPC to LSP server

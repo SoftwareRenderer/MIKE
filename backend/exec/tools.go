@@ -578,19 +578,19 @@ func (te *TaskExecutor) executeToolInner(ctx context.Context, name string, args 
 		}
 		return result, true
 	case "lsp_references":
-		result, err := te.handleLSPSymbolRequest(args, worktreePath, "textDocument/references", map[string]any{"includeDeclaration": true})
+		result, err := te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/references", map[string]any{"includeDeclaration": true})
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
 	case "lsp_definition":
-		result, err := te.handleLSPSymbolRequest(args, worktreePath, "textDocument/definition", nil)
+		result, err := te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/definition", nil)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
 		return result, true
 	case "lsp_hover":
-		result, err := te.handleLSPHover(args, worktreePath)
+		result, err := te.handleLSPHover(ctx, args, worktreePath)
 		if err != nil {
 			return fmt.Sprintf("Error: %v", err), false
 		}
@@ -951,8 +951,9 @@ func (te *TaskExecutor) applyAutoMergeOnParentChange(target *types.Task, parent 
 }
 
 // handleLSPSymbolRequest resolves a symbol name to a position via text search,
-// then calls the given LSP method at that position.
-func (te *TaskExecutor) handleLSPSymbolRequest(args map[string]any, worktreePath string, method string, extraParams map[string]any) (string, error) {
+// then calls the given LSP method at that position. ctx bounds the language-server
+// round trip, so stopping the task stops the tool.
+func (te *TaskExecutor) handleLSPSymbolRequest(ctx context.Context, args map[string]any, worktreePath string, method string, extraParams map[string]any) (string, error) {
 	if te.lspMgr == nil {
 		return "", fmt.Errorf("LSP manager not available")
 	}
@@ -993,7 +994,7 @@ func (te *TaskExecutor) handleLSPSymbolRequest(args map[string]any, worktreePath
 		params[k] = v
 	}
 
-	response, err := te.lspMgr.LSPRequest(absWorkspace, path, method, params)
+	response, err := te.lspMgr.LSPRequest(ctx, absWorkspace, path, method, params)
 	if err != nil {
 		return "", err
 	}
@@ -1003,8 +1004,8 @@ func (te *TaskExecutor) handleLSPSymbolRequest(args map[string]any, worktreePath
 
 // handleLSPHover resolves a symbol name to a position via text search,
 // then calls textDocument/hover at that position.
-func (te *TaskExecutor) handleLSPHover(args map[string]any, worktreePath string) (string, error) {
-	return te.handleLSPSymbolRequest(args, worktreePath, "textDocument/hover", nil)
+func (te *TaskExecutor) handleLSPHover(ctx context.Context, args map[string]any, worktreePath string) (string, error) {
+	return te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/hover", nil)
 }
 
 // handleLSPRename renames a symbol across files using the language server's
@@ -1050,7 +1051,7 @@ func (te *TaskExecutor) handleLSPRename(ctx context.Context, args map[string]any
 	}
 
 	// prepareRename: a null result means the symbol cannot be renamed.
-	prepareResp, err := te.lspMgr.LSPRequest(absWorkspace, path, "textDocument/prepareRename", baseParams)
+	prepareResp, err := te.lspMgr.LSPRequest(ctx, absWorkspace, path, "textDocument/prepareRename", baseParams)
 	if err != nil {
 		return "", err
 	}
@@ -1070,7 +1071,7 @@ func (te *TaskExecutor) handleLSPRename(ctx context.Context, args map[string]any
 		"position":     baseParams["position"],
 		"newName":      newName,
 	}
-	renameResp, err := te.lspMgr.LSPRequest(absWorkspace, path, "textDocument/rename", renameParams)
+	renameResp, err := te.lspMgr.LSPRequest(ctx, absWorkspace, path, "textDocument/rename", renameParams)
 	if err != nil {
 		return "", err
 	}

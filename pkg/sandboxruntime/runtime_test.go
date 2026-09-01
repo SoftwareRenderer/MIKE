@@ -390,3 +390,64 @@ func writeStub(t *testing.T, path, content string) {
 		t.Fatalf("write stub %s: %v", path, err)
 	}
 }
+
+// TestStaleContainerNamesLeavesRunningContainersAlone: the startup sweep matches a whole name
+// family by prefix, so a running container it removes belongs to somebody else who is still using
+// it — a second server on the host, or a unit test that builds a sandbox manager while a real
+// server is serving language sessions. The name the sweep wants back is only ever held by a
+// leftover, and Create removes a same-named leftover itself.
+func TestStaleContainerNamesLeavesRunningContainersAlone(t *testing.T) {
+	running := map[string]bool{
+		"kanban-ext-gopls-live":     true,
+		"kanban-sandbox-task-live":  true,
+		"kanban-ext-gopls-leftover": false,
+	}
+	isRunning := func(name string) (bool, error) {
+		if name == "kanban-ext-uninspectable" {
+			return false, os.ErrPermission
+		}
+		return running[name], nil
+	}
+
+	got := staleContainerNames([]string{
+		"kanban-ext-gopls-live",
+		"kanban-sandbox-task-live",
+		"kanban-ext-gopls-leftover",
+		"kanban-ext-uninspectable",
+	}, isRunning)
+
+	want := map[string]bool{"kanban-ext-gopls-leftover": true, "kanban-ext-uninspectable": true}
+	if len(got) != len(want) {
+		t.Fatalf("sweep list = %v, want exactly %v", got, want)
+	}
+	for _, name := range got {
+		if !want[name] {
+			t.Errorf("sweep list contains %q (running containers must never be swept)", name)
+		}
+	}
+}
+
+// TestStaleContainerNamesKeepsEverythingWhenStateIsUnreadable: a podman that cannot answer the
+// state query is exactly the half-dead state a leftover is in, so the sweep must not lose its one
+// chance to clear the name.
+func TestStaleContainerNamesKeepsEverythingWhenStateIsUnreadable(t *testing.T) {
+	isRunning := func(string) (bool, error) { return false, os.ErrClosed }
+	got := staleContainerNames([]string{"kanban-sandbox-a", "kanban-sandbox-b"}, isRunning)
+	if len(got) != 2 {
+		t.Errorf("sweep list = %v, want both containers", got)
+	}
+}
+
+// TestSkipStartupCleanupIsTheSharedSwitch: the extension sandbox manager has to honour the same
+// switch the task sandbox manager does, or a test binary that opts out of one sweep still wipes
+// the other family's containers.
+func TestSkipStartupCleanupIsTheSharedSwitch(t *testing.T) {
+	t.Setenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP", "")
+	if SkipStartupCleanup() {
+		t.Error("a blank value must mean \"not set\" — same rule the task sandbox manager has always used")
+	}
+	t.Setenv("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP", "1")
+	if !SkipStartupCleanup() {
+		t.Error("MIKE_SANDBOX_SKIP_STARTUP_CLEANUP=1 must skip the sweep")
+	}
+}
