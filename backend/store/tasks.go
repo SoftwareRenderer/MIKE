@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"kanban/backend/types"
@@ -64,13 +63,13 @@ func (s *Store) GetTaskByID(taskID string) (*types.Task, error) {
 }
 
 // queryTask reads a single task matched by `WHERE <where>`. Callers must hold
-// s.mu. sql.ErrNoRows is mapped to a plain "task not found": every caller treats
+// s.mu. sql.ErrNoRows is mapped to ErrTaskNotFound: every caller treats
 // a missing row the same way, and doing it here keeps the two readers identical.
 func (s *Store) queryTask(where string, args ...any) (*types.Task, error) {
 	var t types.Task
 	err := scanTask(s.db.QueryRow(`SELECT `+taskColumns+` FROM tasks WHERE `+where, args...), &t)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("task not found")
+		return nil, ErrTaskNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -176,7 +175,10 @@ func (s *Store) updateTask(t *types.Task, claim bool) error {
 	args = append(args, B2I(t.HasMergeConflict),
 		t.LlamaServerURL, t.ModelName, ptrStr(t.ReasoningEffort), t.MaxConsecutiveFailedTurns, B2I(t.AutoCommit), B2I(t.AutoMerge), B2I(t.SubtasksAutoMerge), t.OperatingMode, ptrStr(t.ParentTaskID), B2I(t.Autostarted), B2I(t.TitleGenerating), ptrStr(t.CurrentThreadID), assignedPortsJSON, t.SessionCost, now.Format(time.RFC3339), t.ID)
 
-	var movedAt, storedExec string
+	var movedAt string
+	// The row answers with the state it actually holds; typing the scan target keeps
+	// the assignment below from accepting anything the database happened to contain.
+	var storedExec types.ExecutionState
 	err := s.db.QueryRow(
 		`UPDATE tasks SET moved_at = CASE WHEN status <> ? THEN ? ELSE moved_at END, title = ?, prompt = ?, status = ?, session_id = ?, branch = ?, base_ref = ?, base_commit = ?, branch_tip = ?, output = ?, `+execSet+`, has_merge_conflict = ?, llama_server_url = ?, model_name = ?, reasoning_effort = ?, max_consecutive_failed_turns = ?, auto_commit = ?, auto_merge = ?, subtasks_auto_merge = ?, operating_mode = ?, parent_task_id = ?, autostarted = ?, title_generating = ?, current_thread_id = ?, assigned_ports = ?, session_cost = ?, updated_at = ? WHERE id = ? RETURNING moved_at, execution_state`,
 		args...,
@@ -213,13 +215,13 @@ func (s *Store) updateTaskColumn(taskID, projectID, column string, value any) er
 }
 
 // UpdateTaskExecutionState updates only the execution_state of a task.
-func (s *Store) UpdateTaskExecutionState(taskID, projectID, executionState string) error {
-	return s.updateTaskColumn(taskID, projectID, "execution_state", executionState)
+func (s *Store) UpdateTaskExecutionState(taskID, projectID string, executionState types.ExecutionState) error {
+	return s.updateTaskColumn(taskID, projectID, "execution_state", string(executionState))
 }
 
 // TransitionInFlightTask atomically moves an in-flight task (running /
 // pulling_image) to the given execution state
-func (s *Store) TransitionInFlightTask(taskID, projectID, executionState string, output *string) (bool, error) {
+func (s *Store) TransitionInFlightTask(taskID, projectID string, executionState types.ExecutionState, output *string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().UTC()

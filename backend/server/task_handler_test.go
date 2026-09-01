@@ -1073,7 +1073,7 @@ func TestAgentBlockedWithNetworkIsolation(t *testing.T) {
 	}
 
 	// Enable network isolation on the project
-	if err := s.store.UpdateProjectSandboxNetworkIsolation(projID, true); err != nil {
+	if err := s.rawStore().UpdateProjectSandboxNetworkIsolation(projID, true); err != nil {
 		t.Fatalf("enable network isolation: %v", err)
 	}
 
@@ -1160,7 +1160,7 @@ func TestLLMAllowedWithNetworkIsolation(t *testing.T) {
 	}
 
 	// Enable network isolation
-	if err := s.store.UpdateProjectSandboxNetworkIsolation(projID, true); err != nil {
+	if err := s.rawStore().UpdateProjectSandboxNetworkIsolation(projID, true); err != nil {
 		t.Fatalf("enable network isolation: %v", err)
 	}
 
@@ -2291,7 +2291,7 @@ func TestTaskOperatingModeRemount(t *testing.T) {
 		// (context cancellation → goroutine exit → defer cleanup → DB update)
 		for i := 0; i < 100; i++ {
 			task, _ := s.store.GetTask(projID, taskID)
-			if task != nil && task.ExecutionState != "running" {
+			if task != nil && task.ExecutionState != types.ExecStateRunning {
 				break
 			}
 			time.Sleep(50 * time.Millisecond)
@@ -2363,8 +2363,8 @@ func createTaskDirect(t *testing.T, s *Server, projID, taskID string, autoCommit
 		ProjectID:         projID,
 		Title:             "Direct Task",
 		Prompt:            "Direct prompt",
-		Status:            "backlog",
-		ExecutionState:    "idle",
+		Status:            types.StatusBacklog,
+		ExecutionState:    types.ExecStateIdle,
 		AutoCommit:        autoCommit,
 		AutoMerge:         autoMerge,
 		SubtasksAutoMerge: subtasksAutoMerge,
@@ -2373,7 +2373,7 @@ func createTaskDirect(t *testing.T, s *Server, projID, taskID string, autoCommit
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
-	if err := s.store.CreateTask(task); err != nil {
+	if err := s.rawStore().CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 }
@@ -2440,7 +2440,7 @@ func TestTaskUpdateUnnestResetsToConfigDefaults(t *testing.T) {
 	projID := createTestProject(t, s)
 
 	// Config default: auto_merge=true
-	if err := s.store.SetConfigValue("default_auto_merge", "true"); err != nil {
+	if err := s.rawStore().SetConfigValue("default_auto_merge", "true"); err != nil {
 		t.Fatalf("set config: %v", err)
 	}
 
@@ -2515,7 +2515,7 @@ func TestTaskMovedAtOnlyChangesOnMove(t *testing.T) {
 
 	// Pin the timestamps so a move within the same second is still observable.
 	old := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
-	if _, err := s.store.Exec(`UPDATE tasks SET created_at = ?, updated_at = ?, moved_at = ? WHERE id = ?`, old, old, old, taskID); err != nil {
+	if _, err := s.rawStore().Exec(`UPDATE tasks SET created_at = ?, updated_at = ?, moved_at = ? WHERE id = ?`, old, old, old, taskID); err != nil {
 		t.Fatalf("seed timestamps: %v", err)
 	}
 

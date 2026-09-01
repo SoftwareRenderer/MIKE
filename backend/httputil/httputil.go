@@ -1,8 +1,14 @@
+// Package httputil holds the shared HTTP vocabulary: JSON responses, request decoding, and
+// Fail, which maps a domain error to a status so handlers never guess whether an error
+// means "not found".
 package httputil
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+
+	"kanban/backend/errs"
 )
 
 // JSONResponse sends a JSON response with the given status code.
@@ -36,4 +42,21 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	return true
+}
+
+// Fail maps an error from a domain call to a status, so a handler never guesses:
+//
+//   - an error declaring errs.ErrNotFound → 404 with notFoundMessage
+//   - anything else, nil included        → 500 "internal error", real error logged
+//
+// Inferring 404 from `err != nil` reports a closed database or a SQLITE_BUSY as a missing
+// row; only the error knows which it was. operation ("get task") is for the log line only
+// and never reaches the client.
+func Fail(w http.ResponseWriter, err error, operation, notFoundMessage string) {
+	if errs.IsNotFound(err) {
+		JSONError(w, http.StatusNotFound, notFoundMessage)
+		return
+	}
+	log.Printf("%s failed: %v", operation, err)
+	JSONError(w, http.StatusInternalServerError, "internal error")
 }

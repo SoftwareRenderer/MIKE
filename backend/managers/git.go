@@ -2,6 +2,7 @@ package managers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,9 +20,22 @@ import (
 	"kanban/backend/types"
 )
 
+// gitStore is what the git endpoints read before shelling out to git.
+type gitStore interface {
+	GetProject(id string) (*types.Project, error)
+	GetTask(projectID, taskID string) (*types.Task, error)
+	GetTaskByID(taskID string) (*types.Task, error)
+	GetThread(threadID string) (*types.TaskThread, error)
+}
+
+var _ gitStore = (*store.Store)(nil)
+
 // GitHandler handles git operations.
 type GitHandler struct {
-	store       *store.Store
+	store gitStore
+	// diffs is the store surface the done-task diff is materialized against — a separate
+	// field so the four diff methods do not have to join gitStore just for this call.
+	diffs       stream.DiffStore
 	worktreeMgr *git.WorktreeManager
 	diffCache   sync.Map // taskID -> *git.TaskDiff (full result including untracked file content)
 	// getWorktreeMutex returns a per-task mutex for serializing git operations.
@@ -34,7 +48,7 @@ type GitHandler struct {
 
 // NewGitHandler creates a new GitHandler.
 func NewGitHandler(store *store.Store, worktreeMgr *git.WorktreeManager) *GitHandler {
-	return &GitHandler{store: store, worktreeMgr: worktreeMgr}
+	return &GitHandler{store: store, diffs: store, worktreeMgr: worktreeMgr}
 }
 
 // SetWorktreeMutex sets the callback for acquiring per-task worktree mutexes.
@@ -79,16 +93,13 @@ func (h *GitHandler) GetDiffManifest(taskID, baseRef string) (any, error) {
 // line of pipe-separated fields, then the body between the BODY/END markers.
 const fullLogFormat = `--format=%H|%h|%s|%aN|%aI|%P%n---BODY---%n%b%n---END---`
 
-// writeFullGitLog writes the extended commit log for dir — the ?full=1 shape:
-// every commit with author/date/parents/body, plus the current branch, the
-// origin tip and a hasMore flag. Both log endpoints (a project checkout and a
-// task worktree) answer ?full=1 with exactly this, so it lives here once.
+// writeFullGitLog writes the extended commit log for dir - the ?full=1 shape: every commit
+// with author/date/parents/body, plus the current branch, the origin tip and a hasMore flag.
+// Both log endpoints (project checkout, task worktree) answer ?full=1 with exactly this.
 //
-// Their NON-full responses are deliberately NOT shared: the project endpoint
-// returns decorated `git log --oneline --decorate` lines (Short + the whole
-// decorated remainder, honouring ?offset), while the task endpoint returns
-// structured %H|%h|%s rows and ignores ?offset. Callers validate branch and path
-// before coming here.
+// Their non-full responses are deliberately not shared: the project endpoint returns
+// decorated `git log --oneline --decorate` lines honouring ?offset, while the task endpoint
+// returns structured %H|%h|%s rows and ignores it. Callers validate branch and path first.
 func (h *GitHandler) writeFullGitLog(w http.ResponseWriter, dir, branch, path string, limit, offset int) {
 	args := []string{"-C", dir, "log"}
 	if offset > 0 {
@@ -180,7 +191,7 @@ func (h *GitHandler) HandleLog(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 	branch := r.URL.Query().Get("branch")
@@ -304,7 +315,7 @@ func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 	branches, err := gitBranchNames(project.Path, "branch", "-a", "--format=%(refname:short)")
@@ -320,7 +331,7 @@ func (h *GitHandler) HandleBranch(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 	c := exec.Command("git", "-C", project.Path, "rev-parse", "--abbrev-ref", "HEAD")
@@ -343,7 +354,7 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 
@@ -404,7 +415,7 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 	c := exec.Command("git", "-C", project.Path, "status", "--porcelain")
@@ -450,7 +461,7 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 	filePath := r.URL.Query().Get("path")
@@ -566,7 +577,7 @@ func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 	var req types.GitCheckoutRequest
@@ -613,7 +624,7 @@ func (h *GitHandler) handleGitRemote(w http.ResponseWriter, r *http.Request, op 
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 	// Acquire per-project mutex to serialize project-level git operations.
@@ -652,14 +663,14 @@ func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 	if h.worktreeMgr == nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
 		return
 	}
-	if task.Status == "backlog" {
+	if task.Status == types.StatusBacklog {
 		httputil.JSONResponse(w, http.StatusOK, git.TaskCommitsResult{Commits: []git.TaskCommit{}})
 		return
 	}
@@ -680,11 +691,11 @@ func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Worktree may not exist (e.g., after commit-and-done).
 		// Fall back to project repo if task has a branch.
-		if task.Branch != "" && strings.Contains(err.Error(), "worktree not found") {
+		if task.Branch != "" && errors.Is(err, git.ErrWorktreeNotFound) {
 			result, err = h.getTaskCommitsFromProject(projectID, task, baseRef)
 		}
 		// Orphaned worktree — return 404
-		if strings.Contains(err.Error(), "exit status 128") {
+		if code, ok := git.GitExitCode(err); ok && code == 128 {
 			httputil.JSONError(w, http.StatusNotFound, "worktree not found")
 			return
 		}
@@ -767,7 +778,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 	if h.worktreeMgr == nil {
@@ -802,9 +813,9 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	// serve it from the persistent snapshot instead of re-running git on every
 	// open. Arbitrary ref comparisons (custom base/head), checkpoint diffs, and
 	// full (untruncated) requests still go through the live computation.
-	if task.Status == "done" && task.BranchTip != "" && customBase == "" && checkpointIdxStr == "" && !fullDiff &&
+	if task.Status == types.StatusDone && task.BranchTip != "" && customBase == "" && checkpointIdxStr == "" && !fullDiff &&
 		(headRef == "" || headRef == task.BranchTip) {
-		if d, err := stream.MaterializeDoneTaskDiff(h.store, h.worktreeMgr, projectID, task); err == nil && d != nil && d.HasChanges {
+		if d, err := stream.MaterializeDoneTaskDiff(h.diffs, h.worktreeMgr, projectID, task); err == nil && d != nil && d.HasChanges {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(d.DiffJSON))
@@ -817,7 +828,7 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	// If no explicit head is provided, use BranchTip to trigger commit-to-commit diff.
 	// This ensures the response is a raw diff string (not a working-tree manifest),
 	// which works correctly even when the worktree no longer exists.
-	if task.Status == "done" && headRef == "" && customBase == "" {
+	if task.Status == types.StatusDone && headRef == "" && customBase == "" {
 		headRef = task.BranchTip
 		if headRef == "" {
 			headRef = task.Branch
@@ -875,11 +886,11 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Worktree may not exist (e.g., after commit-and-done).
 		// Fall back to project repo if task has a branch.
-		if task.Branch != "" && strings.Contains(err.Error(), "worktree not found") {
+		if task.Branch != "" && errors.Is(err, git.ErrWorktreeNotFound) {
 			taskDiff, err = h.getTaskDiffFromProject(projectID, taskID, task, baseRef, headRef)
 		}
 		// Orphaned worktree — return 404
-		if err != nil && strings.Contains(err.Error(), "exit status 128") {
+		if code, ok := git.GitExitCode(err); ok && code == 128 {
 			httputil.JSONError(w, http.StatusNotFound, "worktree not found")
 			return
 		}
@@ -1145,7 +1156,7 @@ func (h *GitHandler) getTaskDiffFromProject(projectID, taskID string, task *type
 	// For done tasks, prefer the base ref commit captured at task start time.
 	// After a fast-forward merge, the base ref branch pointer has moved forward,
 	// so using the branch name would give an empty diff.
-	if task.Status == "done" && task.BaseCommit != "" {
+	if task.Status == types.StatusDone && task.BaseCommit != "" {
 		baseRef = task.BaseCommit
 	}
 
@@ -1195,7 +1206,7 @@ func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request)
 	}
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 	if h.worktreeMgr == nil {
@@ -1203,7 +1214,7 @@ func (h *GitHandler) HandleResetWorktree(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// Only reset if worktree exists and task is active
-	if task.Status == "backlog" || task.Status == "done" {
+	if task.Status == types.StatusBacklog || task.Status == types.StatusDone {
 		httputil.JSONError(w, http.StatusBadRequest, "task must be in_progress or review")
 		return
 	}
@@ -1285,14 +1296,14 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 	if h.worktreeMgr == nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
 		return
 	}
-	if task.Status == "backlog" || task.Status == "done" {
+	if task.Status == types.StatusBacklog || task.Status == types.StatusDone {
 		httputil.JSONError(w, http.StatusBadRequest, "task must be in_progress or review")
 		return
 	}
@@ -1304,7 +1315,7 @@ func (h *GitHandler) HandleStageFile(w http.ResponseWriter, r *http.Request) {
 	}
 	worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "worktree not found")
+		httputil.Fail(w, err, "resolve worktree", "worktree not found")
 		return
 	}
 	if !h.stageOrUnstage(w, worktreePath, req.Path, req.Stage) {
@@ -1320,7 +1331,7 @@ func (h *GitHandler) HandleProjectStageFile(w http.ResponseWriter, r *http.Reque
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 	var req struct {
@@ -1350,7 +1361,7 @@ func (h *GitHandler) HandleProjectCommit(w http.ResponseWriter, r *http.Request)
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "project not found")
+		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
 	var req struct {
@@ -1389,14 +1400,14 @@ func (h *GitHandler) HandleTaskLog(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 
 	// Get worktree path
 	worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task worktree not found")
+		httputil.Fail(w, err, "resolve worktree", "task worktree not found")
 		return
 	}
 
@@ -1456,13 +1467,13 @@ func (h *GitHandler) HandleTaskBranches(w http.ResponseWriter, r *http.Request) 
 
 	_, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 
 	worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task worktree not found")
+		httputil.Fail(w, err, "resolve worktree", "task worktree not found")
 		return
 	}
 
@@ -1481,13 +1492,13 @@ func (h *GitHandler) HandleTaskCheckout(w http.ResponseWriter, r *http.Request) 
 
 	_, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 
 	worktreePath, err := h.worktreeMgr.WorktreePath(taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task worktree not found")
+		httputil.Fail(w, err, "resolve worktree", "task worktree not found")
 		return
 	}
 

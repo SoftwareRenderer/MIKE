@@ -21,12 +21,12 @@ func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
 		ProjectID:      projectID,
 		Title:          "Test Task",
 		Prompt:         "Test prompt",
-		Status:         "in_progress",
+		Status:         types.StatusInProgress,
 		Branch:         "task/test-branch",
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create the task branch from master
 	runGit(t, repoDir, "checkout", "-b", "task/test-branch")
@@ -45,8 +45,8 @@ func TestSyncTargetIntoTask_NoNewCommits(t *testing.T) {
 	}
 
 	// Task state should be unchanged
-	taskFromDB, _ := te.store.GetTaskByID(taskID)
-	if taskFromDB.ExecutionState != "" && taskFromDB.ExecutionState != "idle" {
+	taskFromDB, _ := te.rawStore().GetTaskByID(taskID)
+	if taskFromDB.ExecutionState != "" && taskFromDB.ExecutionState != types.ExecStateIdle {
 		t.Errorf("execution state should be idle, got %q", taskFromDB.ExecutionState)
 	}
 }
@@ -62,12 +62,12 @@ func TestSyncTargetIntoTask_CleanMerge(t *testing.T) {
 		ProjectID:      projectID,
 		Title:          "Test Task",
 		Prompt:         "Test prompt",
-		Status:         "in_progress",
+		Status:         types.StatusInProgress,
 		Branch:         "task/clean-branch",
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create task branch with a change to file A
 	runGit(t, repoDir, "checkout", "-b", "task/clean-branch")
@@ -116,12 +116,12 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 		ProjectID:      projectID,
 		Title:          "Test Task",
 		Prompt:         "Test prompt",
-		Status:         "in_progress",
+		Status:         types.StatusInProgress,
 		Branch:         "task/conflict-branch",
 		LlamaServerURL: "",
 		ModelName:      "",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create task branch with a change to shared file
 	runGit(t, repoDir, "checkout", "-b", "task/conflict-branch")
@@ -148,7 +148,7 @@ func TestSyncTargetIntoTask_Conflict_EntersMergeConflictState(t *testing.T) {
 	}
 
 	// Verify task is in merge_conflict state
-	taskFromDB, _ := te.store.GetTaskByID(taskID)
+	taskFromDB, _ := te.rawStore().GetTaskByID(taskID)
 	if !taskFromDB.HasMergeConflict {
 		t.Fatalf("expected has_merge_conflict=true, got false")
 	}
@@ -176,12 +176,12 @@ func TestSyncTargetIntoTask_WorktreeMissing(t *testing.T) {
 		ProjectID:      projectID,
 		Title:          "Test Task",
 		Prompt:         "Test prompt",
-		Status:         "in_progress",
+		Status:         types.StatusInProgress,
 		Branch:         "task/no-wt-branch",
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.store.CreateTask(task)
+	te.rawStore().CreateTask(task)
 
 	// Create the task branch
 	runGit(t, repoDir, "checkout", "-b", "task/no-wt-branch")
@@ -214,12 +214,12 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 		ProjectID:      projectID,
 		Title:          "Parent Task",
 		Prompt:         "Parent prompt",
-		Status:         "in_progress",
+		Status:         types.StatusInProgress,
 		Branch:         "task/parent-branch",
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.store.CreateTask(parent)
+	te.rawStore().CreateTask(parent)
 
 	// Create parent branch
 	runGit(t, repoDir, "checkout", "-b", "task/parent-branch")
@@ -241,13 +241,13 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 		ProjectID:      projectID,
 		Title:          "Child Task",
 		Prompt:         "Child prompt",
-		Status:         "in_progress",
+		Status:         types.StatusInProgress,
 		ParentTaskID:   parentID,
 		Branch:         "task/child-branch",
 		LlamaServerURL: "http://localhost:8080",
 		ModelName:      "test-model",
 	}
-	te.store.CreateTask(child)
+	te.rawStore().CreateTask(child)
 
 	// Create child branch from parent branch (in parent worktree since it's locked there)
 	runGitInDir(t, parentWtPath, "checkout", "-b", "task/child-branch")
@@ -268,7 +268,7 @@ func TestSyncTargetIntoTask_SubtaskChain(t *testing.T) {
 	runGitInDir(t, parentWtPath, "commit", "-m", "parent new file")
 
 	// Reload child task
-	child, _ = te.store.GetTaskByID(childID)
+	child, _ = te.rawStore().GetTaskByID(childID)
 
 	// Sync parent into child — should merge cleanly
 	err := te.syncTargetIntoTask(projectID, childID, "task/parent-branch", "task/child-branch", child)

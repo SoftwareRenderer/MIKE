@@ -16,12 +16,12 @@ func TestFailTask_PersistsOneErrorAndStopsReplayingIt(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-fail-once", Name: "Fail Once", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := e.store.CreateProject(proj); err != nil {
+	if err := e.rawStore().CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := &types.Task{
 		ID: "task-fail-once", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
-		Status: "in_progress", ExecutionState: "running",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := e.store.CreateTask(task); err != nil {
@@ -82,12 +82,12 @@ func TestSendAgentStreamEvent_PersistsAgentError(t *testing.T) {
 	now := time.Now().UTC()
 
 	proj := &types.Project{ID: "proj-agent-err", Name: "Agent Err", Path: t.TempDir(), CreatedAt: now, UpdatedAt: now}
-	if err := e.store.CreateProject(proj); err != nil {
+	if err := e.rawStore().CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := &types.Task{
 		ID: "task-agent-err", ProjectID: proj.ID, Title: "Test", Prompt: "Test",
-		Status: "in_progress", ExecutionState: "running",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := e.store.CreateTask(task); err != nil {

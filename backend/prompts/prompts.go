@@ -1,3 +1,5 @@
+// Package prompts renders the LLM prompt templates under prompts/ and discovers agent
+// skills, keeping template loading and path resolution out of the execution loop.
 package prompts
 
 import (

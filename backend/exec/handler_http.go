@@ -65,7 +65,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 
 	task, err := te.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 	threadID := task.CurrentThreadID
@@ -83,9 +83,9 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 
 	// allowed Pending: a message that will run starts the task, so it leaves review here.
 	// A deduped message starts nothing and must not move the card.
-	if !isDuplicate && (task.Status == "review" || task.Status == "done") {
-		task.Status = "in_progress"
-		task.ExecutionState = "idle"
+	if !isDuplicate && (task.Status == types.StatusReview || task.Status == types.StatusDone) {
+		task.Status = types.StatusInProgress
+		task.ExecutionState = types.ExecStateIdle
 		task.UpdatedAt = time.Now().UTC()
 		_ = te.storeTask(task, projectID)
 		te.appStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
@@ -182,7 +182,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 
 	task, err := te.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 	if task.LlamaServerURL == "" || task.ModelName == "" {
@@ -394,7 +394,7 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 
 	task, err := te.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 	if !te.configStore.IsAgentProvider(task.LlamaServerURL) {

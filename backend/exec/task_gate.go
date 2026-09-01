@@ -2,37 +2,33 @@ package exec
 
 import (
 	"strings"
+
+	"kanban/backend/types"
 )
 
 // Task-level provider concurrency.
 //
-// "In Progress + Pending" means status in_progress with execution_state idle. It is only
-// allowed while work is really pending: queued for a slot here, a user message just
-// accepted (HandleSend), or a parent waiting on unfinished subtasks (MoveTask). A finished
-// turn always lands in review, which is where a conversation waits for the user; a manual
-// pause is "paused", not idle. So nothing may rest in in_progress+idle — check the three
-// cases above before adding a writer.
+// "In Progress + Pending" means status in_progress with execution_state idle, allowed only
+// while work is really pending: queued for a slot here, a user message just accepted
+// (HandleSend), or a parent waiting on unfinished subtasks (MoveTask). A finished turn lands
+// in review and a manual pause is "paused", so nothing may rest in in_progress+idle - check
+// those three cases before adding a writer.
 //
-// The per-provider "concurrency" setting limits the number of RUNNING TASKS
-// per provider (via te.taskGate, a ConcurrencyGate keyed by provider URL).
-// A task holds its slot from the start of executeTask until it goes idle
-// (turn complete → review), is stopped, or fails; a user message that
-// resumes an idle task re-acquires a slot (possibly queuing again).
+// The per-provider concurrency setting limits RUNNING TASKS per provider (te.taskGate, a
+// ConcurrencyGate keyed by provider URL). A task holds its slot from the start of
+// executeTask until it goes idle (turn complete → review), is stopped, or fails; a message
+// that resumes an idle task re-acquires one, possibly queuing again.
 //
-// This is separate from the per-LLM-request gate (te.gate), which caps
-// in-flight LLM requests (incl. utility calls) and enforces RPS. The two
-// never deadlock: task slots are only acquired while no request slot is
-// held, and request slots are only acquired while (at most) one task slot
-// is held — no cycle.
+// Separate from the per-request gate (te.gate), which caps in-flight LLM requests and
+// enforces RPS. The two cannot form a cycle: a task slot is never acquired while holding a
+// request slot, and a request slot never while holding more than one task slot.
 //
-// Agent providers are excluded — they manage their own concurrency.
+// Agent providers are excluded - they manage their own concurrency.
 
-// acquireTaskSlot blocks until a running-task slot for providerURL is
-// granted (or the execution context is cancelled). While waiting, the task
-// is shown as started-but-pending (in_progress + execution_state idle →
-// "Pending" badge) and queue position/wait events are sent to the task
-// stream every second. On grant, the task is marked running.
-// Returns false if the context was cancelled while waiting.
+// acquireTaskSlot blocks until a running-task slot for providerURL is granted or the
+// execution context is cancelled (which returns false). While waiting the task reads as
+// started-but-pending (in_progress + idle → "Pending" badge) and queue position/wait events
+// go to the task stream every second. On grant the task is marked running.
 func (te *TaskExecutor) acquireTaskSlot(setup *taskExecSetup, providerURL string) bool {
 	providerURL = strings.TrimRight(providerURL, "/")
 	concurrency := te.configStore.GetProviderConcurrency(providerURL)
@@ -40,8 +36,8 @@ func (te *TaskExecutor) acquireTaskSlot(setup *taskExecSetup, providerURL string
 	// allowed Pending: queued for a slot is real pending work.
 	// Show the task as started-but-pending while waiting for a slot:
 	// In Progress column with the "Pending" badge.
-	setup.task.Status = "in_progress"
-	setup.task.ExecutionState = "idle"
+	setup.task.Status = types.StatusInProgress
+	setup.task.ExecutionState = types.ExecStateIdle
 	te.persistTask(setup)
 	te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 
@@ -60,7 +56,7 @@ func (te *TaskExecutor) acquireTaskSlot(setup *taskExecSetup, providerURL string
 	setup.taskSlotURL = providerURL
 
 	// Slot granted — the task is actually running now.
-	setup.task.ExecutionState = "running"
+	setup.task.ExecutionState = types.ExecStateRunning
 	te.persistTaskClaiming(setup)
 	te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 	return true

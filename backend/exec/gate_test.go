@@ -709,6 +709,19 @@ func TestAcquire_RateLimit_ReleaseServeSpacing(t *testing.T) {
 // only E's slot is held (A's went to D and was abandoned with it). A leaked
 // slot here permanently shrinks the provider - twice, and a concurrency-3
 // provider serves one request at a time until the server restarts.
+// activeSlotsFor reads how many slots the gate currently holds for a provider.
+// A value that stays above 0 while nothing is running means slots leaked, which
+// is what the assertions below are looking for; production never asks, so this
+// stays on the test side of the boundary.
+func activeSlotsFor(g *ConcurrencyGate, providerURL string) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if ps, ok := g.providers[gateKey(providerURL)]; ok && ps.active > 0 {
+		return ps.active
+	}
+	return 0
+}
+
 func TestAcquireRelease_CancelledAfterServeReturnsSlot(t *testing.T) {
 	const url = "http://rate-limited:8080/v1"
 	g := NewConcurrencyGate()
@@ -760,7 +773,7 @@ func TestAcquireRelease_CancelledAfterServeReturnsSlot(t *testing.T) {
 		t.Fatal("Release never returned - wedged handing off to a cancelled waiter")
 	}
 
-	if active := g.activeFor(url); active != 1 {
+	if active := activeSlotsFor(g, url); active != 1 {
 		t.Fatalf("active slots = %d, want 1: the cancelled waiter kept the slot Release pre-counted for it", active)
 	}
 }
@@ -858,7 +871,7 @@ func TestConcurrencyGate_CapacitySurvivesCancelChurn(t *testing.T) {
 			g.Release(url) // the waiter did get the slot and owns it
 		}
 		wCancel()
-		if active := g.activeFor(url); active != 0 {
+		if active := activeSlotsFor(g, url); active != 0 {
 			t.Fatalf("cycle %d: %d slot(s) leaked - provider capacity shrinks over time", cycle, active)
 		}
 	}

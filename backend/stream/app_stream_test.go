@@ -233,7 +233,7 @@ func TestBroadcastFramesAreFlat(t *testing.T) {
 	})
 
 	t.Run("task_updated", func(t *testing.T) {
-		asm.BroadcastTaskUpdated(projectID, &types.Task{ID: taskID, ProjectID: projectID, Title: "Flat", Status: "backlog"})
+		asm.BroadcastTaskUpdated(projectID, &types.Task{ID: taskID, ProjectID: projectID, Title: "Flat", Status: types.StatusBacklog})
 		frame := c.awaitFrame(t, 5*time.Second, isType("task_updated"), "task_updated frame")
 		task := requireField(t, frame, "task")
 		if task["id"] != taskID {
@@ -419,4 +419,15 @@ func TestTaskBufferClearedOnTaskDeleted(t *testing.T) {
 	if got := len(asm.getTaskBuffer("proj-1:task-2")); got != 1 {
 		t.Fatalf("other task buffer = %d frames, want 1", got)
 	}
+}
+
+// TestNilStoreStaysNilAfterConstruction: a nil *Store assigned into the streamStore field
+// arrives as a non-nil interface holding a nil pointer, which every `asm.store == nil`
+// guard would read as "a store exists" and dereference.
+func TestNilStoreStaysNilAfterConstruction(t *testing.T) {
+	if asm := NewAppStreamManager(nil, nil); asm.store != nil {
+		t.Fatal("NewAppStreamManager(nil, nil) produced a non-nil store interface — the nil guards in this file are now dead code")
+	}
+	// And the guarded path must actually be callable.
+	NewAppStreamManager(nil, nil).BroadcastProjectCounts()
 }

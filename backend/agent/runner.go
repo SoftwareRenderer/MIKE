@@ -1,3 +1,7 @@
+// Package agent runs agent-type extensions (Pi and the like) as subprocesses.
+// A WASM adapter loaded through wazero translates the agent's protocol; this package owns
+// the subprocess, its stdin/stdout bridge and the model listing. Subprocesses get
+// SafeAgentEnv, never os.Environ(), so an extension binary cannot read the server's secrets.
 package agent
 
 import (
@@ -408,12 +412,9 @@ func (r *AgentRunner) Close() {
 	r.closeChannels()
 }
 
-// closeChannels tears down the outbound channels exactly once, whichever path gets
-// there first: Close() (runner shut down, stdout possibly still open) or readOutput's
-// defer (the agent process exited on its own). Both used to test r.done and then close
-// both channels themselves, which is not atomic — two concurrent teardowns could both
-// pass the test and close the same channel twice, panicking the whole process with
-// "close of closed channel".
+// closeChannels tears down the outbound channels exactly once, whichever path gets there
+// first: Close() or readOutput's defer. Testing a flag before closing is not atomic - two
+// teardowns can both pass and close the same channel twice, which panics the process.
 func (r *AgentRunner) closeChannels() {
 	r.closeOnce.Do(func() {
 		r.sendMu.Lock()

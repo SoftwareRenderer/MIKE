@@ -283,7 +283,16 @@ func askQuestionResults(pending []types.ChatToolCall, results []toolResult) map[
 	return m
 }
 
-func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
+// executeTask runs one task's LLM loop.
+//
+// It copies the setup: prepareTaskExecution's caller keeps using the struct afterwards
+// (handleLazyStart, recovery, tests) while this loop reassigns setup.task and
+// setup.taskSlotURL as it goes. The copy is the ownership rule, not a convenience - the
+// pointers inside (channels, cancel, task, project) are still shared.
+func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
+	setupCopy := *shared
+	setup := &setupCopy
+
 	// Declare lc at function scope so the defer can reference it.
 	var lc *loopContext
 	defer func() {
@@ -332,7 +341,11 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		te.taskMu.Unlock()
 		// Clear assigned ports when the run ends. Column-only write: the task may
 		// already be stopped here, and a full-row write would put "running" back.
-		if len(setup.task.AssignedPorts) > 0 {
+		// Ask the ROW whether to clear: a terminal that forwards a port mid-run writes
+		// that column directly, so this loop's copy can be behind, and a stale copy would
+		// leave a live host port bound to a stopped task. The in-memory check is only the
+		// fallback for a failed read.
+		if row, err := te.store.GetTaskByID(setup.task.ID); (err == nil && len(row.AssignedPorts) > 0) || len(setup.task.AssignedPorts) > 0 {
 			setup.task.AssignedPorts = nil
 			_ = te.store.SetTaskAssignedPorts(setup.task.ID, setup.projectID, nil)
 			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
@@ -526,8 +539,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project, te.sandboxCreateOpts(setup, imageToUse, updatedTask.IsPlanMode()))
 					if createErr != nil {
 						log.Printf("[mode-switch] setup.task=%s failed to recreate sandbox: %v", setup.task.ID, createErr)
-						setup.task.ExecutionState = "failed"
-						setup.task.Status = "review"
+						setup.task.ExecutionState = types.ExecStateFailed
+						setup.task.Status = types.StatusReview
 						setup.task.Output = fmt.Sprintf("Failed to recreate sandbox for mode change: %v", createErr)
 						te.persistTask(setup)
 						te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
@@ -538,8 +551,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					newAgentClient, clientErr := te.sandboxMgr.GetClient(setup.task.ID)
 					if clientErr != nil {
 						log.Printf("[mode-switch] setup.task=%s failed to connect to new sandbox bridge: %v", setup.task.ID, clientErr)
-						setup.task.ExecutionState = "failed"
-						setup.task.Status = "review"
+						setup.task.ExecutionState = types.ExecStateFailed
+						setup.task.Status = types.StatusReview
 						setup.task.Output = fmt.Sprintf("Failed to connect to sandbox bridge after mode change: %v", clientErr)
 						te.persistTask(setup)
 						te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
@@ -591,8 +604,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project, te.sandboxCreateOpts(setup, imageToUse, setup.task.IsPlanMode()))
 				if createErr != nil {
 					log.Printf("[sandbox-config] setup.task=%s failed to recreate sandbox: %v", setup.task.ID, createErr)
-					setup.task.ExecutionState = "failed"
-					setup.task.Status = "review"
+					setup.task.ExecutionState = types.ExecStateFailed
+					setup.task.Status = types.StatusReview
 					setup.task.Output = fmt.Sprintf("Failed to recreate sandbox for config change: %v", createErr)
 					te.persistTask(setup)
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
@@ -602,8 +615,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				newAgentClient, clientErr := te.sandboxMgr.GetClient(setup.task.ID)
 				if clientErr != nil {
 					log.Printf("[sandbox-config] setup.task=%s failed to connect to new sandbox bridge: %v", setup.task.ID, clientErr)
-					setup.task.ExecutionState = "failed"
-					setup.task.Status = "review"
+					setup.task.ExecutionState = types.ExecStateFailed
+					setup.task.Status = types.StatusReview
 					setup.task.Output = fmt.Sprintf("Failed to connect to sandbox bridge after config change: %v", clientErr)
 					te.persistTask(setup)
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
@@ -697,8 +710,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 		llmMessages := buildLLMContext(lc.messages)
 
 		// Set status before the LLM call so the frontend picks up streaming tokens.
-		setup.task.Status = "in_progress"
-		setup.task.ExecutionState = "running"
+		setup.task.Status = types.StatusInProgress
+		setup.task.ExecutionState = types.ExecStateRunning
 		te.persistTaskClaiming(setup)
 		te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 
@@ -1154,8 +1167,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				// Not auto-answered and no request_review: stop and wait for the user.
 				if !hadRequestReview && !autoAnswered {
 					tr := toolResults[askResults[questionIdxs[0]]]
-					setup.task.ExecutionState = "idle"
-					setup.task.Status = "review"
+					setup.task.ExecutionState = types.ExecStateIdle
+					setup.task.Status = types.StatusReview
 					te.persistTask(setup)
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 					te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
@@ -1188,11 +1201,11 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 							continue
 						}
 						if !setup.task.AutoMerge {
-							setup.task.ExecutionState = "idle"
-							setup.task.Status = "review"
+							setup.task.ExecutionState = types.ExecStateIdle
+							setup.task.Status = types.StatusReview
 						} else {
-							setup.task.ExecutionState = "completed"
-							setup.task.Status = "done"
+							setup.task.ExecutionState = types.ExecStateCompleted
+							setup.task.Status = types.StatusDone
 						}
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
@@ -1223,21 +1236,21 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					}
 					if mergeErr != nil {
 						log.Printf("[merge] task=%s merge failed, moving to review: %v", setup.task.ID, mergeErr)
-						setup.task.ExecutionState = "idle"
-						setup.task.Status = "review"
+						setup.task.ExecutionState = types.ExecStateIdle
+						setup.task.Status = types.StatusReview
 						setup.task.Output = "Merge failed: " + mergeErr.Error()
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
 						}
 					} else if !setup.task.AutoMerge {
-						setup.task.ExecutionState = "idle"
-						setup.task.Status = "review"
+						setup.task.ExecutionState = types.ExecStateIdle
+						setup.task.Status = types.StatusReview
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
 						}
 					} else {
-						setup.task.ExecutionState = "completed"
-						setup.task.Status = "done"
+						setup.task.ExecutionState = types.ExecStateCompleted
+						setup.task.Status = types.StatusDone
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
 						}
@@ -1246,27 +1259,27 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					_, setup.task = te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
 					if setup.task.HasMergeConflict {
 						log.Printf("[merge] setup.task=%s merge still conflicted after request_review", setup.task.ID)
-						setup.task.ExecutionState = "failed"
-						setup.task.Status = "review"
+						setup.task.ExecutionState = types.ExecStateFailed
+						setup.task.Status = types.StatusReview
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
 						}
 					} else if !setup.task.AutoMerge {
-						setup.task.ExecutionState = "idle"
-						setup.task.Status = "review"
+						setup.task.ExecutionState = types.ExecStateIdle
+						setup.task.Status = types.StatusReview
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
 						}
 					} else {
-						setup.task.ExecutionState = "completed"
-						setup.task.Status = "done"
+						setup.task.ExecutionState = types.ExecStateCompleted
+						setup.task.Status = types.StatusDone
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
 						}
 					}
 				} else {
-					setup.task.ExecutionState = "idle"
-					setup.task.Status = "review"
+					setup.task.ExecutionState = types.ExecStateIdle
+					setup.task.Status = types.StatusReview
 				}
 				te.persistTask(setup)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
@@ -1289,8 +1302,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 			// Check consecutive identical tool call failures (turn-level).
 			if count := lc.tracker.recordTurn(turnFailures); count >= maxFailures {
-				setup.task.ExecutionState = "failed"
-				setup.task.Status = "review"
+				setup.task.ExecutionState = types.ExecStateFailed
+				setup.task.Status = types.StatusReview
 				setup.task.Output = fmt.Sprintf("Max consecutive failed turns (%d) reached", maxFailures)
 				te.persistTask(setup)
 				te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
@@ -1402,7 +1415,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 				}
 				if !setup.task.IsExploreMode() && !setup.task.IsPlanMode() {
 					// In act mode: loop detected, inject hint, continue
-					setup.task.ExecutionState = "running"
+					setup.task.ExecutionState = types.ExecStateRunning
 					te.persistTaskClaiming(setup)
 					continue
 				}
@@ -1418,8 +1431,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 			// is still generating while the summary is produced. Release the
 			// running-task slot too - an idle task no longer blocks other tasks.
 			te.releaseTaskSlot(setup)
-			setup.task.Status = "review"
-			setup.task.ExecutionState = "idle"
+			setup.task.Status = types.StatusReview
+			setup.task.ExecutionState = types.ExecStateIdle
 			te.persistTask(setup)
 			te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 			te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
@@ -1474,7 +1487,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					te.handleCancelledTask(setup.task.ID, setup.projectID)
 					return
 				}
-				setup.task.ExecutionState = "running"
+				setup.task.ExecutionState = types.ExecStateRunning
 				te.persistTaskClaiming(setup)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
 				continue
@@ -1562,8 +1575,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					// Defensive release: the task is expected not to hold a slot
 					// while idle (it was released when it went idle).
 					te.releaseTaskSlot(setup)
-					setup.task.Status = "review"
-					setup.task.ExecutionState = "idle"
+					setup.task.Status = types.StatusReview
+					setup.task.ExecutionState = types.ExecStateIdle
 					te.persistTask(setup)
 					te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
 					// Re-block for a user message instead of looping into a fresh LLM call.
@@ -1575,8 +1588,8 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					te.handleCancelledTask(setup.task.ID, setup.projectID)
 					return
 				}
-				setup.task.Status = "in_progress"
-				setup.task.ExecutionState = "running"
+				setup.task.Status = types.StatusInProgress
+				setup.task.ExecutionState = types.ExecStateRunning
 				te.persistTaskClaiming(setup)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing queued message"}})
 				break idleWait
@@ -1609,7 +1622,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					te.handleCancelledTask(setup.task.ID, setup.projectID)
 					return
 				}
-				setup.task.ExecutionState = "running"
+				setup.task.ExecutionState = types.ExecStateRunning
 				te.persistTaskClaiming(setup)
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeStatus, Data: map[string]string{"state": "running", "activity": "Processing new message"}})
 				break idleWait
@@ -1728,8 +1741,8 @@ func (te *TaskExecutor) gitRun(dir string, args ...string) error {
 // failTask sets the task to failed/review state, persists it, broadcasts the
 // update, and sends a WebSocket error event.
 func (te *TaskExecutor) failTask(task *types.Task, projectID, output, code string) {
-	task.ExecutionState = "failed"
-	task.Status = "review"
+	task.ExecutionState = types.ExecStateFailed
+	task.Status = types.StatusReview
 	task.Output = output
 	te.storeTask(task, projectID)
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)

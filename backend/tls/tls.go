@@ -1,3 +1,6 @@
+// Package tls provisions HTTPS material: a self-signed local CA created once in the data
+// directory, and a server certificate it signs whose SANs cover localhost, the hostname and
+// the host's addresses. The CA key never leaves the data dir and is never rotated.
 package tls
 
 import (

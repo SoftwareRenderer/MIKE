@@ -56,7 +56,7 @@ func setupDoneSnapshotTest(t *testing.T) (string, *store.Store, *config.ConfigSt
 		ProjectID: "proj-1",
 		Title:     "done task",
 		Prompt:    "p",
-		Status:    "done",
+		Status:    types.StatusDone,
 		Branch:    "task/task-1",
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -112,7 +112,7 @@ func markDone(t *testing.T, s *store.Store, task *types.Task, baseCommit, branch
 	t.Helper()
 	task.BaseCommit = baseCommit
 	task.BranchTip = branchTip
-	task.Status = "done"
+	task.Status = types.StatusDone
 	if err := s.UpdateTask(task); err != nil {
 		t.Fatalf("update task: %v", err)
 	}

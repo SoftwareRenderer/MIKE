@@ -1,3 +1,8 @@
+// Package exec is the execution engine: a task's LLM or agent loop, from accepting a user
+// message until the run settles, including tool execution, summarization, sandbox setup,
+// merge conflicts, checkpoints and the provider gates.
+// The loop never touches a ResponseWriter, so a turn keeps running - and reporting over the
+// task's WebSocket - whatever the browser does.
 package exec
 
 import (
@@ -32,9 +37,44 @@ import (
 	"github.com/google/uuid"
 )
 
+// taskStore is what the execution loop persists: task rows and their state
+// transitions, messages, threads and token accounting.
+type taskStore interface {
+	AccumulateProjectStats(projectID, modelName, providerName string, cost float64)
+	ClearTaskBranch(taskID, projectID string) error
+	CreateTask(t *types.Task) error
+	CreateTaskMessage(m *types.TaskMessage) error
+	CreateThread(th *types.TaskThread) error
+	FixPostSummaryTimestamps(taskID, threadID string, anchorTime, summaryTime time.Time) error
+	GetChildren(taskID string) ([]types.Task, error)
+	GetInFlightTasks() ([]types.Task, error)
+	GetLastMessageInThread(threadID string) (*types.TaskMessage, error)
+	GetPendingIdleTasks() ([]types.Task, error)
+	GetProject(id string) (*types.Project, error)
+	GetTask(projectID, taskID string) (*types.Task, error)
+	GetTaskByID(taskID string) (*types.Task, error)
+	GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, error)
+	GetTasksByProject(projectID string) ([]types.Task, error)
+	GetThread(threadID string) (*types.TaskThread, error)
+	SetTaskAssignedPorts(taskID, projectID string, ports []types.AssignedPort) error
+	SetTaskBranch(taskID, projectID, branch string) error
+	SetTaskBranchIfEmpty(taskID, projectID, branch string) (bool, error)
+	SetTaskMergeConflict(taskID, projectID string, hasConflict bool) error
+	SetTaskSummarizing(taskID string, summarizing bool) error
+	TransitionInFlightTask(taskID, projectID string, executionState types.ExecutionState, output *string) (bool, error)
+	UpdateTask(t *types.Task) error
+	UpdateTaskClaimingExecution(t *types.Task) error
+	UpdateTaskExecutionState(taskID, projectID string, executionState types.ExecutionState) error
+	UpdateTaskMessageCommitHash(messageID, hash string) error
+	UpdateTaskMessageToolResult(messageID, toolResult string) error
+	UpdateTaskSessionCost(taskID string, cost float64) error
+}
+
+var _ taskStore = (*store.Store)(nil)
+
 // TaskExecutor handles task execution endpoints and orchestrates AI task execution.
 type TaskExecutor struct {
-	store         *store.Store
+	store         taskStore
 	configStore   *config.ConfigStore
 	appStreamMgr  *stream.AppStreamManager
 	worktreeMgr   *git.WorktreeManager
@@ -106,9 +146,9 @@ type executionState struct {
 	agentRunner  *agent.AgentRunner       // Agent runner — kept alive after completion for on-demand compaction
 	runnerClosed bool
 	projectName  string
-	createdIDs   []string // task IDs created by create_task during this execution
-	executorType string   // "llm" or "agent" — tracks which executor type is active
-	taskStatus   string   // task status at start; cleared by StopTask so HasRunningTasks can skip it
+	createdIDs   []string     // task IDs created by create_task during this execution
+	executorType string       // "llm" or "agent" — tracks which executor type is active
+	taskStatus   types.Status // task status at start; cleared by StopTask so HasRunningTasks can skip it
 	// lastDiffHash tracks the last broadcast diff hash to avoid duplicate broadcasts
 	// when fsnotify already caught the same change.
 	lastDiffHash string
@@ -453,7 +493,7 @@ func (te *TaskExecutor) StreamCompletion(ctx context.Context, serverURL, modelNa
 // status. An empty slice (no children) counts as done.
 func ChildrenAllDone(children []types.Task) bool {
 	for i := range children {
-		if children[i].Status != "done" {
+		if children[i].Status != types.StatusDone {
 			return false
 		}
 	}
@@ -533,10 +573,10 @@ func (te *TaskExecutor) FindDeepestStartableSubtasks(tasks []types.Task) []types
 // backlog, or in_progress and not running/failed. Board state only —
 // IsStartableNow additionally requires all children done.
 func isIncompleteForStart(t types.Task) bool {
-	if t.Status == "backlog" {
+	if t.Status == types.StatusBacklog {
 		return true
 	}
-	if t.Status == "in_progress" && t.ExecutionState != "running" && t.ExecutionState != "failed" {
+	if t.Status == types.StatusInProgress && t.ExecutionState != types.ExecStateRunning && t.ExecutionState != types.ExecStateFailed {
 		return true
 	}
 	return false
@@ -766,10 +806,10 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 		return fmt.Errorf("get parent task: %w", err)
 	}
 	// Only continue under an in_progress or backlog parent that hasn't completed.
-	if parent.Status != "in_progress" && parent.Status != "backlog" {
+	if parent.Status != types.StatusInProgress && parent.Status != types.StatusBacklog {
 		return nil
 	}
-	if parent.ExecutionState == "completed" {
+	if parent.ExecutionState == types.ExecStateCompleted {
 		return nil
 	}
 
@@ -800,7 +840,7 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 
 	if len(pending) > 0 {
 		// A Backlog parent was never started by the user — no sibling autostart.
-		if parent.Status == "backlog" {
+		if parent.Status == types.StatusBacklog {
 			log.Printf("[auto-start] parent %s is in backlog, skipping sibling auto-start (%d pending siblings)", parentTaskID, len(pending))
 			return nil
 		}
@@ -826,7 +866,7 @@ func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTa
 	// No pending siblings.
 	if allDone {
 		// All children done: autostart the parent only if the user started it.
-		if parent.Status == "in_progress" {
+		if parent.Status == types.StatusInProgress {
 			log.Printf("[auto-start] task=%s all children done, starting parent %s", finishedTaskID, parent.ID)
 			if err := te.StartTask(projectID, parent.ID, true); err != nil {
 				log.Printf("[auto-start] task=%s failed to start parent %s: %v", finishedTaskID, parent.ID, err)
@@ -858,7 +898,7 @@ func (te *TaskExecutor) autoStartAncestorSiblings(projectID string, parent *type
 	if err != nil {
 		return nil
 	}
-	if grandparent.Status == "backlog" {
+	if grandparent.Status == types.StatusBacklog {
 		log.Printf("[auto-start] ancestor %s is in backlog, skipping auto-start", grandparent.ID)
 		return nil
 	}
@@ -999,6 +1039,10 @@ func (s *taskExecSetup) projectName() string {
 	return s.project.Name
 }
 
+// ErrTaskAlreadyRunning means another executor holds this task right now; the API answers
+// 409. Managers.StartTask distinguishes it from a genuine failure by this, not by text.
+var ErrTaskAlreadyRunning = errors.New("task already running")
+
 // prepareTaskExecution sets up the shared infrastructure for task execution.
 // Both StartTask and handleLazyStart use this to avoid duplicating worktree
 // creation, branch watching, status updates, and sandbox configuration.
@@ -1019,7 +1063,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	}
 
 	// Reset stale running state (executor crashed/server restarted)
-	if task.ExecutionState == "running" {
+	if task.ExecutionState == types.ExecStateRunning {
 		te.taskMu.Lock()
 		_, activelyRunning := te.tasks[taskID]
 		te.taskMu.Unlock()
@@ -1027,7 +1071,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 			return nil, fmt.Errorf("task already running")
 		}
 		log.Printf("[start] task=%s stale running state detected, resetting", taskID)
-		task.ExecutionState = "idle"
+		task.ExecutionState = types.ExecStateIdle
 	}
 
 	serverURL := overrideServerURL
@@ -1133,8 +1177,8 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	waitForExecutorExit(taskID, te.cancelExistingExecutor(taskID), executorExitGrace)
 
 	if updateStatus {
-		task.ExecutionState = "running"
-		task.Status = "in_progress"
+		task.ExecutionState = types.ExecStateRunning
+		task.Status = types.StatusInProgress
 		if err := te.storeTaskClaiming(task, projectID); err != nil {
 			return nil, err
 		}
@@ -1161,8 +1205,8 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 		te.taskMu.Lock()
 		delete(te.tasks, taskID)
 		te.taskMu.Unlock()
-		task.ExecutionState = "idle"
-		task.Status = "backlog"
+		task.ExecutionState = types.ExecStateIdle
+		task.Status = types.StatusBacklog
 		task.UpdatedAt = time.Now().UTC()
 		_ = te.storeTask(task, projectID)
 		return nil, fmt.Errorf("agent requires network to be enabled")
@@ -1335,8 +1379,8 @@ func (te *TaskExecutor) StartTask(projectID, taskID string, autostarted bool) er
 		delete(te.tasks, taskID)
 		te.taskMu.Unlock()
 		if fresh, err := te.store.GetTask(projectID, taskID); err == nil {
-			fresh.Status = "review"
-			fresh.ExecutionState = "idle"
+			fresh.Status = types.StatusReview
+			fresh.ExecutionState = types.ExecStateIdle
 			fresh.Output = "Nothing to run — the agent has the last word and is waiting for your reply"
 			fresh.UpdatedAt = time.Now().UTC()
 			_ = te.storeTask(fresh, projectID)
@@ -1491,8 +1535,8 @@ func (te *TaskExecutor) normalizePendingTasks() int {
 		if gerr != nil {
 			continue
 		}
-		fresh.Status = "review"
-		fresh.ExecutionState = "idle"
+		fresh.Status = types.StatusReview
+		fresh.ExecutionState = types.ExecStateIdle
 		fresh.Output = "Nothing to run — the agent has the last word and is waiting for your reply"
 		fresh.UpdatedAt = time.Now().UTC()
 		if perr := te.storeTask(fresh, task.ProjectID); perr != nil {
@@ -1520,7 +1564,7 @@ func (te *TaskExecutor) HasRunningTasks(projectID string) bool {
 	te.taskMu.Lock()
 	defer te.taskMu.Unlock()
 	for _, task := range tasks {
-		if _, ok := te.tasks[task.ID]; ok && task.Status == "in_progress" {
+		if _, ok := te.tasks[task.ID]; ok && task.Status == types.StatusInProgress {
 			return true
 		}
 	}
@@ -1629,7 +1673,7 @@ func (te *TaskExecutor) RetryTask(projectID, taskID string) error {
 	if err != nil {
 		return err
 	}
-	task.ExecutionState = "idle"
+	task.ExecutionState = types.ExecStateIdle
 	te.storeTask(task, projectID)
 	return te.StartTask(projectID, taskID, false)
 }
@@ -1659,8 +1703,8 @@ func (te *TaskExecutor) handleLazyStart(projectID, taskID, content, modelName, s
 	execSetup, err := te.prepareTaskExecution(projectID, taskID, serverURL, modelName, true)
 	if err != nil {
 		log.Printf("[lazy-start] task=%s setup failed: %v", taskID, err)
-		task.ExecutionState = "failed"
-		task.Status = "review"
+		task.ExecutionState = types.ExecStateFailed
+		task.Status = types.StatusReview
 		task.Output = err.Error()
 		_ = te.storeTask(task, projectID)
 		te.appStreamMgr.BroadcastTaskUpdated(projectID, task)

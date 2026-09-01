@@ -2,12 +2,16 @@ package extensions
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"kanban/backend/errs"
 	"kanban/backend/store"
 )
 
@@ -137,6 +141,17 @@ func TestGetByIDNotFound(t *testing.T) {
 	if err == nil {
 		t.Error("GetByID(nil) = nil, want error")
 	}
+	// The handler answers this with 404 only because the error says so; the ID
+	// stays in the message because callers show it.
+	if !errs.IsNotFound(err) {
+		t.Errorf("errs.IsNotFound(%v) = false, want true", err)
+	}
+	if !errors.Is(err, ErrExtensionNotFound) {
+		t.Errorf("errors.Is(err, ErrExtensionNotFound) = false, err = %v", err)
+	}
+	if msg := err.Error(); !strings.HasPrefix(msg, "extension not found: ") {
+		t.Errorf("message = %q, want the %q prefix", msg, "extension not found: ")
+	}
 }
 
 func TestGetByAuthorName(t *testing.T) {
@@ -169,6 +184,8 @@ func TestGetByAuthorName(t *testing.T) {
 
 	if _, err := es.GetByAuthorName("dev", "nonexistent"); err == nil {
 		t.Error("GetByAuthorName(dev, nonexistent) = nil, want error")
+	} else if !errs.IsNotFound(err) {
+		t.Errorf("errs.IsNotFound(%v) = false, want true", err)
 	}
 }
 
@@ -437,22 +454,27 @@ func TestEmptyList(t *testing.T) {
 
 func TestConcurrentAccess(t *testing.T) {
 	es := testStore(t)
-	// Create multiple extensions concurrently
+	// Create multiple extensions concurrently. The WaitGroup is what makes the reads
+	// below meaningful: without it the test raced its own writers on a sleep.
+	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
+		wg.Add(1)
 		go func(i int) {
+			defer wg.Done()
 			ext := makeTestExt("concurrent-ext", "concurrent-ext", ExtensionTypeLSP)
 			_ = es.Create(ext)
 		}(i)
 	}
-	time.Sleep(100 * time.Millisecond) // let goroutines finish
+	wg.Wait()
 
-	// Read concurrently
-	var count int
+	// Read concurrently. count is shared across goroutines, so it needs a counter and
+	// not a +=, which the race detector is right to flag.
+	var count atomic.Int64
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func() {
 			extensions, _ := es.List()
-			count += len(extensions)
+			count.Add(int64(len(extensions)))
 			done <- true
 		}()
 	}
@@ -460,7 +482,7 @@ func TestConcurrentAccess(t *testing.T) {
 		<-done
 	}
 	// Should have at least 1 read (all should succeed)
-	if count == 0 {
+	if count.Load() == 0 {
 		t.Error("Concurrent reads returned 0 results")
 	}
 }

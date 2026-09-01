@@ -31,8 +31,8 @@ func newTask(id, projectID string) *types.Task {
 		ProjectID:      projectID,
 		Title:          id,
 		Prompt:         "test prompt",
-		Status:         "backlog",
-		ExecutionState: "idle",
+		Status:         types.StatusBacklog,
+		ExecutionState: types.ExecStateIdle,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

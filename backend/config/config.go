@@ -1,3 +1,6 @@
+// Package config owns the effective server configuration: the config table, the two
+// provider/model pairs that route work (worker_* for chat, utility_* for titles, summaries
+// and commit messages), and the environment defaults used where a row is absent.
 package config
 
 import (
@@ -38,9 +41,19 @@ func RegistryURL() string {
 	return "https://getmike.dev/extensions/registry.json"
 }
 
-// ConfigStore wraps Store for config-specific operations.
+// configDB is config's whole persistence need: its own key/value table, plus the typed
+// remap that rewrites provider attribution in tables the store owns.
+type configDB interface {
+	GetConfigValue(key string) (string, error)
+	SetConfigValue(key, value string) error
+	RemapProviderNames(oldSlugToID map[string]string) error
+}
+
+var _ configDB = (*store.Store)(nil)
+
+// ConfigStore reads and writes the server configuration.
 type ConfigStore struct {
-	store                *store.Store
+	db                   configDB
 	dbPath               string
 	version              string
 	agentRegistry        AgentProviderLister // optional — set via SetAgentRegistry
@@ -134,7 +147,7 @@ func assignProviderIDs(providers []types.Provider) {
 // provider_name rows in the message/token tables, and persists the new format.
 // It is idempotent: once every persisted provider has an ID it does nothing.
 func (cs *ConfigStore) MigrateProviderIDs() error {
-	providersRaw, err := cs.store.GetConfigValue("providers")
+	providersRaw, err := cs.db.GetConfigValue("providers")
 	if err != nil {
 		return err
 	}
@@ -168,34 +181,31 @@ func (cs *ConfigStore) MigrateProviderIDs() error {
 
 	// Remap worker/utility provider references (which stored the old slug).
 	for _, key := range []string{"worker_provider", "utility_provider"} {
-		raw, _ := cs.store.GetConfigValue(key)
+		raw, _ := cs.db.GetConfigValue(key)
 		if id, ok := slugToID[raw]; ok {
-			if err := cs.store.SetConfigValue(key, id); err != nil {
+			if err := cs.db.SetConfigValue(key, id); err != nil {
 				return err
 			}
 		}
 	}
 
-	// Remap provider_name rows in the message/token tables from slug to ID.
-	for _, table := range []string{"task_messages", "project_token_stats", "project_token_tasks"} {
-		for slug, id := range slugToID {
-			if _, err := cs.store.Exec(`UPDATE `+table+` SET provider_name = ? WHERE provider_name = ?`, id, slug); err != nil {
-				return err
-			}
-		}
+	// Remap provider_name rows in the message/token tables from slug to ID. The rows are
+	// the store's; config only says which slug means which ID.
+	if err := cs.db.RemapProviderNames(slugToID); err != nil {
+		return err
 	}
 
 	providersJSON, err := json.Marshal(providers)
 	if err != nil {
 		return err
 	}
-	return cs.store.SetConfigValue("providers", string(providersJSON))
+	return cs.db.SetConfigValue("providers", string(providersJSON))
 }
 
 // NewConfigStore creates a new ConfigStore.
-func NewConfigStore(store *store.Store, dbPath, version string) *ConfigStore {
+func NewConfigStore(s *store.Store, dbPath, version string) *ConfigStore {
 	abs, _ := filepath.Abs(dbPath)
-	return &ConfigStore{store: store, dbPath: abs, version: version}
+	return &ConfigStore{db: s, dbPath: abs, version: version}
 }
 
 // GetConfig retrieves the full server configuration.
@@ -204,7 +214,7 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 	// Workspace dir is set at startup via CLI flag / env var — not persisted.
 	// WorkspaceDir() is that same computation without the config-row reads.
 	workspaceDir := cs.WorkspaceDir()
-	providersRaw, err := cs.store.GetConfigValue("providers")
+	providersRaw, err := cs.db.GetConfigValue("providers")
 	if err != nil {
 		return nil, err
 	}
@@ -232,33 +242,33 @@ func (cs *ConfigStore) GetConfig() (*types.Config, error) {
 		}
 	}
 
-	workerProvider, err := cs.store.GetConfigValue("worker_provider")
+	workerProvider, err := cs.db.GetConfigValue("worker_provider")
 	if err != nil {
 		return nil, err
 	}
-	workerModel, err := cs.store.GetConfigValue("worker_model")
+	workerModel, err := cs.db.GetConfigValue("worker_model")
 	if err != nil {
 		return nil, err
 	}
-	utilityProvider, err := cs.store.GetConfigValue("utility_provider")
+	utilityProvider, err := cs.db.GetConfigValue("utility_provider")
 	if err != nil {
 		return nil, err
 	}
-	utilityModel, err := cs.store.GetConfigValue("utility_model")
+	utilityModel, err := cs.db.GetConfigValue("utility_model")
 	if err != nil {
 		return nil, err
 	}
 	registryURL := RegistryURL()
-	defaultAutoCommitRaw, _ := cs.store.GetConfigValue("default_auto_commit")
-	defaultAutoMergeRaw, _ := cs.store.GetConfigValue("default_auto_merge")
-	defaultSubtasksAutoMergeRaw, _ := cs.store.GetConfigValue("default_subtasks_auto_merge")
-	defaultOperatingModeRaw, _ := cs.store.GetConfigValue("default_operating_mode")
-	defaultMaxFailedTurnsRaw, _ := cs.store.GetConfigValue("default_max_failed_turns")
-	defaultAutoSummarizeThresholdRaw, _ := cs.store.GetConfigValue("default_auto_summarize_threshold")
-	hideModelBadgeRaw, _ := cs.store.GetConfigValue("hide_model_badge")
-	runSiblingsParallelRaw, _ := cs.store.GetConfigValue("run_siblings_parallel")
-	sortOldestFirstRaw, _ := cs.store.GetConfigValue("sort_oldest_first")
-	keyboardShortcutsRaw, _ := cs.store.GetConfigValue("keyboard_shortcuts")
+	defaultAutoCommitRaw, _ := cs.db.GetConfigValue("default_auto_commit")
+	defaultAutoMergeRaw, _ := cs.db.GetConfigValue("default_auto_merge")
+	defaultSubtasksAutoMergeRaw, _ := cs.db.GetConfigValue("default_subtasks_auto_merge")
+	defaultOperatingModeRaw, _ := cs.db.GetConfigValue("default_operating_mode")
+	defaultMaxFailedTurnsRaw, _ := cs.db.GetConfigValue("default_max_failed_turns")
+	defaultAutoSummarizeThresholdRaw, _ := cs.db.GetConfigValue("default_auto_summarize_threshold")
+	hideModelBadgeRaw, _ := cs.db.GetConfigValue("hide_model_badge")
+	runSiblingsParallelRaw, _ := cs.db.GetConfigValue("run_siblings_parallel")
+	sortOldestFirstRaw, _ := cs.db.GetConfigValue("sort_oldest_first")
+	keyboardShortcutsRaw, _ := cs.db.GetConfigValue("keyboard_shortcuts")
 
 	cfg := &types.Config{
 		WorkspaceDir:    workspaceDir,
@@ -351,63 +361,63 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 	if err != nil {
 		return err
 	}
-	if err := cs.store.SetConfigValue("providers", string(providersJSON)); err != nil {
+	if err := cs.db.SetConfigValue("providers", string(providersJSON)); err != nil {
 		return err
 	}
-	if err := cs.store.SetConfigValue("worker_provider", c.WorkerProvider); err != nil {
+	if err := cs.db.SetConfigValue("worker_provider", c.WorkerProvider); err != nil {
 		return err
 	}
-	if err := cs.store.SetConfigValue("worker_model", c.WorkerModel); err != nil {
+	if err := cs.db.SetConfigValue("worker_model", c.WorkerModel); err != nil {
 		return err
 	}
-	if err := cs.store.SetConfigValue("utility_provider", c.UtilityProvider); err != nil {
+	if err := cs.db.SetConfigValue("utility_provider", c.UtilityProvider); err != nil {
 		return err
 	}
-	if err := cs.store.SetConfigValue("utility_model", c.UtilityModel); err != nil {
+	if err := cs.db.SetConfigValue("utility_model", c.UtilityModel); err != nil {
 		return err
 	}
 	if c.DefaultAutoCommit != nil {
-		if err := cs.store.SetConfigValue("default_auto_commit", fmt.Sprintf("%t", *c.DefaultAutoCommit)); err != nil {
+		if err := cs.db.SetConfigValue("default_auto_commit", fmt.Sprintf("%t", *c.DefaultAutoCommit)); err != nil {
 			return err
 		}
 	}
 	if c.DefaultAutoMerge != nil {
-		if err := cs.store.SetConfigValue("default_auto_merge", fmt.Sprintf("%t", *c.DefaultAutoMerge)); err != nil {
+		if err := cs.db.SetConfigValue("default_auto_merge", fmt.Sprintf("%t", *c.DefaultAutoMerge)); err != nil {
 			return err
 		}
 	}
 	if c.DefaultSubtasksAutoMerge != nil {
-		if err := cs.store.SetConfigValue("default_subtasks_auto_merge", fmt.Sprintf("%t", *c.DefaultSubtasksAutoMerge)); err != nil {
+		if err := cs.db.SetConfigValue("default_subtasks_auto_merge", fmt.Sprintf("%t", *c.DefaultSubtasksAutoMerge)); err != nil {
 			return err
 		}
 	}
 	if c.DefaultOperatingMode != nil {
-		if err := cs.store.SetConfigValue("default_operating_mode", *c.DefaultOperatingMode); err != nil {
+		if err := cs.db.SetConfigValue("default_operating_mode", *c.DefaultOperatingMode); err != nil {
 			return err
 		}
 	}
 	if c.DefaultMaxFailedTurns != nil {
-		if err := cs.store.SetConfigValue("default_max_failed_turns", fmt.Sprintf("%d", *c.DefaultMaxFailedTurns)); err != nil {
+		if err := cs.db.SetConfigValue("default_max_failed_turns", fmt.Sprintf("%d", *c.DefaultMaxFailedTurns)); err != nil {
 			return err
 		}
 	}
 	if c.DefaultAutoSummarizeThreshold != nil {
-		if err := cs.store.SetConfigValue("default_auto_summarize_threshold", fmt.Sprintf("%d", *c.DefaultAutoSummarizeThreshold)); err != nil {
+		if err := cs.db.SetConfigValue("default_auto_summarize_threshold", fmt.Sprintf("%d", *c.DefaultAutoSummarizeThreshold)); err != nil {
 			return err
 		}
 	}
 	if c.HideModelBadge != nil {
-		if err := cs.store.SetConfigValue("hide_model_badge", fmt.Sprintf("%t", *c.HideModelBadge)); err != nil {
+		if err := cs.db.SetConfigValue("hide_model_badge", fmt.Sprintf("%t", *c.HideModelBadge)); err != nil {
 			return err
 		}
 	}
 	if c.RunSiblingsParallel != nil {
-		if err := cs.store.SetConfigValue("run_siblings_parallel", fmt.Sprintf("%t", *c.RunSiblingsParallel)); err != nil {
+		if err := cs.db.SetConfigValue("run_siblings_parallel", fmt.Sprintf("%t", *c.RunSiblingsParallel)); err != nil {
 			return err
 		}
 	}
 	if c.SortOldestFirst != nil {
-		if err := cs.store.SetConfigValue("sort_oldest_first", fmt.Sprintf("%t", *c.SortOldestFirst)); err != nil {
+		if err := cs.db.SetConfigValue("sort_oldest_first", fmt.Sprintf("%t", *c.SortOldestFirst)); err != nil {
 			return err
 		}
 	}
@@ -416,7 +426,7 @@ func (cs *ConfigStore) UpdateConfig(c *types.Config) error {
 		if err != nil {
 			return err
 		}
-		if err := cs.store.SetConfigValue("keyboard_shortcuts", string(ksJSON)); err != nil {
+		if err := cs.db.SetConfigValue("keyboard_shortcuts", string(ksJSON)); err != nil {
 			return err
 		}
 	}
@@ -666,7 +676,7 @@ func parseIntPtr(s string) (*int, error) {
 // percent of the context window (1-100). Falls back to the default of 90 when unset
 // or invalid.
 func (cs *ConfigStore) AutoSummarizeThreshold() int {
-	raw, err := cs.store.GetConfigValue("default_auto_summarize_threshold")
+	raw, err := cs.db.GetConfigValue("default_auto_summarize_threshold")
 	if err != nil {
 		return 90
 	}
@@ -681,7 +691,7 @@ func (cs *ConfigStore) AutoSummarizeThreshold() int {
 // parallel (all at once) rather than one at a time. Returns false (sequential)
 // when the value is unset or invalid.
 func (cs *ConfigStore) GetRunSiblingsParallel() bool {
-	raw, _ := cs.store.GetConfigValue("run_siblings_parallel")
+	raw, _ := cs.db.GetConfigValue("run_siblings_parallel")
 	if v, err := parseBoolPtr(raw); err == nil && v != nil {
 		return *v
 	}
@@ -725,5 +735,5 @@ func (cs *ConfigStore) SaveModelContextWindow(modelName, providerURL string, con
 
 	// Persist
 	providersJSON, _ := json.Marshal(cfg.Providers)
-	_ = cs.store.SetConfigValue("providers", string(providersJSON))
+	_ = cs.db.SetConfigValue("providers", string(providersJSON))
 }

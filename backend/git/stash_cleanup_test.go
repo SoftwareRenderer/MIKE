@@ -58,7 +58,7 @@ func setupStashTest(t *testing.T) (string, string, string, *store.Store, *config
 		ID:        taskID,
 		ProjectID: projID,
 		Title:     "Test task",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 		Branch:    "task/" + taskID,
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -169,7 +169,7 @@ func TestDropStashEntriesForTask_NoFalsePositives(t *testing.T) {
 		ID:        otherTaskID,
 		ProjectID: projID,
 		Title:     "Other task",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 		Branch:    "task/" + otherTaskID,
 	}
 	if err := s.CreateTask(otherTask); err != nil {

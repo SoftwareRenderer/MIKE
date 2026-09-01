@@ -1,3 +1,7 @@
+// Package sandbox is the host-side client of the sandbox-bridge protocol (the package lives
+// in pkg/bridge; its name predates that directory). It wraps the stdin/stdout of one
+// "podman exec … /sandbox-bridge" and issues tool calls over it - no dial, no port - so a
+// tool call does not pay for a podman exec each.
 package sandbox
 
 import (

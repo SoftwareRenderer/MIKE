@@ -32,7 +32,7 @@ func diagTestSetup(t *testing.T, s *store.Store, projectID, taskID string) *task
 	now := time.Now().UTC()
 	task := &types.Task{
 		ID: taskID, ProjectID: projectID, Title: "diag", Prompt: "diag prompt",
-		Status: "in_progress", OperatingMode: "act", LlamaServerURL: "http://test:8080",
+		Status: types.StatusInProgress, OperatingMode: "act", LlamaServerURL: "http://test:8080",
 		ModelName: "test-model", CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -247,22 +247,22 @@ func TestFilterDiagnosticFiles(t *testing.T) {
 
 func TestTurnDiagnosticFiles_AskGitWhatTheShellChanged(t *testing.T) {
 	te, _, projectID, _ := setupExecutorWithGit(t)
-	es := extensions.NewExtensionStore(te.store)
+	es := extensions.NewExtensionStore(te.rawStore())
 	if err := es.InitSchema(); err != nil {
 		t.Fatalf("InitSchema: %v", err)
 	}
 	if err := es.Create(lspGoExtension()); err != nil {
 		t.Fatalf("create lsp extension: %v", err)
 	}
-	te.lspMgr = lsp.NewExtensionLSPManager(es, nil, te.store)
+	te.lspMgr = lsp.NewExtensionLSPManager(es, nil, te.rawStore())
 
 	now := time.Now().UTC()
 	task := &types.Task{
 		ID: "shell-task", ProjectID: projectID, Title: "diag", Prompt: "diag prompt",
-		Status: "in_progress", OperatingMode: "act", LlamaServerURL: "http://test:8080",
+		Status: types.StatusInProgress, OperatingMode: "act", LlamaServerURL: "http://test:8080",
 		ModelName: "test-model", Branch: "task/shell-task", CreatedAt: now, UpdatedAt: now,
 	}
-	if err := te.store.CreateTask(task); err != nil {
+	if err := te.rawStore().CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	setup := &taskExecSetup{task: task, projectID: projectID}

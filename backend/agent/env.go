@@ -56,25 +56,23 @@ func isAgentSafeEnv(name string) bool {
 	return false
 }
 
-// SafeAgentEnv returns the environment for an agent subprocess: the allowlisted
-// part of the server's environment, then extras — adapter-supplied values win,
-// because os/exec keeps the LAST occurrence of a key.
+// SafeAgentEnv returns the environment for an agent subprocess: the allowlisted part of the
+// server's environment, then extras - adapter-supplied values win because os/exec keeps the
+// LAST occurrence of a key.
 //
-// extras are passed through as given (they come from the extension's
-// SubprocessConfig()) — that is how an agent gets provider credentials, which are
-// deliberately not inherited from the server environment.
-// Allowlisted variables the server does not have are omitted rather than emitted
-// empty: shells and Node treat `VAR=` and unset differently.
+// extras are passed through as given (from the extension's SubprocessConfig()); that is how an
+// agent gets provider credentials, which are deliberately not inherited. An allowlisted
+// variable the server lacks is omitted, not emitted empty: shells and Node treat `VAR=` and
+// unset differently.
 //
-// Do not use this elsewhere. These os.Environ() call sites are intentional:
-//   - backend/sandbox/sandbox.go: rootless podman needs XDG_RUNTIME_DIR and
-//     DBUS_SESSION_BUS_ADDRESS to reach the user's session.
-//   - backend/term/terminal.go: that is the user's own interactive shell.
-//   - backend/git/*: git needs its environment and credential configuration.
-//   - pkg/bridge/agent/shell.go: already runs inside the sandbox container.
+// Do not use this elsewhere. These os.Environ() sites are intentional:
+//   - backend/sandbox: rootless podman needs XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS
+//   - backend/term: the user's own interactive shell
+//   - backend/git: git needs its environment and credential configuration
+//   - pkg/bridge/agent/shell.go: already inside the sandbox container
 //
-// Everything else that spawns a process the LLM can steer — including the host
-// bash tool (backend/exec/bash_stream.go) — gets SafeAgentEnv.
+// Everything else that spawns a process the LLM can steer - including the host bash tool -
+// gets SafeAgentEnv.
 func SafeAgentEnv(extras ...string) []string {
 	env := make([]string, 0, len(agentEnvNames)+len(extras)+2)
 	for _, kv := range os.Environ() {

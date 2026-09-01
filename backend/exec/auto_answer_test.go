@@ -57,9 +57,8 @@ func setupAutoAnswerTasks(t *testing.T) (*TaskExecutor, *types.Task, *types.Task
 		t.Fatalf("chdir to repo root: %v", err)
 	}
 
-	te := newTestExecutor(t)
+	te, s := newTestExecutorWithStore(t)
 	te.gate = NewConcurrencyGate()
-	s := te.store
 	proj := createProject(t, s, "proj-auto-answer", "Auto Answer")
 
 	parent := &types.Task{
@@ -67,8 +66,8 @@ func setupAutoAnswerTasks(t *testing.T) (*TaskExecutor, *types.Task, *types.Task
 		ProjectID:       proj.ID,
 		Title:           "Parent AA",
 		Prompt:          "Implement login with OAuth.",
-		Status:          "in_progress",
-		ExecutionState:  "idle",
+		Status:          types.StatusInProgress,
+		ExecutionState:  types.ExecStateIdle,
 		LlamaServerURL:  "http://placeholder",
 		ModelName:       "parent-model",
 		CurrentThreadID: "thread-parent",
@@ -82,8 +81,8 @@ func setupAutoAnswerTasks(t *testing.T) (*TaskExecutor, *types.Task, *types.Task
 		ProjectID:       proj.ID,
 		Title:           "Subtask AA",
 		Prompt:          "Add login endpoint",
-		Status:          "in_progress",
-		ExecutionState:  "idle",
+		Status:          types.StatusInProgress,
+		ExecutionState:  types.ExecStateIdle,
 		ParentTaskID:    parent.ID,
 		Autostarted:     true,
 		LlamaServerURL:  "http://placeholder",
@@ -103,7 +102,7 @@ func TestAutomatedAnswers_SingleQuestion(t *testing.T) {
 	te, parent, subtask := setupAutoAnswerTasks(t)
 	// Parent's endpoint is preferred; point it at the mock.
 	parent.LlamaServerURL = server.URL
-	if err := te.store.UpdateTask(parent); err != nil {
+	if err := te.rawStore().UpdateTask(parent); err != nil {
 		t.Fatalf("update parent: %v", err)
 	}
 
@@ -125,7 +124,7 @@ func TestAutomatedAnswers_MultipleQuestions(t *testing.T) {
 
 	te, parent, subtask := setupAutoAnswerTasks(t)
 	parent.LlamaServerURL = server.URL
-	if err := te.store.UpdateTask(parent); err != nil {
+	if err := te.rawStore().UpdateTask(parent); err != nil {
 		t.Fatalf("update parent: %v", err)
 	}
 

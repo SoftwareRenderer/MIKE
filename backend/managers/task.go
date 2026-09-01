@@ -1,8 +1,12 @@
+// Package managers holds the request-facing domain operations the API is made of - tasks,
+// projects, board state, per-project git - between backend/server and the store, git and
+// exec layers below. Long-running work belongs to backend/exec, not here.
 package managers
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -26,9 +30,32 @@ import (
 	"kanban/backend/types"
 )
 
+// taskStore is the task lifecycle the API drives. It has no execution-state methods
+// on purpose - backend/exec owns that.
+type taskStore interface {
+	ClearTitleGenerating(projectID, taskID string) error
+	CreateTask(t *types.Task) error
+	CreateTaskMessage(m *types.TaskMessage) error
+	CreateThread(th *types.TaskThread) error
+	DeleteTask(projectID, taskID string) error
+	DeleteTaskDiffSnapshot(taskID string) error
+	GetAllDescendants(taskID string) ([]types.Task, error)
+	GetChildren(taskID string) ([]types.Task, error)
+	GetProject(id string) (*types.Project, error)
+	GetTask(projectID, taskID string) (*types.Task, error)
+	GetTaskByID(taskID string) (*types.Task, error)
+	GetTasksByProject(projectID string) ([]types.Task, error)
+	GetThread(threadID string) (*types.TaskThread, error)
+	GetThreadsByTask(taskID string) ([]types.TaskThread, error)
+	SetTaskTitle(projectID, taskID, title string) error
+	UpdateTask(t *types.Task) error
+}
+
+var _ taskStore = (*store.Store)(nil)
+
 // TaskHandler handles task CRUD operations.
 type TaskHandler struct {
-	store          *store.Store
+	store          taskStore
 	boardStreamMgr *stream.AppStreamManager
 	configStore    *config.ConfigStore
 	terminalMgr    *term.TerminalManager
@@ -89,7 +116,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		tasks, err := h.store.GetTasksByProject(projectID)
 		if err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+			httputil.Fail(w, err, "get tasks", "project not found")
 			return
 		}
 		if h.configStore != nil {
@@ -127,7 +154,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		}
 		task.ProjectID = projectID
 		if task.Status == "" {
-			task.Status = "backlog"
+			task.Status = types.StatusBacklog
 		}
 		now := time.Now().UTC()
 		task.CreatedAt = now
@@ -184,7 +211,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// Only tasks in backlog can accept subtasks
-			if parent.Status != "backlog" {
+			if parent.Status != types.StatusBacklog {
 				httputil.JSONError(w, http.StatusBadRequest, "parent task must be in backlog to accept subtasks")
 				return
 			}
@@ -196,7 +223,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			task.TitleGenerating = true
 		}
 		if err := h.store.CreateTask(&task); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+			httputil.Fail(w, err, "create task", "project not found")
 			return
 		}
 		// Create default thread for the task
@@ -221,7 +248,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		}
 		task.CurrentThreadID = defaultThreadID
 		if err := h.store.UpdateTask(&task); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+			httputil.Fail(w, err, "update task", "task not found")
 			return
 		}
 		// Store the task prompt as the first user message in the conversation
@@ -263,7 +290,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		task, err := h.store.GetTask(projectID, taskID)
 		if err != nil {
-			httputil.JSONError(w, http.StatusNotFound, "task not found")
+			httputil.Fail(w, err, "get task", "task not found")
 			return
 		}
 		if h.configStore != nil {
@@ -276,7 +303,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		task, err := h.store.GetTask(projectID, taskID)
 		if err != nil {
-			httputil.JSONError(w, http.StatusNotFound, "task not found")
+			httputil.Fail(w, err, "get task", "task not found")
 			return
 		}
 		// Capture original values before partial update
@@ -293,7 +320,13 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			task.Prompt = v.(string)
 		}
 		if v, ok := rawBody["status"]; ok {
-			task.Status = v.(string)
+			// As in HandleMove: validate the column before it reaches the row.
+			newStatus, valid := types.ParseStatus(v.(string))
+			if !valid {
+				httputil.JSONError(w, http.StatusBadRequest, "unknown status")
+				return
+			}
+			task.Status = newStatus
 		}
 		if v, ok := rawBody["session_id"]; ok {
 			task.SessionID = v.(string)
@@ -326,7 +359,14 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			task.Output = v.(string)
 		}
 		if v, ok := rawBody["execution_state"]; ok {
-			task.ExecutionState = v.(string)
+			// An unrecognised execution_state would leave a card with no spinner, no badge
+			// and no transition that could move it out again.
+			newState, valid := types.ParseExecutionState(v.(string))
+			if !valid {
+				httputil.JSONError(w, http.StatusBadRequest, "unknown execution state")
+				return
+			}
+			task.ExecutionState = newState
 		}
 		if v, ok := rawBody["has_merge_conflict"]; ok {
 			task.HasMergeConflict = v.(bool)
@@ -357,7 +397,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			if newMode != task.OperatingMode {
 				task.OperatingMode = newMode
 				// Remount container if not currently running to apply new mount mode (ro vs rw)
-				if task.ExecutionState != "running" && h.executor != nil {
+				if task.ExecutionState != types.ExecStateRunning && h.executor != nil {
 					h.executor.StopSandbox(task.ID)
 				}
 			}
@@ -402,7 +442,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			task.AutoCommit = true
 		}
 		if err := h.store.UpdateTask(task); err != nil {
-			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+			httputil.Fail(w, err, "update task", "task not found")
 			return
 		}
 		// Propagate subtasks_auto_merge change to all descendants
@@ -419,7 +459,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONResponse(w, http.StatusOK, task)
 	case http.MethodDelete:
 		if _, err := h.store.GetTask(projectID, taskID); err != nil {
-			httputil.JSONError(w, http.StatusNotFound, "task not found")
+			httputil.Fail(w, err, "get task", "task not found")
 			return
 		}
 		h.broadcastTaskDeleted(projectID, taskID)
@@ -447,7 +487,7 @@ func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request) {
 
 	var deleted int
 	for _, task := range tasks {
-		if task.Status != "done" {
+		if task.Status != types.StatusDone {
 			continue
 		}
 		taskID := task.ID
@@ -475,32 +515,40 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
+		return
+	}
+	// Status is the one field a client sends as free text: checked here, typed below. A
+	// value outside the columns leaves the task in the database but on no column -
+	// invisible, and unstuckable from the UI. The offending text is not echoed back.
+	targetStatus, ok := types.ParseStatus(req.Status)
+	if !ok {
+		httputil.JSONError(w, http.StatusBadRequest, "unknown status")
 		return
 	}
 	// Block subtasks from moving to Backlog when an ancestor is In Progress.
-	if req.Status == "backlog" && task.ParentTaskID != "" {
+	if targetStatus == types.StatusBacklog && task.ParentTaskID != "" {
 		if err := h.checkAncestorInProgress(task); err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 	originalStatus := task.Status // save for revert on auto-start failure
-	task.Status = req.Status
+	task.Status = targetStatus
 	task.UpdatedAt = time.Now()
 
 	// Stop the executor if the task is moved out of In Progress.
 	// This ensures the goroutine exits and HasRunningTasks() reflects the new state.
-	if originalStatus == "in_progress" && req.Status != "in_progress" && h.executor != nil {
-		wasInFlight := task.ExecutionState == "running" || task.ExecutionState == "pulling_image"
+	if originalStatus == types.StatusInProgress && targetStatus != types.StatusInProgress && h.executor != nil {
+		wasInFlight := task.ExecutionState == types.ExecStateRunning || task.ExecutionState == types.ExecStatePullingImage
 		_ = h.executor.StopTask(taskID)
 		if wasInFlight {
-			task.ExecutionState = "idle"
+			task.ExecutionState = types.ExecStateIdle
 			task.Output = ""
 		}
 	}
-	if req.Status == "done" {
-		task.ExecutionState = "completed"
+	if targetStatus == types.StatusDone {
+		task.ExecutionState = types.ExecStateCompleted
 		if h.executor != nil {
 			h.executor.StopSandbox(taskID)
 		}
@@ -515,14 +563,14 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-	} else if task.ExecutionState == "completed" {
+	} else if task.ExecutionState == types.ExecStateCompleted {
 		// Task moved away from Done — reset status so it can run again
-		task.ExecutionState = "idle"
+		task.ExecutionState = types.ExecStateIdle
 	}
 	started := false
 	// set when the start had nothing to run; the move must not cascade into children then
 	awaitingUser := false
-	if req.Status == "in_progress" && task.ExecutionState != "running" {
+	if targetStatus == types.StatusInProgress && task.ExecutionState != types.ExecStateRunning {
 		children, _ := h.store.GetChildren(taskID)
 		if len(children) > 0 {
 			// Task with subtasks: start the deepest startable one; this task
@@ -539,7 +587,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 				} else if err != nil {
 					// All subtask starts failed — keep task in_progress (user's
 					// explicit action); record error for visibility.
-					task.ExecutionState = "idle"
+					task.ExecutionState = types.ExecStateIdle
 					task.Output = err.Error()
 				}
 			} else if exec.ChildrenAllDone(children) {
@@ -552,7 +600,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 				}
 				if err != nil {
 					log.Printf("[move] task=%s start failed: %v", taskID, err)
-					task.ExecutionState = "idle"
+					task.ExecutionState = types.ExecStateIdle
 					task.Status = originalStatus
 					task.Output = err.Error()
 				} else {
@@ -565,7 +613,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 			// Leaf subtask: subtask-aware start (branch from parent, inherit model config)
 			if err := h.StartSubtask(projectID, taskID, false); err != nil {
 				log.Printf("[move] task=%s subtask start failed: %v", taskID, err)
-				task.ExecutionState = "idle"
+				task.ExecutionState = types.ExecStateIdle
 				task.Status = originalStatus
 				task.Output = err.Error()
 			} else {
@@ -574,7 +622,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		} else {
 			if err := h.executor.StartTask(projectID, taskID, false); err != nil {
 				log.Printf("[move] task=%s auto-start failed: %v", taskID, err)
-				task.ExecutionState = "idle"
+				task.ExecutionState = types.ExecStateIdle
 				task.Status = originalStatus
 				task.Output = err.Error()
 			} else {
@@ -589,16 +637,16 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	if started {
 		reloaded, err := h.store.GetTask(projectID, taskID)
 		if err == nil {
-			if req.Status == "in_progress" && reloaded.Status == "review" {
+			if targetStatus == types.StatusInProgress && reloaded.Status == types.StatusReview {
 				awaitingUser = true
 			} else {
-				reloaded.Status = req.Status
+				reloaded.Status = targetStatus
 			}
 			task = reloaded
 		}
 	}
 	if err := h.store.UpdateTask(task); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.Fail(w, err, "update task", "task not found")
 		return
 	}
 
@@ -611,7 +659,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If a subtask moved to review/done, auto-start the next sibling
-	if task.ParentTaskID != "" && (req.Status == "review" || req.Status == "done") {
+	if task.ParentTaskID != "" && (targetStatus == types.StatusReview || targetStatus == types.StatusDone) {
 		_ = h.autoStartNextSibling(projectID, taskID, task.ParentTaskID)
 	}
 
@@ -637,9 +685,9 @@ func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 	}
 	for i := range descendants {
 		d := &descendants[i]
-		if d.Status == "backlog" || (d.Status == "in_progress" && d.ExecutionState != "running" && d.ExecutionState != "failed") {
-			d.Status = "in_progress"
-			d.ExecutionState = "idle"
+		if d.Status == types.StatusBacklog || (d.Status == types.StatusInProgress && d.ExecutionState != types.ExecStateRunning && d.ExecutionState != types.ExecStateFailed) {
+			d.Status = types.StatusInProgress
+			d.ExecutionState = types.ExecStateIdle
 			d.UpdatedAt = time.Now().UTC()
 			if err := h.store.UpdateTask(d); err != nil {
 				log.Printf("[move-descendants] failed to update descendant %s: %v", d.ID, err)
@@ -653,7 +701,7 @@ func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
 // moveAllDescendants recursively moves all descendant tasks (children, grandchildren, etc.)
 // to the target status. Skips descendants that are already running (e.g., just auto-started).
 // Processes in reverse order (leaves first) to ensure child tasks are moved before their parents.
-func (h *TaskHandler) moveAllDescendants(projectID, taskID, targetStatus string) {
+func (h *TaskHandler) moveAllDescendants(projectID, taskID string, targetStatus types.Status) {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
 		log.Printf("[move-descendants] failed to get descendants of %s: %v", taskID, err)
@@ -663,32 +711,32 @@ func (h *TaskHandler) moveAllDescendants(projectID, taskID, targetStatus string)
 	for i := len(descendants) - 1; i >= 0; i-- {
 		d := &descendants[i]
 		// Skip in-flight descendants
-		if d.ExecutionState == "running" || d.ExecutionState == "pulling_image" {
+		if d.ExecutionState == types.ExecStateRunning || d.ExecutionState == types.ExecStatePullingImage {
 			continue
 		}
 		// Moving to In Progress is a start: only backlog descendants join. Review
 		// awaits a human, done work is complete, and in_progress tasks are managed
 		// by the autostart chain — dragging them out would bypass the gates.
-		if targetStatus == "in_progress" && d.Status != "backlog" {
+		if targetStatus == types.StatusInProgress && d.Status != types.StatusBacklog {
 			continue
 		}
 		// Stop the executor if the descendant was in In Progress and is being moved out
-		if d.Status == "in_progress" && targetStatus != "in_progress" && h.executor != nil {
+		if d.Status == types.StatusInProgress && targetStatus != types.StatusInProgress && h.executor != nil {
 			_ = h.executor.StopTask(d.ID)
 		}
 		d.Status = targetStatus
 		d.UpdatedAt = time.Now().UTC()
 		// Set execution_state based on target column
 		switch targetStatus {
-		case "done":
-			d.ExecutionState = "completed"
+		case types.StatusDone:
+			d.ExecutionState = types.ExecStateCompleted
 			if h.executor != nil {
 				h.executor.StopSandbox(d.ID)
 			}
-		case "backlog", "in_progress", "review":
-			if d.ExecutionState == "completed" {
+		case types.StatusBacklog, types.StatusInProgress, types.StatusReview:
+			if d.ExecutionState == types.ExecStateCompleted {
 				// Moved away from done — reset
-				d.ExecutionState = "idle"
+				d.ExecutionState = types.ExecStateIdle
 			}
 			// Keep existing state (failed, stopped, idle) if not overridden above
 		}
@@ -714,7 +762,7 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 		if err != nil {
 			break // ancestor not found, stop walking
 		}
-		if ancestor.Status == "in_progress" {
+		if ancestor.Status == types.StatusInProgress {
 			return fmt.Errorf("cannot move to Backlog: parent task is In Progress")
 		}
 		currentID = ancestor.ParentTaskID
@@ -750,7 +798,11 @@ func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabl
 
 // resolveGitAuthor returns the effective git author name/email.
 // Priority: env var override > project git config > defaults.
-func resolveGitAuthor(projectID string, s *store.Store) (string, string) {
+// resolveGitAuthor returns the author a commit-and-done commit is signed with: env vars
+// win, then the project checkout's own git config.
+func resolveGitAuthor(projectID string, s interface {
+	GetProject(id string) (*types.Project, error)
+}) (string, string) {
 	name := git.GitAuthorName
 	email := git.GitAuthorEmail
 
@@ -794,7 +846,7 @@ func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request
 	}
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 	if h.worktreeMgr == nil {
@@ -868,7 +920,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	}
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 	if h.worktreeMgr == nil {
@@ -950,7 +1002,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	task, _ = h.store.GetTask(projectID, taskID)
 	if task.HasMergeConflict {
 		// Already resolving a merge conflict — don't add duplicate messages
-		if task.ExecutionState == "running" {
+		if task.ExecutionState == types.ExecStateRunning {
 			log.Printf("[commit-and-done] task=%s already resolving merge conflict, skipping", taskID)
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 			httputil.JSONResponse(w, http.StatusOK, task)
@@ -999,7 +1051,7 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 		})
 
 		// Move task to In Progress so the board reflects the LLM is working
-		task.Status = "in_progress"
+		task.Status = types.StatusInProgress
 		task.UpdatedAt = time.Now()
 		_ = h.store.UpdateTask(task)
 
@@ -1019,11 +1071,11 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	}
 
 	// Clean merge — move task to Done
-	task.Status = "done"
-	task.ExecutionState = "completed"
+	task.Status = types.StatusDone
+	task.ExecutionState = types.ExecStateCompleted
 	task.UpdatedAt = time.Now()
 	if err := h.store.UpdateTask(task); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.Fail(w, err, "update task", "task not found")
 		return
 	}
 
@@ -1245,7 +1297,7 @@ func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 	task, err := h.executor.InitTask(projectID, taskID)
@@ -1279,7 +1331,7 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	}
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
 
@@ -1293,12 +1345,12 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	if len(children) > 0 {
 		// User explicitly started this task: move it to In Progress
 		// (started-but-pending) until its subtasks are done.
-		if task.Status == "backlog" {
-			task.Status = "in_progress"
-			task.ExecutionState = "idle"
+		if task.Status == types.StatusBacklog {
+			task.Status = types.StatusInProgress
+			task.ExecutionState = types.ExecStateIdle
 			task.UpdatedAt = time.Now().UTC()
 			if err := h.store.UpdateTask(task); err != nil {
-				httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+				httputil.Fail(w, err, "update task", "task not found")
 				return
 			}
 			h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -1337,7 +1389,7 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	// No subtasks — start normally
 	if err := h.executor.StartTask(projectID, taskID, false); err != nil {
 		log.Printf("[start] task=%s error: %v", taskID, err)
-		if strings.Contains(err.Error(), "already running") {
+		if errors.Is(err, exec.ErrTaskAlreadyRunning) {
 			httputil.JSONError(w, http.StatusConflict, err.Error())
 		} else {
 			httputil.JSONError(w, http.StatusInternalServerError, err.Error())
@@ -1395,16 +1447,16 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 	}
 	task, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
-		httputil.JSONError(w, http.StatusNotFound, "task not found")
+		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
-	if task.Status == "backlog" {
-		task.ExecutionState = "idle"
+	if task.Status == types.StatusBacklog {
+		task.ExecutionState = types.ExecStateIdle
 	}
-	task.Status = "in_progress"
+	task.Status = types.StatusInProgress
 	task.UpdatedAt = time.Now().UTC()
 	if err := h.store.UpdateTask(task); err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, err.Error())
+		httputil.Fail(w, err, "update task", "task not found")
 		return
 	}
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
@@ -1531,7 +1583,7 @@ func (h *TaskHandler) StopTaskAndDescendants(projectID, taskID string) error {
 	// Stop all in-flight descendants (leaf-first order: reverse the list)
 	for i := len(descendants) - 1; i >= 0; i-- {
 		d := descendants[i]
-		if d.ExecutionState == "running" || d.ExecutionState == "pulling_image" {
+		if d.ExecutionState == types.ExecStateRunning || d.ExecutionState == types.ExecStatePullingImage {
 			if err := h.executor.StopTask(d.ID); err != nil {
 				log.Printf("[stop-cascade] failed to stop descendant %s: %v", d.ID, err)
 			}

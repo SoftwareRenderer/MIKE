@@ -1,3 +1,7 @@
+// Package agent defines the contract between MIKE and an agent adapter: the event stream
+// (tokens, reasoning, tool calls, status, stats, persistence, turn completion) and the
+// adapter interface a WASM module implements. It has no server dependencies on purpose, so
+// an adapter can be built and tested without importing the backend.
 package agent
 
 import "context"

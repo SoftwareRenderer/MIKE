@@ -65,7 +65,7 @@ func setupTestRepo(t *testing.T) (string, string, *store.Store, *config.ConfigSt
 		ProjectID: projID,
 		Title:     "Test task",
 		Prompt:    "Test prompt",
-		Status:    "in_progress",
+		Status:    types.StatusInProgress,
 		Branch:    "task/" + taskID,
 	}
 	if err := s.CreateTask(task); err != nil {
@@ -123,7 +123,7 @@ func TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus(t *testing.T) {
 	if err := s.CreateProject(proj); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	task := &types.Task{ID: "wt-exclude-task", ProjectID: projID, Title: "t", Status: "in_progress"}
+	task := &types.Task{ID: "wt-exclude-task", ProjectID: projID, Title: "t", Status: types.StatusInProgress}
 	if err := s.CreateTask(task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestCreateWorktree_ExcludesWorktreesDirFromProjectStatus(t *testing.T) {
 	}
 
 	// Idempotent: a second worktree must not duplicate the entry.
-	task2 := &types.Task{ID: "wt-exclude-task2", ProjectID: projID, Title: "t2", Status: "in_progress"}
+	task2 := &types.Task{ID: "wt-exclude-task2", ProjectID: projID, Title: "t2", Status: types.StatusInProgress}
 	if err := s.CreateTask(task2); err != nil {
 		t.Fatalf("create task2: %v", err)
 	}

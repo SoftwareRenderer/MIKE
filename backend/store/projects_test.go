@@ -80,15 +80,15 @@ func TestGetAllProjectCounts(t *testing.T) {
 
 	// Create tasks in different statuses
 	backlog1 := newTask("b1", "proj-1")
-	backlog1.Status = "backlog"
+	backlog1.Status = types.StatusBacklog
 	backlog2 := newTask("b2", "proj-1")
-	backlog2.Status = "backlog"
+	backlog2.Status = types.StatusBacklog
 	inProgress := newTask("ip1", "proj-1")
-	inProgress.Status = "in_progress"
+	inProgress.Status = types.StatusInProgress
 	review := newTask("r1", "proj-1")
-	review.Status = "review"
+	review.Status = types.StatusReview
 	done := newTask("d1", "proj-1")
-	done.Status = "done"
+	done.Status = types.StatusDone
 
 	for _, task := range []*types.Task{backlog1, backlog2, inProgress, review, done} {
 		if err := s.CreateTask(task); err != nil {
@@ -128,7 +128,7 @@ func TestGetAllProjectCountsMultipleProjects(t *testing.T) {
 	}
 	// proj-2: 1 in_progress
 	ip := newTask("t2", "proj-2")
-	ip.Status = "in_progress"
+	ip.Status = types.StatusInProgress
 	if err := s.CreateTask(ip); err != nil {
 		t.Fatalf("create task: %v", err)
 	}

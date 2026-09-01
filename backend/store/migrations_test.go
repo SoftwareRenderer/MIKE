@@ -1,0 +1,260 @@
+package store
+
+import (
+	"bytes"
+	"database/sql"
+	"log"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// Migrations are the only schema path for a database created by an older MIKE. Pinning the
+// two things that matter: an old database arrives at the current shape with its rows, and a
+// current database is left alone in silence.
+
+// legacyDB writes a database whose tasks table has a given older shape. The rest of the
+// schema is left to NewStore: only tasks pre-exists, as in an upgrade in place.
+func legacyDB(t *testing.T, tasksDDL string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kanban.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(tasksDDL); err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+	return path
+}
+
+// columnsOf reads a table's columns from the file, so assertions are about the schema.
+func columnsOf(t *testing.T, dbPath, table string) map[string]bool {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		t.Fatalf("read columns of %s: %v", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+	cols := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan column name: %v", err)
+		}
+		cols[name] = true
+	}
+	return cols
+}
+
+func TestHasColumn(t *testing.T) {
+	s, err := NewStore(filepath.Join(t.TempDir(), "kanban.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer s.Close()
+
+	if !s.hasColumn("tasks", "title") {
+		t.Error("hasColumn(tasks.title) = false, want true")
+	}
+	if s.hasColumn("tasks", "definitely_not_a_column") {
+		t.Error("hasColumn(tasks.definitely_not_a_column) = true, want false")
+	}
+	// A missing table answers "no such column" — the ALTER the caller was about to
+	// skip would have failed on the missing table anyway.
+	if s.hasColumn("no_such_table", "title") {
+		t.Error("hasColumn(no_such_table.title) = true, want false")
+	}
+}
+
+// A tasks table from before the columns existed must gain them, keeping its rows.
+func TestMigration_AddsColumnsMissingFromOldDatabase(t *testing.T) {
+	path := legacyDB(t, `
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			project_id TEXT NOT NULL,
+			title TEXT,
+			status TEXT,
+			created_at TEXT
+		);
+		INSERT INTO tasks (id, project_id, title, status, created_at)
+			VALUES ('t1', 'p1', 'Legacy task', 'backlog', '2024-01-01T00:00:00Z');`)
+
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("NewStore on legacy db: %v", err)
+	}
+	s.Close()
+
+	cols := columnsOf(t, path, "tasks")
+	// execution_state is absent on purpose: it only ever arrived by renaming
+	// status_state (see the rename test), and a table with neither name is older
+	// than the migration itself.
+	for _, want := range []string{
+		"auto_merge", "subtasks_auto_merge", "operating_mode",
+		"summarizing", "has_merge_conflict", "moved_at", "assigned_ports",
+		"current_thread_id", "base_commit", "session_cost",
+	} {
+		if !cols[want] {
+			t.Errorf("migration did not add tasks.%s", want)
+		}
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var title string
+	if err := db.QueryRow(`SELECT title FROM tasks WHERE id = 't1'`).Scan(&title); err != nil {
+		t.Fatalf("read migrated row: %v", err)
+	}
+	if title != "Legacy task" {
+		t.Errorf("title = %q, want %q — migration damaged existing data", title, "Legacy task")
+	}
+}
+
+// The two columns that were renamed must be renamed, not re-added: the value the
+// user set under the old name is the value that must survive.
+func TestMigration_RenamesLegacyColumnsKeepingValues(t *testing.T) {
+	path := legacyDB(t, `
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			project_id TEXT NOT NULL,
+			title TEXT,
+			status TEXT,
+			created_at TEXT,
+			status_state TEXT DEFAULT 'idle',
+			merge_on_commit INTEGER NOT NULL DEFAULT 1,
+			merge_children INTEGER NOT NULL DEFAULT 0
+		);
+		INSERT INTO tasks (id, project_id, title, status, created_at, status_state, merge_on_commit, merge_children)
+			VALUES ('t1', 'p1', 'Legacy task', 'review', '2024-01-01T00:00:00Z', 'running', 0, 1);`)
+
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("NewStore on legacy db: %v", err)
+	}
+	s.Close()
+
+	cols := columnsOf(t, path, "tasks")
+	for _, want := range []string{"execution_state", "auto_merge", "subtasks_auto_merge"} {
+		if !cols[want] {
+			t.Errorf("tasks.%s missing after rename migration", want)
+		}
+	}
+	for _, gone := range []string{"status_state", "merge_on_commit", "merge_children"} {
+		if cols[gone] {
+			t.Errorf("tasks.%s still present — the rename left both names behind", gone)
+		}
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var state string
+	var autoMerge, subtasksMerge int
+	if err := db.QueryRow(`SELECT execution_state, auto_merge, subtasks_auto_merge FROM tasks WHERE id = 't1'`).
+		Scan(&state, &autoMerge, &subtasksMerge); err != nil {
+		t.Fatalf("read migrated row: %v", err)
+	}
+	if state != "running" {
+		t.Errorf("execution_state = %q, want %q (carried over from status_state)", state, "running")
+	}
+	if autoMerge != 0 || subtasksMerge != 1 {
+		t.Errorf("auto_merge=%d subtasks_auto_merge=%d, want 0 and 1 — the old names held these values", autoMerge, subtasksMerge)
+	}
+}
+
+// Guards the two columns that must not come back: adding merge_on_commit unconditionally hit
+// databases that already had auto_merge (the rename right after it then failed), and plan_mode
+// had no writer and no reader - plan mode lives in operating_mode.
+func TestMigration_FreshDatabaseHasNoLegacyOrJunkColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kanban.db")
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	s.Close()
+
+	cols := columnsOf(t, path, "tasks")
+	for _, unwanted := range []string{"status_state", "merge_on_commit", "merge_children", "plan_mode"} {
+		if cols[unwanted] {
+			t.Errorf("fresh database has tasks.%s — it is a retired name", unwanted)
+		}
+	}
+}
+
+// Silence must mean "nothing to do". Before the probes were added, a fresh startup
+// logged nothing only because every error was discarded along with 34 ALTERs that
+// could not succeed; now a schema failure has somewhere to be reported.
+func TestMigration_SilentAndErrorFreeOnCurrentDatabase(t *testing.T) {
+	var logs bytes.Buffer
+	orig := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(orig)
+
+	path := filepath.Join(t.TempDir(), "kanban.db")
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	// Second open = the upgrade-in-place path against a database that is current.
+	s.Close()
+	s2, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("reopening current db: %v", err)
+	}
+	s2.Close()
+
+	log.SetOutput(orig)
+	if out := logs.String(); strings.Contains(out, "[store] schema") {
+		t.Errorf("migrations reported a problem on a current database:\n%s", out)
+	}
+}
+
+// Reopening must not disturb rows or column set — the migrations run every start.
+func TestMigration_IdempotentAcrossRestarts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kanban.db")
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if _, err := s.Exec(`INSERT INTO projects (id, name, path, created_at, updated_at) VALUES ('p1', 'proj', '/tmp/p1', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	before := len(columnsOf(t, path, "tasks"))
+	s.Close()
+
+	for i := 0; i < 3; i++ {
+		s2, err := NewStore(path)
+		if err != nil {
+			t.Fatalf("restart %d: %v", i, err)
+		}
+		s2.Close()
+	}
+
+	if after := len(columnsOf(t, path, "tasks")); after != before {
+		t.Errorf("tasks column count changed across restarts: %d -> %d", before, after)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var name string
+	if err := db.QueryRow(`SELECT name FROM projects WHERE id = 'p1'`).Scan(&name); err != nil {
+		t.Fatalf("read row after restarts: %v", err)
+	}
+	if name != "proj" {
+		t.Errorf("name = %q, want %q", name, "proj")
+	}
+}

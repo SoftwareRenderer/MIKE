@@ -18,10 +18,10 @@ type providerState struct {
 
 // queueEntry represents a goroutine waiting for a provider slot or rate allowance.
 type queueEntry struct {
-	provider string
-	done chan struct{}
-	once sync.Once
-	served bool
+	provider     string
+	done         chan struct{}
+	once         sync.Once
+	served       bool
 	slotReturned bool
 }
 
@@ -378,16 +378,4 @@ func (g *ConcurrencyGate) abandonServedSlot(entry *queueEntry) {
 	if returnSlot {
 		g.Release(entry.provider)
 	}
-}
-
-// activeFor reports how many slots are currently held for a provider. A value
-// that stays above 0 while nothing is running means slots leaked.
-func (g *ConcurrencyGate) activeFor(providerURL string) int {
-	providerURL = gateKey(providerURL)
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if ps, ok := g.providers[providerURL]; ok && ps.active > 0 {
-		return ps.active
-	}
-	return 0
 }

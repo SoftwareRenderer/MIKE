@@ -16,12 +16,12 @@ func seedPendingTask(t *testing.T, te *TaskExecutor, projectID, id string, roles
 	now := time.Now().UTC()
 	task := &types.Task{
 		ID: id, ProjectID: projectID, Title: id, Prompt: "prompt",
-		Status: "in_progress", ExecutionState: "idle",
+		Status: types.StatusInProgress, ExecutionState: types.ExecStateIdle,
 		LlamaServerURL: "http://localhost:8080", ModelName: "test-model",
 		CurrentThreadID: "thread-" + id,
 		CreatedAt:       now, UpdatedAt: now,
 	}
-	if err := te.store.CreateTask(task); err != nil {
+	if err := te.rawStore().CreateTask(task); err != nil {
 		t.Fatalf("create task %s: %v", id, err)
 	}
 	for i, role := range roles {
@@ -29,7 +29,7 @@ func seedPendingTask(t *testing.T, te *TaskExecutor, projectID, id string, roles
 			ID: fmt.Sprintf("%s-%d-%s", id, i, role), TaskID: id, ThreadID: task.CurrentThreadID,
 			Role: role, Content: "x", CreatedAt: now.Add(time.Duration(i) * time.Second),
 		}
-		if err := te.store.CreateTaskMessage(m); err != nil {
+		if err := te.rawStore().CreateTaskMessage(m); err != nil {
 			t.Fatalf("create message for %s: %v", id, err)
 		}
 	}
@@ -40,7 +40,7 @@ func seedPendingTask(t *testing.T, te *TaskExecutor, projectID, id string, roles
 // in "In Progress + Pending", and that every legitimately pending row is left alone.
 func TestRecoverStaleTasksNormalizesPendingRows(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	proj := createProject(t, te.store, "proj-pend", "Pending")
+	proj := createProject(t, te.rawStore(), "proj-pend", "Pending")
 
 	// normalized: the agent has the last word, so the conversation waits on the user
 	agentLast := seedPendingTask(t, te, proj.ID, "pend-agent-last", "user", "assistant")
@@ -55,8 +55,8 @@ func TestRecoverStaleTasksNormalizesPendingRows(t *testing.T) {
 	parent := seedPendingTask(t, te, proj.ID, "pend-parent", "user", "assistant")
 	child := seedPendingTask(t, te, proj.ID, "pend-parent-child")
 	child.ParentTaskID = parent.ID
-	child.Status = "backlog"
-	if err := te.store.UpdateTask(child); err != nil {
+	child.Status = types.StatusBacklog
+	if err := te.rawStore().UpdateTask(child); err != nil {
 		t.Fatalf("make child: %v", err)
 	}
 
@@ -74,36 +74,36 @@ func TestRecoverStaleTasksNormalizesPendingRows(t *testing.T) {
 	})
 
 	// in-flight rows are recovered by the same call; this one ends up paused
-	running := createTaskRow(t, te.store, "pend-running", proj.ID, "in_progress", "running")
+	running := createTaskRow(t, te.rawStore(), "pend-running", proj.ID, "in_progress", "running")
 
 	te.RecoverStaleTasks()
 
 	for _, id := range []string{agentLast.ID, toolLast.ID} {
-		got := waitTaskState(t, te.store, id, func(st, es string) bool { return st == "review" && es == "idle" })
-		if got.Status != "review" || got.ExecutionState != "idle" {
+		got := waitTaskState(t, te.rawStore(), id, func(st types.Status, es types.ExecutionState) bool { return st == "review" && es == "idle" })
+		if got.Status != types.StatusReview || got.ExecutionState != types.ExecStateIdle {
 			t.Errorf("%s: status=%q state=%q, want review/idle", id, got.Status, got.ExecutionState)
 		}
 	}
 	for _, tc := range []struct {
 		id       string
-		wantStat string
+		wantStat types.Status
 	}{
 		{userLast.ID, "in_progress"}, // unanswered user message — not "agent is done"
 		{empty.ID, "in_progress"},    // nothing to judge it by
 		{parent.ID, "in_progress"},   // waiting on unfinished subtasks
 		{live.ID, "in_progress"},     // live executor: queued or just accepted
 	} {
-		got, err := te.store.GetTaskByID(tc.id)
+		got, err := te.rawStore().GetTaskByID(tc.id)
 		if err != nil {
 			t.Fatalf("get %s: %v", tc.id, err)
 		}
-		if got.Status != tc.wantStat || got.ExecutionState != "idle" {
+		if got.Status != tc.wantStat || got.ExecutionState != types.ExecStateIdle {
 			t.Errorf("%s: status=%q state=%q, want %s/idle (legitimate pending)", tc.id, got.Status, got.ExecutionState, tc.wantStat)
 		}
 	}
 
 	// the in-flight recovery still ran
-	if got, err := te.store.GetTaskByID(running.ID); err != nil || got.ExecutionState != "paused" {
+	if got, err := te.rawStore().GetTaskByID(running.ID); err != nil || got.ExecutionState != types.ExecStatePaused {
 		t.Errorf("in-flight row: state=%q err=%v, want paused", got.ExecutionState, err)
 	}
 }
@@ -112,15 +112,15 @@ func TestRecoverStaleTasksNormalizesPendingRows(t *testing.T) {
 // count of recovered in-flight rows, so the startup log keeps the two jobs apart.
 func TestRecoverStaleTasksLeavesPendingCountReported(t *testing.T) {
 	te := newSessionCostTestExecutor(t)
-	proj := createProject(t, te.store, "proj-pend-cnt", "Pending Count")
+	proj := createProject(t, te.rawStore(), "proj-pend-cnt", "Pending Count")
 
 	seedPendingTask(t, te, proj.ID, "cnt-pending", "user", "assistant")
-	createTaskRow(t, te.store, "cnt-running", proj.ID, "in_progress", "running")
+	createTaskRow(t, te.rawStore(), "cnt-running", proj.ID, "in_progress", "running")
 
 	if n := te.RecoverStaleTasks(); n != 1 {
 		t.Fatalf("recovered = %d, want 1 (in-flight rows only; the pending normalization is logged separately)", n)
 	}
-	if got, err := te.store.GetTaskByID("cnt-pending"); err != nil || got.Status != "review" {
+	if got, err := te.rawStore().GetTaskByID("cnt-pending"); err != nil || got.Status != types.StatusReview {
 		t.Errorf("pending row not normalized: status=%q err=%v", got.Status, err)
 	}
 }
