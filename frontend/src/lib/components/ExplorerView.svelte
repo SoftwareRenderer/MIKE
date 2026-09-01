@@ -9,6 +9,7 @@
     import BranchFileBrowser from './BranchFileBrowser.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
     import FileSearchPanel from './FileSearchPanel.svelte';
+    import SandboxImageStatusBanner from './SandboxImageStatusBanner.svelte';
     import EditorTabs from './EditorTabs.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
     import CommitDiffOverlay from './CommitDiffOverlay.svelte';
@@ -825,6 +826,9 @@
         {:else}
             <!-- Column 1: File browser + Git graph (or Find panel) -->
             <div class="explorer-left-column" class:hidden={isMobileCtx.isMobile && activeTab !== 'files'} style="width: {leftWidth}px">
+                <!-- The listing request below is blocked until the project's sandbox image exists,
+                     so its build/pull progress belongs here. -->
+                <SandboxImageStatusBanner />
                 {#if showFind}
                     <!-- Find in files panel (replaces file browser + git graph) -->
                     <FileSearchPanel

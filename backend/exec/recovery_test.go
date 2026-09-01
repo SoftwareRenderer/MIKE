@@ -203,7 +203,7 @@ func TestRecoverBridgeForTask_Tier1ClientReconnect(t *testing.T) {
 	}
 
 	// Recovery reconnects a fresh client on the live agent pipes.
-	ok := (&TaskExecutor{}).recoverBridgeForTask(f, setup, state, "img", nil, "", nil)
+	ok := (&TaskExecutor{}).recoverBridgeForTask(f, setup, state, "img", nil)
 	if !ok {
 		t.Fatal("expected Tier 1 recovery to succeed")
 	}
@@ -256,7 +256,7 @@ func TestRecoverBridgeForTask_Tier2RecreateRunningContainer(t *testing.T) {
 	f.agentAlive = false
 	f.mu.Unlock()
 
-	ok := (&TaskExecutor{}).recoverBridgeForTask(f, setup, state, "img", nil, "", nil)
+	ok := (&TaskExecutor{}).recoverBridgeForTask(f, setup, state, "img", nil)
 	if !ok {
 		t.Fatal("expected Tier 2 recovery to succeed")
 	}
@@ -311,7 +311,7 @@ func TestRecoverBridgeForTask_CreatesSandboxFromScratchWhenStopped(t *testing.T)
 
 	// Tier 1 cannot help (agent pipes are gone) and the container is not
 	// running — recovery must CREATE the sandbox from scratch.
-	ok := (&TaskExecutor{}).recoverBridgeForTask(f, setup, state, "img", nil, "", nil)
+	ok := (&TaskExecutor{}).recoverBridgeForTask(f, setup, state, "img", nil)
 	if !ok {
 		t.Fatal("recovery should create the sandbox from scratch instead of giving up")
 	}
@@ -349,16 +349,16 @@ func TestRecoverBridgeForTask_MaxAttemptsLatch(t *testing.T) {
 	f.mu.Unlock()
 
 	te := &TaskExecutor{}
-	if te.recoverBridgeForTask(f, setup, state, "img", nil, "", nil) {
+	if te.recoverBridgeForTask(f, setup, state, "img", nil) {
 		t.Fatal("expected recovery attempt 1 to fail")
 	}
 	if state.bridgeRecoveryAttempts != 1 {
 		t.Errorf("attempts = %d, want 1", state.bridgeRecoveryAttempts)
 	}
-	if te.recoverBridgeForTask(f, setup, state, "img", nil, "", nil) {
+	if te.recoverBridgeForTask(f, setup, state, "img", nil) {
 		t.Error("expected recovery attempt 2 to fail")
 	}
-	if te.recoverBridgeForTask(f, setup, state, "img", nil, "", nil) {
+	if te.recoverBridgeForTask(f, setup, state, "img", nil) {
 		t.Error("expected recovery attempt 3 to fail")
 	}
 	if state.bridgeRecoveryAttempts != 3 {
@@ -369,7 +369,7 @@ func TestRecoverBridgeForTask_MaxAttemptsLatch(t *testing.T) {
 	}
 
 	// Fourth call: latch engaged, no further work performed.
-	if te.recoverBridgeForTask(f, setup, state, "img", nil, "", nil) {
+	if te.recoverBridgeForTask(f, setup, state, "img", nil) {
 		t.Fatal("expected recovery to give up after max attempts")
 	}
 	if f.createCalls != 3 {

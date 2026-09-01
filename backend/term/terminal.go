@@ -130,11 +130,7 @@ func (t *taskTerminal) removeConnSize(conn *websocket.Conn) {
 // Defined here so tests can provide a mock without depending on gVisor.
 type sandboxOps interface {
 	IsAvailable() bool
-	ImageReady(image string) bool
-	ImageReadyForProject(projectName string) bool
-	BuildImage(projectName, dockerfilePath string) error
-	BuildImageWithProgress(projectName, dockerfilePath string, onProgress func(line string)) error
-	PullImageWithProgress(image string, onProgress func(line string)) error
+	EnsureImageForProject(project *types.Project, onProgress func(types.SandboxImageStatus)) (string, error)
 	StartShell(taskID, worktreePath string, project *types.Project, opts sandbox.SandboxOpts) (*sandbox.ShellProcess, []types.AssignedPort, error)
 	Stop(taskID string) error
 	GetContainerPorts(taskID string) ([]types.AssignedPort, error)
@@ -189,6 +185,31 @@ func (tm *TerminalManager) SetOnProjectPortsAssigned(fn func(projectID string, p
 	tm.onProjectPortsAssigned = fn
 }
 
+// termStatusMessage encodes one status line for the terminal's WebSocket channel.
+func termStatusMessage(data string) []byte {
+	msg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: data})
+	return msg
+}
+
+// imageStatusLabel names what an image-preparation event is doing, for the terminal's text channel,
+// or false when the event carries nothing the user needs (the completion marker, or a failure the
+// caller reports itself).
+func imageStatusLabel(status types.SandboxImageStatus) (string, bool) {
+	switch status.Phase {
+	case types.SandboxImagePhaseBuilding:
+		if status.Line != "" {
+			return status.Line + "\n", true
+		}
+		return "Building sandbox image " + status.Image + "...\n", true
+	case types.SandboxImagePhasePulling:
+		if status.Line != "" {
+			return status.Line + "\n", true
+		}
+		return "Pulling " + status.Image + "...\n", true
+	}
+	return "", false
+}
+
 // GetProjectPorts returns the assigned ports for a project-level terminal, if active.
 // Queries podman on demand for live port mappings.
 func (tm *TerminalManager) GetProjectPorts(projectID string) []types.AssignedPort {
@@ -237,20 +258,15 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		if !tm.sandboxMgr.IsAvailable() {
 			return nil, fmt.Errorf("gVisor (runsc) is not installed — sandbox cannot be used")
 		}
-		// Determine image: Dockerfile build takes precedence over pre-built image
-		imageToUse := ""
-		if proj.SandboxDockerfilePath != "" {
-			imageToUse = sandbox.ProjectImageName(proj.Name)
-			if !tm.sandboxMgr.ImageReadyForProject(proj.Name) {
-				if err := tm.sandboxMgr.BuildImage(proj.Name, proj.SandboxDockerfilePath); err != nil {
-					return nil, fmt.Errorf("build sandbox image: %w", err)
-				}
-			}
-		} else {
-			imageToUse = proj.SandboxImage
-			if imageToUse == "" {
-				imageToUse = sandbox.BaseImage
-			}
+		// The project's image has to exist before a container can run from it. This session has no
+		// stream to report progress on — the WS handler that opens the terminal does, and the two
+		// share one build (see SandboxManager.EnsureImageForProject). It is called again here rather
+		// than passed down on purpose: this is the function that creates the container, so it must
+		// not depend on its caller having prepared the image. After a completed build the repeat
+		// costs one `podman image exists`.
+		imageToUse, imgErr := tm.sandboxMgr.EnsureImageForProject(proj, nil)
+		if imgErr != nil {
+			return nil, fmt.Errorf("sandbox not available: %w", imgErr)
 		}
 		// Mount agent sandbox if any coding agent is configured
 		agentSandbox := tm.getAgentSandbox()
@@ -502,64 +518,26 @@ func (tm *TerminalManager) handleTerminalWSWithSetup(w http.ResponseWriter, r *h
 
 	ctx := context.Background()
 
-	// Check if sandbox needs an image pull or build
-	sandboxEnabled := false
-	baseImage := ""
-	sandboxDockerfilePath := ""
-	projectName := ""
+	// This is the terminal's own progress channel: the image is prepared before the shell starts, so
+	// its output is what the user sees while the terminal is still blank.
+	var sandboxProject *types.Project
 	if projectID != "" {
-		proj, err := tm.store.GetProject(projectID)
-		if err == nil && proj.SandboxEnabled {
-			sandboxEnabled = true
-			baseImage = proj.SandboxImage
-			sandboxDockerfilePath = proj.SandboxDockerfilePath
-			projectName = proj.Name
+		if proj, err := tm.store.GetProject(projectID); err == nil && proj.SandboxEnabled {
+			sandboxProject = proj
 		}
 	}
-	imageToUse := ""
-	if sandboxDockerfilePath != "" {
-		imageToUse = sandbox.ProjectImageName(projectName)
-	} else {
-		imageToUse = baseImage
-		if imageToUse == "" {
-			imageToUse = sandbox.BaseImage
-		}
-	}
+	sandboxEnabled := sandboxProject != nil
 	if sandboxEnabled && tm.sandboxMgr != nil {
-		needsImage := false
-		if sandboxDockerfilePath != "" {
-			needsImage = !tm.sandboxMgr.ImageReadyForProject(projectName)
-		} else {
-			needsImage = !tm.sandboxMgr.ImageReady(imageToUse)
-		}
-		if needsImage {
-			if sandboxDockerfilePath != "" {
-				statusMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Building sandbox image from Dockerfile...\n"})
-				_ = conn.Write(ctx, websocket.MessageText, statusMsg)
-				if buildErr := tm.sandboxMgr.BuildImageWithProgress(projectName, sandboxDockerfilePath, func(line string) {
-					progressMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: line + "\n"})
-					_ = conn.Write(ctx, websocket.MessageText, progressMsg)
-				}); buildErr != nil {
-					errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to build image: " + buildErr.Error() + "\n"})
-					_ = conn.Write(ctx, websocket.MessageText, errMsg)
-					closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
-					_ = conn.Write(ctx, websocket.MessageText, closeMsg)
-					return
-				}
-			} else {
-				statusMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Pulling " + imageToUse + "...\n"})
-				_ = conn.Write(ctx, websocket.MessageText, statusMsg)
-				if pullErr := tm.sandboxMgr.PullImageWithProgress(imageToUse, func(line string) {
-					progressMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: line + "\n"})
-					_ = conn.Write(ctx, websocket.MessageText, progressMsg)
-				}); pullErr != nil {
-					errMsg, _ := json.Marshal(types.TerminalMessage{Type: "status", Data: "Failed to pull image: " + pullErr.Error() + "\n"})
-					_ = conn.Write(ctx, websocket.MessageText, errMsg)
-					closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
-					_ = conn.Write(ctx, websocket.MessageText, closeMsg)
-					return
-				}
+		_, imgErr := tm.sandboxMgr.EnsureImageForProject(sandboxProject, func(status types.SandboxImageStatus) {
+			if line, ok := imageStatusLabel(status); ok {
+				_ = conn.Write(ctx, websocket.MessageText, termStatusMessage(line))
 			}
+		})
+		if imgErr != nil {
+			_ = conn.Write(ctx, websocket.MessageText, termStatusMessage("Failed to prepare sandbox image: "+imgErr.Error()+"\n"))
+			closeMsg, _ := json.Marshal(types.TerminalMessage{Type: "closed"})
+			_ = conn.Write(ctx, websocket.MessageText, closeMsg)
+			return
 		}
 	}
 

@@ -968,23 +968,22 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 
 // taskExecSetup holds the shared state prepared for task execution.
 type taskExecSetup struct {
-	task                  *types.Task
-	project               *types.Project
-	projectID             string
-	worktreePath          string
-	serverURL             string
-	modelName             string
-	ctx                   context.Context
-	cancel                context.CancelFunc
-	userMsgChan           chan stream.UserMessage
-	summarizeCh           chan *summarizeRequest // channel for manual summarization requests
-	initialContent        string                 // user message content for lazy-start (empty for normal start)
-	regenerate            bool
-	sandboxEnabled        bool
-	sandboxDockerfilePath string
-	sandboxOpts           sandboxmgr.SandboxOpts
-	done                  chan struct{} // closed by executor defer; see executionState.done
-	finished              chan struct{} // closed after the executor's last DB write
+	task           *types.Task
+	project        *types.Project
+	projectID      string
+	worktreePath   string
+	serverURL      string
+	modelName      string
+	ctx            context.Context
+	cancel         context.CancelFunc
+	userMsgChan    chan stream.UserMessage
+	summarizeCh    chan *summarizeRequest // channel for manual summarization requests
+	initialContent string                 // user message content for lazy-start (empty for normal start)
+	regenerate     bool
+	sandboxEnabled bool
+	sandboxOpts    sandboxmgr.SandboxOpts
+	done           chan struct{} // closed by executor defer; see executionState.done
+	finished       chan struct{} // closed after the executor's last DB write
 	// taskSlotURL is the provider URL whose running-task slot this execution
 	// currently holds ("" = not held). LLM providers only; agent providers
 	// manage their own concurrency.
@@ -1180,20 +1179,18 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	te.taskMu.Unlock()
 
 	return &taskExecSetup{
-		task:                  task,
-		project:               project,
-		projectID:             projectID,
-		worktreePath:          worktreePath,
-		serverURL:             serverURL,
-		modelName:             modelName,
-		ctx:                   ctx,
-		cancel:                cancel,
-		userMsgChan:           userMsgChan,
-		summarizeCh:           summarizeCh,
-		sandboxEnabled:        project.SandboxEnabled,
-		sandboxDockerfilePath: project.SandboxDockerfilePath,
+		task:           task,
+		project:        project,
+		projectID:      projectID,
+		worktreePath:   worktreePath,
+		serverURL:      serverURL,
+		modelName:      modelName,
+		ctx:            ctx,
+		cancel:         cancel,
+		userMsgChan:    userMsgChan,
+		summarizeCh:    summarizeCh,
+		sandboxEnabled: project.SandboxEnabled,
 		sandboxOpts: sandboxmgr.SandboxOpts{
-			BaseImage:        project.SandboxImage,
 			NetworkIsolation: project.SandboxNetworkIsolation,
 			MemoryLimit:      project.SandboxMemoryLimit,
 			ForwardPorts:     project.ForwardPorts,

@@ -27,7 +27,29 @@ const (
 	WSTypeHint               WSMessageType = "hint"
 	WSTypeAdvisory           WSMessageType = "advisory"
 	WSTypeExtensionChange    WSMessageType = "extension_change"
+	WSTypeSandboxImageStatus WSMessageType = "sandbox_image_status"
 )
+
+// Phases of WSTypeSandboxImageStatus: preparing a project's sandbox image (building it from its
+// Dockerfile, or pulling the configured one) while the request that needs it waits.
+//
+// The two working phases double as task states, which is what the card badges show, so keep them in
+// step with the frontend's task-state vocabulary (Card.svelte, CardDetail.svelte).
+const (
+	SandboxImagePhaseBuilding = "building_image"
+	SandboxImagePhasePulling  = "pulling_image"
+	SandboxImagePhaseDone     = "done"
+	SandboxImagePhaseFailed   = "failed"
+)
+
+// SandboxImageStatus is the payload of WSTypeSandboxImageStatus: the phase, the image, and podman's
+// latest output line.
+type SandboxImageStatus struct {
+	Phase string `json:"phase"`
+	Image string `json:"image"`
+	Line  string `json:"line,omitempty"`
+	Error string `json:"error,omitempty"`
+}
 
 // StreamEvent carries a typed payload to broadcast.
 type StreamEvent struct {

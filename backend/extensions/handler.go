@@ -791,6 +791,12 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		fail(fmt.Errorf("extension %s declares an unusable sandbox configuration: %w", entry.Name, err))
 		return
 	}
+	// An image that names no registry cannot be pulled headless, so reject the entry here rather
+	// than failing at every later start.
+	if err := h.registry.ValidateImage(entry.Image); err != nil {
+		fail(fmt.Errorf("extension %s declares an unusable image: %w", entry.Name, err))
+		return
+	}
 	ext := &Extension{
 		ID:       id,
 		Name:     entry.Name,
@@ -844,7 +850,7 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		}
 		if dockerfile != "" {
 			emit(30, "Building image...")
-			imageRef = fmt.Sprintf("kanban-ext-%s:%s", entry.Name, entry.Version)
+			imageRef = ExtensionImageRef(entry.Name, entry.Version)
 			if err := h.registry.BuildImageFromReader(dockerfile, imageRef); err != nil {
 				fail(fmt.Errorf("failed to build image: %w", err))
 				return
@@ -1091,7 +1097,12 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 	}
 
 	gitPinned := entry.Repo != "" && entry.Commit != ""
-	imageRef := fmt.Sprintf("kanban-ext-%s:%s", name, entry.Version)
+	imageRef := ExtensionImageRef(name, entry.Version)
+	// Same rule as install: a registry image that names no registry cannot be pulled headless.
+	if err := h.registry.ValidateImage(entry.Image); err != nil {
+		fail(fmt.Errorf("extension %s declares an unusable image: %w", name, err))
+		return
+	}
 
 	if gitPinned {
 		// Re-checkout the newly vetted commit (verified) and rebuild from it.

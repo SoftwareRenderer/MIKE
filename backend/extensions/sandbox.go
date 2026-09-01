@@ -172,6 +172,9 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		"--runtime-flag=overlay2=root:self",
 		"--runtime-flag=ignore-cgroups",
 		"create",
+		// ensureExtensionImage builds or pulls the image first, so an implicit pull here would only
+		// be a silent, unbounded repeat of a failure that is reported better elsewhere.
+		"--pull", "never",
 		"--name", containerName,
 		"--runtime", "runsc",
 		"--security-opt", "label=disable",
@@ -293,6 +296,9 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	if err := sm.rt.ValidateImageRef(image); err != nil {
 		return nil, fmt.Errorf("invalid extension image: %w", err)
 	}
+	// Extensions installed before image names were qualified carry a short ref
+	// ("kanban-ext-gopls:1.0.0"); resolve it to the local build it means.
+	image = sm.rt.ResolveImageRef(image)
 
 	if err := sm.ensureExtensionImage(ext, image); err != nil {
 		return nil, err
@@ -303,6 +309,9 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 	// Create container
 	out, err := sm.rt.PodmanExec(createArgs...)
 	if err != nil {
+		if imgErr := sandboxruntime.ImageAvailabilityError(image, out); imgErr != nil {
+			return nil, fmt.Errorf("create container %s: %w", containerName, imgErr)
+		}
 		return nil, fmt.Errorf("create container %s: %w (output: %s)", containerName, err, string(out))
 	}
 
@@ -719,6 +728,14 @@ type ExtensionRuntimeStatus struct {
 	CreatedAt time.Time            `json:"created_at"`
 }
 
+// pullsMissingRemoteImage reports whether a missing extension image has to be pulled to exist. A
+// "localhost/…" ref is a build made on this host: it is rebuilt from the extension's Dockerfile or
+// reported as missing, never fetched — podman would look for a registry on this machine and fail
+// after retries.
+func pullsMissingRemoteImage(image string) bool {
+	return image != "" && !strings.HasPrefix(image, sandboxruntime.LocalImageRegistry+"/")
+}
+
 // ensureExtensionImage verifies the extension's container image exists locally,
 // rebuilding it from the extension's Dockerfile if it has gone missing
 func (sm *ExtensionSandboxManager) ensureExtensionImage(ext *Extension, image string) error {
@@ -731,8 +748,14 @@ func (sm *ExtensionSandboxManager) ensureExtensionImage(ext *Extension, image st
 		return fmt.Errorf("locate Dockerfile for extension %s: %w", ext.Name, err)
 	}
 	if dfPath == "" {
-		// No local Dockerfile to rebuild from — leave it to podman to pull (e.g.
-		// a fully-qualified registry image or the default base).
+		// Nothing to rebuild from, so the image is genuinely remote — and with --pull=never on the
+		// create, pulling it here is the only way it arrives.
+		if pullsMissingRemoteImage(image) {
+			log.Printf("[ext-sandbox] ext=%s image %s missing; pulling", ext.ID, image)
+			if err := sm.registry.PullImage(image); err != nil {
+				return fmt.Errorf("pull image %s: %w", image, err)
+			}
+		}
 		return nil
 	}
 

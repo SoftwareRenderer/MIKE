@@ -7,6 +7,7 @@
     import TaskFileBrowser from './TaskFileBrowser.svelte';
     import BranchGitGraph from './BranchGitGraph.svelte';
     import FileSearchPanel from './FileSearchPanel.svelte';
+    import SandboxImageStatusBanner from './SandboxImageStatusBanner.svelte';
     import EditorTabs from './EditorTabs.svelte';
     import BranchSymbols from './BranchSymbols.svelte';
     import CommitDiffOverlay from './CommitDiffOverlay.svelte';
@@ -612,6 +613,9 @@
         {:else}
             <!-- Column 1: File browser + Git graph -->
             <div class="explorer-left-column" class:hidden={isMobileCtx.isMobile && activeTab !== 'files'} style="width: {leftWidth}px">
+                <!-- The task's file listing waits on the project's sandbox image; this is where
+                     that build or pull becomes visible. -->
+                <SandboxImageStatusBanner />
                 {#if showFind}
                     <FileSearchPanel
                         projectId={projectId}

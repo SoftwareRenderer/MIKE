@@ -30,7 +30,7 @@ const maxBridgeRecoveryAttempts = 3
 
 // recoverBridgeForTask attempts to restore the sandbox bridge for a task after
 // a bridge failure
-func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *taskExecSetup, state *executionState, imageToUse string, agentSandbox *types.AgentSandbox, skillsDir string, onRecovered func()) bool {
+func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *taskExecSetup, state *executionState, imageToUse string, onRecovered func()) bool {
 	maxAttempts := maxBridgeRecoveryAttempts
 
 	te.taskMu.Lock()
@@ -69,18 +69,7 @@ func (te *TaskExecutor) recoverBridgeForTask(mgr bridgeSandboxManager, setup *ta
 	} else {
 		log.Printf("[bridge-recovery] task=%s container not running, creating sandbox from scratch", setup.task.ID)
 	}
-	if _, createErr := mgr.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{
-		BaseImage:        imageToUse,
-		NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
-		MemoryLimit:      setup.sandboxOpts.MemoryLimit,
-		ForwardPorts:     setup.sandboxOpts.ForwardPorts,
-		AgentSandbox:     agentSandbox,
-		SkillsDir:        skillsDir,
-		SandboxMounts:    setup.sandboxOpts.SandboxMounts,
-		SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
-		Capabilities:     setup.sandboxOpts.Capabilities,
-		PlanMode:         setup.task.IsPlanMode(),
-	}); createErr != nil {
+	if _, createErr := mgr.Create(setup.task.ID, setup.worktreePath, setup.project, te.sandboxCreateOpts(setup, imageToUse, setup.task.IsPlanMode())); createErr != nil {
 		log.Printf("[bridge-recovery] task=%s failed to recreate sandbox: %v", setup.task.ID, createErr)
 		return false
 	}
