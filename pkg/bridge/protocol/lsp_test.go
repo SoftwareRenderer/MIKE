@@ -19,7 +19,7 @@ func TestMethodString_LSP(t *testing.T) {
 }
 
 func TestNewRequest_LSP(t *testing.T) {
-	rawJSON := json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":1234}}`)
+	rawJSON := json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":"file:///workspace"}}`)
 	// Wrap in LSPParams for the request
 	params := LSPParams{Raw: rawJSON}
 	paramsJSON, _ := json.Marshal(params)
@@ -125,7 +125,6 @@ func TestLSPParams_ComplexMessage(t *testing.T) {
 		"id": 1,
 		"method": "initialize",
 		"params": {
-			"processId": 1234,
 			"rootUri": "file:///workspace",
 			"capabilities": {
 				"textDocument": {

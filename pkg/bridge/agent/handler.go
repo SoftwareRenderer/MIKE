@@ -23,8 +23,8 @@ type handler struct {
 	fileLocks sync.Map             // path → *sync.Mutex, prevents concurrent read-modify-write on same file
 }
 
-// lockFile returns a lock for the given file path and an unlock function.
-// Ensures that only one read-modify-write cycle (e.g. handleEdit) runs per file at a time.
+// lockFile returns a lock for a file path and its unlock function, so only one
+// read-modify-write cycle (e.g. handleEdit) runs per file at a time.
 func (h *handler) lockFile(path string) func() {
 	lock, _ := h.fileLocks.LoadOrStore(path, &sync.Mutex{})
 	mtx := lock.(*sync.Mutex)
@@ -49,9 +49,9 @@ type bashProc struct {
 	finished bool
 }
 
-// kill stops the command's whole process group. The command runs with Setpgid, so
-// the group id equals its pid, and the grandchildren go down with it — they are
-// what keeps an inherited stdout open after the command itself is done.
+// kill stops the command's whole process group (it runs with Setpgid, so the group id is its
+// pid). The grandchildren are the point: they keep an inherited stdout open after the command
+// itself finishes.
 func (bp *bashProc) kill() {
 	if bp.cmd == nil {
 		return
@@ -119,12 +119,18 @@ func (h *handler) close() {
 		bp.kill()
 		delete(h.bashProcs, id)
 	}
+	// The language server belongs to this connection too. Otherwise every dropped bridge —
+	// a retired workspace, a closed editor, a finished turn — orphans a server in the sandbox
+	// until the container itself stops.
+	if h.lsp != nil && h.lsp.session != nil {
+		h.lsp.session.close()
+		h.lsp = nil
+	}
 	h.mu.Unlock()
 }
 
-// handleConn reads frames from conn and dispatches them to handlers.
-// Binary methods (bash_cancel) are handled synchronously on this goroutine.
-// JSON methods are dispatched to goroutines.
+// handleConn reads frames and dispatches them: binary methods (bash_cancel) synchronously on
+// this goroutine, JSON methods on their own.
 func (h *handler) handleConn(conn net.Conn) error {
 	for {
 		frame, err := protocol.ReadFrame(conn)

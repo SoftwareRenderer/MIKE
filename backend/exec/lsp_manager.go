@@ -13,10 +13,12 @@ type lspManager interface {
 	GetRegistry() *lsp.ExtensionRegistry
 	GetOrCreate(ctx context.Context, workspacePath, language string, cfg *lsp.ServerConfig) (*lsp.LSPProcess, error)
 	Release(workspacePath, language string)
-	SendToServer(proc *lsp.LSPProcess, msg json.RawMessage) error
-	LSPNotify(proc *lsp.LSPProcess, msg json.RawMessage) error
+	SendToServer(ctx context.Context, proc *lsp.LSPProcess, msg json.RawMessage) error
+	LSPNotify(ctx context.Context, proc *lsp.LSPProcess, msg json.RawMessage) error
+	EnsureInitialized(ctx context.Context, workspacePath string, cfg *lsp.ServerConfig) error
+	SyncDocument(ctx context.Context, workspacePath, filePath string, cfg *lsp.ServerConfig) (string, bool, error)
 	Subscribe() chan json.RawMessage
 	Unsubscribe(ch chan json.RawMessage)
 	IsToolCallsEnabledForFile(filePath string) bool
-	LSPRequest(workspacePath, filePath, method string, params any) (json.RawMessage, error)
+	LSPRequest(ctx context.Context, workspacePath, filePath, method string, params any) (json.RawMessage, error)
 }

@@ -1105,6 +1105,24 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 			var m ExtensionManifest
 			if err := json.Unmarshal(data, &m); err == nil {
 				ext.Manifest = m
+				// What the manifest declares about the sandbox is part of what this commit
+				// delivers, so re-read it: a language server updated to a commit that moves its
+				// cache would otherwise keep running on the stored paths from install time.
+				// A manifest that grants itself a mount outside the app's roots, or a capability
+				// that reaches past the container, fails the update exactly as it fails an install.
+				before := ext.SandboxConfig
+				merged := mergeManifestSandboxAdditions(ext.SandboxConfig, lspSandboxFromManifest(&m))
+				if err := h.mountPolicy().ValidateSandboxAdditions(merged.Mounts, merged.Capabilities); err != nil {
+					fail(fmt.Errorf("extension %s declares an unusable sandbox configuration: %w", entry.Name, err))
+					return
+				}
+				if len(merged.Envs) > len(before.Envs) || len(merged.Mounts) > len(before.Mounts) ||
+					len(merged.Capabilities) > len(before.Capabilities) {
+					log.Printf("[extensions] ext=%s update added %d env, %d mount, %d capability declaration(s) from the manifest",
+						id, len(merged.Envs)-len(before.Envs), len(merged.Mounts)-len(before.Mounts),
+						len(merged.Capabilities)-len(before.Capabilities))
+				}
+				ext.SandboxConfig = merged
 			}
 		}
 		ext.Repo = entry.Repo

@@ -298,15 +298,16 @@ func TestCleanupStaleContainers(t *testing.T) {
 
 	dir := t.TempDir()
 
-	// Create containers with taskIDs that won't be in the active map
-	// (simulating containers left behind by a crashed server)
-	staleIDs := []string{"stale-task-alpha", "stale-task-beta"}
-	for _, id := range staleIDs {
+	// The created-only container is what a crashed server leaves behind: a name nobody owns. The
+	// running one is a live sandbox, and the sweep must walk past it.
+	leftover := ContainerNamePrefix + "-stale-task-alpha"
+	running := ContainerNamePrefix + "-stale-task-beta"
+	for _, name := range []string{leftover, running} {
 		_, _ = sm.podmanExec(
 			"--runtime-flag=overlay2=root:self",
 			"--runtime-flag=ignore-cgroups",
 			"create",
-			"--name", ContainerNamePrefix+"-"+id,
+			"--name", name,
 			"--runtime", "runsc",
 			"--security-opt", "label=disable",
 			"--cap-drop", "ALL",
@@ -315,29 +316,31 @@ func TestCleanupStaleContainers(t *testing.T) {
 			BaseImage,
 			"/bin/sh", "-c", "sleep infinity",
 		)
-		_, _ = sm.podmanExec("--runtime-flag", "ignore-cgroups=true", "start", ContainerNamePrefix+"-"+id)
 		t.Cleanup(func() {
-			_, _ = sm.podmanExec("rm", "-f", ContainerNamePrefix+"-"+id)
+			_, _ = sm.podmanExec("rm", "-f", name)
 		})
 	}
+	if _, err := sm.podmanExec("--runtime-flag", "ignore-cgroups=true", "start", running); err != nil {
+		t.Skipf("cannot start a container for the sweep to leave alone: %v", err)
+	}
 
-	// Verify stale containers exist
-	for _, id := range staleIDs {
-		exists, _ := sm.rt.ContainerExists(ContainerNamePrefix + "-" + id)
+	// Verify both containers exist
+	for _, name := range []string{leftover, running} {
+		exists, _ := sm.rt.ContainerExists(name)
 		if !exists {
-			t.Fatalf("expected stale container %s to exist before cleanup", id)
+			t.Fatalf("expected container %s to exist before cleanup", name)
 		}
 	}
 
 	// Run cleanup
 	sm.cleanupStaleContainers()
 
-	// Verify all stale containers are gone
-	for _, id := range staleIDs {
-		exists, _ := sm.rt.ContainerExists(ContainerNamePrefix + "-" + id)
-		if exists {
-			t.Errorf("expected stale container %s to be removed after cleanup", id)
-		}
+	// The leftover is gone; the live one is not.
+	if exists, _ := sm.rt.ContainerExists(leftover); exists {
+		t.Errorf("expected leftover container %s to be removed after cleanup", leftover)
+	}
+	if exists, _ := sm.rt.ContainerExists(running); !exists {
+		t.Errorf("running container %s was swept: a running sandbox belongs to a live owner, and removing it takes a working container away from them", running)
 	}
 }
 
