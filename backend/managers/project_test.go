@@ -446,6 +446,86 @@ func TestBuildWantsNoCache(t *testing.T) {
 	}
 }
 
+// A sandbox image that names no registry ("ubuntu:24.04") breaks every later sandbox start, so it
+// must be refused where it is entered.
+func TestCreateProjectRejectsUnqualifiedSandboxImage(t *testing.T) {
+	h, _ := testProjectHandler(t)
+	repo := t.TempDir()
+	createBareRepo(t, repo)
+
+	isolation := false
+	proj, code, msg := h.createProjectFromRequest(types.CreateProjectRequest{
+		Path:                    repo,
+		Name:                    "img-reject-proj",
+		SandboxEnabled:          true,
+		SandboxNetworkIsolation: &isolation,
+		SandboxImage:            "ubuntu:24.04",
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d (%s), want %d", code, msg, http.StatusBadRequest)
+	}
+	if !strings.Contains(msg, "fully qualified") {
+		t.Fatalf("message = %q, want it to say the image must be fully qualified", msg)
+	}
+	if proj != nil {
+		t.Fatal("project must not be created when its image ref is unusable")
+	}
+
+	okProj, okCode, okMsg := h.createProjectFromRequest(types.CreateProjectRequest{
+		Path:                    repo,
+		Name:                    "img-accept-proj",
+		SandboxEnabled:          true,
+		SandboxNetworkIsolation: &isolation,
+		SandboxImage:            "docker.io/library/ubuntu:24.04",
+	})
+	if okCode != http.StatusCreated {
+		t.Fatalf("status = %d (%s), want %d", okCode, okMsg, http.StatusCreated)
+	}
+	if okProj.SandboxImage != "docker.io/library/ubuntu:24.04" {
+		t.Fatalf("stored image = %q, want the configured ref", okProj.SandboxImage)
+	}
+}
+
+// The update path validates before writing, so a rejected image can't half-update the project.
+func TestUpdateProjectRejectsUnqualifiedSandboxImage(t *testing.T) {
+	h, projID := testProjectHandler(t)
+	const seeded = "docker.io/library/ubuntu:24.04"
+	if err := h.store.UpdateProjectSandboxImage(projID, seeded); err != nil {
+		t.Fatalf("seed image: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/projects/{projectID}", h.HandleByID)
+
+	for _, bad := range []string{"alpine/git", "ubuntu:24.04", "sandbox-getmike.dev"} {
+		req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projID,
+			strings.NewReader(`{"sandbox_image":"`+bad+`"}`))
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("PUT sandbox_image=%q: status = %d, want %d (%s)", bad, rr.Code, http.StatusBadRequest, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "fully qualified") {
+			t.Fatalf("PUT sandbox_image=%q: body = %q, want the fully-qualified-name error", bad, rr.Body.String())
+		}
+		if p, err := h.store.GetProject(projID); err != nil || p.SandboxImage != seeded {
+			t.Fatalf("rejected value %q was written: stored=%q err=%v", bad, p.SandboxImage, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/"+projID,
+		strings.NewReader(`{"sandbox_image":"quay.io/o/r:1"}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if p, _ := h.store.GetProject(projID); p.SandboxImage != "quay.io/o/r:1" {
+		t.Fatalf("stored image = %q, want quay.io/o/r:1", p.SandboxImage)
+	}
+}
+
 func TestApplyPricingBasic(t *testing.T) {
 	h, projID := testProjectHandler(t)
 

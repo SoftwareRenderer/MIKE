@@ -17,8 +17,6 @@ import (
 
 	"kanban/backend/git"
 	"kanban/backend/llama"
-	"kanban/backend/prompts"
-	kanban_sandbox "kanban/backend/sandbox"
 	"kanban/backend/stream"
 	"kanban/backend/toolresult"
 	"kanban/backend/types"
@@ -376,7 +374,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 
 		// Wire up bridge recovery — reconnects client or (re)creates sandbox.
 		state.recoverBridge = func() bool {
-			return te.recoverBridgeForTask(te.sandboxMgr, setup, state, imageToUse, te.agentRegistry.GetAnyAgentSandbox(), prompts.SkillsDir(), func() {
+			return te.recoverBridgeForTask(te.sandboxMgr, setup, state, imageToUse, func() {
 				te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{
 					Type: types.WSTypeStatus,
 					Data: map[string]string{"state": "running", "activity": "Sandbox bridge recovered"},
@@ -525,18 +523,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					}
 					// Create new container with updated mode
 					var assignedPorts []types.AssignedPort
-					assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{
-						BaseImage:        imageToUse,
-						NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
-						MemoryLimit:      setup.sandboxOpts.MemoryLimit,
-						ForwardPorts:     setup.sandboxOpts.ForwardPorts,
-						AgentSandbox:     te.agentRegistry.GetAnyAgentSandbox(),
-						SkillsDir:        prompts.SkillsDir(),
-						SandboxMounts:    setup.sandboxOpts.SandboxMounts,
-						SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
-						Capabilities:     setup.sandboxOpts.Capabilities,
-						PlanMode:         updatedTask.IsPlanMode(),
-					})
+					assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project, te.sandboxCreateOpts(setup, imageToUse, updatedTask.IsPlanMode()))
 					if createErr != nil {
 						log.Printf("[mode-switch] setup.task=%s failed to recreate sandbox: %v", setup.task.ID, createErr)
 						setup.task.ExecutionState = "failed"
@@ -601,18 +588,7 @@ func (te *TaskExecutor) executeTask(setup *taskExecSetup) {
 					log.Printf("[sandbox-config] setup.task=%s failed to stop old sandbox: %v", setup.task.ID, err)
 				}
 				var assignedPorts []types.AssignedPort
-				assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project, kanban_sandbox.SandboxOpts{
-					BaseImage:        imageToUse,
-					NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
-					MemoryLimit:      setup.sandboxOpts.MemoryLimit,
-					ForwardPorts:     setup.sandboxOpts.ForwardPorts,
-					AgentSandbox:     te.agentRegistry.GetAnyAgentSandbox(),
-					SkillsDir:        prompts.SkillsDir(),
-					SandboxMounts:    setup.sandboxOpts.SandboxMounts,
-					SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
-					Capabilities:     setup.sandboxOpts.Capabilities,
-					PlanMode:         setup.task.IsPlanMode(),
-				})
+				assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project, te.sandboxCreateOpts(setup, imageToUse, setup.task.IsPlanMode()))
 				if createErr != nil {
 					log.Printf("[sandbox-config] setup.task=%s failed to recreate sandbox: %v", setup.task.ID, createErr)
 					setup.task.ExecutionState = "failed"

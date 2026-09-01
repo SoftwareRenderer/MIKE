@@ -18,6 +18,7 @@ export interface AppStreamCallbacks {
     onCommitStatus?: (task_id: string, status: 'queued' | 'processing') => void;
     onTaskEvent?: (task_id: string, event: StreamEvent) => void; // task-scoped events (tokens, tool calls, etc.)
     onProjectPorts?: (ports: Array<{ host_port: number; container_port: number }>) => void; // project-level terminal port mappings
+    onSandboxImageStatus?: (status: { phase?: string; image?: string; line?: string; error?: string }) => void; // building/pulling the project's sandbox image
     onExtensionChange?: () => void; // extension enabled/disabled/installed/removed
     onConnected?: (connected: boolean) => void; // true on connect, false on disconnect
     onReconnectScheduled?: (nextAttemptAt: number) => void; // epoch ms of next reconnect attempt
@@ -202,6 +203,11 @@ export function createAppStream(callbacks: AppStreamCallbacks, options: AppStrea
             }
             if (msg.type === 'project_ports' && callbacks.onProjectPorts) {
                 callbacks.onProjectPorts(msg.ports);
+            }
+            // Sent while the project's sandbox image is built or pulled. The request that needs the
+            // image is blocked until it exists, so this channel is the only way to see progress.
+            if (msg.type === 'sandbox_image_status' && callbacks.onSandboxImageStatus) {
+                callbacks.onSandboxImageStatus(msg.data || {});
             }
             if (msg.type === 'extension_change' && callbacks.onExtensionChange) {
                 callbacks.onExtensionChange();

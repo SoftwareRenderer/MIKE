@@ -149,7 +149,9 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     $effect(() => { imageSource = sandboxDockerfilePath ? 'dockerfile' : 'image'; });
     let dockerfileChanged = $derived(sandboxDockerfilePath !== (project.sandbox_dockerfile_path ?? ''));
     let showDockerfilePicker = $state(false);
-    let imageTag = $derived(`sandbox-${project.name.replace(/ /g, '-').replace(/\//g, '-')}`);
+    // Mirrors sandbox.ProjectImageName: a project's Dockerfile image is a local build, so podman
+    // stores it as `localhost/sandbox-<name>`. Keep the two in step.
+    let imageTag = $derived(`localhost/sandbox-${project.name.toLowerCase().replace(/ /g, '-').replace(/\//g, '-')}`);
     let saving = $state(false);
     let building = $state(false);
     // Checked = builds started from this modal skip the layer cache. Not persisted.
@@ -1186,7 +1188,7 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 <div class="config-info">
                     <div class="config-text">
                         <span class="config-label">Image Name</span>
-                        <span class="config-desc">Fully-qualified image name for sandbox containers</span>
+                        <span class="config-desc">Image for sandbox containers — must name its registry, e.g. docker.io/library/ubuntu:24.04</span>
                     </div>
                 </div>
                 <input type="text" class="image-input" bind:value={sandboxImage} placeholder="docker.io/ubuntu:latest" disabled={isLocked} aria-label="Sandbox image name" />

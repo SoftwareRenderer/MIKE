@@ -606,6 +606,16 @@ func (asm *AppStreamManager) BroadcastTaskDeleted(projectID, taskID string) {
 	asm.BroadcastProjectCounts()
 }
 
+// SendProjectEvent sends one typed event to every client subscribed to the project. For work that
+// belongs to the project rather than to a task — building its sandbox image while the file explorer
+// waits, where there is no task chat to carry the progress.
+func (asm *AppStreamManager) SendProjectEvent(projectID string, event types.StreamEvent) {
+	asm.sendBoardPayload(projectID, map[string]any{
+		"type": string(event.Type),
+		"data": event.Data,
+	})
+}
+
 // BroadcastProjectPorts sends a project_ports event to all clients of a project.
 func (asm *AppStreamManager) BroadcastProjectPorts(projectID string, ports []types.AssignedPort) {
 	asm.sendBoardPayload(projectID, map[string]any{

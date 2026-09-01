@@ -266,6 +266,9 @@ func TestFetchDockerfile_FileURL(t *testing.T) {
 	}
 }
 
+// TestValidateImageRef covers the charset gate only — a ref must not become a podman flag. Naming
+// a registry is a separate rule (ValidateConfiguredImageRef), which is why "golang:1.21" passes
+// here but is not acceptable as a user- or registry-declared image.
 func TestValidateImageRef(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -291,6 +294,36 @@ func TestValidateImageRef(t *testing.T) {
 				t.Errorf("sandboxruntime.ValidateImageRef(%q) error = %v, wantErr %v", tt.image, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// A locally built image lives under "localhost/", and only a qualified name keeps later
+// exists/pull/create out of short-name resolution.
+func TestExtensionImageRef(t *testing.T) {
+	ref := ExtensionImageRef("gopls", "1.0.0")
+	if ref != "localhost/kanban-ext-gopls:1.0.0" {
+		t.Fatalf("ExtensionImageRef = %q, want localhost/kanban-ext-gopls:1.0.0", ref)
+	}
+	if !sandboxruntime.IsQualifiedImageRef(ref) {
+		t.Fatalf("extension image ref %q is not fully qualified", ref)
+	}
+	if err := sandboxruntime.ValidateConfiguredImageRef(ref); err != nil {
+		t.Fatalf("extension image ref %q rejected: %v", ref, err)
+	}
+}
+
+// A registry entry's image must name its registry — it is pulled headless.
+func TestRegistryClientValidateImage(t *testing.T) {
+	rc := NewRegistryClient()
+	for _, ok := range []string{"", "docker.io/library/ubuntu:latest", "localhost/x:1", "localhost:5000/o/r"} {
+		if err := rc.ValidateImage(ok); err != nil {
+			t.Errorf("ValidateImage(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"ubuntu:latest", "alpine/git", "kanban-ext-gopls:1.0.0"} {
+		if err := rc.ValidateImage(bad); err == nil {
+			t.Errorf("ValidateImage(%q) = nil, want a fully-qualified-name error", bad)
+		}
 	}
 }
 

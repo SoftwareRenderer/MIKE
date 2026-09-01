@@ -154,6 +154,12 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 		return nil, http.StatusBadRequest, err.Error()
 	}
 
+	// A sandbox image must name its registry: a short one would break every later sandbox start of
+	// this project (see pkg/sandboxruntime/image_ref.go).
+	if err := sandboxruntime.ValidateConfiguredImageRef(req.SandboxImage); err != nil {
+		return nil, http.StatusBadRequest, err.Error()
+	}
+
 	// Collect existing project IDs to avoid collisions
 	existingIDs := []string{}
 	projects, _ := h.store.ListProjects()
@@ -499,6 +505,14 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			}
 			if _, updateErr := h.store.UpdateProject(id, req.Name); updateErr != nil {
 				httputil.JSONError(w, http.StatusInternalServerError, "failed to update project")
+				return
+			}
+		}
+		// Validate before writing any sandbox field, so a rejected value can't leave the project
+		// half-updated.
+		if req.SandboxImage != nil {
+			if err := sandboxruntime.ValidateConfiguredImageRef(*req.SandboxImage); err != nil {
+				httputil.JSONError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 		}

@@ -161,7 +161,12 @@ type SandboxManager struct {
 	clients       map[string]*sandbox.Client // taskID -> agent client (cached)
 	livenessCache map[string]time.Time       // taskID -> last time running was confirmed
 	cgroupDirs    map[string]string          // taskID -> cgroup v2 dir (resolved once per container)
-	available     bool
+	// imageOps holds in-flight image builds/pulls by image ref, so concurrent sandbox starts share
+	// one build. imageOpsMu is separate from mu: a build runs for minutes and must not block the
+	// container maps.
+	imageOpsMu sync.Mutex
+	imageOps   map[string]*imageOp
+	available  bool
 }
 
 // NewSandboxManager creates a new SandboxManager and checks gVisor availability.
@@ -175,6 +180,7 @@ func NewSandboxManager() *SandboxManager {
 		clients:       make(map[string]*sandbox.Client),
 		livenessCache: make(map[string]time.Time),
 		cgroupDirs:    make(map[string]string),
+		imageOps:      make(map[string]*imageOp),
 	}
 	sm.available = sm.checkAvailable()
 	if sm.available {
@@ -247,6 +253,34 @@ func forwardPortSpec(hostPort, containerPort int) string {
 	return fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort)
 }
 
+// createContainerArgs is the fixed part of `podman create` for a task or project sandbox, before
+// any capability, mount, port or environment entry is appended. Extracted so the ordering is
+// testable: the global `--runtime-flag` options must precede `create`, `--pull` must follow it.
+//
+// --runtime-flag overlay2=root:self: use kernel overlay2 for writable rootfs
+// --runtime-flag ignore-cgroups: required for rootless gVisor (no cgroup access)
+// --security-opt label=disable: required for gVisor (no SELinux support)
+// --cap-drop=ALL: drop all capabilities, re-add only those explicitly configured
+// --security-opt no-new-privileges: prevent privilege escalation via setuid binaries
+func createContainerArgs(containerName, mountPath string) []string {
+	return []string{
+		"--runtime-flag=overlay2=root:self",
+		"--runtime-flag=ignore-cgroups",
+		"create",
+		// Every caller ensures the image first, with progress the browser can show. An implicit
+		// pull here would be silent and unbounded, and would fail as a resolution error instead of
+		// "this image was never built".
+		"--pull", "never",
+		"--name", containerName,
+		"--runtime", "runsc",
+		"--security-opt", "label=disable",
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges",
+		"--entrypoint", "",
+		"--workdir", mountPath,
+	}
+}
+
 // Create creates a gVisor sandbox container for a task
 //
 // Filesystem Mounts:
@@ -288,6 +322,9 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	if err := sm.rt.ValidateImageRef(image); err != nil {
 		return nil, fmt.Errorf("invalid sandbox image: %w", err)
 	}
+	// Generated names are qualified already; this covers a value stored before that rule existed.
+	// See pkg/sandboxruntime/image_ref.go for why podman must never see a short name.
+	image = sm.rt.ResolveImageRef(image)
 
 	if !sm.available {
 		return nil, fmt.Errorf("gVisor not available (runsc not installed)")
@@ -325,25 +362,7 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 	}
 
 	// Create container with gVisor runtime
-	// --runtime-flag overlay2=root:self: use kernel overlay2 for writable rootfs
-	// --runtime-flag ignore-cgroups: required for rootless gVisor (no cgroup access)
-	// --security-opt label=disable: required for gVisor (no SELinux support)
-	// --cap-drop=ALL: drop all capabilities, re-add only those explicitly configured
-	// --security-opt no-new-privileges: prevent privilege escalation via setuid binaries
-	// --runtime-flag is a global podman option (must come before subcommand)
-	// Do not include leading -- in the flag value per podman docs
-	createArgs := []string{
-		"--runtime-flag=overlay2=root:self",
-		"--runtime-flag=ignore-cgroups",
-		"create",
-		"--name", containerName,
-		"--runtime", "runsc",
-		"--security-opt", "label=disable",
-		"--cap-drop", "ALL",
-		"--security-opt", "no-new-privileges",
-		"--entrypoint", "",
-		"--workdir", mountPath,
-	}
+	createArgs := createContainerArgs(containerName, mountPath)
 	// Add back any explicitly requested capabilities
 	for _, cap := range opts.Capabilities {
 		createArgs = append(createArgs, "--cap-add", cap)
@@ -463,6 +482,10 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 
 	out, err := sm.podmanExec(createArgs...)
 	if err != nil {
+		// "image not known" is the interesting case and podman buries it; say what to do instead.
+		if imgErr := sandboxruntime.ImageAvailabilityError(image, out); imgErr != nil {
+			return nil, fmt.Errorf("create container: %w", imgErr)
+		}
 		return nil, fmt.Errorf("create container: %w (%s)", err, out)
 	}
 
@@ -1026,16 +1049,13 @@ func (sm *SandboxManager) GetMemoryStats(taskID string) *types.SandboxMemoryStat
 	}
 }
 
-// ImageReady checks if a container image is available locally.
+// ImageReady reports whether image is available locally. An empty image means the app-wide
+// default; a reference podman could misread as a flag is refused without asking it.
 func (sm *SandboxManager) ImageReady(image string) bool {
 	if image == "" {
 		image = BaseImage
 	}
-	if strings.HasPrefix(image, "-") {
-		return false
-	}
-	_, err := sm.podmanExec("image", "exists", image)
-	return err == nil
+	return sm.rt.ImageExists(image)
 }
 
 // PullImageWithProgress downloads a container image, streaming progress lines via onProgress.
@@ -1044,9 +1064,11 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 	if image == "" {
 		image = BaseImage
 	}
-	if strings.HasPrefix(image, "-") {
-		return fmt.Errorf("image reference must not start with a dash: %q", image)
+	// A short name cannot be pulled either: podman prompts for the registry and has no TTY.
+	if err := sm.rt.ValidateImageRef(image); err != nil {
+		return err
 	}
+	image = sm.rt.ResolveImageRef(image)
 	log.Printf("[sandbox] pulling image %s", image)
 
 	c := exec.Command("podman", "pull", image)
@@ -1082,16 +1104,21 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 	return nil
 }
 
-// ProjectImageName returns the image name for a project's custom-built Dockerfile image.
-// Uses a sanitized version of the project name for readability.
+// ProjectImageName returns the image name a project's Dockerfile image is built under, using a
+// sanitized project name for readability.
+//
+// It is qualified with the local registry on purpose: a project name may contain a dot, so
+// "sandbox-getmike.dev" looks like a host but is a short name to podman (see image_ref.go). And
+// `podman build -t sandbox-x` already stores the result as "localhost/sandbox-x", so this is the
+// name the image has always had in storage.
 func ProjectImageName(projectName string) string {
 	safeName := strings.ReplaceAll(projectName, " ", "-")
 	safeName = strings.ReplaceAll(safeName, "/", "-")
 	safeName = strings.ToLower(safeName)
 	if ProjectImagePrefix == "" {
-		return safeName
+		return sandboxruntime.QualifyLocalImageRef(safeName)
 	}
-	return fmt.Sprintf("%s-%s", ProjectImagePrefix, safeName)
+	return sandboxruntime.QualifyLocalImageRef(fmt.Sprintf("%s-%s", ProjectImagePrefix, safeName))
 }
 
 // BuildOptions controls optional behavior of an image build.
@@ -1197,13 +1224,6 @@ func (sm *SandboxManager) BuildImageWithOptions(projectName, dockerfilePath stri
 	}
 	log.Printf("[sandbox] project=%s image %s built successfully", projectName, imageName)
 	return nil
-}
-
-// ImageReadyForProject checks if a project's custom-built image exists locally.
-func (sm *SandboxManager) ImageReadyForProject(projectName string) bool {
-	imageName := ProjectImageName(projectName)
-	_, err := sm.podmanExec("image", "exists", imageName)
-	return err == nil
 }
 
 // StopProjectContainers stops all sandbox containers associated with a project.
