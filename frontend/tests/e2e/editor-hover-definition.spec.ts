@@ -34,7 +34,8 @@ const PROJECT_NAME = 'kanban-test-repo-hover';
 const CALLER = 'caller.go';
 const TARGET = 'target.go';
 
-// caller.go — `Helper` is defined in this file, `Alpha` in target.go.
+// caller.go — `Helper` is defined in this file, `Alpha` in target.go, and
+// `Documented` is the symbol the fake gives long, rule-filled documentation.
 //   1 package hover
 //   2
 //   3 func Helper() int { return 2 }
@@ -42,6 +43,8 @@ const TARGET = 'target.go';
 //   5 func Use() int {
 //   6     return Helper() + Alpha()
 //   7 }
+//   8
+//   9 func Documented() int { return 3 }
 const CALLER_SRC = `package hover
 
 func Helper() int { return 2 }
@@ -49,6 +52,8 @@ func Helper() int { return 2 }
 func Use() int {
 \treturn Helper() + Alpha()
 }
+
+func Documented() int { return 3 }
 `;
 
 const TARGET_SRC = `package hover
@@ -75,6 +80,20 @@ const FAKE_LSP_INIT = (targetPath: string) => {
     const RealWebSocket = w.WebSocket;
     const WORD = /[A-Za-z0-9_$]/;
     const TARGET_URI = 'file://' + targetPath;
+
+    /**
+     * Documentation with the shape a real server sends for a documented symbol:
+     * a signature block, then prose in sections split by `---` (markdown rules),
+     * taller than any reasonable tooltip. This is the input that used to push the
+     * card's "Go to Definition" button below the fold.
+     */
+    const PARAGRAPH =
+        'Documents the symbol at enough length that the documentation itself has to scroll inside the card, ' +
+        'which is exactly the situation the pinned action row exists for. ';
+    const section = (n: number) =>
+        Array.from({ length: n }, (_, i) => `Section ${i + 1}. ${PARAGRAPH}${PARAGRAPH}`).join('\n\n');
+    const LONG_DOC =
+        '```go\nfunc Documented() int\n```\n\n---\n\n' + section(4) + '\n\n---\n\n' + section(4) + '\n\n---\n';
 
     class FakeSocket extends EventTarget {
         /** Only `readyState`, `send`, `close`, `onmessage` and the event target
@@ -173,7 +192,9 @@ const FAKE_LSP_INIT = (targetPath: string) => {
                 case 'textDocument/hover': {
                     const { line, character } = params.position;
                     const word = this.wordAt(params.textDocument.uri, line, character);
-                    if (word === 'Helper' || word === 'Alpha') {
+                    if (word === 'Documented') {
+                        this.reply(msg, { contents: { kind: 'markdown', value: LONG_DOC } });
+                    } else if (word === 'Helper' || word === 'Alpha') {
                         this.reply(msg, { contents: { kind: 'markdown', value: '```go\nfunc ' + word + '() int\n```' } });
                     } else {
                         // Anything else has neither documentation nor a definition,
@@ -191,6 +212,10 @@ const FAKE_LSP_INIT = (targetPath: string) => {
                     } else if (word === 'Helper') {
                         // Same-file definition (line 3, 1-based).
                         this.reply(msg, [{ targetUri: uri, targetRange: { start: { line: 2, character: 5 }, end: { line: 2, character: 11 } }, targetSelectionRange: { start: { line: 2, character: 5 }, end: { line: 2, character: 11 } } }]);
+                    } else if (word === 'Documented') {
+                        // Same-file, and far enough down that a card which grew past
+                        // its own height used to park its button off-screen.
+                        this.reply(msg, [{ targetUri: uri, targetRange: { start: { line: 8, character: 5 }, end: { line: 8, character: 15 } }, targetSelectionRange: { start: { line: 8, character: 5 }, end: { line: 8, character: 15 } } }]);
                     } else {
                         this.reply(msg, []);
                     }
@@ -282,12 +307,13 @@ async function blankSpot(page: Page) {
         const view = el?.__view;
         if (!view) return null;
         const rect = view.dom.getBoundingClientRect();
-        const last = view.state.doc.lines;
-        const at = view.coordsAtPos(view.state.doc.line(last).from);
+        // Past the END of the last line's text, not below it. The area under the
+        // code is only blank while the fixture ends higher up: a "blank" spot that
+        // lands on an identifier turns the pointer move into a re-target, which is
+        // a different test than leaving the card alone.
+        const at = view.coordsAtPos(view.state.doc.line(view.state.doc.lines).to);
         if (!at) return null;
-        // Below the last line: the editor's empty area, where there is no
-        // identifier and no card.
-        return { x: rect.left + 120, y: Math.min(rect.bottom - 6, at.bottom + 120) };
+        return { x: Math.min(rect.right - 8, at.right + 80), y: Math.max(rect.top + 8, at.bottom - 6) };
     });
 }
 
@@ -455,8 +481,58 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
         // `package` resolves to nothing in the fake's routing table.
         const spot = await coordsOf(page, 'package');
         await page.mouse.move(spot.x, spot.y);
-        await page.waitForTimeout(1200);
+        // Comfortably past the 500 ms hover delay plus a round trip to the fake.
+        await page.waitForTimeout(1600);
         await expect(page.locator(CARD)).toHaveCount(0);
+    });
+
+    test('long documentation scrolls beneath the pinned button, and its rules stay tight', async ({ page }) => {
+        await openCaller(page);
+
+        const hover = await coordsOf(page, 'Documented()');
+        await page.mouse.move(hover.x, hover.y);
+        await expect(page.locator(CARD_BUTTON)).toBeVisible({ timeout: 10000 });
+
+        const geometry = await page.evaluate(() => {
+            const card = document.querySelector('.cm-lsp-action-card') as HTMLElement;
+            const body = document.querySelector('.cm-lsp-action-card-body') as HTMLElement;
+            const btn = document.querySelector('.cm-lsp-action-button') as HTMLElement;
+            const rules = Array.from(card.querySelectorAll('hr')) as HTMLElement[];
+            const cardBox = card.getBoundingClientRect();
+            const btnBox = btn.getBoundingClientRect();
+            const firstRule = getComputedStyle(rules[0]);
+            const lastRule = getComputedStyle(rules[rules.length - 1]);
+            return {
+                ruleCount: rules.length,
+                ruleMarginTop: firstRule.marginTop,
+                ruleMarginBottom: firstRule.marginBottom,
+                lastRuleMarginBottom: lastRule.marginBottom,
+                cardOverflowY: getComputedStyle(card).overflowY,
+                bodyOverflowY: getComputedStyle(body).overflowY,
+                cardScrolled: card.scrollTop,
+                cardHeight: cardBox.height,
+                bodyOverflows: body.scrollHeight - body.clientHeight,
+                buttonInsideCard: btnBox.top >= cardBox.top && btnBox.bottom <= cardBox.bottom + 0.5,
+            };
+        });
+
+        // The fixture's documentation: a signature block, two prose sections split
+        // by a rule, and a trailing rule the card must not pad out.
+        expect(geometry.ruleCount).toBe(3);
+        // The card-scoped rule wins over the generic 6px tooltip margin.
+        expect(geometry.ruleMarginTop).toBe('2px');
+        expect(geometry.ruleMarginBottom).toBe('2px');
+        expect(geometry.lastRuleMarginBottom).toBe('0px');
+
+        // There IS something to scroll, and it is the documentation …
+        expect(geometry.bodyOverflows).toBeGreaterThan(0);
+        expect(geometry.bodyOverflowY).toBe('auto');
+        // … never the card, which is what used to take the button with it.
+        expect(geometry.cardOverflowY).toBe('hidden');
+        expect(geometry.cardScrolled).toBe(0);
+        // 240px cap plus its own padding and border.
+        expect(geometry.cardHeight).toBeLessThanOrEqual(260);
+        expect(geometry.buttonInsideCard).toBe(true);
     });
 
     // ── Where a jump lands ───────────────────────────────────────────────────
