@@ -164,10 +164,10 @@ func TestAskQuestionResults_AlignmentWithIncompleteCalls(t *testing.T) {
 		mkToolCall("c3", "ask_question", `{"question":"q2"}`),
 	}
 	results := []toolResult{
-		{toolCallID: "c0", output: "a-content"},
-		{toolCallID: "c1", output: "q1"},
-		{toolCallID: "c2", output: "ls-out"},
-		{toolCallID: "c3", output: "q2"},
+		{toolCallID: "c0", output: "a-content", success: true},
+		{toolCallID: "c1", output: "q1", success: true},
+		{toolCallID: "c2", output: "ls-out", success: true},
+		{toolCallID: "c3", output: "q2", success: true},
 	}
 	got := askQuestionResults(pending, results)
 	want := map[int]int{2: 1, 4: 3}
@@ -183,14 +183,51 @@ func TestAskQuestionResults_AllComplete(t *testing.T) {
 		mkToolCall("c2", "ask_question", ""),
 	}
 	results := []toolResult{
-		{toolCallID: "c0", output: "q0"},
-		{toolCallID: "c1", output: "out"},
-		{toolCallID: "c2", output: "q2"},
+		{toolCallID: "c0", output: "q0", success: true},
+		{toolCallID: "c1", output: "out", success: true},
+		{toolCallID: "c2", output: "q2", success: true},
 	}
 	got := askQuestionResults(pending, results)
 	want := map[int]int{0: 0, 2: 2}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("askQuestionResults: got %#v, want %#v", got, want)
+	}
+}
+
+// A failed ask_question results in an error, not a question, so it must not reach the user
+// as "the agent has a question", and an auto-started subtask must not answer it from the
+// parent's context. A real question in the same turn still does.
+func TestAskQuestionResults_SkipsFailedQuestions(t *testing.T) {
+	pending := []types.ChatToolCall{
+		mkToolCall("c0", "ask_question", `{}`),
+		mkToolCall("c1", "bash", `{"command":"ls"}`),
+		mkToolCall("c2", "ask_question", `{"question":"Which scope?"}`),
+	}
+	results := []toolResult{
+		{toolCallID: "c0", output: "Error: question is required", success: false},
+		{toolCallID: "c1", output: "ls-out", success: true},
+		{toolCallID: "c2", output: "Which scope?", success: true},
+	}
+	got := askQuestionResults(pending, results)
+	want := map[int]int{2: 2}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("askQuestionResults: got %#v, want %#v", got, want)
+	}
+}
+
+// With no question left there is nothing to ask, so the caller falls through to the next
+// LLM call instead of idling the task. A call with no result row is no question either.
+func TestAskQuestionResults_AllQuestionsFailed(t *testing.T) {
+	pending := []types.ChatToolCall{
+		mkToolCall("c0", "ask_question", `{"question":""}`),
+		mkToolCall("c1", "ask_question", `{"question":"never answered"}`),
+	}
+	results := []toolResult{
+		{toolCallID: "c0", output: "Error: question is required", success: false},
+	}
+	got := askQuestionResults(pending, results)
+	if len(got) != 0 {
+		t.Errorf("askQuestionResults: got %#v, want no questions", got)
 	}
 }
 
