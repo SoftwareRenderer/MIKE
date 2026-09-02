@@ -181,6 +181,46 @@ test.describe.serial('Diff panel user interactions', () => {
         execSync(`rm -f ${filePath}`);
     });
 
+    test('should maximize the editor when the diff column is narrow', async ({ page }) => {
+        const taskInfo = await sharedTask(page);
+        const worktreeDir = worktreeDirFor(taskInfo);
+        if (!taskInfo || !worktreeDir) {
+            await expect(page.locator('.board')).toBeVisible();
+            return;
+        }
+
+        const uniqueId = Date.now();
+        const testFile = `maximize-test-${uniqueId}.txt`;
+        const filePath = join(worktreeDir, testFile);
+
+        writeFileSync(filePath, 'Maximize test content\nSecond line\n');
+
+        await navigateToTask(page, taskInfo.taskId, taskInfo.projectId);
+        await page.waitForSelector('.task-detail-page', { timeout: 10000 });
+
+        const fileSection = page.locator('.diff-file-section', { hasText: testFile });
+        await expect(fileSection).toBeVisible({ timeout: 10000 });
+
+        // The rendered column, not the window: at the 1280px viewport the 22%/55%
+        // split leaves the diff column ~450px, under the 1200px threshold.
+        const diffBox = await page.locator('.column-diff').boundingBox();
+        expect(diffBox).not.toBeNull();
+        expect(diffBox!.width).toBeGreaterThan(0);
+        expect(diffBox!.width).toBeLessThan(1200);
+
+        await fileSection.locator('.diff-row-clickable').first().click();
+        await expect(page.locator('.editor')).toBeVisible({ timeout: 5000 });
+        await expect(page.locator('.task-detail-page.fullscreen')).toBeVisible();
+
+        // Escape closes the editor and clears the maximize state.
+        await page.keyboard.press('Escape');
+        await expect(page.locator('.editor')).not.toBeVisible({ timeout: 5000 });
+        await expect(page.locator('.task-detail-page.fullscreen')).toHaveCount(0);
+        await expect(page.locator('.column-diff')).toBeVisible();
+
+        execSync(`rm -f ${filePath}`);
+    });
+
     test('should save file changes with Ctrl+S', async ({ page }) => {
         const taskInfo = await sharedTask(page);
         const worktreeDir = worktreeDirFor(taskInfo);
