@@ -68,14 +68,14 @@ func TestCountEditLines_SingleLineNoNewline(t *testing.T) {
 func TestPhraseDetector_Basic(t *testing.T) {
 	det := newPhraseDetector()
 	phrase := "This is a long enough phrase to be tracked by the detector. "
-	
+
 	// Should not fire until maxPhraseRepeats (10)
 	for i := 0; i < 9; i++ {
 		if det.check(phrase) {
 			t.Fatalf("phrase detector fired too early at iteration %d", i)
 		}
 	}
-	
+
 	if !det.check(phrase) {
 		t.Error("phrase detector should have fired on 10th repetition")
 	}
@@ -84,7 +84,7 @@ func TestPhraseDetector_Basic(t *testing.T) {
 func TestPhraseDetector_MinWords(t *testing.T) {
 	det := newPhraseDetector()
 	shortPhrase := "Too short. "
-	
+
 	for i := 0; i < 20; i++ {
 		if det.check(shortPhrase) {
 			t.Fatalf("phrase detector fired for short phrase at iteration %d", i)
@@ -95,7 +95,7 @@ func TestPhraseDetector_MinWords(t *testing.T) {
 func TestBlockDetector_Basic(t *testing.T) {
 	det := newBlockDetector()
 	block := "This is a repeating block of text. "
-	
+
 	// 1st occurrence
 	det.check(block)
 	// 2nd occurrence
@@ -111,7 +111,7 @@ func TestBlockDetector_Basic(t *testing.T) {
 func TestBlockDetector_MinLength(t *testing.T) {
 	det := newBlockDetector()
 	shortBlock := "Short. "
-	
+
 	for i := 0; i < 10; i++ {
 		if det.check(shortBlock) {
 			t.Fatalf("block detector fired for short block at iteration %d", i)
@@ -121,7 +121,7 @@ func TestBlockDetector_MinLength(t *testing.T) {
 
 func TestLoopDetector_CheckStreamingText(t *testing.T) {
 	ld := newLoopDetector()
-	
+
 	t.Run("PhraseLoop", func(t *testing.T) {
 		ld.reset()
 		phrase := "This is a long enough phrase to be tracked by the detector. "
@@ -132,7 +132,7 @@ func TestLoopDetector_CheckStreamingText(t *testing.T) {
 			t.Error("expected LoopPhrase for repeated phrase")
 		}
 	})
-	
+
 	t.Run("BlockLoop", func(t *testing.T) {
 		ld.reset()
 		block := "Repeat me three times. "

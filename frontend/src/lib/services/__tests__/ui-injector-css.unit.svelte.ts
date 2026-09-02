@@ -167,7 +167,7 @@ describe('UIInjector CSS extension handling', () => {
                     lsp: {
                         command: 'gopls',
                         args: ['serve'],
-                        extensions: ['go'],
+                        file_types: [{ extension: 'go', language_id: 'go', label: 'Go' }],
                         language: 'go',
                     },
                 },

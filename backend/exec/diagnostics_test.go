@@ -199,7 +199,8 @@ func lspGoExtension() *extensions.Extension {
 		Manifest: extensions.ExtensionManifest{
 			DisplayName: "Go Language Server", Version: "1.0.0",
 			Capabilities: &extensions.Capabilities{
-				LSP: &extensions.LSPConfig{Command: "gopls", Args: []string{"serve"}, Extensions: []string{"go"}},
+				LSP: &extensions.LSPConfig{Command: "gopls", Args: []string{"serve"},
+					Language: "go", FileTypes: []extensions.LSPFileType{{Extension: "go", LanguageID: "go"}}},
 			},
 		},
 	}
@@ -413,10 +414,10 @@ func installTsLSPExtension(t *testing.T, s *store.Store) *lsp.ExtensionRegistry 
 			DisplayName: "TypeScript LSP", Version: "1.0.0",
 			Capabilities: &extensions.Capabilities{
 				LSP: &extensions.LSPConfig{
-					Command:    "typescript-language-server",
-					Args:       []string{"--stdio"},
-					Extensions: []string{"ts"},
-					Language:   "typescript",
+					Command:   "typescript-language-server",
+					Args:      []string{"--stdio"},
+					FileTypes: []extensions.LSPFileType{{Extension: "ts", LanguageID: "typescript"}},
+					Language:  "typescript",
 				},
 			},
 		},

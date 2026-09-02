@@ -113,7 +113,7 @@ func TestLSPTools_ToolCallsDisabledForFile(t *testing.T) {
 				LSP: &extensions.LSPConfig{
 					Command:          "gopls",
 					Args:             []string{"serve"},
-					Extensions:       []string{"go"},
+					FileTypes:        []extensions.LSPFileType{{Extension: "go", LanguageID: "go"}},
 					Language:         "go",
 					ToolCallsEnabled: &falseVal,
 				},

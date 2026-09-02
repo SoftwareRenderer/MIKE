@@ -67,10 +67,10 @@ func TestExtension_InstallSourceChecks(t *testing.T) {
 
 func TestLSPConfig_FullConfig(t *testing.T) {
 	cfg := &LSPConfig{
-		Command:    "gopls",
-		Args:       []string{"serve"},
-		Extensions: []string{"go"},
-		Language:   "go",
+		Command:   "gopls",
+		Args:      []string{"serve"},
+		FileTypes: []LSPFileType{{Extension: "go", LanguageID: "go"}},
+		Language:  "go",
 		InitParamsOverride: map[string]any{
 			"hover": map[string]any{
 				"actions": map[string]any{
@@ -88,8 +88,8 @@ func TestLSPConfig_FullConfig(t *testing.T) {
 	if len(cfg.Args) != 1 || cfg.Args[0] != "serve" {
 		t.Errorf("Args = %v, want [serve]", cfg.Args)
 	}
-	if len(cfg.Extensions) != 1 || cfg.Extensions[0] != "go" {
-		t.Errorf("Extensions = %v, want [go]", cfg.Extensions)
+	if len(cfg.FileTypes) != 1 || cfg.FileTypes[0].Extension != "go" {
+		t.Errorf("FileTypes = %v, want one entry for \"go\"", cfg.FileTypes)
 	}
 	if cfg.Language != "go" {
 		t.Errorf("Language = %v, want go", cfg.Language)

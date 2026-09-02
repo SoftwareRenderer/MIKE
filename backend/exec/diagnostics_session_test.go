@@ -167,8 +167,8 @@ func lspLanguageExtension(id, language, fileExt string) *extensions.Extension {
 			DisplayName: id, Version: "1.0.0",
 			Capabilities: &extensions.Capabilities{
 				LSP: &extensions.LSPConfig{
-					Command: id, Args: []string{"--stdio"},
-					Extensions: []string{fileExt}, Language: language,
+					Command: id, Args: []string{"--stdio"}, Language: language,
+					FileTypes: []extensions.LSPFileType{{Extension: fileExt, LanguageID: language}},
 				},
 			},
 		},

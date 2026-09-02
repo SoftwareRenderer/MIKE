@@ -362,10 +362,10 @@ func TestExtensionWithFullConfig(t *testing.T) {
 			Version:     "1.0.0",
 			Capabilities: &Capabilities{
 				LSP: &LSPConfig{
-					Command:    "gopls",
-					Args:       []string{"serve"},
-					Extensions: []string{"go"},
-					Language:   "go",
+					Command:   "gopls",
+					Args:      []string{"serve"},
+					FileTypes: []LSPFileType{{Extension: "go", LanguageID: "go"}},
+					Language:  "go",
 					InitParamsOverride: map[string]any{
 						"usePlaceholders": true,
 						"staticcheck":     true,

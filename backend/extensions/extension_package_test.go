@@ -15,7 +15,7 @@ func findExtensionsDir(t *testing.T) string {
 	// Package is at backend/extensions/; the sibling repo is ../../../MIKE-extensions
 	candidates := []string{
 		filepath.Join(os.Getenv("MIKE_EXTENSIONS"), ""), // env override
-		"../../../MIKE-extensions",                       // sibling repo from backend/extensions/
+		"../../../MIKE-extensions",                      // sibling repo from backend/extensions/
 	}
 	for _, c := range candidates {
 		if c != "" {
@@ -65,15 +65,18 @@ func TestExtensionPackage_TypescriptLanguageServer_Manifest(t *testing.T) {
 	if lsp.Language == "" {
 		t.Error("LSP.Language is empty")
 	}
-	if len(lsp.Extensions) == 0 {
-		t.Error("LSP.Extensions is empty")
+	if len(lsp.FileTypes) == 0 {
+		t.Error("LSP.FileTypes is empty")
 	}
 
-	// Verify expected file extensions
+	// Verify expected file extensions, and that each declares the languageId its server needs
 	expectedExts := []string{"ts", "tsx", "js", "jsx"}
 	extSet := make(map[string]bool)
-	for _, e := range lsp.Extensions {
-		extSet[e] = true
+	for _, ft := range lsp.FileTypes {
+		extSet[ft.Extension] = true
+		if ft.LanguageID == "" {
+			t.Errorf("LSP.FileTypes[%q] declares no language_id", ft.Extension)
+		}
 	}
 	for _, want := range expectedExts {
 		if !extSet[want] {
