@@ -266,8 +266,8 @@ type toolResult struct {
 	duration   int64
 }
 
-// askQuestionResults maps pendingToolCalls indexes of complete ask_question
-// calls to their toolResults index (incomplete calls have no result).
+// askQuestionResults maps the pendingToolCalls index of every ask_question call that
+// returned a question to its index in results.
 func askQuestionResults(pending []types.ChatToolCall, results []toolResult) map[int]int {
 	m := make(map[int]int)
 	ri := 0
@@ -275,7 +275,9 @@ func askQuestionResults(pending []types.ChatToolCall, results []toolResult) map[
 		if tc.ID == "" || tc.Function.Name == "" {
 			continue // incomplete call — skipped during execution, no result
 		}
-		if tc.Function.Name == "ask_question" {
+		// ri < len(results): a call can have no result row, and callers index
+		// results with the mapped value.
+		if tc.Function.Name == "ask_question" && ri < len(results) && results[ri].success {
 			m[i] = ri
 		}
 		ri++

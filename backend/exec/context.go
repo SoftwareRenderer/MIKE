@@ -288,8 +288,7 @@ func formatToolStatus(toolCallID string, toolResults map[string]string) string {
 	if !ok {
 		return "pending"
 	}
-	// Check for common error patterns.
-	// Tool errors are wrapped as "tool <name> failed: <msg>" by executeTool.
+
 	lower := strings.ToLower(output)
 	if strings.HasPrefix(lower, "error") || strings.HasPrefix(lower, "failed") || strings.HasPrefix(lower, "tool ") {
 		return "unsuccessful"
