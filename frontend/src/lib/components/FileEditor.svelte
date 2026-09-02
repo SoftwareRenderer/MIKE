@@ -40,7 +40,7 @@
     import { appStore, dialogStore } from '$lib/stores';
     import { fullscreenToggleTitle } from '$lib/utils/keyboard';
     import { reconcileExternalChange } from '$lib/utils/editor-merge';
-    import { getLanguageSupport, lspLanguageId } from '$lib/utils/editor-language';
+    import { getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
     import { getLanguageTreeFromView } from '$lib/highlighter';
 
     let {
@@ -281,7 +281,7 @@
                     lspClient.notification('textDocument/didOpen', {
                         textDocument: {
                             uri: fileUri,
-                            languageId: lspLanguageId(filePath),
+                            languageId: resolveFile(filePath).languageId,
                             version: 0,
                             text: view.state.doc.toString(),
                         },
@@ -1301,14 +1301,9 @@
                 } catch {
                     /* server may not have the document */
                 }
-                // Display name only — the protocol id comes from lspLanguageId() below
+                // Display name only — the protocol id is passed explicitly below.
                 const ext = filePath.split('.').pop()?.toLowerCase() || '';
-                const langMap: Record<string, string> = {
-                    go: 'Go', ts: 'TypeScript', tsx: 'TypeScript',
-                    js: 'JavaScript', jsx: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript',
-                    py: 'Python', pyi: 'Python', rs: 'Rust',
-                };
-                lspLanguage = langMap[ext] || ext.toUpperCase();
+                lspLanguage = resolveFile(filePath).label || ext.toUpperCase();
                 // Fallback: some LSP servers (e.g., typescript-language-server) don't
                 // include serverInfo in the initialize response. Use language name.
                 if (!lspServerName) {
@@ -1318,7 +1313,7 @@
                 // Swap compartment: replace autocompletion() with LSP plugin
                 if (view && lspClient) {
                     view.dispatch({
-                        effects: lspCompartment.reconfigure(lspClient.plugin(fileUri, lspLanguageId(filePath))),
+                        effects: lspCompartment.reconfigure(lspClient.plugin(fileUri, resolveFile(filePath).languageId)),
                     });
                 }
                 // LSP just became available — refresh outline symbols and
@@ -1422,7 +1417,7 @@
                 // Re-attach plugin
                 if (_view && newClient) {
                     _view.dispatch({
-                        effects: lspCompartment.reconfigure(newClient.plugin(fileUri, lspLanguageId(filePath))),
+                        effects: lspCompartment.reconfigure(newClient.plugin(fileUri, resolveFile(filePath).languageId)),
                     });
                 }
             } catch (e) {

@@ -1,19 +1,28 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { EditorState } from '@codemirror/state';
-import { syntaxTree } from '@codemirror/language';
-import { getLanguageSupport, lspLanguageId } from '$lib/utils/editor-language';
-import { detectLanguage } from '$lib/utils/lsp-connection-manager';
+import type { SyntaxNode } from '@lezer/common';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
+import { getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
+import { fallbackLanguage } from '$lib/utils/fallback-languages';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
-import type { Extension } from '$lib/types';
+import type { Extension, LSPConfig, SyntaxSpec } from '$lib/types';
 
 /**
- * The editor asks two questions about a file and used to answer only one of them:
- * which CodeMirror grammar to load, and which languageId to hand the language
- * server. Getting the second wrong is what made tsserver parse a .ts file as
- * JavaScript and report "'…' declarations can only be used in TypeScript files."
+ * Which grammar loads for a file and which languageId reaches the server — both answered per file
+ * type by the manifests, since `ts`, `tsx`, `js` and `jsx` share one routing language but need four
+ * wire ids and two labels.
  */
 
-function addMockLSPExt(name: string, language: string, extensions: string[]) {
+const TS_PROFILE: SyntaxSpec = {
+  line_comment: '//',
+  block_comment: { open: '/*', close: '*/' },
+  strings: [{ quote: "'", escapes: true }, { quote: '"', escapes: true }],
+  pairs: [{ open: '{', close: '}' }, { open: '(', close: ')' }],
+  keywords: ['interface', 'type', 'function', 'const', 'export'],
+  numbers: true,
+};
+
+function addMockLSPExt(name: string, lsp: LSPConfig, enabled = true): Extension {
   const ext: Extension = {
     id: `${name}-1`,
     name,
@@ -24,110 +33,189 @@ function addMockLSPExt(name: string, language: string, extensions: string[]) {
       description: '',
       author: 'Test',
       version: '1.0.0',
-      capabilities: {
-        lsp: { command: name, args: [], extensions, language },
-      },
+      capabilities: { lsp },
     },
     config: {},
     container_config: {},
     sandbox_config: { network_isolation: true, memory_limit: 256 },
     install_source: 'manual',
-    enabled: true,
+    enabled,
     running: false,
     installed_at: new Date().toISOString(),
     built_at: new Date().toISOString(),
   };
   extensionManager.state.extensions.push(ext);
+  return ext;
 }
 
-/** Count the parse-error nodes a grammar produces for a document. */
-function errorNodes(filePath: string, source: string): number {
+/** The published typescript-language-server declaration, in miniature. */
+function addTypeScriptExt() {
+  return addMockLSPExt('typescript-language-server', {
+    command: 'typescript-language-server',
+    args: ['--stdio'],
+    language: 'typescript',
+    file_types: [
+      { extension: 'ts', language_id: 'typescript', label: 'TypeScript', syntax: 'typescript' },
+      { extension: 'tsx', language_id: 'typescriptreact', label: 'TypeScript JSX', syntax: 'typescript' },
+      { extension: 'js', language_id: 'javascript', label: 'JavaScript', syntax: 'javascript' },
+      { extension: 'jsx', language_id: 'javascriptreact', label: 'JavaScript JSX', syntax: 'javascript' },
+    ],
+    syntax: { typescript: TS_PROFILE, javascript: TS_PROFILE },
+  });
+}
+
+/** The name of the core fallback grammar for a path. */
+function fallbackName(filePath: string): string | undefined {
+  return fallbackLanguage(filePath)?.language.name;
+}
+
+/** Tagged tokens a grammar produces, to assert a declared profile really ran. */
+function tagged(filePath: string, source: string): Array<[string, string]> {
   const support = getLanguageSupport(filePath);
-  const state = EditorState.create({ doc: source, extensions: support ? [support] : [] });
-  let count = 0;
-  syntaxTree(state).cursor().iterate((n) => {
-    // Lezer records a recovered parse error as a "⚠" node.
-    if (n.name === '⚠') count++;
-  });
-  return count;
+  if (!support) return [];
+  const state = EditorState.create({ doc: source, extensions: [support] });
+  ensureSyntaxTree(state, state.doc.length, 50);
+  const out: Array<[string, string]> = [];
+  const walk = (node: SyntaxNode) => {
+    const first = node.firstChild;
+    if (!first) {
+      const text = state.sliceDoc(node.from, node.to);
+      if (text.trim()) out.push([text, node.name]);
+      return;
+    }
+    for (let child: SyntaxNode | null = first; child; child = child.nextSibling) walk(child);
+  };
+  walk(syntaxTree(state).topNode);
+  return out;
 }
 
-const TS_SOURCE = [
-  "export type HoverZone = 'token' | 'outside';",
-  'export interface Box { x: number; y: number }',
-  'export function inBox(p: { x: number }, b: Box): boolean { return p.x >= b.x }',
-].join('\n');
+beforeEach(() => {
+  extensionManager.state.extensions = [];
+});
 
-describe('lspLanguageId', () => {
-  beforeEach(() => {
-    extensionManager.state.extensions = [];
+describe('resolveFile — the wire id and the label', () => {
+  it('gives each JavaScript/TypeScript file its own id and label', () => {
+    addTypeScriptExt();
+    expect(resolveFile('src/a.ts')).toEqual({
+      languageId: 'typescript',
+      label: 'TypeScript',
+      spec: TS_PROFILE,
+      language: 'typescript',
+    });
+    expect(resolveFile('src/App.tsx').languageId).toBe('typescriptreact');
+    expect(resolveFile('src/App.tsx').label).toBe('TypeScript JSX');
+    expect(resolveFile('src/app.js').languageId).toBe('javascript');
+    expect(resolveFile('src/app.jsx').languageId).toBe('javascriptreact');
   });
 
-  it('gives every JavaScript/TypeScript file its own id', () => {
-    expect(lspLanguageId('a.ts')).toBe('typescript');
-    expect(lspLanguageId('a.mts')).toBe('typescript');
-    expect(lspLanguageId('a.cts')).toBe('typescript');
-    expect(lspLanguageId('a.tsx')).toBe('typescriptreact');
-    expect(lspLanguageId('a.js')).toBe('javascript');
-    expect(lspLanguageId('a.mjs')).toBe('javascript');
-    expect(lspLanguageId('a.cjs')).toBe('javascript');
-    expect(lspLanguageId('a.jsx')).toBe('javascriptreact');
+  it('does not collapse the JS family onto the routing language', () => {
+    addTypeScriptExt();
+    // Routing takes the manifest language — one server process owns the whole JS family — while the
+    // wire id stays per-file, because it decides how the buffer is parsed.
+    expect(resolveFile('App.tsx').language).toBe('typescript');
+    expect(resolveFile('App.tsx').languageId).toBe('typescriptreact');
   });
 
-  it('does not collapse the JS family onto the manifest language', () => {
-    addMockLSPExt('typescript-language-server', 'typescript', ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs']);
-    // Routing still wants the manifest language…
-    expect(detectLanguage('app.tsx')).toBe('typescript');
-    // …but tsserver turns the wire id into a ScriptKind, so it must stay per-file:
-    // a .tsx opened as "typescript" answers with 15 × "',' expected.".
-    expect(lspLanguageId('app.tsx')).toBe('typescriptreact');
-    expect(lspLanguageId('app.jsx')).toBe('javascriptreact');
-    expect(lspLanguageId('app.js')).toBe('javascript');
+  it('answers nothing for a file no extension declares', () => {
+    addTypeScriptExt();
+    const resolved = resolveFile('notes.txt');
+    expect(resolved.languageId).toBe('');
+    expect(resolved.label).toBe('');
+    expect(resolved.spec).toBeNull();
+    // Nothing owns the file, so nothing claims a language for it.
+    expect(resolved.language).toBe('');
   });
 
-  it('uses the manifest language for every other language', () => {
-    addMockLSPExt('gopls', 'go', ['go']);
-    addMockLSPExt('rust-analyzer', 'rust', ['rs']);
-    addMockLSPExt('svelte-language-server', 'svelte', ['svelte']);
-    expect(lspLanguageId('main.go')).toBe('go');
-    expect(lspLanguageId('lib.rs')).toBe('rust');
-    // The Svelte grammar has an empty Language.name, so this one is load-bearing.
-    expect(lspLanguageId('App.svelte')).toBe('svelte');
+  it('ignores an extension whose editor features are off', () => {
+    addMockLSPExt('typescript-language-server', {
+      ...addTypeScriptConfigOnly(),
+      editor_enabled: false,
+    });
+    // Not owned for editing: no grammar of its own, no wire id offered.
+    expect(resolveFile('a.ts').languageId).toBe('');
+    expect(resolveFile('a.ts').spec).toBeNull();
   });
 
-  it('falls back to the extension when no LSP extension is installed', () => {
-    expect(lspLanguageId('config.toml')).toBe('toml');
-    expect(lspLanguageId('main.go')).toBe('go');
+  it('matches a suffixless file named after the language', () => {
+    addMockLSPExt('gopls', {
+      command: 'gopls',
+      args: [],
+      language: 'go',
+      file_types: [{ extension: 'go', language_id: 'go', label: 'Go' }],
+    });
+    expect(resolveFile('repo/go').languageId).toBe('go');
+    expect(resolveFile('repo/go').label).toBe('Go');
   });
 });
 
-describe('getLanguageSupport', () => {
-  it('loads the TypeScript dialect for .ts and .tsx', () => {
-    expect(getLanguageSupport('a.ts')?.language.name).toBe('typescript');
-    expect(getLanguageSupport('a.tsx')?.language.name).toBe('typescript');
-    expect(getLanguageSupport('a.js')?.language.name).toBe('javascript');
-    expect(getLanguageSupport('a.jsx')?.language.name).toBe('javascript');
+function addTypeScriptConfigOnly(): LSPConfig {
+  return {
+    command: 'typescript-language-server',
+    args: [],
+    language: 'typescript',
+    file_types: [{ extension: 'ts', language_id: 'typescript', label: 'TypeScript', syntax: 'typescript' }],
+    syntax: { typescript: TS_PROFILE },
+  };
+}
+
+describe('getLanguageSupport — declared profile first, fallback second', () => {
+  it('builds a grammar out of the declared profile', () => {
+    addTypeScriptExt();
+    const tokens = tagged('a.ts', "interface Box { x: number } // what\nconst s = '{';");
+    // The word from the original bug report is a keyword because the manifest said so.
+    expect(tokens.some(([text, name]) => text === 'interface' && name === 'keyword')).toBe(true);
+    expect(tokens.some(([text, name]) => text === '// what')).toBe(true);
+    expect(tokens.some(([text, name]) => text === "'{'")).toBe(true);
   });
 
-  it('parses TypeScript syntax without error nodes', () => {
-    // Meaningful only because the JavaScript grammar does fail on this source.
-    expect(errorNodes('a.js', TS_SOURCE)).toBeGreaterThan(0);
-    expect(errorNodes('a.ts', TS_SOURCE)).toBe(0);
-    expect(errorNodes('a.tsx', TS_SOURCE)).toBe(0);
+  it('prefers an extension profile over the core fallback for the same suffix', () => {
+    addMockLSPExt('json-lsp', {
+      command: 'json-lsp',
+      args: [],
+      language: 'json',
+      file_types: [{ extension: 'json', language_id: 'json', label: 'JSON', syntax: 'json' }],
+      syntax: { json: { line_comment: '//', strings: [{ quote: '"', escapes: true }], numbers: true, pairs: [{ open: '{', close: '}' }] } },
+    });
+    // The core JSON grammar is a real parser named "JSON"; a declared profile is named for what it
+    // is, which is how a caller can tell the two paths apart.
+    expect(getLanguageSupport('cfg.json')?.language.name).toBe('mike-declared');
   });
 
-  it('documents that the grammar name cannot express tsx or svelte', () => {
-    // @codemirror/lsp-client falls back to Language.name when plugin() is not
-    // given an id; that fallback is too coarse (tsx) and empty (svelte), which is
-    // why FileEditor passes lspLanguageId() explicitly.
-    expect(getLanguageSupport('a.tsx')?.language.name).toBe('typescript');
-    expect(lspLanguageId('a.tsx')).toBe('typescriptreact');
-    expect(getLanguageSupport('App.svelte')?.language.name).toBe('');
+  it('uses the core fallback when nothing declares the file', () => {
+    // Compared against the fallback module itself, not against a name: the grammar's own casing is
+    // its business, and this test is about *which* grammar loads.
+    for (const path of ['cfg.json', 'README.md', 'index.html', 'app.css', 'ci.yml', 'q.sql', 't.tmpl']) {
+      expect(getLanguageSupport(path)?.language.name, path).toBe(fallbackName(path));
+    }
   });
 
-  it('returns null for extensionless build files', () => {
+  it('opens a declared file type whose profile is missing, without crashing', () => {
+    addMockLSPExt('json-lsp', {
+      command: 'json-lsp',
+      args: [],
+      language: 'json',
+      file_types: [{ extension: 'json', language_id: 'json', label: 'JSON', syntax: 'absent-profile' }],
+      syntax: {},
+    });
+    // The wire id is still right — a packaging gap in the highlighting must not corrupt the
+    // protocol — and the grammar falls through to the core's JSON parser.
+    expect(resolveFile('cfg.json').languageId).toBe('json');
+    expect(resolveFile('cfg.json').spec).toBeNull();
+    expect(getLanguageSupport('cfg.json')?.language.name).toBe(fallbackName('cfg.json'));
+  });
+
+  it('gives a declared language a name that is deliberately not a language id', () => {
+    addTypeScriptExt();
+    // The client falls back to Language.name when no id is passed — the bug this layer exists for,
+    // so a declared grammar answers with a name no server can mistake for a language.
+    expect(getLanguageSupport('a.ts')?.language.name).toBe('mike-declared');
+    expect(resolveFile('a.ts').languageId).toBe('typescript');
+  });
+
+  it('returns null for extensionless build files and unknown types', () => {
     expect(getLanguageSupport('repo/Dockerfile')).toBeNull();
     expect(getLanguageSupport('repo/Makefile')).toBeNull();
     expect(getLanguageSupport('repo/CMakeLists.txt')).toBeNull();
+    expect(getLanguageSupport('data.parquet')).toBeNull();
   });
 });

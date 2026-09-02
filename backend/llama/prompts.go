@@ -41,13 +41,13 @@ func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, operatingMode st
 	}
 
 	data := prompts.PromptData{
-		WorktreePath:  cwd,
-		CurrentDate:   time.Now().UTC().Format("2006-01-02"),
-		PlanMode:      operatingMode == "plan",
-		Tools:         toolInfos,
-		Skills:        prompts.DiscoverSkills(skillsMount),
-		AgentsMd:      agentsMd,
-		Summary:       summary,
+		WorktreePath: cwd,
+		CurrentDate:  time.Now().UTC().Format("2006-01-02"),
+		PlanMode:     operatingMode == "plan",
+		Tools:        toolInfos,
+		Skills:       prompts.DiscoverSkills(skillsMount),
+		AgentsMd:     agentsMd,
+		Summary:      summary,
 	}
 
 	result, err := prompts.RenderSystemPrompt(data)

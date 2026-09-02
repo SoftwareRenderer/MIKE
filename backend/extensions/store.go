@@ -523,6 +523,9 @@ func scanExtension(s scanner) (*Extension, error) {
 		if err := json.Unmarshal([]byte(manifestJSON.String), &ext.Manifest); err != nil {
 			return nil, fmt.Errorf("unmarshal manifest: %w", err)
 		}
+		// A manifest stored before file types existed is normalized here, so every reader sees one
+		// shape and none carries a legacy branch; idempotent, so no migration.
+		ext.Manifest.Capabilities.GetLSP().NormalizeFileTypes()
 	}
 	if configJSON.Valid {
 		if err := json.Unmarshal([]byte(configJSON.String), &ext.Config); err != nil {

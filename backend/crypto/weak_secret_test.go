@@ -7,10 +7,10 @@ import (
 
 func TestWarnWeakSecrets(t *testing.T) {
 	tests := []struct {
-		name           string
-		encKey         string
-		loginPassword  string
-		wantWeak       []string
+		name          string
+		encKey        string
+		loginPassword string
+		wantWeak      []string
 	}{
 		{
 			name:          "both strong",

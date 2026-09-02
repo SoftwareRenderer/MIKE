@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"kanban/backend/extensions"
+
 	bridge "kanban/pkg/bridge"
 )
 
@@ -270,6 +272,18 @@ export function Widget({ name }: Props) {
 		}
 	}()
 
+	// The ids come from a manifest declaration, so dropping the per-file entry below (or collapsing
+	// every id onto the manifest language) is a mis-parse this test sees, not a silent pass.
+	declared := &extensions.LSPConfig{
+		Language: "typescript",
+		FileTypes: []extensions.LSPFileType{
+			{Extension: "ts", LanguageID: "typescript"},
+			{Extension: "tsx", LanguageID: "typescriptreact"},
+			{Extension: "js", LanguageID: "javascript"},
+			{Extension: "jsx", LanguageID: "javascriptreact"},
+		},
+	}
+
 	for _, path := range []string{widget, legacy} {
 		content, err := os.ReadFile(path)
 		if err != nil {
@@ -278,7 +292,7 @@ export function Widget({ name }: Props) {
 		notifyLSP(ctx, t, client, "textDocument/didOpen", map[string]any{
 			"textDocument": map[string]any{
 				"uri":        "file://" + path,
-				"languageId": wireLanguageId("typescript", path),
+				"languageId": declared.LanguageIDFor(path),
 				"version":    1,
 				"text":       string(content),
 			},

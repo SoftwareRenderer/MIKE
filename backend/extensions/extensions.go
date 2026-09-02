@@ -130,9 +130,16 @@ type NetworkConfig struct {
 
 // LSPConfig defines LSP-specific extension configuration.
 type LSPConfig struct {
-	Command            string         `json:"command,omitempty"`
-	Args               []string       `json:"args,omitempty"`
-	Extensions         []string       `json:"extensions,omitempty"`
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+	// FileTypes says which files this extension owns and what its server calls each one. A
+	// per-file language id is why the flat `extensions` list is gone: tsserver parses .tsx
+	// differently from .ts and mis-parses the file for good when handed the coarse id.
+	FileTypes []LSPFileType `json:"file_types,omitempty"`
+	// Syntax holds the named highlighting profiles the file types refer to — data, never code.
+	Syntax map[string]SyntaxSpec `json:"syntax,omitempty"`
+	// LegacyExtensions decodes the pre-file_types `extensions` key; only NormalizeFileTypes reads it.
+	LegacyExtensions   []string       `json:"extensions,omitempty"`
 	Language           string         `json:"language,omitempty"`
 	InitParamsOverride map[string]any `json:"initParamsOverride,omitempty"`
 	// EditorEnabled gates the editor's LSP features (diagnostics, completions,
@@ -156,6 +163,135 @@ func (c *LSPConfig) IsToolCallsEnabled() bool {
 		return true
 	}
 	return *c.ToolCallsEnabled
+}
+
+// LSPFileType is one file type an LSP extension owns.
+type LSPFileType struct {
+	// Extension is a bare lowercase suffix — "ts", not ".ts".
+	Extension string `json:"extension"`
+	// LanguageID is what `textDocument/didOpen` carries for this file type, which is not the
+	// manifest language: "typescriptreact" for .tsx, "typescript" for .ts.
+	LanguageID string `json:"language_id"`
+	// Label is the human name for the editor's status bar ("TypeScript JSX").
+	Label string `json:"label,omitempty"`
+	// Syntax names the SyntaxSpec that highlights this file type; empty means fallback or plain text.
+	Syntax string `json:"syntax,omitempty"`
+}
+
+// SyntaxSpec declares a grammar as data; the core turns it into a stream grammar and a bracket folder.
+type SyntaxSpec struct {
+	LineComment string `json:"line_comment,omitempty"`
+	// LineComments are extra line-comment markers where a language has more than one (PHP: "//" and "#").
+	LineComments []string      `json:"line_comments,omitempty"`
+	BlockComment *CommentToken `json:"block_comment,omitempty"`
+	Strings      []StringToken `json:"strings,omitempty"`
+	// Pairs are the brackets, and the input to the generic fold provider.
+	Pairs     []CommentToken `json:"pairs,omitempty"`
+	Keywords  []string       `json:"keywords,omitempty"`
+	Types     []string       `json:"types,omitempty"`
+	Constants []string       `json:"constants,omitempty"`
+	Builtins  []string       `json:"builtins,omitempty"`
+	Numbers   bool           `json:"numbers,omitempty"`
+	Region    *CommentToken  `json:"region,omitempty"`
+}
+
+// CommentToken is an open/close delimiter pair: a block comment, a bracket pair or a region marker.
+type CommentToken struct {
+	Open  string `json:"open"`
+	Close string `json:"close"`
+}
+
+// StringToken is one string form: its quote (one character, or that character repeated), whether
+// it honours backslash escapes, and whether it may span lines.
+type StringToken struct {
+	Quote     string `json:"quote"`
+	Escapes   bool   `json:"escapes,omitempty"`
+	Multiline bool   `json:"multiline,omitempty"`
+}
+
+// fileSuffix normalizes a path or file name to the bare lowercase suffix file types match on.
+func fileSuffix(name string) string {
+	base := name
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		base = base[i+1:]
+	}
+	dot := strings.LastIndexByte(base, '.')
+	if dot <= 0 || dot == len(base)-1 {
+		return ""
+	}
+	return strings.ToLower(base[dot+1:])
+}
+
+// fileTypeFor resolves the declared file type for a path; MatchesFile and LanguageIDFor both use it.
+func (c *LSPConfig) fileTypeFor(name string) *LSPFileType {
+	if c == nil {
+		return nil
+	}
+	suffix := fileSuffix(name)
+	for i := range c.FileTypes {
+		if suffix != "" && c.FileTypes[i].Extension == suffix {
+			return &c.FileTypes[i]
+		}
+	}
+	// A file named after the language ("go") reaches its server, as under the old flat list.
+	if c.Language != "" && strings.EqualFold(baseName(name), c.Language) {
+		for i := range c.FileTypes {
+			if c.FileTypes[i].LanguageID == c.Language {
+				return &c.FileTypes[i]
+			}
+		}
+	}
+	return nil
+}
+
+// MatchesFile reports whether this extension serves the file.
+func (c *LSPConfig) MatchesFile(name string) bool { return c.fileTypeFor(name) != nil }
+
+// LanguageIDFor is the languageId to put on a document notification for this file, falling back to
+// the manifest language when no file type claims it.
+func (c *LSPConfig) LanguageIDFor(name string) string {
+	if c == nil {
+		return ""
+	}
+	if ft := c.fileTypeFor(name); ft != nil && ft.LanguageID != "" {
+		return ft.LanguageID
+	}
+	return c.Language
+}
+
+// NormalizeFileTypes turns a pre-file_types manifest's legacy list into FileTypes and clears the
+// legacy key. Synthesized entries can only carry the manifest language, which is why such an
+// extension needs updating to serve .tsx correctly. Idempotent, so it runs at load, not as a migration.
+func (c *LSPConfig) NormalizeFileTypes() bool {
+	if c == nil {
+		return false
+	}
+	changed := false
+	if len(c.LegacyExtensions) > 0 {
+		seen := map[string]bool{}
+		for _, ft := range c.FileTypes {
+			seen[ft.Extension] = true
+		}
+		for _, raw := range c.LegacyExtensions {
+			ext := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(raw), "."))
+			if ext == "" || seen[ext] {
+				continue
+			}
+			seen[ext] = true
+			c.FileTypes = append(c.FileTypes, LSPFileType{Extension: ext, LanguageID: c.Language})
+			changed = true
+		}
+		c.LegacyExtensions = nil
+		changed = true
+	}
+	return changed
+}
+
+func baseName(name string) string {
+	if i := strings.LastIndexByte(name, '/'); i >= 0 {
+		return name[i+1:]
+	}
+	return name
 }
 
 // UIConfig defines UI-specific extension configuration.

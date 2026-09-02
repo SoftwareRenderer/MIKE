@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	"kanban/backend/extensions"
+
 	sandbox "kanban/pkg/bridge"
 	"kanban/pkg/bridge/protocol"
 )
@@ -163,5 +165,6 @@ func TestInitializeReportsAServerRefusal(t *testing.T) {
 
 // tsLikeCfg is the ServerConfig the registry hands back for a .ts file.
 func tsLikeCfg() *ServerConfig {
-	return &ServerConfig{Language: "typescript", Command: "typescript-language-server", Extensions: []string{"ts"}}
+	return &ServerConfig{Language: "typescript", Command: "typescript-language-server",
+		FileTypes: []extensions.LSPFileType{{Extension: "ts", LanguageID: "typescript"}, {Extension: "tsx", LanguageID: "typescriptreact"}}}
 }

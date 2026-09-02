@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"kanban/backend/extensions"
+
 	sandbox "kanban/pkg/bridge"
 	"kanban/pkg/bridge/protocol"
 )
@@ -51,7 +53,8 @@ func bridgePair(t *testing.T) (*sandbox.Client, *atomic.Int32, *atomic.Int32) {
 
 // goCfg is the ServerConfig a caller gets from the registry for a .go file.
 func goCfg() *ServerConfig {
-	return &ServerConfig{Language: "go", Command: "gopls", Extensions: []string{"go"}}
+	return &ServerConfig{Language: "go", Command: "gopls",
+		FileTypes: []extensions.LSPFileType{{Extension: "go", LanguageID: "go"}}}
 }
 
 func waitForCount(t *testing.T, counter *atomic.Int32, want int32) {

@@ -334,8 +334,11 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		if len(req.Manifest.Capabilities.LSP.Args) > 0 {
 			ext.Manifest.Capabilities.LSP.Args = req.Manifest.Capabilities.LSP.Args
 		}
-		if len(req.Manifest.Capabilities.LSP.Extensions) > 0 {
-			ext.Manifest.Capabilities.LSP.Extensions = req.Manifest.Capabilities.LSP.Extensions
+		if len(req.Manifest.Capabilities.LSP.FileTypes) > 0 {
+			ext.Manifest.Capabilities.LSP.FileTypes = req.Manifest.Capabilities.LSP.FileTypes
+		}
+		if len(req.Manifest.Capabilities.LSP.Syntax) > 0 {
+			ext.Manifest.Capabilities.LSP.Syntax = req.Manifest.Capabilities.LSP.Syntax
 		}
 		if req.Manifest.Capabilities.LSP.Language != "" {
 			ext.Manifest.Capabilities.LSP.Language = req.Manifest.Capabilities.LSP.Language
@@ -353,6 +356,11 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		}
 		if req.Manifest.Capabilities.LSP.ToolCallsEnabled != nil {
 			ext.Manifest.Capabilities.LSP.ToolCallsEnabled = req.Manifest.Capabilities.LSP.ToolCallsEnabled
+		}
+		// Checked after the merge, because that is the shape that gets stored.
+		if err := ext.Manifest.Capabilities.GetLSP().Validate(); err != nil {
+			http.Error(w, "extension declares an unusable language configuration: "+err.Error(), http.StatusBadRequest)
+			return
 		}
 	}
 
@@ -791,6 +799,13 @@ func (h *ExtensionHandler) installInBackground(name string, entry *RegistryEntry
 		fail(fmt.Errorf("extension %s declares an unusable sandbox configuration: %w", entry.Name, err))
 		return
 	}
+	// A manifest published before file_types existed still installs: normalize first, then
+	// validate — a bad file type or profile would otherwise be stored and degrade silently.
+	manifest.Capabilities.GetLSP().NormalizeFileTypes()
+	if err := manifest.Capabilities.GetLSP().Validate(); err != nil {
+		fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
+		return
+	}
 	// An image that names no registry cannot be pulled headless, so reject the entry here rather
 	// than failing at every later start.
 	if err := h.registry.ValidateImage(entry.Image); err != nil {
@@ -1125,6 +1140,12 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 				merged := mergeManifestSandboxAdditions(ext.SandboxConfig, lspSandboxFromManifest(&m))
 				if err := h.mountPolicy().ValidateSandboxAdditions(merged.Mounts, merged.Capabilities); err != nil {
 					fail(fmt.Errorf("extension %s declares an unusable sandbox configuration: %w", entry.Name, err))
+					return
+				}
+				// Check the new commit's language declarations before they replace the stored manifest.
+				m.Capabilities.GetLSP().NormalizeFileTypes()
+				if err := m.Capabilities.GetLSP().Validate(); err != nil {
+					fail(fmt.Errorf("extension %s declares an unusable language configuration: %w", entry.Name, err))
 					return
 				}
 				if len(merged.Envs) > len(before.Envs) || len(merged.Mounts) > len(before.Mounts) ||

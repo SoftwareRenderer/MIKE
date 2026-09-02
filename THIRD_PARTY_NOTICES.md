@@ -6,7 +6,7 @@ libraries that MIKE depends on and their respective licenses.
 
 Full license texts are available inside each dependency's package.
 
-**Last updated:** 2026-08-05
+**Last updated:** 2026-09-01
 
 ---
 
@@ -41,16 +41,11 @@ Source of truth: `frontend/package-lock.json` (production `dependencies`).
 |---------|---------|
 | @codemirror/autocomplete | MIT |
 | @codemirror/commands | MIT |
-| @codemirror/lang-cpp | MIT |
 | @codemirror/lang-css | MIT |
-| @codemirror/lang-go | MIT |
 | @codemirror/lang-html | MIT |
 | @codemirror/lang-javascript | MIT |
 | @codemirror/lang-json | MIT |
 | @codemirror/lang-markdown | MIT |
-| @codemirror/lang-php | MIT |
-| @codemirror/lang-python | MIT |
-| @codemirror/lang-rust | MIT |
 | @codemirror/lang-sql | MIT |
 | @codemirror/lang-yaml | MIT |
 | @codemirror/language | MIT |
@@ -60,32 +55,26 @@ Source of truth: `frontend/package-lock.json` (production `dependencies`).
 | @codemirror/state | MIT |
 | @codemirror/view | MIT |
 | @lezer/common | MIT |
-| @lezer/cpp | MIT |
 | @lezer/css | MIT |
-| @lezer/go | MIT |
 | @lezer/highlight | MIT |
 | @lezer/html | MIT |
 | @lezer/javascript | MIT |
 | @lezer/json | MIT |
 | @lezer/lr | MIT |
 | @lezer/markdown | MIT |
-| @lezer/php | MIT |
-| @lezer/python | MIT |
-| @lezer/rust | MIT |
 | @lezer/yaml | MIT |
 | @marijn/find-cluster-break | MIT |
-| @replit/codemirror-lang-svelte | MIT |
 | @types/trusted-types | MIT |
 | @xterm/addon-fit | MIT |
 | @xterm/addon-webgl | MIT |
 | @xterm/xterm | MIT |
 | codemirror | MIT |
 | crelt | MIT |
+| diff | BSD-3-Clause |
+| dompurify | (MPL-2.0 OR Apache-2.0) — treated as Apache-2.0 |
 | marked | MIT |
 | style-mod | MIT |
 | vscode-jsonrpc | MIT |
 | vscode-languageserver-protocol | MIT |
 | vscode-languageserver-types | MIT |
 | w3c-keyname | MIT |
-| diff | BSD-3-Clause |
-| dompurify | (MPL-2.0 OR Apache-2.0) — treated as Apache-2.0 |

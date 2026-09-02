@@ -486,11 +486,62 @@ export interface AgentConfigMount {
 export interface LSPConfig {
     command: string;
     args: string[];
-    extensions: string[];
+    file_types?: LSPFileType[];
+    syntax?: Record<string, SyntaxSpec>;
     language: string;
     initParamsOverride?: Record<string, any>;
     editor_enabled?: boolean;  // LSP features in editor (diagnostics, completions, etc.)
     tool_calls_enabled?: boolean;  // LSP tools for agent (references, definition, etc.)
+}
+
+/** One file type an LSP extension owns. Mirrors extensions.LSPFileType. */
+export interface LSPFileType {
+    /** Bare lowercase suffix, no leading dot: "tsx". */
+    extension: string;
+    /** The LSP well-known identifier this file is opened as: "typescriptreact". */
+    language_id: string;
+    /** Human name for the editor's status bar: "TypeScript JSX". */
+    label?: string;
+    /** Key into LSPConfig.syntax. Absent means: fall back to a core grammar, else plain text. */
+    syntax?: string;
+}
+
+/** An open/close delimiter: a block comment, a bracket pair, or a region marker. */
+export interface DelimiterPair {
+    open: string;
+    close: string;
+}
+
+/**
+ * One string form. `quote` is one character or that character repeated — Python's triple double
+ * quote is a string form, while a two-character *sequence* like `<!--` is a delimiter and belongs
+ * in `block_comment` or `pairs`.
+ */
+export interface StringDelimiter {
+    quote: string;
+    escapes?: boolean;
+    multiline?: boolean;
+}
+
+/**
+ * A grammar declared as data. The core owns the machinery — a stream tokenizer, a bracket fold
+ * provider, an indent service — and everything language-shaped comes from here.
+ */
+export interface SyntaxSpec {
+    line_comment?: string;
+    /** Additional line-comment markers (PHP has `//` and `#`); `line_comment` is what Ctrl-/ uses. */
+    line_comments?: string[];
+    block_comment?: DelimiterPair;
+    strings?: StringDelimiter[];
+    /** Bracket pairs: they drive highlighting, bracket matching, folding and indentation. */
+    pairs?: DelimiterPair[];
+    keywords?: string[];
+    types?: string[];
+    constants?: string[];
+    builtins?: string[];
+    numbers?: boolean;
+    /** Optional region markers ("#region" / "#endregion"), matched inside comment tokens. */
+    region?: DelimiterPair;
 }
 
 export interface UIExtensionConfig {
