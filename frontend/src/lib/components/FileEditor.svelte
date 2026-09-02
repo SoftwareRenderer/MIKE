@@ -64,6 +64,7 @@
         onToggleFullscreen,
         mobileFullscreen,
         isMobile,
+        closeOnEscape = false,
         pendingFsEvent = null,
         onLinesSelected = null,
         initialScrollTop = 0,
@@ -87,6 +88,7 @@
         onToggleFullscreen?: () => void;
         mobileFullscreen?: boolean;
         isMobile?: boolean;
+        closeOnEscape?: boolean;
         /** Explorer-mode only: invoked with the gutter line selection so the
          *  caller can open a Create Task modal prefilled with the lines. */
         onLinesSelected?: ((sel: { relativePath: string; startLine: number; lines: string[] }) => void) | null;
@@ -1124,7 +1126,7 @@
                 showConfirm = false;
                 return;
             }
-            if (mobileFullscreen && onToggleFullscreen) {
+            if (mobileFullscreen && onToggleFullscreen && !closeOnEscape) {
                 onToggleFullscreen();
                 return;
             }
