@@ -100,7 +100,7 @@ def simplify_capabilities(manifest_caps):
     Only fields surfaced in the capabilities modal are kept:
       - ui:      injection_points ("Modifies") and permissions ("Permissions")
       - network: allowed_domains ("Allowed domains")
-      - lsp:   language ("Language") and extensions ("File extensions")
+      - lsp:   language ("Language") and file_types ("File types", with their labels)
       - css/agent: no detail rows, so an empty config is enough
     Everything else (command, args, headers, wasm_module, ...) lives in the
     manifest and is intentionally omitted here.
@@ -126,8 +126,19 @@ def simplify_capabilities(manifest_caps):
             kept = {}
             if value.get('language'):
                 kept['language'] = value['language']
-            if value.get('extensions'):
-                kept['extensions'] = value['extensions']
+            # The declared file types, trimmed to what the UI renders. Syntax profiles stay in the
+            # manifest — the registry never needs them, and forwarding them would put a whole
+            # grammar into every index entry.
+            file_types = []
+            for ft in value.get('file_types') or []:
+                if not isinstance(ft, dict) or not ft.get('extension'):
+                    continue
+                projected = {'extension': ft['extension'], 'language_id': ft.get('language_id', '')}
+                if ft.get('label'):
+                    projected['label'] = ft['label']
+                file_types.append(projected)
+            if file_types:
+                kept['file_types'] = file_types
             if kept:
                 result['lsp'] = kept
         elif key in ('css', 'agent'):

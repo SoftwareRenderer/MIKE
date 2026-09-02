@@ -1,5 +1,5 @@
 import type { Transport } from '@codemirror/lsp-client';
-import { extensionManager } from '$lib/services/extension-manager.svelte';
+import { resolveFile } from './editor-language';
 
 /**
  * Create notification handlers that forward LSP messages to a callback
@@ -27,24 +27,14 @@ export function createLSPNotificationHandlers(
  */
 const CHANNEL_ID_STEP = 1000;
 
-/**
- * Derive the language identifier from a file path.
- * Uses installed LSP extensions (with editor features enabled) to determine language support.
- * Falls back to file extension if no extension is found.
- */
-export function detectLanguage(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() || '';
-  // Check if an LSP extension handles this file (editor features enabled)
-  const lspExt = extensionManager.getLSPForFile(filePath);
-  if (lspExt?.manifest.capabilities?.lsp?.language) {
-    return lspExt.manifest.capabilities.lsp.language;
-  }
-  return ext;
+/** The language the backend routes this file to — the manifest's routing key, not the per-file `didOpen` id. */
+function routingLanguage(filePath: string): string {
+  return resolveFile(filePath).language;
 }
 
-/** Check if LSP is available for a given file. */
+/** Whether an installed extension serves this file, so whether an LSP channel is possible. */
 export function isLSPAvailable(filePath: string): boolean {
-  return extensionManager.getLSPForFile(filePath) !== undefined;
+  return resolveFile(filePath).languageId !== '';
 }
 
 export interface LSPTransportOptions {
@@ -194,7 +184,7 @@ class SharedLSPConnection {
       id: channelId,
       workspace: options.workspace,
       file: options.filePath,
-      lang: detectLanguage(options.filePath),
+      lang: routingLanguage(options.filePath),
       handler: null,
       onServerInfo: options.onServerInfo,
       onReady: options.onReady,

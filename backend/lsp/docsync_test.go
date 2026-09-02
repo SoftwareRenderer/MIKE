@@ -1,6 +1,10 @@
 package lsp
 
-import "testing"
+import (
+	"testing"
+
+	"kanban/backend/extensions"
+)
 
 func TestDecideDocSync(t *testing.T) {
 	tests := []struct {
@@ -68,28 +72,39 @@ func TestDecideDocSync(t *testing.T) {
 	}
 }
 
-func TestWireLanguageId(t *testing.T) {
+// The wire languageId is the extension's declaration, not the routing language: tsserver needs the
+// ts/tsx/js/jsx difference and keeps the first didOpen's verdict for the URI's whole life.
+func TestServerConfigLanguageIDFor(t *testing.T) {
+	ts := &ServerConfig{
+		Language: "typescript",
+		FileTypes: []extensions.LSPFileType{
+			{Extension: "ts", LanguageID: "typescript"},
+			{Extension: "tsx", LanguageID: "typescriptreact"},
+			{Extension: "js", LanguageID: "javascript"},
+			{Extension: "jsx", LanguageID: "javascriptreact"},
+		},
+	}
+	goCfg := &ServerConfig{Language: "go", FileTypes: []extensions.LSPFileType{{Extension: "go", LanguageID: "go"}}}
+
 	tests := []struct {
-		name     string
-		language string
-		filePath string
-		want     string
+		name string
+		cfg  *ServerConfig
+		path string
+		want string
 	}{
-		{"tsx is typescriptreact, not typescript", "typescript", "src/App.tsx", "typescriptreact"},
-		{"jsx is javascriptreact", "typescript", "src/App.jsx", "javascriptreact"},
-		{"plain ts", "typescript", "src/lib/util.ts", "typescript"},
-		{"mts and cts stay typescript", "typescript", "src/decls.d.mts", "typescript"},
-		{"js is javascript so tsserver stops type-checking it", "typescript", "legacy/app.js", "javascript"},
-		{"jsx upper case", "typescript", "src/APP.JSX", "javascriptreact"},
-		{"manifest language survives for an unknown extension", "typescript", "notes.txt", "typescript"},
-		{"other languages are untouched", "go", "main.go", "go"},
-		{"svelte is untouched", "svelte", "App.svelte", "svelte"},
-		{"no language at all is passed through", "", "main.go", ""},
+		{"tsx is typescriptreact, not the routing language", ts, "src/App.tsx", "typescriptreact"},
+		{"jsx is javascriptreact", ts, "src/App.jsx", "javascriptreact"},
+		{"plain ts", ts, "src/lib/util.ts", "typescript"},
+		{"js is javascript, so tsserver stops type-checking it", ts, "legacy/app.js", "javascript"},
+		{"upper-case path", ts, "src/APP.TSX", "typescriptreact"},
+		{"a suffix the manifest declares nothing for falls back to the language", ts, "notes.txt", "typescript"},
+		{"other extensions are untouched", goCfg, "main.go", "go"},
+		{"nil config answers nothing", nil, "main.go", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := wireLanguageId(tt.language, tt.filePath); got != tt.want {
-				t.Errorf("wireLanguageId(%q, %q) = %q, want %q", tt.language, tt.filePath, got, tt.want)
+			if got := tt.cfg.LanguageIDFor(tt.path); got != tt.want {
+				t.Errorf("LanguageIDFor(%q) = %q, want %q", tt.path, got, tt.want)
 			}
 		})
 	}

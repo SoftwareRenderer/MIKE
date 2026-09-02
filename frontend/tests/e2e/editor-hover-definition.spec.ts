@@ -2,7 +2,7 @@ import { test, expect, type Browser, type Page } from '@playwright/test';
 import { writeFileSync, appendFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch, apiGetConfig, createTaskViaApi } from './helpers';
+import { csrfFetch, apiGetConfig, createTaskViaApi, hasInstalledLspExtension } from './helpers';
 
 /**
  * Regression coverage for the editor's go-to-definition UX.
@@ -332,6 +332,15 @@ const CARD_BUTTON = '.cm-lsp-action-button';
 // serial: the dedicated repo/project is created once for the whole suite.
 test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
     let projectId = '';
+
+    // The host binary is not the prerequisite — the Go extension has to be installed to answer a hover.
+    test.beforeEach(async ({ page }) => {
+        await page.goto('/');
+        await page.waitForSelector('.project-item, .empty-state', { timeout: 10000 });
+        if (!(await hasInstalledLspExtension(page, 'go'))) {
+            test.skip(true, 'no installed LSP extension owns .go — install the gopls extension to run LSP specs');
+        }
+    });
 
     test.beforeAll(async ({ browser }) => {
         rmSync(HOVER_REPO, { recursive: true, force: true });

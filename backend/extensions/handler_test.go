@@ -411,10 +411,15 @@ func TestHandleUpdate_LSPConfig(t *testing.T) {
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	ext.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{
-		Command:    "typescript-language-server",
-		Args:       []string{"--stdio"},
-		Extensions: []string{"ts", "tsx", "js", "jsx"},
-		Language:   "typescript",
+		Command: "typescript-language-server",
+		Args:    []string{"--stdio"},
+		FileTypes: []LSPFileType{
+			{Extension: "ts", LanguageID: "typescript"},
+			{Extension: "tsx", LanguageID: "typescriptreact"},
+			{Extension: "js", LanguageID: "javascript"},
+			{Extension: "jsx", LanguageID: "javascriptreact"},
+		},
+		Language: "typescript",
 	}}
 	if err := h.store.Create(ext); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -466,10 +471,10 @@ func TestHandleUpdate_LSPConfig_BoolFlags(t *testing.T) {
 	h := testHandler(t)
 	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeLSP)
 	ext.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{
-		Command:    "gopls",
-		Args:       []string{"serve"},
-		Extensions: []string{"go"},
-		Language:   "go",
+		Command:   "gopls",
+		Args:      []string{"serve"},
+		FileTypes: []LSPFileType{{Extension: "go", LanguageID: "go"}},
+		Language:  "go",
 	}}
 	if err := h.store.Create(ext); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -526,7 +531,7 @@ func TestHandleUpdate_LSPConfig_BoolFlags_PartialUpdate(t *testing.T) {
 	ext.Manifest.Capabilities = &Capabilities{LSP: &LSPConfig{
 		Command:          "gopls",
 		Args:             []string{"serve"},
-		Extensions:       []string{"go"},
+		FileTypes:        []LSPFileType{{Extension: "go", LanguageID: "go"}},
 		Language:         "go",
 		EditorEnabled:    &falseVal,
 		ToolCallsEnabled: &falseVal,
@@ -588,6 +593,9 @@ func TestHandleUpdate_LSPConfig_CreateNilLSP(t *testing.T) {
 				"lsp": map[string]any{
 					"command":  "my-lsp",
 					"language": "mylang",
+					"file_types": []any{
+						map[string]any{"extension": "mylang", "language_id": "mylang"},
+					},
 					"initParamsOverride": map[string]any{
 						"customOption": true,
 					},

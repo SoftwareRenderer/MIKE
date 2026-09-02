@@ -26,11 +26,22 @@ var errStaleClient = errors.New("stale")
 
 // ServerConfig holds the configuration for a single language server.
 type ServerConfig struct {
-	Command            string         // binary to execute (e.g., "gopls")
-	Args               []string       // args template, {workspace} replaced with workspace path
-	Extensions         []string       // file extensions (without dot), e.g., []string{"go"}
-	Language           string         // language identifier, e.g., "go", "typescript"
+	Command string   // binary to execute (e.g., "gopls")
+	Args    []string // args template, {workspace} replaced with workspace path
+	// FileTypes is what the extension declares it serves, and what its server calls each one —
+	// the source of the didOpen languageId.
+	FileTypes          []extensions.LSPFileType
+	Language           string         // routing language, e.g., "go", "typescript"
 	InitParamsOverride map[string]any // merged into initialize params sent to server
+}
+
+// LanguageIDFor answers what a document notification must call this file — the per-file id, not
+// the routing language, because tsserver keeps the first verdict it hears for a URI.
+func (c *ServerConfig) LanguageIDFor(name string) string {
+	if c == nil {
+		return ""
+	}
+	return (&extensions.LSPConfig{Language: c.Language, FileTypes: c.FileTypes}).LanguageIDFor(name)
 }
 
 // lspStartTimeout bounds `lsp_start`, which the bridge answers as soon as it has spawned the
@@ -750,7 +761,7 @@ func (m *ExtensionLSPManager) LSPRequest(ctx context.Context, workspacePath, fil
 	if paramsMap, ok := params.(map[string]any); ok {
 		if td, ok := paramsMap["textDocument"].(map[string]any); ok {
 			if uri, ok := td["uri"].(string); ok {
-				if _, err := m.ensureDocSync(ctx, sc, uri, workspacePath, filePath, language); err != nil {
+				if _, err := m.ensureDocSync(ctx, sc, uri, workspacePath, filePath, cfg); err != nil {
 					log.Printf("[lsp] doc sync failed for %s: %v", filePath, err)
 					// Continue anyway — the server may still have the file
 				}
@@ -838,7 +849,7 @@ func (m *ExtensionLSPManager) SyncDocument(ctx context.Context, workspacePath, f
 	}
 
 	uri := "file://" + filepath.Join(workspacePath, filePath)
-	synced, err := m.ensureDocSync(ctx, sc, uri, workspacePath, filePath, language)
+	synced, err := m.ensureDocSync(ctx, sc, uri, workspacePath, filePath, cfg)
 	return uri, synced, err
 }
 
@@ -931,7 +942,7 @@ func decideDocSync(opened bool, lastSent, onDisk string, lastVersion int) docSyn
 // ensureDocSync sends didOpen or didChange so the server never works from stale content, and
 // reports whether it sent anything: a server that already holds this exact text will not
 // republish it, so a caller waiting for a notification needs to know none is coming.
-func (m *ExtensionLSPManager) ensureDocSync(ctx context.Context, sc *sandboxClient, uri, workspacePath, filePath, language string) (bool, error) {
+func (m *ExtensionLSPManager) ensureDocSync(ctx context.Context, sc *sandboxClient, uri, workspacePath, filePath string, cfg *ServerConfig) (bool, error) {
 	absPath := filepath.Join(workspacePath, filePath)
 	content, err := os.ReadFile(absPath)
 	if err != nil {
@@ -941,11 +952,12 @@ func (m *ExtensionLSPManager) ensureDocSync(ctx context.Context, sc *sandboxClie
 	action := decideDocSync(sc.openedFiles[uri], sc.openedFileContents[uri], string(content), sc.openedFileVersions[uri])
 	switch action.kind {
 	case "open":
-		if err := m.lspDidOpen(ctx, sc, uri, wireLanguageId(language, filePath), string(content), action.version); err != nil {
+		// The extension's per-file languageId, never the routing language.
+		if err := m.lspDidOpen(ctx, sc, uri, cfg.LanguageIDFor(filePath), string(content), action.version); err != nil {
 			return false, err
 		}
 	case "change":
-		if err := m.lspDidChange(ctx, sc, uri, language, string(content), action.version); err != nil {
+		if err := m.lspDidChange(ctx, sc, uri, string(content), action.version); err != nil {
 			return false, err
 		}
 	default:
@@ -957,33 +969,9 @@ func (m *ExtensionLSPManager) ensureDocSync(ctx context.Context, sc *sandboxClie
 	return true, nil
 }
 
-// jsTsLanguageIds maps a file extension to the LSP well-known languageId for the files
-// the TypeScript extension owns. The routing language cannot express this: one extension
-// serves ts, tsx, js and jsx under the single manifest language "typescript", and
-// typescript-language-server turns the wire languageId into a tsserver ScriptKind — only
-// the FIRST didOpen of a URI takes effect, so a ".tsx as typescript" here is a file that
-// answers every later request with a wall of "',' expected."
-var jsTsLanguageIds = map[string]string{
-	".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
-	".jsx": "javascriptreact",
-	".ts":  "typescript", ".mts": "typescript", ".cts": "typescript",
-	".tsx": "typescriptreact",
-}
-
-// wireLanguageId is the languageId a didOpen should carry for this file. Every other
-// server (gopls, rust-analyzer, clangd) takes the language from the file name and ignores
-// this field, so only the TypeScript family needs the per-extension answer.
-func wireLanguageId(language, filePath string) string {
-	if !strings.EqualFold(language, "typescript") {
-		return language
-	}
-	if id, ok := jsTsLanguageIds[strings.ToLower(filepath.Ext(filePath))]; ok {
-		return id
-	}
-	return language
-}
-
-// lspDidOpen sends a textDocument/didOpen notification to the LSP server.
+// lspDidOpen sends a textDocument/didOpen notification. The declared languageId matters for
+// tsserver, which turns it into a ScriptKind whose first answer sticks; other servers take the
+// language from the file name.
 func (m *ExtensionLSPManager) lspDidOpen(ctx context.Context, sc *sandboxClient, uri, language, content string, version int) error {
 	notify := map[string]any{
 		"jsonrpc": "2.0",
@@ -1001,8 +989,9 @@ func (m *ExtensionLSPManager) lspDidOpen(ctx context.Context, sc *sandboxClient,
 }
 
 // lspDidChange sends a textDocument/didChange notification with a full-text
-// sync (no range) to the LSP server.
-func (m *ExtensionLSPManager) lspDidChange(ctx context.Context, sc *sandboxClient, uri, language, content string, version int) error {
+// sync (no range) to the LSP server. It carries no languageId: the document's language was
+// fixed when it was opened, which is exactly why didOpen has to get it right.
+func (m *ExtensionLSPManager) lspDidChange(ctx context.Context, sc *sandboxClient, uri, content string, version int) error {
 	notify := map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "textDocument/didChange",
@@ -1032,13 +1021,6 @@ func (m *ExtensionLSPManager) lookupExtensionByFile(filePath string) (*extension
 		return nil, err
 	}
 
-	ext := filepath.Ext(filePath)
-	base := filepath.Base(filePath)
-	shortExt := ""
-	if len(ext) > 1 {
-		shortExt = ext[1:]
-	}
-
 	for _, extItem := range extensions {
 		if !extItem.Enabled {
 			continue
@@ -1047,17 +1029,10 @@ func (m *ExtensionLSPManager) lookupExtensionByFile(filePath string) (*extension
 		if lspCfg == nil {
 			continue
 		}
-		// Check file extensions
-		for _, extn := range lspCfg.Extensions {
-			if extn == ext || strings.TrimPrefix(extn, ".") == shortExt {
-				return &extItem, nil
-			}
-		}
-		// Check language directly
-		if lspCfg.Language != "" {
-			if ext == "."+lspCfg.Language || base == lspCfg.Language {
-				return &extItem, nil
-			}
+		// One matcher for every caller: the extension's own file-type declaration decides, and
+		// it also answers the case of an extensionless file named after its language.
+		if lspCfg.MatchesFile(filePath) {
+			return &extItem, nil
 		}
 	}
 
@@ -1098,9 +1073,10 @@ func (m *ExtensionLSPManager) lookupExtension(language string) (*extensions.Exte
 		if lspCfg.Language == language {
 			return &ext, nil
 		}
-		// Also check file extensions (entries may or may not have a leading dot)
-		for _, extn := range lspCfg.Extensions {
-			if extn == language || strings.TrimPrefix(extn, ".") == language {
+		// A caller may name a file type instead ("ts", "javascriptreact"); both are answers the
+		// extension declared, not strings this function knows.
+		for _, ft := range lspCfg.FileTypes {
+			if ft.LanguageID == language || ft.Extension == language {
 				return &ext, nil
 			}
 		}
@@ -1128,14 +1104,6 @@ func (r *ExtensionRegistry) Lookup(fileOrPath string) *ServerConfig {
 		return nil
 	}
 
-	// Extract file extension and basename
-	ext := filepath.Ext(fileOrPath)
-	base := filepath.Base(fileOrPath)
-	shortExt := ""
-	if len(ext) > 1 {
-		shortExt = ext[1:]
-	}
-
 	for _, extItem := range extensions {
 		if !extItem.Enabled {
 			continue
@@ -1144,17 +1112,13 @@ func (r *ExtensionRegistry) Lookup(fileOrPath string) *ServerConfig {
 		if lspCfg == nil {
 			continue
 		}
-		// Check file extensions
-		for _, extn := range lspCfg.Extensions {
-			if extn == ext || extn == shortExt {
-				return r.toServerConfig(&extItem)
-			}
+		if lspCfg.MatchesFile(fileOrPath) {
+			return r.toServerConfig(&extItem)
 		}
-		// Check language directly
-		if lspCfg.Language != "" {
-			if ext == "."+lspCfg.Language || base == lspCfg.Language {
-				return r.toServerConfig(&extItem)
-			}
+		// A workspace path (no suffix) still resolves by its directory name, as when the name
+		// names the language — the declared language, not a table here.
+		if lspCfg.Language != "" && strings.EqualFold(filepath.Base(fileOrPath), lspCfg.Language) {
+			return r.toServerConfig(&extItem)
 		}
 	}
 
@@ -1206,7 +1170,7 @@ func (r *ExtensionRegistry) toServerConfig(ext *extensions.Extension) *ServerCon
 		Language:           lspCfg.Language,
 		Command:            lspCfg.Command,
 		Args:               lspCfg.Args,
-		Extensions:         lspCfg.Extensions,
+		FileTypes:          lspCfg.FileTypes,
 		InitParamsOverride: lspCfg.InitParamsOverride,
 	}
 }

@@ -1,102 +1,83 @@
 /**
- * Which grammar the editor loads for a file, and which language identifier the
- * language server is told about.
- *
- * Those are two different questions, and answering only one of them is how `.ts`
- * files ended up parsed as JavaScript:
- *
- *   • `getLanguageSupport()` picks the CodeMirror grammar (highlighting, folding,
- *     outline, sticky-scroll symbols). It also leaks into the protocol: when
- *     `LSPClient.plugin(uri)` is called *without* an explicit language id,
- *     `@codemirror/lsp-client` uses the editor's `Language.name` as the
- *     `textDocument/didOpen` languageId. `javascript()` is named `"javascript"`
- *     even for a `.ts` file — and `@replit/codemirror-lang-svelte` has no name at
- *     all (`""`).
- *   • `lspLanguageId()` is the LSP *well-known language identifier* for the file —
- *     what the server actually wants. For the JavaScript/TypeScript family that is
- *     a 4-way map (`typescript` / `typescriptreact` / `javascript` /
- *     `javascriptreact`), because typescript-language-server turns it into a
- *     tsserver `ScriptKind` and only the first `didOpen` for a URI takes effect.
- *     A wrong one makes tsserver parse the buffer with the wrong grammar:
- *     `.ts` as `javascript` → "'interface' declarations can only be used in
- *     TypeScript files."; `.tsx`/`.jsx` as `typescript` → a wall of `',' expected.`;
- *     `.js` as `typescript` → type-checked as TypeScript.
- *   • `detectLanguage()` ($lib/utils/lsp-connection-manager) answers a third
- *     question: which installed extension owns the file, i.e. the manifest
- *     `language` the backend routes on. One extension owns ts+tsx+js+jsx under
- *     language `"typescript"`, so the routing language and the wire languageId are
- *     deliberately different values — collapsing them breaks routing
- *     (`lookupExtension("javascript")` finds nothing).
+ * What the installed extensions declare about a file: its grammar, its `didOpen` languageId and its
+ * status-bar label. The three must agree, because the id decides how the server parses the buffer.
+ * See "Language Knowledge Lives in Extensions" in AGENTS.md.
  */
 import type { LanguageSupport } from '@codemirror/language';
-import { javascript } from '@codemirror/lang-javascript';
-import { python } from '@codemirror/lang-python';
-import { go } from '@codemirror/lang-go';
-import { json } from '@codemirror/lang-json';
-import { markdown } from '@codemirror/lang-markdown';
-import { rust } from '@codemirror/lang-rust';
-import { cpp } from '@codemirror/lang-cpp';
-import { php } from '@codemirror/lang-php';
-import { sql } from '@codemirror/lang-sql';
-import { html } from '@codemirror/lang-html';
-import { css } from '@codemirror/lang-css';
-import { svelte } from '@replit/codemirror-lang-svelte';
-import { goTemplate } from '$lib/gotemplate';
-import { detectLanguage } from './lsp-connection-manager';
-
-function extensionOf(filePath: string): string {
-  return filePath.split('.').pop()?.toLowerCase() || '';
-}
+import { buildLanguageSupport, specHasContent } from '$lib/syntax/spec-language';
+import type { LSPConfig, LSPFileType, SyntaxSpec } from '$lib/types';
+import { fallbackLanguage } from './fallback-languages';
+import { fileBase, fileSuffix } from './file-suffix';
+import { extensionManager } from '$lib/services/extension-manager.svelte';
 
 /**
- * LSP well-known identifiers for the files one TypeScript extension owns. These
- * must be per-extension: the manifest language ("typescript") cannot express
- * "this is a .tsx file", and tsserver needs the difference.
+ * Grammar name for every spec-built language. Deliberately not a valid language id, so a call site
+ * that forgets the explicit id gets "no provider for 'mike-declared'" instead of wrong diagnostics.
  */
-const LSP_IDS: Record<string, string> = {
-  js: 'javascript', mjs: 'javascript', cjs: 'javascript',
-  jsx: 'javascriptreact',
-  ts: 'typescript', mts: 'typescript', cts: 'typescript',
-  tsx: 'typescriptreact',
-};
+const DECLARED_GRAMMAR_NAME = 'mike-declared';
 
-/** The `textDocument/didOpen` languageId for a file — never empty, never a display name. */
-export function lspLanguageId(filePath: string): string {
-  return LSP_IDS[extensionOf(filePath)] ?? detectLanguage(filePath);
+/** What the installed extensions say about one file. */
+export interface ResolvedFile {
+  /** The `textDocument/didOpen` languageId, or `''` when no extension owns this file. */
+  languageId: string;
+  /** Status-bar label ("TypeScript JSX"), or `''` when nothing declared one. */
+  label: string;
+  /** The highlighting profile the extension declared, or null (fallback grammar or plain text). */
+  spec: SyntaxSpec | null;
+  /** The manifest `language` the backend routes the file to, or `''` when unrouted. */
+  language: string;
 }
 
+/** The extension (and the file type within it) that owns `filePath`, per the editor's grants. */
+function declaredFor(filePath: string): { lsp: LSPConfig; fileType: LSPFileType } | null {
+  const base = fileBase(filePath);
+  const suffix = fileSuffix(filePath);
+
+  for (const ext of extensionManager.getEditorLSPExtensions()) {
+    const lsp = ext.manifest.capabilities?.lsp;
+    if (!lsp?.file_types?.length) continue;
+    const fileType =
+      (suffix && lsp.file_types.find((ft) => ft.extension === suffix)) ||
+      // A file named after the language ("go") reaches its server, as it does on the Go side.
+      (!suffix && lsp.language && base === lsp.language.toLowerCase()
+        ? lsp.file_types.find((ft) => ft.language_id === lsp.language)
+        : undefined);
+    if (fileType) return { lsp, fileType };
+  }
+  return null;
+}
+
+/** Everything the editor needs to know about one file's language; undeclared files get no id. */
+export function resolveFile(filePath: string): ResolvedFile {
+  const declared = declaredFor(filePath);
+  if (!declared) {
+    return { languageId: '', label: '', spec: null, language: '' };
+  }
+  const { lsp, fileType } = declared;
+  const spec = fileType.syntax ? lsp.syntax?.[fileType.syntax] ?? null : null;
+  return {
+    languageId: fileType.language_id || lsp.language,
+    label: fileType.label || '',
+    spec,
+    language: lsp.language || fileType.language_id,
+  };
+}
+
+/** One grammar built per declared spec, since specs are shared across the manifest's file types. */
+const builtLanguages = new WeakMap<SyntaxSpec, LanguageSupport>();
+
 /**
- * CodeMirror language for a file, or null when there is nothing better than plain
- * text. Extensionless build files are deliberately null: their names carry the
- * type, and a wrong grammar is worse than none (it silently produces `⚠` nodes
- * that corrupt folding and the outline).
+ * The grammar for a file: its extension's declared profile, else the core fallback for languages
+ * nothing covers, else plain text. A declared type with no profile opens as the fallback or plain text.
  */
 export function getLanguageSupport(filePath: string): LanguageSupport | null {
-  const ext = extensionOf(filePath);
-  const base = filePath.split('/').pop()?.toLowerCase() || '';
-  const extMap: Record<string, () => LanguageSupport> = {
-    js: javascript, mjs: javascript, cjs: javascript,
-    jsx: () => javascript({ jsx: true }),
-    // The TypeScript dialect is not cosmetic: without it these files are parsed
-    // with the JavaScript grammar, which both mis-highlights them and names them
-    // "javascript" to the language server.
-    ts: () => javascript({ typescript: true }),
-    tsx: () => javascript({ jsx: true, typescript: true }),
-    py: python,
-    go: go,
-    c: cpp, h: cpp,
-    cpp: cpp, cc: cpp, cxx: cpp,
-    rs: rust,
-    json: json,
-    md: markdown,
-    php: php,
-    sql: sql,
-    html: html, htm: html,
-    css: css, scss: css, sass: css, less: css,
-    svelte: svelte,
-    tmpl: goTemplate, gohtml: goTemplate,
-  };
-  if (base === 'dockerfile' || base === 'makefile' || base === 'cmakelists.txt') return null;
-  const support = extMap[ext];
-  return support ? support() : null;
+  const { spec } = resolveFile(filePath);
+  if (specHasContent(spec)) {
+    const cached = builtLanguages.get(spec);
+    if (cached) return cached;
+    const built = buildLanguageSupport(spec, DECLARED_GRAMMAR_NAME);
+    builtLanguages.set(spec, built);
+    return built;
+  }
+  return fallbackLanguage(filePath);
 }

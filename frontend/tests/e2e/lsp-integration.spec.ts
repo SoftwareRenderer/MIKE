@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
-import { csrfFetch } from './helpers';
+import { csrfFetch, hasInstalledLspExtension } from './helpers';
 
 // ─── Prerequisite check ──────────────────────────────────────────────────────
 
@@ -87,6 +87,11 @@ test.describe.serial('LSP Integration', () => {
     // Navigate to the app
     await page.goto('/');
     await page.waitForSelector('.project-item, .empty-state', { timeout: 10000 });
+
+    // The host binary is not enough — without the installed extension there is no server to talk to.
+    if (!(await hasInstalledLspExtension(page, 'go'))) {
+      test.skip(true, 'no installed LSP extension owns .go — install the gopls extension to run LSP specs');
+    }
 
     // Register the Go workspace as a project
     lspProjectId = await createProjectViaApi(page, GO_WORKSPACE);

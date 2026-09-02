@@ -2,6 +2,9 @@ import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { syntaxTree, Language } from '@codemirror/language';
 import { HIGHLIGHT_CACHE_MAX } from '$lib/constants';
 import { escapeHtml } from '$lib/utils/format';
+import { getLanguageSupport } from '$lib/utils/editor-language';
+import { fileBase, fileSuffix } from '$lib/utils/file-suffix';
+import { extensionManager } from '$lib/services/extension-manager.svelte';
 
 /**
  * GitHub Dark highlighter — matches the DiffEditor's githubDarkHighlight colors.
@@ -29,91 +32,27 @@ const githubDarkHighlighter = tagHighlighter([
     { tag: tags.invalid, class: 'hl-invalid' },
 ]);
 
-/**
- * Lazily-loaded language cache. Keys are file extensions.
- * Values are Language objects (or null for unsupported extensions).
- * Uses dynamic import() to avoid bundling all 14 grammar parsers upfront.
- */
+/** Grammar cache, keyed by file suffix (or by basename when the file has no suffix). */
 const languageCache = new Map<string, Language | null>();
 
-/**
- * Load a CodeMirror language for the given file path via dynamic import.
- * Caches the result so subsequent calls for the same extension are instant.
- * Returns null for unsupported file types (plain text fallback).
- */
-async function loadLanguage(path: string): Promise<Language | null> {
-    const ext = path.split('.').pop()?.toLowerCase() || '';
-    const base = path.split('/').pop()?.toLowerCase() || '';
+/** The extension list the cache was built against; a new list means the cache is stale. */
+let grammarOwner: readonly unknown[] | null = null;
 
-    // Check cache first
-    const cached = languageCache.get(ext);
+/** Grammar for a path, or null for plain text; the cache resets with the extension list, since a grammar comes from a manifest. */
+async function loadLanguage(path: string): Promise<Language | null> {
+    const extensions = extensionManager.state.extensions;
+    if (grammarOwner !== extensions) {
+        languageCache.clear();
+        grammarOwner = extensions;
+    }
+
+    const key = fileSuffix(path) || fileBase(path);
+
+    const cached = languageCache.get(key);
     if (cached !== undefined) return cached;
 
-    // Special basenames — no CodeMirror support
-    if (base === 'dockerfile' || base === 'makefile' || base === 'cmakelists.txt') {
-        languageCache.set(ext, null);
-        return null;
-    }
-
-    // Go templates — handled by custom regex-based highlighter (no Lezer grammar)
-    if (ext === 'tmpl' || ext === 'gohtml') {
-        languageCache.set(ext, null);
-        return null;
-    }
-
-    let lang: Language | null = null;
-    try {
-        switch (ext) {
-            case 'js': case 'mjs': case 'cjs': case 'jsx': case 'mx':
-            case 'ts': case 'tsx':
-                lang = (await import('@codemirror/lang-javascript')).javascript().language;
-                break;
-            case 'py': case 'pyw':
-                lang = (await import('@codemirror/lang-python')).python().language;
-                break;
-            case 'go':
-                lang = (await import('@codemirror/lang-go')).go().language;
-                break;
-            case 'c': case 'h':
-            case 'cpp': case 'cc': case 'cxx': case 'hxx': case 'hpp':
-            case 'cppm': case 'hppm': case 'cx': case 'cxxm':
-                lang = (await import('@codemirror/lang-cpp')).cpp().language;
-                break;
-            case 'rs':
-                lang = (await import('@codemirror/lang-rust')).rust().language;
-                break;
-            case 'json':
-                lang = (await import('@codemirror/lang-json')).json().language;
-                break;
-            case 'md': case 'mdx':
-                lang = (await import('@codemirror/lang-markdown')).markdown().language;
-                break;
-            case 'php': case 'php3': case 'php4': case 'php5': case 'php7': case 'phps': case 'phpws':
-                lang = (await import('@codemirror/lang-php')).php().language;
-                break;
-            case 'sql':
-                lang = (await import('@codemirror/lang-sql')).sql().language;
-                break;
-            case 'html': case 'htm':
-                lang = (await import('@codemirror/lang-html')).html().language;
-                break;
-            case 'css': case 'scss': case 'sass': case 'less':
-                lang = (await import('@codemirror/lang-css')).css().language;
-                break;
-            case 'yaml': case 'yml':
-                lang = (await import('@codemirror/lang-yaml')).yaml().language;
-                break;
-            case 'svelte':
-                lang = (await import('@replit/codemirror-lang-svelte')).svelte().language;
-                break;
-            default:
-                lang = null;
-        }
-    } catch {
-        lang = null;
-    }
-
-    languageCache.set(ext, lang);
+    const lang = getLanguageSupport(path)?.language ?? null;
+    languageCache.set(key, lang);
     return lang;
 }
 
@@ -130,206 +69,6 @@ function contentHash(lines: string[]): string {
         }
     }
     return hash.toString(36);
-}
-
-/**
- * Go template action keywords.
- */
-const goTemplateKeywords = new Set([
-    'if', 'else', 'end', 'range', 'with',
-    'template', 'define', 'block',
-    'nil', 'true', 'false',
-    'and', 'or', 'not',
-    'eq', 'ne', 'lt', 'le', 'gt', 'ge',
-    'printf', 'print', 'println',
-    'len', 'index', 'html', 'js', 'urlquery',
-    'slice', 'substr', 'default', 'timeout', 'recover',
-]);
-
-/**
- * Highlight Go template lines using regex-based tokenization.
- * Recognizes template actions {{ ... }}, keywords, variables, strings, comments.
- * Base content (HTML) is left unstyled — the focus is on template action highlighting.
- */
-function highlightGoTemplateLines(lines: string[]): string[] {
-    const result: string[] = new Array(lines.length).fill('');
-    const source = lines.join('\n');
-
-    // Compute line boundaries
-    const lineStarts: number[] = new Array(lines.length);
-    const lineEnds: number[] = new Array(lines.length);
-    let pos = 0;
-    for (let i = 0; i < lines.length; i++) {
-        lineStarts[i] = pos;
-        lineEnds[i] = pos + lines[i].length;
-        if (i < lines.length - 1) pos += lines[i].length + 1;
-    }
-
-    const styledSpans: { from: number; to: number; cls: string }[] = [];
-
-    // Find all {{ ... }} actions in the source
-    // Pattern: {{-? ... -?}} (non-greedy, but handle nested braces)
-    let scanPos = 0;
-    while (scanPos < source.length) {
-        const actionStart = source.indexOf('{{', scanPos);
-        if (actionStart === -1) break;
-
-        // Find matching }}
-        let depth = 0;
-        let actionEnd = -1;
-        for (let i = actionStart; i < source.length - 1; i++) {
-            if (source[i] === '{' && source[i + 1] === '{') depth++;
-            else if (source[i] === '}' && source[i + 1] === '}') {
-                depth--;
-                if (depth === 0) {
-                    actionEnd = i + 2;
-                    break;
-                }
-            }
-        }
-        if (actionEnd === -1) break; // unmatched {{
-
-        // Extract action content (between {{ and }})
-        let contentStart = actionStart + 2;
-        while (contentStart < actionEnd && /\s|-/.test(source[contentStart])) contentStart++;
-        let contentEnd = actionEnd - 2;
-        while (contentEnd > contentStart && /\s|-/.test(source[contentEnd])) contentEnd--;
-        const actionContent = source.substring(contentStart, contentEnd);
-
-        // Check for comment action: {{/* ... */}}
-        if (actionContent.startsWith('/*')) {
-            styledSpans.push({ from: actionStart, to: actionEnd, cls: 'hl-comment' });
-            scanPos = actionEnd;
-            continue;
-        }
-
-        // Highlight the delimiters
-        styledSpans.push({ from: actionStart, to: actionStart + 2, cls: 'hl-meta' });
-        // Close delimiter
-        let closeStart = actionEnd - 2;
-        if (source[closeStart - 1] === '-') closeStart--;
-        styledSpans.push({ from: closeStart, to: actionEnd, cls: 'hl-meta' });
-
-        // Tokenize action content
-        const tokens = tokenizeGoAction(actionContent, actionStart + (contentStart - actionStart));
-        styledSpans.push(...tokens);
-
-        scanPos = actionEnd;
-    }
-
-    // Build per-line output
-    for (let i = 0; i < lines.length; i++) {
-        const lStart = lineStarts[i];
-        const lEnd = lineEnds[i];
-        if (lStart === lEnd) continue;
-
-        let cursor = lStart;
-        let spanIdx = 0;
-
-        while (spanIdx < styledSpans.length && styledSpans[spanIdx].to <= cursor) {
-            spanIdx++;
-        }
-
-        while (cursor < lEnd && spanIdx < styledSpans.length) {
-            const span = styledSpans[spanIdx];
-            if (span.from >= lEnd) {
-                if (span.from > cursor) {
-                    result[i] += escapeHtml(source.substring(cursor, lEnd));
-                }
-                cursor = lEnd;
-                break;
-            }
-            if (span.to <= cursor) { spanIdx++; continue; }
-
-            if (span.from > cursor) {
-                result[i] += escapeHtml(source.substring(cursor, Math.min(span.from, lEnd)));
-            }
-            const sFrom = Math.max(span.from, cursor);
-            const sTo = Math.min(span.to, lEnd);
-            if (sTo > sFrom) {
-                result[i] += `<span class="${span.cls}">${escapeHtml(source.substring(sFrom, sTo))}</span>`;
-            }
-            cursor = Math.max(cursor, Math.min(span.to, lEnd));
-            if (span.to >= lEnd) spanIdx++;
-        }
-        if (cursor < lEnd) {
-            result[i] += escapeHtml(source.substring(cursor, lEnd));
-        }
-    }
-
-    return result;
-}
-
-/**
- * Tokenize Go template action content into styled spans.
- */
-function tokenizeGoAction(content: string, baseOffset: number): { from: number; to: number; cls: string }[] {
-    const spans: { from: number; to: number; cls: string }[] = [];
-    let pos = 0;
-
-    while (pos < content.length) {
-        // Strings
-        const stringMatch = /^("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`)/.exec(content.slice(pos));
-        if (stringMatch) {
-            spans.push({ from: baseOffset + pos, to: baseOffset + pos + stringMatch[0].length, cls: 'hl-string' });
-            pos += stringMatch[0].length;
-            continue;
-        }
-
-        // Dot variables: .Field or .
-        const dotMatch = /^(\.[a-zA-Z_][a-zA-Z0-9_]*)|(\.(?=\s|$|\||\}))/.exec(content.slice(pos));
-        if (dotMatch) {
-            spans.push({ from: baseOffset + pos, to: baseOffset + pos + dotMatch[0].length, cls: 'hl-variable' });
-            pos += dotMatch[0].length;
-            continue;
-        }
-
-        // Named variables: $var
-        const varMatch = /^(\$[a-zA-Z_][a-zA-Z0-9_]*)/.exec(content.slice(pos));
-        if (varMatch) {
-            spans.push({ from: baseOffset + pos, to: baseOffset + pos + varMatch[0].length, cls: 'hl-variable' });
-            pos += varMatch[0].length;
-            continue;
-        }
-
-        // Keywords and identifiers
-        const identMatch = /^([a-zA-Z_][a-zA-Z0-9_]*)/.exec(content.slice(pos));
-        if (identMatch) {
-            const word = identMatch[1];
-            const cls = goTemplateKeywords.has(word) ? 'hl-keyword' : 'hl-function';
-            spans.push({ from: baseOffset + pos, to: baseOffset + pos + word.length, cls });
-            pos += word.length;
-            continue;
-        }
-
-        // Numbers
-        const numMatch = /^(\d+(?:\.\d+)?)/.exec(content.slice(pos));
-        if (numMatch) {
-            spans.push({ from: baseOffset + pos, to: baseOffset + pos + numMatch[1].length, cls: 'hl-number' });
-            pos += numMatch[1].length;
-            continue;
-        }
-
-        // Operators: | == != <= >= = < >
-        const opMatch = /^(\||==|!=|<=|>=|<|>|=)/.exec(content.slice(pos));
-        if (opMatch) {
-            spans.push({ from: baseOffset + pos, to: baseOffset + pos + opMatch[1].length, cls: 'hl-operator' });
-            pos += opMatch[1].length;
-            continue;
-        }
-
-        // Punctuation: () [] , :
-        if ('()[]:,'.includes(content[pos])) {
-            spans.push({ from: baseOffset + pos, to: baseOffset + pos + 1, cls: 'hl-punctuation' });
-            pos++;
-            continue;
-        }
-
-        // Skip whitespace and other chars
-        pos++;
-    }
-
-    return spans;
 }
 
 /**
@@ -454,12 +193,6 @@ function _highlightWithLang(lines: string[], path: string, lang: Language): stri
  */
 export async function highlightLinesAsync(lines: string[], path: string): Promise<string[]> {
     if (lines.length === 0) return [];
-
-    // Go templates use a custom regex-based highlighter (no Lezer grammar available)
-    const ext = path.split('.').pop()?.toLowerCase() || '';
-    if (ext === 'tmpl' || ext === 'gohtml') {
-        return highlightGoTemplateLines(lines);
-    }
 
     const lang = await loadLanguage(path);
     if (!lang) return lines.map(() => '');

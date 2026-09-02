@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
-import { javascript } from '@codemirror/lang-javascript';
+import { json } from '@codemirror/lang-json';
 import { keepViewportParsed } from '../keep-viewport-parsed';
 
 // Mock parse functions; keep the real `language` facet for the guard test.
@@ -22,7 +22,8 @@ let rafCallbacks: FrameRequestCallback[];
 let cancelRaf: ReturnType<typeof vi.fn>;
 
 function makeView(doc: string, withLang: boolean): any {
-    const extensions = withLang ? [javascript()] : [];
+    // Any real grammar will do: the extension under test only asks whether a language is loaded.
+    const extensions = withLang ? [json()] : [];
     const state = EditorState.create({ doc, extensions });
     return {
         state,

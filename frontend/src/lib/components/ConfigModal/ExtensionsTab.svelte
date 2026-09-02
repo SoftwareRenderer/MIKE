@@ -1054,11 +1054,14 @@
                                                 <span class="cap-detail-tag">{caps.lsp.language}</span>
                                             </span>
                                         {/if}
-                                        {#if caps.lsp.extensions?.length}
-                                            <span class="cap-detail-label">File extensions:</span>
+                                        {#if caps.lsp.file_types?.length}
+                                            <span class="cap-detail-label">File types:</span>
                                             <div class="cap-detail-tags">
-                                                {#each caps.lsp.extensions as ext}
-                                                    <span class="cap-detail-tag">.{ext}</span>
+                                                {#each caps.lsp.file_types as ft (ft.extension)}
+                                                    <!-- The tooltip names the language the server is told about this file type. -->
+                                                    <span class="cap-detail-tag" title={ft.label ? `${ft.label} · ${ft.language_id}` : ft.language_id}>
+                                                        .{ft.extension}
+                                                    </span>
                                                 {/each}
                                             </div>
                                         {/if}

@@ -102,10 +102,10 @@ func TestCommitQueue_MultipleSequential(t *testing.T) {
 
 func TestGetWorktreeMu_SameTaskReturnsSameMutex(t *testing.T) {
 	te := &TaskExecutor{}
-	
+
 	mu1 := te.GetWorktreeMu("task-1")
 	mu2 := te.GetWorktreeMu("task-1")
-	
+
 	if mu1 != mu2 {
 		t.Fatal("expected same mutex for same task ID")
 	}
@@ -113,10 +113,10 @@ func TestGetWorktreeMu_SameTaskReturnsSameMutex(t *testing.T) {
 
 func TestGetWorktreeMu_DifferentTasksReturnDifferentMutexes(t *testing.T) {
 	te := &TaskExecutor{}
-	
+
 	mu1 := te.GetWorktreeMu("task-1")
 	mu2 := te.GetWorktreeMu("task-2")
-	
+
 	if mu1 == mu2 {
 		t.Fatal("expected different mutexes for different task IDs")
 	}

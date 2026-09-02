@@ -507,3 +507,17 @@ async function setExtensionEnabledById(page: Page, id: string, enabled: boolean)
   const res = await csrfFetch(page, `/api/extensions/${id}/enabled`, { method: 'PATCH', body: { enabled } });
   if (!res.ok) throw new Error(`set extension enabled failed (${res.status})`);
 }
+
+/**
+ * True when an enabled LSP extension declares `suffix`. The host binary is not the prerequisite a
+ * language-server test has — without the installed extension there is no server to talk to.
+ */
+export async function hasInstalledLspExtension(page: Page, suffix: string): Promise<boolean> {
+  const body = await csrfFetch(page, '/api/extensions');
+  const list: any[] = Array.isArray(body) ? body : (body?.extensions || []);
+  return list.some((e) => {
+    if (e?.type !== 'lsp' || !e?.enabled) return false;
+    const types = e?.manifest?.capabilities?.lsp?.file_types || [];
+    return types.some((ft: any) => ft?.extension === suffix);
+  });
+}

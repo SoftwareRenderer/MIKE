@@ -53,10 +53,10 @@ func makeTestLSPExt(name, lang string) *extensions.Extension {
 			Version:     "1.0.0",
 			Capabilities: &extensions.Capabilities{
 				LSP: &extensions.LSPConfig{
-					Command:    lang + "pls",
-					Args:       []string{"-mode=stdio"},
-					Extensions: extns,
-					Language:   lang,
+					Command:   lang + "pls",
+					Args:      []string{"-mode=stdio"},
+					FileTypes: fileTypesFor(lang, extns),
+					Language:  lang,
 				},
 			},
 		},
@@ -825,4 +825,14 @@ func TestExtensionLSPManager_SandboxMemory_ClientWithoutSandbox(t *testing.T) {
 	if stats == nil || stats.Running {
 		t.Errorf("SandboxMemory() = %+v, want Running=false (sandbox not created)", stats)
 	}
+}
+
+// fileTypesFor builds the declaration a test manifest needs; the per-file ids come from the test, so
+// a core table could never satisfy the fixture by accident.
+func fileTypesFor(language string, exts []string) []extensions.LSPFileType {
+	out := make([]extensions.LSPFileType, 0, len(exts))
+	for _, e := range exts {
+		out = append(out, extensions.LSPFileType{Extension: e, LanguageID: language})
+	}
+	return out
 }
