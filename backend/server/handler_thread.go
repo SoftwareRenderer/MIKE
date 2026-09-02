@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -30,6 +31,48 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 		s.handleThreadDelete(w, r, projectID, taskID)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// gitErrorDetail caps git's own output for a log line.
+func gitErrorDetail(out string) string {
+	out = strings.TrimSpace(out)
+	if len(out) > 200 {
+		return out[:200] + "…"
+	}
+	return out
+}
+
+// releaseThreadSnapshots unpins the worktree state a thread owns: its handoff snapshot plus the checkpoint
+// each of its messages captured. Call it BEFORE deleting the thread — the message ids are what name those
+// snapshots. It is safe for threads forked from this one, because a fork re-pins what it inherited under
+// its own message ids (see CopyMessagesToThread).
+func (s *Server) releaseThreadSnapshots(taskID, threadID string) {
+	wm := s.executor.WorktreeMgr()
+	var ids []string
+	if msgs, err := s.store.GetTaskMessages(taskID, threadID); err == nil {
+		for i := range msgs {
+			if msgs[i].GitCommitHash != "" {
+				ids = append(ids, msgs[i].ID)
+			}
+		}
+	} else {
+		log.Printf("[snapshots] task=%s thread=%s could not list its messages: %v", taskID, threadID, err)
+	}
+	s.releaseMessageSnapshots(taskID, ids)
+	if err := wm.DeleteThreadSnapshot(taskID, threadID); err != nil && !errors.Is(err, git.ErrWorktreeNotFound) {
+		log.Printf("[snapshots] task=%s thread=%s could not release its handoff snapshot: %v", taskID, threadID, err)
+	}
+}
+
+// releaseMessageSnapshots unpins the snapshots the given messages captured. Call it with ids that were
+// just deleted: an unnamed snapshot is a copy of the worktree git can never reclaim.
+func (s *Server) releaseMessageSnapshots(taskID string, messageIDs []string) {
+	if len(messageIDs) == 0 || s.executor == nil {
+		return
+	}
+	if err := s.executor.WorktreeMgr().UnpinMessageSnapshots(taskID, messageIDs); err != nil && !errors.Is(err, git.ErrWorktreeNotFound) {
+		log.Printf("[snapshots] task=%s could not release %d checkpoint snapshot(s): %v", taskID, len(messageIDs), err)
 	}
 }
 
@@ -69,6 +112,9 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 
+	// Release the thread's saved worktree state while its rows still exist to name it.
+	s.releaseThreadSnapshots(taskID, req.ThreadID)
+
 	// One store call: the messages and the thread row go together, and the deleted row
 	// tells us which branch to clean up afterwards.
 	deletedThread, err := s.store.DeleteThreadWithMessages(req.ThreadID)
@@ -84,13 +130,17 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 	if task.CurrentThreadID == req.ThreadID {
 		remaining, _ := s.store.GetThreadsByTask(taskID)
 		if len(remaining) > 0 {
+			// Check out the replacement's branch BEFORE the old one is deleted — git will not remove a
+			// branch that is still checked out — and record where the worktree ended up.
+			targetThread, _ := s.store.GetThread(remaining[0].ID)
+			branch := s.checkoutThreadBranch(projectID, taskID, task, targetThread)
 			_ = s.store.SetActiveThread(remaining[0].ID)
 			task.CurrentThreadID = remaining[0].ID
+			if branch != "" {
+				task.Branch = branch
+			}
 			task.UpdatedAt = time.Now().UTC()
 			_ = s.store.UpdateTask(task)
-			// Checkout the new active thread's branch and delete orphaned branch
-			targetThread, _ := s.store.GetThread(remaining[0].ID)
-			s.checkoutThreadBranch(taskID, targetThread)
 			// Reset file state to match the new thread's conversation
 			lastCommit := s.getLastCommitHashInThread(remaining[0].ID)
 			s.resetWorktreeToCommit(taskID, lastCommit)
@@ -159,15 +209,16 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if task.ExecutionState == types.ExecStateRunning {
+	// The agent must not be writing while its work is captured. Stopping is real, so a refusal that
+	// follows has to say so rather than leave the UI showing a running task.
+	wasRunning := task.ExecutionState == types.ExecStateRunning
+	if wasRunning {
 		_ = s.executor.StopTask(taskID)
 		task.ExecutionState = types.ExecStateIdle
 		task.Output = ""
 	}
-	// Save worktree state and switch to target thread's branch.
-	// Uses labeled stash push + list search to save worktree as a commit hash per-thread.
-	// Message includes task+thread IDs so we can find the correct stash even if
-	// other entries (from crashes or concurrent tasks) are in the stash list.
+	// Save the current thread's worktree state, then move to the target thread's branch and restore its
+	// own state there.
 	if task.Branch != "" {
 		oldThreadID := task.CurrentThreadID
 		if oldThreadID != "" && oldThreadID != req.ThreadID {
@@ -177,47 +228,32 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 				oldBranch = task.Branch
 			}
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", oldBranch)
-			// Only stash if there are actual changes — skip the mutex + git commands
-			// when the worktree is already clean.
-			if s.executor.WorktreeMgr().HasWorktreeChanges(taskID) {
-				// Stash push/drop touches .git/refs/stash which is shared across all
-				// worktrees in the project. Serialize with the shared stash mutex.
-				worktreePath, _ := s.executor.WorktreeMgr().WorktreePath(taskID)
-				s.executor.WorktreeMgr().GetProjectStashMu(projectID).Lock()
-				stashMsg := git.StashMessageForSwitch(taskID)
-				stashHash, _ := s.executor.WorktreeMgr().PushStash(worktreePath, stashMsg)
-				if stashHash != "" {
-					_ = s.executor.WorktreeMgr().DropStashByHash(worktreePath, stashHash)
-				}
-				s.executor.WorktreeMgr().GetProjectStashMu(projectID).Unlock()
-				if stashHash != "" {
-					_ = s.store.UpdateThreadWorktreeStashHash(oldThreadID, stashHash)
-				}
+			// Save the worktree as it is so switching back can restore it — and if it cannot be saved,
+			// leave both threads exactly as they are.
+			stashHash, err := s.stashWorktreeState(projectID, taskID, oldThreadID, git.StashMessageForSwitch(taskID))
+			if err != nil {
+				s.refuseUnsavedWork(w, projectID, task, "switched", err, wasRunning)
+				return
+			}
+			if stashHash != "" {
+				_ = s.store.UpdateThreadWorktreeStashHash(oldThreadID, stashHash)
 			}
 		}
-		// Checkout target thread's branch (or task's original branch if none).
-		// A titled task's Main branch is slug-named, not task/<taskID>; resolve it so checkout succeeds.
-		targetBranch := thread.GitBranch
-		if targetBranch == "" {
-			targetBranch = s.executor.WorktreeMgr().ResolveMainBranch(projectID, taskID, task.Title, fmt.Sprintf("task/%s", taskID))
+		// Check out the thread's branch — resolving it for Main, whose branch is slug-named for a
+		// titled task — and clean the worktree. The next step discards the working state either way, so
+		// there is nothing to protect by checking out unforced.
+		if branch := s.checkoutThreadBranch(projectID, taskID, task, thread); branch != "" {
+			task.Branch = branch
 		}
-		task.Branch = targetBranch
-		// With a saved stash, re-apply it on the branch. Otherwise force-checkout the
-		// branch HEAD, which already holds the thread's committed work (do NOT reset to
-		// baseRef/checkpoint — that would discard committed fork work).
+		// A thread's saved worktree snapshot is its working state; without one the branch HEAD is all
+		// there is (do NOT reset to the base commit — that would discard committed fork work).
 		if thread.WorktreeStashHash != "" {
-			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", targetBranch)
-			s.executor.WorktreeMgr().ResetWorktreeTo(taskID, thread.WorktreeStashHash)
-		} else {
-			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", "-f", targetBranch)
-			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "clean", "-fd")
-			// Re-apply the thread's last checkpoint stash if it sits on top of branch HEAD
-			// (uncommitted work not yet on the branch).
-			if last := s.getLastCommitHashInThread(req.ThreadID); last != "" {
-				if s.executor.WorktreeMgr().IsAncestor(taskID, "HEAD", last) {
-					s.resetWorktreeToCommit(taskID, last)
-				}
+			if err := s.executor.WorktreeMgr().ResetWorktreeTo(taskID, thread.WorktreeStashHash); err != nil {
+				log.Printf("[thread-switch] task=%s thread=%s could not restore its saved worktree (%.12s): %v", taskID, req.ThreadID, thread.WorktreeStashHash, err)
 			}
+		} else if last := s.getLastCommitHashInThread(req.ThreadID); last != "" && s.executor.WorktreeMgr().IsAncestor(taskID, "HEAD", last) {
+			// Uncommitted work not yet on the branch, still sitting on top of HEAD.
+			s.resetWorktreeToCommit(taskID, last)
 		}
 	}
 	// Set new active thread
@@ -312,19 +348,15 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	// overwrite that inactive thread's already-saved stash hash.
 	if task.Branch != "" {
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", task.Branch)
-		// Only stash if there are actual changes.
-		if s.executor.WorktreeMgr().HasWorktreeChanges(taskID) {
-			worktreePath, _ := s.executor.WorktreeMgr().WorktreePath(taskID)
-			s.executor.WorktreeMgr().GetProjectStashMu(projectID).Lock()
-			stashMsg := git.StashMessageForFork(taskID)
-			stashHash, _ := s.executor.WorktreeMgr().PushStash(worktreePath, stashMsg)
-			if stashHash != "" {
-				_ = s.executor.WorktreeMgr().DropStashByHash(worktreePath, stashHash)
-			}
-			s.executor.WorktreeMgr().GetProjectStashMu(projectID).Unlock()
-			if stashHash != "" {
-				_ = s.store.UpdateThreadWorktreeStashHash(task.CurrentThreadID, stashHash)
-			}
+		// Save the worktree as it is: this thread's in-flight work has to survive the rewind below, and
+		// switching back has to be able to put it back. If it cannot be saved, the fork does not happen.
+		stashHash, err := s.stashWorktreeState(projectID, taskID, task.CurrentThreadID, git.StashMessageForFork(taskID))
+		if err != nil {
+			s.refuseUnsavedWork(w, projectID, task, "forked", err, false)
+			return
+		}
+		if stashHash != "" {
+			_ = s.store.UpdateThreadWorktreeStashHash(task.CurrentThreadID, stashHash)
 		}
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", newBranchName, branchPoint)
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", newBranchName)
@@ -332,7 +364,9 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		task.Branch = newBranchName
 		// Reset worktree to checkpoint state.
 		if branchPoint != "" {
-			s.executor.WorktreeMgr().ResetWorktreeTo(taskID, branchPoint)
+			if err := s.executor.WorktreeMgr().ResetWorktreeTo(taskID, branchPoint); err != nil {
+				log.Printf("[thread-fork] task=%s could not rewind the worktree to %.12s: %v", taskID, branchPoint, err)
+			}
 		} else {
 			// No checkpoint — reset to base ref (clean initial state).
 			baseRef := task.BaseRef
@@ -373,10 +407,21 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		Fail(w, err, "create thread", "task not found")
 		return
 	}
-	// Copy messages from source thread up to and including the checkpoint.
-	if err := s.store.CopyMessagesToThread(req.FromThreadID, newThreadID, req.FromMessageID); err != nil {
+	// Copy the parent conversation into the fork: whole entries up to the fork point, payloads and all.
+	inherited, err := s.store.CopyMessagesToThread(req.FromThreadID, newThreadID, req.FromMessageID)
+	if err != nil {
 		Fail(w, err, "copy thread messages", "thread not found")
 		return
+	}
+	// Re-pin every snapshot the fork inherited under the fork's own rows. The rows name these hashes,
+	// but until now the only ref keeping them reachable belonged to the parent thread — delete the
+	// parent and the fork's checkpoints become prunable, which is a restore failing much later against
+	// a conversation that still claims the state exists. Best-effort: the parent's ref still pins the
+	// same objects, so a failed re-pin costs durability against a future deletion, not correctness now.
+	for _, cp := range inherited {
+		if pinErr := s.executor.WorktreeMgr().PinTaskSnapshot(taskID, cp.MessageID, cp.CommitHash); pinErr != nil {
+			log.Printf("[thread-fork] task=%s could not pin inherited snapshot %.12s for message %s: %v", taskID, cp.CommitHash, cp.MessageID, pinErr)
+		}
 	}
 	// If new_content is provided, update the checkpoint message in the fork
 	// to the edited content. Find the last user message in the new thread
@@ -440,12 +485,32 @@ func (s *Server) generateThreadName(ctx context.Context, task *types.Task, conte
 	return trimmed
 }
 
-// checkoutThreadBranch checks out the target thread's git branch.
-func (s *Server) checkoutThreadBranch(taskID string, targetThread *types.TaskThread) {
-	if targetThread == nil || targetThread.GitBranch == "" {
-		return
+// checkoutThreadBranch checks out the branch a thread's work lives on and returns the branch it landed on
+// ("" if it could not). A thread with no git_branch is Main, whose branch still exists (slug-named for a
+// titled task), so it is resolved rather than skipped: skipping it left the worktree on the branch the
+// caller was about to delete, and git will not delete a checked-out branch.
+func (s *Server) checkoutThreadBranch(projectID, taskID string, task *types.Task, targetThread *types.TaskThread) string {
+	if targetThread == nil {
+		return ""
 	}
-	_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", targetThread.GitBranch)
+	branch := targetThread.GitBranch
+	if branch == "" {
+		if task == nil {
+			return ""
+		}
+		branch = s.executor.WorktreeMgr().ResolveMainBranch(projectID, taskID, task.Title, fmt.Sprintf("task/%s", taskID))
+	}
+	// Forced: the worktree holds the state of the thread being deleted, and a restored checkpoint counts
+	// as uncommitted changes, which is what makes a plain checkout refuse. Callers restore the surviving
+	// thread's own checkpoint straight after this.
+	out, err := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "checkout", "-f", branch)
+	if err != nil {
+		// git's own words, because "exit status 1" tells you nothing about a refused checkout.
+		log.Printf("[thread] task=%s could not check out %s: %v: %s", taskID, branch, err, gitErrorDetail(out))
+		return ""
+	}
+	_, _ = s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "clean", "-fd")
+	return branch
 }
 
 // deleteThreadBranch deletes a thread's git branch.
@@ -453,15 +518,89 @@ func (s *Server) deleteThreadBranch(taskID string, branchName string) {
 	if branchName == "" {
 		return
 	}
-	_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "branch", "-D", branchName)
+	// A failure here is a branch that outlived its thread, so it must not be dropped silently.
+	out, err := s.executor.WorktreeMgr().GitRunInWorktreeOutput(taskID, "branch", "-D", branchName)
+	if err != nil {
+		log.Printf("[thread] task=%s could not delete branch %s: %v: %s", taskID, branchName, err, gitErrorDetail(out))
+	}
 }
 
-// resetWorktreeToCommit resets the worktree to a commit or stash hash.
+// stashWorktreeState moves the current worktree changes off the shared worktree and hands the snapshot to
+// threadID to keep. A clean worktree is not a failure: it returns "" with no error, because there is
+// nothing to save and nothing to lose. An error means the state exists and was NOT captured, and the
+// caller must then change nothing — carrying on would discard work that was never saved.
+//
+// The stash entry is dropped once pinned, because the user's stash list is not MIKE's to fill; pin first,
+// since an unpinned snapshot is one git may prune. Stash push/drop touch .git/refs/stash, which every
+// worktree of the project shares.
+func (s *Server) stashWorktreeState(projectID, taskID, threadID, label string) (string, error) {
+	wm := s.executor.WorktreeMgr()
+	// The status is read here rather than through HasWorktreeChanges, which reports a worktree it cannot
+	// read as clean — and an unreadable worktree is exactly what a caller must not overwrite.
+	status, err := wm.GitStatus(taskID)
+	if err != nil {
+		return "", fmt.Errorf("read the worktree state: %w", err)
+	}
+	if strings.TrimSpace(status) == "" {
+		return "", nil
+	}
+	worktreePath, err := wm.WorktreePath(taskID)
+	if err != nil {
+		return "", err
+	}
+	wm.GetProjectStashMu(projectID).Lock()
+	defer wm.GetProjectStashMu(projectID).Unlock()
+
+	stashHash, err := wm.PushStash(worktreePath, label)
+	if errors.Is(err, git.ErrNothingToStash) {
+		// Whatever made the worktree dirty has gone in the meantime; git found nothing to take.
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if pinErr := wm.PinSnapshot(worktreePath, git.SnapshotRef(taskID, git.ThreadSnapshotOwner(threadID)), stashHash); pinErr != nil {
+		// Leave the stash entry where it is: dropped and unpinned, the snapshot is git's to prune, and an
+		// entry the user can see outliving its thread is the lesser evil.
+		log.Printf("[worktree] task=%s thread=%s saved %.12s but could not pin it, so it stays in the stash list: %v", taskID, threadID, stashHash, pinErr)
+		return stashHash, nil
+	}
+	_ = wm.DropStashByHash(worktreePath, stashHash)
+	return stashHash, nil
+}
+
+// refuseUnsavedWork answers a switch or fork that could not capture the worktree: no thread was changed and
+// nothing was discarded, so the reply names git's reason and says the operation did not happen — the user's
+// next move is to fix the complaint and click again, not to work out what a half-completed operation broke.
+//
+// One thing really did change: a task stopped so its work could be captured stays stopped. That is recorded
+// and broadcast here, because a card still showing "running" after a refusal is a lie about the board.
+func (s *Server) refuseUnsavedWork(w http.ResponseWriter, projectID string, task *types.Task, done string, cause error, wasRunning bool) {
+	log.Printf("[thread] task=%s refused to %s: %v", task.ID, done, cause)
+	message := fmt.Sprintf("could not save this thread's work — nothing was %s", done)
+	if detail := gitErrorDetail(cause.Error()); detail != "" {
+		message += ": " + detail
+	}
+	if wasRunning {
+		message += "; the task was stopped to save its work and did not restart"
+		task.ExecutionState = types.ExecStateIdle
+		task.UpdatedAt = time.Now().UTC()
+		if err := s.store.UpdateTask(task); err != nil {
+			log.Printf("[thread] task=%s refused to %s and could not record the stop: %v", task.ID, done, err)
+		}
+		s.appStreamMgr.BroadcastTaskUpdated(projectID, *task)
+	}
+	JSONError(w, http.StatusConflict, message)
+}
+
+// resetWorktreeToCommit resets the worktree to a commit or snapshot.
 func (s *Server) resetWorktreeToCommit(taskID, commitHash string) {
 	if commitHash == "" {
 		return
 	}
-	_ = s.executor.WorktreeMgr().ResetWorktreeTo(taskID, commitHash)
+	if err := s.executor.WorktreeMgr().ResetWorktreeTo(taskID, commitHash); err != nil {
+		log.Printf("[worktree] task=%s could not restore %.12s: %v", taskID, commitHash, err)
+	}
 }
 
 // getLastCommitHashInThread finds the last commit hash in a thread.

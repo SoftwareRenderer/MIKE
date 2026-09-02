@@ -62,7 +62,7 @@ func TestDeletedMessagesNotSentToLLM(t *testing.T) {
 	}
 
 	// Simulate user deleting msg3 (user2) and everything after it (msg4)
-	if err := te.rawStore().DeleteTaskMessagesAfter(taskID, "msg-user2", threadID); err != nil {
+	if _, err := te.rawStore().DeleteTaskMessagesAfter(taskID, "msg-user2", threadID); err != nil {
 		t.Fatalf("delete messages: %v", err)
 	}
 
@@ -174,7 +174,7 @@ func TestDeletedMessagesWithRegenerate(t *testing.T) {
 	messages := buildMessagesFromDB(task, taskMsgs, "/worktree", "Regen Test", false)
 
 	// Simulate regenerate: DB deletes msg3+msg4, in-memory truncates
-	_ = te.rawStore().DeleteTaskMessagesAfter(taskID, "msg-user2", threadID)
+	_, _ = te.rawStore().DeleteTaskMessagesAfter(taskID, "msg-user2", threadID)
 	messages = truncateForRegenerate(messages)
 
 	// Append re-sent user message

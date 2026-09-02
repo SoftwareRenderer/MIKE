@@ -147,24 +147,52 @@ func (s *Store) DeleteTaskMessageByID(messageID string) error {
 	return err
 }
 
-// DeleteTaskMessagesAfter deletes the message with the given ID and all messages after it, optionally scoped to a thread.
-func (s *Store) DeleteTaskMessagesAfter(taskID, messageID, threadID string) error {
+// DeleteTaskMessagesAfter deletes the message with the given ID and all messages after it, optionally
+// scoped to a thread, and reports the ids of the deleted rows that held a worktree checkpoint.
+//
+// The ids come from the delete's own predicate. Which rows go is a created_at/role rule that spares
+// summarization rows and breaks ties by rowid, so a caller that re-derived the set could release a
+// snapshot a surviving row still names — one git is then free to prune.
+func (s *Store) DeleteTaskMessagesAfter(taskID, messageID, threadID string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Get the created_at of the message to delete
 	var createdAt string
-	err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, messageID).Scan(&createdAt)
-	if err != nil {
-		return err
+	if err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, messageID).Scan(&createdAt); err != nil {
+		return nil, err
 	}
-	// Delete this message and all messages created after it (scoped to thread if provided).
-	// Explicitly match the message ID to handle any timestamp precision edge cases.
+	// The message itself plus everything after it in the thread. Matching the ID explicitly covers
+	// timestamps shared inside one turn.
+	where := `task_id = ? AND (id = ? OR (created_at >= ? AND role != 'summarization'))`
+	args := []any{taskID, messageID, createdAt}
 	if threadID != "" {
-		_, err = s.db.Exec(`DELETE FROM task_messages WHERE task_id = ? AND thread_id = ? AND (id = ? OR (created_at >= ? AND role != 'summarization'))`, taskID, threadID, messageID, createdAt)
-	} else {
-		_, err = s.db.Exec(`DELETE FROM task_messages WHERE task_id = ? AND (id = ? OR (created_at >= ? AND role != 'summarization'))`, taskID, messageID, createdAt)
+		where = `task_id = ? AND thread_id = ? AND (id = ? OR (created_at >= ? AND role != 'summarization'))`
+		args = []any{taskID, threadID, messageID, createdAt}
 	}
-	return err
+	rows, err := s.db.Query(`SELECT id, git_commit_hash FROM task_messages WHERE `+where, args...)
+	if err != nil {
+		return nil, err
+	}
+	var checkpointed []string
+	for rows.Next() {
+		var id, hash sql.NullString
+		if err := rows.Scan(&id, &hash); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if hash.String != "" {
+			checkpointed = append(checkpointed, id.String)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	if _, err := s.db.Exec(`DELETE FROM task_messages WHERE `+where, args...); err != nil {
+		return nil, err
+	}
+	return checkpointed, nil
 }
 
 // UpdateTaskMessage updates the content of a message.

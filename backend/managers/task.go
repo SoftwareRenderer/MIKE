@@ -1162,6 +1162,13 @@ func (h *TaskHandler) cleanupSingleTask(taskID string) {
 	// branch (which may be a fork), and thread branches (thread/<threadID>).
 	// Runs after DB delete so it works even when the initial task lookup failed.
 	if h.worktreeMgr != nil && projectID != "" {
+		// Unpin this task's snapshots so git can reclaim their objects. These refs are MIKE's own
+		// namespace; the stash sweep below still serves repos written before snapshots were refs.
+		if n, err := h.worktreeMgr.DeleteTaskSnapshots(projectID, taskID); err != nil {
+			log.Printf("task delete: snapshot cleanup failed for %s: %v", taskID, err)
+		} else if n > 0 {
+			log.Printf("task delete: unpinned %d snapshot(s) for %s", n, taskID)
+		}
 		_ = h.worktreeMgr.DropStashEntriesForTask(projectID, taskID)
 		// Also clean branch-labeled stashes (non-kanban stashes from agent operations).
 		var branchesToClean []string

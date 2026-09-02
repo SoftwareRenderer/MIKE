@@ -213,3 +213,34 @@ func waitForExecutor(t *testing.T, te *TaskExecutor, taskID string, want bool) {
 	}
 	t.Fatalf("executor present = %v, want %v", !want, want)
 }
+
+// A regenerate is the thread being asked to answer the user message it already holds — which is exactly
+// what "New Thread" does: the fork writes the edited question into the new thread, then the send runs it.
+// It must start, and must not store the same question a second time.
+func TestHandleSend_RegenerateOfLastUserMessage_RunsItWithoutInserting(t *testing.T) {
+	te, _, projectID, _ := setupExecutorWithGit(t)
+	taskID, threadID := "regen-task", "regen-thread"
+	seedReviewTask(t, te, projectID, taskID, threadID,
+		types.TaskMessage{ID: "a0", Role: "assistant", Content: "Here's what I found"},
+		types.TaskMessage{ID: "u1", Role: "user", Content: "Yes, do it"},
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/tasks/"+taskID+"/send",
+		bytes.NewBufferString(`{"content":"Yes, do it","regenerate":true}`))
+	req.SetPathValue("projectID", projectID)
+	req.SetPathValue("taskID", taskID)
+	rec := httptest.NewRecorder()
+	te.HandleSend(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("send status = %d, want 201 (body=%s)", rec.Code, rec.Body.String())
+	}
+	t.Cleanup(func() { stopExecutorIfStarted(t, te, taskID) })
+
+	if n := countUserMessages(t, te, taskID, threadID, "Yes, do it"); n != 1 {
+		t.Errorf("a regenerate must reuse the existing row, got %d copies", n)
+	}
+	waitForExecutor(t, te, taskID, true)
+	if task := taskRow(t, te, projectID, taskID); task.Status != types.StatusInProgress {
+		t.Errorf("a regenerate must run the thread, status = %q, want in_progress", task.Status)
+	}
+}

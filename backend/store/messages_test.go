@@ -116,7 +116,7 @@ func TestDeleteTaskMessagesAfter(t *testing.T) {
 	}
 
 	// Delete after msg-2 (should remove msg-2, msg-3, msg-4)
-	if err := s.DeleteTaskMessagesAfter("task-1", "msg-2", ""); err != nil {
+	if _, err := s.DeleteTaskMessagesAfter("task-1", "msg-2", ""); err != nil {
 		t.Fatalf("delete messages after: %v", err)
 	}
 
@@ -171,7 +171,7 @@ func TestDeleteTaskMessagesAfterByThread(t *testing.T) {
 	}
 
 	// Delete after m1 in thread-1 only
-	if err := s.DeleteTaskMessagesAfter("task-1", "m1", "thread-1"); err != nil {
+	if _, err := s.DeleteTaskMessagesAfter("task-1", "m1", "thread-1"); err != nil {
 		t.Fatalf("delete messages after: %v", err)
 	}
 
@@ -600,7 +600,7 @@ func TestDeleteTaskMessagesAfter_PreservesSummarization(t *testing.T) {
 
 	// Delete from the first user message onward: every conversation row goes, the
 	// summary survives standing in for what it summarized.
-	if err := s.DeleteTaskMessagesAfter("task-1", "msg-1", ""); err != nil {
+	if _, err := s.DeleteTaskMessagesAfter("task-1", "msg-1", ""); err != nil {
 		t.Fatalf("delete messages after: %v", err)
 	}
 
@@ -647,7 +647,7 @@ func TestDeleteTaskMessagesAfter_TargetIsSummarization(t *testing.T) {
 		}
 	}
 
-	if err := s.DeleteTaskMessagesAfter("task-1", "sum-1", ""); err != nil {
+	if _, err := s.DeleteTaskMessagesAfter("task-1", "sum-1", ""); err != nil {
 		t.Fatalf("delete messages after: %v", err)
 	}
 
@@ -670,5 +670,65 @@ func TestDeleteTaskMessagesAfter_TargetIsSummarization(t *testing.T) {
 	}
 	if !got["sum-2"] {
 		t.Error("a later summary is collateral and must survive")
+	}
+}
+
+// The delete reports which of the rows it removed held a snapshot — only its own predicate knows what
+// went, since summarization rows stay and rows inside a turn share a created_at. Guessing could release a
+// snapshot a surviving row still names.
+func TestDeleteTaskMessagesAfter_ReportsDeletedCheckpoints(t *testing.T) {
+	s := testStore(t)
+	proj := newProject("proj-1", "test", "/tmp/test")
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	base := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	seed := []struct {
+		id, role, hash string
+	}{
+		{"early-user", "user", ""},
+		{"early-checkpoint", "assistant", "hash-survives"},
+		{"anchor", "user", ""},
+		{"deleted-checkpoint", "assistant", "hash-gone"},
+		{"deleted-tool-call", "tool_call", ""},
+		{"summary", "summarization", "hash-summary-stays"},
+		{"last-checkpoint", "assistant", "hash-last"},
+	}
+	for i, m := range seed {
+		msg := newMessage(m.id, "task-1", m.role, "content "+m.id)
+		msg.GitCommitHash = m.hash
+		msg.CreatedAt = base.Add(time.Duration(i+1) * time.Second)
+		if err := s.CreateTaskMessage(msg); err != nil {
+			t.Fatalf("create %s: %v", m.id, err)
+		}
+	}
+
+	reported, err := s.DeleteTaskMessagesAfter("task-1", "anchor", "")
+	if err != nil {
+		t.Fatalf("delete messages after: %v", err)
+	}
+	want := []string{"deleted-checkpoint", "last-checkpoint"}
+	if len(reported) != len(want) {
+		t.Fatalf("reported %v, want %v", reported, want)
+	}
+	for i := range want {
+		if reported[i] != want[i] {
+			t.Fatalf("reported %v, want %v", reported, want)
+		}
+	}
+
+	remaining, err := s.GetTaskMessages("task-1", "")
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(remaining) != 3 {
+		t.Fatalf("expected 3 surviving rows, got %d: %+v", len(remaining), remaining)
+	}
+	if remaining[1].ID != "early-checkpoint" || remaining[2].ID != "summary" {
+		t.Errorf("the earlier checkpoint and the summary must survive: %+v", remaining)
 	}
 }

@@ -2485,11 +2485,6 @@ func TestStashMessageHelpers_GenerateCorrectFormats(t *testing.T) {
 		t.Errorf("StashMessageForFork = %q, want %q", forkMsg, "mike-fork-"+taskID)
 	}
 
-	checkpointMsg := StashMessageForCheckpoint(taskID, "task/fix-bug")
-	if checkpointMsg != "On task/fix-bug: mike-checkpoint-"+taskID {
-		t.Errorf("StashMessageForCheckpoint = %q, want %q", checkpointMsg, "On task/fix-bug: mike-checkpoint-"+taskID)
-	}
-
 	syncMsg := StashMessageForSyncMerge(taskID)
 	if syncMsg != "mike-sync-merge-"+taskID {
 		t.Errorf("StashMessageForSyncMerge = %q, want %q", syncMsg, "mike-sync-merge-"+taskID)
@@ -2513,12 +2508,6 @@ func TestStashMessageHelpers_MaxLength(t *testing.T) {
 	forkMsg := StashMessageForFork(longTaskID)
 	if len(forkMsg) > 50 {
 		t.Errorf("StashMessageForFork len = %d, want ≤ 50", len(forkMsg))
-	}
-
-	longBranch := "task/" + strings.Repeat("x", 100)
-	checkpointMsg := StashMessageForCheckpoint(longTaskID, longBranch)
-	if len(checkpointMsg) > 50 {
-		t.Errorf("StashMessageForCheckpoint len = %d, want ≤ 50", len(checkpointMsg))
 	}
 
 	syncMsg := StashMessageForSyncMerge(longTaskID)

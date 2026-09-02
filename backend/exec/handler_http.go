@@ -73,13 +73,19 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 	// A duplicate is the same submit arriving twice (double-click, WS replay, offline queue
 	// flush): the thread's last row is still that identical user message. Once the agent has
 	// said anything since, the same words again are a new answer.
+	//
+	// A regenerate is not one of those: the row it matches IS the question being re-answered, and the
+	// request is to run the thread as it already stands. That is how "New Thread" arrives — the fork
+	// writes the edited question into the new thread, and this send is what starts it. So the row is not
+	// written twice, but the executor is still triggered.
 	msgID := uuid.New().String()
-	isDuplicate := false
+	lastRowIsThisMessage := false
 	if last, err := te.store.GetLastMessageInThread(threadID); err == nil && last != nil &&
 		last.Role == "user" && last.Content == req.Content && last.Attachments == req.Attachments {
-		isDuplicate = true
+		lastRowIsThisMessage = true
 		msgID = last.ID
 	}
+	isDuplicate := lastRowIsThisMessage && !req.Regenerate
 
 	// allowed Pending: a message that will run starts the task, so it leaves review here.
 	// A deduped message starts nothing and must not move the card.
@@ -91,7 +97,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		te.appStreamMgr.BroadcastTaskUpdated(task.ProjectID, task)
 	}
 
-	if !isDuplicate {
+	if !lastRowIsThisMessage {
 		tm := &types.TaskMessage{
 			ID:        msgID,
 			TaskID:    taskID,

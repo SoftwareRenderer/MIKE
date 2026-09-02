@@ -26,10 +26,17 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		// If delete_single is true, only remove that one message (e.g., dismissing an error).
 		if req.DeleteSingle {
+			// Read the row first: it may be the one naming a checkpoint, and once it is gone nothing
+			// in the database says so.
+			var released []string
+			if msg, err := s.store.GetTaskMessageByID(req.MessageID); err == nil && msg != nil && msg.GitCommitHash != "" {
+				released = []string{msg.ID}
+			}
 			if err := s.store.DeleteTaskMessageByID(req.MessageID); err != nil {
 				Fail(w, err, "delete message", "message not found")
 				return
 			}
+			s.releaseMessageSnapshots(taskID, released)
 			// Notify running executor to reset loop detector and re-sync messages.
 			// Only when actively running — waking an idle executor triggers an unwanted LLM call.
 			if s.executor != nil {
@@ -52,10 +59,14 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		msgCreatedAt, msgTimeErr := s.store.GetMessageCreatedAt(req.MessageID)
 		// Use the message's own thread_id so deletion targets the correct thread
 		// even if the task's active thread has switched since the message was created.
-		if err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID, msgThreadID); err != nil {
+		deletedCheckpoints, err := s.store.DeleteTaskMessagesAfter(taskID, req.MessageID, msgThreadID)
+		if err != nil {
 			Fail(w, err, "delete messages", "message not found")
 			return
 		}
+		// Release the file states those turns pinned. The delete returns the ids, because only it knows
+		// which rows actually went.
+		s.releaseMessageSnapshots(taskID, deletedCheckpoints)
 		// Fetch task early to check execution state for executor notification.
 		task, _ := s.store.GetTask(projectID, taskID)
 		// Notify running executor to reset loop detector and re-sync messages.
@@ -242,6 +253,8 @@ func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *type
 			if th.GitBranch != "" {
 				branchesToDelete = append(branchesToDelete, th.GitBranch)
 			}
+			// Release its worktree state while its rows are still there to say which snapshots those were.
+			s.releaseThreadSnapshots(taskID, th.ID)
 			_ = s.store.DeleteThread(th.ID)
 		}
 		if activeWasDeleted {
@@ -282,8 +295,12 @@ func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *type
 					}
 				}
 			}
-			// Checkout the new active thread's branch and delete orphaned branches
-			s.checkoutThreadBranch(taskID, targetThread)
+			// Check out the new active thread's branch BEFORE the orphaned ones go (git will not delete a
+			// checked-out branch), and record where the worktree ended up.
+			if branch := s.checkoutThreadBranch(projectID, taskID, task, targetThread); branch != "" && task != nil && task.Branch != branch {
+				task.Branch = branch
+				_ = s.store.UpdateTask(task)
+			}
 			for _, branch := range branchesToDelete {
 				s.deleteThreadBranch(taskID, branch)
 			}
@@ -321,10 +338,8 @@ func (s *Server) cleanupDeletedMessageForks(projectID, taskID string, task *type
 // Resolution order:
 //  1. The last commit hash among the remaining messages — the state captured at
 //     the end of the last surviving turn.
-//  2. The thread's checkpoint_commit_hash — the fork's clean-slate commit. Required
-//     for fork threads, whose copied messages carry no git_commit_hash (see
-//     CopyMessagesToThread), so step 1 finds nothing after deleting everything past
-//     the checkpoint.
+//  2. The thread's checkpoint_commit_hash — the state a fork was cut from, used when the
+//     deleted range took every checkpoint in the thread with it.
 //  3. The task's base_commit — the state before any conversation changes. Required
 //     when the deleted portion contained the only checkpoint(s) (e.g. deleting the
 //     first real request), so no checkpoint remains and the conversation has no
