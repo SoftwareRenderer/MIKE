@@ -1656,17 +1656,19 @@ func TestTaskDeleteCleansCheckpointStashes(t *testing.T) {
 	task.Branch = branchName
 	s.store.UpdateTask(task)
 
-	// Create checkpoint-style stashes with kanban-labeled messages.
-	// This is how the executor saves worktree state during execution.
+	// Legacy checkpoint stashes, labelled the way the executor labelled them before snapshots became
+	// pinned refs (see backend/git/snapshots.go). The label is spelled out rather than built by a
+	// helper on purpose: this data exists in real repos and the sweep must keep matching it no matter
+	// what the current code calls its labels.
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("checkpoint1\n"), 0o644)
 	mustRunGit(t, tmpDir, "add", "change.txt")
 	hash1 := mustRunGitOutput(t, tmpDir, "stash", "create")
-	mustRunGit(t, tmpDir, "stash", "store", "-m", git.StashMessageForCheckpoint(taskID, branchName), hash1)
+	mustRunGit(t, tmpDir, "stash", "store", "-m", "On "+branchName+": mike-checkpoint-"+taskID, hash1)
 
 	os.WriteFile(filepath.Join(tmpDir, "change.txt"), []byte("checkpoint2\n"), 0o644)
 	mustRunGit(t, tmpDir, "add", "change.txt")
 	hash2 := mustRunGitOutput(t, tmpDir, "stash", "create")
-	mustRunGit(t, tmpDir, "stash", "store", "-m", git.StashMessageForCheckpoint(taskID, branchName), hash2)
+	mustRunGit(t, tmpDir, "stash", "store", "-m", "On "+branchName+": mike-checkpoint-"+taskID, hash2)
 
 	// Verify stashes exist
 	stashList := gitListStashes(t, tmpDir)

@@ -211,7 +211,10 @@ export function buildEntriesFromMessages(
         }
 
         // Tool call entries — merged into preceding assistant entry
-        if (m.role === 'tool_call' && m.tool_calls) {
+        if (m.role === 'tool_call') {
+            // Old forks copied the role but dropped the payload, so there is nothing to render.
+            // Falling through to the generic renderer below drew one blank card per row.
+            if (!m.tool_calls) return null;
             const tc = JSON.parse(m.tool_calls);
             const result = m.tool_result ? JSON.parse(m.tool_result) : null;
             const isPending = !result;

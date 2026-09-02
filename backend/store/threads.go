@@ -162,12 +162,23 @@ func (s *Store) GetThreadsByCheckpointMessageTime(messageTime string) ([]types.T
 	return s.queryThreads(`checkpoint_message_time = ?`, messageTime)
 }
 
+// CopiedCheckpoint is a checkpoint the fork inherited: MessageID is the fork's new row, CommitHash the
+// snapshot it names. The caller re-pins that snapshot under SnapshotRef(taskID, MessageID) (see
+// backend/git/snapshots.go), or it stays alive only as long as the parent thread's own rows do.
+type CopiedCheckpoint struct {
+	MessageID  string
+	CommitHash string
+}
+
 // copyMsg holds the fields needed to copy a message.
 type copyMsg struct {
-	role, content, createdAt              string
+	sourceID, role, content, createdAt    string
 	severity, reasoningContent, toolCalls *string
 	toolResult, modelName                 *string
 	providerName                          *string
+	attachments, kind                     *string
+	assistantMsgID                        string
+	isLoopHint                            bool
 	promptTokens, predictedTokens         int
 	cacheTokens                           int
 	promptMs, predictedMs                 int
@@ -175,74 +186,217 @@ type copyMsg struct {
 	gitCommitHash                         *string
 }
 
-// CopyMessagesToThread copies messages from a source thread up to and including a specific message into a target thread.
-func (s *Store) CopyMessagesToThread(sourceThreadID, targetThreadID, upToMessageID string) error {
+// entryRow is a row of a thread's history, in display order — all the entry-boundary walk looks at.
+type entryRow struct {
+	id             string
+	role           string
+	createdAt      string
+	assistantMsgID string
+}
+
+// entryCutoffLocked returns the created_at of the last row of the entry that holds upToMessageID — the
+// boundary a fork copies up to. An assistant row and the tool calls it issued are separate rows that the
+// browser (chat-entries.ts) and the LLM rebuild (exec.groupTaskMessages) both show as one entry, so a fork
+// cuts between entries, never through one.
+//
+// Which entry a row belongs to:
+//   - an assistant row owns itself;
+//   - a tool_call row belongs to its assistant_msg_id owner, or, when that is empty (legacy rows), to the
+//     nearest preceding assistant row;
+//   - any other role is its own entry.
+//
+// The boundary is that entry's newest row. Callers must hold s.mu.
+func (s *Store) entryCutoffLocked(sourceThreadID, upToMessageID string) (string, error) {
+	rows, err := s.db.Query(`
+		SELECT id, role, created_at, COALESCE(assistant_msg_id, '')
+		FROM task_messages
+		WHERE thread_id = ?
+		ORDER BY created_at ASC, rowid ASC
+	`, sourceThreadID)
+	if err != nil {
+		return "", fmt.Errorf("list thread messages: %w", err)
+	}
+	defer rows.Close()
+
+	var threadRows []entryRow
+	for rows.Next() {
+		var r entryRow
+		if err := rows.Scan(&r.id, &r.role, &r.createdAt, &r.assistantMsgID); err != nil {
+			return "", fmt.Errorf("scan thread message: %w", err)
+		}
+		threadRows = append(threadRows, r)
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterate thread messages: %w", err)
+	}
+
+	idx := -1
+	for i, r := range threadRows {
+		if r.id == upToMessageID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		// The row is not in this thread (deleted, or the wrong source thread was passed).
+		// Fall back to its own timestamp rather than inventing a boundary.
+		var own string
+		if err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, upToMessageID).Scan(&own); err != nil {
+			return "", fmt.Errorf("get cutoff message time: %w", err)
+		}
+		return own, nil
+	}
+
+	ownerIdx := idx
+	switch threadRows[idx].role {
+	case "assistant":
+	case "tool_call":
+		ownerIdx = -1
+		if id := threadRows[idx].assistantMsgID; id != "" {
+			for i, r := range threadRows {
+				if r.id == id && r.role == "assistant" {
+					ownerIdx = i
+					break
+				}
+			}
+		}
+		if ownerIdx < 0 { // legacy row without an owner id: the nearest assistant above it
+			for i := idx - 1; i >= 0; i-- {
+				if threadRows[i].role == "assistant" {
+					ownerIdx = i
+					break
+				}
+			}
+		}
+		if ownerIdx < 0 {
+			return threadRows[idx].createdAt, nil // an orphan tool_call row is its own entry
+		}
+	default:
+		return threadRows[idx].createdAt, nil
+	}
+
+	ownerID := threadRows[ownerIdx].id
+	boundary := threadRows[ownerIdx].createdAt
+	for i := ownerIdx + 1; i < len(threadRows); i++ {
+		r := threadRows[i]
+		if r.role != "tool_call" {
+			break
+		}
+		if r.assistantMsgID != "" && r.assistantMsgID != ownerID {
+			break // a call of a different assistant starts a different entry
+		}
+		boundary = r.createdAt
+	}
+	// Rows this assistant owns anywhere in the thread still belong to the entry (a loop hint can land
+	// between the assistant row and its tool calls).
+	for _, r := range threadRows {
+		if r.role == "tool_call" && r.assistantMsgID == ownerID && r.createdAt > boundary {
+			boundary = r.createdAt
+		}
+	}
+	// The entry can never be cut before the row the fork was asked for.
+	if boundary < threadRows[idx].createdAt {
+		boundary = threadRows[idx].createdAt
+	}
+	return boundary, nil
+}
+
+// CopyMessagesToThread copies the parent conversation into a fork: every row up to and including the
+// entry that holds upToMessageID (see entryCutoffLocked), same payloads, new IDs. Owner ids are remapped to
+// the fork's own copies, and it reports the checkpoints the copy inherited so the caller can pin them.
+//
+// Dropping a column changes what the copy is: a tool_call row without its payload renders as a blank card
+// and reaches the model as an empty turn, a loop hint without its flag becomes real conversation input,
+// and rows without a checkpoint hash leave the fork with no recorded file state.
+func (s *Store) CopyMessagesToThread(sourceThreadID, targetThreadID, upToMessageID string) ([]CopiedCheckpoint, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Get the created_at of the cutoff message
-	var cutoffTime string
-	err := s.db.QueryRow(`SELECT created_at FROM task_messages WHERE id = ?`, upToMessageID).Scan(&cutoffTime)
+	// Copy up to the end of the checkpoint's entry, not up to the checkpoint row itself.
+	cutoffTime, err := s.entryCutoffLocked(sourceThreadID, upToMessageID)
 	if err != nil {
-		return fmt.Errorf("get cutoff message time: %w", err)
+		return nil, err
 	}
 	// Get the task_id of the source thread
 	var taskID string
 	err = s.db.QueryRow(`SELECT task_id FROM task_threads WHERE id = ?`, sourceThreadID).Scan(&taskID)
 	if err != nil {
-		return fmt.Errorf("get source thread task: %w", err)
+		return nil, fmt.Errorf("get source thread task: %w", err)
 	}
 	// Fetch all source messages into memory first (SQLite doesn't allow writes with open read cursors)
 	sourceRows, err := s.db.Query(`
-		SELECT role, severity, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at
+		SELECT id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, assistant_msg_id, kind, created_at
 		FROM task_messages
 		WHERE thread_id = ? AND created_at <= ?
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, rowid ASC
 	`, sourceThreadID, cutoffTime)
 	if err != nil {
-		return fmt.Errorf("query source messages: %w", err)
+		return nil, fmt.Errorf("query source messages: %w", err)
 	}
 
 	var messages []copyMsg
 	for sourceRows.Next() {
 		var m copyMsg
-		var rc, tc, tr, mn, pn, gch, sev sql.NullString
-		if err := sourceRows.Scan(&m.role, &sev, &m.content, &rc, &tc, &tr, &mn, &pn, &m.promptTokens, &m.predictedTokens, &m.cacheTokens, &m.promptMs, &m.predictedMs, &m.duration, &gch, &m.createdAt); err != nil {
+		var rc, tc, tr, att, mn, pn, gch, sev, kind, owner sql.NullString
+		var isLoopHint int
+		if err := sourceRows.Scan(&m.sourceID, &m.role, &sev, &m.content, &rc, &tc, &tr, &att, &mn, &pn, &m.promptTokens, &m.predictedTokens, &m.cacheTokens, &m.promptMs, &m.predictedMs, &m.duration, &gch, &isLoopHint, &owner, &kind, &m.createdAt); err != nil {
 			sourceRows.Close()
-			return fmt.Errorf("scan source message: %w", err)
+			return nil, fmt.Errorf("scan source message: %w", err)
 		}
 		m.reasoningContent = nullStr(rc)
 		m.severity = nullStr(sev)
-		// Clear tool_calls and tool_result so the LLM doesn't see stale parent-thread
-		// tool invocations. The fork starts with a clean file state; the LLM will
-		// re-execute tools as needed.
-		m.toolCalls = nil
-		m.toolResult = nil
+		// Everything that gives the row its meaning travels with it, including the tool invocation
+		// and its result: the fork shows the parent conversation, and a tool_call row stripped of
+		// its payload renders as a blank card and reaches the model as an empty turn.
+		m.toolCalls = nullStr(tc)
+		m.toolResult = nullStr(tr)
+		m.attachments = nullStr(att)
+		m.kind = nullStr(kind)
+		m.assistantMsgID = owner.String
+		m.isLoopHint = isLoopHint != 0
 		m.modelName = nullStr(mn)
 		m.providerName = nullStr(pn)
-		// Clear git_commit_hash — commits belong to the parent thread.
-		m.gitCommitHash = nil
+		m.gitCommitHash = nullStr(gch)
 		messages = append(messages, m)
 	}
 	sourceRows.Close()
 	if err := sourceRows.Err(); err != nil {
-		return fmt.Errorf("iterating source messages: %w", err)
+		return nil, fmt.Errorf("iterating source messages: %w", err)
 	}
 
-	// Now insert into target thread
+	// Insert in display order: an assistant row is always written before the tool_call rows it owns, so
+	// newIDs can remap owner ids as it goes.
+	newIDs := make(map[string]string)
+	var inherited []CopiedCheckpoint
 	for _, m := range messages {
 		newID := uuid.New().String()
+		// A copied tool_call row must point at the copied assistant row. An owner that was not part
+		// of the copy stays NULL: exec.toolCallRowsByOwner discards a row whose owner lives in
+		// another thread, and falls back to adjacency for a row with no owner at all.
+		assistantMsgID := (*string)(nil)
+		if m.assistantMsgID != "" {
+			if mapped, ok := newIDs[m.assistantMsgID]; ok {
+				assistantMsgID = ptrStr(mapped)
+			}
+		}
 		_, err := s.db.Exec(`
-			INSERT INTO task_messages (id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO task_messages (id, task_id, thread_id, role, severity, content, reasoning_content, tool_calls, tool_result, attachments, model_name, provider_name, prompt_tokens, predicted_tokens, cache_tokens, prompt_ms, predicted_ms, duration, git_commit_hash, is_loop_hint, assistant_msg_id, kind, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, newID, taskID, targetThreadID, m.role, m.severity, m.content,
-			m.reasoningContent, m.toolCalls, m.toolResult,
+			m.reasoningContent, m.toolCalls, m.toolResult, m.attachments,
 			m.modelName, m.providerName,
-			m.promptTokens, m.predictedTokens, m.cacheTokens, m.promptMs, m.predictedMs, m.duration, m.gitCommitHash, m.createdAt)
+			m.promptTokens, m.predictedTokens, m.cacheTokens, m.promptMs, m.predictedMs, m.duration,
+			m.gitCommitHash, B2I(m.isLoopHint), assistantMsgID, m.kind, m.createdAt)
 		if err != nil {
-			return fmt.Errorf("insert copied message: %w", err)
+			return nil, fmt.Errorf("insert copied message: %w", err)
+		}
+		if m.gitCommitHash != nil && *m.gitCommitHash != "" {
+			inherited = append(inherited, CopiedCheckpoint{MessageID: newID, CommitHash: *m.gitCommitHash})
+		}
+		if m.role == "assistant" {
+			newIDs[m.sourceID] = newID
 		}
 	}
-	return nil
+	return inherited, nil
 }
 
 func nullStr(n sql.NullString) *string {

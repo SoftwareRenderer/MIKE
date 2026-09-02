@@ -1338,8 +1338,10 @@ var hunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?(.*)@@`
 
 // Stash message label prefixes used by kanban operations
 const (
-	stashLabelSwitch     = "mike-switch-"
-	stashLabelFork       = "mike-fork-"
+	stashLabelSwitch = "mike-switch-"
+	stashLabelFork   = "mike-fork-"
+	// No longer written: checkpoints are snapshots pinned under a ref (see snapshots.go). Kept so the
+	// sweep still cleans up repos whose checkpoints were stash entries.
 	stashLabelCheckpoint = "mike-checkpoint-"
 	stashLabelSyncMerge  = "mike-sync-merge-"
 	stashLabelAutoMerge  = "mike-auto-merge-"
@@ -1893,11 +1895,19 @@ func isBinaryContent(path string, size int64) bool {
 }
 
 func (wm *WorktreeManager) gitRun(dir string, args ...string) error {
+	_, err := wm.gitRunInGitDir(dir, args...)
+	return err
+}
+
+// gitRunInGitDir runs git against dir's own gitdir and returns what git printed. The output is the point:
+// git's reason for refusing is on stderr, and a caller that keeps only the exit code cannot tell the user
+// anything ("exit status 1").
+func (wm *WorktreeManager) gitRunInGitDir(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_DIR="+filepath.Join(dir, ".git"))
-	_, err := cmd.CombinedOutput()
-	return err
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 func (wm *WorktreeManager) gitRunOutput(dir string, args ...string) (string, error) {
@@ -2168,39 +2178,64 @@ func (wm *WorktreeManager) IsMergedInto(projectPath, taskBranch, targetBranch st
 	return cmd.Run() == nil
 }
 
-// ResetWorktreeTo resets the worktree to a commit or stash hash.
-// For stash hashes (from `git stash push`), applies the stash patch to restore
-// tracked and untracked files. Falls back to `git reset --hard` for regular commits.
+// ResetWorktreeTo restores the files a snapshot captured and never moves HEAD. The restored files land on
+// the current branch as unstaged/untracked changes, which is what git status, the diff views and the
+// commit flow read as the task's work.
+//
+// The snapshot is read as a tree, not applied as a patch: a patch cannot carry a binary file, and the old
+// `reset --hard` fallback moved the branch onto the snapshot commit — restoring files by rewriting history.
 func (wm *WorktreeManager) ResetWorktreeTo(taskID, hash string) error {
 	worktreePath, err := wm.WorktreePath(taskID)
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(hash) == "" {
+		return fmt.Errorf("restore: no snapshot given for task %s", taskID)
+	}
+	// Check the snapshot exists before throwing the current work away.
+	if _, err := wm.gitRunOutput(worktreePath, "rev-parse", "--verify", hash+"^{tree}"); err != nil {
+		return fmt.Errorf("%w: snapshot %.12s is not in this repository: %w", ErrSnapshotMissing, hash, err)
 	}
 
 	// Clean working tree.
 	_ = wm.gitRun(worktreePath, "checkout", "-f", "HEAD")
 	_ = wm.gitRun(worktreePath, "clean", "-fd")
 
-	// Apply stash patch (--include-untracked for files captured by `git stash push -u`).
-	stashPatch, err := wm.gitRunOutput(worktreePath, "stash", "show", "-p", "--include-untracked", hash)
-	if err != nil {
-		// stash show failed — try regular reset.
-		return wm.gitRun(worktreePath, "reset", "--hard", hash)
+	// Make index and working tree match the snapshot exactly; --reset overwrites local changes.
+	if err := wm.gitRun(worktreePath, "read-tree", "--reset", "-u", hash); err != nil {
+		return fmt.Errorf("restore task %s to snapshot %.12s: %w", taskID, hash, err)
 	}
-	if len(strings.TrimSpace(stashPatch)) == 0 {
-		return nil // empty stash, nothing to apply
+	// A `stash push -u` entry keeps its untracked files in a third parent, absent from the tree above.
+	if untracked, ok := wm.stashUntrackedCommit(worktreePath, hash); ok {
+		if err := wm.gitRun(worktreePath, "checkout", untracked, "--", "."); err != nil {
+			return fmt.Errorf("restore untracked files of snapshot %.12s: %w", hash, err)
+		}
 	}
-
-	// Use stdin to pipe the patch into git apply
-	cmd := exec.Command("git", "apply")
-	cmd.Dir = worktreePath
-	cmd.Stdin = strings.NewReader(stashPatch)
-	_, err = cmd.CombinedOutput()
-	if err != nil {
-		// apply failed — try regular reset.
-		return wm.gitRun(worktreePath, "reset", "--hard", hash)
+	// Unstage again so the restored files read as the task's own changes, not a staged commit.
+	if err := wm.gitRun(worktreePath, "reset", "-q"); err != nil {
+		return fmt.Errorf("unstage restored files for task %s: %w", taskID, err)
 	}
 	return nil
+}
+
+// stashUntrackedCommit returns the commit holding a stash entry's untracked files, when hash names a
+// stash commit made with -u. Git keeps those files only in the third parent, so reading the stash
+// commit's own tree would lose them.
+func (wm *WorktreeManager) stashUntrackedCommit(dir, hash string) (string, bool) {
+	out, err := wm.gitRunOutput(dir, "rev-list", "--parents", "-n1", hash)
+	if err != nil {
+		return "", false
+	}
+	ancestors := strings.Fields(out)
+	if len(ancestors) != 4 {
+		return "", false // not a stash commit with an untracked parent
+	}
+	candidate := ancestors[3]
+	files, err := wm.gitRunOutput(dir, "ls-tree", "-r", "--name-only", candidate)
+	if err != nil || strings.TrimSpace(files) == "" {
+		return "", false // nothing to overlay
+	}
+	return candidate, true
 }
 
 // branchExistsInRepo checks if a branch exists in the given git repo.
@@ -2241,102 +2276,58 @@ func (wm *WorktreeManager) listStashEntries(repoPath string) ([]StashEntry, erro
 	return entries, nil
 }
 
-// GetLatestStashHash returns the commit hash of the most recent stash entry
-// for a task's worktree. Returns empty string if no stashes exist.
-func (wm *WorktreeManager) GetLatestStashHash(taskID string) (string, error) {
-	worktreePath, err := wm.WorktreePath(taskID)
-	if err != nil {
-		return "", err
-	}
-	task, err := wm.store.GetTaskByID(taskID)
-	if err != nil {
-		return "", nil
-	}
-	branchMarker := " " + task.Branch + ":"
-
-	entries, err := wm.listStashEntries(worktreePath)
-	if err != nil {
-		return "", err
-	}
-	for _, e := range entries {
-		if strings.Contains(e.Subject, branchMarker) {
-			return e.Hash, nil
-		}
-	}
-	// Fallback: return any stash if task-specific ones not found
-	if len(entries) > 0 {
-		return entries[0].Hash, nil
-	}
-	return "", nil
-}
-
-// GetStashByCheckpointIndex returns the stash hash for a given checkpoint index.
-// Checkpoint indices are 0-based, oldest first (matching UI order).
-// Stash list is newest first (stash@{0} is newest), so we reverse the mapping:
-// checkpointIndex 0 (oldest) -> last stash entry
-// checkpointIndex N (newest) -> stash@{0} if N matches
-func (wm *WorktreeManager) GetStashByCheckpointIndex(taskID string, checkpointIdx int) (string, error) {
-	if checkpointIdx < 0 {
-		return "", nil
-	}
-	worktreePath, err := wm.WorktreePath(taskID)
-	if err != nil {
-		return "", err
-	}
-	task, err := wm.store.GetTaskByID(taskID)
-	if err != nil {
-		return "", nil
-	}
-	branchMarker := " " + task.Branch + ":"
-
-	entries, err := wm.listStashEntries(worktreePath)
-	if err != nil {
-		return "", err
-	}
-
-	// Filter to task-specific stashes
-	var branchEntries []StashEntry
-	for _, e := range entries {
-		if strings.Contains(e.Subject, branchMarker) {
-			branchEntries = append(branchEntries, e)
-		}
-	}
-	if len(branchEntries) == 0 {
-		branchEntries = entries // fallback to all stashes
-	}
-
-	// Stash list is newest first (stash@{0} is newest = branchEntries[0]).
-	// Checkpoint indices are oldest first (checkpointIdx 0 = oldest).
-	// So checkpointIdx 0 maps to branchEntries[len-1] (oldest stash).
-	// checkpointIdx N maps to branchEntries[len-1-N].
-	totalStashes := len(branchEntries)
-	stashIdx := totalStashes - 1 - checkpointIdx
-	if stashIdx >= 0 && stashIdx < totalStashes {
-		return branchEntries[stashIdx].Hash, nil
-	}
-	return "", nil
-}
-
-// PushStash pushes worktree changes as a stash with a labeled message and
-// returns the commit hash of the stash entry. Searches the stash list by
-// message to find the correct entry, avoiding the fragile stash@{0} assumption.
+// PushStash stashes the worktree changes under `message` and returns the hash of the entry it created.
+// The entry is identified by diffing the stash list across the push: the stack is shared by every worktree
+// of the repository and holds the user's own entries, so the entry on top is not necessarily the one we
+// just made, and handing it back would save somebody else's state as this thread's.
+//
 // The caller must hold the project stash mutex.
 func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
-	if err := wm.gitRun(repoPath, "stash", "push", "-u", "-m", message); err != nil {
-		return "", fmt.Errorf("stash push: %w", err)
+	before, err := wm.stashHashSet(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("stash list: %w", err)
+	}
+	if out, err := wm.gitRunInGitDir(repoPath, "stash", "push", "-u", "-m", message); err != nil {
+		return "", fmt.Errorf("stash push: %s", gitMessage(out, err))
 	}
 	entries, err := wm.listStashEntries(repoPath)
 	if err != nil {
 		return "", fmt.Errorf("stash list: %w", err)
 	}
-	for _, e := range entries {
+	var fresh []StashEntry
+	for _, e := range entries { // newest first
+		if !before[e.Hash] {
+			fresh = append(fresh, e)
+		}
+	}
+	for _, e := range fresh {
 		if strings.Contains(e.Subject, message) {
 			return e.Hash, nil
 		}
 	}
-	// Fallback: mutex serializes operations, our push should be at the top.
-	hash, _ := wm.gitRunOutput(repoPath, "rev-parse", "stash@{0}")
-	return strings.TrimSpace(hash), nil
+	switch len(fresh) {
+	case 0:
+		return "", ErrNothingToStash
+	case 1:
+		// git rewrapped the label; the one entry that appeared during our push is ours.
+		return fresh[0].Hash, nil
+	default:
+		return "", fmt.Errorf("stash push: %d entries appeared and none carries %q", len(fresh), message)
+	}
+}
+
+// stashHashSet snapshots the stash list as a set of commit hashes, so a later list can be diffed against
+// it to find what a push added.
+func (wm *WorktreeManager) stashHashSet(repoPath string) (map[string]bool, error) {
+	entries, err := wm.listStashEntries(repoPath)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		set[e.Hash] = true
+	}
+	return set, nil
 }
 
 // DropStashByHash drops a stash entry identified by its commit hash.
@@ -2382,22 +2373,6 @@ func StashMessageForFork(taskID string) string {
 	return stashMessageWithPrefix(stashLabelFork, taskID)
 }
 
-// StashMessageForCheckpoint returns a stash message for an execution checkpoint.
-// Branch name is truncated to fit within maxStashMessage characters.
-func StashMessageForCheckpoint(taskID, branch string) string {
-	prefix := "On "
-	suffix := ": " + stashLabelCheckpoint + taskID
-	if len(prefix+suffix) > maxStashMessage {
-		return (prefix + suffix)[:maxStashMessage]
-	}
-	branchMax := maxStashMessage - len(prefix) - len(suffix)
-	if len(branch) > branchMax {
-		branch = branch[:branchMax]
-	}
-	return fmt.Sprintf("On %s: %s%s", branch, stashLabelCheckpoint, taskID)
-}
-
-// StashMessageForSyncMerge returns a stash message for a sync-merge operation.
 func StashMessageForSyncMerge(taskID string) string {
 	return stashMessageWithPrefix(stashLabelSyncMerge, taskID)
 }

@@ -46,13 +46,13 @@ type handlerStore interface {
 	Close() error
 	// DBStats returns the pool counters, which Shutdown logs.
 	DBStats() sql.DBStats
-	CopyMessagesToThread(sourceThreadID, targetThreadID, upToMessageID string) error
+	CopyMessagesToThread(sourceThreadID, targetThreadID, upToMessageID string) ([]store.CopiedCheckpoint, error)
 	CreateTaskMessage(m *types.TaskMessage) error
 	CreateThread(th *types.TaskThread) error
 	DeleteOtherSessions(ctx context.Context, currentID string) (int, error)
 	DeleteSessionByID(ctx context.Context, id string) (bool, error)
 	DeleteTaskMessageByID(messageID string) error
-	DeleteTaskMessagesAfter(taskID, messageID, threadID string) error
+	DeleteTaskMessagesAfter(taskID, messageID, threadID string) ([]string, error)
 	DeleteThread(threadID string) error
 	DeleteThreadWithMessages(threadID string) (*types.TaskThread, error)
 	GetLastCommitHashBeforeMessage(messageID, threadID string) (string, error)

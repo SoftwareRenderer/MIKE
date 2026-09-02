@@ -1048,7 +1048,9 @@
             await loadHistory(true);
             updateThreadUrl(forked.id);
             onThreadSwitch?.();
-            const result = await sendWithTracking(newContent, attachments);
+            // regenerate: the fork already wrote the edited question into the new thread, so this send is
+            // "answer what the thread holds", not a second copy of the same message.
+            const result = await sendWithTracking(newContent, attachments, true);
             if (result?.queued) handleQueuedSend(newContent);
         } catch (e) {
             dialogStore.showToast(String(e));

@@ -790,7 +790,6 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 	customBase := r.URL.Query().Get("base")
 	fullDiff := r.URL.Query().Get("full") == "1"
 	checkpointIdxStr := r.URL.Query().Get("checkpointIdx")
-
 	// Validate user-supplied refs to prevent git argument injection.
 	if headRef != "" {
 		if err := types.ValidateBranchName(headRef); err != nil {
@@ -804,10 +803,8 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	checkpointIdx := -1
-	if checkpointIdxStr != "" {
-		checkpointIdx, _ = strconv.Atoi(checkpointIdxStr)
-	}
+	// checkpointIdx is only read as a flag below: a checkpoint diff must never come from the cached
+	// done-task snapshot.
 
 	// The canonical done-task diff (pinned BaseCommit..BranchTip) is immutable —
 	// serve it from the persistent snapshot instead of re-running git on every
@@ -858,29 +855,9 @@ func (h *GitHandler) HandleTaskDiff(w http.ResponseWriter, r *http.Request) {
 		baseRef, _ = h.worktreeMgr.ResolveDiffBaseline(taskID, h.worktreeMgr.ResolveTaskBaseline(projectPath, originBranch, task), task.Branch, forkBranch)
 	}
 
-	// Use headRef directly to show changes accumulated up to AND including the checkpoint.
-	// The checkpoint hash (stash commit) contains the full working tree state at that point.
-	// If headRef resolves to the same commit as baseRef (empty diff), fall back to stash.
-	// This handles the case where checkpoint_commit_hash is a branch name (e.g. "master")
-	// instead of a stash hash — older data may have branch names stored.
-	if headRef != "" && baseRef != "" {
-		headResolved, _ := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "rev-parse", "--verify", headRef)
-		baseResolved, _ := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "rev-parse", "--verify", baseRef)
-		if strings.TrimSpace(headResolved) == strings.TrimSpace(baseResolved) {
-			// headRef and baseRef point to the same commit — would give empty diff.
-			// Fall back to stash at the matching checkpoint index.
-			stashHash, err := h.worktreeMgr.GetStashByCheckpointIndex(taskID, checkpointIdx)
-			if err == nil && stashHash != "" {
-				headRef = stashHash
-			} else {
-				// Fallback: use latest stash if index resolution fails
-				latestStash, err2 := h.worktreeMgr.GetLatestStashHash(taskID)
-				if err2 == nil && latestStash != "" {
-					headRef = latestStash
-				}
-			}
-		}
-	}
+	// headRef is the checkpoint commit, whose tree holds the whole working state at that point, so
+	// baseRef..headRef is "the changes up to and including this checkpoint". A checkpoint that resolves to
+	// the baseline has no changes of its own, and the honest diff for that is empty.
 
 	taskDiff, err := h.worktreeMgr.GetTaskDiff(taskID, baseRef, headRef, fullDiff)
 	if err != nil {

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 
-	"kanban/backend/git"
 	"kanban/backend/prompts"
 	"kanban/backend/types"
 )
@@ -388,12 +387,7 @@ func isLSPTool(name string) bool {
 	return inToolSet(name, lspTools)
 }
 
-// createCheckpoint records a git stash snapshot of the worktree after tool calls, using
-// `git stash create` + `git stash store` so the changes stay visible in the working tree.
-// It runs in a goroutine and holds WorktreeMu until the snapshot exists, so the next turn's
-// tools cannot start and have their changes captured in this checkpoint.
-// Labels are generated at fork time (handleThreadFork); newMessages holds only the messages
-// since the last checkpoint.
+// createCheckpoint snapshots the worktree after a turn's tool calls
 func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID, worktreePath, threadID, assistantMsgID string, newMessages []types.ChatMessage, sandboxEnabled bool) {
 	// Check for file changes
 	statusOut, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "status", "--porcelain")
@@ -404,13 +398,8 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 	// Send pending event to frontend
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeCheckpointPending, Data: map[string]string{"message_id": assistantMsgID}})
 
-	// Run stash creation in background.
-	// Acquires WorktreeMu to serialize against the next turn's tool calls,
-	// so the checkpoint captures only the changes from the current turn.
-	// Label generation is deferred to fork time (handleThreadFork).
+	// In the background, so a slow git never delays the turn.
 	go func() {
-		label := git.StashMessageForCheckpoint(taskID, "")
-
 		// Check for cancellation before git operations
 		select {
 		case <-ctx.Done():
@@ -418,67 +407,59 @@ func (te *TaskExecutor) createCheckpoint(ctx context.Context, projectID, taskID,
 		default:
 		}
 
-		// Serialize stash operations per project (stash is repo-wide)
 		task, _ := te.store.GetTaskByID(taskID)
 		projectID := ""
 		if task != nil {
 			projectID = task.ProjectID
 		}
-		var stashHash string
-		var stashErr error
+
+		// Stage the turn's work, then capture it: no stash entry, no reset.
+		capture := func() (string, error) {
+			_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
+			unstageNewBinaryFiles(te.worktreeMgr, taskID)
+			out, err := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "stash", "create")
+			return strings.TrimSpace(out), err
+		}
+
+		// Staging touches the index, which every worktree of the repository shares. A task with no
+		// project has no project lock to take.
 		if projectID != "" {
 			stashMu := te.worktreeMgr.GetProjectStashMu(projectID)
 			stashMu.Lock()
-			// Acquire worktree mutex to block the next turn's tool calls.
-			// This ensures git add -A captures only the current turn's changes.
-			te.GetWorktreeMu(taskID).Lock()
-			// Stage changes, create stash commit (doesn't remove from working tree), store in stash list
-			_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
-			unstageNewBinaryFiles(te.worktreeMgr, taskID)
-			stashCreateOut, createErr := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "stash", "create")
-			if createErr == nil {
-				stashCreateHash := strings.TrimSpace(stashCreateOut)
-				_ = te.worktreeMgr.GitRunInWorktree(taskID, "stash", "store", "-m", label, stashCreateHash)
-				stashHash = stashCreateHash
-			} else {
-				stashErr = createErr
+			defer stashMu.Unlock()
+		}
+		te.GetWorktreeMu(taskID).Lock()
+		snapHash, snapErr := capture()
+		te.GetWorktreeMu(taskID).Unlock()
+
+		// A hash alone is not a checkpoint: git may prune an object nothing references, and the restore
+		// would fail much later against a conversation that still claims the state exists. So a failed
+		// pin is a failed checkpoint.
+		if snapErr == nil && snapHash != "" {
+			if pinErr := te.worktreeMgr.PinTaskSnapshot(taskID, assistantMsgID, snapHash); pinErr != nil {
+				snapErr = pinErr
 			}
-			te.GetWorktreeMu(taskID).Unlock()
-			stashMu.Unlock()
-		} else {
-			// Fallback without stash locking (shouldn't happen)
-			te.GetWorktreeMu(taskID).Lock()
-			_ = te.worktreeMgr.GitRunInWorktree(taskID, "add", "-A")
-			unstageNewBinaryFiles(te.worktreeMgr, taskID)
-			stashCreateOut, createErr := te.worktreeMgr.GitRunInWorktreeOutput(taskID, "stash", "create")
-			if createErr == nil {
-				stashCreateHash := strings.TrimSpace(stashCreateOut)
-				_ = te.worktreeMgr.GitRunInWorktree(taskID, "stash", "store", "-m", label, stashCreateHash)
-				stashHash = stashCreateHash
-			} else {
-				stashErr = createErr
-			}
-			te.GetWorktreeMu(taskID).Unlock()
 		}
 
-		if stashErr != nil {
-			log.Printf("[checkpoint] task=%s stash failed: %v", taskID, stashErr)
-			te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
+		if snapErr != nil {
+			log.Printf("[checkpoint] task=%s snapshot failed: %v", taskID, snapErr)
+			te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
 				"message_id":  assistantMsgID,
 				"commit_hash": "",
 			}})
 			return
 		}
 
-		// Store stash hash on the assistant message (reuses git_commit_hash field)
-		if stashHash != "" {
-			_ = te.store.UpdateTaskMessageCommitHash(assistantMsgID, stashHash)
+		// The hash stays the database's handle (task_messages.git_commit_hash); the ref is what keeps
+		// the object it names alive for the life of the task.
+		if snapHash != "" {
+			_ = te.store.UpdateTaskMessageCommitHash(assistantMsgID, snapHash)
 		}
 
 		// Send complete event to frontend
-		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
+		te.appStreamMgr.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeCheckpointComplete, Data: map[string]string{
 			"message_id":  assistantMsgID,
-			"commit_hash": stashHash,
+			"commit_hash": snapHash,
 		}})
 	}()
 }
