@@ -6,6 +6,7 @@
     import { getStreamingContext, getTaskDiffStatsContext, getExpandedTasksContext } from '$lib/context';
     import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageFile } from '$lib/api';
     import { parseUnifiedDiff, enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
+    import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
     import { filterTopLevelTaskIds } from '$lib/utils/task-utils';
     import { clearHighlightCache } from '$lib/highlighter';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -214,10 +215,17 @@
         }
     });
 
+    // Read on click: the column's rendered width decides, not the window's.
+    let diffColEl: HTMLDivElement | null = $state(null);
+
     function handleDiffLineClick(relativePath: string, lineNumber: number) {
         const fullPath = resolveFilePath(relativePath);
         if (!fullPath) return;
         loadDiffEditor();
+
+        if (shouldAutoFullscreenDiffEditor(diffColEl?.offsetWidth ?? 0, mobile)) {
+            editorFullscreen = true;
+        }
         editingFile = { path: fullPath, lineNumber, displayPath: relativePath };
     }
 
@@ -982,7 +990,7 @@
             {/if}
 
             <!-- Column 3: Working Changes (Diff) with Checkpoint overlay -->
-            <div class="column column-diff" tabindex="-1" class:hidden={floating || (mobile && (activeTab !== 'diff' && activeTab !== 'checkpoint'))} style:width={diffWidth}>
+            <div class="column column-diff" tabindex="-1" class:hidden={floating || (mobile && (activeTab !== 'diff' && activeTab !== 'checkpoint'))} style:width={diffWidth} bind:this={diffColEl}>
                 <div class="diff-content">
                     {#if editingFile}
                         <!-- Inline file editor (lazy-loaded) -->
@@ -1003,6 +1011,7 @@
                                 onToggleFullscreen={toggleEditorFullscreen}
                                 mobileFullscreen={editorFullscreen}
                                 isMobile={mobile}
+                                closeOnEscape={!mobile}
                             />
                         {:else}
                             <div class="diff-editor-loading">Loading editor...</div>
