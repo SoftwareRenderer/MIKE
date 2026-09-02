@@ -1,8 +1,6 @@
 # AGENTS.md
 
-Design narratives and
-mechanism walkthroughs live in `docs/` — read the pointer before touching that subsystem. When you
-learn something new here, *replace* the stale sentence rather than appending.
+Design narratives and mechanism walkthroughs live in `docs/` — read the pointer before touching that subsystem. When you learn something new here, *replace* the stale sentence rather than appending.
 
 ## Repo Map
 - `backend/` — Go server: API handlers, exec loop, LLM client, git/worktrees, sandbox, extensions.
