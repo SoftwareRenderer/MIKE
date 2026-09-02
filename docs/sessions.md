@@ -1,0 +1,49 @@
+# Sessions — Endpoint and UI Detail
+
+Read this when changing `/api/sessions*`, `backend/auth/session.go`, `backend/store/` session
+rows, or Settings → About → Sessions. The security invariants live in
+`AGENTS.md → Sessions & Auth`.
+
+## Storage shape
+
+`SessionManager` (`backend/auth/session.go`) keeps **only `sha256(password)`** and compares digests
+with `subtle.ConstantTimeCompare` — the plaintext never outlives the login request, and both sides
+are always 32 bytes (a length mismatch would make the constant-time compare short-circuit and leak).
+
+**Tokens:** 32 bytes from `crypto/rand`, hex-encoded, 30-day TTL. The raw token exists only in the
+response/cookie; the DB stores `hex(sha256(token))` (indexed, in both `token_hash` and the legacy
+`token` column), so a copy of `kanban.db` cannot be replayed as a live session.
+`BackfillSessionTokens` migrates pre-hash rows once at startup (their legacy column gets a
+`revoked-<id>` placeholder).
+
+**Per-row metadata:** `ip` + `user_agent` are recorded at login; `last_seen` is stamped during
+validation but throttled to one write per 60 s (`lastSeenInterval`) — the store serialises on a
+single connection, so an unthrottled write would turn every authenticated request into a DB write.
+
+## Endpoints
+
+`backend/server/handler_sessions.go`, routes in `routes.go`. Every one is session-authenticated
+(`SessionMiddleware`) and every non-GET is CSRF-guarded; no `/api/sessions` path is ever in
+`publicPaths`.
+
+- `GET /api/sessions` → all live sessions, newest first: `{id, created_at, last_seen, expires_at,
+  ip, user_agent, current}` (RFC3339 UTC; `""` for a never-seen or pre-migration row). The response
+  type has **no token / token-hash / CSRF field at all**, so a credential cannot leak by accident.
+- `DELETE /api/sessions/{id}` → `204` (`404` when unknown). Revoking your *own* session is allowed:
+  the next request 401s and the SPA falls back to the login modal.
+- `POST /api/sessions/revoke-others` → `{"revoked": n}`; deletes every session except the caller's.
+
+## UI
+
+The **Sessions** section of Settings → **About** (`ConfigModal/SessionsSection.svelte`, API in
+`$lib/api/sessions.ts`) lists the rows (own session pinned on top, relative timestamps with
+absolute-time tooltips), with per-row **Revoke** and a **Sign out all other sessions** action. It
+mutates immediately — deliberately **outside** the modal's dirty/Save/Cancel flow, like the PWA
+install button above it — and fetches only when the About tab mounts. Revoking the current session
+hands off to the modal's `onSignOut` prop.
+
+## Tests
+
+`backend/store/sessions_test.go`, `backend/auth/session_test.go`,
+`backend/server/handler_sessions_test.go`, `backend/types/idgen_test.go`,
+`frontend/src/lib/api/__tests__/sessions.unit.ts`, e2e `settings-sessions.spec.ts` (isolated).
