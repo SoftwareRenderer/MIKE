@@ -616,6 +616,30 @@ describe('buildEntriesFromMessages', () => {
         expect(entries[0].toolCalls![0].isPending).toBe(false);
         expect(entries[0].toolCalls![0].startedAt).toBeUndefined();
     });
+
+    // Legacy fork rows carry the role but no payload: they must render nothing, not a blank card.
+    it('drops a tool_call row that carries no invocation', () => {
+        const messages = [
+            { id: 'u1', role: 'user', content: 'count to 10', created_at: '2025-01-01T00:00:00Z' },
+            { id: 'tc-legacy', role: 'tool_call', content: '', created_at: '2025-01-01T00:00:01Z' },
+        ];
+        const { entries } = buildEntriesFromMessages(messages);
+        expect(entries).toHaveLength(1);
+        expect(entries[0].id).toBe('u1');
+        expect(entries.some(e => e.role === 'tool_call')).toBe(false);
+    });
+
+    it('keeps the real tool cards around a payload-less row', () => {
+        const messages = [
+            { id: 'a1', role: 'assistant', content: 'thinking', created_at: '2025-01-01T00:00:00Z' },
+            { id: 'tc-legacy', role: 'tool_call', content: '', created_at: '2025-01-01T00:00:01Z' },
+            { id: 'tc1', role: 'tool_call', content: '', created_at: '2025-01-01T00:00:02Z', tool_calls: JSON.stringify({ tool_id: 't1', tool_name: 'write_file', args: { path: 'hello.bas' } }), tool_result: JSON.stringify({ output: 'Wrote 82 bytes', success: true }) },
+        ];
+        const { entries } = buildEntriesFromMessages(messages);
+        expect(entries).toHaveLength(1);
+        expect(entries[0].toolCalls).toHaveLength(1);
+        expect(entries[0].toolCalls![0].toolId).toBe('t1');
+    });
 });
 
 describe('advisoryLabel', () => {
