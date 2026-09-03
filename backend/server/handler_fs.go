@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"kanban/backend/httputil"
 	"log"
 	"net/http"
 	"os"
@@ -24,7 +25,7 @@ import (
 
 func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	path := r.URL.Query().Get("path")
@@ -250,7 +251,7 @@ func parseUnifiedDiff(diff string) map[int][]string {
 
 func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	var req struct {
@@ -312,7 +313,7 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	path := r.URL.Query().Get("path")
@@ -464,7 +465,7 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 // Binary files are skipped for content search but still matched by filename.
 func (s *Server) handleFSSearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -928,7 +929,7 @@ func resolveGitIdentity() (name, email string) {
 
 func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	var req struct {
@@ -1059,7 +1060,7 @@ func (s *Server) handleFSInitGit(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	var req struct {

@@ -10,11 +10,9 @@ import (
 	"kanban/backend/types"
 )
 
-// BuildSystemPrompt creates the system prompt for task execution.
-// worktreePath is used to read AGENTS.md; cwd is the working directory.
-// summary is injected into the system prompt.
-// skillsMount is the container mount path for skills (e.g. "/mnt/skills")
-// when running in a sandbox; empty string for non-sandbox mode.
+// BuildSystemPrompt creates the system prompt for task execution. worktreePath is where AGENTS.md
+// is read from and cwd the working directory; summary is injected into the prompt; skillsMount is
+// the container path for skills (e.g. "/mnt/skills") in sandbox mode, empty otherwise;
 // operatingMode is "act" (default), "plan", or "explore".
 func BuildSystemPrompt(worktreePath, cwd, summary, skillsMount, operatingMode string) string {
 	var tools []types.ChatTool

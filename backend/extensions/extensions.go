@@ -501,15 +501,15 @@ type SandboxConfig struct {
 	DependencyHostPath string `json:"dependency_host_path,omitempty"`
 }
 
-// DependencyCache is a language server declaring where it looks for resolved dependencies: a path
-// inside its own container, and the variable that names it. It says nothing about the host — which
-// directory fills that path is the user's choice, made once in Settings → Extensions.
+// DependencyCache is a language server declaring where it looks for resolved dependencies: a
+// path inside its own container and the variable that names it. It says nothing about the host —
+// which directory fills that path is the user's choice, made once in Settings → Extensions.
 //
-// A location, not a command: a declared command would be the core running extension-supplied code,
-// and a location discovered by running the toolchain would be the core starting a server to learn
-// where to point it, for every workspace, on every restart. A location plus an environment gate (see
-// EnvironmentGate) closes the loop: the core assigns, the server's own loader says whether it was
-// enough.
+// A location, not a command: a declared command would mean running extension-supplied code in
+// the core, and a location discovered by asking the toolchain would mean starting a server per
+// workspace on every restart just to learn where to point it. A location plus an environment
+// gate (see EnvironmentGate) closes the loop: the core assigns, the server's own loader says
+// whether it was enough.
 type DependencyCache struct {
 	// ContainerPath is where the cache appears inside the extension's container. Shadowing a path
 	// the server keeps its own state in is checked at bind time, where the real paths are known.
@@ -520,13 +520,11 @@ type DependencyCache struct {
 	Env string `json:"env"`
 }
 
-// DependencyGrant is the host directory the user granted for this server's cache, or "" when there is
-// nothing to bind — a granted path with no declaration, or a declaration nobody granted, binds nothing
-// rather than half a configuration.
-//
-// What comes back is a path and nothing else, because the mode is not the extension's to choose: this
-// container is the only one that binds the grant, and it binds it read-only. A manifest that still
-// carries the removed `read_only` key decodes fine and is ignored.
+// DependencyGrant is the host directory the user granted for this server's cache, or "" when
+// there is nothing to bind — a granted path with no declaration, or a declaration nobody
+// granted, binds nothing rather than half a configuration. Only a path comes back because the
+// mode is not the extension's to choose: this container is the only one that binds the grant,
+// and it binds it read-only.
 func (sc *SandboxConfig) DependencyGrant() string {
 	if sc == nil || sc.DependencyHostPath == "" || sc.Dependency == nil {
 		return ""
@@ -591,20 +589,6 @@ type EnvironmentGate struct {
 	SuppressCodes []string `json:"suppress_codes,omitempty"`
 	// Note is one sentence shown to the user instead of the suppressed noise.
 	Note string `json:"note,omitempty"`
-}
-
-// Suppresses reports whether a diagnostic code is one this gate hides while the
-// environment is unhealthy.
-func (g *EnvironmentGate) Suppresses(code string) bool {
-	if g == nil || code == "" {
-		return false
-	}
-	for _, c := range g.SuppressCodes {
-		if c == code {
-			return true
-		}
-	}
-	return false
 }
 
 // lspSandboxFromManifest returns the LSP capability's sandbox config, or nil.

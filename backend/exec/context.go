@@ -321,12 +321,10 @@ func extractTaskFields(output string) (taskID, title string) {
 	return result["task_id"], result["title"]
 }
 
-// formatToolResult returns the descriptive result text for a tool call.
-// For create_task: returns "task ID: [id] - [title]" on success (extracted from JSON result),
-// "but was unsuccessful. Error: [msg]" on failure, or "a task" when result is unknown.
-// For edit_task: returns "task ID: [id] - [title]" on success (extracted from JSON result),
-// "but was unsuccessful. Error: [msg]" on failure.
-// For other tools: returns "which was [status]".
+// formatToolResult returns the descriptive result text for a tool call. create_task and
+// edit_task report "task ID: [id] - [title]" on success (read out of the JSON result),
+// "but was unsuccessful. Error: [msg]" on failure, and create_task says "a task" when the
+// result is unknown. Every other tool reports "which was [status]".
 func formatToolResult(name, toolCallID string, status string, toolResults map[string]string) string {
 	if name == "create_task" {
 		if status == "successful" {
@@ -531,19 +529,18 @@ func BuildConversationFromTaskMessages(taskMsgs []types.TaskMessage) []types.Cha
 	return groupTaskMessages(taskMsgs)
 }
 
-// groupTaskMessages rebuilds a conversation from persisted rows:
+// groupTaskMessages rebuilds a conversation from persisted rows. The LLM context
+// (buildMessagesFromDB) and the utility prompts (BuildConversationFromTaskMessages) share it:
 //
-//   - every tool_call row is emitted with the assistant row that issued it, its tool
-//     results immediately after, so a call is never separated from its answer;
-//   - loop hints are dropped (they are UI commentary the model already acted on);
-//   - advisory rows keep their own role, which is what stops toAPIMessage's "user"
-//     mapping and formatChatHistory from crediting the user with an environment note;
-//   - roles no conversation understands (merge_resolution, legacy markers) are dropped.
+//   - a tool_call row is emitted with the assistant row that issued it and its results right
+//     after, so a call is never separated from its answer;
+//   - loop hints are dropped — the model already acted on them;
+//   - advisory rows keep their own role, so neither toAPIMessage nor formatChatHistory can
+//     credit the user with an environment note;
+//   - roles no conversation understands are dropped.
 //
-// Both rebuild paths share it: the LLM context (buildMessagesFromDB) and the utility
-// prompts (BuildConversationFromTaskMessages). Attaching tool calls by adjacency instead of
-// by owner costs a turn its remaining calls whenever anything is written between an
-// assistant row and its tool_call rows.
+// Attaching tool calls by adjacency rather than by owner loses a turn's remaining calls
+// whenever anything is written between an assistant row and its tool_call rows.
 func groupTaskMessages(taskMsgs []types.TaskMessage) []types.ChatMessage {
 	toolRows, totalToolRows := toolCallRowsByOwner(taskMsgs)
 	messages := make([]types.ChatMessage, 0, len(taskMsgs))
@@ -890,12 +887,11 @@ func collectToolIDs(msgs []*types.ChatMessage) map[string]bool {
 	return ids
 }
 
-// ExtractCommitContext extracts the first user message and ALL assistant messages that
-// contain a request_review tool call, along with those assistants' tool results.
-// Nothing else is included: working turns (and their tool results) are visible in the
-// diff, so the commit generator gets the task prompt plus what the agent itself
-// claimed it had done when it asked for review. A conversation with no request_review
-// therefore yields only the task prompt.
+// ExtractCommitContext returns the first user message and every assistant message that
+// contains a request_review call, plus those assistants' tool results. Nothing else: working
+// turns are already visible in the diff, so the commit generator gets the task prompt plus
+// what the agent claimed it had done when it asked for review. A conversation with no
+// request_review yields only the task prompt.
 func ExtractCommitContext(messages []types.ChatMessage) []types.ChatMessage {
 	var firstUser *types.ChatMessage
 	var requestReviews []*types.ChatMessage // all request_review assistant messages, chronological

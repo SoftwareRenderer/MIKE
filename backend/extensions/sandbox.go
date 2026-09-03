@@ -133,32 +133,28 @@ func (sm *ExtensionSandboxManager) SetWorkspaceDir(dir string) {
 	sm.workspaceDir = dir
 }
 
-// MountPolicy returns the host roots an extension sandbox may mount: workspace dir,
-// registered project paths, the extensions dir, the temp dir, the EnvMountRoots
-// extras, and the host paths projects declare in their own Sandbox Configuration.
-// Project paths are allowed but pinned read-only, so a project can let a language
-// server read a cache without handing an extension a writable host directory. Built
-// on demand, so new projects apply without a restart.
+// MountPolicy returns the host roots an extension sandbox may mount: workspace dir, registered
+// project paths, the extensions dir, the temp dir, the EnvMountRoots extras, and the paths
+// projects declare in their own Sandbox Configuration. Project paths are pinned read-only, so a
+// project can let a language server read a cache without handing an extension a writable host
+// directory. Built on demand, so new projects apply without a restart.
 //
-// Install and settings validation (ExtensionHandler.mountPolicy) does not get these
-// roots: an extension may not ask for a path a user configured for a project. Nor does
-// it get anyone's granted dependency directory, which belongs to one extension and
-// enters through MountPolicyForExtension.
+// Install and settings validation (ExtensionHandler.mountPolicy) gets neither those project roots
+// nor anyone's granted dependency directory: an extension may not ask for a path a user
+// configured, and a grant enters only through MountPolicyForExtension.
 func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
 	return sm.mountPolicy("")
 }
 
-// MountPolicyForExtension is MountPolicy plus the dependency directory granted to THIS extension
-// only, pinned read-only.
+// MountPolicyForExtension is MountPolicy plus the dependency directory granted to THIS
+// extension, pinned read-only. It is not a widening: a person named that directory for this
+// extension and could already have mounted it as ordinary sandbox configuration. What it buys
+// is that the bind passes the same gate as every other mount (ValidateHostPath, container-path
+// charset, read-only pinning) instead of trusting the stored string.
 //
-// This is not a widening: a person named that directory for this extension and could already have
-// mounted it as ordinary sandbox configuration. What it buys is that the bind passes the same gate
-// as every other mount (ValidateHostPath, container-path charset, read-only pinning) instead of a
-// path that trusts the stored string.
-//
-// The pin is unconditional. One granted directory is shared by every project this extension serves, and
-// the files in it belong to the user's own toolchain: a language server writing into a cache every
-// project reads is how one project's turn changes another's dependencies.
+// The pin is unconditional: one granted directory is shared by every project this extension
+// serves, and a language server writing into a cache every project reads is how one project's
+// turn changes another's dependencies.
 func (sm *ExtensionSandboxManager) MountPolicyForExtension(ext *Extension) *MountPolicy {
 	var grant string
 	if ext != nil {
@@ -209,13 +205,13 @@ func extensionMemoryLimit(ext *Extension) int {
 // DependencyMount is what a granted dependency directory gives a container: a mount plus the
 // environment assignment that points at it, or the reason there is nothing to bind.
 //
-// Derived in one place and used on both sides of the lifecycle. If the compatibility check and the
-// create each computed their own answer, a container built before a grant would be called compatible
-// with it and the grant would never take effect.
+// Derived in one place and used on both sides of the lifecycle — if the compatibility check and
+// the create each computed their own answer, a container built before a grant would be called
+// compatible with it and the grant would never take effect.
 //
-// The assignment belongs on the container, not on the server process: `environment.check` is an exec
-// in this container and asks the toolchain the same question, so it needs the same assignment. Given
-// only to the server, the check would report failure forever with the mount right there.
+// The assignment belongs on the container, not on the server process: `environment.check` is an
+// exec in this container asking the toolchain the same question, and given only to the server it
+// would report failure forever with the mount right there.
 type DependencyMount struct {
 	Mount  types.SandboxMount
 	Env    types.SandboxEnv

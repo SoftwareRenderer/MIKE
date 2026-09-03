@@ -1,14 +1,12 @@
 package lsp
 
-// A language server that cannot load a project does not say "I could not load
-// this project". It answers with confident specifics — "no required module
-// provides package X", "no active builds contain Y" — and the model spends the
-// next turns fixing code that was never broken.
+// A language server that cannot load a project does not say so. It answers with confident
+// specifics — "no required module provides package X", "no active builds contain Y" — and the
+// model spends the next turns fixing code that was never broken.
 //
-// So an extension may declare how to check whether its server can answer at all.
-// When the check says it cannot, the codes the extension lists as
-// "could-not-load" noise are dropped before they reach the model, and the user
-// gets one honest sentence instead. Core only compares opaque strings.
+// So an extension may declare how to check whether its server can answer at all, which codes mean
+// "could not load", and one sentence to tell the user instead. Core only compares opaque strings.
+// Nothing calls Environment today, so no verdict is recorded — see its comment.
 
 import (
 	"bytes"
@@ -80,24 +78,16 @@ type EnvironmentReport struct {
 	SuppressCodes []string `json:"suppress_codes,omitempty"`
 }
 
-// Suppresses reports whether a diagnostic code is one this report says means
-// "the server could not load the project", not "this code is wrong".
-func (r EnvironmentReport) Suppresses(code string) bool {
-	if code == "" {
-		return false
-	}
-	for _, c := range r.SuppressCodes {
-		if c == code {
-			return true
-		}
-	}
-	return false
-}
-
-// Environment answers for one file in one workspace. Everything about it is
-// permissive on purpose: no LSP session, no declared check, or a check that
-// could not be run all report healthy, so a failure here can only ever restore
-// today's behaviour, never hide a real error because a probe was unreachable.
+// Environment answers for one file in one workspace.
+//
+// Not wired: no caller asks it, so no verdict is ever recorded and
+// EnvironmentSummary always reports healthy, which means the Settings →
+// Extensions health note can never appear. Deleting this chain or calling it
+// from the diagnostics pass are the two honest endings.
+//
+// Everything about it is permissive on purpose: no LSP session, no declared check, or a
+// check that could not be run all report healthy, so a failure here can only ever restore
+// the old behaviour, never hide a real error because a probe was unreachable.
 func (m *ExtensionLSPManager) Environment(workspacePath, filePath string) EnvironmentReport {
 	cfg := m.GetRegistry().Lookup(filePath)
 	if cfg == nil {
@@ -206,23 +196,6 @@ func envCheckCommand(gate *extensions.EnvironmentGate, cwd string) (string, bool
 		return line, true
 	}
 	return "cd " + shlex.Quote(cwd) + " && " + line, true
-}
-
-// isEnvKey reports whether s is usable as a shell variable name. Anything else
-// is skipped rather than pasted into a command line.
-func isEnvKey(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i, r := range s {
-		switch {
-		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r == '_':
-		case r >= '0' && r <= '9' && i > 0:
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 // limitWriter is an io.Writer that stops after n bytes.

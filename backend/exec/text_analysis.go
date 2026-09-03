@@ -76,12 +76,10 @@ func (d *phraseDetector) reset() {
 	d.fired = false
 }
 
-// check feeds new text into the detector and returns true if exact phrase
-// repetition is detected. Once fired, subsequent calls return false until reset.
-//
-// It appends new text to any pending (incomplete) text, extracts complete
-// sentences, and checks each against previously seen phrases. Incomplete
-// text at the end is kept as pending for the next call.
+// check feeds new text to the detector and reports repeated exact phrases. Once it fires,
+// later calls return false until reset. New text is appended to any pending text, complete
+// sentences are checked against the phrases already seen, and the incomplete tail stays
+// pending for the next call.
 func (d *phraseDetector) check(newText string) bool {
 	if d.fired {
 		return false
@@ -139,8 +137,8 @@ func (d *phraseDetector) check(newText string) bool {
 // A sentence boundary is: .!? followed by whitespace/newline, .!? followed by uppercase,
 // or a double newline.
 // The last segment (incomplete sentence) is included so it can accumulate more text.
-// maxPendingSize limits the phraseDetector.pending buffer to prevent
-// unbounded memory growth from extremely long text without sentence boundaries.
+// maxPendingSize bounds phraseDetector.pending, so text with no sentence boundaries cannot
+// grow the buffer without limit.
 const maxPendingSize = 16 * 1024
 
 func splitSentences(text string) []string {

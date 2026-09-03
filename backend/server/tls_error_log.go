@@ -7,20 +7,17 @@ import (
 	"sync"
 )
 
-// net/http logs its own errors through Server.ErrorLog (TLS handshake failures, accept
-// errors, malformed responses); with none it writes to the standard logger. One of them is
-// pure noise here:
+// net/http logs its own errors through Server.ErrorLog; with none it writes to the standard
+// logger. One of them is pure noise here:
 //
 //	http: TLS handshake error from 192.168.1.190:61946: remote error: tls: unknown certificate authority
 //
-// That comes from the *client* - it could not chain our certificate to a root in its own trust
-// store, so the device never imported the local CA (or holds an older copy) - and such a device
-// retries every request, so one phone buries the log.
-//
-// httpErrorLog filters them: a certificate-trust rejection is logged once per remote host (the
-// actionable hint) and dropped after. Everything else passes through, including errors that do
-// point at the server: an expired leaf (never renewed on expiry, by design) or no usable cipher
-// ("remote error: tls: handshake failure").
+// It comes from the client, which could not chain our certificate to a root in its own trust store
+// (never imported the local CA, or holds an older copy), and such a device retries every request, so
+// one phone buries the log. httpErrorLog logs a certificate-trust rejection once per remote host —
+// with the actionable hint — and drops the rest. Everything else passes through, including errors
+// that do point at the server: an expired leaf (never renewed on expiry, by design) or no usable
+// cipher ("remote error: tls: handshake failure").
 func httpErrorLog(caFile string) *log.Logger {
 	return log.New(&tlsTrustNoiseFilter{caFile: caFile, seen: map[string]bool{}}, "", 0)
 }

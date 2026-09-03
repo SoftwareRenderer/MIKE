@@ -150,6 +150,15 @@ func newSandboxClient(bridgeClient *sandbox.Client, workspace, language, extensi
 	}
 }
 
+// swapPrefix replaces a path's leading root and reports whether it had one — one scan where
+// the caller used to test the prefix and then replace it.
+func swapPrefix(path, from, to string) (string, bool) {
+	if rest, ok := strings.CutPrefix(path, from); ok {
+		return to + rest, true
+	}
+	return "", false
+}
+
 // translateURIs recursively rewrites file URIs in data, host paths → container paths when
 // toContainer is true and the other way round when it is false.
 func translateURIs(val any, workspacePath string, projectMounts map[string]string, toContainer bool) any {
@@ -162,25 +171,22 @@ func translateURIs(val any, workspacePath string, projectMounts map[string]strin
 		absWorkspace, _ := filepath.Abs(workspacePath)
 
 		if toContainer {
-			// Host -> Container
-			if strings.HasPrefix(path, absWorkspace) {
-				mount := "/mnt/" + filepath.Base(absWorkspace)
-				return "file://" + strings.Replace(path, absWorkspace, mount, 1)
+			if out, ok := swapPrefix(path, absWorkspace, "/mnt/"+filepath.Base(absWorkspace)); ok {
+				return "file://" + out
 			}
 			for host, container := range projectMounts {
-				if strings.HasPrefix(path, host) {
-					return "file://" + strings.Replace(path, host, container, 1)
+				if out, ok := swapPrefix(path, host, container); ok {
+					return "file://" + out
 				}
 			}
 		} else {
-			// Container -> Host
 			for host, container := range projectMounts {
-				if strings.HasPrefix(path, container) {
-					return "file://" + strings.Replace(path, container, host, 1)
+				if out, ok := swapPrefix(path, container, host); ok {
+					return "file://" + out
 				}
 			}
-			if strings.HasPrefix(path, "/mnt/"+filepath.Base(absWorkspace)) {
-				return "file://" + strings.Replace(path, "/mnt/"+filepath.Base(absWorkspace), absWorkspace, 1)
+			if out, ok := swapPrefix(path, "/mnt/"+filepath.Base(absWorkspace), absWorkspace); ok {
+				return "file://" + out
 			}
 		}
 		return v
