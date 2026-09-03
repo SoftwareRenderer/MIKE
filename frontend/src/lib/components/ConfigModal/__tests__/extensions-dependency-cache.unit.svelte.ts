@@ -250,7 +250,7 @@ describe('Settings → Extensions: the dialog that names the directory', () => {
         await openEditFor(container, 'gopls');
 
         await waitFor(() => expect(container.querySelector('.ext-dep-path')?.textContent).toBe('/data/shared/gomodcache'));
-        const clear = buttonByText([...container.querySelectorAll('button')] as HTMLButtonElement[], 'Don’t share');
+        const clear = buttonByText([...container.querySelectorAll('button')] as HTMLButtonElement[], 'Unmount');
         if (!clear) throw new Error('a granted directory offers no way to stop sharing it');
         await fireEvent.click(clear);
         await clickSave(container);

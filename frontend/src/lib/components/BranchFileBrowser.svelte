@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from 'svelte';
     import { ensureCsrfToken, getGitStatus } from '$lib/api';
+    import { gitStatusLabel, gitStatusClass, gitStatusPriority } from '$lib/utils/git-status';
     import Icon from '$lib/components/Icon.svelte';
     import folderIcon from '$lib/assets/icons/folder.svg?raw';
     import fileIcon from '$lib/assets/icons/file.svg?raw';
@@ -233,7 +234,7 @@
                 let dir = absPath.substring(0, absPath.lastIndexOf('/'));
                 while (dir.length > rootPath.length) {
                     const existing = absMap.get(dir);
-                    if (!existing || statusPriority(char) > statusPriority(existing)) {
+                    if (!existing || gitStatusPriority(char) > gitStatusPriority(existing)) {
                         absMap.set(dir, char);
                     }
                     dir = dir.substring(0, dir.lastIndexOf('/'));
@@ -245,51 +246,9 @@
         }
     }
 
-    // Priority for status characters (higher = more significant)
-    function statusPriority(char: string): number {
-        switch (char) {
-            case 'U': return 7;  // unmerged (conflict)
-            case 'D': return 6;  // deleted
-            case 'R': return 5;  // renamed
-            case 'M': return 4;  // modified
-            case 'C': return 3;  // copied
-            case 'A': return 2;  // added
-            case '?': return 1;  // untracked
-            default: return 0;
-        }
-    }
-
     /** Get the display status character for a file path. */
     function getGitStatusChar(path: string): string {
         return gitStatusMap.get(path) || '';
-    }
-
-    /** Get CSS class for git status color. */
-    function getGitStatusClass(char: string): string {
-        switch (char) {
-            case 'M': return 'git-status-modified';
-            case 'A': return 'git-status-added';
-            case 'D': return 'git-status-deleted';
-            case '?': return 'git-status-untracked';
-            case 'R': return 'git-status-renamed';
-            case 'U': return 'git-status-unmerged';
-            case 'C': return 'git-status-copied';
-            default: return '';
-        }
-    }
-
-    /** Get human-readable name for git status. */
-    function getGitStatusName(char: string): string {
-        switch (char) {
-            case 'M': return 'Modified';
-            case 'A': return 'Added';
-            case 'D': return 'Deleted';
-            case '?': return 'Untracked';
-            case 'R': return 'Renamed';
-            case 'U': return 'Unmerged';
-            case 'C': return 'Copied';
-            default: return char;
-        }
     }
 
     function handleClick(entry: { isDir: boolean; path: string }, pin: boolean = false) {
@@ -469,7 +428,7 @@
                         {/if}
                         <span class="file-name">{entry.name}</span>
                         {#if getGitStatusChar(entry.path)}
-                            <span class="git-status-badge {getGitStatusClass(getGitStatusChar(entry.path))}" title="Git: {getGitStatusChar(entry.path)}" aria-label={`Git status: ${getGitStatusName(getGitStatusChar(entry.path))}`}>
+                            <span class="git-status-badge {gitStatusClass(getGitStatusChar(entry.path))}" title="Git: {getGitStatusChar(entry.path)}" aria-label={`Git status: ${gitStatusLabel(getGitStatusChar(entry.path))}`}>
                                 {getGitStatusChar(entry.path)}
                             </span>
                         {/if}

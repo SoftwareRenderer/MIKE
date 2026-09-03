@@ -166,7 +166,7 @@ test.describe.serial('Extension dependency directory', () => {
         const dialog = await openEditDialog(page);
 
         await expect(dialog.locator('.ext-dep-path')).toHaveText(cacheDir, { timeout: 5000 });
-        await dialog.getByRole('button', { name: 'Don’t share' }).click();
+        await dialog.getByRole('button', { name: 'Unmount' }).click();
         await dialog.getByRole('button', { name: 'Save' }).click();
 
         await expect(fixtureRow(page).getByRole('button', { name: 'Needs setup' })).toBeVisible({ timeout: 5000 });

@@ -13,7 +13,6 @@
         taskId,
         projectId,
         taskTitle,
-        taskPrompt,
         editProviders,
         editModel,
         editUrl,
@@ -24,14 +23,12 @@
         taskHasParent,
         targetBranch,
         baseRef,
-        isAgentSelected,
         onSave,
         onCancel,
     }: {
         taskId: string;
         projectId: string;
         taskTitle: string;
-        taskPrompt: string;
         editProviders: Provider[];
         editModel: string;
         editUrl: string;
@@ -42,7 +39,6 @@
         taskHasParent: boolean;
         targetBranch: string;
         baseRef: string;
-        isAgentSelected: () => boolean;
         onSave: (title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean, baseRef: string) => void;
         onCancel: () => void;
     } = $props();

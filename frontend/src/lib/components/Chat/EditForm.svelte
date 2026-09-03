@@ -1,6 +1,8 @@
 <script lang="ts">
     import FileMentionDropdown from '../FileMentionDropdown.svelte';
     import { useFileMention } from '$lib/composables/use-file-mention.svelte';
+    import { dialogStore } from '$lib/stores';
+    import { readImageAttachments, describeRejectedImages, MAX_IMAGES } from '$lib/utils/attachments';
 
     interface Props {
         content: string;
@@ -36,20 +38,14 @@
         getTextarea: () => textareaEl,
     });
 
-    function handleEditFileSelect(e: Event) {
-        const files = (e.target as HTMLInputElement).files;
+    async function handleEditFileSelect(e: Event) {
+        const input = e.target as HTMLInputElement;
+        const files = input.files;
         if (!files || files.length === 0) return;
-        const remaining = 4 - editAttachments.length;
-        for (let i = 0; i < Math.min(remaining, files.length); i++) {
-            const file = files[i];
-            if (!file.type.startsWith('image/')) continue;
-            if (file.size > 4 * 1024 * 1024) continue;
-            const reader = new FileReader();
-            reader.onload = () => {
-                editAttachments = [...editAttachments, { mimeType: file.type, data: reader.result as string }];
-            };
-            reader.readAsDataURL(file);
-        }
+        const picked = await readImageAttachments(files, MAX_IMAGES - editAttachments.length);
+        if (picked.accepted.length > 0) editAttachments = [...editAttachments, ...picked.accepted];
+        const problem = describeRejectedImages(picked);
+        if (problem) dialogStore.showToast(problem, 'error');
         if (editFileInput) editFileInput.value = '';
     }
 

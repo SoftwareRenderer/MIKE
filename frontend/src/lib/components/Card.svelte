@@ -503,7 +503,6 @@
             taskId: task.id,
             projectId: projectId!,
             taskTitle: task.title,
-            taskPrompt: task.prompt,
             editProviders: providers,
             editModel: task.model_name || '',
             editUrl: task.llama_server_url || '',
@@ -514,13 +513,6 @@
             taskHasParent: !!task.parent_task_id,
             targetBranch: selProject?.origin_branch || 'main',
             baseRef: task.base_ref || '',
-            isAgentSelected: () => {
-                const url = task.llama_server_url;
-                if (!url) return false;
-                if (url.startsWith(AGENT_URL_PREFIX)) return true;
-                const p = providers.find(p => p.url === url);
-                return p ? isAgentProvider(p) : false;
-            },
         };
         appStore.showEditTask = true;
     }

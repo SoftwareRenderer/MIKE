@@ -23,11 +23,11 @@ import (
 // flat `{root}/{name}`), never from a request field. The containment checks are what make it safe to
 // hand this a recursive delete: author and name originate in a manifest, which is third-party content.
 func (h *ExtensionHandler) removeExtensionFiles(ext *Extension) string {
-	if ext == nil || ext.Name == "" {
-		return "the extension record carried no name, so its files could be located"
+	if ext == nil {
+		return "the extension record is missing, so no files could be located"
 	}
-	if ext.Name == "." || ext.Name == ".." || strings.ContainsAny(ext.Name, `/\`) {
-		return fmt.Sprintf("refused to remove files for %s: %q is not a directory name", ext.ID, ext.Name)
+	if reason := unsafeDirName(ext.Name); reason != "" {
+		return fmt.Sprintf("refused to remove files for %s: %s", ext.ID, reason)
 	}
 	root := h.config.ExtensionsDirOrDefault()
 	if root == "" {
@@ -64,6 +64,21 @@ func (h *ExtensionHandler) removeExtensionFiles(ext *Extension) string {
 		}
 	}
 	log.Printf("[extensions] ext=%s removed its files: %s", ext.ID, dir)
+	return ""
+}
+
+// unsafeDirName reports why an extension name cannot be used as a directory name, or "" when it can.
+// Both the delete path and the startup repair derive a directory from a stored record and hand it to a
+// recursive filesystem operation, so both must refuse exactly the same names: author and name
+// originate in a manifest, which is third-party content, and a separator would walk out of the
+// extensions root.
+func unsafeDirName(name string) string {
+	if name == "" {
+		return "the record carried no name"
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return fmt.Sprintf("%q is not a directory name", name)
+	}
 	return ""
 }
 

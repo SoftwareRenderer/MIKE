@@ -50,6 +50,15 @@ exactly `commit` (full SHA-1/SHA-256), verifies `git rev-parse HEAD` matches, th
 subdir into `./extensions/<author>/<name>`. Deploy via Settings → Extensions → "Install from
 Registry".
 
+**A missing install is re-materialized at startup.** That directory *is* the extension —
+`/extensions/<author>/<name>/index.html` is what gets framed — so a wiped `extensions/` tree leaves every
+UI extension enabled and inert with nothing to see: the frame 404s, the document never boots, so there is
+no channel and no capability call, and `extHost.ready()` simply never resolves. At startup the server
+re-checks out each row's **own** pinned commit for any install whose `manifest.json` is missing or
+unreadable (`backend/extensions/repair.go`, `[extensions] repair:` log lines). Nothing is fetched for a row
+with no `repo`/`commit` (a local install has no second copy to come from), and nothing is fetched at all
+when the files are present.
+
 **Bundling a runtime library (isolation):** keep it **inside the extension folder** (bundle an ESM
 npm package to a single IIFE committed in the extension dir, with its own `package.json` + build).
 The core `frontend/` workspace must NOT gain an extension's runtime dependencies.

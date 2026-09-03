@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -196,6 +197,9 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	repairCtx, cancelRepair := context.WithCancel(context.Background())
+	go srv.RepairExtensionFiles(repairCtx)
+
 	// A Serve() failure must not end the process where it happens: take the same cleanup
 	// a signal does (trace close, Shutdown), then exit 1 so a supervisor restarts. Never
 	// log.Fatalf here — it skips that cleanup.
@@ -215,6 +219,7 @@ func main() {
 		}
 	}
 
+	cancelRepair() // the repair pass is bounded by this context; nothing joins it
 	close(rotationDone)
 	trace.Stop()
 	traceFile.Close()
