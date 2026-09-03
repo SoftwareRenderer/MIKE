@@ -2,7 +2,11 @@ import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 import { readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, isolatedProject, gotoProject } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 // ============================================================
 // TASK LIFECYCLE — Parallel Tests (independent)
@@ -14,7 +18,7 @@ test.describe.configure({ mode: 'parallel' });
 
 test.describe('Create New Task', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -24,7 +28,7 @@ test.describe('Create New Task', () => {
     expect(taskId).not.toBe('');
 
     // Verify the task appears on the board
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
 
     const card = page.locator(`.card[data-task-id="${taskId}"]`);
@@ -52,7 +56,7 @@ test.describe('Create New Task', () => {
 
 test.describe('Delete Task with Confirmation', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -95,7 +99,7 @@ test.describe('Delete Task with Confirmation', () => {
 
 test.describe('Start Task Button', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -115,7 +119,7 @@ test.describe('Start Task Button', () => {
 
 test.describe('No Legacy Start/Stop Buttons', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -138,7 +142,7 @@ test.describe('No Legacy Start/Stop Buttons', () => {
 
 test.describe('Backlog Column Title in Context', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -156,7 +160,7 @@ test.describe('Backlog Column Title in Context', () => {
 
 test.describe('Task Count in Context Column', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -174,7 +178,7 @@ test.describe('Task Count in Context Column', () => {
 
 test.describe('Task Detail Layout', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
   });
 
@@ -265,7 +269,7 @@ test.describe.serial('Subtask Progress Tracking', () => {
   let subtaskIds: string[] = [];
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -411,7 +415,7 @@ function getTaskInfo(): { projectId: string; taskId: string; worktreeDir: string
 
 test.describe.serial('Task Stash/Unstash', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
   });
 
@@ -545,7 +549,7 @@ test.describe.serial('Task Stash/Unstash', () => {
 
 test.describe.serial('Task Commit Diff', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
   });
 
@@ -566,7 +570,7 @@ test.describe.serial('Task Commit Diff', () => {
   });
 
   test('shows two dropdowns with defaults: Original branch -> Working tree', async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
 
     const inProgressCards = page.locator('.card').filter({ hasText: 'In Progress' });
@@ -604,7 +608,7 @@ test.describe.serial('Task Commit Diff', () => {
   });
 
   test('changing dropdowns updates the diff view', async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
 
     const inProgressCards = page.locator('.card').filter({ hasText: 'In Progress' });

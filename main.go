@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -219,8 +218,13 @@ func main() {
 	close(rotationDone)
 	trace.Stop()
 	traceFile.Close()
-	if err := srv.Shutdown(context.Background()); err != nil {
+	// Bounded, so a blocked cleanup step cannot leave the process holding the data directory.
+	if err := server.RunShutdownWithDeadline(srv.Shutdown); err != nil {
 		log.Printf("Shutdown: %v", err)
+		if errors.Is(err, server.ErrShutdownDeadline) && exitCode == 0 {
+			// A wedged subsystem is worth a non-zero exit: the process left work behind.
+			exitCode = 1
+		}
 	}
 	os.Exit(exitCode)
 }

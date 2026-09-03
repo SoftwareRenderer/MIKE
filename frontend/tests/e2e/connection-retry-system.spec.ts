@@ -25,8 +25,9 @@ test.describe.serial('Connection retry renders as system message', () => {
     const userBubbles = page.locator('.chat-message.user .message-text', { hasText: 'Connection interrupted' });
     expect(await userBubbles.count()).toBe(0);
 
-    // Retry recovers: the assistant response still streams in.
-    await expect(page.locator('.chat-message.assistant')).toBeVisible({ timeout: 60000 });
+    // Retry recovers: the assistant response still streams in. `.last()` because a
+    // successful retry appends to the assistant messages already on screen.
+    await expect(page.locator('.chat-message.assistant').last()).toBeVisible({ timeout: 60000 });
     await waitForSendButton(page);
   });
 });

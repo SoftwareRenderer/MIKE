@@ -2,14 +2,7 @@ import { test, expect, type Browser, type Page, type Frame } from '@playwright/t
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'path';
-import {
-    apiGetConfig,
-    getTaskData,
-    ensureTaskStarted,
-    createTaskViaApi,
-    navigateToTask,
-    csrfFetch,
-} from './helpers';
+import { apiGetConfig, createTaskViaApi, csrfFetch, ensureTaskStarted, getTaskData, navigateToTask, storageStatePath } from './helpers';
 
 // HTML preview extension — end-to-end. Installs the local extension via
 // install-local, then verifies the Preview button (HTML-family only), the
@@ -232,10 +225,11 @@ async function previewTitle(page: Page): Promise<string | null> {
 }
 
 // No page fixture in beforeAll/afterAll — dedicated logged-in context.
+/** Set in beforeAll: the two lanes are different servers, so the session file is lane-specific. */
+let storageState = '/tmp/kanban-test-storage-state.json';
+
 async function setupPage(browser: Browser) {
-  const context = await browser.newContext({
-    storageState: '/tmp/kanban-test-storage-state.json',
-  });
+  const context = await browser.newContext({ storageState });
   const page = await context.newPage();
   await page.goto('/');
   return { context, page };
@@ -248,6 +242,9 @@ async function installLocal(page: Page): Promise<void> {
     const csrf = session.csrf_token || '';
     const localRes = await fetch('/api/extensions/local');
     const local = await localRes.json();
+    // A non-array here means the server could not scan its extensions directory at all
+    // (500 "failed to scan extensions directory") — say so instead of dying in .find().
+    if (!Array.isArray(local)) throw new Error(`/api/extensions/local -> ${localRes.status}: ${JSON.stringify(local).slice(0, 300)}`);
     const entry = local.find((e: any) => e.name === 'html-preview');
     if (!entry) return { status: 404, text: 'html-preview not in local extensions list' };
     const r = await fetch('/api/extensions/install-local', {
@@ -259,6 +256,9 @@ async function installLocal(page: Page): Promise<void> {
     const text = await r.text(); // SSE stream; fetch resolves when install completes
     return { status: r.status, text };
   });
+  // "already installed" means setup's goal is already met. Treating it as a failure would couple
+  // the spec to residue from an earlier run.
+  if (res.status === 409 && res.text.includes('already installed')) return;
   if (res.status !== 200 && res.status !== 201) {
     throw new Error(`install-local failed (${res.status}): ${res.text.slice(0, 300)}`);
   }
@@ -279,32 +279,74 @@ async function getHtmlPreviewExtId(page: Page): Promise<string> {
  */
 async function testRepoProject(page: Page): Promise<{ id: string; name: string }> {
   return await page.evaluate(async (path) => {
-    const projects = await (await fetch('/api/projects')).json();
+    const res = await fetch('/api/projects');
+    const projects = await res.json();
+    if (!Array.isArray(projects)) throw new Error(`/api/projects -> ${res.status}: ${JSON.stringify(projects).slice(0, 200)}`);
     const mine = (projects as any[]).find((p) => p.path === path);
     return mine ? { id: mine.id, name: mine.name } : { id: '', name: '' };
   }, TEST_REPO);
 }
 
-/** Select TEST_REPO's project row by name. Identity, not position: the chromium
- * project runs several workers against one server, so `.project-item` `.first()`
- * can be a project another spec created — possibly one whose directory it has
- * just deleted, which leaves the explorer on an empty directory with no list to
- * click into. */
+/** Open TEST_REPO's project by deep link.
+ *
+ * Not a sidebar click: another worker's project may be selected first, and the explorer would
+ * list that path instead — a path the server refuses (400 "path outside allowed project
+ * directory"), leaving the panel with no list at all. The deep link names the project. */
 async function selectTestRepoProject(page: Page): Promise<void> {
-  const { name } = await testRepoProject(page);
+  const { id, name } = await testRepoProject(page);
   expect(name, `a project exists for ${TEST_REPO}`).not.toBe('');
-  await page.locator(`.project-item:has(span.project-name:text-is("${name}"))`).first().click();
+  // Click the row (this is what actually mounts the project's explorer state); the deep link
+  // alone leaves the file explorer unmounted.
+  await page.locator(`a.project-item[href$="project=${id}"]`).click();
+  await expect(page.locator('.top-bar')).toBeVisible({ timeout: 20000 });
 }
 
 /** Open the project explorer and open `file` (relative to repo root, with subfolders). */
 async function openFile(page: Page, parts: string[]): Promise<void> {
-  await page.goto('/');
-  await page.waitForSelector('.card', { timeout: 10000 });
+  await page.goto('/'); // so the project lookup below has a document to fetch from
   await selectTestRepoProject(page);
   await page.waitForSelector('.top-bar', { timeout: 10000 });
-  await page.locator('.explorer-btn').click();
-  await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
-  await expect(page.locator('.file-browser-list')).toBeVisible({ timeout: 10000 });
+  // The listing is a live `git status` of the repo: the slowest request on the box during
+  // a full-suite run. When it fails the explorer shows an error and does NOT retry, so
+  // reopen it the way a user would rather than fail on a transient.
+  // Keep the listing failures visible: the explorer does not retry after an error, so an
+  // open-and-no-list run is otherwise indistinguishable from a slow run.
+  const listingFailures: string[] = [];
+  let lastPath = '(never read)';
+  page.on('response', (res) => {
+    const u = new URL(res.url());
+    if (u.pathname !== '/api/fs') return;
+    listingFailures.push(`${res.status()} ${u.searchParams.get('path')} ${res.status() >= 400 ? u.searchParams.get('project') : ''}`);
+  });
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.locator('.explorer-btn').click();
+    await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 20000 });
+    // Listing AND directory: `.file-browser-list` alone would happily describe another
+    // project's directory (the explorer takes its path from whatever the app has selected,
+    // and `/api/fs` resolves the project from the PATH — a stale selection gets refused with
+    // 400 "path outside allowed project directory" and no list at all).
+    const [listed, shownPath] = await Promise.all([
+      page.locator('.file-browser-list').waitFor({ timeout: 10000 }).then(() => true).catch(() => false),
+      page.locator('.file-browser-path-input').waitFor({ timeout: 10000 })
+        .then(() => page.locator('.file-browser-path-input').inputValue())
+        .catch(() => ''),
+    ]);
+    lastPath = shownPath;
+    if (listed && shownPath === TEST_REPO) {
+      await openParts(page, parts);
+      return;
+    }
+    await page.locator('.close-btn, [aria-label="Close explorer"]').first().click().catch(() => {});
+    await page.waitForTimeout(500);
+  }
+  throw new Error(
+    `explorer never listed ${TEST_REPO} (last path shown: ${lastPath}); ` +
+    `/api/fs failures: ${listingFailures.join(' | ') || 'none reported'}`,
+  );
+}
+
+async function openParts(page: Page, parts: string[]): Promise<void> {
   for (const part of parts) {
     await page.locator('.file-browser-item', { hasText: part }).first().click();
     await page.waitForTimeout(150); // tree expands / editor loads
@@ -329,7 +371,8 @@ async function previewFrameOf(page: Page): Promise<Frame> {
 test.describe.serial('HTML Preview extension', () => {
   let extId = '';
 
-  test.beforeAll(async ({ browser }) => {
+  test.beforeAll(async ({ browser }, testInfo) => {
+    storageState = storageStatePath(testInfo.project.name);
     // Egress listener first — the fixture's exfil probes need its URL.
     egressServer = createServer(handleEgress);
     await new Promise<void>((resolve) => egressServer.listen(0, '127.0.0.1', resolve));
@@ -390,6 +433,10 @@ test.describe.serial('HTML Preview extension', () => {
   });
 
   test('Preview button appears for HTML/SVG files but not Markdown', async ({ page }) => {
+    // Three openFile() calls = three app boots, three explorer listings and three
+    // CodeMirror mounts. The default 45s was hit under full-suite load with nothing
+    // actually wrong, so this one gets a bigger budget rather than fewer assertions.
+    test.setTimeout(120000);
     // .html → button present
     await openFile(page, [`html-preview-${TS}`, PAGE_FILE]);
     await expect(previewButton(page)).toBeVisible({ timeout: 10000 });
@@ -819,8 +866,18 @@ test.describe.serial('HTML Preview extension', () => {
     await expect(frame.locator('#title')).toHaveText('META-REFRESH-INTREE', { timeout: 10000 });
 
     // The 2s refresh navigates to page2.html — in-tree, so allowed.
-    await expect(frame.locator('#title')).toHaveText('PAGE-2', { timeout: 15000 });
-    await expect(page.locator('[data-ext-modal]', { hasText: 'navigate away' })).toHaveCount(0);
+    // Checked as a decision, because the two failures are different bugs: the title staying
+    // META-REFRESH-INTREE means the refresh never fired; the title going null with a warning
+    // modal means the extension contained the frame (its /nav lookup came back stale).
+    await expect
+        .poll(
+            async () => ({
+                title: await frame.locator('#title').textContent().catch(() => null),
+                warned: await page.locator('[data-ext-modal]', { hasText: 'navigate away' }).count(),
+            }),
+            { message: 'in-tree meta-refresh must land on PAGE-2 with no containment warning', timeout: 20000 },
+        )
+        .toEqual({ title: 'PAGE-2', warned: 0 });
     await expect(btn).toHaveClass(/active/);
 
     // Toggle off → code view restored.

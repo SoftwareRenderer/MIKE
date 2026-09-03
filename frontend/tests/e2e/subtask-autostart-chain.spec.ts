@@ -1,5 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
-import { getProjectId, createTaskViaApi, csrfFetch, getTaskData } from './helpers';
+import { getProjectId, createTaskViaApi, csrfFetch, getTaskData, isolatedProject, gotoProject } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 // ============================================================
 // SUBTASK AUTOSTART CHAIN — P → C1 → G1, G2
@@ -77,7 +81,7 @@ test.describe.serial('subtask autostart chain', () => {
       storageState: '/tmp/kanban-test-storage-state.json',
     });
     const page = await context.newPage();
-    await page.goto('/');
+    await gotoProject(page);
     projectId = await getProjectId(page);
 
     // Build the chain P → C1 → G1, G2 (all in Backlog).
@@ -115,7 +119,7 @@ test.describe.serial('subtask autostart chain', () => {
   });
 
   test('starting the parent moves the chain to In Progress and starts the lowest-level subtask first', async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     const parent = await getTaskData(page, projectId, parentId);
     expect(parent.status, 'parent should be In Progress (started-but-pending)').toBe('in_progress');
     expect(parent.execution_state, 'parent should stay pending while subtasks run').toBe('idle');
@@ -135,14 +139,14 @@ test.describe.serial('subtask autostart chain', () => {
   });
 
   test('the chain continues to the next sibling after the first leaf finishes its turn', async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     // G1's fast mock-LLM turn ends in Review, which triggers the chain to
     // auto-start the next leaf (G2).
     await expectTaskStarted(page, g2Id, 'sibling G2');
   });
 
   test('the intermediate task starts only after ALL its children are Done, and the root runs last', async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     // Both leaves in Review are NOT done — C1 must not start yet.
     const c1Before = await getTaskData(page, projectId, c1Id);
     expect(c1Before.execution_state, 'C1 must wait until both leaves are Done').not.toBe('running');

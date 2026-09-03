@@ -1,10 +1,17 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'child_process';
 import { existsSync, writeFileSync, mkdirSync } from 'fs';
-import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask, getWorktreePath, worktreeExists } from './helpers';
+import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask, getWorktreePath, worktreeExists,
+  isolatedProject, gotoProject, ownProjectPath } from './helpers';
 
 // Test project and worktrees locations (managed by global-setup.ts)
-const TEST_REPO = '/tmp/kanban-test-repo';
+// This spec commits through the app and then reads the PROJECT checkout, so it must not
+// share that checkout with anyone: other specs run their own `git add -A && git commit`
+// in the shared test repo, and an index race there shows up here as "the staged file is
+// not in the project" — the exact assertion this spec exists for.
+isolatedProject();
+
+const TEST_REPO = () => ownProjectPath() || '/tmp/kanban-test-repo';
 
 /** Write a file into the task worktree and stage it (git add). */
 function writeStagedFile(projectId: string, taskId: string, filePath: string, content: string): void {
@@ -22,14 +29,14 @@ function writeUntrackedFile(projectId: string, taskId: string, filePath: string,
 }
 
 function projectGit(args: string): string {
-  return execSync(`git -C ${TEST_REPO} ${args}`, { encoding: 'utf-8' }).trim();
+  return execSync(`git -C ${TEST_REPO()} ${args}`, { encoding: 'utf-8' }).trim();
 }
 
 test.describe.serial('Commit and move to done excludes unstaged files', () => {
   let projectId: string;
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
     projectId = await getProjectId(page);
   });
@@ -109,12 +116,12 @@ test.describe.serial('Commit and move to done excludes unstaged files', () => {
     }).toPass({ timeout: 15000 });
 
     // The staged file must be committed and merged into the project checkout.
-    expect(existsSync(`${TEST_REPO}/${stagedName}`)).toBe(true);
+    expect(existsSync(`${TEST_REPO()}/${stagedName}`)).toBe(true);
     expect(projectGit(`log --all --oneline -- ${stagedName}`)).not.toBe('');
 
     // The untracked file must NOT have landed in the main project folder:
     // not on disk, not in any ref, not in the project's git status.
-    expect(existsSync(`${TEST_REPO}/${untrackedName}`)).toBe(false);
+    expect(existsSync(`${TEST_REPO()}/${untrackedName}`)).toBe(false);
     expect(projectGit(`log --all --oneline -- ${untrackedName}`)).toBe('');
     expect(projectGit('status --porcelain')).not.toContain(untrackedName);
 

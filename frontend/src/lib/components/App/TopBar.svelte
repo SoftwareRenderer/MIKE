@@ -121,6 +121,7 @@
     .project-title {
         flex: 1;
         min-width: 0;
+        overflow: hidden;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -129,6 +130,7 @@
         color: var(--color-text-primary);
     }
     .icon-btn.explorer-btn {
+        min-width: 0;
         gap: 6px;
         padding-left: 6px;
         font-weight: 500;
@@ -137,7 +139,8 @@
         position: relative;
         height: 28px;
     }
-    .explorer-btn .project-path {
+    .explorer-btn .project-path,
+    .explorer-btn .branch-badge {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;

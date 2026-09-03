@@ -1,4 +1,13 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+/**
+ * The auth modal, addressed precisely. `[role="dialog"]` is not a login-modal selector here:
+ * BaseModal, CommitDiffOverlay, TerminalPanel, both explorer views and every ChatMessage edit
+ * `<dialog>` carry it. The login modal has no #modal-title, so it is identified by the one thing
+ * only it contains: its password field.
+ */
+const loginDialog = (page: Page) =>
+    page.locator('[role="dialog"]').filter({ has: page.locator('input[type="password"]') });
 
 test.describe.configure({ mode: 'parallel' });
 test.describe('Login', () => {
@@ -10,8 +19,8 @@ test.describe('Login', () => {
     });
 
     test('should show login modal when not authenticated', async ({ page }) => {
-        await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 10000 });
-        await expect(page.locator('[role="dialog"] h2')).toHaveText('Sign in');
+        await expect(loginDialog(page)).toBeVisible({ timeout: 10000 });
+        await expect(loginDialog(page).locator('h2')).toHaveText('Sign in');
     });
 
     test('should hide app content when not authenticated', async ({ page }) => {
@@ -21,7 +30,7 @@ test.describe('Login', () => {
     });
 
     test('should login with correct password', async ({ page }) => {
-        await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 10000 });
+        await expect(loginDialog(page)).toBeVisible({ timeout: 10000 });
 
         // Login via API directly (bypass UI for reliability)
         const context = page.context();
@@ -40,26 +49,26 @@ test.describe('Login', () => {
         await page.waitForURL('/', { timeout: 10000 });
 
         // Login modal should not be visible
-        await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 10000 });
+        await expect(loginDialog(page)).not.toBeVisible({ timeout: 10000 });
 
         // App content should be visible
         await expect(page.locator('.project-item').first()).toBeVisible({ timeout: 10000 });
     });
 
     test('should not dismiss login modal when clicking outside', async ({ page }) => {
-        await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 10000 });
+        await expect(loginDialog(page)).toBeVisible({ timeout: 10000 });
 
         // Click on the overlay (outside the modal)
         await page.locator('.overlay').click();
 
         // Login modal should still be visible (overlay click is blocked)
-        await expect(page.locator('[role="dialog"]')).toBeVisible();
+        await expect(loginDialog(page)).toBeVisible();
         // App content should still be hidden
         await expect(page.locator('.sidebar')).not.toBeVisible();
     });
 
     test('should show error on wrong password', async ({ page }) => {
-        await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 10000 });
+        await expect(loginDialog(page)).toBeVisible({ timeout: 10000 });
 
         // Try wrong password via API
         const response = await page.context().request.post('/api/auth/login', {
@@ -68,25 +77,26 @@ test.describe('Login', () => {
         expect(response.status()).toBe(401);
 
         // Login modal should still be visible (no valid session)
-        await expect(page.locator('[role="dialog"]')).toBeVisible();
+        await expect(loginDialog(page)).toBeVisible();
     });
-
-    test('should logout and show login modal again', async ({ page }) => {
+        test('should logout and show login modal again', async ({ page }) => {
         // Login first
-        await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 10000 });
+        await expect(loginDialog(page)).toBeVisible({ timeout: 10000 });
         await page.context().request.post('/api/auth/login', {
             data: { password: 'test-password-1234' },
         });
         await page.reload();
-        await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 10000 });
+        await expect(loginDialog(page)).not.toBeVisible({ timeout: 10000 });
         await expect(page.locator('.project-item').first()).toBeVisible({ timeout: 10000 });
 
         // Navigate to a project to see the top bar with settings button
-        await page.click('.project-item');
+        // `[href]` — the row of a project that is still cloning has no href and is not
+        // clickable, and clicking it waits out the whole test timeout.
+        await page.locator('a.project-item[href]').first().click();
         await page.waitForSelector('.card, .top-bar', { timeout: 10000 });
 
         // Click settings icon button in the top bar (not the sidebar one)
-        const settingsBtn = page.locator('.icon-btn[aria-label="Settings"]');
+        const settingsBtn = page.locator('.top-bar .icon-btn[aria-label="Settings"]');
         await expect(settingsBtn).toBeVisible({ timeout: 10000 });
         await settingsBtn.click();
 
@@ -99,6 +109,6 @@ test.describe('Login', () => {
         await page.click('.btn-confirm.destructive');
 
         // Login modal should reappear
-        await expect(page.locator('[role="dialog"] h2')).toHaveText('Sign in', { timeout: 10000 });
+        await expect(loginDialog(page).locator('h2')).toHaveText('Sign in', { timeout: 10000 });
     });
 });

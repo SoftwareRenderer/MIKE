@@ -2,7 +2,11 @@ import { test, expect, Page } from '@playwright/test';
 import { execSync } from 'child_process';
 import { existsSync, writeFileSync, unlinkSync, rmSync } from 'fs';
 import { join } from 'path';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, getWorktreePath, worktreeExists } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, getWorktreePath, worktreeExists, isolatedProject, gotoProject } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 // --- Shared utilities ---
 
@@ -32,14 +36,11 @@ async function getDiffFileViaApi(page: Page, projectId: string, taskId: string, 
 }
 
 /**
- * Per-describe dedicated task factory. The chromium project runs serial
- * describes in parallel (fullyParallel: true), so describes must NOT share
- * "the first in-progress task" — each describe lazily creates one dedicated
- * task (with worktree) and reuses it across its own tests. Returns null if the
- * worktree is missing.
- *
- * The prompt is deliberately neutral: mock-LLM keyword routing turns e.g.
- * "list files" into tool calls that mutate the worktree (or complete the task).
+ * Per-describe task factory: each describe gets its own task (with worktree) instead of sharing
+ * "the first in-progress task", which fullyParallel would hand to several describes at once.
+ * The prompt stays neutral — a keyword-routed one can answer with tool calls that mutate the
+ * worktree or complete the task. Pass llm-fixture:<name> to pick the answer. Returns null if the
+ * worktree never appeared.
  */
 function makeSharedTask() {
     let shared: { taskInfo: { projectId: string; taskId: string }; worktreeDir: string } | null = null;
@@ -87,33 +88,25 @@ function writeFileInWorktree(projectId: string, taskId: string, filePath: string
 }
 
 /**
- * Poll the diff API until the expected file appears, then get the diff panel to
- * show it. The worktree watcher's 2s poll + WS broadcast is unreliable in
- * headless tests, so we force a reload once the backend confirms the file is
- * visible — and we RE-navigate until the panel agrees, because one reload is not
- * enough: the panel fetches its diff once per mount, so a request that lands
- * while the backend is still rewriting the worktree (a thread switch checks
- * snapshots out) answers "No changes since last commit", and nothing refetches
- * it after that. Under parallel load that window is easy to hit — the API has
- * the file, the panel stays pinned to the empty answer forever.
+ * Poll the diff API until the file appears, then re-navigate until the panel shows it. The panel
+ * fetches its diff once per mount, so a request that lands while the backend is still rewriting
+ * the worktree answers "No changes since last commit" and nothing refetches it after that.
  */
 async function waitForDiffFile(page: any, projectId: string, taskId: string, expectFile: string) {
     await page.waitForFunction(async ([pid, tid, file]: [string, string, string]) => {
         const res = await fetch(`/api/projects/${pid}/tasks/${tid}/diff`);
         const data = await res.json();
         return data.files && Object.keys(data.files).some((k: string) => k.includes(file));
-    }, [projectId, taskId, expectFile], { timeout: 15000 });
+    }, [projectId, taskId, expectFile], { timeout: 30000 });
     await expect(async () => {
         await navigateToTask(page, taskId);
         await expect(page.locator('.diff-content')).toContainText(expectFile, { timeout: 4000 });
-    }).toPass({ timeout: 12000 });
+    }).toPass({ timeout: 30000 });
 }
 
 /**
- * Poll the diff-file API until the file's content contains the expected text,
- * then re-navigate so the diff panel renders fresh data (same rationale as
- * waitForDiffFile — the worktree watcher's 2s poll + WS broadcast is unreliable
- * in headless tests).
+ * Poll the diff-file API until the content matches, then re-navigate so the panel refetches —
+ * same reason as waitForDiffFile.
  */
 async function waitForDiffFileContent(page: Page, projectId: string, taskId: string, filePath: string, expected: string) {
     await page.waitForFunction(async ([pid, tid, file, text]: [string, string, string, string]) => {
@@ -132,7 +125,7 @@ test.describe.serial('Diff panel user interactions', () => {
     const sharedTask = makeSharedTask();
     test.beforeEach(async ({ page }) => {
         test.setTimeout(30000);
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.project-item', { timeout: 10000 });
     });
 
@@ -664,7 +657,7 @@ test.describe.serial('Diff panel user interactions', () => {
 test.describe.serial('Diff panel real-time file updates', () => {
     const sharedTask = makeSharedTask();
     test.beforeEach(async ({ page }) => {
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.project-item', { timeout: 10000 });
     });
 
@@ -1043,7 +1036,7 @@ test.describe.serial('Diff panel real-time file updates', () => {
 test.describe.serial('Done-task diff shows committed changes', () => {
     test.beforeEach(async ({ page }) => {
         test.setTimeout(60000);
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.project-item', { timeout: 10000 });
     });
 
@@ -1191,7 +1184,7 @@ test.describe.serial('Done-task diff shows committed changes', () => {
 test.describe.serial('Diff panel tab rendering', () => {
     test.beforeEach(async ({ page }) => {
         test.setTimeout(60000);
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.project-item', { timeout: 10000 });
     });
 

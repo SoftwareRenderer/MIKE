@@ -1,12 +1,9 @@
 import { test, expect } from '@playwright/test';
-import {
-  getProjectId,
-  createTaskViaApi,
-  navigateToTask,
-  waitForChatForm,
-  ensureTaskStarted,
-  waitForTaskState,
-} from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, waitForChatForm, ensureTaskStarted, waitForTaskState, isolatedProject, gotoProject } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 /**
  * PAUSE / RESUME
@@ -76,7 +73,7 @@ test.describe('Pause / Resume', () => {
   let projectId: string;
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
     projectId = await getProjectId(page);
   });
@@ -137,7 +134,7 @@ test.describe('Pause / Resume', () => {
     // Load the board FIRST, then start the task: the slow mock stream only
     // stays in-flight for ~2s, so the board must already be live when the
     // running state lands (no page reload between start and pause).
-    await page.goto('/');
+    await gotoProject(page);
     const backlogCard = cardInColumn(page, taskId, 'Backlog');
     await expect(backlogCard).toBeVisible({ timeout: 10000 });
 

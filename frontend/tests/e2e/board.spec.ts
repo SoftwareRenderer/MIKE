@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, isolatedProject, gotoProject } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 test.describe.configure({ mode: 'parallel' });
 
@@ -9,7 +13,7 @@ test.describe.configure({ mode: 'parallel' });
 
 test.describe('Board Layout', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
   });
 
@@ -25,7 +29,7 @@ test.describe('Board Layout', () => {
 
 test.describe('Column Ordering by Last Move', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -60,7 +64,7 @@ test.describe('Column Ordering by Last Move', () => {
       });
     }
 
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
 
     // task3 moved last, so it sits on top; task1 (moved first) at the bottom.
@@ -84,7 +88,7 @@ test.describe('Column Ordering by Last Move', () => {
         body: { status: 'review' },
       });
     }
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
     await expect(async () => {
       expect(await columnCardOrder(page, 2, ids)).toEqual([second, first]);
@@ -111,7 +115,7 @@ test.describe('Column Ordering by Last Move', () => {
 
 test.describe('Drag and Drop Between Columns', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -152,7 +156,7 @@ test.describe('Drag and Drop Between Columns', () => {
 
 test.describe('Scroll to Current Task in Side Panel', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -220,7 +224,7 @@ test.describe('Scroll to Current Task in Side Panel', () => {
 
 test.describe('Clear Done Tasks', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -235,7 +239,7 @@ test.describe('Clear Done Tasks', () => {
     });
     expect(moveResult.status).toBe(200);
 
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
 
     await expect(async () => {
@@ -252,7 +256,7 @@ test.describe('Clear Done Tasks', () => {
   });
 
   test('should not show Clear all button when no done tasks exist', async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
 
     const projectId = await getProjectId(page);
@@ -333,7 +337,7 @@ test.describe('Clear Done Tasks', () => {
       body: { status: 'done' },
     });
 
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card');
 
     const doneCountBefore = await page.evaluate(async ({ pid }) => {
@@ -348,7 +352,7 @@ test.describe('Clear Done Tasks', () => {
     await expect(page.locator('[role="dialog"]')).toBeVisible();
     await page.click('[role="dialog"] .btn-confirm');
 
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card');
 
     const doneCountAfter = await page.evaluate(async ({ pid }) => {
@@ -374,7 +378,7 @@ test.describe('Clear Done Tasks', () => {
       body: { status: 'done' },
     });
 
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
 
     await expect(async () => {
@@ -408,7 +412,7 @@ test.describe('Clear Done Tasks', () => {
 
 test.describe('Project ID in URL', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -461,7 +465,7 @@ test.describe('Project ID in URL', () => {
 test.describe('Mobile Delete Scroll Column', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -557,7 +561,7 @@ test.describe('Multi-Select', () => {
   let projectId: string;
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
     projectId = await getProjectId(page);
 

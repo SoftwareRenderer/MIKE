@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForChatFormReady } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForChatFormReady, isolatedProject, gotoProject } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 test.describe.configure({ mode: 'serial' });
 
@@ -42,7 +46,7 @@ async function openReadyTask(page: any, projectId: string, prefix = 'draft-test'
 
 test.describe('Chat draft text persistence', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item');
   });
 

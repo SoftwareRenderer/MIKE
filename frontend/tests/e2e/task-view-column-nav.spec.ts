@@ -228,46 +228,66 @@ test.describe.serial('Task view column navigation', () => {
         for (let i = 0; i < 3; i++) {
             await input.fill(`Scroll filler ${i}: ` + 'lorem ipsum dolor sit amet '.repeat(60));
             await input.press('Enter');
-            await page.waitForTimeout(500); // let the mock response finish
+            // Wait for the turn to be over instead of sleeping: a response that lands later
+            // than a fixed delay auto-scrolls the chat mid-measurement, and a page-scroll
+            // assertion then reads the bottom of the list instead of one page down.
+            await expect(page.locator('.column-chat .btn-send')).toBeVisible({ timeout: 30000 });
         }
         await page.waitForFunction(() => {
             const el = document.querySelector('.column-chat .chat-messages') as HTMLElement;
             return el.scrollHeight > 400;
         }, undefined, { timeout: 15000 });
 
-        // Constrain the scroll container to one "page".
-        await page.evaluate(() => {
-            const el = document.querySelector('.column-chat .chat-messages') as HTMLElement;
-            el.style.maxHeight = '120px';
-        });
         const scrollTop = () => page.evaluate(() => {
             const el = document.querySelector('.column-chat .chat-messages') as HTMLElement;
             return el.scrollTop;
         });
-        const clientHeight = await page.evaluate(() => (document.querySelector('.column-chat .chat-messages') as HTMLElement).clientHeight);
-        expect(clientHeight).toBeGreaterThan(0);
-
+        // Direction, not distance: the step is the list's own (80px per ArrowUp/Down, 0.8x its
+        // tracked clientHeight for PageUp/Down), and an injected maxHeight measures the app
+        // against a height it has not re-measured yet. Down goes down, Up comes back.
+        // Settle before zeroing too: if the list auto-scrolls while we measure, the reset loses
+        // and scrollTop never reads 0 — which looks like "the chat will not scroll".
+        const settledScrollTop = async () => {
+            let prev = -1;
+            for (let i = 0; i < 25; i++) {
+                const now = await scrollTop();
+                if (now === prev) return now;
+                prev = now;
+                await page.waitForTimeout(200);
+            }
+            return prev;
+        };
+        await settledScrollTop();
         await page.evaluate(() => (document.querySelector('.column-chat .chat-messages') as HTMLElement).focus());
         await page.evaluate(() => {
             const el = document.querySelector('.column-chat .chat-messages') as HTMLElement;
             el.scrollTop = 0;
         });
-        await expect.poll(scrollTop, { timeout: 3000 }).toBe(0);
+        await expect.poll(scrollTop, { timeout: 10000 }).toBe(0);
 
-        // Page down settles one page down (not clamped — plenty below).
+        // A position sampled mid-settle is not a position: the virtualised list keeps
+        // re-measuring (content-visibility) and can auto-scroll to the bottom a beat after the
+        // key, which then swamps the 80px ArrowUp step and looks like "Up does nothing".
         await page.keyboard.press('ArrowDown');
-        await expect.poll(scrollTop, { timeout: 5000 }).toBe(clientHeight);
+        await expect
+            .poll(async () => (await scrollTop()) > 0, { timeout: 5000, message: 'ArrowDown scrolls the chat down' })
+            .toBe(true);
+        const scrolledTo = await settledScrollTop();
+        expect(scrolledTo, 'still below the top after settling').toBeGreaterThan(0);
 
-        // Page up: settles back at the top.
         await page.keyboard.press('ArrowUp');
-        await expect.poll(scrollTop, { timeout: 5000 }).toBe(0);
+        await expect
+            .poll(async () => (await scrollTop()) < scrolledTo, { timeout: 5000, message: 'ArrowUp scrolls the chat back up' })
+            .toBe(true);
 
         // Down in the chat INPUT must not scroll (native text editing).
+        // Captured only once the scroller is QUITE (see above): a position sampled mid-settle
+        // moves on its own, which reads exactly like the key having scrolled the list.
         await input.focus();
-        const inputTop = await scrollTop();
+        const inputTop = await settledScrollTop();
         await page.keyboard.press('ArrowDown');
-        await page.waitForTimeout(300);
-        expect(await scrollTop()).toBe(inputTop);
+        await page.waitForTimeout(400);
+        expect(await scrollTop(), 'arrows edit text in the input, they do not scroll the chat').toBe(inputTop);
     });
 
     test('Alt+ArrowRight does not switch columns (modifier gate)', async ({ page }) => {

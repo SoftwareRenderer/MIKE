@@ -18,6 +18,8 @@ const TEST_REPO_2 = '/tmp/kanban-test-repo-2';
 const TEST_DATA_DIR = '/tmp/kanban-test-data';
 const TEST_DATA_DIR_ISOLATED = '/tmp/kanban-test-data-isolated';
 const TEST_WORKTREES = '/tmp/kanban-test-worktrees';
+// Per-worker project repos created by helpers.ts isolatedProject() — scratch, like the worktrees.
+const TEST_OWN_REPOS = '/tmp/kanban-test-repos';
 const KANBAN_PORT = 3000;
 const KANBAN_PORT_ISOLATED = 3001;
 const MOCK_PORT = 9999;
@@ -208,9 +210,11 @@ async function setup(): Promise<void> {
     try { fs.writeFileSync(LOCK_FILE, ''); } catch { /* ignore */ }
 }
 
-async function teardown(): Promise<void> {
+export async function teardown(): Promise<void> {
     console.error('[teardown] ENTRY');
-    // Stop servers.
+    // Stop servers — by identity first (the port does not reach the whole process tree), then by
+    // port for anything else (the mock LLM).
+    killTestServers();
     for (const port of [MOCK_PORT, KANBAN_PORT_ISOLATED, KANBAN_PORT]) {
         console.error(`[teardown] killing port ${port}...`);
         killPort(port);
@@ -231,7 +235,8 @@ async function teardown(): Promise<void> {
         console.log('[global-teardown] Warning: failed to clean up sandbox containers');
     }
 
-    // Delete test data
+    // Delete test data — only once the server has let go of it (see waitForFilesRelease)
+    waitForFilesRelease(TEST_DATA_DIR);
     try {
         fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
         console.log('[global-teardown] Test data directory deleted');
@@ -240,6 +245,7 @@ async function teardown(): Promise<void> {
     }
 
     // Delete isolated test data
+    waitForFilesRelease(TEST_DATA_DIR_ISOLATED);
     try {
         fs.rmSync(TEST_DATA_DIR_ISOLATED, { recursive: true, force: true });
         console.log('[global-teardown] Isolated test data directory deleted');
@@ -254,6 +260,9 @@ async function teardown(): Promise<void> {
     } catch {
         console.log('[global-teardown] Test worktrees already gone');
     }
+
+    // Delete the per-worker project repos (helpers.ts isolatedProject)
+    try { fs.rmSync(TEST_OWN_REPOS, { recursive: true, force: true }); } catch { /* ignore */ }
 
     // Clean up lock and auth files
     try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
@@ -346,18 +355,109 @@ function ensureTestRepo(): void {
     }
 }
 
-/** Kill processes on a port. */
-function killPort(port: number): void {
+/**
+ * Stop the test servers by identity (--data-dir) and wait for them to be gone. The port is not
+ * enough: the servers are grandchildren (`setsid go run . …`), so the port owner is not the process
+ * that should stop, and `lsof -ti:PORT` also lists the port's clients. A server that outlives its
+ * run keeps the ports and its SQLite files, so the next run boots on the previous run's database.
+ * The pattern is anchored because the two data dirs share a prefix.
+ */
+function killTestServers(): void {
+    // Isolated first: its pattern is the only one that cannot also match the main server.
+    for (const dir of [TEST_DATA_DIR_ISOLATED, TEST_DATA_DIR]) {
+        const pattern = `--data-dir ${dir}([[:space:]]|$)`;
+        let pids = '';
+        try {
+            pids = execSync(`pgrep -f "${pattern}" 2>/dev/null || true`, { encoding: 'utf-8', timeout: 5000 }).trim();
+        } catch { /* none */ }
+        const mine = String(process.pid);
+        let victims = pids ? pids.split('\n').map((x) => x.trim()).filter((x) => x && x !== mine) : [];
+        if (victims.length === 0) continue;
+        for (const pid of victims) { try { process.kill(parseInt(pid), 'SIGTERM'); } catch { /* ignore */ } }
+        const deadline = Date.now() + 8000;
+        while (Date.now() < deadline) {
+            const still = survivors(pattern, mine);
+            if (still.length === 0) return;
+            victims = still;
+            execSync('sleep 0.25');
+        }
+        for (const pid of victims) {
+            console.error(`[global-setup] test server pid ${pid} (${dir}) ignored SIGTERM — SIGKILL`);
+            try { process.kill(parseInt(pid), 'SIGKILL'); } catch { /* ignore */ }
+        }
+        const killed = Date.now() + 5000;
+        while (Date.now() < killed && survivors(pattern, mine).length > 0) execSync('sleep 0.2');
+    }
+}
+
+function survivors(pattern: string, selfPid: string): string[] {
+    try {
+        const out = execSync(`pgrep -f "${pattern}" 2>/dev/null || true`, { encoding: 'utf-8', timeout: 5000 }).trim();
+        return out ? out.split('\n').map((x) => x.trim()).filter((x) => x && x !== selfPid) : [];
+    } catch {
+        return [];
+    }
+}
+
+/** PIDs listening on `port`, excluding this process (killing the runner would end the suite). */
+function portPids(port: number): string[] {
     try {
         const output = execSync(`lsof -ti:${port}`, { encoding: 'utf-8', timeout: 3000 }).trim();
-        if (!output) return;
-        const myPid = String(process.pid);
-        for (const pid of output.split('\n')) {
-            const p = pid.trim();
-            if (p === myPid) continue;
-            try { process.kill(parseInt(p), 'SIGTERM'); } catch { /* ignore */ }
+        return output ? output.split('\n').map((p) => p.trim()).filter((p) => p && p !== String(process.pid)) : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Stop whoever owns `port` and do not return until it is free. A wedged server ignores SIGTERM and
+ * keeps the listener; a polite one stays bound for a moment while it shuts down.
+ */
+function killPort(port: number): void {
+    let pids = portPids(port);
+    if (pids.length === 0) return;
+    for (const pid of pids) {
+        try { process.kill(parseInt(pid), 'SIGTERM'); } catch { /* ignore */ }
+    }
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+        pids = portPids(port);
+        if (pids.length === 0) return;
+        execSync('sleep 0.25');
+    }
+    for (const pid of pids) {
+        console.error(`[global-setup] port ${port} pid ${pid} ignored SIGTERM — SIGKILL`);
+        try { process.kill(parseInt(pid), 'SIGKILL'); } catch { /* ignore */ }
+    }
+    const killed = Date.now() + 3000;
+    while (Date.now() < killed && portPids(port).length > 0) execSync('sleep 0.2');
+}
+
+/**
+ * Wait until no process holds anything open inside `dir`. Deleting the data dir while the killed
+ * server is still checkpointing SQLite leaves it re-created afterwards, and the next run then
+ * recovers the PREVIOUS run's database from the leftover WAL.
+ */
+// Budget: server.ShutdownTimeout (the worst-case graceful exit) plus slack to notice.
+function waitForFilesRelease(dir: string, timeoutMs = 20000): void {
+    if (!fs.existsSync(dir)) return;
+    const holders = (): string => {
+        try {
+            return execSync(`lsof +D ${dir} -t 2>/dev/null || true`, { encoding: 'utf-8', timeout: 5000 }).trim();
+        } catch {
+            return '';
         }
-    } catch { /* no processes on this port */ }
+    };
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        const open = holders();
+        if (!open) return;
+        if (Date.now() > deadline) {
+            console.error(`[global-setup] Warning: ${dir} still held by ${open.split('\n').join(',')} — deleting anyway`);
+            return;
+        }
+        execSync('sleep 0.25');
+    }
 }
 
 function cleanupStaleState(keepLockFile: boolean): void {
@@ -367,13 +467,17 @@ function cleanupStaleState(keepLockFile: boolean): void {
         try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
     }
     // Kill stale processes (no shell pipeline to avoid self-kill)
+    killTestServers();
     for (const port of [MOCK_PORT, KANBAN_PORT, KANBAN_PORT_ISOLATED]) {
         killPort(port);
     }
-    // Clean stale data
+    // Clean stale data — after the servers above have actually released their files
+    waitForFilesRelease(TEST_DATA_DIR);
+    waitForFilesRelease(TEST_DATA_DIR_ISOLATED);
     try { fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
     try { fs.rmSync(TEST_DATA_DIR_ISOLATED, { recursive: true, force: true }); } catch { /* ignore */ }
     try { fs.rmSync(TEST_WORKTREES, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { fs.rmSync(TEST_OWN_REPOS, { recursive: true, force: true }); } catch { /* ignore */ }
 }
 
 async function killKanbanServer(): Promise<void> {

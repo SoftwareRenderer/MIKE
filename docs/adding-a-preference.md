@@ -34,7 +34,8 @@ by `hide_hints` (tooltips keep the text) and below 768px; `aria-label`s stay sta
 **Tests to add/update:** `backend/config/config_test.go`,
 `utils/__tests__/keyboard.unit.ts`, `preferences-tab.unit.svelte.ts`, e2e
 `preferences-keyboard.spec.ts` (isolated), and — if it drives a widget — a spec like
-`create-task-submit-shortcut` / `terminal-shortcut` / `toggle-fullscreen-shortcut`.
+`terminal-shortcut`. `preferences-keyboard.spec.ts` already covers rebinding/clearing/resetting
+the submit and fullscreen bindings, so a new widget-level shortcut does not need its own spec.
 
 ## Adding a UI preference (`*bool`)
 

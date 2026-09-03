@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { identityKey } from '../../src/lib/utils/extension-identity';
 
 test.describe.configure({ mode: 'parallel' });
 
@@ -17,36 +18,40 @@ test.describe.configure({ mode: 'parallel' });
 // are safe (local + registry entries load asynchronously, so the rendered
 // card set can be transiently partial).
 async function getBrowseSegments(page: Page) {
-  return page.evaluate(async () => {
-    const localRes = await fetch('/api/extensions/local');
-    const regRes = await fetch('/api/extensions/registry');
-    const instRes = await fetch('/api/extensions');
-    const local = localRes.ok ? ((await localRes.json()) as any[]) : [];
-    const registry = regRes.ok ? ((await regRes.json()) as any[]) : [];
-    const installed = instRes.ok ? ((await instRes.json()) as any[]) : [];
-    const key = (e: any) => `${e.author}/${e.name}`;
-    const displayName = (e: any) => e.display_name || e.name;
-    const registryKeys = new Set(registry.map(key));
-    const installedKeys = new Set(installed.map(key));
-    const unpublished = local
-      .filter((e: any) => !registryKeys.has(key(e)))
-      .map(displayName);
-    const featuredEntries = registry.filter(
-      (e: any) => e.featured === true && !installedKeys.has(key(e)),
-    );
-    const featured = featuredEntries.map(displayName);
-    const featuredKeys = new Set(featuredEntries.map(key));
-    const rest = registry
-      .filter((e: any) => !featuredKeys.has(key(e)))
-      .map(displayName);
+  // The lists are fetched in the page, but the identity model is imported from
+  // src/lib/utils/extension-identity — the same module ExtensionsTab.svelte uses.
+  // A local copy here drifted (it did not slugify the author, so the registry's
+  // "Microsoft/typescript-language-server" and the on-disk
+  // "microsoft/typescript-language-server" counted as two extensions) and the
+  // Browse assertions were off by one card.
+  const lists = await page.evaluate(async () => {
+    const j = async (url: string) => {
+      const res = await fetch(url);
+      return res.ok ? ((await res.json()) as any[]) : [];
+    };
     return {
-      unpublished,
-      featured,
-      rest,
-      localCount: unpublished.length,
-      registryCount: registry.length,
+      local: await j('/api/extensions/local'),
+      registry: await j('/api/extensions/registry'),
+      installed: await j('/api/extensions'),
     };
   });
+  const { local, registry, installed } = lists;
+  const key = (e: { author?: string; name: string }) => identityKey(e.author, e.name);
+  const displayName = (e: any) => e.display_name || e.name;
+  const registryKeys = new Set(registry.map(key));
+  const installedKeys = new Set(installed.map(key));
+  const unpublished = local.filter((e: any) => !registryKeys.has(key(e))).map(displayName);
+  const featuredEntries = registry.filter((e: any) => e.featured === true && !installedKeys.has(key(e)));
+  const featured = featuredEntries.map(displayName);
+  const featuredKeys = new Set(featuredEntries.map(key));
+  const rest = registry.filter((e: any) => !featuredKeys.has(key(e))).map(displayName);
+  return {
+    unpublished,
+    featured,
+    rest,
+    localCount: unpublished.length,
+    registryCount: registry.length,
+  };
 }
 
 test.describe('Extensions Tab', () => {
