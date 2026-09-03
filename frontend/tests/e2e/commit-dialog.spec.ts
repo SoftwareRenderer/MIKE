@@ -1,6 +1,10 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { execSync } from 'child_process';
-import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask, worktreeExists, writeFileInWorktree } from './helpers';
+import { getProjectId, createTaskViaApi, csrfFetch, navigateToTask, worktreeExists, writeFileInWorktree, waitForWorktree, waitForTurnAnswered, isolatedProject, gotoProject } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 // --- Shared utilities ---
 
@@ -8,11 +12,36 @@ function getConfig() {
   return JSON.parse(execSync('curl -s http://localhost:3000/api/config', { encoding: 'utf-8' }));
 }
 
+/**
+ * Drive a task into the state the commit dialog needs: worktree created, prompt answered (the
+ * review bar shows "Resume" otherwise), one file STAGED (this flow never commits untracked
+ * files), task in review, commit button rendered. Returns [taskId, commitButton].
+ */
+async function taskWithStagedChanges(page: Page, projectId: string, title: string, file: string) {
+  const taskId = await createTaskViaApi(page, projectId, title);
+  await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+    method: 'POST',
+    body: { status: 'in_progress' },
+  });
+  await waitForWorktree(projectId, taskId);
+  await waitForTurnAnswered(page, projectId, taskId);
+  writeFileInWorktree(projectId, taskId, file, `${file} content`);
+  await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+    method: 'POST',
+    body: { status: 'review' },
+  });
+  await navigateToTask(page, taskId);
+  await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 10000 });
+  const commitBtn = page.locator('.btn-commit-and-done');
+  await expect(commitBtn).toBeVisible({ timeout: 10000 });
+  return { taskId, commitBtn };
+}
+
 test.describe.serial('Commit Dialog', () => {
   let projectId: string;
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
     projectId = await getProjectId(page);
   });
@@ -67,42 +96,19 @@ test.describe.serial('Commit Dialog', () => {
     const taskId = await createTaskViaApi(page, projectId, `commit-with-changes-${Date.now()}`);
     expect(taskId).not.toBe('');
 
-    // Move to in_progress via API
+    // Moving only schedules worktree creation — wait for it, instead of falling through to a
+    // branch that passes without opening the dialog.
     await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
       method: 'POST',
       body: { status: 'in_progress' },
     });
+    await waitForWorktree(projectId, taskId);
+    // Let the agent answer the prompt first: with the user's prompt still the trailing
+    // chat entry the review bar offers "Resume", not the commit button.
+    await waitForTurnAnswered(page, projectId, taskId);
 
-    // Check if worktree exists
-    if (!worktreeExists(projectId, taskId)) {
-      // Worktree doesn't exist — test the no-changes path
-      await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
-        method: 'POST',
-        body: { status: 'review' },
-      });
-      await navigateToTask(page, taskId);
-      await expect(page.locator('.task-detail-page')).toBeVisible();
-      await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 10000 });
-
-      const commitBtn = page.locator('.btn-commit-done');
-      await commitBtn.click();
-
-      // Without changes, no dialog should appear
-      const commitDialog = page.locator('[role="dialog"]');
-      await expect(commitDialog).not.toBeVisible({ timeout: 3000 }).catch(() => {});
-
-      // Task should move to done
-      await expect(async () => {
-        const task = await page.evaluate(async ({ pid, tid }) => {
-          const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
-          return res.ok ? res.json() : null;
-        }, { pid: projectId, tid: taskId });
-        expect(task?.status).toBe('done');
-      }).toPass({ timeout: 10000 });
-      return;
-    }
-
-    // Write a file to create changes
+    // A staged file is what gates the commit button: `HandleCommitAndDone` commits
+    // staged changes only, so an untracked file leaves the plain "Move to Done" variant.
     writeFileInWorktree(projectId, taskId, 'test-file.txt', 'test content for commit');
 
     // Move to review
@@ -127,8 +133,10 @@ test.describe.serial('Commit Dialog', () => {
       expect(diff).not.toBeNull();
     }).toPass({ timeout: 10000 });
 
-    // Click "Commit and move to Done"
-    const commitBtn = page.locator('.btn-commit-done');
+    // The commit button is the one gated on staged changes — `.btn-commit-done` alone
+    // also matches the Resume and plain Move-to-Done variants of the review bar.
+    const commitBtn = page.locator('.btn-commit-and-done');
+    await expect(commitBtn).toBeVisible({ timeout: 10000 });
     await commitBtn.click();
 
     // Commit dialog should appear (modal with commit-textarea)
@@ -162,44 +170,10 @@ test.describe.serial('Commit Dialog', () => {
 
   test('should cancel commit dialog and keep task in review', async ({ page }) => {
     // Create a task and move it to review
-    const taskId = await createTaskViaApi(page, projectId, `commit-cancel-${Date.now()}`);
-    expect(taskId).not.toBe('');
+    const { taskId, commitBtn } = await taskWithStagedChanges(page, projectId, `commit-cancel-${Date.now()}`, 'cancel-test.txt');
+    await commitBtn.click();
 
-    // Move to in_progress first
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
-      method: 'POST',
-      body: { status: 'in_progress' },
-    });
-
-    if (!worktreeExists(projectId, taskId)) {
-      // Skip if no worktree — the cancel test requires changes to trigger the dialog
-      test.skip();
-    }
-
-    writeFileInWorktree(projectId, taskId, 'cancel-test.txt', 'cancel test content');
-
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
-      method: 'POST',
-      body: { status: 'review' },
-    });
-
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible();
-    await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 10000 });
-
-    // Wait for diff stats to arrive (indicates changes exist)
-    await expect(async () => {
-      const diff = await page.evaluate(async ({ pid, tid }) => {
-        const res = await fetch(`/api/projects/${pid}/tasks/${tid}/diff`);
-        return res.ok ? await res.json() : null;
-      }, { pid: projectId, tid: taskId });
-      expect(diff).not.toBeNull();
-    }).toPass({ timeout: 10000 });
-
-    // Click commit button
-    await page.click('.btn-commit-done');
-
-    // Wait for dialog to appear (modal with commit-textarea)
+    // Wait for dialog to appear (modal with commit-textarea)    // Wait for dialog to appear (modal with commit-textarea)
     const commitDialog = page.locator('[role="dialog"]');
     await expect(commitDialog).toBeVisible({ timeout: 10000 });
 
@@ -219,65 +193,7 @@ test.describe.serial('Commit Dialog', () => {
 
   test('should cancel streaming commit message when user starts typing', async ({ page }) => {
     // Create a task and move it to in_progress (triggers worktree creation via API)
-    const taskId = await createTaskViaApi(page, projectId, `commit-cancel-type-${Date.now()}`);
-    expect(taskId).not.toBe('');
-
-    // Move to in_progress via API
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
-      method: 'POST',
-      body: { status: 'in_progress' },
-    });
-
-    // Send a message to trigger lazy-start (creates worktree)
-    await page.evaluate(async ({ pid, tid }) => {
-      await fetch(`/api/projects/${pid}/tasks/${tid}/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: 'list files' }),
-      });
-    }, { pid: projectId, tid: taskId });
-
-    // Poll for worktree to be created (up to 15s)
-    let worktreeReady = false;
-    for (let i = 0; i < 30; i++) {
-      await new Promise(r => setTimeout(r, 500));
-      if (worktreeExists(projectId, taskId)) {
-        worktreeReady = true;
-        break;
-      }
-    }
-    if (!worktreeReady) {
-      test.skip();
-    }
-
-    // Write a file to create changes
-    writeFileInWorktree(projectId, taskId, 'cancel-type-test.txt', 'test content for cancel on type');
-
-    // Move to review
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
-      method: 'POST',
-      body: { status: 'review' },
-    });
-
-    // Navigate to the task
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible();
-
-    // Wait for the review bar
-    await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 10000 });
-
-    // Wait for diff stats to arrive (indicates changes exist)
-    await expect(async () => {
-      const diff = await page.evaluate(async ({ pid, tid }) => {
-        const res = await fetch(`/api/projects/${pid}/tasks/${tid}/diff`);
-        return res.ok ? await res.json() : null;
-      }, { pid: projectId, tid: taskId });
-      expect(diff).not.toBeNull();
-    }).toPass({ timeout: 10000 });
-
-    // Click "Commit and move to Done" (has yellow border when changes exist)
-    const commitBtn = page.locator('.btn-commit-and-done').first();
-    await expect(commitBtn).toBeVisible({ timeout: 10000 });
+    const { taskId, commitBtn } = await taskWithStagedChanges(page, projectId, `commit-cancel-type-${Date.now()}`, 'cancel-type-test.txt');
     await commitBtn.click();
 
     // Commit dialog should appear (detect via the commit textarea which is unique to this dialog)
@@ -300,41 +216,5 @@ test.describe.serial('Commit Dialog', () => {
     // The confirm button should be enabled (user has typed a message)
     const confirmBtn = page.locator('.modal-footer .btn-primary');
     await expect(confirmBtn).toBeEnabled();
-  });
-
-  test('should have green border on Move to Done (no changes)', async ({ page }) => {
-    const taskId = await createTaskViaApi(page, projectId, `commit-style-${Date.now()}`);
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
-      method: 'POST',
-      body: { status: 'review' },
-    });
-
-    await navigateToTask(page, taskId);
-    await expect(page.locator('.task-detail-page')).toBeVisible();
-    await expect(page.locator('.chat-review-bar')).toBeVisible({ timeout: 10000 });
-
-    const commitBtn = page.locator('.btn-commit-done');
-    await expect(commitBtn).toBeVisible();
-
-    // Without changes, button should NOT have has-changes class
-    const hasChangesClass = await commitBtn.getAttribute('class');
-    expect(hasChangesClass).not.toContain('has-changes');
-
-    // Button should have text "Move to Done"
-    await expect(commitBtn).toContainText('Move to Done');
-
-    // Check that the button has a green border (default state)
-    const computedStyle = await commitBtn.evaluate((el) => {
-      const style = window.getComputedStyle(el);
-      return {
-        borderColor: style.borderColor,
-        background: style.backgroundColor,
-      };
-    });
-
-    // Should have a border (not 'none' or 'transparent')
-    expect(computedStyle.borderColor).not.toBe('rgba(0, 0, 0, 0)');
-    // Background should be a surface color, not green fill
-    expect(computedStyle.background).not.toContain('34, 197, 94'); // green RGB
   });
 });

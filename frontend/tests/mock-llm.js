@@ -36,6 +36,7 @@ const toolCallFail = loadFixture('tool_call_fail');
 const toolCallStreaming = loadFixture('tool_call_streaming');
 const toolCallWithText = loadFixture('tool_call_with_text');
 const toolCallComplete = loadFixture('tool_call_complete');
+const toolCallReadFile = loadFixture('tool_call_read_file');
 const toolCallLoop = loadFixture('tool_call_loop');
 const toolCallTaskComplete = loadFixture('tool_call_task_complete');
 const textLoop = loadFixture('text_loop');
@@ -133,6 +134,31 @@ function enrichTimings(chunk) {
  * Select fixture based on request body content.
  * Returns { chunks, chunkDelay } where chunkDelay is ms between SSE frames.
  */
+// Explicit fixture pin: a prompt containing "llm-fixture:<name>" gets exactly that fixture.
+// The keyword table below is otherwise unreachable in the common case — the plan-first skill
+// is in every system prompt, so plan routing (see isPlanMode) answers first and a spec asking
+// for "edit" silently gets create_task. A pin says what the test means and keeps every other
+// spec's routing untouched.
+const FIXTURES_BY_NAME = {
+    // name: [chunks, chunkDelay] — the delay mirrors the keyword table, so a pinned slow
+    // fixture is still slow (pinning text_slow at 1ms streams the whole turn in ~16ms and
+    // any test that waits for a mid-stream state waits forever).
+    text: [textResponse, 1],
+    text_long: [textResponseLong, 1],
+    text_slow: [textResponseSlow, 100],
+    text_loop: [textLoop, 1],
+    phrase_repeat: [phraseRepeat, 1],
+    tool_call_edit_file: [toolCallEditFile, 1],
+    tool_call_read_file: [toolCallReadFile, 1],
+    tool_call_response: [toolCallResponse, 1],
+    tool_call_create_task: [toolCallCreateTask, 1],
+    tool_call_complete: [toolCallTaskComplete, 1],
+    tool_call_streaming: [toolCallStreaming, 1],
+    tool_call_fail: [toolCallFail, 1],
+    tool_call_loop: [toolCallLoop, 1],
+    text_response_reasoning: [textResponseReasoning, 1],
+};
+
 function selectResponse(parsed) {
     const hasTools = parsed.tools && parsed.tools.length > 0;
     const messages = parsed.messages || [];
@@ -148,6 +174,13 @@ function selectResponse(parsed) {
     // Whether the conversation already contains tool results (used by plan-mode
     // routing below and by the tool-result routing further down).
     const hasToolResults = messages.some(m => m.role === 'tool');
+
+    const pin = lastUserMsg.match(/llm-fixture:([a-z0-9_-]+)/);
+    if (pin) {
+        const pinned = FIXTURES_BY_NAME[pin[1]];
+        if (pinned) return { chunks: pinned[0], chunkDelay: pinned[1] };
+        console.error(`[mock-llm] unknown llm-fixture:"${pin[1]}" — falling through to keyword routing`);
+    }
 
     // Bash-card reconnect probe: the long-running bash call keeps the tool in
     // flight while the spec drops the live WebSocket, so loadHistory() replaces the
@@ -184,6 +217,20 @@ function selectResponse(parsed) {
     if (hasTools && /is the task complete\?/i.test(lastUserMsg) &&
         messages.some(m => m.role === 'tool' && /SANDBOX-(SLEEP|MEMHOG)-PROBE-DONE/.test(m.content || ''))) {
         return { chunks: toolCallTaskComplete, chunkDelay: 1 };
+    }
+
+    // Tool-args rendering probe: a tool call whose args the UI is EXPECTED to show.
+    // Must stay ABOVE the plan-mode check (the plan-first skill is in every system prompt,
+    // so an ordinary "list files" prompt routes to create_task — whose args the UI hides on
+    // purpose, see HIDE_ARGS_FOR_TOOLS). read_file executes harmlessly; the follow-up ends
+    // the turn in review.
+    // Not gated on hasToolResults the way the other probes are: a chat message arrives in a
+    // thread that already has tool results from the task's initial turn, so that gate would
+    // answer the probe with text on its very first call. The turn still ends by itself — the
+    // loop detector's "Is the task complete?" becomes the last user message, which no longer
+    // matches, and plan routing then calls request_review.
+    if (hasTools && /read-file-probe/i.test(lastUserMsg)) {
+        return { chunks: toolCallReadFile, chunkDelay: 1 };
     }
 
     // Plan mode: LLM creates subtasks via create_task tool, then calls request_review.
@@ -348,6 +395,7 @@ const server = http.createServer((req, res) => {
                                     chunks === toolCallSandboxSleep ? 'tool_call_sandbox_sleep' :
                                     chunks === toolCallSandboxMemhog ? 'tool_call_sandbox_memhog' :
                                     chunks === toolCallComplete ? 'tool_call_complete' :
+                                    chunks === toolCallReadFile ? 'tool_call_read_file' :
                                     chunks === textResponseSlow ? 'text_slow' :
                                     chunks === textResponseLong ? 'text_long' : 'text';
                 const msgs = parsed.messages || [];

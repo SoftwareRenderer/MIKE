@@ -8,6 +8,7 @@
     import { effectiveConfigFields, initialEditConfig, HOST_OWNED_LSP_CONFIG_KEY, type ConfigField } from '$lib/utils/extension-config';
     import { memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { orderBrowseEntries } from '$lib/composables/use-browse-order';
+    import { identityKey } from '$lib/utils/extension-identity';
 
     let { onExtensionsChanged }: { onExtensionsChanged?: () => void } = $props();
 
@@ -24,36 +25,9 @@
     }
 
     /**
-     * Normalize an author to a directory-style slug, mirroring the backend's
-     * authorDir(): lowercase, non-alphanumeric characters (other than '-' '_'
-     * '.') collapsed to a single '-', trailing separators trimmed. This aligns
-     * registry display authors (e.g. "Go Team") with their on-disk namespace
-     * directory ("go-team") so identity comparisons line up.
+     * Identity of an extension is `<slugified-author>/<name>` — see
+     * $lib/utils/extension-identity, which the e2e Browse-composition helper shares.
      */
-    function slugify(author: string | undefined): string {
-        const slug = (author ?? '').trim().toLowerCase();
-        if (!slug) return 'unknown';
-        let out = '';
-        let lastDash = false;
-        for (const ch of slug) {
-            const ok = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch === '-' || ch === '_' || ch === '.';
-            if (!ok) {
-                if (lastDash) continue;
-                out += '-';
-                lastDash = true;
-                continue;
-            }
-            out += ch;
-            lastDash = false;
-        }
-        if (!out) return 'unknown';
-        return out.replace(/[-._]+$/, '');
-    }
-
-    /** Canonical identity key for an extension: <author>/<name>. */
-    function identityKey(author: string | undefined, name: string): string {
-        return `${slugify(author)}/${name}`;
-    }
 
     // State
     let extensions = $state<Extension[]>([]);

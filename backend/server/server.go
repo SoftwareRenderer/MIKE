@@ -751,34 +751,62 @@ func newHybridListener(l net.Listener, stdCfg *stdtls.Config, sniffTimeout time.
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	// Logged before it runs: none of these can be interrupted, so when the shutdown deadline fires
+	// the last line here is the only thing that names what hung.
+	shutdownStep := func(name string, run func()) {
+		if run == nil {
+			return
+		}
+		log.Printf("shutdown: %s", name)
+		run()
+	}
 	// Stop preview document cleanup
-	if s.previewStore != nil {
-		s.previewStore.stopSweeper()
-	}
+	shutdownStep("preview sweeper", func() {
+		if s.previewStore != nil {
+			s.previewStore.stopSweeper()
+		}
+	})
 	// Stop all LSP connections and sandbox containers
-	if s.lspHandler != nil {
-		s.lspHandler.Close()
-	}
-	if s.extLSPMgr != nil {
-		s.extLSPMgr.Close()
-	}
-	if s.extSandboxMgr != nil {
-		s.extSandboxMgr.Close()
-	}
+	shutdownStep("lsp handler", func() {
+		if s.lspHandler != nil {
+			s.lspHandler.Close()
+		}
+	})
+	shutdownStep("extension lsp manager", func() {
+		if s.extLSPMgr != nil {
+			s.extLSPMgr.Close()
+		}
+	})
+	shutdownStep("extension sandbox manager", func() {
+		if s.extSandboxMgr != nil {
+			s.extSandboxMgr.Close()
+		}
+	})
 	// Stop sandbox memory sampling, then clean up all task sandbox containers
-	if s.sandboxStatsSampler != nil {
-		s.sandboxStatsSampler.Stop()
-	}
-	if s.sandboxMgr != nil {
-		s.sandboxMgr.Cleanup()
-	}
-	if s.loginLimiter != nil {
-		s.loginLimiter.Stop()
-	}
+	shutdownStep("sandbox stats sampler", func() {
+		if s.sandboxStatsSampler != nil {
+			s.sandboxStatsSampler.Stop()
+		}
+	})
+	shutdownStep("sandbox containers", func() {
+		if s.sandboxMgr != nil {
+			s.sandboxMgr.Cleanup()
+		}
+	})
+	shutdownStep("login rate limiter", func() {
+		if s.loginLimiter != nil {
+			s.loginLimiter.Stop()
+		}
+	})
 	// Logged once on the way out: a zero wait count is the evidence the single-connection
 	// pool is not the constraint, and a large one is the trigger to widen it.
 	stats := s.store.DBStats()
 	log.Printf("database pool over this run: %d connection waits totalling %s (open=%d, inUse=%d, maxOpen=%d)",
 		stats.WaitCount, stats.WaitDuration.Round(time.Millisecond), stats.OpenConnections, stats.InUse, stats.MaxOpenConnections)
-	return s.store.Close()
+	shutdownStep("database", func() {
+		if err := s.store.Close(); err != nil {
+			log.Printf("shutdown: closing database: %v", err)
+		}
+	})
+	return nil
 }

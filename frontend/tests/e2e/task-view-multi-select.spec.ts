@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, findProviderByRef,
-} from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, findProviderByRef, isolatedProject, gotoProject, clearBoardExcept } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 /**
- * Multi-select in Task View Board Overview sidebar.
- *
- * Tests that the Board Overview panel inside the Task Detail view supports
- * the same multi-select interactions (Ctrl+Click, selection bar, delete, start)
- * as the main Project View board.
+ * Multi-select (Ctrl+Click, selection bar, delete, start) in the Board Overview panel that the
+ * Task Detail view opens — the same interactions as the main board.
  */
 test.describe.serial('Task View Board Overview multi-select', () => {
   let projectId = '';
@@ -26,9 +26,13 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
   let grandchildTaskId = '';
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
     projectId = await getProjectId(page);
+    // This block creates exactly the tasks it selects, so start from an empty board:
+    // whatever the previous spec on this worker left behind (running tasks especially)
+    // cannot be deleted through the multi-select bar the same way.
+    await clearBoardExcept(page, projectId);
 
     // Create a parent task
     parentTaskId = await createTaskViaApi(page, projectId, `parent-${Date.now()}`);
@@ -197,7 +201,7 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
 });
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
     projectId = await getProjectId(page);
 

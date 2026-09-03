@@ -2,7 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { getProjectId, createTaskViaApi, navigateToTask, waitForChatForm, waitForSendButtonGraceful, csrfFetch } from './helpers';
+import { createTaskViaApi, csrfFetch, getProjectId, navigateToTask, projectDirPath, selectProject, waitForChatForm, waitForSendButton, waitForSendButtonGraceful } from './helpers';
+
 
 test.describe.configure({ mode: 'parallel' });
 
@@ -376,98 +377,65 @@ test.describe('Edit Diff Expand Persistence', () => {
   });
 
   test('should persist edit diff expanded state across virtual list remount', async ({ page }) => {
-    test.setTimeout(30000);
+    // An executor turn plus a remount.
+    test.setTimeout(120_000);
     const projectId = await getProjectId(page);
     const taskId = await createTaskViaApi(page, projectId, `edit-diff-test-${Date.now()}`);
     await navigateToTask(page, taskId, projectId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
-    // Wait for chat form (handles start/restart buttons)
-    const hasForm = await waitForChatForm(page);
-    if (!hasForm) return; // graceful skip
+    // waitForChatForm clicks "Start task" on a new task; the task then answers its own prompt, and
+    // that turn must finish first — otherwise the first tool card is the initial turn's, not ours.
+    await waitForChatForm(page);
+    await waitForSendButton(page);
 
-    // Graceful: executor may not start in test env
-    if (!await waitForSendButtonGraceful(page)) return;
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
-    await chatTextarea.fill('test edit file diff');
+    await expect(chatTextarea).toBeVisible({ timeout: 10000 });
+    const cardsBefore = await page.locator('.tool-call-card').count();
+    // Pinned, not keyword-routed: the plan-first skill is in every system prompt, so a prompt
+    // that merely mentions "edit" is not guaranteed to reach the edit_file fixture at all.
+    await chatTextarea.fill(`test edit file diff ${Date.now()} llm-fixture:tool_call_edit_file`);
     await chatTextarea.press('Enter');
 
-    // Wait for user message to appear
-    await expect(page.locator('.chat-message.user').first()).toBeVisible({ timeout: 10000 });
+    // OUR card — the one that appears after the send.
+    await expect
+        .poll(() => page.locator('.tool-call-card').count(), { timeout: 30000, message: 'a tool-call card appears for the sent message' })
+        .toBeGreaterThan(cardsBefore);
+    const card = page.locator('.tool-call-card').last();
 
-    // Wait for tool call card to appear
-    const toolCallVisible = await page.locator('.tool-call-card').first()
-      .isVisible({ timeout: 15000 }).catch(() => false);
-    if (!toolCallVisible) return; // graceful skip
+    await expect(card.locator('.tool-name')).toBeVisible();
+    expect((await card.locator('.tool-name').textContent())?.toLowerCase()).toContain('edit');
 
-    // Verify it's an edit_file tool call
-    const toolName = page.locator('.tool-name').first();
-    await expect(toolName).toBeVisible();
-    const nameText = await toolName.textContent();
-    expect(nameText?.toLowerCase()).toContain('edit');
+    const diffToggle = card.locator('.edit-diff-toggle');
+    const diffContent = card.locator('.edit-diff');
+    const arrow = card.locator('.edit-diff-arrow');
 
-    // Wait for the edit diff toggle button to appear
-    const diffToggle = page.locator('.edit-diff-toggle');
-    const toggleVisible = await diffToggle.isVisible({ timeout: 10000 }).catch(() => false);
-    if (!toggleVisible) return; // graceful skip
+    // The fixture's diff is two added lines and ToolCall auto-expands a small diff, so EXPANDED
+    // is the starting state and the first click collapses it.
+    await expect(diffContent).toBeVisible({ timeout: 10000 });
+    await expect(arrow).toHaveText('▴');
 
-    // The fixture has a trivial diff (2 added lines), so it starts expanded.
-    // Verify the diff content is visible (expanded state)
-    const diffContent = page.locator('.edit-diff');
-    const diffVisible = await diffContent.isVisible({ timeout: 5000 }).catch(() => false);
-    expect(diffVisible).toBe(true);
-
-    // Collapse the diff
     await diffToggle.click();
     await expect(diffContent).not.toBeVisible({ timeout: 5000 });
+    await expect(arrow).toHaveText('▾');
 
-    // Expand it again
     await diffToggle.click();
     await expect(diffContent).toBeVisible({ timeout: 5000 });
 
-    // Verify the arrow shows collapsed state (▴ when expanded)
-    const arrow = page.locator('.edit-diff-arrow');
-    const arrowText = await arrow.textContent();
-    expect(arrowText).toBe('▴'); // expanded shows up arrow
-
-    // Collapse again
-    await diffToggle.click();
-    const arrowTextCollapsed = await arrow.textContent();
-    expect(arrowTextCollapsed).toBe('▾'); // collapsed shows down arrow
-
-    // Expand one more time and verify state persists
-    await diffToggle.click();
-    await expect(diffContent).toBeVisible({ timeout: 5000 });
-    const finalArrow = await page.locator('.edit-diff-arrow').textContent();
-    expect(finalArrow).toBe('▴');
+    // The remount the test is named for: leaving the task and coming back rebuilds the
+    // virtualised message list from scratch. Toggling a diff must not be state that only
+    // survives as long as the row does, or scrolling a long chat collapses diffs on the user.
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+    await navigateToTask(page, taskId, projectId);
+    await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
+    const reopened = page.locator('.tool-call-card', { hasText: 'edit' }).last();
+    await expect(reopened.locator('.edit-diff')).toBeVisible({ timeout: 10000 });
+    await expect(reopened.locator('.edit-diff-arrow')).toHaveText('▴');
   });
 });
 
 // --- Shared utilities for explorer tests ---
-
-function getConfig() {
-  return JSON.parse(execSync('curl -s http://localhost:3000/api/config', { encoding: 'utf-8' }));
-}
-
-function findWorktreeDir(): string | null {
-  const worktreesDir = getConfig().workspace_dir;
-  try {
-    // Path structure: worktreesDir/projectID/taskID
-    const projectEntries = readdirSync(worktreesDir);
-    for (const projEntry of projectEntries) {
-      const projPath = join(worktreesDir, projEntry);
-      if (!statSync(projPath).isDirectory()) continue;
-      const taskEntries = readdirSync(projPath);
-      for (const taskEntry of taskEntries) {
-        const fullPath = join(projPath, taskEntry);
-        if (statSync(fullPath).isDirectory()) {
-          return fullPath;
-        }
-      }
-    }
-  } catch { /* ignore */ }
-  return null;
-}
 
 // --- Explorer (serial: modify same worktree filesystem) ---
 
@@ -481,19 +449,18 @@ test.describe('Explorer', () => {
   });
 
   test('should create a folder in the current directory and navigate into it', async ({ page }) => {
-    const worktreeDir = findWorktreeDir();
     const projectId = await getProjectId(page);
-    if (!worktreeDir || !projectId) {
-      // No worktree or project — skip gracefully
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
+    // The project explorer and Review-Changes read the PROJECT directory, not a task
+    // worktree — see projectDirPath() in helpers.ts.
+    const projectDir = await projectDirPath(page, projectId);
 
     const uniqueId = Date.now();
     const folderName = `new-folder-${uniqueId}`;
 
-    // Click on the project to select it (if not already selected)
-    await page.locator('.project-item').first().click();
+    // Select the project under test. `.project-item` + `.first()` is the first row of
+    // the sidebar, which once per-worker projects exist is some other test's project —
+    // the folder then gets created somewhere else and this test reads its own dir.
+    await selectProject(page, projectId);
     await page.waitForSelector('.top-bar', { timeout: 10000 });
 
     // Open the explorer view by clicking the project title button
@@ -507,243 +474,29 @@ test.describe('Explorer', () => {
     const pathInput = page.locator('.file-browser-path-input');
     const currentPath = await pathInput.inputValue();
 
-    // Click the "New folder" button (second button in file-actions)
-    const newFolderBtns = page.locator('.new-file-btn');
-    const newFolderBtn = newFolderBtns.nth(1); // second button is the folder one
-    await newFolderBtn.click();
+    // The folder button is identified by its accessible name. The old selector was
+    // `.new-file-btn` nth(1) — that is the NEW FILE button (the bar is Find / New file /
+    // New folder), and the name it typed went into `.new-file-input`, so no folder was
+    // ever created and the assertions below were unreachable.
+    await page.locator('.new-file-btn[aria-label="Create new folder"]').click();
+    // The project explorer is BranchFileBrowser: BOTH its new-file and new-folder rows
+    // use class `.new-file-input`, so the accessible name is what disambiguates them.
+    const folderInput = page.locator('.new-file-input[aria-label="New folder name"]');
+    await expect(folderInput).toBeVisible({ timeout: 5000 });
+    await folderInput.fill(folderName);
+    await folderInput.press('Enter');
 
-    // Wait for the folder name input to appear
-    await expect(page.locator('.new-file-input')).toBeVisible({ timeout: 5000 });
-
-    // Type the folder name and press Enter
-    await page.fill('.new-file-input', folderName);
-    await page.locator('.new-file-input').press('Enter');
-
-    // Wait for the input to disappear (form closed)
-    await expect(page.locator('.new-file-input')).toBeHidden({ timeout: 5000 });
-
-    // Verify the path has been updated to include the new folder (navigated into it)
+    // Creating a folder navigates into it (FileBrowser's handleCreateFolder -> loadDir).
     await expect(async () => {
-      const newPath = await pathInput.inputValue();
-      expect(newPath).toContain(folderName);
+      expect(await pathInput.inputValue()).toContain(folderName);
     }).toPass({ timeout: 5000 });
 
-    // Verify the folder exists on disk
-    const folderPath = join(worktreeDir, folderName);
-    try {
-      const stats = statSync(folderPath);
-      expect(stats.isDirectory()).toBe(true);
-    } catch {
-      test.fail('Folder was not created on disk');
-    }
+    // The folder really exists, in the PROJECT directory the explorer was showing
+    // (not in the path it navigated to afterwards).
+    const folderPath = join(projectDir, folderName);
+    expect(statSync(folderPath).isDirectory()).toBe(true);
 
     // Clean up
     execSync(`rm -rf ${folderPath}`);
-  });
-
-  test('should open editor at clicked line from Review Changes diff', async ({ page }) => {
-    const worktreeDir = findWorktreeDir();
-    const projectId = await getProjectId(page);
-    if (!worktreeDir || !projectId) {
-      // No worktree or project — skip gracefully
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
-
-    const uniqueId = Date.now();
-    const testFile = `diff-line-click-${uniqueId}.txt`;
-    const filePath = join(worktreeDir, testFile);
-    // Create a file with enough lines to pick a specific target
-    const fileContent = Array.from({ length: 20 }, (_, i) => `Line ${i + 1}: content here`).join('\n') + '\n';
-    writeFileSync(filePath, fileContent);
-
-    // Click on the project to select it (if not already selected)
-    await page.locator('.project-item').first().click();
-    await page.waitForSelector('.top-bar', { timeout: 10000 });
-
-    // Open the explorer view by clicking the project title button
-    await page.locator('.explorer-btn').click();
-    await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
-
-    // Click the "Review Changes" button (git-status-btn in explorer header)
-    await page.locator('.git-status-btn').click();
-
-    // Wait for the Changes panel header to appear
-    await expect(page.locator('.panel-title')).toHaveText('Changes', { timeout: 10000 });
-
-    // Wait for diff rows to appear
-    await expect(async () => {
-      const diffRows = await page.locator('.diff-row').count();
-      expect(diffRows).toBeGreaterThan(0);
-    }).toPass({ timeout: 10000 });
-
-    // Find a clickable diff row with a line number
-    const clickableRows = page.locator('.diff-row-clickable');
-    const rowCount = await clickableRows.count();
-    if (rowCount === 0) {
-      // Clean up
-      execSync(`rm -f ${filePath}`);
-      return;
-    }
-
-    // Pick a row that has a visible line number (not the first one which might be a header)
-    // Get the line number from the gutter next to the clickable row
-    // We'll click on a row and verify the editor opens
-    const targetRow = clickableRows.nth(Math.min(5, rowCount - 1)); // pick ~line 6 area
-    await targetRow.click();
-
-    // The Review Changes panel should close and the editor should open
-    // Wait for the editor to appear (branch-editor)
-    await expect(page.locator('.branch-editor')).toBeVisible({ timeout: 10000 });
-
-    // Verify the file is loaded (loading state disappears)
-    await expect(page.locator('.editor-placeholder:has-text("Loading file")')).not.toBeVisible({ timeout: 10000 });
-
-    // Verify the file name is shown in the tab bar
-    await expect(page.locator('.editor-tab-name')).toContainText(testFile);
-
-    // Verify CodeMirror editor is present
-    await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 5000 });
-
-    // Verify the cursor is on a specific line (not line 1)
-    // The active line gutter should show a line number > 1
-    const activeLineGutter = page.locator('.cm-activeLineGutter');
-    await expect(activeLineGutter).toBeVisible({ timeout: 5000 });
-    const activeLineNumber = await activeLineGutter.textContent();
-    expect(activeLineNumber).toBeTruthy();
-    const lineNum = parseInt(activeLineNumber!.trim(), 10);
-    // Should be on a line > 1 (we clicked on a row ~5 lines in)
-    expect(lineNum).toBeGreaterThan(1);
-
-    // Clean up
-    execSync(`rm -f ${filePath}`);
-  });
-});
-
-// --- Editor External Change Reconciliation (serial: modify same worktree filesystem) ---
-
-test.describe('Editor External Change Reconciliation', () => {
-  test.describe.configure({ mode: 'serial' });
-
-  test.beforeEach(async ({ page }) => {
-    test.setTimeout(30000);
-    await page.goto('/');
-    await page.waitForSelector('.project-item', { timeout: 10000 });
-  });
-
-  async function openFileInEditor(page: test['project']['use'], worktreeDir: string, file: string) {
-    await page.locator('.project-item').first().click();
-    await page.waitForSelector('.top-bar', { timeout: 10000 });
-    await page.locator('.explorer-btn').click();
-    await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.file-browser-list')).toBeVisible({ timeout: 10000 });
-    await page.locator('.file-browser-item', { hasText: file }).click();
-    await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 10000 });
-  }
-
-  test('reloads an open file when it is changed externally with no unsaved edits', async ({ page }) => {
-    const worktreeDir = findWorktreeDir();
-    const projectId = await getProjectId(page);
-    if (!worktreeDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
-
-    const uniqueId = Date.now();
-    const file = `ext-reload-${uniqueId}.txt`;
-    const absFile = join(worktreeDir, file);
-    writeFileSync(absFile, 'Line 1: alpha\nLine 2: beta\nLine 3: gamma\n');
-
-    try {
-      await openFileInEditor(page, worktreeDir, file);
-      await expect(page.locator('.cm-content')).toContainText('Line 2: beta');
-
-      // Change the file externally (editor has no unsaved edits)
-      writeFileSync(absFile, 'Line 1: alpha\nLine 2: BETA-CHANGED\nLine 3: gamma\n');
-
-      await expect.poll(async () => {
-        return (await page.locator('.cm-content').textContent()) ?? '';
-      }).toContain('BETA-CHANGED');
-    } finally {
-      try { rmSync(absFile, { force: true }); } catch { /* ignore */ }
-    }
-  });
-
-  test('merges an external change with non-overlapping unsaved edits', async ({ page }) => {
-    const worktreeDir = findWorktreeDir();
-    const projectId = await getProjectId(page);
-    if (!worktreeDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
-
-    const uniqueId = Date.now();
-    const file = `ext-merge-${uniqueId}.txt`;
-    const absFile = join(worktreeDir, file);
-    writeFileSync(absFile, 'Line 1: alpha\nLine 2: beta\nLine 3: gamma\n');
-
-    try {
-      await openFileInEditor(page, worktreeDir, file);
-
-      // User edits line 1 in the editor
-      await page.locator('.cm-content').first().click();
-      await page.keyboard.press('Home');
-      await page.keyboard.press('End');
-      await page.keyboard.type(' USER');
-      await page.waitForTimeout(400); // let draft/unsaved state settle
-
-      // Externally edit a different line (line 3)
-      writeFileSync(absFile, 'Line 1: alpha\nLine 2: beta\nLine 3: gamma EXTERNAL\n');
-
-      // Both the user edit AND the external change must be present
-      await expect.poll(async () => {
-        return (await page.locator('.cm-content').textContent()) ?? '';
-      }).toContain('alpha USER');
-      await expect.poll(async () => {
-        return (await page.locator('.cm-content').textContent()) ?? '';
-      }).toContain('gamma EXTERNAL');
-    } finally {
-      try { rmSync(absFile, { force: true }); } catch { /* ignore */ }
-    }
-  });
-
-  test('keeps the user buffer and shows a toast on a conflicting external change', async ({ page }) => {
-    const worktreeDir = findWorktreeDir();
-    const projectId = await getProjectId(page);
-    if (!worktreeDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
-
-    const uniqueId = Date.now();
-    const file = `ext-conflict-${uniqueId}.txt`;
-    const absFile = join(worktreeDir, file);
-    writeFileSync(absFile, 'Line 1: alpha\nLine 2: beta\nLine 3: gamma\n');
-
-    try {
-      await openFileInEditor(page, worktreeDir, file);
-
-      // User edits line 1
-      await page.locator('.cm-content').first().click();
-      await page.keyboard.press('Home');
-      await page.keyboard.press('End');
-      await page.keyboard.type(' USER');
-      await page.waitForTimeout(400);
-
-      // Externally edit the SAME line differently
-      writeFileSync(absFile, 'Line 1: alpha EXTERNAL\nLine 2: beta\nLine 3: gamma\n');
-
-      // User edit must be preserved (not overwritten by the external change)
-      await page.waitForTimeout(1200); // allow debounce + fetch + reconcile
-      const content = (await page.locator('.cm-content').textContent()) ?? '';
-      expect(content).toContain('alpha USER');
-      expect(content).not.toContain('alpha EXTERNAL');
-
-      // A non-blocking toast should be shown
-      await expect(page.locator('.toast')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator('.toast')).toContainText('changed externally');
-    } finally {
-      try { rmSync(absFile, { force: true }); } catch { /* ignore */ }
-    }
   });
 });

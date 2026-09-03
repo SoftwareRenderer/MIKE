@@ -2,59 +2,37 @@ import { test, expect } from '@playwright/test';
 import { writeFileSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { getProjectId, csrfFetch } from './helpers';
+import { getProjectId, csrfFetch, projectDirPath, selectProject, isolatedProject, gotoProject } from './helpers';
 
-function getConfig() {
-  return JSON.parse(execSync('curl -s http://localhost:3000/api/config', { encoding: 'utf-8' }));
-}
-
-function findWorktreeDir(): string | null {
-  const worktreesDir = getConfig().workspace_dir;
-  try {
-    const projectEntries = readdirSync(worktreesDir);
-    for (const projEntry of projectEntries) {
-      const projPath = join(worktreesDir, projEntry);
-      if (!statSync(projPath).isDirectory()) continue;
-      const taskEntries = readdirSync(projPath);
-      for (const taskEntry of taskEntries) {
-        const fullPath = join(projPath, taskEntry);
-        if (statSync(fullPath).isDirectory()) {
-          return fullPath;
-        }
-      }
-    }
-  } catch { /* ignore */ }
-  return null;
-}
+// Own project: this file writes files into the project directory and commits them, and
+// the shared test repo is where other specs run their own `git add -A && git commit`.
+isolatedProject();
 
 test.describe('Explorer Git History Refresh After Commit', () => {
   test.describe.configure({ mode: 'serial' });
 
   test.beforeEach(async ({ page }) => {
     test.setTimeout(30000);
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
   test('should update git history after committing from Review Changes panel', async ({ page }) => {
-    const worktreeDir = findWorktreeDir();
     const projectId = await getProjectId(page);
-    if (!worktreeDir || !projectId) {
-      // No worktree or project — skip gracefully
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
+    // The project explorer and Review-Changes read the PROJECT directory, not a task
+    // worktree — see projectDirPath() in helpers.ts.
+    const projectDir = await projectDirPath(page, projectId);
 
     const uniqueId = Date.now();
     const testFile = `history-refresh-${uniqueId}.txt`;
-    const filePath = join(worktreeDir, testFile);
+    const filePath = join(projectDir, testFile);
     const commitMessage = `Add ${testFile}`;
     const fileContent = `Test file for git history refresh\nLine 2\nLine 3\n`;
     writeFileSync(filePath, fileContent);
 
     try {
       // Click on the project to select it
-      await page.locator('.project-item').first().click();
+      await selectProject(page, projectId);
       await page.waitForSelector('.top-bar', { timeout: 10000 });
 
       // Open the explorer view
@@ -96,8 +74,10 @@ test.describe('Explorer Git History Refresh After Commit', () => {
       await expect(commitBtn).toBeVisible({ timeout: 5000 });
       await commitBtn.click();
 
-      // Wait for the commit dialog to appear
-      const commitDialog = page.locator('[role="dialog"]');
+      // The commit dialog, identified by the one thing only it contains. `[role="dialog"]`
+      // on its own matches the EXPLORER VIEW (ExplorerView.svelte carries role="dialog"),
+      // so "the dialog closed" could never be observed from a panel that was open.
+      const commitDialog = page.locator('[role="dialog"]').filter({ has: page.locator('.commit-textarea') });
       await expect(commitDialog).toBeVisible({ timeout: 10000 });
 
       // Fill in the commit message
@@ -139,22 +119,20 @@ test.describe('Explorer Git History Refresh After Commit', () => {
   });
 
   test('should refresh branches list after committing from Review Changes', async ({ page }) => {
-    const worktreeDir = findWorktreeDir();
     const projectId = await getProjectId(page);
-    if (!worktreeDir || !projectId) {
-      await expect(page.locator('.board')).toBeVisible();
-      return;
-    }
+    // The project explorer and Review-Changes read the PROJECT directory, not a task
+    // worktree — see projectDirPath() in helpers.ts.
+    const projectDir = await projectDirPath(page, projectId);
 
     const uniqueId = Date.now();
     const testFile = `branch-refresh-${uniqueId}.txt`;
-    const filePath = join(worktreeDir, testFile);
+    const filePath = join(projectDir, testFile);
     const fileContent = `Test file for branch refresh\n`;
     writeFileSync(filePath, fileContent);
 
     try {
       // Click on the project to select it
-      await page.locator('.project-item').first().click();
+      await selectProject(page, projectId);
       await page.waitForSelector('.top-bar', { timeout: 10000 });
 
       // Open the explorer view
@@ -184,7 +162,7 @@ test.describe('Explorer Git History Refresh After Commit', () => {
 
       // Commit
       await page.locator('.panel-commit-btn').click();
-      const commitDialog = page.locator('[role="dialog"]');
+      const commitDialog = page.locator('[role="dialog"]').filter({ has: page.locator('.commit-textarea') });
       await expect(commitDialog).toBeVisible({ timeout: 10000 });
 
       const commitTextarea = page.locator('.commit-textarea');
@@ -209,7 +187,7 @@ test.describe('Explorer Git History Refresh After Commit', () => {
       }).toPass({ timeout: 10000 });
 
       // Verify the branch badge is still visible in the git graph
-      await expect(page.locator('.branch-badge')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('.branch-badge').first()).toBeVisible({ timeout: 5000 });
     } finally {
       try { rmSync(filePath, { force: true }); } catch { /* ignore */ }
     }

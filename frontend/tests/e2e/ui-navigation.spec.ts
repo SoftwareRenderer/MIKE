@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, findProviderByRef,
-} from './helpers';
+  apiGetJson } from './helpers';
 
 // Helper: create a subtask via API (CSRF-aware)
 async function createSubtaskViaApi(page: test.Page, projectId: string, parentTaskId: string, prompt: string): Promise<string> {
@@ -167,7 +167,12 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
   test('back from task preserves correct project in sidebar', async ({ page }) => {
     // Get project info
     const projectId = await getProjectId(page);
-    const projectName = (await page.locator('.project-name').first().textContent())?.trim();
+    // The sidebar renders `sortedProjects`, so ".project-name first" is whichever row
+    // sorts first — not the project this test navigates to. Read the name of the project
+    // under test from the API instead of guessing it from the DOM order.
+    const projectName = (await apiGetJson<any[]>(page, '/api/projects'))
+      .find((p: any) => p.id === projectId)?.name;
+    expect(projectName).toBeTruthy();
 
     // Navigate to project view
     await page.goto(`/?project=${projectId}`);
@@ -231,7 +236,11 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
 
   test('switch project via sidebar, open task, back preserves new project', async ({ page}) => {
     const projectId = await getProjectId(page);
-    const projectName = (await page.locator('.project-name').first().textContent())?.trim();
+    // The name of the project under test, from the API: the sidebar renders
+    // `sortedProjects`, so ".project-name first" names whichever row sorts first.
+    const projectName = (await apiGetJson<any[]>(page, '/api/projects'))
+      .find((p: any) => p.id === projectId)?.name;
+    expect(projectName).toBeTruthy();
 
     // Create a unique task in the project
     const taskTitle = `nav-switch-${Date.now()}`;
@@ -269,43 +278,32 @@ test.describe.serial('Browser Navigation (Back/Forward)', () => {
 // ─── Offline Cache (serial — route interceptions and IndexedDB state) ───
 
 test.describe.serial('Offline Cache', () => {
-  test('board renders from cache when server is unreachable', async ({ page, context }) => {
-      // 1. Navigate to the project board and let it load (populates cache)
-      await page.goto('/');
-      await page.waitForSelector('.project-item', { timeout: 10000 });
+  test('board renders from cache when the API is unreachable', async ({ page }) => {
+    // 1. Load the board normally, which is what populates the client-side cache.
+    await page.goto('/');
+    await page.waitForSelector('.project-item', { timeout: 10000 });
+    const projectId = await getProjectId(page);
+    await page.goto(`/?project=${projectId}`);
+    await page.waitForSelector('.card', { timeout: 10000 });
+    expect(await page.locator('.card').count()).toBeGreaterThan(0);
 
-      const projectId = await getProjectId(page);
-      await page.goto(`/?project=${projectId}`);
-      await page.waitForSelector('.card', { timeout: 10000 });
+    // Make the API unreachable while the document and its assets still load. That is the state the
+    // offline screen exists for. context.setOffline(true) would take the document down too, and the
+    // service worker does not serve the shell here, leaving only Chrome's error page to assert on.
+    await page.route('**/api/**', (route) => route.abort());
+    await page.goto(`/?project=${projectId}`, { waitUntil: 'domcontentloaded' }).catch(() => {});
 
-      const cardsBefore = await page.locator('.card').count();
-      expect(cardsBefore).toBeGreaterThan(0);
+    // 3. The offline screen, then the cached board behind it.
+    await expect(page.locator('.offline-screen')).toBeVisible({ timeout: 15000 });
+    await page.click('.offline-btn');
+    await page.waitForSelector('.card', { timeout: 15000 });
+    expect(await page.locator('.card').count()).toBeGreaterThan(0);
 
-      // 2. Set browser to offline mode — all network requests will fail
-      await context.setOffline(true);
+    // 4. Cached data is labelled as such — a silent stale board is the failure mode
+    //    this whole path exists to avoid.
+    await expect(page.locator('.cache-banner')).toContainText('Viewing cached data', { timeout: 10000 });
 
-      // 3. Navigate again — service worker serves cached HTML, auth fails
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
-
-      // 4. Wait for the offline screen to appear
-      await expect(page.locator('.offline-screen')).toBeVisible({ timeout: 10000 });
-
-      // 5. Click "Offline Mode" button to load from cache
-      await page.click('.offline-btn');
-
-      // 6. Wait for the board to render from cache
-      await page.waitForSelector('.card', { timeout: 15000 });
-
-      // 7. Verify board renders from cache
-      const cards = await page.locator('.card').count();
-      expect(cards).toBeGreaterThan(0);
-
-      // 8. Verify the "Viewing cached data" banner is visible
-      await expect(page.locator('.cache-banner')).toBeVisible({ timeout: 10000 });
-      await expect(page.locator('.cache-banner')).toContainText('Viewing cached data');
-
-      // 9. Restore online mode
-      await context.setOffline(false);
+    await page.unroute('**/api/**');
   });
 
   test('offline queue persists and merges with cached board', async ({ page, context }) => {

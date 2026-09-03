@@ -102,7 +102,7 @@ test.describe.serial('Merge Sync', () => {
     // Wait for the commit dialog to appear (if there are changes)
     // The commit dialog may or may not appear depending on whether there are changes
     const commitDialog = page.locator('[role="dialog"] .commit-textarea');
-    const dialogVisible = await commitDialog.isVisible({ timeout: 10000 }).catch(() => false);
+    const dialogVisible = await commitDialog.waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false);
 
     if (dialogVisible) {
       // Confirm the commit

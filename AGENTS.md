@@ -63,6 +63,7 @@ TLS is **on by default**: a local CA in `data/tls/` (`mike-ca.crt`/`.key`) signs
 - **The CA never rotates** and there is **no expiry-based renewal** — refresh an expired leaf by deleting `mike.crt`/`mike.key` and restarting (keep the CA). The leaf is re-issued only when the host's names change.
 - **The TLS-vs-plain first-byte sniff must not run inside `hybridListener.Accept()`** (`backend/server/server.go`): `net/http` accepts **serially**, so sniffing there lets one peer that connects and sends nothing stall every later handshake, and returning that peer's EOF/reset reads as a dead listener, ends `Serve` and kills the process. `Accept()` waits on a queue that a per-connection sniff goroutine fills — no worker pool, since N workers still block everyone at N silent peers. Sniffed-out peers are closed and logged per host, never handed to `net/http`; only the listener's own accept error may end `Serve`. Tests: `backend/server/listener_test.go`.
 - **Never `log.Fatalf` on a `Serve()` error** (`main.go`): run the signal cleanup path (flight recorder, `srv.Shutdown`) and then exit 1 — `log.Fatalf` skips that cleanup and makes any listener error an abrupt exit.
+- **SIGTERM must end the process.** `srv.Shutdown` runs under `server.RunShutdownWithDeadline` (`backend/server/shutdown.go`, 15s): every step waits on something that cannot be interrupted (a container that is not answering podman, an LSP bridge whose peer died), and a shutdown that hangs leaves the process **holding the data directory open** — it re-creates `kanban.db`/`-wal` after whatever deleted them, so the next run boots on the previous run's database. A bounded *context* bounds nothing here; the deadline is enforced by leaving anyway. Each step logs `shutdown: <name>` before running, so the last line names what wedged. Tests: `backend/server/shutdown_test.go`.
 - **A certificate is not the gate** — reachability is `MIKE_LISTEN` + Host pinning (`MIKE_ALLOWED_HOSTS`), not the SAN set. Weak-password/non-loopback startup rules: `docs/tls.md`.
 - Tests: `backend/tls/tls_test.go`.
 
@@ -99,12 +100,14 @@ Two dedicated test servers with isolated databases plus one shared mock LLM, ful
 | Server | Port | Data dir | Purpose |
 |--------|------|----------|---------|
 | Main | 3000 | `/tmp/kanban-test-data` | `chromium` Playwright project (default tests) |
-| Isolated | 3001 | `/tmp/kanban-test-data-isolated` | `isolated` project (serialized, 1 worker) — config-modifying suites; see `testMatch` in `frontend/playwright.config.ts` |
+| Isolated | 3001 | `/tmp/kanban-test-data-isolated` | `isolated` project (serialized, 1 worker) — config-modifying suites; see `ISOLATED_SPECS` in `frontend/playwright.config.ts` |
 | Mock LLM | 9999 | — | shared; `frontend/tests/mock-llm.js` |
 
 Test repos live at `/tmp/kanban-test-repo` (+ `-2`), worktrees at `/tmp/kanban-test-worktrees/`. The registry is pinned to a local fixture (`frontend/tests/registry-fixture.json`) so registry e2e never hits the hosted registry.
 
 Test servers are spawned via `go run .` and **inherit your shell environment** — export `MIKE_ENCRYPTION_KEY` before running e2e, or global-setup fails with "Server on port 3000 did not start within 15000ms".
+
+**A run must leave nothing behind**, and that is an enforced property, not a nicety: `globalTeardown` is `tests/global-teardown.ts`, whose default export is *only* teardown (it used to name `global-setup.ts`, whose default export is `main()` — so every run ended by running **setup again**, spawning a fresh server pair + lock + database that nothing would ever stop; the next run then booted on a *used* DB with the previous run's extensions, providers and tasks). Verify after any change to setup/teardown: `pgrep -xc kanban` → 0, nothing listening on 3000/3001/9999, no `/tmp/kanban-test-data*`. teardown stops servers by **identity** (`--data-dir <dir>`), because they are `setsid go run .` grandchildren — the port owner is not the process that should stop, and `lsof -ti:PORT` also answers with clients.
 
 If a prior run was interrupted, clean stale state first (stale processes hold the ports — symptom `ERR_CONNECTION_REFUSED`, or a stale TLS server answering a `--no-tls` test — and a stale lock makes global-setup run teardown instead of setup):
 ```bash
@@ -120,15 +123,22 @@ rm -rf /tmp/kanban-test-data /tmp/kanban-test-data-isolated /tmp/kanban-test-wor
 
 ### Go Unit Tests
 - Use the `testServer(t)` helper for an isolated server with a temp DB; `t.TempDir()` for files. Deterministic — no external dependencies.
+- **`MIKE_ENCRYPTION_KEY` must be set in the shell** for `go test ./backend/...`: the config tests that store a provider API key encrypt it on the way in (`backend/config` fails with `crypto: MIKE_ENCRYPTION_KEY environment variable is not set`, not with a test failure you can read past).
 - A few tests shell out to a real `git commit` without `-c user.*` flags (e.g. the `backend/managers` remote-fixture tests), so the machine needs a git identity (`git config --global user.email …`) or they fail with `Committer identity unknown`.
 - Sandbox tests need `runsc` **and** a working podman storage: under a nested/overlayfs root they all fail with `'overlay' is not supported over overlayfs, a mount_program is required` (podman exit status 125). That is environmental, not a regression — verify with `podman info` before reading anything into it.
 - The Pi agent adapter's unit tests live in `../MIKE-extensions/agent/pi` and are run there — they are **not** part of `./backend/... ./pkg/...`.
 
 ### E2E Tests
 Specs in `frontend/tests/e2e/` (helpers in `helpers.ts`); **mock LLM by default** (`frontend/tests/mock-llm.js`, port 9999, fixtures in `frontend/tests/fixtures/`). Conventions that bite:
-- **Config-modifying specs** (settings, models, shortcuts, mode select, …) must run in the `isolated` project — add them to `testMatch` in `playwright.config.ts`.
+- **Config-modifying specs** (settings, models, shortcuts, mode select, …) must run in the `isolated` project — add the spec name to `ISOLATED_SPECS` in `frontend/playwright.config.ts` (one array; the chromium lane's `testMatch` is derived from it, so the two lanes cannot drift).
 - **Heavy fixtures get a dedicated repo** — never write big files into the shared `/tmp/kanban-test-repo`, where another spec's `git add -A && git commit` races with them.
 - `test.describe.serial()` + `Date.now()` identifiers for shared state; wait for selectors, not delays (drag-and-drop is the known exception).
+- **Every spec that touches the board owns its project** via `isolatedProject()` + `gotoProject()` (`helpers.ts`) — the lane used to share global-setup's one project across ~9 concurrent specs, and two runs of identical code then differed by 15 failures. It is keyed at the *worker*, never the file, because `fullyParallel` spreads one file across workers. Specs asserting on the **global** view (sidebar project list, file browser, add-project flow) must not use it, and must never do `.project-item` + `.first()` — use `selectProject(page, id)`. `serial` amplifies any leftover coupling: one failure skips its whole block as "did not run".
+- **`workers: 4` is measured** (see `playwright.config.ts`): 6 is ~10% faster and buys 1-4 rotating turn-queue failures per run.
+- **A spec that runs an executor TURN owns its own project** — turns are queued per project, so on the shared project a fork's answer waits behind every other worker's task and the spec times out waiting for the task to go idle (`.btn-send` never returns). Same for anything that mutates the project: `git add`/`commit`, or its **sandbox configuration**. Concurrent git in the shared repo makes *other* specs lose their file listing (the listing is a live `git status` that never retries after an error), and flipping `sandbox_enabled` makes the project explorer seed the **container** mount path and ask the host for it — 400 `path outside allowed project directory`, panel stuck on the error.
+- **Pin the mock LLM's fixture with `llm-fixture:<name>` in the prompt.** Keyword routing is unreachable from an ordinary task prompt — the plan-first skill is in every system prompt, so plan routing answers first and a spec asking for "edit" silently gets `create_task`. Convention + the two measured chat behaviours (`.awaiting-llm` = "request sent, nothing back yet", absent while streaming; a task auto-starts, so wait for idle and assert on the entry that appears *after* your send): `docs/testing.md`.
+- **`[role="dialog"]` is never a unique locator** (BaseModal, both explorer views, `TerminalPanel`, `CommitDiffOverlay`, and every ChatMessage's `<dialog>` all have it) — filter by the content that identifies the dialog you mean. Selector-by-component and the commit/review-bar rules: `docs/testing.md`.
+- **A spec exists only if it needs a browser or the real backend** (DnD, real focus/keyboard, scroll/CSS geometry, iframes + CSP, git/worktrees, WS reconnect). Component state belongs in vitest — 1.4k assertions in ~20 s versus a page-load tax per spec. And **never write a `readFileSync('../Foo.svelte')` + `toContain(...)` "test"**: it cannot fail a real bug and breaks on renames. The suite is budgeted at a few minutes for a full run; keep it there.
 
 Fixture format and recording, the dedicated-repo recipe, the local-git-identity requirement, mock-LLM keyword routing, ad-hoc `.mjs` probe scripts: **`docs/testing.md`**.
 

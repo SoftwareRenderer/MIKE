@@ -1,12 +1,16 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForSendButton, csrfFetch } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForSendButton, csrfFetch, isolatedProject, gotoProject, apiGetJson, waitForTurnAnswered } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 test.describe.serial('Chat Message Actions', () => {
   let projectId: string;
   let taskId: string;
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.card', { timeout: 10000 });
 
     projectId = await getProjectId(page);
@@ -132,100 +136,50 @@ test.describe.serial('Chat Message Actions', () => {
   });
 
   test('should not duplicate the previous assistant message after deleting a user message', async ({ page }) => {
-    test.setTimeout(60000);
-
-    // --- First exchange ---
-    const userCountBefore = await page.locator('.chat-message.user').count();
+    // Every count here comes from the messages API and every step waits for the turn to
+    // be ANSWERED. The mock LLM keeps appending while it streams, so the old version —
+    // which snapshotted `.chat-message.assistant` from the DOM right after
+    // waitForSendButton — measured a turn that had not finished: the count went UP
+    // after the delete and the test failed on its own bookkeeping, not on a duplicate.
+    const assistants = async () =>
+      (await apiGetJson<any[]>(page, `/api/projects/${projectId}/tasks/${taskId}/messages`))
+        .filter((m: any) => m.role === 'assistant').length;
 
     const msg1 = `first message ${Date.now()}`;
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/send`, {
-      method: 'POST',
-      body: { content: msg1 },
-    });
-
-    await expect(async () => {
-      expect(await page.locator('.chat-message.user').count()).toBeGreaterThan(userCountBefore);
-    }).toPass({ timeout: 20000 });
-
-    // Fallback: if optimistic UI hasn't rendered, reload to pick up the message
-    if (await page.locator('.chat-message.user').count() <= userCountBefore) {
-      await page.reload();
-      await navigateToTask(page, taskId, projectId);
-      await waitForSendButton(page);
-    }
-
-    await waitForSendButton(page);
-
-    // Verify at least 1 assistant message
-    const assistantCountAfterFirst = await page.locator('.chat-message.assistant').count();
-    expect(assistantCountAfterFirst).toBeGreaterThanOrEqual(1);
-    const firstAssistantText = await page.locator('.chat-message.assistant').first().textContent();
-    expect(firstAssistantText?.trim()).not.toBe('');
-
-    // --- Second exchange ---
-    const userCountBeforeSecond = await page.locator('.chat-message.user').count();
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/send`, { method: 'POST', body: { content: msg1 } });
+    await waitForTurnAnswered(page, projectId, taskId);
+    const afterFirst = await assistants();
+    // A turn can append several assistant entries (the mock LLM answers in more than
+    // one message), so this test works with counts, never with "one turn == one row".
+    expect(afterFirst).toBeGreaterThanOrEqual(1);
+    const firstText = (await page.locator('.chat-message.assistant').first().textContent())?.trim();
+    expect(firstText).not.toBe('');
 
     const msg2 = `second message ${Date.now()}`;
-    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/send`, {
-      method: 'POST',
-      body: { content: msg2 },
-    });
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/send`, { method: 'POST', body: { content: msg2 } });
+    await waitForTurnAnswered(page, projectId, taskId);
+    const afterSecond = await assistants();
+    expect(afterSecond).toBeGreaterThan(afterFirst);
 
-    await expect(async () => {
-      expect(await page.locator('.chat-message.user').count()).toBeGreaterThan(userCountBeforeSecond);
-    }).toPass({ timeout: 20000 });
-
-    // Fallback: if optimistic UI hasn't rendered, reload to pick up the message
-    if (await page.locator('.chat-message.user').count() <= userCountBeforeSecond) {
-      await page.reload();
-      await navigateToTask(page, taskId, projectId);
-      await waitForSendButton(page);
-    }
-
-    await waitForSendButton(page);
-
-    const assistantCountAfterSecond = await page.locator('.chat-message.assistant').count();
-    expect(assistantCountAfterSecond).toBeGreaterThanOrEqual(2);
-
-    // --- Delete the last user message ---
-    const userMessages = page.locator('.chat-message.user');
-    const lastUserMsg = userMessages.nth(await userMessages.count() - 1);
-    const deleteBtn = lastUserMsg.locator('[aria-label="Delete message and all following messages"]');
-
-    if (!(await deleteBtn.isVisible().catch(() => false))) {
-      return; // Streaming, skip
-    }
-
+    // The behaviour under test is the UI delete: the action icon on the last user
+    // message, its confirmation dialog, and everything after it disappearing.
+    const deleteBtn = page.locator('.chat-message.user').last().locator('[aria-label="Delete message and all following messages"]');
+    await expect(deleteBtn).toBeVisible({ timeout: 10000 });
     await deleteBtn.click();
     await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
     await page.click('[role="dialog"] .btn-confirm');
     await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 5000 });
 
-    // Wait for page to stabilize after deletion (LLM may still be processing)
+    // The deleted turn's answer is gone from the store AND from the DOM, with no
+    // duplicate left behind, and the first answer is untouched.
     await expect(async () => {
-      const hasSend = await page.locator('.btn-send').isVisible();
-      const hasStop = await page.locator('.btn-stop').isVisible();
-      expect(hasSend || hasStop).toBe(true);
+      expect(await assistants()).toBe(afterFirst);
     }).toPass({ timeout: 15000 });
-    // If stop button is visible, wait for send button
-    if (await page.locator('.btn-stop').isVisible().catch(() => false)) {
-      await waitForSendButton(page);
-    }
-
-    // Wait for the deleted messages to actually disappear from the UI
-    await expect(async () => {
-      const count = await page.locator('.chat-message.assistant').count();
-      expect(count).toBeLessThan(assistantCountAfterSecond);
-    }).toPass({ timeout: 10000 });
-
-    // --- ASSERTION: assistant count decreased by 1, no duplicates ---
-    const finalAssistantCount = await page.locator('.chat-message.assistant').count();
-    // Deleting the last user message also removes its assistant response,
-    // so the count should decrease by exactly 1
-    expect(finalAssistantCount).toBe(assistantCountAfterSecond - 1);
-
-    // The first assistant message (from the initial prompt) should remain unchanged
-    const remainingText = await page.locator('.chat-message.assistant').first().textContent();
-    expect(remainingText).toBe(firstAssistantText);
+    await expect(page.locator('.chat-message.assistant')).toHaveCount(afterFirst);
+    // A prefix compare, not equality: the stats footer (model · tokens · elapsed) renders
+    // once the turn fully settles, so the same message's textContent grows over time.
+    expect((await page.locator('.chat-message.assistant').first().textContent())?.trim() || '').toContain(
+      firstText.slice(0, 40),
+    );
   });
 });
