@@ -40,22 +40,36 @@ export function hasNetworkCapability(capabilities?: Record<string, any> | null):
     return !!capabilities?.network;
 }
 
+/** A declared dependency directory, or null when the declaration is missing or incomplete. */
+function readDependencyCache(dep: unknown): { container_path: string; env: string } | null {
+    if (!dep || typeof dep !== 'object') return null;
+    const { container_path, env } = dep as Record<string, unknown>;
+    if (typeof container_path !== 'string' || typeof env !== 'string') return null;
+    return { container_path, env };
+}
+
 /**
- * The dependency directory this extension will want, read from the registry projection, or null
- * when it declares none. Projected into the index precisely so this can be said *before* the
- * manifest is fetched: an extension that declares one is about to ask the user for a folder on
- * their machine, and "install this?" is the last moment that is worth saying so out loud.
+ * The dependency directory this extension reads, or null when it declares none. Read it before the
+ * manifest is fetched, so the UI can warn about the missing folder at install time.
  *
- * There is no write permission in here because there is none to disclose: the extension's own
- * container reads the directory, and the containers that fill it (tasks, sandboxed terminals) are
- * the user's own work, not this extension's.
+ * Two shapes carry it: the registry index projects it onto `lsp` (scripts/gen-registry.py), while
+ * `GET /api/extensions/local` returns the manifest as written, with it under `lsp.sandbox`. Reading
+ * only the first leaves every local extension unbadged.
  */
 export function dependencyCacheDeclaration(
     capabilities?: Record<string, any> | null,
 ): { container_path: string; env: string } | null {
-    const dep = capabilities?.lsp?.dependency_cache;
-    if (!dep || typeof dep.container_path !== 'string' || typeof dep.env !== 'string') return null;
-    return { container_path: dep.container_path, env: dep.env };
+    const lsp = capabilities?.lsp;
+    return readDependencyCache(lsp?.dependency_cache) ?? readDependencyCache(lsp?.sandbox?.dependency_cache);
+}
+
+/**
+ * True when installing this extension is only the first half of making it work. Today that is one
+ * thing: it declared a dependency directory, which installing does not fill. Add further reasons
+ * here rather than adding another check where the card decides to badge.
+ */
+export function requiresSetupAfterInstall(capabilities?: Record<string, any> | null): boolean {
+    return dependencyCacheDeclaration(capabilities) !== null;
 }
 
 /** The two fields `needsDependencyGrant` reads, so a test can hand it one object literal. */
@@ -69,9 +83,12 @@ export type DependencyGrantView = {
 
 /**
  * True when this extension declared a dependency directory and nobody has named one yet — the state
- * behind the card's yellow dot and its "Needs setup" badge. Without it the server starts and resolves
- * only what its own image contains, which for anything but a stdlib-only project means it answers
- * about imports it could not load.
+ * behind the installed card's yellow dot and its "Needs setup" badge. Without it the server starts
+ * and resolves only what its own image contains, which for anything but a stdlib-only project means
+ * it answers about imports it could not load.
+ *
+ * This is the state of an *installed* extension, one with a stored record that can be missing a
+ * grant. A Browse entry has no such record yet, so its card uses `requiresSetupAfterInstall`.
  *
  * Disabled extensions are excluded deliberately: one you switched off is not waiting on you, and a
  * warning about a thing that cannot run teaches people to ignore warnings. It reappears on enable.
@@ -93,7 +110,7 @@ export function requiresInstallReview(entry: { capabilities?: Record<string, any
     return (
         hasNetworkCapability(entry.capabilities) ||
         hasDangerousPermissions((entry.capabilities?.ui?.permissions ?? []) as string[]) ||
-        dependencyCacheDeclaration(entry.capabilities) !== null
+        requiresSetupAfterInstall(entry.capabilities)
     );
 }
 

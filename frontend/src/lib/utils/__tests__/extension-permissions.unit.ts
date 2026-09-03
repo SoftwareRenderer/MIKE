@@ -7,6 +7,7 @@ import {
     hasNetworkCapability,
     requiresInstallReview,
     dependencyCacheDeclaration,
+    requiresSetupAfterInstall,
     needsDependencyGrant,
 } from '../extension-permissions';
 
@@ -172,6 +173,17 @@ describe('requiresInstallReview (network capability OR dangerous permissions)', 
         ).toBe(true);
     });
 
+    it('is true for a local entry whose declaration is under lsp.sandbox', () => {
+        // The local endpoint returns the manifest as written, with the declaration under lsp.sandbox.
+        expect(
+            requiresInstallReview({
+                capabilities: {
+                    lsp: { language: 'go', sandbox: { dependency_cache: { container_path: '/fake/mod', env: 'FAKE_CACHE' } } },
+                },
+            }),
+        ).toBe(true);
+    });
+
     it('is false for an LSP extension that declares no dependency cache', () => {
         expect(requiresInstallReview({ capabilities: { lsp: { language: 'go' } } })).toBe(false);
     });
@@ -181,6 +193,25 @@ describe('dependencyCacheDeclaration', () => {
     it('reads the projected declaration', () => {
         expect(
             dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE' } } }),
+        ).toEqual({ container_path: '/go/pkg/mod', env: 'GOMODCACHE' });
+    });
+
+    it('reads the manifest shape a local entry carries', () => {
+        expect(
+            dependencyCacheDeclaration({
+                lsp: { language: 'go', sandbox: { dependency_cache: { container_path: '/fake/mod', env: 'FAKE_CACHE' } } },
+            }),
+        ).toEqual({ container_path: '/fake/mod', env: 'FAKE_CACHE' });
+    });
+
+    it('prefers the projection when a document somehow carries both', () => {
+        expect(
+            dependencyCacheDeclaration({
+                lsp: {
+                    dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE' },
+                    sandbox: { dependency_cache: { container_path: '/elsewhere', env: 'OTHER' } },
+                },
+            }),
         ).toEqual({ container_path: '/go/pkg/mod', env: 'GOMODCACHE' });
     });
 
@@ -201,6 +232,39 @@ describe('dependencyCacheDeclaration', () => {
         // A half-declared cache would render a sentence with an empty path in it.
         expect(dependencyCacheDeclaration({ lsp: { dependency_cache: { env: 'GOMODCACHE' } } })).toBeNull();
         expect(dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/go/pkg/mod' } } })).toBeNull();
+        // The same rule for the manifest shape.
+        expect(dependencyCacheDeclaration({ lsp: { sandbox: {} } })).toBeNull();
+        expect(dependencyCacheDeclaration({ lsp: { sandbox: { dependency_cache: { env: 'FAKE_CACHE' } } } })).toBeNull();
+    });
+
+    it('is null for capabilities that are not the objects they claim to be', () => {
+        expect(dependencyCacheDeclaration({ lsp: null })).toBeNull();
+        expect(dependencyCacheDeclaration({ lsp: 'go' })).toBeNull();
+        expect(dependencyCacheDeclaration({ lsp: { dependency_cache: 'GOMODCACHE' } })).toBeNull();
+        expect(dependencyCacheDeclaration({ lsp: { sandbox: null } })).toBeNull();
+        expect(dependencyCacheDeclaration({ lsp: { sandbox: { dependency_cache: [] } } })).toBeNull();
+    });
+});
+
+describe('requiresSetupAfterInstall (what a Browse card badges)', () => {
+    it('is true for an entry whose dependency directory is configured after installation', () => {
+        expect(requiresSetupAfterInstall({ lsp: { dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE' } } })).toBe(true);
+        expect(
+            requiresSetupAfterInstall({ lsp: { sandbox: { dependency_cache: { container_path: '/fake/mod', env: 'FAKE_CACHE' } } } }),
+        ).toBe(true);
+    });
+
+    it('is false for an extension that will work straight out of its image', () => {
+        expect(requiresSetupAfterInstall(undefined)).toBe(false);
+        expect(requiresSetupAfterInstall({})).toBe(false);
+        expect(requiresSetupAfterInstall({ lsp: { language: 'typescript' } })).toBe(false);
+        expect(requiresSetupAfterInstall({ ui: { permissions: ['editor.save'] } })).toBe(false);
+    });
+
+    it('does not confuse a permission review with setup: only a declared directory counts', () => {
+        // Dangerous permissions get the review dialog; they are not a step to do after installing.
+        expect(requiresSetupAfterInstall({ network: { allowed_domains: ['x.dev'] } })).toBe(false);
+        expect(requiresSetupAfterInstall({ ui: { permissions: ['network.proxy'] } })).toBe(false);
     });
 });
 

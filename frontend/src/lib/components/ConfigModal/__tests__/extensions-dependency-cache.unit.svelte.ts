@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, cleanup, fireEvent, waitFor } from '@testing-library/svelte';
 import ExtensionsTab from '$lib/components/ConfigModal/ExtensionsTab.svelte';
-import type { Extension } from '$lib/types';
+import type { Extension, RegistryEntry } from '$lib/types';
 
 /**
  * The dependency directory: the card says who still needs one (a badge and a dot on Edit, both
  * `needsDependencyGrant`), and the configuration itself lives in the Edit dialog and rides its Save —
  * so a path is sent only when the field differs from what is stored, Cancel sends nothing, and a
  * refusal lands on the field it is about with the dialog still open.
+ *
+ * The Browse card carries the pre-install half: the badge and the note that say installation is only
+ * the first step.
  */
 
 const HOME = '/home/tester';
@@ -41,11 +44,32 @@ function lspExtension(id: string, name: string, sandbox: Extension['sandbox_conf
 
 const DECLARED = { container_path: '/go/pkg/mod', env: 'GOMODCACHE' };
 
+/** A registry index entry, where the declaration sits on `lsp`. */
+function registryEntry(name: string, author: string, capabilities: Record<string, any>): RegistryEntry {
+    return {
+        name,
+        author,
+        version: '0.7.0',
+        type: 'lsp',
+        display_name: name,
+        description: `${name} language server`,
+        capabilities,
+    } as unknown as RegistryEntry;
+}
+
+/** A local entry as `GET /api/extensions/local` answers it: the manifest as written, with the
+ *  declaration under `lsp.sandbox`. */
+function localEntry(name: string, author: string, capabilities: Record<string, any>): RegistryEntry {
+    return { ...registryEntry(name, author, capabilities), local_path: `/opt/extensions/${author}/${name}` };
+}
+
 interface Harness {
     /** What the store holds; the list endpoint answers from this, so a granted path shows up after reload. */
     granted: Record<string, string>;
     /** Whether the declarer is switched on — a disabled extension must not be warned about. */
     enabled: boolean;
+    registry: RegistryEntry[];
+    local: RegistryEntry[];
     /** Grant calls, in order: the grant endpoint has its own route precisely because empty means revoke. */
     puts: { id: string; body: any }[];
     /** The dialog's ordinary save (`PUT /api/extensions/{id}`), which the grant now rides alongside. */
@@ -62,7 +86,8 @@ function stubFetch(h: Harness) {
 
         if (url.pathname === '/api/auth/session') return json({ authenticated: true, csrf_token: 'csrf-test' });
         if (url.pathname === '/api/home') return json({ home: HOME });
-        if (url.pathname === '/api/extensions/registry' || url.pathname === '/api/extensions/local') return json([]);
+        if (url.pathname === '/api/extensions/registry') return json(h.registry);
+        if (url.pathname === '/api/extensions/local') return json(h.local);
 
         if (url.pathname === '/api/extensions' && (!init?.method || init.method === 'GET')) {
             return json([
@@ -98,7 +123,7 @@ function stubFetch(h: Harness) {
 }
 
 function newHarness(): Harness {
-    return { granted: {}, enabled: true, puts: [], saves: [], putFailure: null };
+    return { granted: {}, enabled: true, registry: [], local: [], puts: [], saves: [], putFailure: null };
 }
 
 async function renderTab() {
@@ -109,11 +134,24 @@ async function renderTab() {
     return utils;
 }
 
+/** One extension's card, by the name in its title row. */
+function card(container: HTMLElement, name: string): HTMLElement | undefined {
+    const cards = [...container.querySelectorAll<HTMLElement>('.extension-card')];
+    return cards.find((c) => c.querySelector('.ext-name')?.textContent?.trim() === name);
+}
+
 /** Every button of one extension's card, by the name shown in its title row. */
 function cardButtons(container: HTMLElement, name: string): HTMLButtonElement[] {
-    const cards = [...container.querySelectorAll('.extension-card')];
-    const card = cards.find((c) => c.querySelector('.ext-name')?.textContent?.trim() === name);
-    return [...(card?.querySelectorAll('button') ?? [])] as HTMLButtonElement[];
+    return [...(card(container, name)?.querySelectorAll('button') ?? [])] as HTMLButtonElement[];
+}
+
+/** Switch to the Browse view and wait for its cards. */
+async function openBrowse(container: HTMLElement) {
+    const tab = [...container.querySelectorAll('.view-tab')].find((b) => b.textContent?.includes('Browse'));
+    if (!tab) throw new Error('the Extensions tab has no Browse view');
+    await fireEvent.click(tab);
+    // Wait for a card: the "no extensions" empty state would otherwise pass as the loaded list.
+    await waitFor(() => expect(container.querySelector('.registry-card')).toBeTruthy());
 }
 
 function buttonByText(buttons: HTMLButtonElement[], text: string): HTMLButtonElement | undefined {
@@ -205,6 +243,68 @@ describe('Settings → Extensions: saying who needs a dependency directory', () 
     });
 });
 
+describe('Settings → Extensions: saying what an install will need afterwards', () => {
+    it('badges a registry entry that declares a dependency directory, and says what for', async () => {
+        const h = newHarness();
+        h.registry = [
+            registryEntry('gopls', 'Go Team', { lsp: { language: 'go', dependency_cache: DECLARED } }),
+            registryEntry('typescript', 'Microsoft', { lsp: { language: 'typescript' } }),
+        ];
+        stubFetch(h);
+        const { container } = await renderTab();
+        await openBrowse(container);
+
+        const gopls = card(container, 'gopls');
+        const badge = gopls?.querySelector('.needs-setup-badge');
+        expect(badge?.textContent?.trim()).toBe('Needs setup');
+        // A label, not a button: nothing is installed yet, so there is no record to open.
+        expect(badge?.tagName).toBe('SPAN');
+        expect(badge?.getAttribute('title')).toContain('GOMODCACHE=/go/pkg/mod');
+
+        const note = gopls?.querySelector('.ext-needs-setup-note');
+        expect(note?.textContent).toContain('Requires additional setup after installation');
+        expect(note?.textContent).toContain('GOMODCACHE=/go/pkg/mod');
+        expect(note?.textContent).toContain('only what its own image contains');
+
+        // An extension that declares nothing gets neither badge nor note.
+        const tsserver = card(container, 'typescript');
+        expect(tsserver?.querySelector('.needs-setup-badge')).toBeNull();
+        expect(tsserver?.querySelector('.ext-needs-setup-note')).toBeNull();
+    });
+
+    it('says it for a local extension, whose declaration is in the manifest shape', async () => {
+        // The local endpoint returns the manifest as written, so the declaration is under lsp.sandbox.
+        const h = newHarness();
+        h.local = [localEntry('dep-cache-lsp', 'Test Dev', {
+            lsp: { language: 'go', sandbox: { dependency_cache: { container_path: '/fake/mod', env: 'FAKE_CACHE' } } },
+        })];
+        stubFetch(h);
+        const { container } = await renderTab();
+        await openBrowse(container);
+
+        const fixture = card(container, 'dep-cache-lsp');
+        expect(fixture?.querySelector('.needs-setup-badge')?.textContent?.trim()).toBe('Needs setup');
+        expect(fixture?.querySelector('.ext-needs-setup-note')?.textContent).toContain('FAKE_CACHE=/fake/mod');
+    });
+
+    it('says it in Browse even once the extension is installed and configured', async () => {
+        // Browse says what installing costs, which a folder on this machine does not change; the
+        // Installed card is the one that stops warning once a folder is shared.
+        const h = newHarness();
+        h.granted[GO_ID] = '/data/shared/gomodcache';
+        h.registry = [registryEntry('gopls', 'Go Team', { lsp: { language: 'go', dependency_cache: DECLARED } })];
+        stubFetch(h);
+        const { container } = await renderTab();
+
+        expect(buttonByText(cardButtons(container, 'gopls'), 'Needs setup')).toBeUndefined();
+
+        await openBrowse(container);
+        const browseCard = card(container, 'gopls');
+        expect(browseCard?.querySelector('.needs-setup-badge')?.textContent?.trim()).toBe('Needs setup');
+        expect(browseCard?.textContent).toContain('Installed');
+    });
+});
+
 describe('Settings → Extensions: the dialog that names the directory', () => {
     it('prefills the suggestion as editable text, and grants nothing by it', async () => {
         const h = newHarness();
@@ -250,8 +350,8 @@ describe('Settings → Extensions: the dialog that names the directory', () => {
         await openEditFor(container, 'gopls');
 
         await waitFor(() => expect(container.querySelector('.ext-dep-path')?.textContent).toBe('/data/shared/gomodcache'));
-        const clear = buttonByText([...container.querySelectorAll('button')] as HTMLButtonElement[], 'Don’t share');
-        if (!clear) throw new Error('a granted directory offers no way to stop sharing it');
+        const clear = buttonByText([...container.querySelectorAll('button')] as HTMLButtonElement[], 'Unmount');
+        if (!clear) throw new Error('a granted directory offers no way to unmount it');
         await fireEvent.click(clear);
         await clickSave(container);
 
