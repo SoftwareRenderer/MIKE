@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolvePair, resolveWorker, resolveUtility, getModelName, displayModelName, extractDomain, getProviderDisplayName } from '../providers';
+import { resolvePair, resolveWorker, resolveUtility, getModelName, displayModelName, extractDomain, getProviderDisplayName, reselectProvider } from '../providers';
 import type { Config, Provider } from '$lib/types';
 
 function makeConfig(partial: Partial<Config>): Config {
@@ -189,5 +189,57 @@ describe('getProviderDisplayName', () => {
     it('falls back to provider name when URL is invalid or empty', () => {
         expect(getProviderDisplayName({ name: 'n', url: '', kind: 'llm' }, [])).toBe('n');
         expect(getProviderDisplayName({ name: 'n', url: 'not a url', kind: 'llm' }, [])).toBe('n');
+    });
+});
+
+describe('reselectProvider', () => {
+    // The case that exists because of agent extensions: the provider list changes under an
+    // open task chat, because the server derives agent://<name> rows from the enabled agent
+    // extensions per request.
+    const cfg = makeConfig({
+        providers: [llmProvider, agentProvider],
+        worker_provider: '1',
+        worker_model: 'model-a',
+    });
+
+    it('keeps a selection whose provider is still offered', () => {
+        expect(reselectProvider(cfg, cfg.providers, agentProvider.url, 'pi')).toBeNull();
+        expect(reselectProvider(cfg, cfg.providers, llmProvider.url, 'model-b')).toBeNull();
+    });
+
+    it('follows the worker pair when the selected provider is gone (agent removed)', () => {
+        expect(reselectProvider(cfg, [llmProvider], agentProvider.url, 'pi'))
+            .toEqual({ url: llmProvider.url, model: 'model-a' });
+    });
+
+    it('selects the worker pair when nothing is selected yet (agent installed)', () => {
+        expect(reselectProvider(cfg, cfg.providers, '', '')).toEqual({ url: llmProvider.url, model: 'model-a' });
+    });
+
+    it('falls back to the first provider with a model when the worker pair resolves to nothing', () => {
+        const noWorker = makeConfig({ providers: [llmProvider], worker_provider: '', worker_model: '' });
+        expect(reselectProvider(noWorker, noWorker.providers, '', ''))
+            .toEqual({ url: llmProvider.url, model: 'model-a' });
+
+        // Legacy rows name the worker by hand; when that name no longer resolves, the
+        // selector still has to land on something selectable.
+        const staleWorker = makeConfig({ providers: [llmProvider], worker_provider: 'gone', worker_model: 'x' });
+        expect(reselectProvider(staleWorker, staleWorker.providers, '', ''))
+            .toEqual({ url: llmProvider.url, model: 'model-a' });
+    });
+
+    it('leaves the selection alone when there is nothing to select from', () => {
+        expect(reselectProvider(cfg, [], '', '')).toBeNull();
+        expect(reselectProvider(null, [llmProvider], '', '')).toBeNull();
+        // Providers exist but none has a model, and there is no worker pair to fall back on.
+        const onlyAgent = makeConfig({ providers: [agentProvider], worker_provider: '', worker_model: '' });
+        expect(reselectProvider(onlyAgent, [agentProvider], '', '')).toBeNull();
+    });
+
+    it('does not report a model for a worker pair whose provider is absent', () => {
+        // resolvePair returns a null provider, so the fallback (first provider with models)
+        // must be what the selector gets — never the worker's URL with an empty model.
+        const dangling = makeConfig({ providers: [llmProvider], worker_provider: '99', worker_model: 'model-a' });
+        expect(reselectProvider(dangling, [llmProvider], '', '')).toEqual({ url: llmProvider.url, model: 'model-a' });
     });
 });

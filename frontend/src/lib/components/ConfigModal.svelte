@@ -111,6 +111,11 @@
         return p.kind === 'agent' ? (p.name || '') : String(p.id ?? 0);
     }
 
+    /** A row the server derives from an installed agent extension, not one the user typed. */
+    function isAgentDraft(p: ProviderDraft): boolean {
+        return p.kind === 'agent';
+    }
+
     /** Find a provider draft by its reference string (LLM ID or agent name). */
     function findProviderByRef(ref: string) {
         if (!ref) return null;
@@ -120,77 +125,124 @@
     let providers = $state<ProviderDraft[]>([]);
     let _providerUidCounter = 0;
 
-    function buildProviders(cfg: Config | null): ProviderDraft[] {
-        return (cfg?.providers || []).map(p => {
-            // Detect agent providers (kind field or agent:// URL prefix)
-            const isAgent = isAgentProvider(p);
-            const draft: ProviderDraft = {
-                uid: isAgent ? (p.name || p.url) : String(p.id ?? `new-${Date.now()}-${Math.random()}`),
-                id: p.id || 0,
-                name: p.name || '',
-                ...p,
-                kind: isAgent ? 'agent' : (p.kind || 'llm'),
-                api_key: p.api_key || '',
-                concurrency: p.concurrency || 1,
-                max_requests_per_second: p.max_requests_per_second || 0,
-                input_price: p.input_price || 0,
-                output_price: p.output_price || 0,
-                cache_read_price: p.cache_read_price || 0,
-                cache_write_price: p.cache_write_price || 0,
-                power_consumption_w: p.power_consumption_w || 0,
-                electricity_cost_per_kwh: p.electricity_cost_per_kwh || 0,
-                fetchingModels: false,
-                fetchError: '',
-                expanded: false,
-                testingConnection: false,
-                testResult: null,
-                agent_config_dir: isAgent ? (p.agent_config_dir || '') : undefined,
-                models: isAgent ? [] : (p.models || []).map(m => {
-                    // Handle both old format (string) and new format ({name, reasoning_effort, ...})
-                    if (typeof m === 'string') {
-                        return { name: m, readonly: false, reasoning_effort: 'default' as const, context_window: null, input_price: null, output_price: null, cache_read_price: null, cache_write_price: null, power_consumption_w: null };
-                    }
-                    return {
-                        name: m.name,
-                        readonly: false,
-                        reasoning_effort: m.reasoning_effort || 'default',
-                        context_window: m.context_window ?? null,
-                        input_price: m.input_price ?? null,
-                        output_price: m.output_price ?? null,
-                        cache_read_price: m.cache_read_price ?? null,
-                        cache_write_price: m.cache_write_price ?? null,
-                        power_consumption_w: m.power_consumption_w ?? null,
-                    };
-                }).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
-            };
-            return draft;
-        });
+    function buildProviderDraft(p: Provider): ProviderDraft {
+        // Detect agent providers (kind field or agent:// URL prefix)
+        const isAgent = isAgentProvider(p);
+        const draft: ProviderDraft = {
+            uid: isAgent ? (p.name || p.url) : String(p.id ?? `new-${Date.now()}-${Math.random()}`),
+            id: p.id || 0,
+            name: p.name || '',
+            ...p,
+            kind: isAgent ? 'agent' : (p.kind || 'llm'),
+            api_key: p.api_key || '',
+            concurrency: p.concurrency || 1,
+            max_requests_per_second: p.max_requests_per_second || 0,
+            input_price: p.input_price || 0,
+            output_price: p.output_price || 0,
+            cache_read_price: p.cache_read_price || 0,
+            cache_write_price: p.cache_write_price || 0,
+            power_consumption_w: p.power_consumption_w || 0,
+            electricity_cost_per_kwh: p.electricity_cost_per_kwh || 0,
+            fetchingModels: false,
+            fetchError: '',
+            expanded: false,
+            testingConnection: false,
+            testResult: null,
+            agent_config_dir: isAgent ? (p.agent_config_dir || '') : undefined,
+            models: isAgent ? [] : (p.models || []).map(m => {
+                // Handle both old format (string) and new format ({name, reasoning_effort, ...})
+                if (typeof m === 'string') {
+                    return { name: m, readonly: false, reasoning_effort: 'default' as const, context_window: null, input_price: null, output_price: null, cache_read_price: null, cache_write_price: null, power_consumption_w: null };
+                }
+                return {
+                    name: m.name,
+                    readonly: false,
+                    reasoning_effort: m.reasoning_effort || 'default',
+                    context_window: m.context_window ?? null,
+                    input_price: m.input_price ?? null,
+                    output_price: m.output_price ?? null,
+                    cache_read_price: m.cache_read_price ?? null,
+                    cache_write_price: m.cache_write_price ?? null,
+                    power_consumption_w: m.power_consumption_w ?? null,
+                };
+            }).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
+        };
+        return draft;
     }
 
-    // Sync form fields and providers from config on mount and when config changes
+    function buildProviders(cfg: Config | null): ProviderDraft[] {
+        return (cfg?.providers || []).map(buildProviderDraft);
+    }
+
+    /** What the agent rows are: the enabled agent extensions, as the server derives them.
+     *  Nothing the user can edit by hand, which is what makes them safe to reconcile. */
+    function agentRowSignature(cfg: Config | null): string {
+        return (cfg?.providers || [])
+            .filter(isAgentProvider)
+            .map(p => `${p.name}\u0000${p.url}\u0000${p.display_name || ''}`)
+            .join(',');
+    }
+
+    /**
+     * Swap the agent rows for the ones the server currently reports, leaving every LLM draft
+     * — and the user's ordering of them — untouched. Agents land at the end because that is
+     * where the server puts them: persisted providers first, derived ones after.
+     */
+    function reconcileAgentRows(cfg: Config | null): void {
+        const gone = providers.filter(isAgentDraft).map(p => p.name);
+        providers = [...providers.filter(p => !isAgentDraft(p)), ...(cfg?.providers || []).filter(isAgentProvider).map(buildProviderDraft)];
+        // Only a pair that pointed at one of the agent rows that just disappeared is cleared.
+        // An LLM provider can legitimately be referenced by its legacy name — which the server
+        // still resolves but this list does not contain — so "not in the list" alone is no
+        // evidence to throw away the user's choice.
+        if (workerProvider && gone.includes(workerProvider) && !findProviderByRef(workerProvider)) { workerProvider = ''; workerModel = ''; }
+        if (utilityProvider && gone.includes(utilityProvider) && !findProviderByRef(utilityProvider)) { utilityProvider = ''; utilityModel = ''; }
+    }
+
+    // Sync the form from the config **once per dialog open**. Everything in this form is the
+    // user's to edit, and re-syncing mid-edit discards their work — a half-typed provider
+    // disappears and an API key comes back masked.
+    //
+    // The exception is the set of agent rows, which is not user-owned: it is the set of
+    // installed and enabled agent extensions, and the server appends it to the provider list
+    // per request. So while the dialog is open only those rows reconcile — installing Pi on
+    // the Extensions tab puts it under Providers immediately (no page reload), without
+    // discarding the LLM card being edited beside it.
+    let formSynced = false;
+    let agentRows = '';
     $effect(() => {
-        workerProvider = config?.worker_provider || '';
-        workerModel = config?.worker_model || '';
-        utilityProvider = config?.utility_provider || '';
-        utilityModel = config?.utility_model || '';
-        defaultAutoCommit = config?.default_auto_commit ?? false;
-        defaultAutoMerge = config?.default_auto_merge ?? false;
-        defaultSubtasksAutoMerge = config?.default_subtasks_auto_merge ?? true;
-        defaultOperatingMode = config?.default_operating_mode ?? 'act';
-        defaultMaxFailedTurns = config?.default_max_failed_turns ?? 3;
-        defaultAutoSummarizeThreshold = config?.default_auto_summarize_threshold ?? 90;
-        runSiblingsParallel = config?.run_siblings_parallel ?? false;
-        keyboardCreateTask = config?.keyboard_shortcuts?.create_task;
-        keyboardCreateTaskSubmit = config?.keyboard_shortcuts?.create_task_submit;
-        keyboardOpenTerminal = config?.keyboard_shortcuts?.open_terminal;
-        keyboardStartTask = config?.keyboard_shortcuts?.start_task;
-        keyboardToggleFullscreen = config?.keyboard_shortcuts?.toggle_fullscreen;
-        keyboardMultiSelectClick = config?.keyboard_shortcuts?.multi_select_click;
-        keyboardHideHints = config?.keyboard_shortcuts?.hide_hints === true;
-        hideModelBadge = config?.hide_model_badge === true;
-        sortOldestFirst = config?.sort_oldest_first === true;
-        providers = buildProviders(config);
-        hasChanges = false;
+        if (!config) return;
+        if (!formSynced) {
+            formSynced = true;
+            workerProvider = config.worker_provider || '';
+            workerModel = config.worker_model || '';
+            utilityProvider = config.utility_provider || '';
+            utilityModel = config.utility_model || '';
+            defaultAutoCommit = config.default_auto_commit ?? false;
+            defaultAutoMerge = config.default_auto_merge ?? false;
+            defaultSubtasksAutoMerge = config.default_subtasks_auto_merge ?? true;
+            defaultOperatingMode = config.default_operating_mode ?? 'act';
+            defaultMaxFailedTurns = config.default_max_failed_turns ?? 3;
+            defaultAutoSummarizeThreshold = config.default_auto_summarize_threshold ?? 90;
+            runSiblingsParallel = config.run_siblings_parallel ?? false;
+            keyboardCreateTask = config.keyboard_shortcuts?.create_task;
+            keyboardCreateTaskSubmit = config.keyboard_shortcuts?.create_task_submit;
+            keyboardOpenTerminal = config.keyboard_shortcuts?.open_terminal;
+            keyboardStartTask = config.keyboard_shortcuts?.start_task;
+            keyboardToggleFullscreen = config.keyboard_shortcuts?.toggle_fullscreen;
+            keyboardMultiSelectClick = config.keyboard_shortcuts?.multi_select_click;
+            keyboardHideHints = config.keyboard_shortcuts?.hide_hints === true;
+            hideModelBadge = config.hide_model_badge === true;
+            sortOldestFirst = config.sort_oldest_first === true;
+            providers = buildProviders(config);
+            hasChanges = false;
+            agentRows = agentRowSignature(config);
+            return;
+        }
+        const next = agentRowSignature(config);
+        if (next === agentRows) return;
+        agentRows = next;
+        reconcileAgentRows(config);
     });
 
     function toggleProvider(idx: number) {
