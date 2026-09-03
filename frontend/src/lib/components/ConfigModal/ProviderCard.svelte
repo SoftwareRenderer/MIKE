@@ -42,13 +42,11 @@
         testResult: { success: boolean; message: string } | null;
     }
 
-    let { providers, provider, index, encryptionEnabled, currencySymbol, getModelColor, onDragStart, onRemove, onFetchModels, onTestConnection, onAddModel, onRemoveModel, isDragging, onDirty }: {
+    let { providers, provider, index, currencySymbol, onDragStart, onRemove, onFetchModels, onTestConnection, onAddModel, onRemoveModel, isDragging, onDirty }: {
         providers: ProviderDraft[];
         provider: ProviderDraft;
         index: number;
-        encryptionEnabled: boolean;
         currencySymbol: string;
-        getModelColor: (m: string) => string;
         onDragStart: (e: PointerEvent) => void;
         onRemove: () => void;
         onFetchModels: () => void;

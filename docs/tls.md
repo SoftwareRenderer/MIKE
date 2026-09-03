@@ -12,9 +12,16 @@ server certificate `mike.crt`/`mike.key` (`O=MIKE, CN=localhost`, 1 year).
 
 The leaf's SANs cover `localhost`/127.0.0.1/::1 **plus the machine hostname, `<hostname>.local`
 and every non-loopback address of the host**, so other devices can reach it by name or LAN IP.
-Import `data/tls/mike-ca.crt` into a device's trust store to make the certificate valid there —
-distribution is file-only (never served over HTTP; the CA *key* never leaves the data dir, keys
-are `0600`).
+Import `data/tls/mike-ca.crt` into a device's trust store to make the certificate valid there.
+While that default certificate is in use the CA is also downloadable: `GET /api/tls/ca` serves it and
+Settings → About → System Info links to it (`tls_ca_available` in `GET /api/config` is what makes the
+link appear, and it is derived from the same `tls.Config` the route checks, so a link can never point
+at a 404). The route is session-authed like every other `/api` path, pinned to GET, and the only file
+it can name is `Config.CAFile` — no request field is ever a path — and `tls.CertPEM` answers with a
+certificate block or an error, so the download cannot be turned into a key dump even if that path
+were swapped for a key file. The CA *key* is never served and never leaves the data dir (keys are
+`0600`). `--no-tls` and a `--tls-cert`/`--tls-key` pair offer no download: neither has a CA of ours,
+so the route answers 404 and the System Info row is absent rather than explained.
 
 The CA is reused across restarts and never rotated automatically; the leaf is re-issued only
 when the host's names change (network or hostname change). There is **no expiry-based renewal** —
@@ -50,4 +57,6 @@ Loopback + weak stays allowed so `make run` (password `test`) keeps working.
 ## Tests
 
 `backend/tls/tls_test.go` (CA is a real CA, leaf verifies against it, SAN set + re-issue rules,
-CA/leaf reuse), `backend/server/listener_test.go`.
+CA/leaf reuse, `CertPEM` serves a certificate and nothing else), `backend/server/handler_tls_test.go`
+(the download: needs a session, 404 without a local CA, GET-only, and `tls_ca_available` tracks it),
+`backend/server/listener_test.go`.

@@ -25,6 +25,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/sessions/revoke-others", s.handleSessionsRevokeOthers)
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleSessionRevoke)
 
+	// The local CA behind the server's default certificate, for Settings → About.
+	s.mux.HandleFunc("GET /api/tls/ca", s.HandleTLSCA)
+
 	// Config
 	s.mux.HandleFunc("/api/config/test-connection", s.configStore.HandleTestConnection)
 	s.mux.HandleFunc("/api/config/fetch-models", s.handleFetchModels)

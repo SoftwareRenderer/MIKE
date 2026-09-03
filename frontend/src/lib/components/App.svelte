@@ -8,6 +8,7 @@
     import { createStreamingContext, createTaskDiffContext, createCommitQueueContext, createExpandedTasksContext, createTaskEventContext } from '$lib/context';
     import { getProjects, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setCsrfToken, clearCsrfToken, ensureCsrfToken, setOfflineStatus, loadQueue, flushQueueNow, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask } from '$lib/api';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
+    import { timeAgo } from '$lib/utils/format-time';
     import { resolveBoardLandingColumn } from '$lib/utils/task-utils';
     import { getBoardCache, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache } from '$lib/storage';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
@@ -181,19 +182,10 @@
         }
     }
 
-    /** Format seconds as a human-readable relative time string. */
-    function timeAgo(seconds: number): string {
-        if (seconds < 60) return `just now`;
-        const mins = Math.floor(seconds / 60);
-        if (mins < 60) return `${mins}m ago`;
-        const hrs = Math.floor(mins / 60);
-        return `${hrs}h ago`;
-    }
-
     /** Get relative time since last data sync. */
     function lastSyncedAgo(): string {
         if (lastSyncedAt === Infinity) return 'just now';
-        return timeAgo(Math.floor((Date.now() - lastSyncedAt) / 1000));
+        return timeAgo(lastSyncedAt) || 'just now';
     }
 
     function tryReconnectNow() {
@@ -1323,7 +1315,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             <TopBar
                 currentProject={currentProject}
                 {currentBranch}
-                isMobile={isMobileCtx.isMobile}
                 {hasReview}
                 onOpenMenu={() => mobileMenuOpen = true}
                 onOpenSandboxConfig={() => currentProject && openSandboxConfig(currentProject)}
@@ -1467,7 +1458,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             taskId={appStore.editTaskData.taskId}
             projectId={appStore.editTaskData.projectId}
             taskTitle={appStore.editTaskData.taskTitle}
-            taskPrompt={appStore.editTaskData.taskPrompt}
             editProviders={appStore.editTaskData.editProviders}
             editModel={appStore.editTaskData.editModel}
             editUrl={appStore.editTaskData.editUrl}
@@ -1478,7 +1468,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             taskHasParent={appStore.editTaskData.taskHasParent}
             targetBranch={appStore.editTaskData.targetBranch}
             baseRef={appStore.editTaskData.baseRef}
-            isAgentSelected={appStore.editTaskData.isAgentSelected}
             onSave={(title: string, model: string, url: string, reasoningEffort: string, operatingMode: string, autoMerge: boolean, subtasksAutoMerge: boolean, baseRef: string) => {
                 const taskId = appStore.editTaskData!.taskId;
                 const projectId = appStore.editTaskData!.projectId;
