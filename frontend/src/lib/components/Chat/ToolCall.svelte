@@ -16,6 +16,7 @@
     import { formatToolArgs, normalizeEdits, HIDE_ARGS_FOR_TOOLS, SANDBOXABLE_TOOLS, ARGS_MAX_LEN, EDIT_DIFF_MAX_LINES } from '$lib/utils/toolArgs';
     import type { EditDiffEntry } from '$lib/utils/toolArgs';
     import { formatElapsed, formatDuration } from '$lib/utils/format-time';
+    import { formatBytes } from '$lib/utils/format';
     import { getTaskMessageFull } from '$lib/api';
 
     interface Props {
@@ -118,12 +119,6 @@
     function handleArgsClick() {
         if (!wasSelecting) onToggleArgs(tc.toolId);
         wasSelecting = false;
-    }
-
-    function formatBytes(bytes: number): string {
-        if (bytes < 1024) return bytes + 'B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
-        return (bytes / (1024 * 1024)).toFixed(1) + 'MB';
     }
 
     let showArgs = $derived(!HIDE_ARGS_FOR_TOOLS.has(tc.toolName));

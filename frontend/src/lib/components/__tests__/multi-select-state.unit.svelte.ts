@@ -80,7 +80,6 @@ describe('MultiSelectBar', () => {
         const { container } = render(MultiSelectBar, {
             multiSelect,
             tasks,
-            projectId: 'test-project',
             onClear,
         });
 
@@ -94,7 +93,6 @@ describe('MultiSelectBar', () => {
         const { container } = render(MultiSelectBar, {
             multiSelect,
             tasks,
-            projectId: 'test-project',
             onClear,
         });
 
@@ -109,7 +107,6 @@ describe('MultiSelectBar', () => {
         const { container } = render(MultiSelectBar, {
             multiSelect,
             tasks,
-            projectId: 'test-project',
             onClear,
         });
 
@@ -125,7 +122,6 @@ describe('MultiSelectBar', () => {
         const { container } = render(MultiSelectBar, {
             multiSelect,
             tasks,
-            projectId: 'test-project',
             onClear,
         });
 
@@ -146,7 +142,6 @@ describe('MultiSelectBar', () => {
         const { container } = render(MultiSelectBar, {
             multiSelect,
             tasks,
-            projectId: 'test-project',
             onClear,
         });
 
@@ -167,7 +162,6 @@ describe('MultiSelectBar', () => {
         const { container } = render(MultiSelectBar, {
             multiSelect,
             tasks,
-            projectId: 'test-project',
             onClear,
         });
 
@@ -187,7 +181,6 @@ describe('MultiSelectBar', () => {
         const { container } = render(MultiSelectBar, {
             multiSelect,
             tasks: mixedTasks,
-            projectId: 'test-project',
             onClear,
         });
 
@@ -202,7 +195,6 @@ describe('MultiSelectBar', () => {
         const { container } = render(MultiSelectBar, {
             multiSelect,
             tasks,
-            projectId: 'test-project',
             onClear,
         });
 
@@ -215,7 +207,6 @@ describe('MultiSelectBar', () => {
         const { container } = render(MultiSelectBar, {
             multiSelect,
             tasks,
-            projectId: 'test-project',
             onClear,
         });
 

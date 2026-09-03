@@ -19,19 +19,6 @@
 
     let { config, onClose, onSaved, onSignOut }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void> } = $props();
 
-    const MODEL_COLORS = [
-        '#888888', '#4C9AFF', '#3FB950', '#D29922', '#F85149',
-        '#A371F7', '#E3B341', '#79C0FF', '#7EE787', '#FF7B72',
-        '#D2A8FF', '#F0883E', '#56B6C2', '#F778BA', '#DB6D28',
-    ];
-    function getModelColor(modelName: string): string {
-        let hash = 0;
-        for (let i = 0; i < modelName.length; i++) {
-            hash = ((hash << 5) - hash + modelName.charCodeAt(i)) | 0;
-        }
-        return MODEL_COLORS[Math.abs(hash) % MODEL_COLORS.length];
-    }
-
     let workerProvider = $state('');
     let workerModel = $state('');
     let utilityProvider = $state('');
@@ -131,7 +118,6 @@
     }
 
     let providers = $state<ProviderDraft[]>([]);
-    let encryptionEnabled = $state(false);
     let _providerUidCounter = 0;
 
     function buildProviders(cfg: Config | null): ProviderDraft[] {
@@ -203,7 +189,6 @@
         keyboardHideHints = config?.keyboard_shortcuts?.hide_hints === true;
         hideModelBadge = config?.hide_model_badge === true;
         sortOldestFirst = config?.sort_oldest_first === true;
-        encryptionEnabled = config?.encryption_enabled ?? false;
         providers = buildProviders(config);
         hasChanges = false;
     });
@@ -725,9 +710,7 @@
                             {providers}
                             provider={p}
                             index={i}
-                            {encryptionEnabled}
                             {currencySymbol}
-                            {getModelColor}
                             isDragging={dragIndex === i}
                             onDragStart={(e: PointerEvent) => handleDragStart(e, i)}
                             onRemove={() => removeProvider(i)}

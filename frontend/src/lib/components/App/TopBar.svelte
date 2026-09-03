@@ -10,7 +10,6 @@
     let {
         currentProject,
         currentBranch,
-        isMobile,
         onOpenMenu,
         onOpenSandboxConfig,
         onOpenExplorerView,
@@ -21,7 +20,6 @@
     }: {
         currentProject: Project;
         currentBranch: string;
-        isMobile: boolean;
         onOpenMenu: () => void;
         onOpenSandboxConfig: () => void;
         onOpenExplorerView: () => void;

@@ -202,8 +202,12 @@ test.describe.serial('Multi-select parent/subtask recursion', () => {
 
   test.beforeEach(async ({ page }) => {
     await gotoProject(page);
-    await page.waitForSelector('.card', { timeout: 10000 });
+    // The board, not `.card`: the nested block above deletes every task it created, so a
+    // card-first wait dead-ends on an empty board. The tasks this block needs come next.
+    await page.waitForSelector('.board', { timeout: 10000 });
     projectId = await getProjectId(page);
+    // Select exactly the three tasks created below — nothing else may be on the board.
+    await clearBoardExcept(page, projectId);
 
     // Create 3 tasks — all in Backlog
     taskId1 = await createTaskViaApi(page, projectId, `taskview-ms-${Date.now()}-1`);

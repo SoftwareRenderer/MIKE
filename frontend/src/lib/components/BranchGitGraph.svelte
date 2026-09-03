@@ -3,9 +3,9 @@
     import VirtualList from '$lib/components/VirtualList.svelte';
     import { getHistoryDensity, buildCommitTooltip } from '$lib/utils/git-history';
     import type { HistoryDensity } from '$lib/utils/git-history';
+    import { timeAgo } from '$lib/utils/format-time';
 
-    let { projectId, currentBranch, commits, originTip, loading, hasMore, onCommitSelected, onLoadMore, selectedCommitHash }: {
-        projectId: string;
+    let { currentBranch, commits, originTip, loading, hasMore, onCommitSelected, onLoadMore, selectedCommitHash }: {
         currentBranch: string;
         commits: GitCommit[];
         originTip: string;
@@ -52,7 +52,6 @@
             tipIndex = commits.findIndex(c => c.hash === originTip);
         }
         const hasOrigin = originTip && tipIndex >= 0;
-        const now = Date.now();
 
         return commits.map((c, idx) => {
             const isUnpushed = !hasOrigin || idx < tipIndex;
@@ -73,28 +72,10 @@
             let dateFormatted = '';
             let dateFull = '';
             if (c.date) {
-                try {
-                    const diffMs = now - new Date(c.date).getTime();
-                    const diffMinutes = Math.floor(diffMs / 60000);
-                    if (diffMinutes < 1) dateFormatted = 'just now';
-                    else if (diffMinutes < 60) dateFormatted = `${diffMinutes}m ago`;
-                    else {
-                        const diffHours = Math.floor(diffMs / 3600000);
-                        if (diffHours < 24) dateFormatted = `${diffHours}h ago`;
-                        else {
-                            const diffDays = Math.floor(diffMs / 86400000);
-                            if (diffDays === 1) dateFormatted = 'yesterday';
-                            else if (diffDays < 7) dateFormatted = `${diffDays}d ago`;
-                            else if (diffDays < 30) dateFormatted = `${Math.floor(diffDays / 7)}w ago`;
-                            else if (diffDays < 365) dateFormatted = `${Math.floor(diffDays / 30)}mo ago`;
-                            else dateFormatted = `${Math.floor(diffDays / 365)}y ago`;
-                        }
-                    }
-                    dateFull = new Date(c.date).toLocaleString();
-                } catch {
-                    dateFormatted = c.date.slice(0, 10);
-                    dateFull = c.date;
-                }
+                // 'compact' keeps counting in w/mo/y — a commit lane is read by age.
+                dateFormatted = timeAgo(c.date, { scale: 'compact' }) || c.date.slice(0, 10);
+                const when = new Date(c.date);
+                dateFull = isNaN(when.getTime()) ? c.date : when.toLocaleString();
             }
 
             return {
