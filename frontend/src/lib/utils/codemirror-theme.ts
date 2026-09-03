@@ -354,6 +354,38 @@ export const lightTheme = EditorView.theme({
 export const lightSyntax = syntaxHighlighting(lightHighlight);
 
 /**
+ * Block spacing for the markdown a language server sends into a tooltip — the
+ * hover card, completion info and signature help all render it, and all three
+ * carry the `.cm-lsp-documentation` class the renderer puts on their content
+ * element (the hover card's docs div carries it too).
+ *
+ * A server's documentation is a signature block followed by prose, and the
+ * browser lays that out as if it were a page: 1em margins around paragraphs,
+ * lists and headings, plus `1.5em`+ font sizes on the headings `####` doc
+ * comments produce. In a 12px tooltip that reads as mostly whitespace, so every
+ * block element is pulled to the 2px the renderer itself uses for `p`/`pre`,
+ * with the first and last block flush against the card edge.
+ *
+ * Color-free on purpose — this belongs to neither theme, so it is not
+ * duplicated in both.
+ */
+const LSP_DOCS = '.cm-lsp-documentation';
+const HEADINGS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map(h => `${LSP_DOCS} ${h}`).join(', ');
+
+export const lspDocsTheme = EditorView.baseTheme({
+    [`${LSP_DOCS} p`]: { margin: '2px 0' },
+    // A heading in documentation is a label over the block beneath it, not a
+    // page header: the card's own size, one step of separation above.
+    [HEADINGS]: { fontSize: '1em', fontWeight: 600, lineHeight: '1.3', margin: '3px 0 1px' },
+    // The default 40px list indent is a third of a narrow tooltip.
+    [`${LSP_DOCS} ul, ${LSP_DOCS} ol`]: { margin: '2px 0', paddingLeft: '1.2em' },
+    [`${LSP_DOCS} li`]: { margin: '1px 0' },
+    [`${LSP_DOCS} blockquote`]: { margin: '2px 0', paddingLeft: '6px' },
+    [`${LSP_DOCS} > :first-child`]: { marginTop: '0' },
+    [`${LSP_DOCS} > :last-child`]: { marginBottom: '0' },
+});
+
+/**
  * Detect whether a light theme is active by checking a CSS variable.
  * Theme extensions override --color-bg-page to a light value.
  * We check if the background is lighter than a midpoint.
