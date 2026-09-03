@@ -268,7 +268,7 @@ An extension may ship `CHANGELOG.jsonl` next to its manifest (one JSON object pe
 Agent extensions run AI agents (e.g. Pi) as subprocesses: `Backend (executor) ←→ AgentRunner (I/O bridge) ←→ WASM Adapter (protocol) ←→ Agent Process`. The backend knows **nothing** about agent protocols — all of it lives in the adapter. Adapter interface + event types, the zero-buffer WASM memory model, and the file-by-file recipe for a new adapter: **`docs/agent-extensions.md`**.
 
 - **Persistence:** `EventTypePersist` (carrying `[]PersistEntry`) is the **only** path to the DB — the executor iterates entries generically; never add agent-specific persistence to the backend.
-- **URL scheme** `agent://<name>`. Key files: `backend/agent/` (interface, runner, wazero loader with `WithStartFunctions("_initialize")`, registry), `backend/exec/loop_agent.go`.
+- **URL scheme** `agent://<name>`, and an enabled agent extension **is a provider** with that URL — `GET /api/config` merges it per request and never persists it — so the client re-reads the config on the `extension_change` broadcast (`appStore.refreshConfig()`): an agent that only shows up after a browser refresh is a bug. Key files: `backend/agent/` (interface, runner, wazero loader with `WithStartFunctions("_initialize")`, registry), `backend/exec/loop_agent.go`, `frontend/src/lib/stores/app.svelte.ts`.
 
 ## Common Patterns
 
@@ -332,7 +332,7 @@ Read the file before editing that subsystem — each holds the detail and histor
 | `docs/languages.md` | `language` vs `language_id`, `syntax` as data, dependency-set trade-offs |
 | `docs/ui-extensions.md` | `/extensions` serving + CSP, channel handshake, install model |
 | `docs/preview.md` | preview routes, ref rewriting, nav record, iframe isolation, known residuals |
-| `docs/agent-extensions.md` | adapter interface + events, WASM memory model, new-adapter recipe |
+| `docs/agent-extensions.md` | adapter interface + events, WASM memory model, new-adapter recipe, agent-as-provider live refresh |
 | `docs/link-rows.md` | project-row/task-card markup, click routing, known limitation |
 | `docs/navigation.md` | board + task-view arrow-key resolution |
 | `docs/reconnection.md` | WS reconnect/offline queue mechanism |

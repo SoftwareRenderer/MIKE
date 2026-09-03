@@ -61,6 +61,30 @@ export function resolvePair(cfg: Config | null, ref: string, modelName: string):
     return { provider, modelName, url: provider.url };
 }
 
+/**
+ * What a provider selector should hold once the provider **list** has changed — the case an
+ * open task chat hits when an agent extension is installed or removed while it is looking at
+ * the config (`agent://<name>` rows appear and disappear with the enabled extensions).
+ *
+ * The current selection wins whenever its provider is still offered: neither a task's own
+ * model nor a choice the user just made is ours to second-guess. Otherwise fall back to the
+ * configured worker pair, then to the first provider that has a model at all.
+ * `null` means "leave the selection exactly as it is".
+ */
+export function reselectProvider(
+    cfg: Config | null,
+    providers: Provider[],
+    currentUrl: string,
+    currentModel: string,
+): { url: string; model: string } | null {
+    if (!cfg || providers.length === 0) return null;
+    if (currentModel && currentUrl && providers.some(p => p.url === currentUrl)) return null;
+    const worker = resolveWorker(cfg);
+    if (worker.provider && worker.modelName) return { url: worker.url, model: worker.modelName };
+    const first = providers.find(p => (p.models?.length ?? 0) > 0);
+    return first ? { url: first.url, model: getModelName(first.models[0]) } : null;
+}
+
 /** Resolve the configured Worker provider/model pair. */
 export function resolveWorker(cfg: Config | null): ResolvedPair {
     if (!cfg) return { provider: null, modelName: '', url: '' };
