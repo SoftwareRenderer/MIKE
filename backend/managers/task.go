@@ -571,8 +571,13 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	// set when the start had nothing to run; the move must not cascade into children then
 	awaitingUser := false
 	if targetStatus == types.StatusInProgress && task.ExecutionState != types.ExecStateRunning {
-		children, _ := h.store.GetChildren(taskID)
-		if len(children) > 0 {
+		children, childErr := h.store.GetChildren(taskID)
+		if childErr != nil {
+			// An unreadable child list is not "no children". Starting here could run this
+			// task next to its own subtasks, so the move stands and the auto-start does
+			// not — the user starts it once the read works again.
+			log.Printf("[move] task=%s children unreadable — not auto-starting: %v", taskID, childErr)
+		} else if len(children) > 0 {
 			// Task with subtasks: start the deepest startable one; this task
 			// stays started-but-pending until all children are done.
 			h.moveAllDescendantsToInProgress(taskID)
@@ -1468,7 +1473,11 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 	}
 	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 
-	children, _ := h.store.GetChildren(taskID)
+	children, err := h.store.GetChildren(taskID)
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("get children: %v", err))
+		return
+	}
 	if len(children) > 0 {
 		h.moveAllDescendantsToInProgress(taskID)
 		toStart := h.subtasksToStart(task, children)

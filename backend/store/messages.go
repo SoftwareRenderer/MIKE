@@ -112,16 +112,9 @@ func (s *Store) GetTaskMessages(taskID, threadID string) ([]types.TaskMessage, e
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	messages := []types.TaskMessage{}
-	for rows.Next() {
-		m, err := scanTaskMessage(rows)
-		if err != nil {
-			return nil, err
-		}
-		messages = append(messages, m)
-	}
-	return messages, rows.Err()
+	return scanRows(rows, func(r *sql.Rows) (types.TaskMessage, error) {
+		return scanTaskMessage(r)
+	})
 }
 
 // GetTaskMessageByID retrieves a single message by its ID.
@@ -173,26 +166,32 @@ func (s *Store) DeleteTaskMessagesAfter(taskID, messageID, threadID string) ([]s
 	if err != nil {
 		return nil, err
 	}
-	var checkpointed []string
-	for rows.Next() {
-		var id, hash sql.NullString
-		if err := rows.Scan(&id, &hash); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		if hash.String != "" {
-			checkpointed = append(checkpointed, id.String)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
+	// Collected and closed before the DELETE: the pool is one connection, and the
+	// checkpointed ids must all be known before any row that names them is gone.
+	checkpointedRows, err := scanRows(rows, func(r *sql.Rows) (checkpointRef, error) {
+		var ref checkpointRef
+		err := r.Scan(&ref.id, &ref.hash)
+		return ref, err
+	})
+	if err != nil {
 		return nil, err
 	}
-	rows.Close()
+	var checkpointed []string
+	for _, ref := range checkpointedRows {
+		if ref.hash.String != "" {
+			checkpointed = append(checkpointed, ref.id.String)
+		}
+	}
+
 	if _, err := s.db.Exec(`DELETE FROM task_messages WHERE `+where, args...); err != nil {
 		return nil, err
 	}
 	return checkpointed, nil
+}
+
+// checkpointRef is one row's id plus the snapshot its git_commit_hash names.
+type checkpointRef struct {
+	id, hash sql.NullString
 }
 
 // UpdateTaskMessage updates the content of a message.

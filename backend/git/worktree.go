@@ -2051,20 +2051,6 @@ func (wm *WorktreeManager) GitRunInDirOutput(dir string, args ...string) (string
 	return wm.gitRunOutput(dir, args...)
 }
 
-// TaskCommit represents a single commit in the task's worktree history.
-type TaskCommit struct {
-	Hash    string `json:"hash"`
-	Short   string `json:"short"`
-	Subject string `json:"subject"`
-	Date    string `json:"date"`
-}
-
-// TaskCommitsResult holds the base commit info and list of task-specific commits.
-type TaskCommitsResult struct {
-	BaseCommit *TaskCommit  `json:"base_commit,omitempty"` // commit at the divergence point
-	Commits    []TaskCommit `json:"commits"`
-}
-
 // GetTaskCommits returns the commit log for a task's worktree branch.
 // If baseRef is provided, only commits after the divergence from baseRef are returned (baseRef..HEAD).
 // Also returns the commit at baseRef as BaseCommit for display purposes.
@@ -2078,53 +2064,7 @@ func (wm *WorktreeManager) GetTaskCommits(taskID, baseRef string) (*TaskCommitsR
 		return nil, ErrWorktreeNotFound
 	}
 
-	result := &TaskCommitsResult{Commits: []TaskCommit{}}
-
-	// Get the base commit info (the commit at the divergence point)
-	if baseRef != "" {
-		baseOut, err := wm.gitRunOutput(worktreePath, "log", "--format=%H|%h|%s|%aI", "-1", baseRef)
-		if err == nil {
-			line := strings.TrimSpace(baseOut)
-			parts := strings.SplitN(line, "|", 4)
-			if len(parts) == 4 {
-				result.BaseCommit = &TaskCommit{
-					Hash:    parts[0],
-					Short:   parts[1],
-					Subject: parts[2],
-					Date:    parts[3],
-				}
-			}
-		}
-	}
-
-	// Format: hash|short|subject|date (ISO 8601)
-	// Use baseRef..HEAD to only show commits made since the original branch
-	ref := "HEAD"
-	if baseRef != "" {
-		ref = baseRef + "..HEAD"
-	}
-	out, err := wm.gitRunOutput(worktreePath, "log", "--format=%H|%h|%s|%aI", ref)
-	if err != nil {
-		return nil, fmt.Errorf("git log: %w", err)
-	}
-
-	for line := range strings.SplitSeq(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "|", 4)
-		if len(parts) != 4 {
-			continue
-		}
-		result.Commits = append(result.Commits, TaskCommit{
-			Hash:    parts[0],
-			Short:   parts[1],
-			Subject: parts[2],
-			Date:    parts[3],
-		})
-	}
-	return result, nil
+	return TaskCommitsIn(worktreePath, baseRef, "")
 }
 
 // ResolveDiffBaseline computes the effective git ref to diff against for a task.

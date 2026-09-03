@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"kanban/backend/config"
 	"kanban/backend/prompts"
 	"kanban/backend/types"
 )
@@ -43,9 +44,10 @@ type summarizeResult struct {
 	predictedMs     int64
 }
 
-// defaultSummarizeThreshold is the auto-summarization threshold (percent of the
-// context window) used when no explicit config value is set.
-const defaultSummarizeThreshold = 90
+// defaultSummarizeThreshold is the auto-summarization threshold used when no config value
+// is set. It is config's default, not a copy: the Settings UI shows that number, so a turn
+// must summarize at the percentage it advertises.
+const defaultSummarizeThreshold = config.DefaultAutoSummarizeThreshold
 
 // shouldSummarize checks if the LLM context usage is approaching the window limit.
 // thresholdPct is the percent of the context window at which auto-summarization

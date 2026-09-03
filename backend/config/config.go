@@ -672,17 +672,20 @@ func parseIntPtr(s string) (*int, error) {
 	return parsePtr(s, strconv.Atoi)
 }
 
+// DefaultAutoSummarizeThreshold is the auto-summarization threshold (percent of the context window)
+const DefaultAutoSummarizeThreshold = 90
+
 // AutoSummarizeThreshold returns the configured auto-summarization threshold as a
-// percent of the context window (1-100). Falls back to the default of 90 when unset
-// or invalid.
+// percent of the context window (1-100). Falls back to DefaultAutoSummarizeThreshold
+// when unset or invalid.
 func (cs *ConfigStore) AutoSummarizeThreshold() int {
 	raw, err := cs.db.GetConfigValue("default_auto_summarize_threshold")
 	if err != nil {
-		return 90
+		return DefaultAutoSummarizeThreshold
 	}
 	v, err := strconv.Atoi(raw)
 	if err != nil || v < 1 || v > 100 {
-		return 90
+		return DefaultAutoSummarizeThreshold
 	}
 	return v
 }

@@ -2,8 +2,8 @@
 
 Read this before touching `backend/git/snapshots.go`, `backend/git/worktree.go` (restore),
 `createCheckpoint` in `backend/exec/context.go`, `CopyMessagesToThread` in `backend/store/threads.go`, or
-the fork/switch handlers in `backend/server/handler_thread.go`. The hard rules live in
-`AGENTS.md → Thread Forks & Checkpoints`.
+the fork/switch handlers in `backend/server/handler_thread.go`. The hard rules are the bolded claims
+below — each one is a bug that happened, and the rest of the file is why they are shaped that way.
 
 ## The two layers
 
