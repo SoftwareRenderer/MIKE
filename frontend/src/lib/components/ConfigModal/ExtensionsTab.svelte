@@ -7,6 +7,7 @@
     import { isDangerousPermission, requiresInstallReview, sortPermissions, dependencyCacheDeclaration, needsDependencyGrant } from '$lib/utils/extension-permissions';
     import { effectiveConfigFields, initialEditConfig, HOST_OWNED_LSP_CONFIG_KEY, type ConfigField } from '$lib/utils/extension-config';
     import { memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
+    import { timeAgo } from '$lib/utils/format-time';
     import { orderBrowseEntries } from '$lib/composables/use-browse-order';
     import { identityKey } from '$lib/utils/extension-identity';
 
@@ -578,18 +579,8 @@
     // Format built_at timestamp as a readable relative time
     function formatBuiltAt(builtAt: string): string {
         if (!builtAt) return 'Not built';
-        const date = new Date(builtAt);
-        if (isNaN(date.getTime())) return builtAt;
-        const now = new Date();
-        const diffMs = now.getTime() - date.getTime();
-        const diffMins = Math.floor(diffMs / 60000);
-        const diffHours = Math.floor(diffMs / 3600000);
-        const diffDays = Math.floor(diffMs / 86400000);
-        if (diffMins < 1) return 'Built just now';
-        if (diffMins < 60) return `Built ${diffMins}m ago`;
-        if (diffHours < 24) return `Built ${diffHours}h ago`;
-        if (diffDays < 7) return `Built ${diffDays}d ago`;
-        return `Built ${date.toLocaleDateString()}`;
+        // 'calendar': a build from last March is a date, not an age.
+        return timeAgo(builtAt, { scale: 'calendar', prefix: 'Built ' }) || `Built ${builtAt}`;
     }
 
     // Filter extensions by search, with local (unpublished) extensions first

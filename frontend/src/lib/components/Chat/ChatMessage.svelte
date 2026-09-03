@@ -9,6 +9,8 @@
     import { formatTimestamp } from '$lib/utils/format-time';
     import { computeInterleavedLayout } from '$lib/utils/chat-layout';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
+    import { dialogStore } from '$lib/stores';
+    import { readImageAttachments, describeRejectedImages, MAX_IMAGES } from '$lib/utils/attachments';
 
     interface ToolCallInfo {
         toolId: string;
@@ -46,12 +48,9 @@
         attachments?: Array<{ mimeType: string; data: string }>;
         stats?: { model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number };
         toolCalls?: ToolCallInfo[];
-        formatToolArgs?: (toolName: string, args: Record<string, unknown>) => string;
-        onCopy?: () => void;
         onDelete?: () => void;
         onFork?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => Promise<void>;
         onSend?: (messageId: string, originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) => Promise<void>;
-        onEdit?: (messageId: string, newContent: string) => Promise<void>;
         onRegenerate?: () => void;
         isLastUserMessage?: boolean;
         isFirstUserMessage?: boolean;
@@ -68,7 +67,7 @@
         onReasoningResolved?: (content: string) => void;
     }
 
-    let { role, severity = '', content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onCopy, onDelete, onFork, onSend, onEdit, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
+    let { role, severity = '', content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onDelete, onFork, onSend, onRegenerate, isLastUserMessage = false, isFirstUserMessage = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
 
     // Edit state
     let isEditing = $state(false);
@@ -170,9 +169,9 @@
         if (newContent.trim() && messageId) {
             isSubmitting = true;
             try {
-                if (onEdit) {
-                    await onEdit(messageId, newContent.trim());
-                } else if (isFirstUserMessage) {
+                // No in-place rewrite: an edit forks a new thread (first/any message) or
+                // is sent as a follow-up (the last one), never rewrites history.
+                if (isFirstUserMessage) {
                     await onFork?.(messageId, content, newContent.trim(), newAttachments?.length ? newAttachments : undefined);
                 } else if (isLastUserMessage && onSend) {
                     await onSend(messageId, content, newContent.trim(), newAttachments?.length ? newAttachments : undefined);
@@ -209,20 +208,14 @@
 
     let mobileFileInput: HTMLInputElement | null = $state(null);
 
-    function handleMobileFileSelect(e: Event) {
-        const files = (e.target as HTMLInputElement).files;
+    async function handleMobileFileSelect(e: Event) {
+        const input = e.target as HTMLInputElement;
+        const files = input.files;
         if (!files || files.length === 0) return;
-        const remaining = 4 - mobileEditAttachments.length;
-        for (let i = 0; i < Math.min(remaining, files.length); i++) {
-            const file = files[i];
-            if (!file.type.startsWith('image/')) continue;
-            if (file.size > 4 * 1024 * 1024) continue;
-            const reader = new FileReader();
-            reader.onload = () => {
-                mobileEditAttachments = [...mobileEditAttachments, { mimeType: file.type, data: reader.result as string }];
-            };
-            reader.readAsDataURL(file);
-        }
+        const picked = await readImageAttachments(files, MAX_IMAGES - mobileEditAttachments.length);
+        if (picked.accepted.length > 0) mobileEditAttachments = [...mobileEditAttachments, ...picked.accepted];
+        const problem = describeRejectedImages(picked);
+        if (problem) dialogStore.showToast(problem, 'error');
         if (mobileFileInput) mobileFileInput.value = '';
     }
 
@@ -380,7 +373,6 @@
                     {isStreaming}
                     isOptimistic={isOptimistic}
                     onCopy={handleCopy}
-                    onEdit={onEdit ? startEdit : undefined}
                     onRegenerate={onRegenerate}
                     onDelete={onDelete}
                     {copied}

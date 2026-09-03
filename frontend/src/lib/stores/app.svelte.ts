@@ -27,7 +27,6 @@ export interface EditTaskData {
     taskId: string;
     projectId: string;
     taskTitle: string;
-    taskPrompt: string;
     editProviders: Provider[];
     editModel: string;
     editUrl: string;
@@ -38,7 +37,6 @@ export interface EditTaskData {
     taskHasParent: boolean;
     targetBranch: string;
     baseRef: string;
-    isAgentSelected: () => boolean;
 }
 
 export class AppStore {

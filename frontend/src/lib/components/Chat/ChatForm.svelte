@@ -5,6 +5,8 @@
     import ContextUsage from './ContextUsage.svelte';
     import FileMentionDropdown from '../FileMentionDropdown.svelte';
     import { useFileMention } from '$lib/composables/use-file-mention.svelte';
+    import { dialogStore } from '$lib/stores';
+    import { classifyImages, describeRejectedImages, readImageDataUrl, MAX_IMAGES } from '$lib/utils/attachments';
 
     interface ImageAttachment {
         file: File;
@@ -70,8 +72,6 @@
     let isAgent = $derived(selectedUrl.startsWith(AGENT_URL_PREFIX));
     let showModelSelector = $derived(providers.length > 0 || isAgent);
     let contextDisplay = $derived({ used: contextUsed, limit: contextLimit });
-    const MAX_IMAGE_SIZE = 4 * 1024 * 1024; // 4MB
-    const MAX_IMAGES = 4;
 
     let textareaEl: HTMLTextAreaElement | undefined;
     let fileInputEl: HTMLInputElement | undefined;
@@ -138,40 +138,34 @@
         }
     }
 
-    function handleFileSelect(e: Event) {
+    async function handleFileSelect(e: Event) {
         const target = e.target as HTMLInputElement;
         const files = target.files;
         if (!files || files.length === 0) return;
 
-        for (let i = 0; i < files.length; i++) {
-            if (attachments.length >= MAX_IMAGES) break;
-            const file = files[i];
-            if (!file.type.startsWith('image/')) continue;
-            if (file.size > MAX_IMAGE_SIZE) {
-                console.warn(`Image too large: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB > ${MAX_IMAGE_SIZE / 1024 / 1024}MB)`);
-                continue;
-            }
-            readImageFile(file);
-        }
+        const { readable, ...rejected } = classifyImages(files, MAX_IMAGES - attachments.length);
+        for (const file of readable) void addAttachment(file);
+        const problem = describeRejectedImages(rejected);
+        if (problem) dialogStore.showToast(problem, 'error');
+
         // Reset input so the same file can be selected again
         target.value = '';
     }
 
-    function readImageFile(file: File) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const result = e.target?.result as string;
-            const base64 = result.split(',')[1] || result;
+    async function addAttachment(file: File) {
+        try {
+            const preview = await readImageDataUrl(file);
             attachments = [...attachments, {
                 file,
-                preview: result,
+                preview,
                 mimeType: file.type,
-                base64,
+                base64: preview.split(',')[1] || preview,
             }];
             autoResize();
-        };
-        reader.onerror = (e) => console.error('FileReader error:', e);
-        reader.readAsDataURL(file);
+        } catch (err) {
+            console.error('FileReader error:', err);
+            dialogStore.showToast(`Could not read ${file.name}`, 'error');
+        }
     }
 
     function removeAttachment(index: number) {
