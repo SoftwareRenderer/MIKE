@@ -936,7 +936,7 @@
                         <label class="field-label" for="edit-dep-path">Dependencies directory</label>
                         <p class="field-desc">
                             This LSP reads resolved dependencies from <code class="ext-dep-env">{dep.env}={dep.container_path}</code>
-                            inside its sandbox by mounting the following host folder as read-only:
+                            inside its sandbox. To allow tasks to update dependencies, the project's Sandbox Configuration should be updated with the same folder mounted with read-write permissions.
                         </p>
                         <input
                             id="edit-dep-path"
@@ -949,22 +949,17 @@
                         />
                         <div class="ext-dep-state">
                             {#if stored}
-                                <span class="ext-dep-state-label">Mounted</span>
+                                <span class="ext-dep-state-label">Mounted Read-only</span>
                                 <code class="ext-dep-path" title={`${stored} → ${dep.container_path} in this server’s sandbox, read-only`}>{stored}</code>
                                 <button type="button" class="btn-secondary btn-small" onclick={() => { editDepDraft = ''; }} disabled={saving}
-                                    title="Stop sharing this folder with the extension when you save. It deletes nothing on the host.">Don’t share</button>
+                                    title="Unmount the folder when you click save">Unmount</button>
                             {:else}
                                 <span class="ext-dep-none">Nothing mounted yet.</span>
                             {/if}
                             {#if draft !== stored}
-                                <span class="ext-dep-pending">{draft === '' ? 'Stops sharing this folder' : stored ? 'Replaces the host directory' : 'Mounts this directory'} when you save</span>
+                                <span class="ext-dep-pending">{draft === '' ? 'Unmounts this folder' : stored ? 'Replaces the host directory' : 'Mounts this directory'} when you save</span>
                             {/if}
                         </div>
-                        <p class="field-desc ext-dep-fill">
-                            Nothing else mounts this folder — not a task, not a terminal. To fill it, run the download
-                            on the host, or add the same path to a project's Sandbox Configuration mounts with
-                            <code>{dep.env}</code> set to its container path, and a task can fill it from there.
-                        </p>
                         {#if editDepError}
                             <p class="ext-dep-error" role="alert">{editDepError}</p>
                         {/if}
@@ -1545,11 +1540,6 @@
     .ext-dep-pending {
         font-size: 0.72rem;
         color: var(--color-status-yellow);
-    }
-
-    .ext-dep-fill {
-        margin: 0.4rem 0 0;
-        line-height: 1.45;
     }
 
     .ext-dep-error {
