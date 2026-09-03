@@ -74,6 +74,10 @@ type ExtensionLSPManager struct {
 	projects   projectPaths
 	mu         sync.Mutex
 	clients    map[string]*sandboxClient // workspaceKey → client state
+	// environments holds one workspace's last "can its server resolve the project"
+	// verdict, keyed like clients. It dies with the connection: a fresh server may
+	// find a different dependency root than the one that just stopped answering.
+	environments map[string]envStatus
 	// serverCh receives messages from all LSP servers (responses + notifications)
 	serverCh chan json.RawMessage
 	// subscribers receive a copy of all LSP server messages (for filtered listening)
@@ -112,7 +116,21 @@ type sandboxClient struct {
 	// connection outlives the server, so without this flag the map keeps handing out a
 	// connection whose every request answers `lsp server died`.
 	dead atomic.Bool
+	// extension is the installed record this connection was created from. Its manifest
+	// carries the environment check and the diagnostic codes that mean "could not load the
+	// project" — core never interprets either, it only forwards them.
+	extension *extensions.Extension
+	// gate is that extension's environment check, when it declared one. nil means the
+	// server's answers are always forwarded.
+	gate *extensions.EnvironmentGate
 }
+
+// A language server's dependency root is NOT assigned here, per connection. It is a container-level
+// `-e` (see extensions.DependencyMount), and that is not an oversight: the extension's own
+// environment check runs as an exec in the same container, and both the server and the check have
+// to be told the same thing by one source. A per-connection assignment would leave the check
+// answering "cannot resolve" while the mount sat right there — which turns an honest gate into a
+// false one, the exact failure this mechanism was built to avoid.
 
 // usable reports whether requests may still go through this connection: both the bridge
 // connection and the language server on the far end of it have to be standing.
@@ -218,12 +236,13 @@ type projectPaths interface {
 
 func NewExtensionLSPManager(extStore *extensions.ExtensionStore, extSandbox *extensions.ExtensionSandboxManager, projects projectPaths) *ExtensionLSPManager {
 	return &ExtensionLSPManager{
-		extStore:    extStore,
-		extSandbox:  extSandbox,
-		projects:    projects,
-		clients:     make(map[string]*sandboxClient),
-		serverCh:    make(chan json.RawMessage, 256),
-		subscribers: make([]chan json.RawMessage, 0),
+		extStore:     extStore,
+		extSandbox:   extSandbox,
+		projects:     projects,
+		clients:      make(map[string]*sandboxClient),
+		environments: make(map[string]envStatus),
+		serverCh:     make(chan json.RawMessage, 256),
+		subscribers:  make([]chan json.RawMessage, 0),
 	}
 }
 
@@ -332,10 +351,14 @@ func (m *ExtensionLSPManager) startSession(ctx context.Context, ext *extensions.
 	}()
 
 	client := newSandboxClient(bridgeClient, workspacePath, language, ext.ID, projectMounts)
+	client.extension = ext
+	client.gate = ext.SandboxConfig.Environment
 	client.refs = refs
 
 	startCtx, cancelStart := context.WithTimeout(ctx, lspStartTimeout)
 	defer cancelStart()
+	// No environment of its own: the container it runs in already carries the extension's declared
+	// envs and, when the user granted one, the dependency directory assignment.
 	if err := bridgeClient.LSPStart(startCtx, lspConfig.Command, lspConfig.Args); err != nil {
 		return nil, fmt.Errorf("start LSP server in sandbox: %w", err)
 	}
@@ -419,6 +442,7 @@ func (m *ExtensionLSPManager) retire(workspaceKey string, sc *sandboxClient) {
 		return
 	}
 	delete(m.clients, workspaceKey)
+	delete(m.environments, workspaceKey)
 	m.mu.Unlock()
 
 	m.closeConnection(workspaceKey, sc)
@@ -433,6 +457,74 @@ func (m *ExtensionLSPManager) closeConnection(workspaceKey string, sc *sandboxCl
 		return
 	}
 	log.Printf("[lsp] retired connection for %s and handed back sandbox %s", workspaceKey, sc.extensionID)
+}
+
+// reloadNeeded reports whether a changed file means the language server has to re-read the
+// project. A declared entry matches itself (`go.mod`) or any file of that name below the
+// workspace (`internal/foo/go.mod`), because a nested module changing is exactly the same event
+// for the server — and because a server watching nothing, it only learns what it is told.
+func reloadNeeded(reloadFiles []string, changed string) bool {
+	if len(reloadFiles) == 0 {
+		return false
+	}
+	changed = filepath.Clean(strings.TrimSpace(changed))
+	if changed == "" || changed == "." {
+		return false
+	}
+	base := filepath.Base(changed)
+	for _, declared := range reloadFiles {
+		declared = filepath.Clean(strings.TrimSpace(declared))
+		if declared == "." || declared == "" {
+			continue
+		}
+		if changed == declared || base == filepath.Base(declared) {
+			return true
+		}
+	}
+	return false
+}
+
+// FilesChanged ends the language-server connection of this workspace whenever the turn changed a
+// file its extension declared in `reload_files` (a go.mod, a lockfile), and reports whether any
+// connection was ended.
+//
+// Recycling means retiring the connection, not restarting the process inside it: the agent kills
+// its language server when the connection ends, which is the only thing that reaps the server,
+// and the next request re-attaches to a fresh process that loads the graph again. An in-place
+// restart would need a new wire call to stop a server and would still leave the holder attached
+// to a process that had forgotten `initialize` and every document it was told about.
+func (m *ExtensionLSPManager) FilesChanged(workspacePath string, changed []string) bool {
+	if len(changed) == 0 {
+		return false
+	}
+	type victim struct {
+		key string
+		sc  *sandboxClient
+	}
+	var targets []victim
+	m.mu.Lock()
+	for key, sc := range m.clients {
+		if sc.workspace != workspacePath || sc.extension == nil {
+			continue
+		}
+		for _, f := range changed {
+			if reloadNeeded(sc.extension.SandboxConfig.ReloadFiles, f) {
+				targets = append(targets, victim{key, sc})
+				break
+			}
+		}
+	}
+	m.mu.Unlock()
+
+	for _, v := range targets {
+		// Marked dead first: a holder still attached (the editor's WebSocket) must find the
+		// connection unusable and re-attach, rather than write into a bridge on its way out.
+		v.sc.dead.Store(true)
+		m.retire(v.key, v.sc)
+		log.Printf("[lsp] recycled the language server for workspace=%s lang=%s (re-reads the project)",
+			v.sc.workspace, v.sc.language)
+	}
+	return len(targets) > 0
 }
 
 // Release hands back one holder's reference; the connection dies with the last one out, so no
@@ -465,21 +557,19 @@ func (m *ExtensionLSPManager) ensureSandbox(ext *extensions.Extension, workspace
 	// custom mounts adapted for the LSP sandbox) so we can check compatibility
 	// with an existing sandbox.
 	wsContainer := containerWorkspacePath(workspacePath, projectMounts)
-	desiredMounts := resolveWorkspaceMounts(ext.SandboxConfig.Mounts, workspacePath, projectMounts)
-	projectMountsRO := m.adaptProjectMounts(workspacePath, wsContainer)
-	if len(projectMountsRO) > 0 {
-		desiredMounts = append(desiredMounts, projectMountsRO...)
-	}
-
+	createMounts, compareMounts, compareEnvs := m.sandboxMountPlan(ext, workspacePath, projectMounts, wsContainer)
 	// Check if sandbox already exists and is alive
 	if m.extSandbox.IsRunning(ext.ID) {
-		// Existing sandbox — check if mounts are compatible
-		if m.extSandbox.MountsCompatible(ext.ID, projectMounts, desiredMounts) {
+		// Existing sandbox — does it still match what we would create? The reason comes back
+		// because three different causes share this one decision (project set, mounts, the
+		// extension's own envs) and a log line that does not say which is a wasted morning.
+		if ok, why := m.extSandbox.MountsCompatible(ext.ID, projectMounts, compareMounts, compareEnvs); ok {
 			log.Printf("[lsp] reusing existing sandbox for extension %s", ext.ID)
 			return nil
+		} else {
+			log.Printf("[lsp] sandbox %s: %s — recreating", ext.ID, why)
+			_ = m.extSandbox.Stop(ext.ID)
 		}
-		// Sandbox exists but mounts are stale — recreate
-		log.Printf("[lsp] sandbox mounts changed, recreating for extension %s", ext.ID)
 		_ = m.extSandbox.Stop(ext.ID)
 	}
 
@@ -488,11 +578,51 @@ func (m *ExtensionLSPManager) ensureSandbox(ext *extensions.Extension, workspace
 	// dependencies. Applied to a copy so the shared extension record isn't mutated.
 	log.Printf("[lsp] creating sandbox for extension %s", ext.ID)
 	extCopy := *ext
-	extCopy.SandboxConfig.Mounts = desiredMounts
+	extCopy.SandboxConfig.Mounts = createMounts
 	if _, err := m.extSandbox.Create(&extCopy, projectMounts); err != nil {
 		return fmt.Errorf("create extension sandbox: %w", err)
 	}
 	return nil
+}
+
+// sandboxMountPlan returns the two mount lists this workspace implies, and they are two because
+// confusing them is a bug that costs a cold start on every file the user opens:
+//
+//   - createMounts is what the container is created with. It does NOT contain the granted dependency
+//     directory, because Create appends that itself (`dependencyBind`) — asking it twice is what made
+//     the recorded snapshot hold the same mount twice, and a snapshot with a duplicate in it is one no
+//     comparison can ever match, so every workspace open recreated the container and restarted the
+//     language server.
+//   - compareMounts/compareEnvs are what a later MountsCompatible must expect that create to have
+//     recorded, and those DO contain it, because the create records it. Without it a sandbox that
+//     predates a grant is reused forever and the user stares at a grant that does nothing.
+func (m *ExtensionLSPManager) sandboxMountPlan(ext *extensions.Extension, workspacePath string, projectMounts map[string]string, wsContainer string) (createMounts, compareMounts []types.SandboxMount, compareEnvs []types.SandboxEnv) {
+	createMounts = resolveWorkspaceMounts(ext.SandboxConfig.Mounts, workspacePath, projectMounts)
+	compareEnvs = ext.SandboxConfig.Envs
+
+	// What a create would bind for the granted dependency directory, asked of the same derivation the
+	// create uses, so the two can never disagree about what exists.
+	var bind extensions.DependencyMount
+	if m.extSandbox != nil {
+		bind = m.extSandbox.DesiredDependencyMount(ext)
+	}
+	var reserved []types.SandboxMount
+	if bind.OK {
+		reserved = append(reserved, bind.Mount)
+	} else if bind.Reason != "" {
+		log.Printf("[lsp] ext=%s no dependency directory will be bound: %s", ext.ID, bind.Reason)
+	}
+
+	// A borrowed project mount that wants the dependency directory's container path gives way: core's
+	// mount is the declared one and cannot be moved.
+	createMounts = append(createMounts, m.adaptProjectMounts(workspacePath, wsContainer, reserved)...)
+
+	compareMounts = createMounts
+	if bind.OK {
+		compareMounts = append(append([]types.SandboxMount(nil), createMounts...), bind.Mount)
+		compareEnvs = append(append([]types.SandboxEnv(nil), ext.SandboxConfig.Envs...), bind.Env)
+	}
+	return createMounts, compareMounts, compareEnvs
 }
 
 // SendToServer sends a JSON-RPC message to the server and waits for the response, translating
@@ -678,7 +808,11 @@ func (m *ExtensionLSPManager) findProjectForWorkspace(workspacePath string) (*ty
 // paths under the task sandbox project root (/home/sandbox/<project-name>) are remapped onto the
 // LSP workspace path, global paths (e.g. /go) pass through, everything is forced read-only, and
 // anything shadowing the server's own writable state is dropped (see shadowsToolState).
-func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath, wsContainerPath string) []types.SandboxMount {
+// reserved are container paths core mounts itself — today, the granted dependency directory. A
+// borrowed mount that wants one of them is dropped: two -v specs on one container path make podman
+// refuse the whole create, and "the extension will not start" is a worse outcome for the project
+// than "your graft mount is not in the LSP sandbox", which is also what the log line says.
+func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath, wsContainerPath string, reserved []types.SandboxMount) []types.SandboxMount {
 	project, err := m.findProjectForWorkspace(workspacePath)
 	if err != nil {
 		log.Printf("[lsp] adaptProjectMounts: %v", err)
@@ -699,6 +833,11 @@ func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath, wsContainerPath 
 		}
 		if shadowsToolState(cp) {
 			log.Printf("[lsp] not borrowing project mount %s -> %s: the language server needs to write there",
+				mo.HostPath, cp)
+			continue
+		}
+		if isReservedContainerPath(cp, reserved) {
+			log.Printf("[lsp] not borrowing project mount %s -> %s: core mounts the extension's dependency directory there",
 				mo.HostPath, cp)
 			continue
 		}

@@ -384,6 +384,74 @@ func TestHasDotDotSegment(t *testing.T) {
 	}
 }
 
+// --- Project-configured roots (shared LSP sandbox) ---------------------------
+//
+// The LSP sandbox borrows the caches a project already bind-mounts for its own
+// task sandbox. Borrowing is allowed; writing through them is not.
+
+func TestMountPolicyProjectRootsAreAllowedButPinnedReadOnly(t *testing.T) {
+	dir := t.TempDir()
+	appRoot := filepath.Join(dir, "app")
+	projectCache := filepath.Join(dir, "go-cache")
+	for _, d := range []string{appRoot, projectCache} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	p := newMountPolicyWithReadOnly([]string{appRoot, projectCache}, []string{projectCache})
+
+	// The borrowed path is mountable at all — this is the whole point: without it
+	// a language server never sees the modules its workspace can compile against.
+	borrowed, err := p.ValidateHostPath(filepath.Join(projectCache, "pkg", "mod"))
+	if err != nil {
+		t.Fatalf("project-configured path rejected: %v", err)
+	}
+	if !p.ForceReadOnly(borrowed) {
+		t.Error("a project's own Sandbox Configuration path must be pinned read-only")
+	}
+
+	owned, err := p.ValidateHostPath(filepath.Join(appRoot, "data"))
+	if err != nil {
+		t.Fatalf("app-owned path rejected: %v", err)
+	}
+	if p.ForceReadOnly(owned) {
+		t.Error("an app-owned path should keep whatever mode the caller asked for")
+	}
+
+	// Widening for the borrowed cache must not widen anything else.
+	if _, err := p.ValidateHostPath("/etc/shadow"); err == nil {
+		t.Error("a path outside every root was accepted")
+	}
+}
+
+func TestMountPolicyNilPolicyIsReadOnly(t *testing.T) {
+	var p *MountPolicy
+	if !p.ForceReadOnly("/anything") {
+		t.Error("a nil policy must fail closed to read-only")
+	}
+}
+
+func TestNewMountPolicyWithReadOnlyNormalizesBothLists(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "cache")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Same directory reached two ways must not become two roots.
+	p := newMountPolicyWithReadOnly([]string{target, target + "/./", "  "}, []string{"./", target})
+	if len(p.Roots()) != 1 {
+		t.Errorf("roots = %v, want exactly one", p.Roots())
+	}
+	resolved, err := p.ValidateHostPath(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.ForceReadOnly(resolved) {
+		t.Error("read-only root not recognized after normalization")
+	}
+}
+
 // TestValidateHostPath_RejectsDanglingSymlink: a host path that is a symlink to a
 // target that does not exist yet cannot be checked against the roots, so it is
 // refused rather than binding wherever the link later points.

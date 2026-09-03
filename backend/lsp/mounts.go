@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"kanban/backend/extensions"
 	"kanban/backend/types"
 )
 
@@ -37,28 +38,21 @@ func resolveWorkspaceMounts(mounts []types.SandboxMount, workspacePath string, p
 	return resolved
 }
 
-// shadowsToolState reports whether a borrowed Sandbox Configuration mount would cover the
-// language server's own writable state — its cache, or the container's tmpfs.
-//
-// Borrowed mounts are forced read-only, and a server with a read-only cache publishes nothing
-// about a file it cannot load, so a broken file looks clean.
-func shadowsToolState(containerPath string) bool {
-	// Only the tmpfs roots themselves; a read-only mount over /tmp makes the whole scratch space
-	// unusable, while a subtree of it is fine.
-	switch containerPath {
-	case "/tmp", "/var/tmp":
-		return true
-	}
-	// A .cache directory of the container's own user (/root/.cache, /home/node/.cache) or
-	// anything under it. Depth-bounded so a project's own .cache, deep under /mnt, stays borrowed.
-	parts := strings.Split(strings.TrimPrefix(containerPath, "/"), "/")
-	for i, part := range parts {
-		if i > 2 {
-			break
-		}
-		if part == ".cache" {
+// isReservedContainerPath reports whether core already mounts this container path itself — today,
+// the granted dependency directory. Borrowed mounts have to check it: two -v specs on one container
+// path make podman refuse the whole create, so the cost of missing one is an extension that will
+// not start at all.
+func isReservedContainerPath(containerPath string, reserved []types.SandboxMount) bool {
+	for _, r := range reserved {
+		if r.ContainerPath == containerPath {
 			return true
 		}
 	}
 	return false
 }
+
+// shadowsToolState is the extensions rule of the same name, under its old local name — the rule
+// has one home (backend/extensions/mount_policy.go) because both things that mount read-only,
+// a borrowed Sandbox Configuration mount and a declared dependency_cache, have to agree on what
+// counts as the server's own state.
+var shadowsToolState = extensions.ShadowsToolState

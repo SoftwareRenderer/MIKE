@@ -252,6 +252,13 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	s.executor.RecoverStaleTasks()
 	// Wire agent registry to terminal manager (created earlier before agentRegistry was available)
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
+	// A sandboxed shell needs the same dependency directories the language servers were granted: the
+	// terminal is where a user warms one by hand, and a container created without the grant would
+	// quietly make that work invisible to the editor. Guarded so a nil manager never arrives as a
+	// non-nil interface.
+	if s.extLSPMgr != nil {
+		s.terminalMgr.SetDependencyProvider(s.extLSPMgr)
+	}
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)
 	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())
@@ -261,7 +268,16 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	// s.gitHandler wires the worktree mutex in above; extensions are entirely
 	// registry-driven now — there is no built-in bootstrap step.
 	s.extHandler = extensions.NewExtensionHandler(s.extStore, s.extSandboxMgr, extRegistry, extCfg)
-
+	// Settings → Extensions shows one honest sentence when a language server cannot
+	// resolve the project it is serving — the state behind diagnostics core
+	// deliberately withheld rather than forwarded as fact.
+	s.extHandler.SetEnvironmentStatus(func(extID string) *extensions.EnvironmentStatus {
+		healthy, note := s.extLSPMgr.EnvironmentSummary(extID)
+		if healthy || note == "" {
+			return nil
+		}
+		return &extensions.EnvironmentStatus{Healthy: false, Note: note}
+	})
 	// LSP handler for language server WebSocket bridging
 	// Use extension-based registry and manager for dynamic LSP discovery
 	extLSPRegistry := lsp.NewExtensionRegistry(s.extStore)

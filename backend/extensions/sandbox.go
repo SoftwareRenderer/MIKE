@@ -65,6 +65,13 @@ type extensionSandboxState struct {
 	// extension's SandboxConfig.Mounts, used to detect when custom mounts
 	// (e.g. a node_modules mount) have changed and the container needs recreation.
 	customMounts []string
+	// envs is the sorted list of "KEY=VALUE" assignments the extension's own
+	// config put into the container. A container's environment is fixed at
+	// creation, so a manifest/config env change needs a recreate. Values a
+	// *session* discovered at runtime (a language's dependency cache) are never
+	// in here — they belong to one workspace's server process, not to the shared
+	// container, and must not be able to restart everyone else's.
+	envs []string
 }
 
 // NewExtensionSandboxManager creates a new ExtensionSandboxManager.
@@ -129,14 +136,51 @@ func (sm *ExtensionSandboxManager) SetWorkspaceDir(dir string) {
 	sm.workspaceDir = dir
 }
 
-// MountPolicy returns the host-mount allowlist for extension sandboxes (workspace dir,
-// registered projects, extensions dir, temp dir, EnvMountRoots), built on demand so new projects
-// apply without a restart.
+// MountPolicy returns the host-mount allowlist for extension sandboxes: the
+// workspace dir, the registered project paths, the extensions dir, the system
+// temp dir, the EnvMountRoots extras, and the host paths projects declare in
+// their own Sandbox Configuration. The last group is allowed but pinned read-only:
+// it exists so a language server can read the same caches its workspace reads
+// without any project handing an extension a writable host directory. Built on
+// demand so new projects apply without a restart.
+//
+// The install-time and settings-time validators (ExtensionHandler.mountPolicy)
+// deliberately do NOT get these roots: an extension may not ask for a path the
+// user configured for a project, only the sandbox runtime lends it.
+//
+// Nor does it contain anyone's granted dependency directory — that one belongs to a
+// single extension, so it enters through MountPolicyForExtension. A policy that
+// carried every extension's grants would let one extension's manifest name another's
+// directory, which is the widening this feature has to avoid.
 func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
+	return sm.mountPolicy("", false)
+}
+
+// MountPolicyForExtension is MountPolicy plus the dependency directory the user granted to THIS
+// extension, and only this extension's.
+//
+// Adding it to the roots is not a widening: the directory was named by the person who owns the
+// machine for this one extension, so nothing reachable here was not already reachable by that
+// extension mounting it as an ordinary Sandbox Configuration mount. What it does buy is that the
+// bind goes through the same gate as every other mount — ValidateHostPath, the container-path
+// charset, the read-only pinning — instead of a second path that trusts the stored string. A
+// read-only declaration lands in the read-only roots, so even a mount asking for `rw` is pinned,
+// exactly like a path that only exists because a project configured it.
+func (sm *ExtensionSandboxManager) MountPolicyForExtension(ext *Extension) *MountPolicy {
+	var grant string
+	writable := false
+	if ext != nil {
+		grant, writable = ext.SandboxConfig.DependencyGrant()
+	}
+	return sm.mountPolicy(grant, writable)
+}
+
+func (sm *ExtensionSandboxManager) mountPolicy(grantHostPath string, grantWritable bool) *MountPolicy {
 	var (
 		workspaceDir  string
 		extensionsDir string
 		projectPaths  []string
+		projectMounts []string
 	)
 	if sm != nil {
 		workspaceDir = sm.workspaceDir
@@ -146,8 +190,21 @@ func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
 			log.Printf("[ext-sandbox] WARNING: cannot list project paths for the mount allowlist: %v", err)
 			projectPaths = nil
 		}
+		if projectMounts, err = sm.store.ListProjectSandboxMountPaths(); err != nil {
+			log.Printf("[ext-sandbox] WARNING: cannot list project sandbox mounts for the mount allowlist: %v", err)
+			projectMounts = nil
+		}
 	}
-	return newMountPolicy(mountRoots(extensionsDir, workspaceDir, projectPaths))
+
+	roots := append(mountRoots(extensionsDir, workspaceDir, projectPaths), projectMounts...)
+	readOnlyRoots := append([]string(nil), projectMounts...)
+	if grantHostPath != "" {
+		roots = append(roots, grantHostPath)
+		if !grantWritable {
+			readOnlyRoots = append(readOnlyRoots, grantHostPath)
+		}
+	}
+	return newMountPolicyWithReadOnly(roots, readOnlyRoots)
 }
 
 // extensionMemoryLimit resolves the memory limit (MB) for an extension's sandbox: 0 means no
@@ -157,6 +214,98 @@ func extensionMemoryLimit(ext *Extension) int {
 		return 0
 	}
 	return ext.SandboxConfig.MemoryLimit
+}
+
+// DependencyMount is what a granted dependency directory contributes to one container: a mount, an
+// environment assignment, and either a successful pair or the reason there is nothing to bind.
+//
+// It is computed in ONE place, on both sides of the lifecycle. The compatibility check has to want
+// exactly what a container create would produce — if the two derived their own answers, a container
+// built before a grant was applied would be called "compatible" with it, and the grant would never
+// take effect until something else happened to recreate the sandbox. That is the same silent
+// staleness this whole mechanism exists to remove, so it is not worth two derivations.
+//
+// The assignment goes on the CONTAINER rather than on the language-server process for one reason
+// that is easy to miss: the extension's own `environment.check` runs as an exec in this container,
+// and it answers "can this workspace be resolved?" by asking the toolchain — which needs the same
+// assignment the server has. An env handed only to the server would leave the check reporting
+// failure forever with the mount sitting right there, and an honest gate would become a false one.
+type DependencyMount struct {
+	Mount  types.SandboxMount
+	Env    types.SandboxEnv
+	OK     bool
+	Reason string // why nothing is bound; empty when there is no grant at all, or when OK
+}
+
+// dependencyBind resolves the grant against the extension's own mount policy. `policy` must be the
+// per-extension one (MountPolicyForExtension): with the narrow policy the granted path is not a
+// root, and the honest answer is "not mountable".
+//
+// A grant that cannot be honored is reported, not fatal. The extension still starts and resolves
+// what its image contains, and its own environment check says so — whereas refusing to create the
+// container would turn a deleted cache directory into an extension that will not load at all, with
+// the editor left without completions rather than without dependencies.
+func dependencyBind(ext *Extension, policy *MountPolicy) DependencyMount {
+	host, writable := ext.SandboxConfig.DependencyGrant()
+	if host == "" {
+		return DependencyMount{}
+	}
+	declared := ext.SandboxConfig.Dependency
+	resolved, err := policy.ValidateHostPath(host)
+	if err != nil {
+		return DependencyMount{Reason: fmt.Sprintf("the granted directory %s cannot be mounted: %v", host, err)}
+	}
+	// Existence is checked HERE as well as when the grant was applied, because the two moments can
+	// be years apart: a directory deleted afterwards would otherwise be recreated by podman as
+	// root-owned at container start, and the toolchain that later tries to warm it (read-write, in a
+	// task sandbox) would find it cannot write to the cache the user just granted.
+	if info, err := os.Stat(resolved); err != nil || !info.IsDir() {
+		if err != nil {
+			return DependencyMount{Reason: fmt.Sprintf("the granted directory %s is not there any more: %v", resolved, err)}
+		}
+		return DependencyMount{Reason: fmt.Sprintf("the granted path %s is not a directory", resolved)}
+	}
+	mode := "ro"
+	// Writable only when the extension's declaration asked for it AND the path is not one the app
+	// pins read-only — a directory that is a root merely because a project configured it stays read
+	// no matter what anyone asked for.
+	if writable && !policy.ForceReadOnly(resolved) {
+		mode = "rw"
+	}
+	return DependencyMount{
+		Mount: types.SandboxMount{HostPath: resolved, ContainerPath: declared.ContainerPath, Mode: mode},
+		// The value is the container path, not the host path: inside the container that is where the
+		// directory is, and the host path must not reach a process that could report it back.
+		Env: types.SandboxEnv{Key: declared.Env, Value: declared.ContainerPath},
+		OK:  true,
+	}
+}
+
+// DesiredDependencyMount is what a container create for ext would bind for its granted dependency
+// directory. Callers checking compatibility with a running sandbox need this, not their own guess.
+func (sm *ExtensionSandboxManager) DesiredDependencyMount(ext *Extension) DependencyMount {
+	if ext == nil {
+		return DependencyMount{}
+	}
+	return dependencyBind(ext, sm.MountPolicyForExtension(ext))
+}
+
+// withDependencyMount appends the dependency bind to a mount list, for the snapshot that a later
+// compatibility check compares against. No-op when nothing is bound.
+func withDependencyMount(mounts []types.SandboxMount, bind DependencyMount) []types.SandboxMount {
+	if !bind.OK {
+		return mounts
+	}
+	return append(append([]types.SandboxMount(nil), mounts...), bind.Mount)
+}
+
+// withDependencyEnv is withDependencyMount for the env list, and for the same reason: both sides of
+// the comparison have to include it, or every check asks for a recreate.
+func withDependencyEnv(envs []types.SandboxEnv, bind DependencyMount) []types.SandboxEnv {
+	if !bind.OK {
+		return envs
+	}
+	return append(append([]types.SandboxEnv(nil), envs...), bind.Env)
 }
 
 // buildExtensionCreateArgs assembles the `podman create` args for an extension sandbox (always
@@ -219,10 +368,32 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dM", memLimit))
 	}
 
+	// The granted dependency directory, first among the mounts: where it lands is declared by the
+	// extension and cannot be moved, so a borrowed mount that wants the same container path is the
+	// one that has to give way (see the collision check below).
+	bind := dependencyBind(ext, policy)
+	if bind.OK {
+		createArgs = append(createArgs,
+			"-v", fmt.Sprintf("%s:%s:rprivate,%s", bind.Mount.HostPath, bind.Mount.ContainerPath, bind.Mount.Mode),
+			"-e", fmt.Sprintf("%s=%s", bind.Env.Key, bind.Env.Value),
+		)
+		log.Printf("[ext-sandbox] ext=%s mounted the granted dependency directory %s at %s (%s) and assigned %s=%s",
+			ext.ID, bind.Mount.HostPath, bind.Mount.ContainerPath, bind.Mount.Mode, bind.Env.Key, bind.Env.Value)
+	} else if bind.Reason != "" {
+		log.Printf("[ext-sandbox] ext=%s SKIPPED dependency directory: %s — the server resolves only what its image contains, and its environment check will say so", ext.ID, bind.Reason)
+	}
+
 	// Custom mounts, each re-checked: the container path charset keeps the
 	// "<host>:<container>:rprivate,<mode>" spec from being rewritten by the value
 	// itself, and the host path must resolve inside one of the app's own roots.
 	for _, m := range ext.SandboxConfig.Mounts {
+		if bind.OK && m.ContainerPath == bind.Mount.ContainerPath {
+			// Two -v specs on one container path make podman fail the whole create, which would
+			// look like a broken extension rather than a mount that collides with a declaration.
+			log.Printf("[ext-sandbox] ext=%s SKIPPED mount (host %q -> container %q): core mounts the granted dependency directory there",
+				ext.ID, m.HostPath, m.ContainerPath)
+			continue
+		}
 		if err := ValidateContainerPath(m.ContainerPath); err != nil {
 			log.Printf("[ext-sandbox] ext=%s SKIPPED mount (host %q): %v", ext.ID, m.HostPath, err)
 			continue
@@ -232,8 +403,11 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 			log.Printf("[ext-sandbox] ext=%s SKIPPED mount (container %q): %v", ext.ID, m.ContainerPath, err)
 			continue
 		}
+		// Read-only unless the caller asked for write access to a path the app owns.
+		// A path that only exists because a user configured it for a project stays
+		// read-only no matter what mode was requested.
 		mode := "ro"
-		if m.Mode == "rw" {
+		if m.Mode == "rw" && !policy.ForceReadOnly(resolved) {
 			mode = "rw"
 		}
 		createArgs = append(createArgs,
@@ -304,7 +478,9 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		return nil, err
 	}
 
-	createArgs, mountedProjects := buildExtensionCreateArgs(ext, containerName, image, projectMounts, sm.MountPolicy())
+	// Per-extension on purpose: this is the one place a granted dependency directory becomes a root,
+	// and it is a root for this container only.
+	createArgs, mountedProjects := buildExtensionCreateArgs(ext, containerName, image, projectMounts, sm.MountPolicyForExtension(ext))
 
 	// Create container
 	out, err := sm.rt.PodmanExec(createArgs...)
@@ -339,8 +515,11 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 
 	log.Printf("[ext-sandbox] ext=%s created and started container %s (mounts: %d projects)", ext.ID, containerName, len(projectMounts))
 
-	// Snapshot of the extension's custom mounts for compatibility checks.
-	customMounts := customMountSnapshot(ext.SandboxConfig.Mounts)
+	// Snapshot of the extension's custom mounts and own envs for compatibility checks.
+	// The same derivation the create used, so a later compatibility check wants what this container
+	// actually got — including the dependency directory, if it was bound.
+	bind := dependencyBind(ext, sm.MountPolicyForExtension(ext))
+	customMounts := customMountSnapshot(withDependencyMount(ext.SandboxConfig.Mounts, bind))
 
 	// Store state
 	sm.states[ext.ID] = &extensionSandboxState{
@@ -350,6 +529,7 @@ func (sm *ExtensionSandboxManager) Create(ext *Extension, projectMounts map[stri
 		isAlive:         true,
 		mountedProjects: mountedProjects,
 		customMounts:    customMounts,
+		envs:            envSnapshot(withDependencyEnv(ext.SandboxConfig.Envs, bind)),
 	}
 
 	return nil, nil
@@ -638,12 +818,48 @@ func customMountSnapshot(mounts []types.SandboxMount) []string {
 	return snap
 }
 
-// MountsCompatible reports whether the running sandbox's mounted projects and custom mounts
-// still match the desired set — if not, the container needs recreation.
-func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[string]string, desiredCustom []types.SandboxMount) bool {
-	state := sm.states[extID]
-	if state == nil {
+// envSnapshot returns a sorted "KEY=VALUE" list of the extension's own container
+// environment, suitable for equality comparison.
+func envSnapshot(envs []types.SandboxEnv) []string {
+	if len(envs) == 0 {
+		return nil
+	}
+	snap := make([]string, len(envs))
+	for i, e := range envs {
+		snap[i] = e.Key + "=" + e.Value
+	}
+	sort.Strings(snap)
+	return snap
+}
+
+// equalStrings reports whether two sorted snapshots are identical.
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
 		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// MountsCompatible checks whether a live sandbox still matches what the caller
+// would create. It returns false plus a human-readable reason when the container
+// must be recreated — a different project set, different mounts, or different
+// extension-declared envs (a container's env is fixed at `podman create`).
+//
+// desiredEnvs is the extension's *own* env list (manifest + user config) only.
+// One workspace's own environment assignments are deliberately not part of this
+// comparison: they belong to that workspace's connection, and letting them in
+// would make one project's dependency root restart every other project's server.
+func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[string]string, desiredCustom []types.SandboxMount, desiredEnvs []types.SandboxEnv) (bool, string) {
+	sm.mu.Lock()
+	state := sm.states[extID]
+	sm.mu.Unlock()
+	if state == nil {
+		return false, "no sandbox"
 	}
 	// Compare sorted lists of project host paths
 	desiredSorted := make([]string, 0, len(desired))
@@ -651,25 +867,18 @@ func (sm *ExtensionSandboxManager) MountsCompatible(extID string, desired map[st
 		desiredSorted = append(desiredSorted, p)
 	}
 	sort.Strings(desiredSorted)
-	if len(desiredSorted) != len(state.mountedProjects) {
-		return false
-	}
-	for i := range desiredSorted {
-		if desiredSorted[i] != state.mountedProjects[i] {
-			return false
-		}
+	if !equalStrings(desiredSorted, state.mountedProjects) {
+		return false, "project mounts changed"
 	}
 	// Compare custom extension mounts (e.g. node_modules)
-	desiredCustomSnap := customMountSnapshot(desiredCustom)
-	if len(desiredCustomSnap) != len(state.customMounts) {
-		return false
+	if !equalStrings(customMountSnapshot(desiredCustom), state.customMounts) {
+		return false, "mounts changed"
 	}
-	for i := range desiredCustomSnap {
-		if desiredCustomSnap[i] != state.customMounts[i] {
-			return false
-		}
+	// Compare the extension's own container env
+	if !equalStrings(envSnapshot(desiredEnvs), state.envs) {
+		return false, "envs changed"
 	}
-	return true
+	return true, ""
 }
 
 // ListRunning returns all running extension sandboxes with their status.

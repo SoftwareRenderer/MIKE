@@ -62,6 +62,18 @@ type ExtensionHandler struct {
 	inFlightOps        *inFlight
 	onImageUpdated     func(extID string) // callback after successful image update
 	onExtensionChanged func()             // callback after any extension change (enable/disable/create/delete)
+	// environmentStatus reports whether an extension's language server can resolve
+	// the workspaces it is currently serving. Set by the server, which is where the
+	// LSP manager lives; the extensions package stays independent of it.
+	environmentStatus func(extID string) *EnvironmentStatus
+}
+
+// EnvironmentStatus is the runtime answer to "can this extension actually serve
+// a workspace?". When it cannot, its diagnostics are guesses and core withholds
+// them — so the manifest's own sentence is what the user is shown instead.
+type EnvironmentStatus struct {
+	Healthy bool   `json:"healthy"`
+	Note    string `json:"note,omitempty"`
 }
 
 // ExtensionConfig holds configuration for the extension handler.
@@ -131,6 +143,13 @@ func (h *ExtensionHandler) SetOnImageUpdated(fn func(extID string)) {
 // SetOnExtensionChanged sets a callback invoked after any extension state change.
 func (h *ExtensionHandler) SetOnExtensionChanged(fn func()) {
 	h.onExtensionChanged = fn
+}
+
+// SetEnvironmentStatus wires the runtime "can it resolve the project" report for
+// language-server extensions, so Settings → Extensions can say in one sentence
+// why diagnostics are being withheld instead of showing nothing at all.
+func (h *ExtensionHandler) SetEnvironmentStatus(fn func(extID string) *EnvironmentStatus) {
+	h.environmentStatus = fn
 }
 
 // mountPolicy returns the host-mount allowlist an extension sandbox is held to:
@@ -446,6 +465,99 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, statuses))
 
 	// Notify frontend to refresh UI injection slots
+	if h.onExtensionChanged != nil {
+		h.onExtensionChanged()
+	}
+}
+
+// HandleSetDependencyCache grants — or revokes — the one host directory an extension's language
+// server reads its resolved dependencies from.
+//
+// It is its own endpoint rather than one more field on the sandbox form for two reasons. An empty
+// value here means "revoke", and the form handler copies only non-empty fields, so a blank would
+// silently mean "unchanged". And granting it has a side effect the form does not: the running
+// container's mount set is fixed at creation, so it has to go.
+//
+// The manifest declares the location; only a human names the directory. A manifest carrying
+// dependency_host_path is refused at install (see manifest_validate.go), so the value written here
+// is always a decision made on this machine by whoever owns it.
+func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// A pointer, because "empty" and "absent" must not mean the same thing here. An empty value is a
+	// revoke — that is the documented way to take a grant back — but a body whose key is misspelled
+	// would otherwise decode to the empty string and silently revoke a working grant while answering
+	// 200. Absent is a caller mistake, so it is answered as one.
+	var req struct {
+		HostPath *string `json:"host_path"`
+	}
+	if !httputil.DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.HostPath == nil {
+		http.Error(w, "host_path is required; send an empty value to revoke the grant", http.StatusBadRequest)
+		return
+	}
+
+	ext, err := h.store.GetByID(id)
+	if err != nil {
+		httputil.Fail(w, err, "get extension", "extension not found")
+		return
+	}
+	declared := ext.SandboxConfig.Dependency
+	if !ext.IsLSP() || declared == nil {
+		http.Error(w, "this extension declares no dependency cache, so there is nothing to grant", http.StatusBadRequest)
+		return
+	}
+
+	granted := strings.TrimSpace(*req.HostPath)
+	if granted != "" {
+		granted, err = ValidateDependencyGrant(granted)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	previous := ext.SandboxConfig.DependencyHostPath
+	if granted == previous {
+		// Nothing changed: answering without stopping the container, so clicking Apply twice does
+		// not cost a cold start of a server someone is using.
+		httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, h.sandbox.ListRunning()))
+		return
+	}
+
+	ext.SandboxConfig.DependencyHostPath = granted
+	if err := h.store.Update(id, ext); err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to save the grant: "+err.Error())
+		return
+	}
+
+	// The mount set is fixed when the container is created, so a running container now has the
+	// wrong view of the world. Stopping it is the whole application: the bridge connection dies
+	// with it, the host reads the closed channel as "this server is gone" and retires it, and the
+	// next request starts a container with the new mount. Nothing here waits for that, and an
+	// extension with no running container needs nothing — the next start reads the grant from the
+	// stored record on its own.
+	recreated := "no sandbox was running, so the next start picks it up"
+	if h.sandbox.IsRunning(id) {
+		h.sandbox.Stop(id)
+		recreated = "running sandbox stopped, so the next use recreates it with this mount"
+	}
+	if granted == "" {
+		log.Printf("[extensions] ext=%s dependency grant revoked (was %s); %s reads the image's own copy again — %s", id, previous, declared.Env, recreated)
+	} else {
+		mode := "read-only"
+		if declared.Writable() {
+			mode = "read-write"
+		}
+		log.Printf("[extensions] ext=%s dependency grant %s -> %s (mounted at %s, %s) — %s", id, previous, granted, declared.ContainerPath, mode, recreated)
+	}
+
+	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, h.sandbox.ListRunning()))
 	if h.onExtensionChanged != nil {
 		h.onExtensionChanged()
 	}
@@ -1467,6 +1579,11 @@ type ExtensionResponse struct {
 	Repo            string               `json:"repo,omitempty"`
 	Commit          string               `json:"commit,omitempty"`
 	Author          string               `json:"author,omitempty"`
+	// Environment is the runtime "can this extension resolve the workspace it is
+	// serving" report, present for a language-server extension that declares an
+	// environment check. When it says unhealthy, core is withholding that
+	// extension's unresolvable diagnostics — the note is what the user should see.
+	Environment *EnvironmentStatus `json:"environment,omitempty"`
 }
 
 // ExtensionUpdate describes an available update.
@@ -1523,6 +1640,9 @@ func (h *ExtensionHandler) toResponse(ext *Extension, statuses map[string]Extens
 		BuiltAt:         ext.BuiltAt,
 		Repo:            ext.Repo,
 		Commit:          ext.Commit,
+	}
+	if h.environmentStatus != nil {
+		resp.Environment = h.environmentStatus(ext.ID)
 	}
 	// Local (filesystem) extensions have a concrete on-disk path. For an
 	// author-namespaced extension that is <extensions>/<author>/<name>; an

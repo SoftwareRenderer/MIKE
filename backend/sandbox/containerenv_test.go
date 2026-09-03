@@ -42,7 +42,7 @@ func TestContainerEnvArgs_OnlyConfigured(t *testing.T) {
 		},
 	}
 
-	got := envFlags(t, containerEnvArgs("task-1", opts))
+	got := envFlags(t, containerEnvArgs("task-1", opts, nil))
 	want := []string{"API_TOKEN=secret", "NODE_ENV=development"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("containerEnvArgs() = %v, want %v", got, want)
@@ -70,7 +70,7 @@ func TestContainerEnvArgs_SourcesAndPrecedence(t *testing.T) {
 		},
 	}
 
-	got := envFlags(t, containerEnvArgs("task-1", opts))
+	got := envFlags(t, containerEnvArgs("task-1", opts, nil))
 	want := []string{"AGENT_KEY=from-extension", "SHARED=from-extension", "SHARED=from-project"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("containerEnvArgs() = %v, want %v (agent envs first, project config last)", got, want)
@@ -83,7 +83,7 @@ func TestContainerEnvArgs_SkipsBlankKeys(t *testing.T) {
 		SandboxEnvs:  []types.SandboxEnv{{Key: "", Value: "y"}, {Key: "KEEP", Value: ""}},
 	}
 
-	got := envFlags(t, containerEnvArgs("task-1", opts))
+	got := envFlags(t, containerEnvArgs("task-1", opts, nil))
 	// A blank key is not a variable; an empty VALUE is (FOO= clears/sets it).
 	if len(got) != 1 || got[0] != "KEEP=" {
 		t.Errorf("containerEnvArgs() = %v, want [KEEP=]", got)
@@ -96,7 +96,7 @@ func TestContainerEnvArgs_ValueStaysOneArgument(t *testing.T) {
 		{Key: "PHRASE", Value: "a b c"},
 	}}
 
-	args := containerEnvArgs("task-1", opts)
+	args := containerEnvArgs("task-1", opts, nil)
 	if len(args) != 4 {
 		t.Fatalf("want 2 -e pairs, got %v", args)
 	}
@@ -106,7 +106,7 @@ func TestContainerEnvArgs_ValueStaysOneArgument(t *testing.T) {
 }
 
 func TestContainerEnvArgs_Empty(t *testing.T) {
-	if got := containerEnvArgs("task-1", SandboxOpts{}); len(got) != 0 {
+	if got := containerEnvArgs("task-1", SandboxOpts{}, nil); len(got) != 0 {
 		t.Errorf("no configuration must add no flags, got %v", got)
 	}
 }

@@ -41,6 +41,10 @@ func (s *lspSession) isClosed() bool {
 
 // newLSPSession creates a new LSP session by starting the server process
 // and communicating over stdin/stdout with Content-Length framing.
+// newLSPSession starts one language server process with the container's own environment: the image's
+// plus whatever `-e` the container was created with. Nothing on this connection can add to it, so a
+// language server has exactly one view of where its dependencies are, and it is the same view its
+// extension's environment check gets.
 func newLSPSession(command string, args []string) (*lspSession, error) {
 	cmd := exec.Command(command, args...)
 
@@ -298,16 +302,14 @@ func (h *handler) handleLSP(conn net.Conn, req *protocol.Request) {
 			return
 		}
 
-		cmd, args := p.Command, p.Args
-
-		sess, err := newLSPSession(cmd, args)
+		sess, err := newLSPSession(p.Command, p.Args)
 		if err != nil {
 			_ = h.writeFrame(conn, protocol.NewError(req.MsgID, err.Error()))
 			return
 		}
 
 		h.mu.Lock()
-		h.lsp = &lspState{session: sess, command: cmd, args: args}
+		h.lsp = &lspState{session: sess, command: p.Command, args: p.Args}
 		h.mu.Unlock()
 
 		// Forward notifications (e.g. publishDiagnostics) to the host through h.writeFrame, like
