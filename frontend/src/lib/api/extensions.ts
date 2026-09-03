@@ -51,6 +51,29 @@ export async function setExtensionEnabled(id: string, enabled: boolean): Promise
     return res.json();
 }
 
+/**
+ * Grant (or revoke, with an empty path) the one host directory an extension's language server
+ * reads its resolved dependencies from. An empty string is a real value here — it means revoke —
+ * which is why this is its own call rather than a field of the sandbox form.
+ */
+export async function setDependencyCache(id: string, hostPath: string): Promise<Extension> {
+    const res = await apiFetch(`${API_BASE}/extensions/${id}/dependency-cache`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host_path: hostPath }),
+    });
+    if (!res.ok) throw await apiError(res, 'Failed to update the dependency directory');
+    return res.json();
+}
+
+/** The server's own home directory, for suggesting where a dependency directory should live. */
+export async function getHomeDirectory(): Promise<string> {
+    const res = await apiFetch(`${API_BASE}/home`);
+    if (!res.ok) throw await apiError(res, 'Failed to read the home directory');
+    const data = await res.json();
+    return typeof data?.home === 'string' ? data.home : '';
+}
+
 /** Fetch extensions present in the local extensions directory (filesystem). */
 export async function listLocalExtensions(): Promise<RegistryEntry[]> {
     const res = await apiFetch(`${API_BASE}/extensions/local`);

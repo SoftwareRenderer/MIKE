@@ -101,9 +101,16 @@ def simplify_capabilities(manifest_caps):
       - ui:      injection_points ("Modifies") and permissions ("Permissions")
       - network: allowed_domains ("Allowed domains")
       - lsp:   language ("Language") and file_types ("File types", with their labels)
+             and environment_note ("the one sentence shown when the server cannot
+             resolve a workspace") and dependency_cache (where it reads resolved
+             dependencies from, and whether it would write there)
       - css/agent: no detail rows, so an empty config is enough
     Everything else (command, args, headers, wasm_module, ...) lives in the
-    manifest and is intentionally omitted here.
+    manifest and is intentionally omitted here. The lsp additions are the exception
+    because consent has to be visible *before* the manifest is fetched: which
+    machine-level directory an install is going to want, and what the server will
+    say when it cannot do its job, are both things you would want before agreeing
+    to run someone's container.
     """
     if not isinstance(manifest_caps, dict):
         return {}
@@ -139,6 +146,20 @@ def simplify_capabilities(manifest_caps):
                 file_types.append(projected)
             if file_types:
                 kept['file_types'] = file_types
+            sandbox = value.get('sandbox') or {}
+            note = (sandbox.get('environment') or {}).get('note')
+            if note:
+                kept['environment_note'] = note
+            # Where this server reads its resolved dependencies from, and whether it would write
+            # there. Projected so the *pre-install* view can disclose that installing this reads a
+            # directory on the user's machine — the host path itself never comes from here.
+            dep = sandbox.get('dependency_cache')
+            if isinstance(dep, dict) and dep.get('container_path') and dep.get('env'):
+                projected = {'container_path': dep['container_path'], 'env': dep['env']}
+                # read_only defaults to true, and is projected explicitly so a false (warming) is
+                # never lost to a default the reader has to remember.
+                projected['read_only'] = dep.get('read_only', True)
+                kept['dependency_cache'] = projected
             if kept:
                 result['lsp'] = kept
         elif key in ('css', 'agent'):

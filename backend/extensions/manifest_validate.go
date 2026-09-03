@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -56,6 +57,99 @@ func (c *LSPConfig) Validate() error {
 	for name, spec := range c.Syntax {
 		if err := spec.Validate(); err != nil {
 			return fmt.Errorf("capabilities.lsp.syntax.%s: %w", name, err)
+		}
+	}
+
+	// The sandbox block holds three things the runtime acts on directly. Each is checked here,
+	// where a manifest is refused rather than stored and then worked around at every start.
+	if c.Sandbox != nil {
+		// The host directory is a grant, so it is asked of a human and never read from a
+		// manifest — not "stripped from", refused. An extension that names a directory on the
+		// machine it happens to be installed on has crossed the line this whole mechanism walks
+		// carefully: it declares where *it* looks, not what it may read here.
+		if c.Sandbox.DependencyHostPath != "" {
+			return fmt.Errorf("capabilities.lsp.sandbox.dependency_host_path is a grant the user applies under Settings -> Extensions and may not come from a manifest (got %q)", c.Sandbox.DependencyHostPath)
+		}
+		if err := c.Sandbox.Dependency.Validate(); err != nil {
+			return fmt.Errorf("capabilities.lsp.sandbox.dependency_cache: %w", err)
+		}
+		if err := validateReloadFiles(c.Sandbox.ReloadFiles); err != nil {
+			return fmt.Errorf("capabilities.lsp.sandbox.reload_files: %w", err)
+		}
+		if err := c.Sandbox.Environment.Validate(); err != nil {
+			return fmt.Errorf("capabilities.lsp.sandbox.environment: %w", err)
+		}
+	}
+	return nil
+}
+
+// envName is a shell variable name: the only thing a manifest may name in dependency_cache.env.
+// An assignment ("GOMODCACHE=/x") or a value with a metacharacter in it is refused here rather
+// than sorted out where it is applied, and the value is not the manifest's to give anyway.
+var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// Validate checks a declared dependency location. It checks the *declaration*, never whether
+// some host directory exists: that is the user's setting and the runtime's problem, and a
+// manifest cannot be held to a machine it does not run on.
+func (d *DependencyCache) Validate() error {
+	if d == nil {
+		return nil
+	}
+	if strings.TrimSpace(d.ContainerPath) == "" {
+		return fmt.Errorf("container_path is required (where this server reads its dependencies from)")
+	}
+	if err := ValidateContainerPath(d.ContainerPath); err != nil {
+		return err
+	}
+	if !envName.MatchString(d.Env) {
+		return fmt.Errorf("env %q is not a variable name — letters, digits and underscore, not starting with a digit", d.Env)
+	}
+	// The cache is mounted read-only by default, and a server that cannot write where it thinks
+	// its state lives publishes nothing at all. Refuse the location here, where the message can be
+	// acted on, rather than unmounting it in silence at every container start.
+	if ShadowsToolState(d.ContainerPath) {
+		return fmt.Errorf("container_path %q covers the server's own writable state (the container's tmpfs or its user's .cache) — point it at a location the server only reads from", d.ContainerPath)
+	}
+	return nil
+}
+
+// validateReloadFiles checks the paths that mean "the project changed". They are matched
+// against a workspace-relative changed-file list, so a path that escapes the workspace or names
+// the whole tree would recycle the server on every turn of every project.
+func validateReloadFiles(files []string) error {
+	for _, f := range files {
+		trimmed := strings.TrimSpace(f)
+		if trimmed == "" {
+			return fmt.Errorf("an entry is blank")
+		}
+		if strings.HasPrefix(trimmed, "/") {
+			return fmt.Errorf("%q is absolute — these are workspace-relative paths", trimmed)
+		}
+		if strings.Contains(trimmed, "\\") {
+			return fmt.Errorf("%q must use '/' separators", trimmed)
+		}
+		for _, seg := range strings.Split(trimmed, "/") {
+			if seg == ".." {
+				return fmt.Errorf("%q must not contain '..'", trimmed)
+			}
+		}
+	}
+	return nil
+}
+
+// Validate checks the environment gate: a gate whose check is empty would be stored, run as
+// nothing, and read as "the workspace is fine" forever — which is the silence this whole field
+// exists to prevent.
+func (g *EnvironmentGate) Validate() error {
+	if g == nil {
+		return nil
+	}
+	if _, ok := g.Check.Argv(); !ok {
+		return fmt.Errorf("check.command is empty — declare the command that answers whether this server can resolve the workspace, or omit environment entirely")
+	}
+	for _, code := range g.SuppressCodes {
+		if strings.TrimSpace(code) == "" {
+			return fmt.Errorf("suppress_codes contains a blank entry")
 		}
 	}
 	return nil

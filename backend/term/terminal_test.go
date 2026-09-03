@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"kanban/backend/config"
+	"kanban/backend/lsp"
 	"kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/types"
@@ -66,6 +67,9 @@ type mockSandbox struct {
 	imageErr      error
 	ensureCalls   int
 	startShellErr error
+	// lastOpts is what the most recent StartShell was asked to create its container with — the only
+	// way to see whether the configuration assembled for a shell is the configuration it gets.
+	lastOpts sandbox.SandboxOpts
 }
 
 type mockShell struct {
@@ -124,6 +128,7 @@ func (m *mockSandbox) StartShell(taskID, worktreePath string, project *types.Pro
 	}
 	m.mu.Lock()
 	m.shells[taskID] = &mockShell{cmd: cmd, ptmx: ptmx}
+	m.lastOpts = opts
 	m.mu.Unlock()
 	return &sandbox.ShellProcess{Cmd: cmd, Ptmx: ptmx}, nil, nil
 }
@@ -655,4 +660,74 @@ func TestHandleTerminal_OriginVerification(t *testing.T) {
 			}
 		}
 	})
+}
+
+// dependencyStandsInForTheLSPManager answers the one question a sandboxed shell asks about
+// dependencies. It is a stub rather than a real manager because what matters here is which directories
+// the container is created with, not how they were chosen.
+type dependencyStandsInForTheLSPManager struct {
+	caches []lsp.DependencyCache
+}
+
+func (d dependencyStandsInForTheLSPManager) DependencyCaches() []lsp.DependencyCache { return d.caches }
+
+// TestTerminalOpensItsContainerWithTheDependencyCaches is the other half of a granted dependency
+// directory. A terminal is where somebody warms one by hand — `go mod download` in a shell — and a
+// container created without the grant sends that work into a layer that is deleted with the task,
+// while the language server next door keeps reading the empty directory it was given. So the mounts
+// have to reach StartShell, not merely the options struct.
+func TestTerminalOpensItsContainerWithTheDependencyCaches(t *testing.T) {
+	dir := t.TempDir()
+	s, cs := newTestConfigStore(t)
+
+	proj := &types.Project{
+		ID: "test-proj-deps", Name: "Deps Project", Path: dir, SandboxEnabled: true,
+		SandboxEnvs: []types.SandboxEnv{{Key: "GOFLAGS", Value: "-mod=mod"}},
+	}
+	if err := s.CreateProject(proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Two managers rather than one whose provider arrives in the middle of a session: the provider is
+	// wired once at startup, like the agent registry, and reading it is lock-free because
+	// getOrCreate already holds the manager's mutex.
+	openShell := t.Name()
+	mockWithout := newMockSandbox(t)
+	tmWithout := NewTerminalManager(s, cs, mockWithout, nil)
+	if _, err := tmWithout.getOrCreate(openShell, openShell, dir, proj.ID); err != nil {
+		t.Fatalf("open a shell with no dependency provider: %v", err)
+	}
+	mockWithout.mu.Lock()
+	without := mockWithout.lastOpts
+	mockWithout.mu.Unlock()
+	if len(without.DependencyMounts) != 0 || len(without.DependencyEnvs) != 0 {
+		t.Errorf("an install with no LSP extensions mounted %v %v", without.DependencyMounts, without.DependencyEnvs)
+	}
+
+	mock := newMockSandbox(t)
+	tm := NewTerminalManager(s, cs, mock, nil)
+	tm.SetDependencyProvider(dependencyStandsInForTheLSPManager{caches: []lsp.DependencyCache{
+		{HostPath: "/home/dev/go/pkg/mod", ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE"},
+	}})
+	if _, err := tm.getOrCreate(openShell, openShell, dir, proj.ID); err != nil {
+		t.Fatalf("open a shell: %v", err)
+	}
+	mock.mu.Lock()
+	got := mock.lastOpts
+	mock.mu.Unlock()
+
+	if len(got.DependencyMounts) != 1 || got.DependencyMounts[0].ContainerPath != "/go/pkg/mod" || got.DependencyMounts[0].Mode != "rw" {
+		t.Fatalf("the shell container gets %+v, want the granted directory read-write", got.DependencyMounts)
+	}
+	if len(got.DependencyEnvs) != 1 || got.DependencyEnvs[0].Key != "GOMODCACHE" || got.DependencyEnvs[0].Value != "/go/pkg/mod" {
+		t.Errorf("the shell gets %v, want GOMODCACHE pointing at the container path", got.DependencyEnvs)
+	}
+	// Everything the project configured still arrives — the caches are added to the shell's
+	// container, not substituted for its own configuration.
+	if len(got.SandboxEnvs) != 1 || got.SandboxEnvs[0].Key != "GOFLAGS" {
+		t.Errorf("the project's own envs were lost: %v", got.SandboxEnvs)
+	}
+	if got.BaseImage == "" {
+		t.Error("the image is missing from the shell's options")
+	}
 }

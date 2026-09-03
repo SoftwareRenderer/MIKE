@@ -64,7 +64,7 @@ func TestAdaptProjectMountsKeepsToolStateOutOfTheBorrow(t *testing.T) {
 	wsContainer := "/mnt/frost-amber-quartz"
 	// The workspace is a task worktree inside the project, which is what the adapter is
 	// asked about in production.
-	adapted := m.adaptProjectMounts(filepath.Join(projectDir, ".worktrees", "MIKE", "frost-amber-quartz"), wsContainer)
+	adapted := m.adaptProjectMounts(filepath.Join(projectDir, ".worktrees", "MIKE", "frost-amber-quartz"), wsContainer, nil)
 
 	got := map[string]string{}
 	for _, mo := range adapted {

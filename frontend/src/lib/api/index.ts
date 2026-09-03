@@ -134,6 +134,8 @@ export {
     updateExtensionImage,
     deleteExtension,
     setExtensionEnabled,
+    setDependencyCache,
+    getHomeDirectory,
     getRegistryIndex,
     installExtension,
     installLocalExtension,

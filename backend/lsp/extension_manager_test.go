@@ -700,7 +700,7 @@ func TestAdaptProjectMounts(t *testing.T) {
 
 	// Every project mount is adapted: project-relative paths remapped, global paths pass
 	// through, all forced to ro — except one, which is refused below.
-	mounts := mgr.adaptProjectMounts(wsPath, wsContainer)
+	mounts := mgr.adaptProjectMounts(wsPath, wsContainer, nil)
 	if len(mounts) != 2 {
 		t.Fatalf("adaptProjectMounts returned %d mounts, want 2: %v", len(mounts), mounts)
 	}
@@ -741,7 +741,7 @@ func TestAdaptProjectMounts(t *testing.T) {
 
 	// No project store -> nil.
 	nilMgr := NewExtensionLSPManager(nil, nil, nil)
-	if got := nilMgr.adaptProjectMounts(wsPath, wsContainer); got != nil {
+	if got := nilMgr.adaptProjectMounts(wsPath, wsContainer, nil); got != nil {
 		t.Errorf("adaptProjectMounts(nil projects) = %v, want nil", got)
 	}
 
@@ -762,7 +762,7 @@ func TestAdaptProjectMounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	emptyMgr := NewExtensionLSPManager(nil, nil, projStore2)
-	if got := emptyMgr.adaptProjectMounts(filepath.Join(root, "empty"), "/mnt/empty"); got != nil {
+	if got := emptyMgr.adaptProjectMounts(filepath.Join(root, "empty"), "/mnt/empty", nil); got != nil {
 		t.Errorf("adaptProjectMounts(no mounts) = %v, want nil", got)
 	}
 }

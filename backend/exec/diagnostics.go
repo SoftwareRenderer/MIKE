@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,6 +111,42 @@ func (te *TaskExecutor) worktreeChangedFiles(taskID string) ([]string, error) {
 		return nil, err
 	}
 	return git.ParseStatusPaths(out), nil
+}
+
+// diagnosticCode returns a finding's code as the opaque string the extension
+// declared it with, or "" when it has none.
+func diagnosticCode(d LSPDiagnostic) string {
+	switch c := d.Code.(type) {
+	case string:
+		return c
+	case float64:
+		return strconv.Itoa(int(c))
+	case json.Number:
+		return c.String()
+	}
+	return ""
+}
+
+// filterUnresolvable drops the findings a language server produces because it
+// could not load the project at all — "no required module provides package X",
+// "no active builds contain Y". They are not facts about the code; they are the
+// server guessing about a dependency root it was never given, and a model told
+// about them spends its turns "fixing" imports that resolve fine in the sandbox.
+//
+// Nothing is dropped while the server's own environment check says the workspace
+// resolves, so a healthy session keeps reporting everything it always did.
+func filterUnresolvable(env lsp.EnvironmentReport, findings []LSPDiagnostic) []LSPDiagnostic {
+	if env.Healthy || len(env.SuppressCodes) == 0 || len(findings) == 0 {
+		return findings
+	}
+	kept := make([]LSPDiagnostic, 0, len(findings))
+	for _, d := range findings {
+		if env.Suppresses(diagnosticCode(d)) {
+			continue
+		}
+		kept = append(kept, d)
+	}
+	return kept
 }
 
 // composeDiagnosticsAdvisory turns one pass's per-file findings into the single note the
@@ -464,6 +501,14 @@ func (te *TaskExecutor) collectTurnDiagnostics(setup *taskExecSetup, lc *loopCon
 	if err != nil {
 		log.Printf("[lsp-diag] task=%s worktree path error: %v", setup.task.ID, err)
 		return
+	}
+	// A dependency manifest that changed mid-turn is not visible to a language
+	// server watching nothing: it keeps answering with the graph it loaded at
+	// startup, which is how a resolved import goes on looking unresolved. Hand the
+	// changed list to the manager — it knows which files mean "re-read the project"
+	// for each installed extension, and restarts only the affected session.
+	if recycled := te.lspMgr.FilesChanged(worktreePath, files); recycled {
+		log.Printf("[lsp-diag] task=%s reloaded the language server after a manifest change", setup.task.ID)
 	}
 	// One budget for the pass, so eight slow files cannot add up to a stalled turn.
 	passCtx, cancel := context.WithTimeout(setup.ctx, lspDiagnosticsPassBudget)

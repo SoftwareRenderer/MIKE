@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"kanban/backend/llama"
+	"kanban/backend/lsp"
 	"kanban/backend/prompts"
 	kanban_sandbox "kanban/backend/sandbox"
 	"kanban/backend/stream"
@@ -770,6 +771,16 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 // it, so a new field cannot be set in three of them. Only the image comes from the caller -
 // only EnsureImageForProject knows what it settled on.
 func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, planMode bool) kanban_sandbox.SandboxOpts {
+	// The dependency caches the install's LSP extensions were granted. Asked for here, at the one
+	// place all four create paths assemble their options, so a task cannot be built with the cache
+	// by one caller and without it by another. Plan mode gets it too: a read-only worktree whose
+	// toolchain cannot resolve the project would spend the plan guessing about imports.
+	var depMounts []types.SandboxMount
+	var depEnvs []types.SandboxEnv
+	if te.lspMgr != nil {
+		depMounts, depEnvs = lsp.DependencySandboxArgs(te.lspMgr.DependencyCaches())
+	}
+
 	return kanban_sandbox.SandboxOpts{
 		BaseImage:        image,
 		NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
@@ -780,6 +791,8 @@ func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, pl
 		SandboxMounts:    setup.sandboxOpts.SandboxMounts,
 		SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
 		Capabilities:     setup.sandboxOpts.Capabilities,
+		DependencyMounts: depMounts,
+		DependencyEnvs:   depEnvs,
 		PlanMode:         planMode,
 	}
 }

@@ -6,6 +6,7 @@ import {
     sortPermissions,
     hasNetworkCapability,
     requiresInstallReview,
+    dependencyCacheDeclaration,
 } from '../extension-permissions';
 
 describe('isDangerousPermission (sandbox-escaping permissions only)', () => {
@@ -158,5 +159,50 @@ describe('requiresInstallReview (network capability OR dangerous permissions)', 
 
     it('does not treat a legacy "proxy" key as the network capability', () => {
         expect(requiresInstallReview({ capabilities: { proxy: { allowed_domains: ['x.dev'] } } })).toBe(false);
+    });
+
+    it('is true when the extension declares a dependency cache it will ask about', () => {
+        // Installing grants nothing, but it means a folder on this machine gets asked for later,
+        // and "install this?" is the last question that can still be answered with the facts.
+        expect(
+            requiresInstallReview({
+                capabilities: { lsp: { language: 'go', dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE', read_only: true } } },
+            }),
+        ).toBe(true);
+    });
+
+    it('is false for an LSP extension that declares no dependency cache', () => {
+        expect(requiresInstallReview({ capabilities: { lsp: { language: 'go' } } })).toBe(false);
+    });
+});
+
+describe('dependencyCacheDeclaration', () => {
+    it('reads the projected declaration', () => {
+        expect(
+            dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE', read_only: true } } }),
+        ).toEqual({ container_path: '/go/pkg/mod', env: 'GOMODCACHE', read_only: true });
+    });
+
+    it('defaults a missing read_only to the safe direction', () => {
+        // Alarm over a write the extension never asked for would be worse than the omission.
+        expect(
+            dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE' } } })?.read_only,
+        ).toBe(true);
+    });
+
+    it('reports a writable declaration as writable', () => {
+        expect(
+            dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/usr/local/cargo', env: 'CARGO_HOME', read_only: false } } }),
+        ).toEqual({ container_path: '/usr/local/cargo', env: 'CARGO_HOME', read_only: false });
+    });
+
+    it('is null for anything incomplete, so the disclosure cannot invent one', () => {
+        expect(dependencyCacheDeclaration(undefined)).toBeNull();
+        expect(dependencyCacheDeclaration({})).toBeNull();
+        expect(dependencyCacheDeclaration({ lsp: {} })).toBeNull();
+        expect(dependencyCacheDeclaration({ lsp: { dependency_cache: null } })).toBeNull();
+        // A half-declared cache would render a sentence with an empty path in it.
+        expect(dependencyCacheDeclaration({ lsp: { dependency_cache: { env: 'GOMODCACHE' } } })).toBeNull();
+        expect(dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/go/pkg/mod' } } })).toBeNull();
     });
 });

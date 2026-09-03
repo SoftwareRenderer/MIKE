@@ -18,6 +18,7 @@ const ISOLATED_SPECS = [
   'preferences-hide-model-badge',
   'preferences-keyboard',
   'provider-task-concurrency',
+  'settings-extension-dependency-cache',
   'settings-provider',
   'settings-sessions',
 ];
