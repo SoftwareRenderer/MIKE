@@ -30,6 +30,17 @@ export function formatTokens(n: number): string {
     return n.toString();
 }
 
+/**
+ * Byte count with a binary unit: 900 → "900 B", 2048 → "2.0 KB", 5 MiB → "5.0 MB".
+ * Sizes here are file contents, which are counted in 1024-byte blocks, so the units
+ * are binary even though the label reads "KB"/"MB".
+ */
+export function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
 /** Cached USD currency symbol for the active locale (e.g. "$", "US$"). */
 let usdSymbol: string | null = null;
 function localeUsdSymbol(): string {

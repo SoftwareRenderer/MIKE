@@ -21,6 +21,24 @@ test.describe('Board Layout', () => {
     await expect(page.locator('.board')).toBeVisible();
     await expect(page.locator('.column')).toHaveCount(4);
   });
+
+  // The landmark/skip-link contract lives in App.svelte's markup and is only real in a
+  // browser — a screen reader reads the rendered document, not the component source.
+  test('exposes the landmarks and skip link a keyboard/AT user navigates by', async ({ page }) => {
+    await expect(page.locator('.board-container')).toHaveAttribute('aria-label', 'Kanban board');
+    await expect(page.locator('.board')).toBeVisible();
+
+    const skip = page.locator('a.skip-link');
+    await expect(skip).toHaveAttribute('href', '#main-content');
+    await expect(skip).toContainText('Skip to main content');
+
+    // The skip link must land on a real, focusable target.
+    await expect(page.locator('#main-content')).toHaveCount(1);
+    await skip.focus();
+    await expect(skip).toBeVisible();
+    await skip.press('Enter');
+    await expect(page.locator('#main-content')).toBeFocused();
+  });
 });
 
 // ============================================================

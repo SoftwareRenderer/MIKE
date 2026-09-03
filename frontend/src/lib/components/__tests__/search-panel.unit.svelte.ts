@@ -1,86 +1,92 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { render, cleanup } from '@testing-library/svelte';
+import { render, cleanup, fireEvent } from '@testing-library/svelte';
 import CustomSearchPanel from '../CustomSearchPanel.svelte';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const searchPanelPath = resolve(__dirname, '../CustomSearchPanel.svelte');
-const source = readFileSync(searchPanelPath, 'utf-8');
+/**
+ * The find/replace panel over a fake CodeMirror view. Everything here is asserted
+ * through the rendered DOM — the panel's contract with the user is what its inputs,
+ * its counter and its buttons do, not which identifiers the component happens to use.
+ */
+function makeMockView(doc: string) {
+    return {
+        state: { doc: { toString: () => doc } },
+        dispatch: () => { },
+        coordsAtPos: () => null,
+        scrollDOM: { clientHeight: 400, scrollTop: 0 },
+    } as any;
+}
 
-describe('CustomSearchPanel', () => {
-    it('should open search panel with expected structure', () => {
-        expect(source).toContain('class="search-panel"');
-        expect(source).toContain('class="search-input"');
-        expect(source).toContain('placeholder="Find"');
-        expect(source).toContain('class="search-row"');
-        expect(source).toContain('class="search-nav"');
+function renderPanel(onFocusFind: (fn: (() => void) | null) => void, doc = 'hello world') {
+    return render(CustomSearchPanel, {
+        view: makeMockView(doc),
+        onClose: () => { },
+        onFocusFind,
+    });
+}
+
+describe('CustomSearchPanel structure', () => {
+    afterEach(cleanup);
+
+    const noop = () => { };
+
+    it('offers a find input, a match counter and match navigation', () => {
+        const { container } = renderPanel(noop);
+
+        expect(container.querySelector('.search-panel')).toBeTruthy();
+        expect(container.querySelector('.search-row')).toBeTruthy();
+        expect(container.querySelector('.search-nav')).toBeTruthy();
+        expect(container.querySelector<HTMLInputElement>('input[placeholder="Find"]')).toBeTruthy();
+        expect(container.querySelector('.match-count')).toBeTruthy();
+
+        const nav = [...container.querySelectorAll('.nav-btn')];
+        expect(nav.map(b => b.getAttribute('aria-label'))).toEqual(
+            expect.arrayContaining(['Previous match', 'Next match', 'Close search']));
     });
 
-    it('should find matches for text in the file', () => {
-        // The component implements findMatches() that searches the document
-        expect(source).toContain('function findMatches');
-        expect(source).toContain('class="match-count"');
-        expect(source).toContain('oninput={onInput}');
+    it('counts matches in the document as the query is typed', async () => {
+        const { container } = renderPanel(noop);
+        const input = container.querySelector<HTMLInputElement>('input[placeholder="Find"]')!;
+
+        await fireEvent.input(input, { target: { value: 'o' } });
+        expect(container.querySelector('.match-count')?.textContent).toBe('2 matches');
+
+        await fireEvent.input(input, { target: { value: 'world' } });
+        expect(container.querySelector('.match-count')?.textContent).toBe('1 match');
+
+        await fireEvent.input(input, { target: { value: 'zzz' } });
+        expect(container.querySelector('.match-count')?.textContent).toBe('0 matches');
     });
 
-    it('should show zero matches for non-existent text', () => {
-        // The match count displays the number of matches found
-        expect(source).toContain('matchCount');
-        expect(source).toContain('{matchCount}');
+    it('closes on Escape and from the close button', async () => {
+        let closed = 0;
+        const utils = render(CustomSearchPanel, {
+            view: makeMockView('hello world'),
+            onClose: () => { closed++; },
+            onFocusFind: () => { },
+        });
+        const input = utils.container.querySelector<HTMLInputElement>('input[placeholder="Find"]')!;
+
+        await fireEvent.keyDown(input, { key: 'Escape' });
+        expect(closed).toBe(1);
+
+        const closeBtn = utils.container.querySelector<HTMLButtonElement>('button[aria-label="Close search"]')!;
+        await fireEvent.click(closeBtn);
+        expect(closed).toBe(2);
     });
 
-    it('should close search panel with Escape', () => {
-        // The handleKeydown function handles Escape key
-        expect(source).toContain("e.key === 'Escape'");
-        expect(source).toContain('onClose()');
-    });
+    it('keeps replace hidden until it is asked for, then offers a replace input', async () => {
+        const { container } = renderPanel(noop);
+        expect(container.querySelector('.replace-row')).toBeNull();
 
-    it('should navigate between matches with navigation buttons', () => {
-        // Navigation buttons for prev/next match
-        expect(source).toContain('class="nav-btn"');
-        expect(source).toContain('aria-label="Previous match"');
-        expect(source).toContain('aria-label="Next match"');
-        expect(source).toContain('selectNext');
-    });
+        await fireEvent.click(container.querySelector<HTMLButtonElement>('.toggle-replace-btn')!);
 
-    it('should toggle replace panel', () => {
-        // The replace panel is toggled by showReplace state
-        expect(source).toContain('showReplace');
-        expect(source).toContain('class="replace-row"');
-        expect(source).toContain('replace-input');
-        expect(source).toContain('class="toggle-replace-btn"');
-        expect(source).toContain('class="replace-actions"');
-        expect(source).toContain('class="action-btn"');
-    });
-
-    it('should close search panel with close button', () => {
-        // Close button with aria-label
-        expect(source).toContain('aria-label="Close search"');
-        expect(source).toContain('onclick={onClose}');
+        expect(container.querySelector('.replace-row')).toBeTruthy();
+        expect(container.querySelector('input[placeholder="Replace"]')).toBeTruthy();
     });
 });
 
-describe('CustomSearchPanel focus contract (rendered)', () => {
+describe('CustomSearchPanel focus contract', () => {
     afterEach(cleanup);
-
-    function makeMockView(doc: string) {
-        return {
-            state: { doc: { toString: () => doc } },
-            dispatch: () => {},
-            coordsAtPos: () => null,
-            scrollDOM: { clientHeight: 400, scrollTop: 0 },
-        } as any;
-    }
-
-    function renderPanel(onFocusFind: (fn: (() => void) | null) => void) {
-        return render(CustomSearchPanel, {
-            view: makeMockView('hello world'),
-            onClose: () => {},
-            onFocusFind,
-        });
-    }
 
     it('registers a focus function that focuses the find input', () => {
         let focusFind: (() => void) | null | undefined;

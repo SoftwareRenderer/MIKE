@@ -1,34 +1,42 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor } from '@testing-library/svelte';
+import { render, cleanup, waitFor } from '@testing-library/svelte';
 
-// Mock the dialogStore with a reactive toast property
-let mockToastValue: { message: string; type: 'error' | 'success' } | null = null;
-vi.mock('$lib/stores', () => ({
-    dialogStore: {
-        get toast() { return mockToastValue; },
-    },
-    uiStore: {},
-    appStore: {},
-}));
+// A real DialogStore behind the `$lib/stores` name Toast imports: the component renders
+// `dialogStore.toast` as derived state, so only genuinely reactive store can drive it.
+vi.mock('$lib/stores', async () => {
+    const { DialogStore } = await import('$lib/stores/dialogs.svelte');
+    return { dialogStore: new DialogStore(), uiStore: {}, appStore: {} };
+});
 
 import Toast from '$lib/components/Toast.svelte';
+import { dialogStore } from '$lib/stores';
+import { TOAST_DURATION_MS } from '$lib/constants';
 
 describe('Toast', () => {
     beforeEach(() => {
         vi.useFakeTimers();
-        mockToastValue = null;
     });
 
     afterEach(() => {
+        cleanup();
+        vi.clearAllTimers();
         vi.useRealTimers();
     });
 
-    it('should apply error styling for error toasts', async () => {
-        mockToastValue = { message: 'Something went wrong', type: 'error' };
-
+    it('renders nothing while the store holds no toast', () => {
         const { container } = render(Toast);
-        const toast = container.querySelector('.toast');
-        expect(toast).toBeTruthy();
+        expect(container.querySelector('.toast')).toBeNull();
+    });
+
+    it('should apply error styling for error toasts', async () => {
+        const { container } = render(Toast);
+        dialogStore.showToast('Something went wrong', 'error');
+
+        const toast = await waitFor(() => {
+            const el = container.querySelector('.toast');
+            expect(el).toBeTruthy();
+            return el;
+        });
         expect(toast?.classList.contains('error')).toBe(true);
         expect(toast?.classList.contains('success')).toBe(false);
         expect(toast?.getAttribute('role')).toBe('alert');
@@ -36,47 +44,43 @@ describe('Toast', () => {
     });
 
     it('should apply success styling for success toasts', async () => {
-        mockToastValue = { message: 'Task started successfully', type: 'success' };
-
         const { container } = render(Toast);
-        const toast = container.querySelector('.toast');
-        expect(toast).toBeTruthy();
+        dialogStore.showToast('Task started successfully', 'success');
+
+        const toast = await waitFor(() => {
+            const el = container.querySelector('.toast');
+            expect(el).toBeTruthy();
+            return el;
+        });
         expect(toast?.classList.contains('success')).toBe(true);
         expect(toast?.classList.contains('error')).toBe(false);
         expect(toast?.getAttribute('role')).toBe('alert');
         expect(toast?.textContent).toContain('Task started successfully');
     });
 
-    it('should auto-dismiss toast after 4 seconds', async () => {
-        mockToastValue = { message: 'Auto-dismiss test', type: 'success' };
-
+    it('dismisses when the store releases the toast', async () => {
         const { container } = render(Toast);
-        expect(container.querySelector('.toast')).toBeTruthy();
+        dialogStore.showToast('Auto-dismiss test', 'success');
+        await waitFor(() => expect(container.querySelector('.toast')).toBeTruthy());
 
-        // Advance time by 4 seconds
-        vi.advanceTimersByTime(4000);
+        vi.advanceTimersByTime(TOAST_DURATION_MS);
 
-        // Wait for the effect to process
         await waitFor(() => {
             expect(container.querySelector('.toast')).toBeNull();
         });
     });
 
-    it('should dismiss toast when a new toast replaces it', async () => {
-        mockToastValue = { message: 'First toast', type: 'success' };
-
+    it('shows the newest toast when one replaces a pending toast', async () => {
         const { container } = render(Toast);
-        let toast = container.querySelector('.toast');
-        expect(toast).toBeTruthy();
-        expect(toast?.textContent).toContain('First toast');
+        dialogStore.showToast('First toast', 'success');
+        await waitFor(() => expect(container.querySelector('.toast')?.textContent).toContain('First toast'));
 
-        // Simulate a new toast replacing the first one
-        // The Toast component's $effect watches dialogStore.toast,
-        // and when it changes, the previous timeout is cleared and a new one starts.
-        mockToastValue = { message: 'Second toast', type: 'error' };
+        dialogStore.showToast('Second toast', 'error');
 
-        // Verify the toast still exists (not auto-dismissed yet)
-        toast = container.querySelector('.toast');
-        expect(toast).toBeTruthy();
+        await waitFor(() => {
+            const toast = container.querySelector('.toast');
+            expect(toast).toBeTruthy();
+            expect(toast?.textContent).toContain('Second toast');
+        });
     });
 });

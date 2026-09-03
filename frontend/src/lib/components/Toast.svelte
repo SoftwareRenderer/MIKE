@@ -1,35 +1,14 @@
 <script lang="ts">
-    import { onDestroy } from 'svelte';
     import { dialogStore } from '$lib/stores';
 
-    let visible = $state(false);
-    let message = $state('');
-    let type = $state<'error' | 'success'>('error');
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    $effect(() => {
-        const value = dialogStore.toast;
-        if (value) {
-            message = value.message;
-            type = value.type;
-            visible = true;
-            if (timeoutId) clearTimeout(timeoutId);
-            timeoutId = setTimeout(() => {
-                visible = false;
-            }, 4000);
-        } else {
-            visible = false;
-        }
-    });
-
-    onDestroy(() => {
-        if (timeoutId) clearTimeout(timeoutId);
-    });
+    // The store owns the lifetime: `showToast` already schedules its own clearing after
+    // TOAST_DURATION_MS, so a second timer here would only be able to disagree with it.
+    let toast = $derived(dialogStore.toast);
 </script>
 
-{#if visible}
-    <div class="toast" class:error={type === 'error'} class:success={type === 'success'} role="alert">
-        {message}
+{#if toast}
+    <div class="toast" class:error={toast.type === 'error'} class:success={toast.type === 'success'} role="alert">
+        {toast.message}
     </div>
 {/if}
 

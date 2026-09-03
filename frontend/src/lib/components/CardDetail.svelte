@@ -951,7 +951,6 @@
                             taskPrompt={task.prompt}
                             taskStatus={task.status}
                             taskExecutionState={task.execution_state}
-                            taskTitle={task.title}
                             taskSummarizing={task.summarizing}
                             hasStagedChanges={hasStagedChanges}
                             onToggleFullscreen={toggleChatFullscreen}
@@ -1010,7 +1009,6 @@
                                 onClose={closeDiffEditor}
                                 onToggleFullscreen={toggleEditorFullscreen}
                                 mobileFullscreen={editorFullscreen}
-                                isMobile={mobile}
                                 closeOnEscape={!mobile}
                             />
                         {:else}
@@ -1062,7 +1060,6 @@
         <MultiSelectBar
             {multiSelect}
             tasks={allTasks}
-            projectId={task.project_id}
             onClear={() => multiSelect.clear()}
         />
     </div>

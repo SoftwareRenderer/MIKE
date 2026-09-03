@@ -128,6 +128,12 @@ reachable from a normal task prompt: the plan-first skill is in **every** system
 `isPlanMode` branch answers first and a spec that asks for "edit" gets `create_task`. That is why
 several chat specs asserted against the wrong tool card for their whole life — and why the fix is
 a pin, not a reordering — `fill` a prompt like `edit 1749… llm-fixture:tool_call_edit_file`.
+**A pinned tool-call fixture also needs its operand**: the tool runs in the task's worktree, and the
+e2e repos hold only a README, so a fixture that edits `src/lib/utils/format.ts` fails on a missing
+file unless the spec writes it first (`writeFileInWorktree`, task-scoped). And the task's **creation**
+prompt must stay keyword-free: `edit-file-<ts>` matches the mock's `\bedit\b` route, so the initial
+turn replays that same fixture with the same static tool-call id — and the second card *replaces*
+the first, so the count the spec waits on never grows.
 Names and their chunk delays live in `FIXTURES_BY_NAME` (`text_slow` keeps its 100ms delay —
 pinning it at 1ms streams the whole turn in ~16ms and any mid-stream wait fails forever). An
 unknown name logs a warning and falls through, so a typo is visible rather than mysterious. **A spec
@@ -158,6 +164,17 @@ For request-pattern/race investigation, write standalone Playwright scripts in `
 
 - **`ERR_CONNECTION_REFUSED`** / wrong-protocol response: stale processes from an interrupted run hold
   the ports — run the cleanup block in `AGENTS.md → Testing → Test Environment`.
+- **A panel container is visible before its content is.** `.git-graph` is on screen while the history
+  panel still reads "Loading commits…", so counting `.git-commit-row` right after it answers 0 for a
+  repo that has commits — wait for the first row, not for the container.
+- **A spec that is green alone and red in a full run is sharing a repository.** Two specs `git add`
+  in the same checkout and one loses with `index.lock: File exists` or an ENOENT worktree; give the
+  spec its own repo (`isolatedProject()` / a dedicated fixture repo) instead of adding a retry.
+- **Chat/board assertions that depend on the plan-first skill cannot run on a fresh clone:**
+  `prompts/skills/` is gitignored, so with no skill installed the mock's `isPlanMode` branch never
+  fires and prompts fall through to plain text. Same class: specs that install a **local** extension
+  need it present under `extensions/` (also gitignored) — `GET /api/extensions/local` lists nothing
+  else and the helper reports `not in local extensions list`.
 - **`waiting for locator('.project-item')`**: test project not created — check global-setup logs.
   **`waiting for locator('.card')`**: no tasks exist.
 - **Drag-and-drop flakes:** headless is slow — add `waitForTimeout` after the drag, increase the

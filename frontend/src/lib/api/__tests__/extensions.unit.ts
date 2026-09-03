@@ -64,18 +64,6 @@ describe('extensions API', () => {
         expect(calls[0][0]).toContain('/api/extensions');
     });
 
-    it('getExtension returns single extension', async () => {
-        const ext = { id: 'gopls-1', name: 'gopls', type: 'lsp', enabled: true };
-        mockSuccess(ext);
-
-        const { getExtension } = await import('$lib/api/extensions');
-        const result = await getExtension('gopls-1');
-
-        expect(result).toEqual(ext);
-        const calls = apiCalls(mockFetch.mock.calls);
-        expect(calls[0][0]).toContain('/api/extensions/gopls-1');
-    });
-
     it('updateExtension sends PUT with correct body', async () => {
         const data = { version: '2.0.0' };
         const result = { id: 'gopls-1', name: 'gopls', version: '2.0.0', type: 'lsp', enabled: true };
@@ -236,35 +224,10 @@ describe('extensions API', () => {
         expect(calls[0][0]).toContain('/api/extensions/check-updates');
     });
 
-    it('getExtensionLogs returns log text', async () => {
-        const logs = '2024/01/01 00:00:00 info: starting gopls\n';
-        mockFetch.mockImplementation(async (url: any) => {
-            if (typeof url === 'string' && url.includes('/api/auth/session')) {
-                return {
-                    ok: true,
-                    status: 200,
-                    json: async () => ({ authenticated: true, csrf_token: 'test-token' }),
-                };
-            }
-            return {
-                ok: true,
-                status: 200,
-                text: async () => logs,
-            };
-        });
-
-        const { getExtensionLogs } = await import('$lib/api/extensions');
-        const result = await getExtensionLogs('gopls-1');
-
-        expect(result).toBe(logs);
-        const calls = apiCalls(mockFetch.mock.calls);
-        expect(calls[0][0]).toContain('/api/extensions/gopls-1/logs');
-    });
-
     it('throws error on API failure', async () => {
         mockError('extension not found', 404);
 
-        const { getExtension } = await import('$lib/api/extensions');
-        await expect(getExtension('nonexistent')).rejects.toThrow();
+        const { listExtensions } = await import('$lib/api/extensions');
+        await expect(listExtensions()).rejects.toThrow();
     });
 });

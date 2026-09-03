@@ -32,11 +32,9 @@ export type ActionType =
     | 'sendTaskMessage' | 'createTaskMessage' | 'deleteTaskMessagesAfter'
     | 'deleteTaskMessage' | 'updateTaskMessage'
     // Threads
-    | 'switchTaskThread' | 'forkTaskThread' | 'deleteTaskThread'
+    | 'switchTaskThread' | 'forkTaskThread'
     // Projects
     | 'createProject' | 'updateProject' | 'deleteProject'
-    // Git
-    | 'resetWorktree'
     // Config
     | 'updateConfig' | 'resetProjectStats'
 
@@ -454,12 +452,6 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
         case 'forkTaskThread':
             await forkTaskThreadRaw(p.projectId, taskId, p.fromThreadId, p.fromMessageId, p.newContent);
             break;
-        case 'deleteTaskThread':
-            await deleteTaskThreadRaw(p.projectId, taskId, p.threadId);
-            break;
-        case 'resetWorktree':
-            await resetWorktreeRaw(p.projectId, taskId, p.commitHash);
-            break;
         case 'updateConfig':
             await updateConfigRaw(p.config);
             break;
@@ -742,17 +734,6 @@ async function updateTaskMessageRaw(projectId: string, taskId: string, messageId
     if (!res.ok) throw await apiError(res, 'Failed to update message');
 }
 
-// -- Git endpoints --
-async function resetWorktreeRaw(projectId: string, taskId: string, commitHash: string): Promise<{ status: string }> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/reset-worktree`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ commit_hash: commitHash }),
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to reset worktree');
-    return res.json();
-}
-
 // -- Configuration endpoints --
 async function updateConfigRaw(config: Config): Promise<Config> {
     const res = await apiFetch(`${API_BASE}/config`, {
@@ -787,16 +768,6 @@ async function forkTaskThreadRaw(projectId: string, taskId: string, fromThreadId
     return res.json();
 }
 
-async function deleteTaskThreadRaw(projectId: string, taskId: string, threadId: string): Promise<{ status: string }> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ thread_id: threadId }),
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to delete thread');
-    return res.json();
-}
-
 // Export raw functions for queue execution
 export {
     createProjectRaw,
@@ -818,9 +789,7 @@ export {
     deleteTaskMessagesAfterRaw,
     deleteTaskMessageRaw,
     updateTaskMessageRaw,
-    resetWorktreeRaw,
     updateConfigRaw,
     switchTaskThreadRaw,
     forkTaskThreadRaw,
-    deleteTaskThreadRaw,
 };
