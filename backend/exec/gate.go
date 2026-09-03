@@ -121,14 +121,13 @@ func (g *ConcurrencyGate) removeEntryLocked(entry *queueEntry) {
 	}
 }
 
-// Acquire blocks until a slot and rate allowance are available for the
-// provider (concurrency min 1; maxRPS 0 = unlimited). Returns the entry
-// (nil = granted immediately) and an error if the context is cancelled.
+// Acquire blocks until a slot and rate allowance are available for the provider
+// (concurrency min 1; maxRPS 0 = unlimited) and returns the queue entry (nil = granted
+// immediately), or an error if ctx is cancelled.
 //
-// onEnqueued (may be nil) is invoked with the caller's queue entry as soon
-// as it is enqueued — BEFORE Acquire blocks — so callers can report the
-// caller's own queue position while waiting (Position/EstimateWait with a
-// nil entry count ALL waiters, not just those ahead of the caller).
+// onEnqueued (may be nil) is called with the caller's entry as soon as it is enqueued,
+// before Acquire blocks, so a caller can report its own queue position while waiting —
+// Position/EstimateWait on a nil entry count all waiters, not just those ahead.
 func (g *ConcurrencyGate) Acquire(ctx context.Context, providerURL string, concurrency, maxRPS int, onEnqueued func(*queueEntry)) (*queueEntry, error) {
 	providerURL = gateKey(providerURL)
 	if concurrency < 1 {
@@ -359,15 +358,12 @@ func (g *ConcurrencyGate) cleanupEntry(entry *queueEntry) {
 	g.removeEntryLocked(entry)
 }
 
-// abandonServedSlot returns to the provider pool the slot that Release
-// pre-counted for entry when the waiter gives up on it (its context was
-// cancelled after the handoff was made, before the request started).
-//
-// Without this, every cancel that lands in the handoff window permanently
-// inflates ps.active: with concurrency 3, two of them leave a provider stuck
-// at one in-flight request for the lifetime of the process (only a restart
-// clears it). The release path also hands the slot to the next waiter.
-// No-op when Release never pre-counted a slot, or it was already returned.
+// abandonServedSlot returns to the provider pool the slot that Release pre-counted for entry
+// when the waiter gives up during the handoff window — its context was cancelled after the
+// handoff was made but before the request started. Without this, every such cancel
+// permanently inflates ps.active: with concurrency 3, two of them leave a provider stuck at
+// one in-flight request until the process restarts. The release path also hands the slot to
+// the next waiter. No-op when Release never pre-counted a slot, or it was already returned.
 func (g *ConcurrencyGate) abandonServedSlot(entry *queueEntry) {
 	g.mu.Lock()
 	returnSlot := entry.served && !entry.slotReturned

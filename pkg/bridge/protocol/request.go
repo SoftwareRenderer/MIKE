@@ -6,14 +6,10 @@ import (
 	"fmt"
 )
 
-// Method identifiers.
-//
-// 0x05-0x08 (shell_open / shell_io / shell_resize / shell_close) are retired:
-// the shell-over-bridge subsystem was removed because terminals are served by a
-// host-side PTY (`podman exec -it`, see backend/sandbox + backend/term). The
-// numbers stay reserved rather than being reused, so a stale bridge binary that
-// still sends one gets a clean "unknown method" error instead of being routed to
-// an unrelated handler.
+// Method identifiers. 0x05-0x08 (shell_open / shell_io / shell_resize / shell_close) are retired
+// and stay reserved rather than being reused: terminals are served by a host-side PTY (see
+// backend/sandbox and backend/term), and a stale bridge binary still sending one of these must get
+// a clean "unknown method" error instead of reaching an unrelated handler.
 const (
 	MethodRead       uint8 = 0x01
 	MethodWrite      uint8 = 0x02

@@ -270,13 +270,11 @@ func newPermissions(installed, remote *Capabilities) []string {
 // anything, which is not a pinned revision.
 var commitHashRe = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 
-// validateGitSource validates a git repo URL and pinned commit for the
-// commit-verified install path.
-//
-// The repo is registry content and the clone runs on the host, so it must pass
-// the same gate as a user-supplied project clone (git.ValidateCloneURL) — see
-// extCloneArgs for what a helper transport would do. The commit must be a full
-// hex hash, so only an exact, content-addressed revision is installed.
+// validateGitSource validates a repo URL and pinned commit for the commit-verified install
+// path. The repo is registry content and the clone runs on the host, so it must pass the same
+// gate as a user-supplied clone (git.ValidateCloneURL) — see extCloneArgs for what a helper
+// transport would do. The commit must be a full hex hash, so only an exact, content-addressed
+// revision is installed.
 func validateGitSource(repo, commit string) error {
 	if err := git.ValidateCloneURL(repo); err != nil {
 		return fmt.Errorf("repo %q: %w", repo, err)
@@ -319,14 +317,11 @@ func validateSubdir(subdir string) error {
 	return nil
 }
 
-// CheckoutExtension checks out exactly the pinned commit of a git repository
-// and materializes its extension subdirectory into destDir.
-//
-// The checkout is verified cryptographically: after a shallow fetch at the
-// pinned SHA, `git rev-parse HEAD` must equal the pinned commit. Only if the
-// verification passes is the content copied to destDir, so the installed files
-// are guaranteed to be the vetted commit's bytes. Any mismatch or fetch failure
-// returns an error and nothing is written.
+// CheckoutExtension checks out exactly the pinned commit of a git repository and materializes
+// its extension subdirectory into destDir. The checkout is verified cryptographically: after a
+// shallow fetch at the pinned SHA, `git rev-parse HEAD` must equal that commit, and only then is
+// content copied — so installed files are the vetted commit's bytes. Any mismatch or fetch
+// failure returns an error and writes nothing.
 func (rc *RegistryClient) CheckoutExtension(repo, commit, subdir, destDir string) error {
 	if err := validateGitSource(repo, commit); err != nil {
 		return err

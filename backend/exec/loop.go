@@ -285,12 +285,10 @@ func askQuestionResults(pending []types.ChatToolCall, results []toolResult) map[
 	return m
 }
 
-// executeTask runs one task's LLM loop.
-//
-// It copies the setup: prepareTaskExecution's caller keeps using the struct afterwards
-// (handleLazyStart, recovery, tests) while this loop reassigns setup.task and
-// setup.taskSlotURL as it goes. The copy is the ownership rule, not a convenience - the
-// pointers inside (channels, cancel, task, project) are still shared.
+// executeTask runs one task's LLM loop. It copies the setup because
+// prepareTaskExecution's caller keeps using the struct afterwards (handleLazyStart,
+// recovery, tests) while this loop reassigns setup.task and setup.taskSlotURL. The copy is
+// the ownership rule, not a convenience — the pointers inside stay shared.
 func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 	setupCopy := *shared
 	setup := &setupCopy
@@ -341,12 +339,12 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			}
 		}
 		te.taskMu.Unlock()
-		// Clear assigned ports when the run ends. Column-only write: the task may
-		// already be stopped here, and a full-row write would put "running" back.
-		// Ask the ROW whether to clear: a terminal that forwards a port mid-run writes
-		// that column directly, so this loop's copy can be behind, and a stale copy would
-		// leave a live host port bound to a stopped task. The in-memory check is only the
-		// fallback for a failed read.
+		// Clear assigned ports when the run ends, with a column-only write: the task may
+		// already be stopped, and a full-row write would put "running" back. Ask the ROW
+		// whether to clear — a terminal that forwarded a port mid-run writes that column
+		// directly, so this loop's copy can be behind and a stale copy would leave a live
+		// host port bound to a stopped task. The in-memory check is only the fallback for a
+		// failed read.
 		if row, err := te.store.GetTaskByID(setup.task.ID); (err == nil && len(row.AssignedPorts) > 0) || len(setup.task.AssignedPorts) > 0 {
 			setup.task.AssignedPorts = nil
 			_ = te.store.SetTaskAssignedPorts(setup.task.ID, setup.projectID, nil)
@@ -1016,12 +1014,10 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 						te.appStreamMgr.SendTaskEvent(setup.projectID, setup.task.ID, types.StreamEvent{Type: types.WSTypeToolOutput, Data: map[string]any{"tool_id": tc.ID, "text": text}})
 					})
 
-					// Remember what this tool touched. Diagnostics are NOT run here: this
-					// callback runs while the worktree mutex is held, and a language server
-					// round trip there serialises the rest of the turn and reports a state
-					// the turn's own later edits may already have fixed. The turn boundary
-					// pass (collectTurnDiagnostics) asks for the files that actually ended
-					// up changed.
+					// Remember what this tool touched. Diagnostics run at the turn boundary
+					// (collectTurnDiagnostics), not here: this callback holds the worktree
+					// mutex, where a language server round trip would serialise the rest of
+					// the turn and report a state the turn's later edits may already fix.
 					switch tc.Function.Name {
 					case "write_file", "edit_file":
 						if path, ok := args["path"].(string); ok && path != "" {
@@ -1621,12 +1617,9 @@ func (te *TaskExecutor) syncMessagesFromDB(task *types.Task, worktreePath, proje
 	return buildMessagesFromDB(task, taskMsgs, worktreePath, projectName, sandboxEnabled), task
 }
 
-// truncateForRegenerate removes the last user message and everything after it
-// from the in-memory conversation. When a regenerate arrives, the DB has already
-// trimmed messages from the last user message onward (DeleteTaskMessagesAfter),
-// but lc.messages still retains the stale entries. This function syncs the
-// in-memory state by finding the last user message and discarding it plus
-// everything after it. The new (re-sent) user message is then appended.
+// truncateForRegenerate drops the last user message and everything after it from the
+// in-memory conversation. The DB was already trimmed by DeleteTaskMessagesAfter; this is the
+// same cut applied to lc.messages before the re-sent user message is appended.
 func truncateForRegenerate(messages []types.ChatMessage) []types.ChatMessage {
 	for i := len(messages) - 1; i > 0; i-- {
 		if messages[i].Role == "user" {

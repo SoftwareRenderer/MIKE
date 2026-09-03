@@ -345,18 +345,15 @@ func ShadowsToolState(containerPath string) bool {
 	return false
 }
 
-// ValidateDependencyGrant validates the one host directory a user grants to one extension's language
-// server for its resolved dependencies, and returns the cleaned absolute path to store.
+// ValidateDependencyGrant validates the one host directory a user grants to one extension's
+// language server for its resolved dependencies, and returns the cleaned absolute path to
+// store. Its rule is deliberately not MountPolicy.ValidateHostPath: a module cache or Cargo
+// home sits exactly where that allowlist does not reach, which is why a human is asked for it.
+// Required: absolute, no `..`, symlinks resolved before storing, not the filesystem root, and
+// already existing — a missing directory surfaces as a podman error nobody traces back here.
 //
-// Deliberately a different rule than MountPolicy.ValidateHostPath: a module cache or Cargo home sits
-// exactly where that allowlist does not reach, which is why a human is asked for it rather than an
-// extension declaring it. Still required: absolute, no `..`, symlinks resolved before storing, not
-// the filesystem root, and already existing — a missing directory would surface as a podman error
-// nobody traces back to this field.
-//
-// Consequence: everything under the path is readable inside that extension's container, and writable
-// by task sandboxes when the manifest asked for it. One directory per extension, never widened by
-// anything the extension says.
+// Everything under the path becomes readable inside that extension's container. One directory
+// per extension, never widened by anything the extension says.
 func ValidateDependencyGrant(hostPath string) (string, error) {
 	trimmed := strings.TrimSpace(hostPath)
 	if trimmed == "" {
@@ -398,15 +395,10 @@ var systemGrantRoots = []string{"/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32
 // A denylist of credential stores: host safety, not language knowledge.
 var credentialGrantDirs = []string{".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".config/gcloud", ".config/gh", ".config/huggingface", ".config/pip"}
 
-// checkGrantShape is the shape rule a dependency directory has to pass, and it costs the user nothing
-// to satisfy: see checkGrantShapeWithHomes for what it refuses and why. A manifest cannot carry a host
-// path, so the user's answer is the only input and this is the only place to catch a wrong one.
-func checkGrantShape(resolved string) error {
-	return checkGrantShapeWithHomes(resolved, hostHomeDirs())
-}
-
-// checkGrantShapeWithHomes takes the homes as an argument so the rules are testable without touching
-// a real home directory.
+// checkGrantShapeWithHomes is the shape rule a dependency directory has to satisfy, and it
+// costs the user nothing to satisfy. A manifest cannot carry a host path, so the user's own
+// answer is the only input and this is the only place to catch a wrong one. Homes are passed
+// in so the rules are testable without touching a real home directory.
 func checkGrantShapeWithHomes(resolved string, homes []string) error {
 	// Not the root, and not the bare top level of the tree. Either hands a language server an entire
 	// mount instead of the directory of dependencies under it, and a whole mount is the widest thing

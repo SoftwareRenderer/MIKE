@@ -91,14 +91,10 @@ func NewClient(stdin io.WriteCloser, stdout io.ReadCloser) *Client {
 	return c
 }
 
-// IsAlive returns true if the client is still usable: it has not been closed
-// AND its readLoop is still running.
-//
-// Checking the closed flag matters: Close() marks the client closed before the
-// readLoop goroutine notices the closed pipe and exits. In that window the old
-// implementation (readDone only) reported true even though every request fails
-// with "client closed", which made SandboxManager.GetClient and recoverBridge
-// reuse a dead client and defeat bridge recovery.
+// IsAlive reports whether the client can still be used: not closed, and its readLoop still
+// running. The closed flag matters because Close() marks the client closed before readLoop notices
+// the closed pipe and exits; in that window a readDone-only check reports true while every request
+// fails with "client closed", which made GetClient and recoverBridge reuse a dead client.
 func (c *Client) IsAlive() bool {
 	c.mu.Lock()
 	closed := c.closed
@@ -158,14 +154,12 @@ func (c *Client) writeFrame(frame *protocol.Frame) error {
 // deadline — the peer stopped reading. Callers decide whether to retire the client.
 var ErrWriteStalled = errors.New("bridge write stalled past its deadline")
 
-// writeFrameCtx writes one frame, giving up when ctx is done.
-//
-// Giving up does not close the connection, even though the abandoned Write keeps
-// writeMu until the peer drains. Closing would let a task sandbox build a second
-// client over the same pipes and interleave frames mid-frame, and EOF on the
-// bridge's stdin kills the `podman exec` that nothing restarts. Callers that can
-// reconnect — extension sandboxes, whose Start spawns a fresh bridge — retire the
-// client on ErrWriteStalled themselves.
+// writeFrameCtx writes one frame, giving up when ctx is done. Giving up does not close the
+// connection, even though the abandoned Write holds writeMu until the peer drains: closing would
+// let a task sandbox build a second client over the same pipes and interleave frames mid-frame,
+// and EOF on the bridge's stdin kills the `podman exec` that nothing restarts. Callers that can
+// reconnect — extension sandboxes, whose Start spawns a fresh bridge — retire the client on
+// ErrWriteStalled themselves.
 func (c *Client) writeFrameCtx(ctx context.Context, frame *protocol.Frame) error {
 	if ctx.Done() == nil {
 		return c.writeFrame(frame)
