@@ -5,10 +5,9 @@
     import { fade } from 'svelte/transition';
     import ChangeModelModal from './ChangeModelModal.svelte';
 
-    let { multiSelect, tasks, projectId, onClear }: {
+    let { multiSelect, tasks, onClear }: {
         multiSelect: MultiSelect;
         tasks: Task[];
-        projectId: string;
         onClear: () => void;
     } = $props();
 

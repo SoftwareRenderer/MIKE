@@ -2,6 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import type { DiffFile } from '$lib/types/diff';
     import { parseUnifiedDiff } from '$lib/utils/diff-parser';
+    import { gitStatusLabel } from '$lib/utils/git-status';
     import { getGitStatus, getProjectDiff, getProjectDiffFile, stageProjectFile, commitProject, pullProject, pushProject, getGitLogFull, getCommitDiff } from '$lib/api/git';
     import type { GitCommit } from '$lib/types';
     import { dialogStore } from '$lib/stores';
@@ -600,19 +601,6 @@
         return { folder: path.substring(0, idx), name: path.substring(idx + 1) };
     }
 
-    function getStatusLabel(char: string): string {
-        switch (char) {
-            case 'M': return 'Modified';
-            case 'A': return 'Added';
-            case 'D': return 'Deleted';
-            case '?': return 'Untracked';
-            case 'R': return 'Renamed';
-            case 'U': return 'Unmerged';
-            case 'C': return 'Copied';
-            default: return char;
-        }
-    }
-
     // Serialize stage/unstage operations
     let stageQueue: Promise<void> = Promise.resolve();
     function enqueueStage(task: () => Promise<void>): void {
@@ -1013,7 +1001,7 @@
                                     >
                                         <span class="changes-file-basename">{name}</span>
                                         {#if folder}<span class="changes-file-folder">{folder}</span>{/if}
-                                        <span class="changes-file-badge" style="color: {getStatusBadge(entry).color}" title={getStatusLabel(entry.status)}>
+                                        <span class="changes-file-badge" style="color: {getStatusBadge(entry).color}" title={gitStatusLabel(entry.status)}>
                                             {entry.status}
                                         </span>
                                     </button>
@@ -1059,7 +1047,7 @@
                                     >
                                         <span class="changes-file-basename">{name}</span>
                                         {#if folder}<span class="changes-file-folder">{folder}</span>{/if}
-                                        <span class="changes-file-badge" style="color: {getStatusBadge(entry).color}" title={getStatusLabel(entry.status)}>
+                                        <span class="changes-file-badge" style="color: {getStatusBadge(entry).color}" title={gitStatusLabel(entry.status)}>
                                             {entry.status === '?' ? '??' : entry.status}
                                         </span>
                                     </button>
@@ -1335,17 +1323,6 @@
         gap: 6px;
     }
     /* Screen reader only (visually hidden) */
-    .sr-only {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border: 0;
-    }
     .panel-icon-btn {
         display: flex;
         align-items: center;

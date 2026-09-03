@@ -63,7 +63,6 @@
         displayPath: displayPathProp,
         onToggleFullscreen,
         mobileFullscreen,
-        isMobile,
         closeOnEscape = false,
         pendingFsEvent = null,
         onLinesSelected = null,
@@ -87,7 +86,6 @@
         displayPath?: string;
         onToggleFullscreen?: () => void;
         mobileFullscreen?: boolean;
-        isMobile?: boolean;
         closeOnEscape?: boolean;
         /** Explorer-mode only: invoked with the gutter line selection so the
          *  caller can open a Create Task modal prefilled with the lines. */

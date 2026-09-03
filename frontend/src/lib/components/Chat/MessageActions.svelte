@@ -8,13 +8,12 @@
         isOptimistic?: boolean;
         onCopy?: () => void;
         onDelete?: () => void;
-        onEdit?: () => void;
         onRegenerate?: () => void;
         onFork?: () => void;
         copied?: boolean;
     }
 
-    let { variant = 'assistant', timestampTooltip, timestampDisplay, hasContent = true, isStreaming = false, isOptimistic = false, onCopy, onDelete, onEdit, onRegenerate, onFork, copied = false }: Props = $props();
+    let { variant = 'assistant', timestampTooltip, timestampDisplay, hasContent = true, isStreaming = false, isOptimistic = false, onCopy, onDelete, onRegenerate, onFork, copied = false }: Props = $props();
 </script>
 
 <div class="message-actions" class:user-actions={variant === 'user'} class:assistant-actions={variant === 'assistant'}>
@@ -54,14 +53,6 @@
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                 </svg>
                 <span class="check">✓</span>
-            </button>
-        {/if}
-        {#if onEdit && !isStreaming && !isOptimistic}
-            <button class="action-btn" onclick={onEdit} aria-label="Edit message" title="Edit message">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                </svg>
             </button>
         {/if}
         {#if onRegenerate && !isStreaming && !isOptimistic}

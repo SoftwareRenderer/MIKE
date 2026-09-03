@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { createTaskViaApi, csrfFetch, getProjectId, navigateToTask, projectDirPath, selectProject, waitForChatForm, waitForSendButton, waitForSendButtonGraceful } from './helpers';
+import { createTaskViaApi, csrfFetch, getProjectId, navigateToTask, projectDirPath, selectProject, waitForChatForm, waitForSendButton, waitForSendButtonGraceful, waitForWorktree, writeFileInWorktree } from './helpers';
 
 
 test.describe.configure({ mode: 'parallel' });
@@ -380,7 +380,10 @@ test.describe('Edit Diff Expand Persistence', () => {
     // An executor turn plus a remount.
     test.setTimeout(120_000);
     const projectId = await getProjectId(page);
-    const taskId = await createTaskViaApi(page, projectId, `edit-diff-test-${Date.now()}`);
+    // Keyword-free prompt: "edit-diff-test" matches the mock's `\bedit\b` route, and the
+    // initial turn then replays this fixture with the same tool-call id — the remount test's
+    // "our card" would be the initial turn's, not the one it sent.
+    const taskId = await createTaskViaApi(page, projectId, `seed-turn-${Date.now()}`);
     await navigateToTask(page, taskId, projectId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
 
@@ -391,6 +394,10 @@ test.describe('Edit Diff Expand Persistence', () => {
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
     await expect(chatTextarea).toBeVisible({ timeout: 10000 });
+    // Seed the file the fixture edits — the e2e repo holds only a README, so an unseeded
+    // edit_file fails on a missing file and no edit-diff card is rendered.
+    await waitForWorktree(projectId, taskId);
+    writeFileInWorktree(projectId, taskId, 'src/lib/utils/format.ts', 'func one\nfunc two\n');
     const cardsBefore = await page.locator('.tool-call-card').count();
     // Pinned, not keyword-routed: the plan-first skill is in every system prompt, so a prompt
     // that merely mentions "edit" is not guaranteed to reach the edit_file fixture at all.

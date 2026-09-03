@@ -7,7 +7,7 @@
     import { fade } from 'svelte/transition';
     import { countWithDescendants } from '$lib/utils/task-utils';
 
-    let { columnId, title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDragStart, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
+    let { columnId, title, color, columnColor, tasks, childrenMap, expandedTasks, onToggleExpanded, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
         columnId: string;
         title: string;
         color: string;
@@ -16,7 +16,6 @@
         childrenMap: Map<string, Task[]>;
         expandedTasks: Set<string>;
         onToggleExpanded: (taskId: string) => void;
-        onDragStart: (taskId: string) => void;
         onDrop: (taskId: string) => void;
         onAddTask?: () => void;
         projectId?: string;

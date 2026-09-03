@@ -13,6 +13,7 @@
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId, startTask } from '$lib/api';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
+    import { readImageAttachments, describeRejectedImages, MAX_IMAGES } from '$lib/utils/attachments';
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
     import FileMentionDropdown from './FileMentionDropdown.svelte';
@@ -135,20 +136,14 @@
         // Handled by UI extension
     }
 
-    function handleFileSelect(e: Event) {
-        const files = (e.target as HTMLInputElement).files;
+    async function handleFileSelect(e: Event) {
+        const input = e.target as HTMLInputElement;
+        const files = input.files;
         if (!files || files.length === 0) return;
-        const remaining = 4 - attachments.length;
-        for (let i = 0; i < Math.min(remaining, files.length); i++) {
-            const file = files[i];
-            if (!file.type.startsWith('image/')) continue;
-            if (file.size > 4 * 1024 * 1024) continue;
-            const reader = new FileReader();
-            reader.onload = () => {
-                attachments = [...attachments, { mimeType: file.type, data: reader.result as string }];
-            };
-            reader.readAsDataURL(file);
-        }
+        const picked = await readImageAttachments(files, MAX_IMAGES - attachments.length);
+        if (picked.accepted.length > 0) attachments = [...attachments, ...picked.accepted];
+        const problem = describeRejectedImages(picked);
+        if (problem) dialogStore.showToast(problem, 'error');
         if (fileInput) fileInput.value = '';
     }
 
