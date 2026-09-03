@@ -65,7 +65,7 @@ TLS is **on by default**: a local CA in `data/tls/` (`mike-ca.crt`/`.key`) signs
 - **Never `log.Fatalf` on a `Serve()` error** (`main.go`): run the signal cleanup path (flight recorder, `srv.Shutdown`) and then exit 1 — `log.Fatalf` skips that cleanup and makes any listener error an abrupt exit.
 - **SIGTERM must end the process.** `srv.Shutdown` runs under `server.RunShutdownWithDeadline` (`backend/server/shutdown.go`, 15s): every step waits on something that cannot be interrupted (a container that is not answering podman, an LSP bridge whose peer died), and a shutdown that hangs leaves the process **holding the data directory open** — it re-creates `kanban.db`/`-wal` after whatever deleted them, so the next run boots on the previous run's database. A bounded *context* bounds nothing here; the deadline is enforced by leaving anyway. Each step logs `shutdown: <name>` before running, so the last line names what wedged. Tests: `backend/server/shutdown_test.go`.
 - **A certificate is not the gate** — reachability is `MIKE_LISTEN` + Host pinning (`MIKE_ALLOWED_HOSTS`), not the SAN set. Weak-password/non-loopback startup rules: `docs/tls.md`.
-- Tests: `backend/tls/tls_test.go`.
+- Tests: `backend/tls/tls_test.go`, `backend/server/handler_tls_test.go` (the CA download offered by Settings → About).
 
 ### Required Environment Variables
 Every `MIKE_*` below also has a `--flag` twin named after it (`--port`/`MIKE_PORT`, `--listen`, `--data-dir`/`MIKE_DATA_DIR`, `--no-tls`, `--tls-cert`/`--tls-key`, `--allowed-hosts`, `--worktrees-dir`); **flags take priority over env vars**. The one non-obvious flag: `--worktrees-dir` (`MIKE_WORKTREES_DIR`) is a runtime override that is **not** persisted to the DB `workspace_dir`.

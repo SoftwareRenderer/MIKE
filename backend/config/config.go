@@ -59,6 +59,7 @@ type ConfigStore struct {
 	agentRegistry        AgentProviderLister // optional — set via SetAgentRegistry
 	workspaceDirOverride string              // set at startup via --worktrees-dir / MIKE_WORKTREES_DIR
 	llmAdapter           *llmadapter.Adapter // optional — set via SetLLMAdapter
+	tlsCAAvailable       bool                // set at startup via SetTLSCAAvailable
 }
 
 // SetLLMAdapter helps map outgoing LLM API requests to the provider's expected format
@@ -70,6 +71,13 @@ func (cs *ConfigStore) SetLLMAdapter(a *llmadapter.Adapter) {
 // Must be called before GetConfig().
 func (cs *ConfigStore) SetWorkspaceDirOverride(dir string) {
 	cs.workspaceDirOverride = dir
+}
+
+// SetTLSCAAvailable records that the server runs its default certificate, signed
+// by the local CA — which is what makes that CA downloadable. A fact about the
+// running process, never a stored preference.
+func (cs *ConfigStore) SetTLSCAAvailable(available bool) {
+	cs.tlsCAAvailable = available
 }
 
 // WorkspaceDir returns the effective worktrees directory: the startup override
@@ -454,6 +462,9 @@ type configResponse struct {
 	SortOldestFirst               *bool                    `json:"sort_oldest_first,omitempty"`
 	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitempty"`
 	EncryptionEnabled             bool                     `json:"encryption_enabled"`
+	// TLSCAAvailable tells the UI to offer the CA download (GET /api/tls/ca). The
+	// CA's path is not published: the route already knows where it lives.
+	TLSCAAvailable bool `json:"tls_ca_available"`
 }
 
 // storedAPIKey returns the decrypted key saved for the provider whose URL matches
@@ -528,6 +539,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		SortOldestFirst:               cfg.SortOldestFirst,
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
 		EncryptionEnabled:             crypto.IsEnabled(),
+		TLSCAAvailable:                cs.tlsCAAvailable,
 	}
 }
 
