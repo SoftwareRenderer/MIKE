@@ -16,10 +16,8 @@ import (
 )
 
 func TestAdaptProjectMountsDropsACoreContainerPath(t *testing.T) {
-	// Two -v specs on one container path make podman refuse the whole create, so a borrowed mount
-	// that wants the granted dependency directory has to be the one that gives way — dropping it is
-	// the difference between "your graft mount is not in the LSP sandbox" and "the extension will
-	// not start for anyone".
+	// Two -v specs on one container path make podman refuse the create, so a borrowed mount that wants the
+	// granted dependency directory has to give way.
 	root := t.TempDir()
 	projPath := filepath.Join(root, "MIKE")
 	wsPath := filepath.Join(projPath, "worktrees", "MIKE", "flint")

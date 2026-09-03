@@ -479,67 +479,57 @@ type SandboxConfig struct {
 	Envs             []types.SandboxEnv   `json:"envs,omitempty"`
 	Capabilities     []string             `json:"capabilities,omitempty"`
 
-	// Environment says how to tell whether this server can answer *at all* in this
-	// workspace (a dependency root that is missing, a cache that is cold). When it
-	// cannot, the listed diagnostic codes are the server guessing, and core does not
-	// forward them to the model.
+	// Environment says how to tell whether this server can answer at all in this workspace
+	// (a missing dependency root, a cold cache). When it cannot, the suppressed diagnostic
+	// codes are the server guessing, and core does not forward them to the model.
 	Environment *EnvironmentGate `json:"environment,omitempty"`
 	// ReloadFiles are workspace-relative paths whose change means the language
 	// server has to re-read the project (a go.mod, a lockfile). A server sees no
 	// file-watch events through a bind mount, so the turn's changed-file list is
 	// what tells us.
 	ReloadFiles []string `json:"reload_files,omitempty"`
-	// Dependency names where this server reads its resolved dependencies from, so the
-	// host can supply them without being told where to look. Manifest data.
+	// Dependency names where this server reads its resolved dependencies from, so the host can
+	// supply them without being told where to look. Manifest data.
 	Dependency *DependencyCache `json:"dependency_cache,omitempty"`
-	// DependencyHostPath is the host directory the *user* granted to fill that cache — the
-	// answer to the one field Settings → Extensions asks. It lives beside the declaration and
-	// not inside it so the two origins stay distinguishable in the stored record: a manifest
-	// declares a location in its own container, a human names a directory on this machine, and
-	// the difference is the whole security argument. A manifest that carries it is refused
-	// (manifest_validate.go), never merged.
+	// DependencyHostPath is the host directory the user granted to fill that cache. It lives
+	// beside the declaration, not inside it, so the two origins stay distinguishable in the stored
+	// record: a manifest declares a path in its own container, a human names a directory on this
+	// machine. A manifest carrying it is refused (manifest_validate.go), never merged.
 	//
-	// It is also why the grant has its own endpoint: an empty value must mean "revoke", which a
-	// handler that copies non-empty fields cannot express.
+	// It has its own endpoint because an empty value must mean "revoke", which a handler that
+	// copies non-empty fields cannot express.
 	DependencyHostPath string `json:"dependency_host_path,omitempty"`
 }
 
-// DependencyCache is a language server's declaration of where *it* looks for resolved
-// dependencies: a path inside its own container and the environment variable that names it.
-// It says nothing about the host — which directory fills that path is the user's choice, made
-// once in Settings → Extensions, and a manifest that named a host directory would be naming a
-// path on someone else's machine.
+// DependencyCache is a language server declaring where it looks for resolved dependencies: a path
+// inside its own container, and the variable that names it. It says nothing about the host — which
+// directory fills that path is the user's choice, made once in Settings → Extensions.
 //
-// This is deliberately a location and not a command. A declared command ("run go mod
-// download") would be the core executing extension-supplied code, and a location *discovered*
-// by running the toolchain would be the core starting a server to learn where to point it —
-// each workspace, cold, on every restart. A location plus an environment gate (see
-// EnvironmentGate) closes the loop instead: the core assigns, and the server's own loader
-// says whether what it found was enough.
+// A location, not a command: a declared command would be the core running extension-supplied code,
+// and a location discovered by running the toolchain would be the core starting a server to learn
+// where to point it, for every workspace, on every restart. A location plus an environment gate (see
+// EnvironmentGate) closes the loop: the core assigns, the server's own loader says whether it was
+// enough.
 type DependencyCache struct {
-	// ContainerPath is where the cache appears inside the extension's container. It must not
-	// shadow a path the server keeps its own state in — that is checked at bind time, where
-	// the container's real paths are known, not here.
+	// ContainerPath is where the cache appears inside the extension's container. Shadowing a path
+	// the server keeps its own state in is checked at bind time, where the real paths are known.
 	ContainerPath string `json:"container_path"`
-	// Env is the variable the server reads the location from: a NAME, never an assignment, and
-	// never a value. The value is ContainerPath, which the manifest already declared; taking
-	// arbitrary values here would turn this field into a second, unvalidated `envs`.
+	// Env is the variable the server reads the location from: a NAME, never an assignment or a
+	// value. The value is always ContainerPath; arbitrary values here would be a second,
+	// unvalidated `envs`.
 	Env string `json:"env"`
-	// ReadOnly defaults to true, which is the direction that can only ever fail to make a
-	// server slow rather than able to change a machine. Set false when the toolchain must warm
-	// the cache itself — and read_only is then the user's switch, not the extension's.
+	// ReadOnly defaults to true — the direction that can only make a server slow, never able to
+	// change a machine. Set false when the toolchain must warm the cache itself; it is then the
+	// user's switch, not the extension's.
 	ReadOnly *bool `json:"read_only,omitempty"`
 }
 
-// DependencyGrant is the pair the runtime binds: the directory the user granted, and whether this
-// extension's declaration allows writing to it. Both halves are required — a grant with no
-// declaration has nowhere to mount and nothing to point at, and a declaration with no grant is the
-// normal state before anyone has been asked — so a missing half answers "bind nothing" rather than
-// half a configuration.
+// DependencyGrant is the pair the runtime binds: the granted directory, and whether this extension's
+// declaration allows writing to it. Both halves are required, so a missing half binds nothing rather
+// than half a configuration.
 //
-// The writable answer comes from the *manifest*, so an extension can only ever widen itself into
-// writing a directory its author already declared it would write; the user cannot make it writable
-// by granting alone.
+// Writability comes from the manifest, so an extension can only widen itself into writing a directory
+// its author already said it would write; granting alone cannot make it writable.
 func (sc *SandboxConfig) DependencyGrant() (hostPath string, writable bool) {
 	if sc == nil || sc.DependencyHostPath == "" || sc.Dependency == nil {
 		return "", false

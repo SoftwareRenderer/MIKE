@@ -253,9 +253,8 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	// Wire agent registry to terminal manager (created earlier before agentRegistry was available)
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
 	// A sandboxed shell needs the same dependency directories the language servers were granted: the
-	// terminal is where a user warms one by hand, and a container created without the grant would
-	// quietly make that work invisible to the editor. Guarded so a nil manager never arrives as a
-	// non-nil interface.
+	// terminal is where a user warms one by hand. Guarded so a nil manager never arrives as a non-nil
+	// interface holding a nil pointer.
 	if s.extLSPMgr != nil {
 		s.terminalMgr.SetDependencyProvider(s.extLSPMgr)
 	}

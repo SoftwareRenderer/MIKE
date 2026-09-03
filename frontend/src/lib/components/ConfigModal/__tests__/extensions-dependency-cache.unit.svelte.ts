@@ -4,12 +4,9 @@ import ExtensionsTab from '$lib/components/ConfigModal/ExtensionsTab.svelte';
 import type { Extension } from '$lib/types';
 
 /**
- * The one field this feature asks of the user: which folder on this machine a language server may
- * read its resolved dependencies from. Everything here is about the row that asks — that it asks
- * only of the extensions that declared a cache, that the suggestion it prefills is editable text
- * and not an invisible value, that applying sends exactly the path shown, that revoking sends an
- * empty string rather than nothing at all, and that a refusal appears as a sentence on the row it
- * belongs to instead of a banner over the whole settings page.
+ * The dependency-cache row: that it appears only for extensions that declared a cache, prefills
+ * editable text, sends exactly the path shown, sends an empty string on revoke, and shows a refusal
+ * on its own row rather than as a page-wide banner.
  */
 
 const HOME = '/home/tester';

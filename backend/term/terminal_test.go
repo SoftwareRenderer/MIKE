@@ -671,11 +671,8 @@ type dependencyStandsInForTheLSPManager struct {
 
 func (d dependencyStandsInForTheLSPManager) DependencyCaches() []lsp.DependencyCache { return d.caches }
 
-// TestTerminalOpensItsContainerWithTheDependencyCaches is the other half of a granted dependency
-// directory. A terminal is where somebody warms one by hand — `go mod download` in a shell — and a
-// container created without the grant sends that work into a layer that is deleted with the task,
-// while the language server next door keeps reading the empty directory it was given. So the mounts
-// have to reach StartShell, not merely the options struct.
+// TestTerminalOpensItsContainerWithTheDependencyCaches: a terminal is where somebody warms a dependency
+// directory by hand, so its container must be created with the grant.
 func TestTerminalOpensItsContainerWithTheDependencyCaches(t *testing.T) {
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)

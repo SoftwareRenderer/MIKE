@@ -1,13 +1,8 @@
 package extensions
 
-// The bundled language extensions live in the sibling MIKE-extensions checkout, and their
-// manifests are what every install of them has to survive: a declaration this package refuses is a
-// registry entry nobody can install. That makes "our own manifests validate" a real contract
-// between the two repos, and a contract worth a test — the alternative is discovering it in an
-// install error on someone else's machine.
-//
-// Skipped when MIKE-extensions is not checked out beside this repo, which is the case in a
-// standalone MIKE checkout and in CI for this repo alone.
+// The bundled language extensions live in the sibling MIKE-extensions checkout and their manifests are
+// what every install has to survive: a declaration this package refuses is a registry entry nobody can
+// install.
 
 import (
 	"encoding/json"
@@ -84,19 +79,11 @@ func TestBundledLSPManifests_Validate(t *testing.T) {
 	}
 }
 
-// TestBundledLSPManifests_CanActuallyFail guards the one property a health check has to have, which
-// no runtime can check for it: it must be able to fail.
+// TestBundledLSPManifests_CanActuallyFail: a health check must be able to fail.
 //
-// The reason this is a test is a measured mistake. The gopls check was `go list -e -deps ./...`, and
-// `-e` means "tolerate packages it cannot load" — so the check exited 0 in a container with no
-// module cache at all, exactly as it did in one with a full cache. Both runs: exit 0. A gate that
-// cannot fail does not merely do nothing: it reports the workspace healthy while the server answers
-// from an empty dependency root, which is the false-clean state this whole mechanism exists to
-// remove. The check is now `GOPROXY=off go list -deps ./...`, measured at exit 0 with the cache
-// mounted and exit 1 without it.
-//
-// This is a rule about our own registry data, which is where knowledge of a specific toolchain's
-// flags belongs — never in the core, which must stay language-blind.
+// This exists because of a measured mistake: the gopls check was `go list -e -deps ./...`, and `-e`
+// tolerates packages it cannot resolve — the check passed with an empty cache and with a full one, so
+// it could never report anything. A check that cannot fail is not a gate.
 func TestBundledLSPManifests_CanActuallyFail(t *testing.T) {
 	for name, m := range bundledManifests(t) {
 		sb := lspSandboxFromManifest(m)

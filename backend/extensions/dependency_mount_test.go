@@ -1,9 +1,8 @@
 package extensions
 
-// The mount and the assignment a granted dependency directory contributes to a container, and the
-// two properties that make it safe rather than merely convenient: what a create produces is exactly
-// what the compatibility check will later ask for (or a grant never takes effect), and an
-// unmountable grant is reported and skipped instead of becoming a container that will not build.
+// Tests for the mount and assignment a granted directory contributes to a container. The two properties
+// that matter: what a create produces is exactly what the compatibility check later asks for (or a
+// grant never takes effect), and an unmountable grant is reported instead of silently dropped.
 
 import (
 	"os"

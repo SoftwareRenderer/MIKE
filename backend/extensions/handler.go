@@ -411,6 +411,9 @@ func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	// Read the record first: the files to delete are derived from its author and name.
+	ext, _ := h.store.GetByID(id)
+
 	// Stop sandbox if running
 	_ = h.sandbox.Destroy(id)
 
@@ -423,7 +426,15 @@ func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
+	// Take the files with the row. The directory is what gets served and what the local scan offers
+	// for install, so leaving it behind resurrects the extension with its old manifest.
+	response := map[string]string{"status": "deleted"}
+	if warning := h.removeExtensionFiles(ext); warning != "" {
+		// Reported, not swallowed: from the UI the extension is gone either way.
+		response["leftover"] = warning
+	}
+
+	httputil.JSONResponse(w, http.StatusOK, response)
 
 	// Notify frontend to refresh UI injection slots
 	if h.onExtensionChanged != nil {
@@ -473,14 +484,12 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 // HandleSetDependencyCache grants — or revokes — the one host directory an extension's language
 // server reads its resolved dependencies from.
 //
-// It is its own endpoint rather than one more field on the sandbox form for two reasons. An empty
-// value here means "revoke", and the form handler copies only non-empty fields, so a blank would
-// silently mean "unchanged". And granting it has a side effect the form does not: the running
-// container's mount set is fixed at creation, so it has to go.
+// Its own endpoint, not a field on the sandbox form: an empty value here means "revoke", and the
+// form handler copies only non-empty fields. Applying it also has to destroy the running container,
+// whose mount set is fixed at creation.
 //
-// The manifest declares the location; only a human names the directory. A manifest carrying
-// dependency_host_path is refused at install (see manifest_validate.go), so the value written here
-// is always a decision made on this machine by whoever owns it.
+// The manifest declares the location; only a human names the directory — a manifest carrying
+// dependency_host_path is refused at install.
 func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

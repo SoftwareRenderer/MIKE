@@ -104,11 +104,8 @@ type SandboxOpts struct {
 	SandboxMounts    []types.SandboxMount
 	SandboxEnvs      []types.SandboxEnv
 	// DependencyMounts are host directories that enabled LSP extensions keep their resolved
-	// dependencies in, granted by the user on Settings → Extensions. Unlike SandboxMounts they are
-	// nobody's project configuration: they come from the extensions of the whole install and are
-	// mounted read-write here so a turn that downloads dependencies fills the cache the language
-	// server reads read-only in its own sandbox. Same host directory, same container path, one
-	// difference in mode — which is the whole point.
+	// dependencies in, granted by the user. Unlike SandboxMounts these come from the install as a
+	// whole, and are mounted read-write here so a turn can fill them.
 	DependencyMounts []types.SandboxMount
 	// DependencyEnvs points a toolchain at each mount above. Lowest priority of all: a project that
 	// sets GOMODCACHE itself means it, and gets it.
@@ -121,15 +118,11 @@ type SandboxOpts struct {
 // session, not to the sandbox, so it is set on the shell's own exec.
 const shellTERM = "xterm-256color"
 
-// containerEnvArgs returns the -e flags for a sandbox container: the variables configured
-// for it and nothing else. An agent extension's envs come first so the project's own
-// configuration wins on a clash (podman takes the last -e). Nothing is invented here: -e
-// overrides the image's ENV, so a hardcoded PATH would discard a custom image's one.
-//
-// dependencyEnvs is passed rather than read from opts because it is the *resolved* list: the
-// assignments whose dependency directory was really mounted. An assignment for a mount that was
-// skipped would send a toolchain to an empty container path instead of the directory its image
-// already contains, which is a worse answer than the default it would have used.
+// containerEnvArgs returns the -e flags for a sandbox container: the variables configured for it and
+// nothing else. Order is lowest to highest priority — dependency assignments, then the agent
+// extension's envs, then the project's own configuration, since podman takes the last -e. Nothing is
+// invented here: -e overrides the image's ENV, so a hardcoded PATH or TERM would silently replace what
+// the image sets.
 func containerEnvArgs(taskID string, opts SandboxOpts, dependencyEnvs []types.SandboxEnv) []string {
 	var args []string
 	// Dependency assignments first so both the agent's and the project's own configuration win a
@@ -275,28 +268,15 @@ func forwardPortSpec(hostPort, containerPort int) string {
 	return fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort)
 }
 
-// createContainerArgs is the fixed part of `podman create` for a task or project sandbox,
-// before any capability, mount, port or environment entry. Extracted so the ordering is
-// testable: the --runtime-flag options must precede `create`, --pull must follow it.
+// dependencyCaches decides which granted dependency directories this container gets, and the
+// assignments that go with them. Decided together: an assignment pointing at a container path with
+// nothing behind it sends the toolchain to an empty directory instead of the cache its image ships
+// with.
 //
-// --runtime-flag overlay2=root:self: use kernel overlay2 for writable rootfs
-// --runtime-flag ignore-cgroups: required for rootless gVisor (no cgroup access)
-// --security-opt label=disable: required for gVisor (no SELinux support)
-// --cap-drop=ALL: drop all capabilities, re-add only those explicitly configured
-// --security-opt no-new-privileges: prevent privilege escalation via setuid binaries
-// dependencyCaches decides which granted dependency directories this container actually gets, and
-// which assignments go with them. Decided together, because half of it surviving is worse than
-// neither: GOMODCACHE pointing at a container path with nothing behind it makes the toolchain look
-// somewhere empty instead of at the cache its image ships with.
-//
-// Deliberately no ":U". It is the flag that would let a project image running as a non-root user
-// write into these directories, and what it pays with is a recursive chown of the *host* directory
-// into the container's mapped uid — measured on a scratch directory, which afterwards reported owner
-// 525287 and could no longer be deleted by the owner of the account. Taking a 1.1 GB module cache out
-// of somebody's ownership to spare one image an EACCES is not a trade this server gets to make, so
-// the mount is plain rw: an image running as root writes the cache as the host user (the common
-// case), and an image running as any other uid fails its download, which is a task error the user can
-// read instead of a home directory they can no longer write to.
+// Deliberately no ":U": it chowns the *host* directory recursively into the container's mapped uid
+// (measured: the directory came back owned by 525287 and its own account could no longer delete it).
+// Taking someone's module cache out of their ownership to spare one image an EACCES is not this
+// server's trade to make, so the mount is plain rw — see dependency_test.go.
 func dependencyCaches(taskID, worktreeMount, projectPath string, opts SandboxOpts) ([]string, []types.SandboxEnv) {
 	if len(opts.DependencyMounts) == 0 {
 		return nil, nil

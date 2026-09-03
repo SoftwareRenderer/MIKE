@@ -4,19 +4,13 @@ import os from 'os';
 import path from 'path';
 
 /**
- * The one directory a language server may read its resolved dependencies from, granted from
- * Settings → Extensions.
+ * Granting a language server its dependency directory, end to end: what the field shows is what lands
+ * in the database, a missing directory comes back as a sentence, an empty value revokes, and the
+ * running sandbox is stopped so the next use recreates it. Component states are in vitest.
  *
- * This runs against the real backend on purpose. The grant's whole meaning is on the other side of
- * the request: the path is validated by the server (a missing directory is a sentence, not a
- * container that will not build), it is stored on the extension record, an empty value has to mean
- * revoke rather than "field left blank", and the sandbox has to be stopped so the next use
- * recreates it with the new mount. The component's own states are covered in vitest; what a browser
- * and a Go server add here is that the value in the field is the value that lands in the database.
- *
- * The subject is a local fixture extension (`tests/fixtures/local-extensions/testdev/dep-cache-lsp`)
- * that declares `capabilities.lsp.sandbox.dependency_cache`. A local LSP install needs no image, so
- * installing it is a real install, not a stub. It is deleted again at the end.
+ * Subject: the local fixture `tests/fixtures/local-extensions/testdev/dep-cache-lsp`, which declares
+ * `capabilities.lsp.sandbox.dependency_cache`. A local LSP install needs no image, so this is a real
+ * install; it is deleted at the end.
  */
 
 const FIXTURE_AUTHOR = 'testdev';

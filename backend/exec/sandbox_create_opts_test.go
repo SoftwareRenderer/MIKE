@@ -70,11 +70,9 @@ func TestSandboxCreateOpts_CarriesEveryConfiguredField(t *testing.T) {
 	}
 }
 
-// TestSandboxCreateOpts_CarriesDependencyCaches is the wiring between the two sandboxes: what the
-// enabled LSP extensions were granted reaches the task container, read-write, with the variable
-// pointing at the container path rather than the host one. It lives at this level because the
-// alternative failure is silent — a cache mounted in the extension's sandbox and never in the task's
-// is a dependency directory that can only ever be read, and nothing but a cold toolchain notices.
+// TestSandboxCreateOpts_CarriesDependencyCaches: the wiring between the two sandboxes — what the enabled
+// LSP extensions were granted reaches the task container, read-write, with the variable pointing at the
+// container path.
 func TestSandboxCreateOpts_CarriesDependencyCaches(t *testing.T) {
 	setup := &taskExecSetup{
 		task:    &types.Task{ID: "brave-amber-quartz"},

@@ -123,14 +123,10 @@ type sandboxClient struct {
 	// gate is that extension's environment check, when it declared one. nil means the
 	// server's answers are always forwarded.
 	gate *extensions.EnvironmentGate
+	// There is no dependency-root field: that assignment is a container-level `-e` (see
+	// extensions.DependencyMount), not per connection, so the language server and the extension's own
+	// environment check get the same answer.
 }
-
-// A language server's dependency root is NOT assigned here, per connection. It is a container-level
-// `-e` (see extensions.DependencyMount), and that is not an oversight: the extension's own
-// environment check runs as an exec in the same container, and both the server and the check have
-// to be told the same thing by one source. A per-connection assignment would leave the check
-// answering "cannot resolve" while the mount sat right there — which turns an honest gate into a
-// false one, the exact failure this mechanism was built to avoid.
 
 // usable reports whether requests may still go through this connection: both the bridge
 // connection and the language server on the far end of it have to be standing.
@@ -585,17 +581,12 @@ func (m *ExtensionLSPManager) ensureSandbox(ext *extensions.Extension, workspace
 	return nil
 }
 
-// sandboxMountPlan returns the two mount lists this workspace implies, and they are two because
-// confusing them is a bug that costs a cold start on every file the user opens:
+// sandboxMountPlan returns the two mount lists this workspace implies. They are two because Create
+// appends the granted dependency directory itself: passing it in the create list would record it twice,
+// a snapshot no comparison can ever match, and the sandbox would restart on every file the user opens.
 //
-//   - createMounts is what the container is created with. It does NOT contain the granted dependency
-//     directory, because Create appends that itself (`dependencyBind`) — asking it twice is what made
-//     the recorded snapshot hold the same mount twice, and a snapshot with a duplicate in it is one no
-//     comparison can ever match, so every workspace open recreated the container and restarted the
-//     language server.
-//   - compareMounts/compareEnvs are what a later MountsCompatible must expect that create to have
-//     recorded, and those DO contain it, because the create records it. Without it a sandbox that
-//     predates a grant is reused forever and the user stares at a grant that does nothing.
+//   - createMounts: what the container is created with, without the dependency directory.
+//   - compareMounts/compareEnvs: the snapshot to compare against, with what Create will have recorded.
 func (m *ExtensionLSPManager) sandboxMountPlan(ext *extensions.Extension, workspacePath string, projectMounts map[string]string, wsContainer string) (createMounts, compareMounts []types.SandboxMount, compareEnvs []types.SandboxEnv) {
 	createMounts = resolveWorkspaceMounts(ext.SandboxConfig.Mounts, workspacePath, projectMounts)
 	compareEnvs = ext.SandboxConfig.Envs
@@ -804,14 +795,10 @@ func (m *ExtensionLSPManager) findProjectForWorkspace(workspacePath string) (*ty
 	return bestProject, nil
 }
 
-// adaptProjectMounts rewrites the project's Sandbox Configuration mounts for the LSP sandbox:
-// paths under the task sandbox project root (/home/sandbox/<project-name>) are remapped onto the
-// LSP workspace path, global paths (e.g. /go) pass through, everything is forced read-only, and
-// anything shadowing the server's own writable state is dropped (see shadowsToolState).
-// reserved are container paths core mounts itself — today, the granted dependency directory. A
-// borrowed mount that wants one of them is dropped: two -v specs on one container path make podman
-// refuse the whole create, and "the extension will not start" is a worse outcome for the project
-// than "your graft mount is not in the LSP sandbox", which is also what the log line says.
+// adaptProjectMounts rewrites the project's Sandbox Configuration mounts for the LSP sandbox: paths
+// under the task project root are remapped onto the LSP workspace path, global paths pass through,
+// everything is forced read-only, and anything shadowing the dependency mount or the server's own state
+// is dropped (two -v specs on one container path make podman refuse the create).
 func (m *ExtensionLSPManager) adaptProjectMounts(workspacePath, wsContainerPath string, reserved []types.SandboxMount) []types.SandboxMount {
 	project, err := m.findProjectForWorkspace(workspacePath)
 	if err != nil {
