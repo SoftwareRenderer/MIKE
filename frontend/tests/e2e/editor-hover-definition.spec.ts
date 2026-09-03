@@ -85,7 +85,8 @@ const FAKE_LSP_INIT = (targetPath: string) => {
      * Documentation with the shape a real server sends for a documented symbol:
      * a signature block, then prose in sections split by `---` (markdown rules),
      * taller than any reasonable tooltip. This is the input that used to push the
-     * card's "Go to Definition" button below the fold.
+     * card's "Go to Definition" button below the fold — and the `---` are kept in
+     * the fixture because the card is expected to render none of them.
      */
     const PARAGRAPH =
         'Documents the symbol at enough length that the documentation itself has to scroll inside the card, ' +
@@ -495,7 +496,7 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
         await expect(page.locator(CARD)).toHaveCount(0);
     });
 
-    test('long documentation scrolls beneath the pinned button, and its rules stay tight', async ({ page }) => {
+    test('long documentation scrolls beneath the pinned button, without its rules', async ({ page }) => {
         await openCaller(page);
 
         const hover = await coordsOf(page, 'Documented()');
@@ -506,16 +507,11 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
             const card = document.querySelector('.cm-lsp-action-card') as HTMLElement;
             const body = document.querySelector('.cm-lsp-action-card-body') as HTMLElement;
             const btn = document.querySelector('.cm-lsp-action-button') as HTMLElement;
-            const rules = Array.from(card.querySelectorAll('hr')) as HTMLElement[];
             const cardBox = card.getBoundingClientRect();
             const btnBox = btn.getBoundingClientRect();
-            const firstRule = getComputedStyle(rules[0]);
-            const lastRule = getComputedStyle(rules[rules.length - 1]);
             return {
-                ruleCount: rules.length,
-                ruleMarginTop: firstRule.marginTop,
-                ruleMarginBottom: firstRule.marginBottom,
-                lastRuleMarginBottom: lastRule.marginBottom,
+                rules: card.querySelectorAll('hr').length,
+                sections: card.querySelectorAll('p').length,
                 cardOverflowY: getComputedStyle(card).overflowY,
                 bodyOverflowY: getComputedStyle(body).overflowY,
                 cardScrolled: card.scrollTop,
@@ -525,13 +521,11 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
             };
         });
 
-        // The fixture's documentation: a signature block, two prose sections split
-        // by a rule, and a trailing rule the card must not pad out.
-        expect(geometry.ruleCount).toBe(3);
-        // The card-scoped rule wins over the generic 6px tooltip margin.
-        expect(geometry.ruleMarginTop).toBe('2px');
-        expect(geometry.ruleMarginBottom).toBe('2px');
-        expect(geometry.lastRuleMarginBottom).toBe('0px');
+        // The fixture's documentation carries three `---` dividers; the card
+        // renders none of them …
+        expect(geometry.rules).toBe(0);
+        // … without eating the prose they separated.
+        expect(geometry.sections).toBeGreaterThan(4);
 
         // There IS something to scroll, and it is the documentation …
         expect(geometry.bodyOverflows).toBeGreaterThan(0);
