@@ -28,7 +28,7 @@
     import { highlightSelectionMatches } from '@codemirror/search';
     import { drawSelection, dropCursor, highlightActiveLineGutter, highlightActiveLine, rectangularSelection, crosshairCursor, highlightSpecialChars, gutterLineClass, GutterMarker, Decoration, ViewPlugin, type ViewUpdate, type DecorationSet } from '@codemirror/view';
     import { gitGutter, type GitGutterState } from '$lib/utils/git-gutter';
-    import { darkTheme, darkSyntax, lightTheme, lightSyntax, isLightTheme } from '$lib/utils/codemirror-theme';
+    import { darkTheme, darkSyntax, lightTheme, lightSyntax, lspDocsTheme, isLightTheme } from '$lib/utils/codemirror-theme';
     import { stickyScroll, updateHeadersEffect, sectionHeadersField, buildSectionHeaders, type SectionHeader } from '$lib/utils/sticky-scroll';
     import { keepViewportParsed } from '$lib/utils/keep-viewport-parsed';
     import { closeHoverOnScroll } from '$lib/utils/close-hover-on-scroll';
@@ -476,6 +476,10 @@
             ]),
             isLightTheme() ? lightTheme : darkTheme,
             isLightTheme() ? lightSyntax : darkSyntax,
+            // Markdown spacing inside LSP tooltips (hover card, completion info,
+            // signature help) — the browser's page-sized block margins are far
+            // too much whitespace in a 12px card.
+            lspDocsTheme,
             // Hover documentation + "Go to Definition", and Ctrl/Cmd+Click. Both
             // resolve the connection through LSPPlugin at use time, so they keep
             // working across an LSP reconnect.

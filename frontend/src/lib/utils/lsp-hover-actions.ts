@@ -656,7 +656,13 @@ const hoverCardTheme = EditorView.baseTheme({
         overscrollBehavior: 'contain',
     },
     '& .cm-lsp-action-loading': { color: 'var(--color-text-muted, #888)', padding: '1px 2px' },
-    '& .cm-lsp-action-docs': { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+    // NOT `white-space: pre-wrap`: the renderer's output is block HTML, and it
+    // writes a newline *between* every tag (`</pre>\n<p>`), which pre-wrap turns
+    // into a blank line between the signature and its prose — and between every
+    // paragraph after it. Line structure that matters survives without it:
+    // plaintext documentation arrives as `<br>`s and code blocks keep their own
+    // pre-wrap (next rule).
+    '& .cm-lsp-action-docs': { overflowWrap: 'anywhere' },
     '& .cm-lsp-action-docs pre': { margin: '2px 0', whiteSpace: 'pre-wrap' },
     '& .cm-lsp-action-row': { marginTop: '4px', flexShrink: 0 },
     '& .cm-lsp-action-button': {

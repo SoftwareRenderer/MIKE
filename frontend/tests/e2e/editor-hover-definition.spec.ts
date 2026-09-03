@@ -507,11 +507,19 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
             const card = document.querySelector('.cm-lsp-action-card') as HTMLElement;
             const body = document.querySelector('.cm-lsp-action-card-body') as HTMLElement;
             const btn = document.querySelector('.cm-lsp-action-button') as HTMLElement;
+            const signature = card.querySelector('pre') as HTMLElement | null;
+            const paras = Array.from(card.querySelectorAll('p')) as HTMLElement[];
+            /** Whitespace between two stacked blocks — a rendered blank line
+             *  shows up here as a whole line box, not as a margin. */
+            const gap = (from: Element, to: Element) =>
+                Math.round((to.getBoundingClientRect().top - from.getBoundingClientRect().bottom) * 10) / 10;
             const cardBox = card.getBoundingClientRect();
             const btnBox = btn.getBoundingClientRect();
             return {
                 rules: card.querySelectorAll('hr').length,
-                sections: card.querySelectorAll('p').length,
+                sections: paras.length,
+                signatureToBody: signature && paras[0] ? gap(signature, paras[0]) : null,
+                paragraphGap: paras.length > 1 ? gap(paras[0], paras[1]) : null,
                 cardOverflowY: getComputedStyle(card).overflowY,
                 bodyOverflowY: getComputedStyle(body).overflowY,
                 cardScrolled: card.scrollTop,
@@ -526,6 +534,13 @@ test.describe.serial('Editor go-to-definition hover + Ctrl/Cmd+Click', () => {
         expect(geometry.rules).toBe(0);
         // … without eating the prose they separated.
         expect(geometry.sections).toBeGreaterThan(4);
+
+        // Signature → prose and prose → prose are one collapsed margin apart. A
+        // container with `white-space: pre-wrap` renders the newline the
+        // markdown renderer writes *between* block tags, which cost a full empty
+        // line at every one of those breaks.
+        expect(geometry.signatureToBody).toBeLessThanOrEqual(4);
+        expect(geometry.paragraphGap).toBeLessThanOrEqual(4);
 
         // There IS something to scroll, and it is the documentation …
         expect(geometry.bodyOverflows).toBeGreaterThan(0);
