@@ -456,6 +456,19 @@ type configResponse struct {
 	EncryptionEnabled             bool                     `json:"encryption_enabled"`
 }
 
+// storedAPIKey returns the decrypted key saved for the provider whose URL matches
+// serverURL, or "" when no provider matches or that one has no key. A trailing slash
+// is ignored on both sides, because the client sends whichever it was given.
+func storedAPIKey(providers []types.Provider, serverURL string) string {
+	serverURL = strings.TrimRight(serverURL, "/")
+	for _, p := range providers {
+		if strings.TrimRight(p.URL, "/") == serverURL {
+			return p.APIKeyValue()
+		}
+	}
+	return ""
+}
+
 // maskAPIKeys replaces non-empty API keys with a masked placeholder.
 
 const maskedAPIKey = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // 10 bullets
@@ -645,7 +658,7 @@ func (cs *ConfigStore) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		resp := cs.buildConfigResponse(current)
 		httputil.JSONResponse(w, http.StatusOK, resp)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 	}
 }
 
@@ -701,20 +714,14 @@ func (cs *ConfigStore) GetRunSiblingsParallel() bool {
 	return false
 }
 
-// GetProviderAPIKey looks up and returns the decrypted API key for a provider by URL.
-// Returns empty string if no matching provider is found or no key is set.
+// GetProviderAPIKey returns the decrypted API key stored for a provider URL,
+// or "" when no provider matches or none is set.
 func (cs *ConfigStore) GetProviderAPIKey(serverURL string) string {
 	cfg, err := cs.GetConfig()
 	if err != nil {
 		return ""
 	}
-	serverURL = strings.TrimRight(serverURL, "/")
-	for _, provider := range cfg.Providers {
-		if strings.TrimRight(provider.URL, "/") == serverURL {
-			return provider.APIKeyValue()
-		}
-	}
-	return ""
+	return storedAPIKey(cfg.Providers, serverURL)
 }
 
 // SaveModelContextWindow persists a discovered context window for a model in the config.

@@ -274,7 +274,7 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		h.boardStreamMgr.Broadcast(projectID)
 		httputil.JSONResponse(w, http.StatusCreated, task)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 	}
 }
 
@@ -288,9 +288,8 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		task, err := h.store.GetTask(projectID, taskID)
-		if err != nil {
-			httputil.Fail(w, err, "get task", "task not found")
+		task, ok := resolveTask(w, r, h.store)
+		if !ok {
 			return
 		}
 		if h.configStore != nil {
@@ -301,9 +300,8 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		h.refreshTaskPorts(task)
 		httputil.JSONResponse(w, http.StatusOK, task)
 	case http.MethodPut:
-		task, err := h.store.GetTask(projectID, taskID)
-		if err != nil {
-			httputil.Fail(w, err, "get task", "task not found")
+		task, ok := resolveTask(w, r, h.store)
+		if !ok {
 			return
 		}
 		// Capture original values before partial update
@@ -422,11 +420,12 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			}
 			var parentTask *types.Task
 			if task.ParentTaskID != "" {
-				parentTask, err = h.store.GetTask(projectID, task.ParentTaskID)
+				parent, err := h.store.GetTask(projectID, task.ParentTaskID)
 				if err != nil {
 					httputil.JSONError(w, http.StatusBadRequest, "parent task not found")
 					return
 				}
+				parentTask = parent
 			}
 			var cfg *types.Config
 			if h.configStore != nil {
@@ -467,7 +466,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		h.boardStreamMgr.Broadcast(projectID)
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 	}
 }
 
@@ -475,7 +474,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) HandleClearDone(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	if r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -505,7 +504,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	var req types.MoveTaskRequest
@@ -513,9 +512,8 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	task, err := h.store.GetTask(projectID, taskID)
-	if err != nil {
-		httputil.Fail(w, err, "get task", "task not found")
+	task, ok := resolveTask(w, r, h.store)
+	if !ok {
 		return
 	}
 	// Status is the one field a client sends as free text: checked here, typed below. A
@@ -844,18 +842,15 @@ func resolveGitAuthor(projectID string, s interface {
 // for a commit-and-done operation, without performing the commit.
 func (h *TaskHandler) HandleCommitPreview(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
-	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
-	task, err := h.store.GetTask(projectID, taskID)
-	if err != nil {
-		httputil.Fail(w, err, "get task", "task not found")
+	task, ok := resolveTask(w, r, h.store)
+	if !ok {
 		return
 	}
-	if h.worktreeMgr == nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
+	if !requireWorktreeMgr(w, h.worktreeMgr) {
 		return
 	}
 
@@ -881,7 +876,7 @@ func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.R
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	task, err := h.store.GetTask(projectID, taskID)
@@ -920,16 +915,14 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
-	task, err := h.store.GetTask(projectID, taskID)
-	if err != nil {
-		httputil.Fail(w, err, "get task", "task not found")
+	task, ok := resolveTask(w, r, h.store)
+	if !ok {
 		return
 	}
-	if h.worktreeMgr == nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "worktree manager not available")
+	if !requireWorktreeMgr(w, h.worktreeMgr) {
 		return
 	}
 
@@ -1304,12 +1297,10 @@ func (h *TaskHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
-	_, err := h.store.GetTask(projectID, taskID)
-	if err != nil {
-		httputil.Fail(w, err, "get task", "task not found")
+	if _, ok := resolveTask(w, r, h.store); !ok {
 		return
 	}
 	task, err := h.executor.InitTask(projectID, taskID)
@@ -1338,12 +1329,11 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
-	task, err := h.store.GetTask(projectID, taskID)
-	if err != nil {
-		httputil.Fail(w, err, "get task", "task not found")
+	task, ok := resolveTask(w, r, h.store)
+	if !ok {
 		return
 	}
 
@@ -1421,7 +1411,7 @@ func (h *TaskHandler) HandleStop(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -1454,12 +1444,11 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
-	task, err := h.store.GetTask(projectID, taskID)
-	if err != nil {
-		httputil.Fail(w, err, "get task", "task not found")
+	task, ok := resolveTask(w, r, h.store)
+	if !ok {
 		return
 	}
 	if task.Status == types.StatusBacklog {
@@ -1513,12 +1502,10 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// subtasksToStart returns the subtask IDs to start for a parent task. When
-// "run siblings in parallel" is enabled it returns every currently startable
-// (deepest) subtask so they all kick off at once; otherwise it returns the
-// single subtask picked by the existing depth/LLM heuristic. The per-provider
-// concurrency gate still caps how many actually run — the rest queue as
-// "Pending".
+// subtasksToStart returns the subtask IDs to start for a parent. With "run siblings in
+// parallel" it returns every startable (deepest) subtask so they all begin at once; otherwise
+// the single subtask the depth/LLM heuristic picks. The per-provider concurrency gate still
+// caps how many run — the rest queue as "Pending".
 func (h *TaskHandler) subtasksToStart(parent *types.Task, subtasks []types.Task) []string {
 	if h.configStore != nil && h.configStore.GetRunSiblingsParallel() {
 		deepest := h.executor.FindDeepestStartableSubtasks(subtasks)

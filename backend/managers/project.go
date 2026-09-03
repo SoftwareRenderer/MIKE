@@ -77,7 +77,7 @@ func (h *ProjectHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 // HandleCounts returns task counts for all projects.
 func (h *ProjectHandler) HandleCounts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	counts := h.store.GetAllProjectCounts()
@@ -232,13 +232,11 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 	return p, http.StatusCreated, ""
 }
 
-// HandleClone streams a git clone with live progress over SSE, then creates
-// the project from the cloned directory.
+// HandleClone streams a git clone with live progress over SSE, then creates the project from
+// the cloned directory. Body: CreateProjectRequest with Path = the clone-into parent directory
+// and GitUrl = the repository to clone (both required).
 //
-// Body: CreateProjectRequest with Path = clone-into parent directory and
-// GitUrl = repository to clone (both required).
-//
-// Emits one JSON object per "data:" frame:
+// Each "data:" frame is one JSON object:
 //
 //	{"type":"status","message":"..."}  — informational
 //	{"type":"progress","percent":42}   — clone progress (0-100)
@@ -331,7 +329,7 @@ func (h *ProjectHandler) HandleStats(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 	}
 }
 
@@ -690,7 +688,7 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 	}
 }
 

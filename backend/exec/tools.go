@@ -155,11 +155,10 @@ func makeRootCallbacks(root *os.Root, worktreePath string) (readFunc, writeFunc)
 	return readCb, writeCb
 }
 
-// executeTool dispatches a tool call to the appropriate handler.
-// Sandbox callbacks are read from state.
-// When nil, os.Root provides folder isolation on the host.
-// ctx is used to cancel long-running operations (e.g., bash) when the task is stopped.
-// outputCallback, if non-nil, is called with incremental output for streaming tools (e.g., bash).
+// executeTool dispatches a tool call to its handler. Sandbox callbacks come from state; when
+// nil, os.Root provides folder isolation on the host. ctx cancels long-running tools (bash)
+// when the task stops, and outputCallback, if non-nil, receives incremental output from the
+// streaming tools.
 func (te *TaskExecutor) executeTool(ctx context.Context, name string, args map[string]any, worktreePath string, task *types.Task, state *executionState, outputCallback func(toolID string, text string)) (string, bool) {
 	result, ok := te.executeToolInner(ctx, name, args, worktreePath, task, state, outputCallback)
 	// A successful tool call proves the sandbox bridge is healthy (or unused),
@@ -1008,12 +1007,10 @@ func (te *TaskExecutor) handleLSPHover(ctx context.Context, args map[string]any,
 	return te.handleLSPSymbolRequest(ctx, args, worktreePath, "textDocument/hover", nil)
 }
 
-// handleLSPRename renames a symbol across files using the language server's
-// textDocument/rename. It validates renamability with prepareRename first,
-// then applies the returned WorkspaceEdit to every target file (all must be
-// inside the workspace). Writes go through the same sandbox-aware read/write
-// callbacks as write_file, so the rename lands as one checkpoint's worth of
-// changes in the task diff.
+// handleLSPRename renames a symbol across files with textDocument/rename, validating with
+// prepareRename first and then applying the returned WorkspaceEdit to every target file (all
+// must be inside the workspace). Writes go through the same sandbox-aware callbacks as
+// write_file, so a rename lands as one checkpoint's worth of changes in the task diff.
 func (te *TaskExecutor) handleLSPRename(ctx context.Context, args map[string]any, worktreePath string, read readFunc, write writeFunc) (string, error) {
 	if te.lspMgr == nil {
 		return "", fmt.Errorf("LSP manager not available")

@@ -164,7 +164,7 @@ func (h *LSPHandler) Close() {
 // running the language server for a workspace+file (query params: workspace, file).
 func (h *LSPHandler) HandleSandboxMemory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 

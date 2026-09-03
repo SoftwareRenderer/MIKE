@@ -13,14 +13,13 @@ import (
 	"kanban/backend/types"
 )
 
-// mapSensitiveConfig applies transform to every config value the schema declares sensitive
-// and copies the rest unchanged. Encrypting, decrypting and masking all share it, including
-// the guard: with no schema nothing is known to be secret, so nothing is touched — guessing
-// by key name would encrypt a non-secret.
+// mapSensitiveConfig applies transform to every config value the schema declares sensitive and
+// copies the rest unchanged. Encrypting, decrypting and masking share it, including the guard:
+// with no schema nothing is known to be secret, so nothing is touched — guessing by key name
+// would encrypt a non-secret. A transform returns ok=false to leave a value alone.
 //
-// A transform returns ok=false to leave a value alone. The result is always a copy: these
-// maps reach both the store and the browser, and mutating the input could leak a decrypted
-// secret into a cached response.
+// The result is always a copy: these maps reach both the store and the browser, and mutating the
+// input could leak a decrypted secret into a cached response.
 func mapSensitiveConfig(config map[string]any, schema *ConfigSchema, transform func(value any) (any, bool)) map[string]any {
 	if schema == nil || len(schema.Properties) == 0 || config == nil {
 		return config
