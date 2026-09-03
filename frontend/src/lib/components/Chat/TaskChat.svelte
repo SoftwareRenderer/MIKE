@@ -28,7 +28,7 @@
     import ReviewBar from './ReviewBar.svelte';
     import StartPanel from './StartPanel.svelte';
 
-    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskTitle = '', taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskTitle?: string; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean } = $props();
+    let { projectId, taskId, taskPrompt = '', taskStatus = 'backlog', taskExecutionState = '', disabled = false, taskSummarizing = false, hasStagedChanges: hasStagedChangesProp, onRefreshDiff, onMoveTask, onThreadSwitch, onViewChanges, onInvalidateDiff, onToggleFullscreen, isChatFullscreen }: { projectId: string; taskId: string; taskPrompt?: string; taskStatus?: string; taskExecutionState?: string; disabled?: boolean; taskSummarizing?: boolean; hasStagedChanges?: boolean; onRefreshDiff?: (data: DiffData) => void; onMoveTask?: (status: string) => void; onThreadSwitch?: () => void; onViewChanges?: (commitHash: string) => void; onInvalidateDiff?: () => void; onToggleFullscreen?: () => void; isChatFullscreen?: boolean } = $props();
 
     let connected = $state(false);
     let connecting = $state(true);
@@ -246,11 +246,6 @@
     }
     async function handleMsgSend(msgId: string, origContent: string, newContent: string, atts?: Array<{ mimeType: string; data: string }>) {
         await handleEditSend(msgId, origContent, newContent, atts);
-    }
-    async function handleMsgEdit(msgId: string, newContent: string) {
-        await updateTaskMessage(projectId, taskId, msgId, newContent);
-        const entry = entries.find(e => e.id === msgId);
-        if (entry) entry.content = newContent;
     }
     function handleMsgNavigateTask(targetTaskId: string) {
         const task = appStore.board?.tasks.find(t => t.id === targetTaskId);
@@ -1425,7 +1420,6 @@
         onMsgDelete={handleMsgDelete}
         onMsgFork={handleMsgFork}
         onMsgSend={handleMsgSend}
-        onMsgEdit={handleMsgEdit}
         onRegenerate={handleRegenerate}
         onNavigateTask={handleMsgNavigateTask}
         {onViewChanges}
@@ -1503,17 +1497,6 @@
 </div>
 
 <style>
-    .sr-only {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border: 0;
-    }
 
     .task-chat {
         display: flex;

@@ -38,10 +38,19 @@ export class DialogStore {
         _resolve?: (value: boolean) => void;
     } | null>(null);
 
+    /** Pending dismissal — one toast at a time, so one timer at a time. */
+    private toastTimer: ReturnType<typeof setTimeout> | null = null;
+
     /** Show a toast message that auto-dismisses after `duration` ms. */
     public showToast(message: string, type: 'error' | 'success' = 'error', duration = TOAST_DURATION_MS) {
+        // Without this, a toast shown while an older one is still counting down inherits
+        // the older timer and disappears on the previous toast's schedule.
+        if (this.toastTimer) clearTimeout(this.toastTimer);
         this.toast = { message, type };
-        setTimeout(() => this.toast = null, duration);
+        this.toastTimer = setTimeout(() => {
+            this.toastTimer = null;
+            this.toast = null;
+        }, duration);
     }
 
     /**

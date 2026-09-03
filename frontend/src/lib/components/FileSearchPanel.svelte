@@ -8,9 +8,8 @@
         text?: string;
     }
 
-    let { projectId, projectPath, taskId, onFileSelected, onClose }: {
+    let { projectId, taskId, onFileSelected, onClose }: {
         projectId: string;
-        projectPath: string;
         taskId?: string;
         onFileSelected: (path: string, line?: number) => void;
         onClose: () => void;

@@ -1,7 +1,7 @@
 import { expect, test, Page, Locator } from '@playwright/test';
 import { execSync } from 'child_process';
 import { existsSync, writeFileSync, mkdirSync, readFileSync, cpSync, readdirSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import http from 'node:http';
 
 /**
@@ -582,8 +582,11 @@ export function worktreeExists(projectId: string, taskId: string): boolean {
 
 export function writeFileInWorktree(projectId: string, taskId: string, filePath: string, content: string): void {
   const worktreePath = getWorktreePath(projectId, taskId);
-  mkdirSync(worktreePath, { recursive: true });
-  writeFileSync(`${worktreePath}/${filePath}`, content);
+  const target = join(worktreePath, filePath);
+  // The file's own directories, not just the worktree root: a fixture that edits a nested
+  // path (`src/lib/utils/format.ts`) would otherwise fail with ENOENT on the write.
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, content);
   // Stage the file so git detects it
   try {
     execSync(`cd ${worktreePath} && git add ${filePath}`);

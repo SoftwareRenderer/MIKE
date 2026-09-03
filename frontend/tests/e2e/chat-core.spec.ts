@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, waitForChatForm, waitForSendButton, sendMessage, csrfFetch, ensureChatForm, findProviderByRef, isolatedProject, gotoProject } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, waitForChatForm, waitForSendButton, sendMessage, csrfFetch, ensureChatForm, findProviderByRef, isolatedProject, gotoProject, waitForWorktree, writeFileInWorktree } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -291,7 +291,10 @@ test.describe('Chat Core', () => {
 
   test('should show Editing label and +X/-Y toggle for edit_file tool calls', async ({ page }) => {
     test.setTimeout(90000);
-    const taskId = await createTaskViaApi(page, projectId, `edit-file-${Date.now()}`);
+    // A keyword-free task prompt: "edit-file" matches the mock's `\bedit\b` route, so the
+    // initial turn would answer with this very fixture — same tool-call id, and the second
+    // card then replaces the first instead of adding to it.
+    const taskId = await createTaskViaApi(page, projectId, `seed-turn-${Date.now()}`);
     await navigateToTask(page, taskId);
     await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 10000 });
     await waitForChatForm(page);
@@ -299,6 +302,11 @@ test.describe('Chat Core', () => {
     // Not an early return: a skipped check is a green test that checks nothing. Wait for
     // the task to be idle (its own initial turn may still be running) and fail if it never is.
     await expect(page.locator('.btn-send'), 'the task is idle before sending').toBeVisible({ timeout: 60000 });
+
+    // Seed the file the fixture edits. The e2e repo is a README only, so an unseeded
+    // edit_file fails with "no such file or directory" and the card never appears.
+    await waitForWorktree(projectId, taskId);
+    writeFileInWorktree(projectId, taskId, 'src/lib/utils/format.ts', 'func one\nfunc two\n');
 
     const chatTextarea = page.locator('textarea[placeholder*="message"]');
     // Pinned, not keyworded: this needs the edit_file fixture specifically (the edit label
@@ -308,8 +316,7 @@ test.describe('Chat Core', () => {
     await chatTextarea.press('Enter');
     await expect(chatTextarea).toHaveValue('');
 
-    // The task's initial turn already put tool-call cards in this chat, so assert on the one
-    // that appears after the send (the last). `.first()` is the initial turn's card.
+    // Assert on the card that appears after the send (the last), not on any earlier entry's.
     const cards = page.locator('.tool-call-card');
     const cardsBefore = await cards.count();
 

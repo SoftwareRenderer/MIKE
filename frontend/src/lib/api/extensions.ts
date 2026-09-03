@@ -8,13 +8,6 @@ export async function listExtensions(): Promise<Extension[]> {
     return res.json();
 }
 
-/** Fetch a single extension by ID. */
-export async function getExtension(id: string): Promise<Extension> {
-    const res = await apiFetch(`${API_BASE}/extensions/${id}`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch extension');
-    return res.json();
-}
-
 /** Update an existing extension. */
 export async function updateExtension(id: string, data: {
     version?: string;
@@ -116,13 +109,6 @@ export async function checkUpdates(): Promise<ExtensionUpdate[]> {
 /** Stream SSE progress + final result for an image update (detached, like install). */
 export function updateExtensionImage(id: string): AsyncIterable<BuildProgressEvent> {
     return streamOperation(`/extensions/${id}/update`, {});
-}
-
-/** Get extension sandbox logs. */
-export async function getExtensionLogs(id: string): Promise<string> {
-    const res = await apiFetch(`${API_BASE}/extensions/${id}/logs`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch extension logs');
-    return res.text();
 }
 
 /** Build progress event from an operation's SSE stream. */
