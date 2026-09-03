@@ -22,14 +22,14 @@ type stdioConn struct {
 	w io.Writer
 }
 
-func (c *stdioConn) Read(b []byte) (int, error)          { return c.r.Read(b) }
-func (c *stdioConn) Write(b []byte) (int, error)         { return c.w.Write(b) }
-func (c *stdioConn) Close() error                        { return nil }
-func (c *stdioConn) LocalAddr() net.Addr                 { return &net.UnixAddr{Net: "unix", Name: "stdin"} }
-func (c *stdioConn) RemoteAddr() net.Addr                { return &net.UnixAddr{Net: "unix", Name: "stdout"} }
-func (c *stdioConn) SetDeadline(t time.Time) error       { return nil }
-func (c *stdioConn) SetReadDeadline(t time.Time) error   { return nil }
-func (c *stdioConn) SetWriteDeadline(t time.Time) error  { return nil }
+func (c *stdioConn) Read(b []byte) (int, error)         { return c.r.Read(b) }
+func (c *stdioConn) Write(b []byte) (int, error)        { return c.w.Write(b) }
+func (c *stdioConn) Close() error                       { return nil }
+func (c *stdioConn) LocalAddr() net.Addr                { return &net.UnixAddr{Net: "unix", Name: "stdin"} }
+func (c *stdioConn) RemoteAddr() net.Addr               { return &net.UnixAddr{Net: "unix", Name: "stdout"} }
+func (c *stdioConn) SetDeadline(t time.Time) error      { return nil }
+func (c *stdioConn) SetReadDeadline(t time.Time) error  { return nil }
+func (c *stdioConn) SetWriteDeadline(t time.Time) error { return nil }
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)

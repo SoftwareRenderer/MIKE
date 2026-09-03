@@ -31,16 +31,7 @@ func (s *Store) queryThreads(where string, args ...any) ([]types.TaskThread, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	threads := []types.TaskThread{}
-	for rows.Next() {
-		var th types.TaskThread
-		if err := scanTaskThread(rows, &th); err != nil {
-			return nil, err
-		}
-		threads = append(threads, th)
-	}
-	return threads, rows.Err()
+	return scanRows(rows, scanInto(scanTaskThread))
 }
 
 // GetThreadsByTask returns all threads for a task ordered by creation time.
@@ -126,7 +117,9 @@ func (s *Store) DeleteThread(threadID string) error {
 	return err
 }
 
-// GetAllThreadIDs returns all thread IDs across all tasks.
+// GetAllThreadIDs returns every thread id across all tasks. A row that will not scan
+// fails the call rather than being skipped: the branch GC reads a missing id as an
+// orphan and deletes the branch.
 func (s *Store) GetAllThreadIDs() ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -134,16 +127,7 @@ func (s *Store) GetAllThreadIDs() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	ids := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			continue
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+	return scanColumn[string](rows)
 }
 
 // UpdateThreadWorktreeStashHash saves the worktree stash hash for a thread.
@@ -216,18 +200,14 @@ func (s *Store) entryCutoffLocked(sourceThreadID, upToMessageID string) (string,
 	if err != nil {
 		return "", fmt.Errorf("list thread messages: %w", err)
 	}
-	defer rows.Close()
 
-	var threadRows []entryRow
-	for rows.Next() {
-		var r entryRow
-		if err := rows.Scan(&r.id, &r.role, &r.createdAt, &r.assistantMsgID); err != nil {
-			return "", fmt.Errorf("scan thread message: %w", err)
-		}
-		threadRows = append(threadRows, r)
-	}
-	if err := rows.Err(); err != nil {
-		return "", fmt.Errorf("iterate thread messages: %w", err)
+	threadRows, err := scanRows(rows, func(r *sql.Rows) (entryRow, error) {
+		var row entryRow
+		err := r.Scan(&row.id, &row.role, &row.createdAt, &row.assistantMsgID)
+		return row, err
+	})
+	if err != nil {
+		return "", fmt.Errorf("list thread messages: %w", err)
 	}
 
 	idx := -1

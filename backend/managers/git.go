@@ -326,25 +326,6 @@ func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, branches)
 }
 
-// HandleBranch returns the current branch name for a project.
-func (h *GitHandler) HandleBranch(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("projectID")
-	project, err := h.store.GetProject(projectID)
-	if err != nil {
-		httputil.Fail(w, err, "get project", "project not found")
-		return
-	}
-	c := exec.Command("git", "-C", project.Path, "rev-parse", "--abbrev-ref", "HEAD")
-	out, err := c.CombinedOutput()
-	branch := strings.TrimSpace(string(out))
-	if err != nil {
-		// Not a git repo or other error
-		httputil.JSONResponse(w, http.StatusOK, map[string]string{"branch": ""})
-		return
-	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"branch": branch})
-}
-
 // HandleDiff returns diff between refs.
 // Supports:
 //   - ?ref=X         — git diff X (working tree vs ref, legacy)
@@ -572,7 +553,7 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 	httputil.JSONResponse(w, http.StatusOK, resp)
 }
 
-// HandleCheckout checks out a branch.
+// HandleCheckout checks out a branch in the project's own checkout.
 func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	project, err := h.store.GetProject(projectID)
@@ -580,13 +561,8 @@ func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 		httputil.Fail(w, err, "get project", "project not found")
 		return
 	}
-	var req types.GitCheckoutRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-	if err := types.ValidateBranchName(req.Branch); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+	branch, ok := checkoutBranchFrom(w, r)
+	if !ok {
 		return
 	}
 	// Acquire per-project mutex to serialize project-level git operations.
@@ -595,13 +571,41 @@ func (h *GitHandler) HandleCheckout(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 	}
-	c := exec.Command("git", "-C", project.Path, "checkout", req.Branch)
-	if out, err := c.CombinedOutput(); err != nil {
-		log.Printf("git checkout failed: %v: %s", err, out)
-		httputil.JSONError(w, http.StatusInternalServerError, "git checkout failed")
+	if !runCheckout(w, project.Path, branch) {
 		return
 	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"branch": req.Branch})
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"branch": branch})
+}
+
+// checkoutBranchFrom reads and validates the branch out of a checkout request body.
+// Both checkout endpoints take the same body, and the branch is a `git checkout`
+// argument, so the validation lives with the shared runner rather than being copied
+// per endpoint. On refusal the response is written and false is returned.
+func checkoutBranchFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var req types.GitCheckoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, "branch is required")
+		return "", false
+	}
+	if err := types.ValidateBranchName(req.Branch); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return "", false
+	}
+	return req.Branch, true
+}
+
+// runCheckout switches the checkout in dir to branch. A refusal says so with git's
+// own reason, capped: "your local changes would be overwritten by checkout" is the
+// answer the user needs, while git's full output is pages of paths on the server's
+// filesystem. The unsanitised output always goes to the log.
+func runCheckout(w http.ResponseWriter, dir, branch string) bool {
+	out, err := exec.Command("git", "-C", dir, "checkout", branch).CombinedOutput()
+	if err != nil {
+		log.Printf("git checkout failed in %s: %v: %s", dir, err, out)
+		httputil.JSONError(w, http.StatusInternalServerError, "git checkout failed: "+gitErrorSummary(out))
+		return false
+	}
+	return true
 }
 
 // gitErrorSummary returns a trimmed, length-capped summary
@@ -710,29 +714,14 @@ func (h *GitHandler) HandleTaskCommits(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, result)
 }
 
-// getTaskCommitsFromProject runs git log from the project repo using the task's branch.
-// Uses BranchTip (captured at commit-and-done time) if available, otherwise falls back to Branch.
+// getTaskCommitsFromProject answers the commit list from the project checkout for a task
+// whose worktree is gone (after commit-and-done). It is the same log the worktree answers
+// with — same refs, same parser — so switching between the two cannot show a different
+// history. Head comes from BranchTip when captured at commit time, else Branch.
 func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Task, baseRef string) (*git.TaskCommitsResult, error) {
 	project, err := h.store.GetProject(projectID)
 	if err != nil {
 		return nil, err
-	}
-
-	result := &git.TaskCommitsResult{Commits: []git.TaskCommit{}}
-
-	// Get base commit info
-	baseOut, err := exec.Command("git", "-C", project.Path, "log", "--format=%H|%h|%s|%aI", "-1", baseRef).CombinedOutput()
-	if err == nil {
-		line := strings.TrimSpace(string(baseOut))
-		parts := strings.SplitN(line, "|", 4)
-		if len(parts) == 4 {
-			result.BaseCommit = &git.TaskCommit{
-				Hash:    parts[0],
-				Short:   parts[1],
-				Subject: parts[2],
-				Date:    parts[3],
-			}
-		}
 	}
 
 	// Use branch tip captured at commit time, or fall back to branch name
@@ -740,29 +729,12 @@ func (h *GitHandler) getTaskCommitsFromProject(projectID string, task *types.Tas
 	if target == "" {
 		target = task.Branch
 	}
-	ref := fmt.Sprintf("%s..%s", baseRef, target)
-	out, err := exec.Command("git", "-C", project.Path, "log", "--format=%H|%h|%s|%aI", ref).CombinedOutput()
-	if err != nil {
-		// Branch may not exist (e.g., orphaned worktree). Return empty commits.
-		log.Printf("[git] task=%s branch %s not found in project, returning empty commits: %v", task.ID, target, err)
-		return result, nil
-	}
 
-	for line := range strings.SplitSeq(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "|", 4)
-		if len(parts) != 4 {
-			continue
-		}
-		result.Commits = append(result.Commits, git.TaskCommit{
-			Hash:    parts[0],
-			Short:   parts[1],
-			Subject: parts[2],
-			Date:    parts[3],
-		})
+	result, err := git.TaskCommitsIn(project.Path, baseRef, target)
+	if err != nil {
+		// Branch may not exist (orphaned worktree): answer with no commits.
+		log.Printf("[git] task=%s branch %s not found in project, returning empty commits: %v", task.ID, target, err)
+		return &git.TaskCommitsResult{Commits: []git.TaskCommit{}}, nil
 	}
 	return result, nil
 }
@@ -1466,6 +1438,10 @@ func (h *GitHandler) HandleTaskBranches(w http.ResponseWriter, r *http.Request) 
 func (h *GitHandler) HandleTaskCheckout(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
 	_, err := h.store.GetTask(projectID, taskID)
 	if err != nil {
@@ -1479,28 +1455,19 @@ func (h *GitHandler) HandleTaskCheckout(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	branch, ok := checkoutBranchFrom(w, r)
+	if !ok {
 		return
 	}
-	var req struct {
-		Branch string `json:"branch"`
+	// A checkout rewrites the whole worktree, so it takes the same per-task mutex as
+	// every other worktree mutation (reset, stage).
+	if h.getWorktreeMutex != nil {
+		mu := h.getWorktreeMutex(taskID)
+		mu.Lock()
+		defer mu.Unlock()
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Branch == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "branch is required")
+	if !runCheckout(w, worktreePath, branch) {
 		return
 	}
-	if err := types.ValidateBranchName(req.Branch); err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	c := exec.Command("git", "-C", worktreePath, "checkout", req.Branch)
-	out, err := c.CombinedOutput()
-	if err != nil {
-		log.Printf("git checkout failed: %v: %s", err, out)
-		httputil.JSONError(w, http.StatusInternalServerError, fmt.Sprintf("git checkout failed: %s", out))
-		return
-	}
-	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "checked out", "branch": req.Branch})
+	httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "checked out", "branch": branch})
 }

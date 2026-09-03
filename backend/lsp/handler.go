@@ -187,14 +187,10 @@ func (h *LSPHandler) HandleSandboxMemory(w http.ResponseWriter, r *http.Request)
 
 // HandleLSP is the HTTP handler for the LSP WebSocket endpoint at /api/lsp.
 func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		// Origin verification is enabled by default: the browser must connect
-		// from the same host (or an explicitly listed pattern). This prevents
-		// cross-site WebSocket hijacking.
-		CompressionMode: websocket.CompressionContextTakeover,
-	})
-	if err != nil {
-		log.Printf("[lsp] accept error: %v", err)
+	// Origin checking lives in httputil.AcceptWS; this endpoint hands out a workspace's
+	// language servers.
+	conn, ok := httputil.AcceptWS(w, r, "lsp")
+	if !ok {
 		return
 	}
 
@@ -255,33 +251,11 @@ func (h *LSPHandler) HandleLSP(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[lsp] client %d connected", clientID)
 
-	// Ping/pong keepalive
-	// If a ping fails, cancel the read context to unblock Read() and close the connection.
+	// A failed ping cancels the read context, which is what unblocks the Read loop below:
+	// a peer that stopped talking never closes the connection itself.
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	go func() {
-		ticker := time.NewTicker(27 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
-				err := conn.Ping(pingCtx)
-				if err == nil {
-					// Control Ping/Pong frames are transparent to JS and don't reset
-					// the client-side stale-detection timer.
-					_ = conn.Write(pingCtx, websocket.MessageText, []byte(`{"type":"ping"}`))
-				}
-				pingCancel()
-				if err != nil {
-					cancel() // unblock Read() to tear down the connection
-					return
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	httputil.Keepalive(ctx, conn, nil, cancel)
 
 	// Read loop — handle client messages
 	for {

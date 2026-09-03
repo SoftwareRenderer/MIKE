@@ -158,12 +158,12 @@ type agentConn struct {
 type SandboxManager struct {
 	mu            sync.Mutex
 	rt            *sandboxruntime.Runtime
-	active        map[string]string          // taskID -> containerName
-	mountPaths    map[string]string          // taskID -> mount path inside container
-	agents        map[string]*agentConn      // taskID -> agent pipes + process
-	clients       map[string]*sandbox.Client // taskID -> agent client (cached)
-	livenessCache map[string]time.Time       // taskID -> last time running was confirmed
-	cgroupDirs    map[string]string          // taskID -> cgroup v2 dir (resolved once per container)
+	active        map[string]string             // taskID -> containerName
+	mountPaths    map[string]string             // taskID -> mount path inside container
+	agents        map[string]*agentConn         // taskID -> agent pipes + process
+	clients       map[string]*sandbox.Client    // taskID -> agent client (cached)
+	livenessCache map[string]time.Time          // taskID -> last time running was confirmed
+	mem           *sandboxruntime.MemoryTracker // taskID -> container memory, via containerName
 	// imageOps holds in-flight image builds/pulls by image ref, so concurrent sandbox starts share
 	// one build. imageOpsMu is separate from mu: a build runs for minutes and must not block the
 	// container maps.
@@ -182,7 +182,7 @@ func NewSandboxManager() *SandboxManager {
 		agents:        make(map[string]*agentConn),
 		clients:       make(map[string]*sandbox.Client),
 		livenessCache: make(map[string]time.Time),
-		cgroupDirs:    make(map[string]string),
+		mem:           sandboxruntime.NewMemoryTracker(rt),
 		imageOps:      make(map[string]*imageOp),
 	}
 	sm.available = sm.checkAvailable()
@@ -883,8 +883,10 @@ func (sm *SandboxManager) Stop(taskID string) error {
 		delete(sm.agents, taskID)
 	}
 	delete(sm.livenessCache, taskID)
-	delete(sm.cgroupDirs, taskID)
 	sm.mu.Unlock()
+	if ok {
+		sm.mem.Forget(containerName)
+	}
 
 	// Close agent client
 	if client != nil {
@@ -1005,42 +1007,19 @@ func (sm *SandboxManager) ActiveTaskIDs() []string {
 func (sm *SandboxManager) GetMemoryStats(taskID string) *types.SandboxMemoryStats {
 	sm.mu.Lock()
 	name, tracked := sm.active[taskID]
-	dir := sm.cgroupDirs[taskID]
 	sm.mu.Unlock()
 
 	if !tracked {
 		return &types.SandboxMemoryStats{}
 	}
 
-	if dir == "" {
-		var err error
-		dir, err = sm.rt.ContainerCgroupDir(name)
-		if err != nil {
-			return &types.SandboxMemoryStats{}
-		}
-		sm.mu.Lock()
-		if sm.cgroupDirs[taskID] == "" {
-			sm.cgroupDirs[taskID] = dir
-		}
-		sm.mu.Unlock()
-	}
-
-	mem, err := sandboxruntime.ReadCgroupMemory(dir)
-	if err != nil {
-		// cgroup gone (container stopped or removed) — drop the cached dir so
-		// the next call re-resolves it.
-		sm.mu.Lock()
-		delete(sm.cgroupDirs, taskID)
-		sm.mu.Unlock()
-		return &types.SandboxMemoryStats{}
-	}
-
+	usage := sm.mem.Usage(name)
 	return &types.SandboxMemoryStats{
-		Running:   true,
-		CurrentMB: mem.CurrentBytes >> 20,
-		LimitMB:   mem.MaxBytes >> 20,
-		PeakMB:    mem.PeakBytes >> 20,
-		OOMKills:  mem.OOMKills,
+		Running:   usage.Known,
+		CurrentMB: usage.Current,
+		LimitMB:   usage.Limit,
+		PeakMB:    usage.Peak,
+		OOMKills:  usage.OOMKills,
 	}
 }
 
@@ -1066,16 +1045,28 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 	image = sm.rt.ResolveImageRef(image)
 	log.Printf("[sandbox] pulling image %s", image)
 
-	c := exec.Command("podman", "pull", image)
-	// Merge stdout+stderr into a single pipe for streaming
-	pr, pw := io.Pipe()
-	c.Stdout = pw
-	c.Stderr = pw
+	if err := sm.streamPodman(exec.Command("podman", "pull", image), "pull", image, "pull", onProgress); err != nil {
+		return err
+	}
+	log.Printf("[sandbox] image %s pulled", image)
+	return nil
+}
 
-	if err := c.Start(); err != nil {
+// streamPodman runs a podman command whose output is worth watching while it happens — a
+// pull or a build takes minutes. stdout and stderr share one pipe because podman writes
+// progress to stderr, and one interleaved stream renders readably.
+//
+// onProgress may be nil; every line is logged under logTag either way. The error names op
+// and image so a caller can show it as-is.
+func (sm *SandboxManager) streamPodman(cmd *exec.Cmd, op, image, logTag string, onProgress func(line string)) error {
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	if err := cmd.Start(); err != nil {
 		pw.Close()
 		pr.Close()
-		return fmt.Errorf("start pull: %w", err)
+		return fmt.Errorf("start %s: %w", op, err)
 	}
 
 	// Stream output line by line
@@ -1086,16 +1077,15 @@ func (sm *SandboxManager) PullImageWithProgress(image string, onProgress func(li
 			if onProgress != nil {
 				onProgress(line)
 			}
-			log.Printf("[sandbox] pull: %s", line)
+			log.Printf("[sandbox] %s: %s", logTag, line)
 		}
 	}()
 
-	waitErr := c.Wait()
+	waitErr := cmd.Wait()
 	pw.Close() // signal EOF to reader goroutine
 	if waitErr != nil {
-		return fmt.Errorf("pull image %s: %w", image, waitErr)
+		return fmt.Errorf("%s image %s: %w", op, image, waitErr)
 	}
-	log.Printf("[sandbox] image %s pulled", image)
 	return nil
 }
 
@@ -1187,34 +1177,8 @@ func (sm *SandboxManager) BuildImageWithOptions(projectName, dockerfilePath stri
 
 	// Build the image with streaming output
 	log.Printf("[sandbox] project=%s building image %s from %s (no_cache=%v)", projectName, imageName, dockerfilePath, opts.NoCache)
-	c := exec.Command("podman", buildPodmanBuildArgs(imageName, tmpDir, opts.NoCache)...)
-	// Merge stdout+stderr into a single pipe for streaming
-	pr, pw := io.Pipe()
-	c.Stdout = pw
-	c.Stderr = pw
-
-	if err := c.Start(); err != nil {
-		pw.Close()
-		pr.Close()
-		return fmt.Errorf("start build: %w", err)
-	}
-
-	// Stream output line by line
-	go func() {
-		scanner := bufio.NewScanner(pr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if onProgress != nil {
-				onProgress(line)
-			}
-			log.Printf("[sandbox] build: %s", line)
-		}
-	}()
-
-	waitErr := c.Wait()
-	pw.Close() // signal EOF to reader goroutine
-	if waitErr != nil {
-		return fmt.Errorf("build image %s: %w", imageName, waitErr)
+	if err := sm.streamPodman(exec.Command("podman", buildPodmanBuildArgs(imageName, tmpDir, opts.NoCache)...), "build", imageName, "build", onProgress); err != nil {
+		return err
 	}
 	log.Printf("[sandbox] project=%s image %s built successfully", projectName, imageName)
 	return nil
