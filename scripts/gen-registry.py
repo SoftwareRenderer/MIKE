@@ -151,16 +151,14 @@ def simplify_capabilities(manifest_caps):
             note = (sandbox.get('environment') or {}).get('note')
             if note:
                 kept['environment_note'] = note
-            # Where this server reads its resolved dependencies from, and whether it would write
-            # there. Projected so the *pre-install* view can disclose that installing this reads a
-            # directory on the user's machine — the host path itself never comes from here.
+            # Where this server reads its resolved dependencies from. Projected so the *pre-install*
+            # view can disclose that installing this reads a directory on the user's machine — the host
+            # path itself never comes from here, and neither does a write permission: the extension's
+            # own container always reads the directory, and `read_only` is no longer projected because
+            # nothing reads it.
             dep = sandbox.get('dependency_cache')
             if isinstance(dep, dict) and dep.get('container_path') and dep.get('env'):
-                projected = {'container_path': dep['container_path'], 'env': dep['env']}
-                # read_only defaults to true, and is projected explicitly so a false (warming) is
-                # never lost to a default the reader has to remember.
-                projected['read_only'] = dep.get('read_only', True)
-                kept['dependency_cache'] = projected
+                kept['dependency_cache'] = {'container_path': dep['container_path'], 'env': dep['env']}
             if kept:
                 result['lsp'] = kept
         elif key in ('css', 'agent'):
