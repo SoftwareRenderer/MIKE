@@ -168,22 +168,22 @@ func (s *Store) BackfillSessionTokens(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("scan legacy sessions: %w", err)
 	}
 	var pending []legacyRow
-	for rows.Next() {
-		var r legacyRow
-		if err := rows.Scan(&r.id, &r.token); err != nil {
-			rows.Close()
-			return 0, fmt.Errorf("scan legacy session row: %w", err)
-		}
+	// Read fully before any UPDATE: the pool is one connection, and scanRows closes the
+	// result before the first write.
+	all, err := scanRows(rows, func(r *sql.Rows) (legacyRow, error) {
+		var row legacyRow
+		err := r.Scan(&row.id, &row.token)
+		return row, err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("scan legacy sessions: %w", err)
+	}
+	for _, r := range all {
 		if r.token == "" {
 			continue // nothing to derive a digest from; already unusable
 		}
 		pending = append(pending, r)
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return 0, fmt.Errorf("scan legacy sessions: %w", err)
-	}
-	rows.Close()
 
 	n := 0
 	for _, r := range pending {
@@ -227,35 +227,36 @@ func (s *Store) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
-	defer rows.Close()
-
-	var out []SessionInfo
-	for rows.Next() {
-		var (
-			id                string
-			createdAt, seenAt int64
-			expiresAt         int64
-			ip, userAgent     string
-		)
-		if err := rows.Scan(&id, &createdAt, &seenAt, &expiresAt, &ip, &userAgent); err != nil {
-			return nil, fmt.Errorf("scan session row: %w", err)
-		}
-		info := SessionInfo{
-			ID:        id,
-			CreatedAt: time.Unix(createdAt, 0),
-			ExpiresAt: time.Unix(expiresAt, 0),
-			IP:        ip,
-			UserAgent: userAgent,
-		}
-		if seenAt > 0 {
-			info.LastSeen = time.Unix(seenAt, 0)
-		}
-		out = append(out, info)
-	}
-	if err := rows.Err(); err != nil {
+	sessions, err := scanRows(rows, scanSessionRow)
+	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
-	return out, nil
+	return sessions, nil
+}
+
+// scanSessionRow reads one session row. Timestamps are stored as unix seconds, and a
+// session that has never been used has last_seen 0 — a zero time, not the epoch.
+func scanSessionRow(r *sql.Rows) (SessionInfo, error) {
+	var (
+		id                string
+		createdAt, seenAt int64
+		expiresAt         int64
+		ip, userAgent     string
+	)
+	if err := r.Scan(&id, &createdAt, &seenAt, &expiresAt, &ip, &userAgent); err != nil {
+		return SessionInfo{}, fmt.Errorf("scan session row: %w", err)
+	}
+	info := SessionInfo{
+		ID:        id,
+		CreatedAt: time.Unix(createdAt, 0),
+		ExpiresAt: time.Unix(expiresAt, 0),
+		IP:        ip,
+		UserAgent: userAgent,
+	}
+	if seenAt > 0 {
+		info.LastSeen = time.Unix(seenAt, 0)
+	}
+	return info, nil
 }
 
 // DeleteSessionByID revokes a single session. Returns false when no session

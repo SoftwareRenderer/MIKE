@@ -12,11 +12,15 @@ import (
 	"kanban/backend/types"
 )
 
-// encryptConfigValues encrypts sensitive config values based on the manifest's config_schema.
-// Only string values for properties marked as sensitive are encrypted.
-// Non-string values are converted to string for encryption.
-// Returns a new map with encrypted values.
-func encryptConfigValues(config map[string]any, schema *ConfigSchema) map[string]any {
+// mapSensitiveConfig applies transform to every config value the schema declares sensitive
+// and copies the rest unchanged. Encrypting, decrypting and masking all share it, including
+// the guard: with no schema nothing is known to be secret, so nothing is touched — guessing
+// by key name would encrypt a non-secret.
+//
+// A transform returns ok=false to leave a value alone. The result is always a copy: these
+// maps reach both the store and the browser, and mutating the input could leak a decrypted
+// secret into a cached response.
+func mapSensitiveConfig(config map[string]any, schema *ConfigSchema, transform func(value any) (any, bool)) map[string]any {
 	if schema == nil || len(schema.Properties) == 0 || config == nil {
 		return config
 	}
@@ -28,47 +32,42 @@ func encryptConfigValues(config map[string]any, schema *ConfigSchema) map[string
 			result[k] = v
 			continue
 		}
-		// Convert value to string for encryption
-		strVal := fmt.Sprintf("%v", v)
-		encrypted, err := crypto.Encrypt(strVal)
-		if err != nil {
-			// If encryption fails, store as-is (graceful degradation)
-			result[k] = v
-		} else {
-			result[k] = encrypted
+		if mapped, ok := transform(v); ok {
+			result[k] = mapped
+			continue
 		}
+		result[k] = v
 	}
 	return result
 }
 
-// decryptConfigValues decrypts sensitive config values based on the manifest's config_schema.
-// Returns a new map with decrypted values.
-func decryptConfigValues(config map[string]any, schema *ConfigSchema) map[string]any {
-	if schema == nil || len(schema.Properties) == 0 || config == nil {
-		return config
-	}
-
-	result := make(map[string]any, len(config))
-	for k, v := range config {
-		prop := schema.GetProperty(k)
-		if prop == nil || !prop.Sensitive {
-			result[k] = v
-			continue
+// encryptConfigValues encrypts sensitive config values based on the manifest's config_schema.
+// A value that fails to encrypt is stored as-is (graceful degradation).
+func encryptConfigValues(config map[string]any, schema *ConfigSchema) map[string]any {
+	return mapSensitiveConfig(config, schema, func(v any) (any, bool) {
+		encrypted, err := crypto.Encrypt(fmt.Sprintf("%v", v))
+		if err != nil {
+			return nil, false
 		}
+		return encrypted, true
+	})
+}
+
+// decryptConfigValues decrypts sensitive config values based on the manifest's config_schema.
+// Returns a new map with decrypted values. Anything that is not a non-empty
+// decryptable string is left as-is (it may be plain text stored before encryption).
+func decryptConfigValues(config map[string]any, schema *ConfigSchema) map[string]any {
+	return mapSensitiveConfig(config, schema, func(v any) (any, bool) {
 		strVal, okStr := v.(string)
 		if !okStr || strVal == "" {
-			result[k] = v
-			continue
+			return nil, false
 		}
 		decrypted, err := crypto.Decrypt(strVal)
 		if err != nil {
-			// If decryption fails, leave as-is (may be plain text from before encryption)
-			result[k] = v
-		} else {
-			result[k] = decrypted
+			return nil, false
 		}
-	}
-	return result
+		return decrypted, true
+	})
 }
 
 // rawSQL is this package's whole database need. The extensions table is its schema, not the

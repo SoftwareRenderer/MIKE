@@ -244,27 +244,53 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	var totalPromptTokens, totalPredictedTokens int
 	compactCh := te.getCompactCh(task.ID)
 
-	// Query initial stats
-	statsCtx, statsCancel := context.WithCancel(ctx)
-	defer statsCancel()
-	statsCtxInner, cancel := context.WithTimeout(statsCtx, 3*time.Second)
-	initialStats := runner.QueryStats(statsCtxInner)
-	cancel()
-	if initialStats.ContextWindow > 0 {
-		cost := initialStats.Cost
+	// sendAgentStats publishes a session-stats event. Every field is a cumulative
+	// session total, except cost: some agents report no cost in stats, so it falls back
+	// to the per-message accumulation.
+	sendAgentStats := func(stats pkgagent.SessionStatsData) {
+		if stats.ContextWindow <= 0 {
+			return
+		}
+		cost := stats.Cost
 		if cost <= 0 {
 			cost = runner.SessionCost()
 		}
 		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-			"model_name":       runner.ModelName(),
-			"prompt_tokens":    initialStats.TotalInput,
-			"predicted_tokens": initialStats.TotalOutput,
-			"context_used":     initialStats.ContextTokens,
-			"context_limit":    initialStats.ContextWindow,
-			"context_percent":  initialStats.ContextPercent,
-			"cost":             cost,
+			"model_name":         runner.ModelName(),
+			"prompt_tokens":      stats.TotalInput,
+			"predicted_tokens":   stats.TotalOutput,
+			"context_used":       stats.ContextTokens,
+			"context_limit":      stats.ContextWindow,
+			"context_percent":    stats.ContextPercent,
+			"cost":               cost,
+			"cache_read_tokens":  stats.TotalCacheRead,
+			"cache_write_tokens": stats.TotalCacheWrite,
 		}})
 	}
+
+	// sendAgentComplete clears the frontend's streaming state. Its token figures are
+	// per-turn sums, and a persist entry carries no cache count, so cache_tokens stays 0
+	// here — cumulative cache numbers belong in the stats event.
+	sendAgentComplete := func(state types.ExecutionState, promptTokens, predictedTokens int, turnDuration time.Duration) {
+		te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
+			"state":            state,
+			"summary":          "Agent finished",
+			"model_name":       runner.ModelName(),
+			"prompt_tokens":    promptTokens,
+			"predicted_tokens": predictedTokens,
+			"cache_tokens":     0,
+			"prompt_ms":        0,
+			"predicted_ms":     0,
+			"duration":         turnDuration.Milliseconds(),
+		}})
+	}
+
+	// Query initial stats
+	statsCtx, statsCancel := context.WithCancel(ctx)
+	defer statsCancel()
+	statsCtxInner, cancel := context.WithTimeout(statsCtx, 3*time.Second)
+	sendAgentStats(runner.QueryStats(statsCtxInner))
+	cancel()
 
 	// Periodically query agent session stats.
 	statsTicker := time.NewTicker(5 * time.Second)
@@ -276,25 +302,8 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 				return
 			case <-statsTicker.C:
 				statsCtxInner, cancel := context.WithTimeout(statsCtx, 3*time.Second)
-				stats := runner.QueryStats(statsCtxInner)
+				sendAgentStats(runner.QueryStats(statsCtxInner))
 				cancel()
-				if stats.ContextWindow > 0 {
-					// Use per-message cost accumulation as fallback when get_session_stats
-					// returns NaN/null cost (Pi agent bug: usage.cost.total missing from entries).
-					cost := stats.Cost
-					if cost <= 0 {
-						cost = runner.SessionCost()
-					}
-					te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeStats, Data: map[string]any{
-						"model_name":       runner.ModelName(),
-						"prompt_tokens":    stats.TotalInput,
-						"predicted_tokens": stats.TotalOutput,
-						"context_used":     stats.ContextTokens,
-						"context_limit":    stats.ContextWindow,
-						"cost":             cost,
-						"context_percent":  stats.ContextPercent,
-					}})
-				}
 			}
 		}
 	}()
@@ -390,17 +399,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 					// For normal idle (agentEnded=false), the loop stays alive for follow-ups.
 					// For terminal states (agentEnded=true), the loop exits and sends its own complete.
 					if !agentEnded {
-						te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-							"state":            task.ExecutionState,
-							"summary":          "Agent finished",
-							"model_name":       runner.ModelName(),
-							"prompt_tokens":    totalPromptTokens,
-							"predicted_tokens": totalPredictedTokens,
-							"cache_tokens":     0,
-							"prompt_ms":        0,
-							"predicted_ms":     0,
-							"duration":         time.Since(turnStartTime).Milliseconds(),
-						}})
+						sendAgentComplete(task.ExecutionState, totalPromptTokens, totalPredictedTokens, time.Since(turnStartTime))
 					}
 				}
 
@@ -482,17 +481,7 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 	te.storeTask(task, projectID)
 
 	// Broadcast complete event to clear streaming state on the frontend.
-	te.appStreamMgr.SendTaskEvent(projectID, task.ID, types.StreamEvent{Type: types.WSTypeComplete, Data: map[string]any{
-		"state":            task.ExecutionState,
-		"summary":          "Agent finished",
-		"model_name":       runner.ModelName(),
-		"prompt_tokens":    totalPromptTokens,
-		"predicted_tokens": totalPredictedTokens,
-		"cache_tokens":     0,
-		"prompt_ms":        0,
-		"predicted_ms":     0,
-		"duration":         duration.Milliseconds(),
-	}})
+	sendAgentComplete(task.ExecutionState, totalPromptTokens, totalPredictedTokens, duration)
 
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 

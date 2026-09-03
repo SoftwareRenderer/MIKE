@@ -38,7 +38,7 @@ export type ActionType =
     // Git
     | 'resetWorktree'
     // Config
-    | 'updateConfig' | 'resetProjectStats' | 'reloadPrompts'
+    | 'updateConfig' | 'resetProjectStats'
 
 
 let isOffline = false;
@@ -466,9 +466,6 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
         case 'resetProjectStats':
             await resetProjectStatsRaw(p.projectId, p.modelName, p.providerName);
             break;
-        case 'reloadPrompts':
-            await reloadPromptsRaw();
-            break;
         default: {
             const _exhaustive: never = action.type as never;
             console.warn('[Queue] Unknown action type:', _exhaustive);
@@ -753,15 +750,6 @@ async function resetWorktreeRaw(projectId: string, taskId: string, commitHash: s
         body: JSON.stringify({ commit_hash: commitHash }),
     });
     if (!res.ok) throw await apiError(res, 'Failed to reset worktree');
-    return res.json();
-}
-
-// -- Prompt endpoints --
-async function reloadPromptsRaw(): Promise<{ status: string; message: string; files: string[] }> {
-    const res = await apiFetch(`${API_BASE}/prompts/reload`, {
-        method: 'POST',
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to reload prompts');
     return res.json();
 }
 

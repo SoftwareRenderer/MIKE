@@ -92,16 +92,7 @@ func (s *Store) queryTasks(where string, args ...any) ([]types.Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	tasks := []types.Task{}
-	for rows.Next() {
-		var t types.Task
-		if err := scanTask(rows, &t); err != nil {
-			return nil, err
-		}
-		tasks = append(tasks, t)
-	}
-	return tasks, rows.Err()
+	return scanRows(rows, scanInto(scanTask))
 }
 
 // GetInFlightTasks returns all tasks whose execution state indicates an
@@ -323,16 +314,7 @@ func (s *Store) queryTaskStrings(query string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	values := []string{}
-	for rows.Next() {
-		var v string
-		if err := rows.Scan(&v); err != nil {
-			return nil, err
-		}
-		values = append(values, v)
-	}
-	return values, rows.Err()
+	return scanColumn[string](rows)
 }
 
 // GetAllTaskIDs returns all task IDs across all projects.

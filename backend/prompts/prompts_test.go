@@ -7,479 +7,213 @@ import (
 	"testing"
 )
 
-// --- Skill Frontmatter Parsing Tests ---
-
-func TestParseSkillFrontmatter(t *testing.T) {
-	tests := []struct {
-		name       string
-		input      string
-		wantName   string
-		wantDesc   string
-		wantNoName bool
-		wantNoDesc bool
-	}{
-		{
-			name: "basic frontmatter",
-			input: `---
-name: my-skill
-description: Does something useful.
----
-
-# My Skill
-
-Content here.
-`,
-			wantName: "my-skill",
-			wantDesc: "Does something useful.",
-		},
-		{
-			name: "quoted values",
-			input: `---
-name: "quoted-skill"
-description: "A skill with quotes."
----
-
-Content.
-`,
-			wantName: "quoted-skill",
-			wantDesc: "A skill with quotes.",
-		},
-		{
-			name: "extra frontmatter fields",
-			input: `---
-name: full-skill
-description: Full featured skill.
-license: MIT
-compatibility: go 1.21+
----
-
-Content.
-`,
-			wantName: "full-skill",
-			wantDesc: "Full featured skill.",
-		},
-		{
-			name: "missing name",
-			input: `---
-description: Has description but no name.
----
-`,
-			wantNoName: true,
-			wantDesc:   "Has description but no name.",
-		},
-		{
-			name: "missing description",
-			input: `---
-name: no-desc-skill
----
-`,
-			wantName:   "no-desc-skill",
-			wantNoDesc: true,
-		},
-		{
-			name:       "no frontmatter at all",
-			input:      "# Just markdown content",
-			wantNoName: true,
-			wantNoDesc: true,
-		},
-		{
-			name:       "empty frontmatter",
-			input:      "---\n---\nContent",
-			wantNoName: true,
-			wantNoDesc: true,
-		},
-		{
-			name: "whitespace in values",
-			input: `---
-name:   spaced-skill   
-description:   Spaced description   
----
-`,
-			wantName: "spaced-skill",
-			wantDesc: "Spaced description",
-		},
-		{
-			name:     "crlf line endings",
-			input:    "---\r\nname: crlf-skill\r\ndescription: CRLF skill.\r\n---\r\nContent",
-			wantName: "crlf-skill",
-			wantDesc: "CRLF skill.",
-		},
+// withRealTemplates points promptDir at the repository's prompts/ directory for the test.
+// Under `go test` the working directory is this package, which holds no .tmpl files, so
+// without this the resolver finds nothing to render.
+func withRealTemplates(t *testing.T) {
+	t.Helper()
+	prev := promptDir
+	promptDir = func() string {
+		abs, err := filepath.Abs(filepath.Join("..", "..", "prompts"))
+		if err != nil {
+			t.Fatalf("resolve prompts dir: %v", err)
+		}
+		return abs
 	}
+	t.Cleanup(func() { promptDir = prev })
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			name, desc := parseSkillFrontmatter([]byte(tt.input))
-			if tt.wantNoName && name != "" {
-				t.Errorf("expected empty name, got %q", name)
+// baseSample is one PromptData carrying every field a template can read, so a render that
+// reaches the end has exercised each branch's data path.
+func baseSample() PromptData {
+	return PromptData{
+		WorktreePath: "/tmp/kanban-worktree",
+		CurrentDate:  "2026-01-02",
+		Tools:        []ToolInfo{{Name: "read_file", Description: "Read the contents of a file."}},
+		AgentsMd:     "Never commit.",
+		Skills: []Skill{{
+			Name:        "plan-first",
+			Description: "Structured planning workflow.",
+			Location:    "/mnt/skills/plan-first/SKILL.md",
+		}},
+		Summary: "Earlier work: added the session list.",
+	}
+}
+
+// TestRenderSystemPrompt_ShippedTemplates renders the templates as shipped: a template that
+// no longer parses or executes now fails `go test` instead of the first LLM call of a real
+// task.
+func TestRenderSystemPrompt_ShippedTemplates(t *testing.T) {
+	withRealTemplates(t)
+
+	for _, tc := range []struct {
+		name     string
+		planMode bool
+	}{
+		{name: "act mode", planMode: false},
+		{name: "plan mode", planMode: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := baseSample()
+			data.PlanMode = tc.planMode
+
+			out, err := RenderSystemPrompt(data)
+			if err != nil {
+				t.Fatalf("RenderSystemPrompt: %v", err)
 			}
-			if !tt.wantNoName && name != tt.wantName {
-				t.Errorf("name = %q, want %q", name, tt.wantName)
+			if out == "" {
+				t.Fatal("rendered an empty system prompt")
 			}
-			if tt.wantNoDesc && desc != "" {
-				t.Errorf("expected empty description, got %q", desc)
+
+			// Every field the base template reads has to come through: a typo in
+			// a field name renders as nothing rather than failing, which is how
+			// a prompt silently loses its tools.
+			for _, want := range []string{
+				"read_file",
+				"Read the contents of a file.",
+				"plan-first",
+				"Structured planning workflow.",
+				"/mnt/skills/plan-first/SKILL.md",
+				"/tmp/kanban-worktree",
+				"2026-01-02",
+				"Never commit.",
+				"Earlier work: added the session list.",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("prompt is missing %q", want)
+				}
 			}
-			if !tt.wantNoDesc && desc != tt.wantDesc {
-				t.Errorf("description = %q, want %q", desc, tt.wantDesc)
+
+			// The mode branch is the reason base.tmpl is rendered by name:
+			// Execute() would run the alphabetically-first file instead and a
+			// new template could hijack the system prompt.
+			if got := strings.Contains(out, "Plan-First Workflow"); got != tc.planMode {
+				t.Errorf("plan-mode section present = %v, want %v", got, tc.planMode)
 			}
 		})
 	}
 }
 
-// --- DiscoverSkills Tests ---
+// TestRenderHelpers_ShippedTemplates covers the other four renderers for the
+// same reason: they are built from separate files and parse nothing else, so
+// nothing else loads them until a task hits that code path.
+func TestRenderHelpers_ShippedTemplates(t *testing.T) {
+	withRealTemplates(t)
 
+	t.Run("merge conflict", func(t *testing.T) {
+		out, err := RenderMergeConflictPrompt(MergeConflictData{
+			TaskBranch:      "task/alpha",
+			TargetBranch:    "main",
+			TaskTitle:       "Add sessions",
+			TaskDescription: "List the signed-in sessions",
+			ConflictedFiles: []string{"backend/server/handler_sessions.go"},
+		})
+		if err != nil {
+			t.Fatalf("RenderMergeConflictPrompt: %v", err)
+		}
+		for _, want := range []string{"task/alpha", "main", "Add sessions", "handler_sessions.go"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("merge conflict prompt is missing %q", want)
+			}
+		}
+	})
+
+	t.Run("summarize pair", func(t *testing.T) {
+		system, user, err := RenderSummarizePrompt(SummarizeData{
+			ChatHistory:     "user: hello\nassistant: hi",
+			PreviousSummary: "Built the board.",
+		})
+		if err != nil {
+			t.Fatalf("RenderSummarizePrompt: %v", err)
+		}
+		if system == "" {
+			t.Error("summarize system prompt is empty")
+		}
+		// The history and the prior summary ride on the user message.
+		for _, want := range []string{"hello", "Built the board."} {
+			if !strings.Contains(user, want) {
+				t.Errorf("summarize user message is missing %q", want)
+			}
+		}
+	})
+
+	t.Run("answer question pair", func(t *testing.T) {
+		system, user, err := RenderAnswerQuestionPrompt(AnswerQuestionData{
+			ParentTitle:  "Ship sessions",
+			ParentPrompt: "Add the revoke endpoint",
+			SubtaskTitle: "Write the handler",
+			Questions:    []string{"Which column?", "Auth by cookie?"},
+		})
+		if err != nil {
+			t.Fatalf("RenderAnswerQuestionPrompt: %v", err)
+		}
+		if system == "" {
+			t.Error("answer-question system prompt is empty")
+		}
+		// Questions go in the user message because some chat templates reject
+		// system-only requests, so a render that drops them breaks the feature.
+		for _, want := range []string{"Which column?", "Auth by cookie?"} {
+			if !strings.Contains(user, want) {
+				t.Errorf("answer-question user message is missing %q", want)
+			}
+		}
+	})
+}
+
+// TestDiscoverSkills reads the frontmatter format the shipped skills actually use
+// and keeps the containerMount remap honest: an agent in a sandbox is told to
+// read the mounted path, never the host path.
 func TestDiscoverSkills(t *testing.T) {
-	// Create a temp directory structure mimicking prompts/skills/
-	tmpDir := t.TempDir()
-	skillsDir := filepath.Join(tmpDir, "skills")
-
-	// Skill 1: valid skill
-	skill1Dir := filepath.Join(skillsDir, "alpha-skill")
-	os.MkdirAll(skill1Dir, 0755)
-	os.WriteFile(filepath.Join(skill1Dir, "SKILL.md"), []byte(`---
-name: alpha-skill
-description: Alpha does alpha things.
----
-
-# Alpha Skill
-
-Content.
-`), 0644)
-
-	// Skill 2: valid skill with extra fields
-	skill2Dir := filepath.Join(skillsDir, "beta-skill")
-	os.MkdirAll(skill2Dir, 0755)
-	os.WriteFile(filepath.Join(skill2Dir, "SKILL.md"), []byte(`---
-name: beta-skill
-description: Beta does beta things.
-license: MIT
----
-
-# Beta
-`), 0644)
-
-	// Skill 3: missing description (should be skipped)
-	skill3Dir := filepath.Join(skillsDir, "gamma-skill")
-	os.MkdirAll(skill3Dir, 0755)
-	os.WriteFile(filepath.Join(skill3Dir, "SKILL.md"), []byte(`---
-name: gamma-skill
----
-
-No description.
-`), 0644)
-
-	// Skill 4: no SKILL.md (should be skipped)
-	skill4Dir := filepath.Join(skillsDir, "delta-skill")
-	os.MkdirAll(skill4Dir, 0755)
-
-	// Non-directory file (should be skipped)
-	os.WriteFile(filepath.Join(skillsDir, "not-a-dir.md"), []byte("ignore me"), 0644)
-
-	// Override promptDir to use our temp dir
-	origPromptDir := promptDir
-	promptDir = func() string { return tmpDir }
-	defer func() { promptDir = origPromptDir }()
-
-	skills := DiscoverSkills("")
-
-	// Should find 2 valid skills (alpha and beta), sorted by name
-	if len(skills) != 2 {
-		t.Fatalf("expected 2 skills, got %d", len(skills))
+	dir := t.TempDir()
+	skills := map[string]string{
+		"plan-first": "---\nname: plan-first\ndescription: \"Quoted, with a comma\"\n---\n\nBody.\n",
+		"plain":      "---\nname: plain\ndescription: Bare description\n---\n\nBody.\n",
+		"incomplete": "---\nname: incomplete\n---\n\nNo description, so it is not a skill.\n",
 	}
-
-	if skills[0].Name != "alpha-skill" {
-		t.Errorf("first skill name = %q, want %q", skills[0].Name, "alpha-skill")
-	}
-	if skills[0].Description != "Alpha does alpha things." {
-		t.Errorf("first skill desc = %q", skills[0].Description)
-	}
-
-	if skills[1].Name != "beta-skill" {
-		t.Errorf("second skill name = %q, want %q", skills[1].Name, "beta-skill")
-	}
-	if skills[1].Description != "Beta does beta things." {
-		t.Errorf("second skill desc = %q", skills[1].Description)
-	}
-}
-
-func TestDiscoverSkills_NoDirectory(t *testing.T) {
-	// Override promptDir to return a dir with no skills/ subdirectory
-	tmpDir := t.TempDir()
-	origPromptDir := promptDir
-	promptDir = func() string { return tmpDir }
-	defer func() { promptDir = origPromptDir }()
-
-	skills := DiscoverSkills("")
-	if skills != nil {
-		t.Errorf("expected nil when no skills dir exists, got %d skills", len(skills))
-	}
-}
-
-func TestDiscoverSkills_ContainerMount(t *testing.T) {
-	// Create a temp directory with a skill
-	tmpDir := t.TempDir()
-	skillsDir := filepath.Join(tmpDir, "skills")
-	skillDir := filepath.Join(skillsDir, "my-skill")
-	os.MkdirAll(skillDir, 0755)
-	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
-name: my-skill
-description: A test skill.
----
-
-Content.
-`), 0644)
-
-	origPromptDir := promptDir
-	promptDir = func() string { return tmpDir }
-	defer func() { promptDir = origPromptDir }()
-
-	// Without container mount: uses host path
-	skills := DiscoverSkills("")
-	if len(skills) != 1 {
-		t.Fatalf("expected 1 skill, got %d", len(skills))
-	}
-	if !filepath.IsAbs(skills[0].Location) || skills[0].Location == "/mnt/skills/my-skill/SKILL.md" {
-		t.Errorf("host mode: expected host path, got %q", skills[0].Location)
-	}
-
-	// With container mount: uses container path
-	skills = DiscoverSkills("/mnt/skills")
-	if len(skills) != 1 {
-		t.Fatalf("expected 1 skill, got %d", len(skills))
-	}
-	if skills[0].Location != "/mnt/skills/my-skill/SKILL.md" {
-		t.Errorf("sandbox mode: location = %q, want %q", skills[0].Location, "/mnt/skills/my-skill/SKILL.md")
-	}
-}
-
-// findProjectRoot walks up from the current directory to find the project root
-// by looking for the prompts/merge_conflict.tmpl file.
-func findProjectRoot() (string, bool) {
-	dir, _ := os.Getwd()
-	for i := 0; i < 10; i++ {
-		candidate := filepath.Join(dir, "prompts", "merge_conflict.tmpl")
-		if _, err := os.Stat(candidate); err == nil {
-			return dir, true
+	for name, body := range skills {
+		skillDir := filepath.Join(dir, "skills", name)
+		if err := os.MkdirAll(skillDir, 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
 		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
+		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(body), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
 		}
-		dir = parent
 	}
-	return "", false
-}
-
-// TestRenderMergeConflictPrompt verifies that the merge conflict
-// prompt template renders correctly with all fields populated.
-func TestRenderMergeConflictPrompt(t *testing.T) {
-	root, ok := findProjectRoot()
-	if !ok {
-		t.Skip("merge_conflict.tmpl not found (run from project root)")
+	// A directory with no SKILL.md is skipped, not an error.
+	if err := os.MkdirAll(filepath.Join(dir, "skills", "not-a-skill"), 0o700); err != nil {
+		t.Fatalf("mkdir not-a-skill: %v", err)
 	}
 
-	// Change to project root so promptDir() finds the template
-	origWd, _ := os.Getwd()
-	os.Chdir(root)
-	defer os.Chdir(origWd)
+	prev := promptDir
+	promptDir = func() string { return dir }
+	t.Cleanup(func() { promptDir = prev })
 
-	data := MergeConflictData{
-		TaskBranch:      "task/feature",
-		TargetBranch:    "main",
-		TaskTitle:       "Add feature",
-		TaskDescription: "Implement the feature",
-		ConflictedFiles: []string{"src/main.go", "src/util.go"},
+	got := DiscoverSkills("")
+	if len(got) != 2 {
+		t.Fatalf("discovered %d skills, want 2 (frontmatter-less dirs are skipped): %+v", len(got), got)
 	}
-
-	prompt, err := RenderMergeConflictPrompt(data)
-	if err != nil {
-		t.Fatalf("render prompt: %v", err)
+	byName := map[string]Skill{}
+	for _, s := range got {
+		byName[s.Name] = s
 	}
-
-	// Should include branch names
-	if !strings.Contains(prompt, "task/feature") {
-		t.Error("prompt should include task branch name")
+	if s, ok := byName["plan-first"]; !ok || s.Description != "Quoted, with a comma" {
+		t.Errorf("quoted frontmatter description not unwrapped: %+v", s)
 	}
-	if !strings.Contains(prompt, "main") {
-		t.Error("prompt should include target branch name")
+	if s, ok := byName["plain"]; !ok || s.Description != "Bare description" {
+		t.Errorf("bare frontmatter description mangled: %+v", s)
 	}
-	// Should include task context
-	if !strings.Contains(prompt, "Add feature") {
-		t.Error("prompt should include task title")
-	}
-	// Should include conflicted files
-	if !strings.Contains(prompt, "src/main.go") {
-		t.Error("prompt should include conflicted files")
-	}
-	// Should instruct to use tools
-	if !strings.Contains(prompt, "your tools") {
-		t.Error("prompt should instruct to use tools")
-	}
-	// Should instruct to call request_review
-	if !strings.Contains(prompt, "request_review") {
-		t.Error("prompt should instruct to call request_review")
-	}
-	// Should instruct to ask about conflicting intent
-	if !strings.Contains(prompt, "conflicting intent") {
-		t.Error("prompt should instruct to ask about conflicting intent")
-	}
-}
-
-func TestRenderAnswerQuestionPrompt(t *testing.T) {
-	root, ok := findProjectRoot()
-	if !ok {
-		t.Skip("answer_question.tmpl not found (run from project root)")
-	}
-	origWd, _ := os.Getwd()
-	os.Chdir(root)
-	defer os.Chdir(origWd)
-
-	systemPrompt, userPrompt, err := RenderAnswerQuestionPrompt(AnswerQuestionData{
-		ParentTitle:  "Build Auth",
-		ParentPrompt: "Implement login with OAuth.",
-		SubtaskTitle: "Add login endpoint",
-		Questions:    []string{"Which auth flow?", "Token expiry?"},
-	})
-	if err != nil {
-		t.Fatalf("render prompt: %v", err)
-	}
-	// System prompt keeps the parent context and the answer format rules...
-	if !strings.Contains(systemPrompt, "Build Auth") {
-		t.Error("system prompt should include parent task title")
-	}
-	if !strings.Contains(systemPrompt, "Implement login with OAuth.") {
-		t.Error("system prompt should include parent task prompt context")
-	}
-	if !strings.Contains(systemPrompt, "1) answer to first question 2) answer to second") {
-		t.Error("system prompt should specify the simple numbered answer format")
-	}
-	// ...but must not carry the questions — they belong in the user message
-	// because some chat templates reject system-only requests.
-	if strings.Contains(systemPrompt, "Which auth flow?") || strings.Contains(systemPrompt, "Token expiry?") {
-		t.Error("system prompt must not contain the questions")
-	}
-	// The user message carries the numbered questions.
-	if !strings.Contains(userPrompt, "Which auth flow?") {
-		t.Error("user prompt should include the first question")
-	}
-	if !strings.Contains(userPrompt, "Token expiry?") {
-		t.Error("user prompt should include the second question")
-	}
-}
-
-func TestRenderSummarizePrompt(t *testing.T) {
-	root, ok := findProjectRoot()
-	if !ok {
-		t.Skip("summarize.tmpl not found (run from project root)")
-	}
-	origWd, _ := os.Getwd()
-	os.Chdir(root)
-	defer os.Chdir(origWd)
-
-	data := SummarizeData{
-		ChatHistory:     "user: fix the bug\nassistant: fixed it",
-		PreviousSummary: "## Goal\nEarlier goal",
+	for _, s := range got {
+		if filepath.Base(s.Location) != "SKILL.md" || !strings.HasPrefix(s.Location, dir) {
+			t.Errorf("skill %q location %q is not the host SKILL.md under %s", s.Name, s.Location, dir)
+		}
 	}
 
-	// With a previous summary.
-	systemPrompt, userPrompt, err := RenderSummarizePrompt(data)
-	if err != nil {
-		t.Fatalf("render prompt: %v", err)
-	}
-	// System prompt keeps the summarization instructions...
-	if !strings.Contains(systemPrompt, "EXACT format") {
-		t.Error("system prompt should contain the format instructions")
-	}
-	if !strings.Contains(systemPrompt, "## Goal") {
-		t.Error("system prompt should contain the summary format sections")
-	}
-	// ...but must not carry the conversation data — that belongs in the
-	// user message because some chat templates reject system-only requests.
-	if strings.Contains(systemPrompt, "fix the bug") {
-		t.Error("system prompt must not contain the chat history")
-	}
-	if strings.Contains(systemPrompt, "Earlier goal") {
-		t.Error("system prompt must not contain the previous summary")
-	}
-	// The user message carries the chat history and the previous summary.
-	if !strings.Contains(userPrompt, "fix the bug") || !strings.Contains(userPrompt, "fixed it") {
-		t.Error("user prompt should contain the chat history")
-	}
-	if !strings.Contains(userPrompt, "<chat_history>") {
-		t.Error("user prompt should wrap the chat history in <chat_history>")
-	}
-	if !strings.Contains(userPrompt, "Earlier goal") {
-		t.Error("user prompt should contain the previous summary")
-	}
-	if !strings.Contains(userPrompt, "# Previous Summary") {
-		t.Error("user prompt should label the previous summary section")
-	}
-
-	// Without a previous summary: no summary section in the user message.
-	data.PreviousSummary = ""
-	_, userPrompt, err = RenderSummarizePrompt(data)
-	if err != nil {
-		t.Fatalf("render prompt (no previous summary): %v", err)
-	}
-	if !strings.Contains(userPrompt, "fix the bug") {
-		t.Error("user prompt should still contain the chat history")
-	}
-	if strings.Contains(userPrompt, "# Previous Summary") {
-		t.Error("user prompt must omit the previous summary section when empty")
-	}
-}
-
-// TestRenderSystemPromptStillBase verifies that adding answer_question.tmpl does
-// not hijack the main system prompt — RenderSystemPrompt must render base.tmpl.
-func TestRenderSystemPromptStillBase(t *testing.T) {
-	root, ok := findProjectRoot()
-	if !ok {
-		t.Skip("templates not found (run from project root)")
-	}
-	origWd, _ := os.Getwd()
-	os.Chdir(root)
-	defer os.Chdir(origWd)
-
-	prompt, err := RenderSystemPrompt(PromptData{
-		WorktreePath: "/tmp",
-		CurrentDate:  "2026-01-01",
-		Tools:        []ToolInfo{{Name: "bash", Description: "run a command"}},
-	})
-	if err != nil {
-		t.Fatalf("render system prompt: %v", err)
-	}
-	if !strings.HasPrefix(prompt, "You are an expert autonomous coding assistant.") {
-		t.Errorf("system prompt should start with the base template, got: %.80q", prompt)
-	}
-}
-
-// TestRenderMergeConflictPrompt_EmptyConflictedFiles verifies that the template
-// renders correctly when no conflicted files are provided.
-func TestRenderMergeConflictPrompt_EmptyConflictedFiles(t *testing.T) {
-	root, ok := findProjectRoot()
-	if !ok {
-		t.Skip("merge_conflict.tmpl not found (run from project root)")
-	}
-
-	// Change to project root so promptDir() finds the template
-	origWd, _ := os.Getwd()
-	os.Chdir(root)
-	defer os.Chdir(origWd)
-
-	data := MergeConflictData{
-		TaskBranch:      "task/feature",
-		TargetBranch:    "main",
-		TaskTitle:       "Add feature",
-		TaskDescription: "Implement the feature",
-		ConflictedFiles: nil,
-	}
-
-	prompt, err := RenderMergeConflictPrompt(data)
-	if err != nil {
-		t.Fatalf("render prompt: %v", err)
-	}
-
-	// Should not have a blank "Conflicted files:" line
-	if strings.Contains(prompt, "Conflicted files: ") {
-		t.Error("prompt should not include empty conflicted files line")
+	// With a mount configured, every location moves under it.
+	mounted := DiscoverSkills("/mnt/skills")
+	for _, s := range mounted {
+		want := filepath.Join("/mnt/skills", s.Name, "SKILL.md")
+		if s.Location != want {
+			t.Errorf("mount remap: got %q, want %q", s.Location, want)
+		}
 	}
 }

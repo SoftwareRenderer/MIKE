@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"kanban/pkg/bridge/protocol"
+	"kanban/pkg/procterm"
 )
 
 const (
@@ -18,15 +19,6 @@ const (
 
 	defaultBashTimeout = 5   // seconds
 	maxBashTimeout     = 300 // seconds
-
-	// drainGrace: how long the readers may keep flushing after the command exited,
-	// so every Chunk frame goes out before the Result frame.
-	drainGrace = 250 * time.Millisecond
-
-	// drainCap: hard stop for that flush. A detached child (`npm run dev &`) keeps
-	// the pipe write end open, so real EOF may never arrive and must not be waited
-	// for.
-	drainCap = 2 * time.Second
 )
 
 // handleBash runs a shell command, streams output as Chunk frames and sends a
@@ -165,8 +157,9 @@ func handleBash(h *handler, conn net.Conn, req *protocol.Request) error {
 	}
 
 	// Flush what the command already wrote before the Result frame closes the
-	// client's chunk stream (bounded — see drainOutput).
-	drainOutput(readersDone, stdoutR, stderrR)
+	// client's chunk stream (bounded — see pkg/procterm for why the readers cannot
+	// simply be waited for).
+	procterm.Drain(readersDone, stdoutR, stderrR)
 
 	// Build result: exitCode + meta with timing and cancelled flag
 	meta, _ := json.Marshal(map[string]any{
@@ -194,35 +187,4 @@ func (h *handler) writeBashResult(conn net.Conn, bp *bashProc, msgID uint32, pay
 	defer bp.mu.Unlock()
 	bp.finished = true
 	return h.writeFrame(conn, protocol.NewResult(msgID, payload))
-}
-
-// drainOutput waits for the reader goroutines to finish once the command exited,
-// bounded by drainGrace (normal flush) and drainCap (hard stop). At the grace
-// deadline it closes the read ends, freeing a reader parked on a pipe that a
-// detached child still holds open.
-func drainOutput(readersDone <-chan struct{}, readers ...*os.File) {
-	grace := time.NewTimer(drainGrace)
-	defer grace.Stop()
-	hardStop := time.NewTimer(drainCap)
-	defer hardStop.Stop()
-
-	forceEOF := func() {
-		for _, r := range readers {
-			_ = r.Close()
-		}
-	}
-
-	drained := 0
-loop:
-	for drained < len(readers) {
-		select {
-		case <-readersDone:
-			drained++
-		case <-grace.C:
-			forceEOF()
-		case <-hardStop.C:
-			forceEOF()
-			break loop
-		}
-	}
 }
