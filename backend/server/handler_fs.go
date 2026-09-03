@@ -17,7 +17,6 @@ import (
 
 	"kanban/backend/fsutil"
 	"kanban/backend/git"
-	"kanban/backend/lsp"
 	"kanban/backend/prompts"
 	"kanban/backend/sandbox"
 	"kanban/backend/types"
@@ -1202,12 +1201,6 @@ func (s *Server) fsSandboxOpts(project *types.Project) (sandbox.SandboxOpts, err
 		SandboxMounts:    project.SandboxMounts,
 		SandboxEnvs:      project.SandboxEnvs,
 		Capabilities:     project.SandboxCapabilities,
-	}
-	// The project container is shared with the project's terminal, whichever of the two creates it
-	// first — so it carries the dependency caches for the same reason the terminal does, and a shell
-	// opened on the project cannot land in a container that was built without them.
-	if s.extLSPMgr != nil {
-		opts.DependencyMounts, opts.DependencyEnvs = lsp.DependencySandboxArgs(s.extLSPMgr.DependencyCaches())
 	}
 	return opts, nil
 }

@@ -17,8 +17,13 @@ const FIXTURE_AUTHOR = 'testdev';
 const FIXTURE_NAME = 'dep-cache-lsp';
 const DISPLAY = 'Dependency Cache Fixture';
 
-/** A directory that exists, for the grant to point at: the server refuses one that does not. */
-const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-dep-cache-'));
+/**
+ * A directory that exists, for the grant to point at: the server refuses one that does not. A directory
+ * of the test's own under a temp folder, which is what the field asks for — a bare top level of the
+ * machine is refused, and whatever is granted is readable only from this extension's own sandbox.
+ */
+const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kanban-dep-cache-')) + '/mod';
+fs.mkdirSync(cacheDir, { recursive: true });
 
 let installedId: string | null = null;
 
@@ -57,6 +62,21 @@ function fixtureRow(page: import('@playwright/test').Page) {
     return page.locator('.extension-card').filter({ hasText: DISPLAY });
 }
 
+/**
+ * Open the fixture's Edit dialog and return its locator. `[role="dialog"]` is never unique here — the
+ * Settings dialog is still open behind this one — so the dialog is found by the section it contains.
+ */
+async function openEditDialog(page: import('@playwright/test').Page) {
+    const row = fixtureRow(page);
+    const badge = row.getByRole('button', { name: 'Needs setup' });
+    if (await badge.count()) await badge.click();
+    else await row.locator('button[title^="Edit"]').first().click();
+
+    const dialog = page.locator('[role="dialog"]').filter({ hasText: 'Dependencies directory' }).last();
+    await expect(dialog.locator('#edit-dep-path')).toBeVisible({ timeout: 5000 });
+    return dialog;
+}
+
 test.describe.serial('Extension dependency directory', () => {
     test('installs the fixture extension that declares a dependency cache', async ({ page }) => {
         await page.goto('/');
@@ -80,45 +100,60 @@ test.describe.serial('Extension dependency directory', () => {
         expect(installed.sandbox_config?.dependency_cache).toEqual({
             container_path: '/fake/mod',
             env: 'FAKE_CACHE',
-            read_only: true,
         });
     });
 
-    test('asks for the directory, and refuses a path that is not one', async ({ page }) => {
+    test('says on the card that it needs a directory, and refuses a path that is not one', async ({ page }) => {
         await openExtensionsTab(page);
 
         const row = fixtureRow(page);
-        await expect(row.locator('.ext-dep')).toBeVisible({ timeout: 5000 });
-        // Where it looks inside the sandbox is stated, in the extension's own terms.
-        await expect(row.locator('.ext-dep-hint')).toContainText('FAKE_CACHE=/fake/mod');
-        await expect(row.locator('.ext-dep-none')).toBeVisible();
+        // Said twice, because a dot on an icon is easy to look straight past: the badge beside the name
+        // and the dot on the Edit icon are the same state.
+        const badge = row.getByRole('button', { name: 'Needs setup' });
+        await expect(badge, 'a declarer with no directory is not warned about').toBeVisible({ timeout: 5000 });
+        await expect(row.locator('.ext-needs-dot')).toBeVisible();
 
-        const input = row.locator('.ext-dep-input');
+        await badge.click();
+        const dialog = page.locator('[role="dialog"]').filter({ hasText: 'Dependencies directory' }).last();
+        // Where it looks inside the sandbox is stated, in the extension's own terms. (`.field-desc`
+        // is every field's description, so the assertion names the location element itself.)
+        await expect(dialog.locator('.ext-dep-env')).toHaveText('FAKE_CACHE=/fake/mod');
+        await expect(dialog.locator('.ext-dep-none')).toBeVisible();
+
+        const input = dialog.locator('#edit-dep-path');
         await input.fill('/definitely/not/here-anywhere');
-        await row.getByRole('button', { name: 'Apply' }).click();
+        await dialog.getByRole('button', { name: 'Save' }).click();
 
-        // The server's sentence reaches the row it is about — "create it first" is the actionable
-        // half, so a wrapper message that swallowed it would be a worse error than none.
-        await expect(row.locator('.ext-dep-error')).toContainText('cannot be read', { timeout: 5000 });
-        await expect(row.locator('.ext-dep-error')).toContainText('create it first');
-        await expect(row.locator('.ext-dep-path')).toHaveCount(0);
+        // The server's sentence reaches the field it is about — "create it first" is the actionable
+        // half, and a wrapper message that swallowed it would be a worse error than none. The dialog
+        // stays open: the refusal is about one field, and the rest of the dialog is still unsaved.
+        await expect(dialog.locator('.ext-dep-error')).toContainText('cannot be read', { timeout: 5000 });
+        await expect(dialog.locator('.ext-dep-error')).toContainText('create it first');
+        await expect(dialog.locator('.ext-dep-path')).toHaveCount(0);
+        await expect(fixtureRow(page).getByRole('button', { name: 'Needs setup' })).toBeVisible();
     });
 
-    test('grants a real directory, and it survives a reload', async ({ page }) => {
+    test('grants the path in the dialog, and it survives a reload', async ({ page }) => {
         await openExtensionsTab(page);
+        const dialog = await openEditDialog(page);
 
-        const row = fixtureRow(page);
-        const input = row.locator('.ext-dep-input');
-        await expect(input).toBeVisible({ timeout: 5000 });
+        const input = dialog.locator('#edit-dep-path');
         await input.fill(cacheDir);
-        await row.getByRole('button', { name: 'Apply' }).click();
+        // The field does not apply on its own: what grants is the dialog's Save, because applying a
+        // grant stops the running sandbox.
+        await expect(dialog.locator('.ext-dep-pending')).toContainText('when you save');
+        await dialog.getByRole('button', { name: 'Save' }).click();
 
-        await expect(row.locator('.ext-dep-path')).toHaveText(cacheDir, { timeout: 5000 });
+        await expect(dialog).toHaveCount(0);
+        await expect(fixtureRow(page).getByRole('button', { name: 'Needs setup' })).toHaveCount(0);
+        await expect(fixtureRow(page).locator('.ext-needs-dot')).toHaveCount(0);
 
-        // A second mount of the settings page reads it from the server: this is stored state, not a
-        // value the component remembered.
+        // A second mount reads it from the server: this is stored state, not a value the component
+        // remembered — and the dialog opens showing the directory, not the suggestion.
         await openExtensionsTab(page);
-        await expect(fixtureRow(page).locator('.ext-dep-path')).toHaveText(cacheDir, { timeout: 5000 });
+        const reopened = await openEditDialog(page);
+        await expect(reopened.locator('.ext-dep-path')).toHaveText(cacheDir, { timeout: 5000 });
+        await expect(reopened.locator('#edit-dep-path')).toHaveValue(cacheDir);
 
         // And the record itself says so, which is what the sandbox builder will read next time.
         const list = await api(page, 'GET', '/api/extensions');
@@ -126,14 +161,15 @@ test.describe.serial('Extension dependency directory', () => {
         expect(mine.sandbox_config?.dependency_host_path).toBe(cacheDir);
     });
 
-    test('revokes with an empty value, which is a decision and not an omission', async ({ page }) => {
+    test('revokes by clearing the field and saving, which is a decision not an omission', async ({ page }) => {
         await openExtensionsTab(page);
+        const dialog = await openEditDialog(page);
 
-        const row = fixtureRow(page);
-        await expect(row.locator('.ext-dep-path')).toHaveText(cacheDir, { timeout: 5000 });
-        await row.getByRole('button', { name: 'Revoke' }).click();
+        await expect(dialog.locator('.ext-dep-path')).toHaveText(cacheDir, { timeout: 5000 });
+        await dialog.getByRole('button', { name: 'Don’t share' }).click();
+        await dialog.getByRole('button', { name: 'Save' }).click();
 
-        await expect(row.locator('.ext-dep-none')).toBeVisible({ timeout: 5000 });
+        await expect(fixtureRow(page).getByRole('button', { name: 'Needs setup' })).toBeVisible({ timeout: 5000 });
 
         const list = await api(page, 'GET', '/api/extensions');
         const mine = (list.json ?? []).find((e: any) => e.id === installedId);
@@ -142,6 +178,10 @@ test.describe.serial('Extension dependency directory', () => {
 
     test('removes the fixture again', async ({ page }) => {
         expect(installedId, 'the install test did not record an id to clean up').toBeTruthy();
+        // The cleanup calls the API through the page, and a relative fetch needs a document — this
+        // test navigates no further than that.
+        await page.goto('/');
+        await page.waitForSelector('.project-item', { timeout: 15000 });
         const res = await api(page, 'DELETE', `/api/extensions/${installedId}`);
         expect(res.status, `delete failed: ${res.text.slice(0, 200)}`).toBe(200);
 

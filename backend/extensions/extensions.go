@@ -491,7 +491,7 @@ type SandboxConfig struct {
 	// Dependency names where this server reads its resolved dependencies from, so the host can
 	// supply them without being told where to look. Manifest data.
 	Dependency *DependencyCache `json:"dependency_cache,omitempty"`
-	// DependencyHostPath is the host directory the user granted to fill that cache. It lives
+	// DependencyHostPath is the host directory the user granted for that cache. It lives
 	// beside the declaration, not inside it, so the two origins stay distinguishable in the stored
 	// record: a manifest declares a path in its own container, a human names a directory on this
 	// machine. A manifest carrying it is refused (manifest_validate.go), never merged.
@@ -518,29 +518,20 @@ type DependencyCache struct {
 	// value. The value is always ContainerPath; arbitrary values here would be a second,
 	// unvalidated `envs`.
 	Env string `json:"env"`
-	// ReadOnly defaults to true — the direction that can only make a server slow, never able to
-	// change a machine. Set false when the toolchain must warm the cache itself; it is then the
-	// user's switch, not the extension's.
-	ReadOnly *bool `json:"read_only,omitempty"`
 }
 
-// DependencyGrant is the pair the runtime binds: the granted directory, and whether this extension's
-// declaration allows writing to it. Both halves are required, so a missing half binds nothing rather
-// than half a configuration.
+// DependencyGrant is the host directory the user granted for this server's cache, or "" when there is
+// nothing to bind — a granted path with no declaration, or a declaration nobody granted, binds nothing
+// rather than half a configuration.
 //
-// Writability comes from the manifest, so an extension can only widen itself into writing a directory
-// its author already said it would write; granting alone cannot make it writable.
-func (sc *SandboxConfig) DependencyGrant() (hostPath string, writable bool) {
+// What comes back is a path and nothing else, because the mode is not the extension's to choose: this
+// container is the only one that binds the grant, and it binds it read-only. A manifest that still
+// carries the removed `read_only` key decodes fine and is ignored.
+func (sc *SandboxConfig) DependencyGrant() string {
 	if sc == nil || sc.DependencyHostPath == "" || sc.Dependency == nil {
-		return "", false
+		return ""
 	}
-	return sc.DependencyHostPath, sc.Dependency.Writable()
-}
-
-// Writable reports whether the declared cache may be mounted read-write. Absent means the
-// safe default: read-only.
-func (d *DependencyCache) Writable() bool {
-	return d != nil && d.ReadOnly != nil && !*d.ReadOnly
+	return sc.DependencyHostPath
 }
 
 // Assignments returns the environment assignments that point this server at its declared

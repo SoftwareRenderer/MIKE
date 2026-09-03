@@ -507,7 +507,7 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 		return
 	}
 	if req.HostPath == nil {
-		http.Error(w, "host_path is required; send an empty value to revoke the grant", http.StatusBadRequest)
+		httputil.JSONError(w, http.StatusBadRequest, "host_path is required; send an empty value to revoke the grant")
 		return
 	}
 
@@ -518,7 +518,7 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 	}
 	declared := ext.SandboxConfig.Dependency
 	if !ext.IsLSP() || declared == nil {
-		http.Error(w, "this extension declares no dependency cache, so there is nothing to grant", http.StatusBadRequest)
+		httputil.JSONError(w, http.StatusBadRequest, "this extension declares no dependency cache, so there is nothing to grant")
 		return
 	}
 
@@ -526,7 +526,7 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 	if granted != "" {
 		granted, err = ValidateDependencyGrant(granted)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			httputil.JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -559,11 +559,9 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 	if granted == "" {
 		log.Printf("[extensions] ext=%s dependency grant revoked (was %s); %s reads the image's own copy again — %s", id, previous, declared.Env, recreated)
 	} else {
-		mode := "read-only"
-		if declared.Writable() {
-			mode = "read-write"
-		}
-		log.Printf("[extensions] ext=%s dependency grant %s -> %s (mounted at %s, %s) — %s", id, previous, granted, declared.ContainerPath, mode, recreated)
+		// The mode is stated, not computed: this extension's sandbox is the only container that binds the
+		// grant, and it binds it read-only.
+		log.Printf("[extensions] ext=%s dependency grant %s -> %s (mounted read-only at %s, in this extension's sandbox only) — %s", id, previous, granted, declared.ContainerPath, recreated)
 	}
 
 	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, h.sandbox.ListRunning()))

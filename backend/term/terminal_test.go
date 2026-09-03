@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"kanban/backend/config"
-	"kanban/backend/lsp"
 	"kanban/backend/sandbox"
 	"kanban/backend/store"
 	"kanban/backend/types"
@@ -662,69 +661,33 @@ func TestHandleTerminal_OriginVerification(t *testing.T) {
 	})
 }
 
-// dependencyStandsInForTheLSPManager answers the one question a sandboxed shell asks about
-// dependencies. It is a stub rather than a real manager because what matters here is which directories
-// the container is created with, not how they were chosen.
-type dependencyStandsInForTheLSPManager struct {
-	caches []lsp.DependencyCache
-}
-
-func (d dependencyStandsInForTheLSPManager) DependencyCaches() []lsp.DependencyCache { return d.caches }
-
-// TestTerminalOpensItsContainerWithTheDependencyCaches: a terminal is where somebody warms a dependency
-// directory by hand, so its container must be created with the grant.
-func TestTerminalOpensItsContainerWithTheDependencyCaches(t *testing.T) {
-	dir := t.TempDir()
-	s, cs := newTestConfigStore(t)
-
+// TestTerminalShellOptsCarryTheProjectConfiguration: what a sandboxed shell's container is created with
+// is the project's own Sandbox Configuration — image, isolation, mounts, envs. It is not a place an
+// install-wide grant gets grafted on: a directory handed to an LSP extension is bound into that
+// extension's own sandbox and nowhere else, and a shell that needs the same folder gets it the way a
+// task does, from the project's own mount list.
+func TestTerminalShellOptsCarryTheProjectConfiguration(t *testing.T) {
 	proj := &types.Project{
-		ID: "test-proj-deps", Name: "Deps Project", Path: dir, SandboxEnabled: true,
-		SandboxEnvs: []types.SandboxEnv{{Key: "GOFLAGS", Value: "-mod=mod"}},
-	}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-
-	// Two managers rather than one whose provider arrives in the middle of a session: the provider is
-	// wired once at startup, like the agent registry, and reading it is lock-free because
-	// getOrCreate already holds the manager's mutex.
-	openShell := t.Name()
-	mockWithout := newMockSandbox(t)
-	tmWithout := NewTerminalManager(s, cs, mockWithout, nil)
-	if _, err := tmWithout.getOrCreate(openShell, openShell, dir, proj.ID); err != nil {
-		t.Fatalf("open a shell with no dependency provider: %v", err)
-	}
-	mockWithout.mu.Lock()
-	without := mockWithout.lastOpts
-	mockWithout.mu.Unlock()
-	if len(without.DependencyMounts) != 0 || len(without.DependencyEnvs) != 0 {
-		t.Errorf("an install with no LSP extensions mounted %v %v", without.DependencyMounts, without.DependencyEnvs)
+		ID: "test-proj-shell-opts", Name: "Shell Opts Project", Path: t.TempDir(), SandboxEnabled: true,
+		SandboxEnvs:             []types.SandboxEnv{{Key: "GOFLAGS", Value: "-mod=mod"}},
+		SandboxMounts:           []types.SandboxMount{{HostPath: "/tmp/data", ContainerPath: "/data", Mode: "ro"}},
+		SandboxMemoryLimit:      2048,
+		SandboxNetworkIsolation: true,
 	}
 
-	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock, nil)
-	tm.SetDependencyProvider(dependencyStandsInForTheLSPManager{caches: []lsp.DependencyCache{
-		{HostPath: "/home/dev/go/pkg/mod", ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE"},
-	}})
-	if _, err := tm.getOrCreate(openShell, openShell, dir, proj.ID); err != nil {
-		t.Fatalf("open a shell: %v", err)
-	}
-	mock.mu.Lock()
-	got := mock.lastOpts
-	mock.mu.Unlock()
+	tm := NewTerminalManager(nil, nil, nil, nil)
+	got := tm.shellSandboxOpts("localhost/sandbox-example.com", proj, nil)
 
-	if len(got.DependencyMounts) != 1 || got.DependencyMounts[0].ContainerPath != "/go/pkg/mod" || got.DependencyMounts[0].Mode != "rw" {
-		t.Fatalf("the shell container gets %+v, want the granted directory read-write", got.DependencyMounts)
+	if got.BaseImage != "localhost/sandbox-example.com" {
+		t.Errorf("BaseImage = %q, want the image the caller passed in", got.BaseImage)
 	}
-	if len(got.DependencyEnvs) != 1 || got.DependencyEnvs[0].Key != "GOMODCACHE" || got.DependencyEnvs[0].Value != "/go/pkg/mod" {
-		t.Errorf("the shell gets %v, want GOMODCACHE pointing at the container path", got.DependencyEnvs)
+	if !got.NetworkIsolation || got.MemoryLimit != 2048 {
+		t.Errorf("isolation/limit = %v/%d, want the project's settings", got.NetworkIsolation, got.MemoryLimit)
 	}
-	// Everything the project configured still arrives — the caches are added to the shell's
-	// container, not substituted for its own configuration.
 	if len(got.SandboxEnvs) != 1 || got.SandboxEnvs[0].Key != "GOFLAGS" {
-		t.Errorf("the project's own envs were lost: %v", got.SandboxEnvs)
+		t.Errorf("SandboxEnvs = %v, want the project's envs", got.SandboxEnvs)
 	}
-	if got.BaseImage == "" {
-		t.Error("the image is missing from the shell's options")
+	if len(got.SandboxMounts) != 1 || got.SandboxMounts[0].ContainerPath != "/data" {
+		t.Errorf("SandboxMounts = %+v, want the project's mounts", got.SandboxMounts)
 	}
 }

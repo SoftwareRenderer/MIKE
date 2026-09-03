@@ -5,6 +5,7 @@ package extensions
 // stored.
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -153,21 +154,33 @@ func TestDependencyCacheAssignments(t *testing.T) {
 	}
 }
 
-func TestDependencyCacheWritableDefaultsToReadOnly(t *testing.T) {
-	// Absent means read-only: the direction that can only ever fail to make a server slow.
+func TestDependencyCache_IgnoresTheRemovedReadOnlyKey(t *testing.T) {
+	// `read_only` is gone: this container always reads, and the containers that fill the cache write
+	// it from their own side. A manifest or a stored record that still carries the key must decode,
+	// validate and behave exactly like one that never mentioned it — the published registry pins point
+	// at commits whose manifests have the field, so refusing it would be an install failure for an
+	// extension that asks for nothing.
+	for _, raw := range []string{
+		`{"container_path":"/go/pkg/mod","env":"GOMODCACHE"}`,
+		`{"container_path":"/go/pkg/mod","env":"GOMODCACHE","read_only":true}`,
+		`{"container_path":"/go/pkg/mod","env":"GOMODCACHE","read_only":false}`,
+	} {
+		var d DependencyCache
+		if err := json.Unmarshal([]byte(raw), &d); err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		if err := d.Validate(); err != nil {
+			t.Errorf("%s refused: %v", raw, err)
+		}
+		if got := d.Assignments(); len(got) != 1 || got[0] != "GOMODCACHE=/go/pkg/mod" {
+			t.Errorf("%s assignments = %v, want [GOMODCACHE=/go/pkg/mod]", raw, got)
+		}
+	}
+
+	// And nothing in the type can express a write request any more.
 	var none *DependencyCache
-	if none.Writable() {
-		t.Error("an absent cache must not be writable")
-	}
-	if (&DependencyCache{}).Writable() {
-		t.Error("a declaration that says nothing must not be writable")
-	}
-	yes, no := false, true
-	if !(&DependencyCache{ReadOnly: &yes}).Writable() {
-		t.Error("read_only:false must be writable — a toolchain module has to be downloadable")
-	}
-	if (&DependencyCache{ReadOnly: &no}).Writable() {
-		t.Error("read_only:true must never be writable")
+	if none.Assignments() != nil {
+		t.Error("an absent cache must produce no assignment")
 	}
 }
 
