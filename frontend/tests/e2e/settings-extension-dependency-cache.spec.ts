@@ -10,7 +10,8 @@ import path from 'path';
  *
  * Subject: the local fixture `tests/fixtures/local-extensions/testdev/dep-cache-lsp`, which declares
  * `capabilities.lsp.sandbox.dependency_cache`. A local LSP install needs no image, so this is a real
- * install; it is deleted at the end.
+ * install; it is deleted at the end. The first test is the pre-install story: the Browse card badges
+ * it and says setup follows installation.
  */
 
 const FIXTURE_AUTHOR = 'testdev';
@@ -78,6 +79,18 @@ async function openEditDialog(page: import('@playwright/test').Page) {
 }
 
 test.describe.serial('Extension dependency directory', () => {
+    test('says in Browse, before installing, that setup comes after installation', async ({ page }) => {
+        // A local extension, so the card reads the declaration from the manifest's own shape.
+        await openExtensionsTab(page);
+        await page.locator('.view-tab', { hasText: 'Browse' }).click();
+
+        const card = fixtureRow(page);
+        await expect(card.locator('.needs-setup-badge'), 'a declarer is not badged before install').toBeVisible({ timeout: 5000 });
+        const note = card.locator('.ext-needs-setup-note');
+        await expect(note).toContainText('Requires additional setup after installation');
+        await expect(note).toContainText('FAKE_CACHE=/fake/mod');
+    });
+
     test('installs the fixture extension that declares a dependency cache', async ({ page }) => {
         await page.goto('/');
         await page.waitForSelector('.project-item', { timeout: 15000 });
@@ -166,7 +179,7 @@ test.describe.serial('Extension dependency directory', () => {
         const dialog = await openEditDialog(page);
 
         await expect(dialog.locator('.ext-dep-path')).toHaveText(cacheDir, { timeout: 5000 });
-        await dialog.getByRole('button', { name: 'Don’t share' }).click();
+        await dialog.getByRole('button', { name: 'Unmount' }).click();
         await dialog.getByRole('button', { name: 'Save' }).click();
 
         await expect(fixtureRow(page).getByRole('button', { name: 'Needs setup' })).toBeVisible({ timeout: 5000 });
