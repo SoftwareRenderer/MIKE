@@ -971,6 +971,12 @@ import ToggleSwitch from './ToggleSwitch.svelte';
                 </button>
             </div>
 
+            <p class="mounts-hint">
+                A task sees the host only through this list. A dependency folder granted to a language server
+                is not in it automatically — to let a task fill one, add it here read-write and set its variable
+                (for example <code>GOMODCACHE=/go/pkg/mod</code>) under Environment Variables.
+            </p>
+
             {#if mountError}
             <div class="mount-error">{mountError}</div>
             {/if}
@@ -2238,6 +2244,20 @@ import ToggleSwitch from './ToggleSwitch.svelte';
     .btn-add-mount:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+    }
+
+    /* What the list is: the only way a task reaches the host. */
+    .mounts-hint {
+        margin: 0.5rem 0 0;
+        padding: 0 2px;
+        font-size: 0.72rem;
+        line-height: 1.45;
+        color: var(--color-text-secondary);
+    }
+
+    .mounts-hint code {
+        font-family: var(--font-mono, monospace);
+        font-size: 0.7rem;
     }
 
     /* Error messages (ports + mounts) */

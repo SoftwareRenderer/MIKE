@@ -7,6 +7,7 @@ import {
     hasNetworkCapability,
     requiresInstallReview,
     dependencyCacheDeclaration,
+    needsDependencyGrant,
 } from '../extension-permissions';
 
 describe('isDangerousPermission (sandbox-escaping permissions only)', () => {
@@ -166,7 +167,7 @@ describe('requiresInstallReview (network capability OR dangerous permissions)', 
         // and "install this?" is the last question that can still be answered with the facts.
         expect(
             requiresInstallReview({
-                capabilities: { lsp: { language: 'go', dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE', read_only: true } } },
+                capabilities: { lsp: { language: 'go', dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE' } } },
             }),
         ).toBe(true);
     });
@@ -179,21 +180,17 @@ describe('requiresInstallReview (network capability OR dangerous permissions)', 
 describe('dependencyCacheDeclaration', () => {
     it('reads the projected declaration', () => {
         expect(
-            dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE', read_only: true } } }),
-        ).toEqual({ container_path: '/go/pkg/mod', env: 'GOMODCACHE', read_only: true });
+            dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE' } } }),
+        ).toEqual({ container_path: '/go/pkg/mod', env: 'GOMODCACHE' });
     });
 
-    it('defaults a missing read_only to the safe direction', () => {
-        // Alarm over a write the extension never asked for would be worse than the omission.
+    it('says nothing about write access, because there is none to disclose', () => {
+        // The extension's own container reads the directory; the containers that fill it are the
+        // user's tasks and terminals. A `read_only` left in a published manifest must not come back as
+        // a permission claim, which is what an alarm over a write nobody asked for would be.
         expect(
-            dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE' } } })?.read_only,
-        ).toBe(true);
-    });
-
-    it('reports a writable declaration as writable', () => {
-        expect(
-            dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/usr/local/cargo', env: 'CARGO_HOME', read_only: false } } }),
-        ).toEqual({ container_path: '/usr/local/cargo', env: 'CARGO_HOME', read_only: false });
+            dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE', read_only: false } } }),
+        ).toEqual({ container_path: '/go/pkg/mod', env: 'GOMODCACHE' });
     });
 
     it('is null for anything incomplete, so the disclosure cannot invent one', () => {
@@ -204,5 +201,36 @@ describe('dependencyCacheDeclaration', () => {
         // A half-declared cache would render a sentence with an empty path in it.
         expect(dependencyCacheDeclaration({ lsp: { dependency_cache: { env: 'GOMODCACHE' } } })).toBeNull();
         expect(dependencyCacheDeclaration({ lsp: { dependency_cache: { container_path: '/go/pkg/mod' } } })).toBeNull();
+    });
+});
+
+describe('needsDependencyGrant', () => {
+    const DECLARED = { container_path: '/go/pkg/mod', env: 'GOMODCACHE' };
+
+    it('is true for a declarer nobody has given a directory yet', () => {
+        expect(needsDependencyGrant({ enabled: true, sandbox_config: { dependency_cache: DECLARED } })).toBe(true);
+        expect(needsDependencyGrant({ enabled: true, sandbox_config: { dependency_cache: DECLARED, dependency_host_path: '' } })).toBe(true);
+        // Whitespace is not a directory: the endpoint trims, and a field of spaces is not a grant.
+        expect(needsDependencyGrant({ enabled: true, sandbox_config: { dependency_cache: DECLARED, dependency_host_path: '   ' } })).toBe(true);
+    });
+
+    it('is false once a directory is shared', () => {
+        expect(needsDependencyGrant({
+            enabled: true,
+            sandbox_config: { dependency_cache: DECLARED, dependency_host_path: '/home/tester/go/pkg/mod' },
+        })).toBe(false);
+    });
+
+    it('is false for an extension that declares none', () => {
+        // tsserver reads the checkout's node_modules; warning about a directory it would never read
+        // would train people to ignore the warning that matters.
+        expect(needsDependencyGrant({ enabled: true, sandbox_config: {} })).toBe(false);
+        expect(needsDependencyGrant({ enabled: true })).toBe(false);
+        expect(needsDependencyGrant({})).toBe(false);
+    });
+
+    it('is false for an extension that is switched off', () => {
+        // One that cannot run is not waiting on anyone, and the warning returns when it is enabled.
+        expect(needsDependencyGrant({ enabled: false, sandbox_config: { dependency_cache: DECLARED } })).toBe(false);
     });
 });

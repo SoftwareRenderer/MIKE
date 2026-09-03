@@ -252,12 +252,6 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	s.executor.RecoverStaleTasks()
 	// Wire agent registry to terminal manager (created earlier before agentRegistry was available)
 	s.terminalMgr.SetAgentRegistry(agentRegistry)
-	// A sandboxed shell needs the same dependency directories the language servers were granted: the
-	// terminal is where a user warms one by hand. Guarded so a nil manager never arrives as a non-nil
-	// interface holding a nil pointer.
-	if s.extLSPMgr != nil {
-		s.terminalMgr.SetDependencyProvider(s.extLSPMgr)
-	}
 	s.projectHandler = managers.NewProjectHandler(store, cfgStore, worktreeMgr, s.terminalMgr, s.sandboxMgr, s.executor)
 	s.taskHandler = managers.NewTaskHandler(store, s.appStreamMgr, cfgStore, s.terminalMgr, s.executor, worktreeMgr, commitQueue, s.sandboxMgr)
 	s.gitHandler = managers.NewGitHandler(store, s.executor.WorktreeMgr())

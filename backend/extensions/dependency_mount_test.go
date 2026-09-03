@@ -25,12 +25,11 @@ func envSpecs(args []string) []string {
 	return out
 }
 
-func grantedExtension(hostPath string, writable bool) *Extension {
-	readOnly := !writable
+func grantedExtension(hostPath string) *Extension {
 	ext := &Extension{ID: "ext-dep-mount", Name: "gopls", Type: "lsp"}
 	ext.SandboxConfig = SandboxConfig{
 		Envs:               []types.SandboxEnv{{Key: "GOCACHE", Value: "/var/cache/gopls/go-build"}},
-		Dependency:         &DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE", ReadOnly: &readOnly},
+		Dependency:         &DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE"},
 		DependencyHostPath: hostPath,
 	}
 	return ext
@@ -40,7 +39,7 @@ func TestBuildExtensionCreateArgs_MountsTheGrantedDependencyDirectory(t *testing
 	grant := t.TempDir()
 	policy := newMountPolicyWithReadOnly([]string{grant}, []string{grant})
 
-	args, _ := buildExtensionCreateArgs(grantedExtension(grant, false), "kanban-ext-ext-dep-mount", "ubuntu:latest", nil, policy)
+	args, _ := buildExtensionCreateArgs(grantedExtension(grant), "kanban-ext-ext-dep-mount", "ubuntu:latest", nil, policy)
 	spec := grant + ":/go/pkg/mod:rprivate,ro"
 	if !hasElem(mountSpecs(args), spec) {
 		t.Errorf("the granted directory is not mounted read-only: %v", mountSpecs(args))
@@ -56,21 +55,20 @@ func TestBuildExtensionCreateArgs_MountsTheGrantedDependencyDirectory(t *testing
 	}
 }
 
-func TestBuildExtensionCreateArgs_WritableDeclarationOnlyWhenTheAppAllowsIt(t *testing.T) {
-	// Two conditions, both required: the manifest asked to write, and the path is not one the app
-	// pins read-only. Either alone leaves the mount read-only.
+func TestBuildExtensionCreateArgs_GrantIsReadOnlyEvenWhereTheAppWouldAllowWrite(t *testing.T) {
+	// The extension's own bind is read-only because dependencyBind says so, not because the policy
+	// happens to pin the root: a policy with no read-only roots at all still gets a read-only cache.
+	// Warming it is the task container's job (lsp.DependencySandboxArgs), and one writer per cache is
+	// the property that stops a language server editing dependencies every other project reads.
 	grant := t.TempDir()
 
 	free := newMountPolicy([]string{grant})
-	args, _ := buildExtensionCreateArgs(grantedExtension(grant, true), "kanban-ext-ext-dep-rw", "ubuntu:latest", nil, free)
-	if !hasElem(mountSpecs(args), grant+":/go/pkg/mod:rprivate,rw") {
-		t.Errorf("a writable declaration on an app-owned path should mount read-write: %v", mountSpecs(args))
-	}
-
-	pinned := newMountPolicyWithReadOnly([]string{grant}, []string{grant})
-	args, _ = buildExtensionCreateArgs(grantedExtension(grant, true), "kanban-ext-ext-dep-rw", "ubuntu:latest", nil, pinned)
+	args, _ := buildExtensionCreateArgs(grantedExtension(grant), "kanban-ext-ext-dep-rw", "ubuntu:latest", nil, free)
 	if !hasElem(mountSpecs(args), grant+":/go/pkg/mod:rprivate,ro") {
-		t.Errorf("a pinned root must stay read-only whatever the declaration asks: %v", mountSpecs(args))
+		t.Errorf("the dependency mount must be read-only whatever the policy pins: %v", mountSpecs(args))
+	}
+	if hasElem(mountSpecs(args), grant+":/go/pkg/mod:rprivate,rw") {
+		t.Errorf("the extension's sandbox was handed a writable dependency cache: %v", mountSpecs(args))
 	}
 }
 
@@ -81,7 +79,7 @@ func TestBuildExtensionCreateArgs_UnmountableGrantIsReportedAndSkipped(t *testin
 	// The stored grant still points at it (the directory was deleted afterwards). The extension has
 	// to start anyway: its own environment check will say the project cannot be resolved, which is
 	// true, whereas refusing to build the container would leave the editor with nothing at all.
-	ext := grantedExtension(missing, false)
+	ext := grantedExtension(missing)
 	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-dep-missing", "ubuntu:latest", nil, newMountPolicy([]string{grant}))
 	if specs := mountSpecs(args); len(specs) != 0 {
 		t.Errorf("an unmountable grant produced a mount: %v", specs)
@@ -95,13 +93,13 @@ func TestBuildExtensionCreateArgs_UnmountableGrantIsReportedAndSkipped(t *testin
 	// A grant that is not a root for this extension at all (it belongs to another one) binds nothing
 	// either — the policy is the gate, not the stored string.
 	other := t.TempDir()
-	args, _ = buildExtensionCreateArgs(grantedExtension(other, false), "kanban-ext-ext-dep-other", "ubuntu:latest", nil, newMountPolicy([]string{grant}))
+	args, _ = buildExtensionCreateArgs(grantedExtension(other), "kanban-ext-ext-dep-other", "ubuntu:latest", nil, newMountPolicy([]string{grant}))
 	if specs := mountSpecs(args); len(specs) != 0 {
 		t.Errorf("a grant outside the policy still mounted: %v", specs)
 	}
 
 	// No policy at all must be the strictest case, not the loosest.
-	args, _ = buildExtensionCreateArgs(grantedExtension(grant, false), "kanban-ext-ext-dep-nil", "ubuntu:latest", nil, nil)
+	args, _ = buildExtensionCreateArgs(grantedExtension(grant), "kanban-ext-ext-dep-nil", "ubuntu:latest", nil, nil)
 	if specs := mountSpecs(args); len(specs) != 0 {
 		t.Errorf("a nil policy mounted the granted directory: %v", specs)
 	}
@@ -113,7 +111,7 @@ func TestDependencyMountIsTheSameDerivationBothWays(t *testing.T) {
 	// compatible with a grant it does not have — and the user's grant does nothing, silently, forever.
 	grant := t.TempDir()
 	policy := newMountPolicyWithReadOnly([]string{grant}, nil)
-	ext := grantedExtension(grant, false)
+	ext := grantedExtension(grant)
 
 	bind := dependencyBind(ext, policy)
 	if !bind.OK {
@@ -137,7 +135,7 @@ func TestDependencyMountIsTheSameDerivationBothWays(t *testing.T) {
 	}
 
 	// Both helpers are no-ops when nothing is bound, and never mutate the caller's list.
-	none := dependencyBind(grantedExtension("", false), policy)
+	none := dependencyBind(grantedExtension(""), policy)
 	if len(withDependencyMount(ext.SandboxConfig.Mounts, none)) != 0 || len(withDependencyEnv(ext.SandboxConfig.Envs, none)) != 1 {
 		t.Error("an empty bind must not add anything to either list")
 	}
@@ -152,7 +150,7 @@ func TestBuildExtensionCreateArgs_BorrowedMountCollidingWithTheCacheIsDropped(t 
 	// the dependency path is declared and cannot be moved.
 	grant := t.TempDir()
 	policy := newMountPolicy([]string{grant})
-	ext := grantedExtension(grant, false)
+	ext := grantedExtension(grant)
 	ext.SandboxConfig.Mounts = []types.SandboxMount{
 		{HostPath: grant, ContainerPath: "/go/pkg/mod", Mode: "ro"},
 		{HostPath: grant, ContainerPath: "/workspace/share", Mode: "ro"},
@@ -185,7 +183,7 @@ func TestDesiredDependencyMountNeedsTheManager(t *testing.T) {
 	if got := sm.DesiredDependencyMount(nil); got.OK || got.Reason != "" {
 		t.Errorf("nil extension = %+v, want nothing to bind and nothing to report", got)
 	}
-	if got := sm.DesiredDependencyMount(grantedExtension("", false)); got.OK || got.Reason != "" {
+	if got := sm.DesiredDependencyMount(grantedExtension("")); got.OK || got.Reason != "" {
 		t.Errorf("no grant = %+v, want nothing to bind and nothing to report", got)
 	}
 
@@ -194,7 +192,7 @@ func TestDesiredDependencyMountNeedsTheManager(t *testing.T) {
 		t.Skipf("no home directory outside the app's roots: %v", err)
 	}
 	home = filepath.Clean(home)
-	got := sm.DesiredDependencyMount(grantedExtension(home, false))
+	got := sm.DesiredDependencyMount(grantedExtension(home))
 	if !got.OK {
 		t.Errorf("a granted directory outside the app's roots must be bindable by its own extension: %+v", got)
 	}

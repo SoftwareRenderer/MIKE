@@ -5,6 +5,7 @@ package extensions
 // extension's container — the allowlist must be as narrow as it was before.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,11 +30,10 @@ func grantCandidate(t *testing.T) string {
 	return filepath.Clean(home)
 }
 
-func dependencyExtension(id, hostPath string, writable bool) *Extension {
-	readOnly := !writable
+func dependencyExtension(id, hostPath string) *Extension {
 	ext := &Extension{ID: id, Name: "gopls", Type: "lsp"}
 	ext.SandboxConfig = SandboxConfig{
-		Dependency:         &DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE", ReadOnly: &readOnly},
+		Dependency:         &DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE"},
 		DependencyHostPath: hostPath,
 	}
 	return ext
@@ -49,7 +49,7 @@ func TestMountPolicyForExtension_GrantIsARootForItsOwnExtensionOnly(t *testing.T
 	sm := sandboxManagerForTest(t)
 	grant := grantCandidate(t)
 
-	granted := sm.MountPolicyForExtension(dependencyExtension("ext-gopls", grant, false))
+	granted := sm.MountPolicyForExtension(dependencyExtension("ext-gopls", grant))
 	resolved, err := granted.ValidateHostPath(grant)
 	if err != nil {
 		t.Fatalf("the granted directory must be mountable by the extension it was granted to: %v", err)
@@ -57,7 +57,7 @@ func TestMountPolicyForExtension_GrantIsARootForItsOwnExtensionOnly(t *testing.T
 
 	// Another extension of the same install gets the base allowlist, so its manifest cannot name
 	// this directory and get it.
-	other := sm.MountPolicyForExtension(dependencyExtension("ext-other", "", false))
+	other := sm.MountPolicyForExtension(dependencyExtension("ext-other", ""))
 	if _, err := other.ValidateHostPath(grant); err == nil {
 		t.Error("a second extension was handed another extension's granted directory")
 	}
@@ -82,28 +82,25 @@ func TestMountPolicyForExtension_GrantIsARootForItsOwnExtensionOnly(t *testing.T
 	}
 }
 
-func TestMountPolicyForExtension_ReadOnlyDeclarationIsPinned(t *testing.T) {
+func TestMountPolicyForExtension_GrantIsAlwaysPinnedReadOnly(t *testing.T) {
 	// The pinning is what makes "read-only" a property of the mount rather than a polite default:
-	// a mount spec asking for rw against this root still comes out ro.
+	// a mount spec asking for rw against this root still comes out ro. There is no declaration that
+	// can lift it — the containers that fill the cache mount it read-write from their own side.
 	sm := sandboxManagerForTest(t)
 	grant := grantCandidate(t)
 
-	ro := sm.MountPolicyForExtension(dependencyExtension("ext-gopls", grant, false))
-	resolved, err := ro.ValidateHostPath(grant)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ro.ForceReadOnly(resolved) {
-		t.Error("a read-only dependency declaration must be pinned read-only, whatever the mount asks for")
-	}
-
-	rw := sm.MountPolicyForExtension(dependencyExtension("ext-gopls", grant, true))
-	resolvedRW, err := rw.ValidateHostPath(grant)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rw.ForceReadOnly(resolvedRW) {
-		t.Error("a declaration that asks to write (a toolchain module that must be downloadable) was pinned read-only")
+	for _, ext := range []*Extension{dependencyExtension("ext-gopls", grant), dependencyExtension("ext-rust", grant)} {
+		policy := sm.MountPolicyForExtension(ext)
+		resolved, err := policy.ValidateHostPath(grant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !policy.ForceReadOnly(resolved) {
+			t.Errorf("%s: the granted dependency directory is not pinned read-only", ext.ID)
+		}
+		if _, err := policy.ValidateHostPath(grant); err != nil {
+			t.Errorf("the grant is not a root for its own extension: %v", err)
+		}
 	}
 
 	// The base policy's own pins are untouched by any of this — a project-configured path stays
@@ -121,7 +118,7 @@ func TestMountPolicyForExtension_NarrowAtInstallAndSettings(t *testing.T) {
 	h := NewExtensionHandler(store, sm, NewRegistryClient(), &ExtensionConfig{})
 	grant := grantCandidate(t)
 
-	ext := dependencyExtension("ext-gopls-narrow", grant, false)
+	ext := dependencyExtension("ext-gopls-narrow", grant)
 	if err := store.Create(ext); err != nil {
 		t.Fatal(err)
 	}
@@ -140,48 +137,64 @@ func TestMountPolicyForExtension_NarrowAtInstallAndSettings(t *testing.T) {
 func TestDependencyGrantNeedsBothHalves(t *testing.T) {
 	// Half a configuration binds nothing: a grant with no declaration has no container path and no
 	// env to assign, and a declaration with no grant is the normal state before anyone is asked.
-	host, writable := (&SandboxConfig{DependencyHostPath: "/some/dir"}).DependencyGrant()
-	if host != "" || writable {
-		t.Errorf("grant without a declaration = (%q, %v), want nothing bound", host, writable)
+	if host := (&SandboxConfig{DependencyHostPath: "/some/dir"}).DependencyGrant(); host != "" {
+		t.Errorf("grant without a declaration = %q, want nothing bound", host)
 	}
-	host, writable = (&SandboxConfig{Dependency: &DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE"}}).DependencyGrant()
-	if host != "" || writable {
-		t.Errorf("declaration without a grant = (%q, %v), want nothing bound", host, writable)
+	if host := (&SandboxConfig{Dependency: &DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE"}}).DependencyGrant(); host != "" {
+		t.Errorf("declaration without a grant = %q, want nothing bound", host)
 	}
 
 	var none *SandboxConfig
-	if host, writable := none.DependencyGrant(); host != "" || writable {
+	if host := none.DependencyGrant(); host != "" {
 		t.Error("a missing sandbox config must bind nothing")
 	}
 
-	// Writable follows the declaration, never the grant: the user choosing a directory cannot make
-	// an extension write into it.
-	host, writable = (&SandboxConfig{
+	if host := (&SandboxConfig{
 		DependencyHostPath: "/some/dir",
 		Dependency:         &DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GOMODCACHE"},
-	}).DependencyGrant()
-	if host != "/some/dir" || writable {
-		t.Errorf("default declaration = (%q, %v), want the granted path read-only", host, writable)
+	}).DependencyGrant(); host != "/some/dir" {
+		t.Errorf("both halves = %q, want the granted directory", host)
 	}
-	readWrite := false
-	host, writable = (&SandboxConfig{
-		DependencyHostPath: "/some/dir",
-		Dependency:         &DependencyCache{ContainerPath: "/usr/local/cargo", Env: "CARGO_HOME", ReadOnly: &readWrite},
-	}).DependencyGrant()
-	if host != "/some/dir" || !writable {
-		t.Errorf("read_only:false declaration = (%q, %v), want the granted path writable", host, writable)
+
+	// A stale `read_only` in a stored record changes nothing: the answer is a path, and the mode is
+	// the app's. Decoding the JSON a pre-removal record holds is the case that matters.
+	var stored SandboxConfig
+	if err := json.Unmarshal([]byte(`{"dependency_host_path":"/some/dir","dependency_cache":{"container_path":"/go/pkg/mod","env":"GOMODCACHE","read_only":false}}`), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if host := stored.DependencyGrant(); host != "/some/dir" {
+		t.Errorf("a record carrying the removed field = %q, want the granted directory", host)
 	}
 }
 
 func TestBuildExtensionCreateArgs_UsesNoGrantItself(t *testing.T) {
 	// The argument builder takes its policy from the caller, so the per-extension behaviour lives
 	// in one place (MountPolicyForExtension) and a test that passes nil still refuses everything.
-	ext := dependencyExtension("ext-dep-mount", grantCandidate(t), false)
+	ext := dependencyExtension("ext-dep-mount", grantCandidate(t))
 	ext.SandboxConfig.Mounts = []types.SandboxMount{{HostPath: grantCandidate(t), ContainerPath: "/go/pkg/mod", Mode: "rw"}}
 	args, _ := buildExtensionCreateArgs(ext, "kanban-ext-ext-dep-mount", "ubuntu:latest", nil, nil)
 	for _, a := range args {
 		if strings.HasPrefix(a, "/") && strings.Contains(a, ":/go/pkg/mod") {
 			t.Errorf("a nil policy mounted %q — the policy is the gate, not the extension's word", a)
+		}
+	}
+}
+
+// TestGrantShapeNamesADirectoryNotAMount: the shape rule is about what the path IS, not how deep it
+// sits. A NAS-style /tank/gomodcache is a perfectly good dependency directory and the old rule refused
+// it for no reason now that the only container which ever sees the path is the extension's own,
+// read-only. A bare top level is still refused: /tank is the whole mount, and a grant is meant to be
+// the dependencies under it, not everything the machine holds.
+func TestGrantShapeNamesADirectoryNotAMount(t *testing.T) {
+	homes := []string{"/home/dev"}
+	for _, good := range []string{"/tank/gomodcache", "/data/go/pkg/mod", "/home/dev/go/pkg/mod", "/opt/cargo/registry"} {
+		if err := checkGrantShapeWithHomes(good, homes); err != nil {
+			t.Errorf("%s refused: %v", good, err)
+		}
+	}
+	for _, bad := range []string{"/", "/tank", "/data"} {
+		if err := checkGrantShapeWithHomes(bad, homes); err == nil {
+			t.Errorf("%s accepted, want it refused as a whole top level rather than a dependency directory", bad)
 		}
 	}
 }

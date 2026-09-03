@@ -474,8 +474,6 @@ func (m *wedgedLSPManager) GetRegistry() *lsp.ExtensionRegistry { return m.regis
 // and no handshake completed yet.
 func (m *wedgedLSPManager) FilesChanged(string, []string) bool { return false }
 
-func (m *wedgedLSPManager) DependencyCaches() []lsp.DependencyCache { return nil }
-
 func (m *wedgedLSPManager) Environment(string, string) lsp.EnvironmentReport {
 	return lsp.EnvironmentReport{Healthy: true}
 }

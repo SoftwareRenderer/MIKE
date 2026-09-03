@@ -43,7 +43,6 @@ type recordingLSPManager struct {
 	// so a test that says nothing about the environment sees every finding: the gate can
 	// only ever subtract, and that must be the default a test starts from.
 	environment func(file string) lsp.EnvironmentReport
-	depCaches   []lsp.DependencyCache
 	// reloadQuestions records each FilesChanged call, so a test can pin which files a turn
 	// handed to the manager as "the project changed".
 	reloadQuestions [][]string
@@ -54,11 +53,6 @@ func newRecordingLSPManager(registry *lsp.ExtensionRegistry) *recordingLSPManage
 }
 
 func (m *recordingLSPManager) GetRegistry() *lsp.ExtensionRegistry { return m.registry }
-
-// DependencyCaches lets a test see the task sandbox's dependency mounts being fed. The task sandbox
-// mounts what the enabled extensions were granted; whether a *turn* resolves its dependencies is
-// decided downstream of this call, so this fake only has to answer.
-func (m *recordingLSPManager) DependencyCaches() []lsp.DependencyCache { return m.depCaches }
 
 func (m *recordingLSPManager) Environment(_, filePath string) lsp.EnvironmentReport {
 	if m.environment != nil {

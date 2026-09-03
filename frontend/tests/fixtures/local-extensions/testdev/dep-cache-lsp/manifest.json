@@ -14,9 +14,8 @@
             "sandbox": {
                 "dependency_cache": {
                     "container_path": "/fake/mod",
-                    "env": "FAKE_CACHE",
-                    "read_only": true
-                },
+                    "env": "FAKE_CACHE"
+                                    },
                 "reload_files": ["fake.mod"],
                 "environment": {
                     "check": { "command": "/bin/sh", "args": ["-c", "test -f fake.mod"] },
