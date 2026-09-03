@@ -107,6 +107,24 @@ func LoadDisabled() *Config {
 	return nil
 }
 
+// CertPEM returns the PEM encoding of a file's first CERTIFICATE block.
+// Re-encoding rather than returning the file is the point: only the certificate
+// goes out, and a file that is not a certificate is an error, never key material.
+func CertPEM(path string) ([]byte, error) {
+	pemBytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("tls: failed to read certificate %s: %w", path, err)
+	}
+	block, _ := pem.Decode(pemBytes)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("tls: no CERTIFICATE PEM block in %s", path)
+	}
+	if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+		return nil, fmt.Errorf("tls: invalid certificate in %s: %w", path, err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: block.Bytes}), nil
+}
+
 // ensureCA loads the local CA from tlsDir, creating and persisting it on first
 // use. An existing, usable CA is never replaced: devices that already imported
 // it would stop trusting the server otherwise.
