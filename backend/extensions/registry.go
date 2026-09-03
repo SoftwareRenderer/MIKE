@@ -1,6 +1,7 @@
 package extensions
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -323,10 +324,22 @@ func validateSubdir(subdir string) error {
 // content copied — so installed files are the vetted commit's bytes. Any mismatch or fetch
 // failure returns an error and writes nothing.
 func (rc *RegistryClient) CheckoutExtension(repo, commit, subdir, destDir string) error {
+	return rc.CheckoutExtensionContext(context.Background(), repo, commit, subdir, destDir)
+}
+
+// CheckoutExtensionContext is CheckoutExtension under a deadline. The verification is identical; only
+// the three git subprocesses gain a context, so a fetch that hangs (an unreachable host, a server that
+// accepts the connection and says nothing) cannot outlive the caller's deadline. The startup repair
+// runs it under one precisely because nothing there may hang: an install the user asked for can wait,
+// a boot cannot.
+func (rc *RegistryClient) CheckoutExtensionContext(ctx context.Context, repo, commit, subdir, destDir string) error {
 	if err := validateGitSource(repo, commit); err != nil {
 		return err
 	}
 	if err := validateSubdir(subdir); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
@@ -341,7 +354,7 @@ func (rc *RegistryClient) CheckoutExtension(repo, commit, subdir, destDir string
 	// branch or tag is present. The pinned commit must therefore be on a
 	// permanent ref.
 	srcDir := filepath.Join(tmp, "src")
-	cloneCmd := exec.Command("git", extCloneArgs(repo, srcDir)...)
+	cloneCmd := exec.CommandContext(ctx, "git", extCloneArgs(repo, srcDir)...)
 	// The fence in the argv is half of it: GIT_ALLOW_PROTOCOL is enforced by git
 	// itself whatever the host's git config says, and GIT_TERMINAL_PROMPT=0 stops
 	// a credential prompt hanging the install request. See git.CloneEnv.
@@ -351,13 +364,13 @@ func (rc *RegistryClient) CheckoutExtension(repo, commit, subdir, destDir string
 		return fmt.Errorf("clone %s: %w (output: %s)", repo, err, gitErrorOutput(out))
 	}
 
-	checkoutCmd := exec.Command("git", "-C", srcDir, "checkout", "-q", commit)
+	checkoutCmd := exec.CommandContext(ctx, "git", "-C", srcDir, "checkout", "-q", commit)
 	if out, err := checkoutCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("checkout pinned commit %s: %w (output: %s)", commit, err, strings.TrimSpace(string(out)))
 	}
 
 	// Verify the checked-out commit is exactly the pinned one before copying.
-	out, err := exec.Command("git", "-C", srcDir, "rev-parse", "HEAD").Output()
+	out, err := exec.CommandContext(ctx, "git", "-C", srcDir, "rev-parse", "HEAD").Output()
 	if err != nil {
 		return fmt.Errorf("verify checkout: %w", err)
 	}
