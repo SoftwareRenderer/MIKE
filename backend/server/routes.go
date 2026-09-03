@@ -23,7 +23,6 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/sessions", s.handleSessionsList)
 	s.mux.HandleFunc("POST /api/sessions/revoke-others", s.handleSessionsRevokeOthers)
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleSessionRevoke)
-	s.mux.HandleFunc("/api/prompts/reload", s.handleReloadPrompts)
 
 	// Config
 	s.mux.HandleFunc("/api/config/test-connection", s.configStore.HandleTestConnection)
@@ -135,7 +134,6 @@ func (s *Server) setupRoutes() {
 
 	// Git operations
 	s.mux.HandleFunc("/api/projects/{projectID}/git/log", s.gitHandler.HandleLog)
-	s.mux.HandleFunc("/api/projects/{projectID}/git/branch", s.gitHandler.HandleBranch)
 	s.mux.HandleFunc("/api/projects/{projectID}/git/branches", s.gitHandler.HandleBranches)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/git/diff", s.gitHandler.HandleDiff)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/git/diff/file", s.gitHandler.HandleProjectDiffFile)

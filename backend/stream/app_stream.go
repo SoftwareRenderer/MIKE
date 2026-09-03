@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"kanban/backend/git"
+	"kanban/backend/httputil"
 	"kanban/backend/store"
 	"kanban/backend/types"
 
@@ -856,11 +857,8 @@ func (asm *AppStreamManager) sendDoneTaskInitialDiff(ctx context.Context, client
 
 // HandleStream is the HTTP handler for the /api/stream WebSocket endpoint.
 func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		CompressionMode: websocket.CompressionContextTakeover,
-	})
-	if err != nil {
-		log.Printf("[app stream] accept error: %v", err)
+	conn, ok := httputil.AcceptWS(w, r, "app stream")
+	if !ok {
 		return
 	}
 
@@ -900,37 +898,11 @@ func (asm *AppStreamManager) HandleStream(w http.ResponseWriter, r *http.Request
 	// Send initial project counts
 	asm.BroadcastProjectCounts()
 
-	// Ping/pong keepalive
-	// If a ping fails, cancel the read context to unblock Read() and close the connection.
+	// A failed ping cancels the read context, unblocking the Read loop below. The write
+	// lock covers the ping because frames are broadcast to this connection elsewhere.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() {
-		ticker := time.NewTicker(27 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				// Per-ping timeout so Ping() itself can't hang forever
-				pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
-				client.writeMu.Lock()
-				err := conn.Ping(pingCtx)
-				if err == nil {
-					// Also send a data frame so the browser's onmessage fires.
-					// Control Ping/Pong frames are transparent to JS and don't reset
-					// the client-side stale-detection timer.
-					_ = conn.Write(pingCtx, websocket.MessageText, []byte(`{"type":"ping"}`))
-				}
-				client.writeMu.Unlock()
-				pingCancel()
-				if err != nil {
-					cancel() // unblock Read() to tear down the connection
-					return
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	httputil.Keepalive(ctx, conn, &client.writeMu, cancel)
 
 	// Send buffered events on reconnect
 	if r.URL.Query().Get("sync") == "1" {

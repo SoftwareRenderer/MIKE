@@ -940,50 +940,75 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 		return nil, fmt.Errorf("branch was not set by concurrent caller")
 	}
 
-	// If this is a child task, ensure the parent has a branch first.
-	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByID(task.ParentTaskID)
-		if err == nil && parent.Branch == "" {
-			if err := te.EnsureParentBranch(projectID, parent); err != nil {
-				return nil, fmt.Errorf("ensure parent branch: %w", err)
-			}
-		}
-	}
-
-	// If this is a child task, branch from the parent's actual worktree branch.
-	sourceBranch := ""
-	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByID(task.ParentTaskID)
-		if err == nil {
-			if parentWtPath, wtErr := te.worktreeMgr.WorktreePath(parent.ID); wtErr == nil {
-				if _, statErr := os.Stat(parentWtPath); statErr == nil {
-					if actualBranch, gitErr := te.worktreeMgr.GitRunInDirOutput(parentWtPath, "rev-parse", "--abbrev-ref", "HEAD"); gitErr == nil {
-						sourceBranch = strings.TrimSpace(actualBranch)
-					}
-				}
-			}
-			if sourceBranch == "" && parent.Branch != "" {
-				sourceBranch = parent.Branch
-			}
-		}
+	sourceBranch, err := te.branchChildFrom(projectID, task)
+	if err != nil {
+		return nil, err
 	}
 
 	_, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName, sourceBranch)
 	if err != nil {
-		// Roll back orphaned branch name so later calls don't see a stale
-		// branch with no corresponding git ref (would cause "not a valid
-		// commit, skipping merge" errors).
+		// Roll back the branch name: this path persists it before the worktree exists,
+		// so a stale name here would later read as "not a valid commit, skipping merge".
 		_ = te.store.ClearTaskBranch(taskID, projectID)
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
 	task.Branch = branchName
 	task.BaseRef = baseRef
+	te.pinBaselineAndWatch(projectID, task)
 
-	// Capture the base ref's commit hash.
+	task.UpdatedAt = time.Now().UTC()
+	if err := te.storeTask(task, projectID); err != nil {
+		return nil, fmt.Errorf("update task: %w", err)
+	}
+
+	log.Printf("[init] task=%s created worktree with branch %s", taskID, branchName)
+	return task, nil
+}
+
+// branchChildFrom settles what a task branches from, in the order both start paths need:
+// the parent must have a branch before the child does (it is the subtask auto-merge
+// target), and the child forks from the parent's actual worktree branch, because the
+// stored parent.Branch can be stale. "" means branch from the project baseline.
+func (te *TaskExecutor) branchChildFrom(projectID string, task *types.Task) (string, error) {
+	if task.ParentTaskID == "" {
+		return "", nil
+	}
+
+	parent, err := te.store.GetTaskByID(task.ParentTaskID)
+	if err == nil && parent.Branch == "" {
+		if err := te.EnsureParentBranch(projectID, parent); err != nil {
+			return "", fmt.Errorf("ensure parent branch: %w", err)
+		}
+	}
+
+	// Re-read: EnsureParentBranch (or a concurrent caller that won the same race)
+	// may have just given the parent its branch.
+	parent, err = te.store.GetTaskByID(task.ParentTaskID)
+	if err != nil {
+		return "", nil
+	}
+
+	if parentWtPath, wtErr := te.worktreeMgr.WorktreePath(parent.ID); wtErr == nil {
+		if _, statErr := os.Stat(parentWtPath); statErr == nil {
+			if actualBranch, gitErr := te.worktreeMgr.GitRunInDirOutput(parentWtPath, "rev-parse", "--abbrev-ref", "HEAD"); gitErr == nil {
+				if b := strings.TrimSpace(actualBranch); b != "" {
+					return b, nil
+				}
+			}
+		}
+	}
+	// Fall back to the stored branch when the parent's worktree is unavailable.
+	return parent.Branch, nil
+}
+
+// pinBaselineAndWatch records the base ref's commit hash and starts diff watching on it.
+// The hash is taken now because a fast-forward merge moves the branch pointer, and a
+// done-task diff needs the original commit. Watching the commit keeps card stats matching
+// the panel. Both are no-ops without a base ref.
+func (te *TaskExecutor) pinBaselineAndWatch(projectID string, task *types.Task) {
 	if task.BaseCommit == "" && task.BaseRef != "" {
-		project, _ := te.store.GetProject(projectID)
-		if project != nil {
+		if project, _ := te.store.GetProject(projectID); project != nil {
 			c := osexec.Command("git", "-C", project.Path, "rev-parse", task.BaseRef)
 			if out, err := c.CombinedOutput(); err == nil {
 				task.BaseCommit = strings.TrimSpace(string(out))
@@ -995,15 +1020,7 @@ func (te *TaskExecutor) InitTask(projectID, taskID string) (*types.Task, error) 
 	if task.BaseCommit != "" {
 		watchBaseRef = task.BaseCommit
 	}
-	te.appStreamMgr.WatchWorktree(taskID, projectID, watchBaseRef)
-
-	task.UpdatedAt = time.Now().UTC()
-	if err := te.storeTask(task, projectID); err != nil {
-		return nil, fmt.Errorf("update task: %w", err)
-	}
-
-	log.Printf("[init] task=%s created worktree with branch %s", taskID, branchName)
-	return task, nil
+	te.appStreamMgr.WatchWorktree(task.ID, projectID, watchBaseRef)
 }
 
 // taskExecSetup holds the shared state prepared for task execution.
@@ -1091,37 +1108,10 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	if branchName == "" {
 		branchName = te.generateBranchName(task, taskID, projectID)
 	}
-	// If this is a child task, ensure the parent has a branch first.
-	// The parent's branch is the merge target for subtask auto-merge.
-	// If the parent hasn't started yet (no branch), create one now.
-	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByID(task.ParentTaskID)
-		if err == nil && parent.Branch == "" {
-			if err := te.EnsureParentBranch(projectID, parent); err != nil {
-				return nil, fmt.Errorf("ensure parent branch: %w", err)
-			}
-		}
-	}
-
-	// If this is a child task, branch from the parent's actual worktree branch.
-	// The stored parent.Branch may be stale (e.g., set before collision resolution).
-	sourceBranch := ""
-	if task.ParentTaskID != "" {
-		parent, err := te.store.GetTaskByID(task.ParentTaskID)
-		if err == nil {
-			// Prefer the parent's worktree branch if it exists.
-			if parentWtPath, wtErr := te.worktreeMgr.WorktreePath(parent.ID); wtErr == nil {
-				if _, statErr := os.Stat(parentWtPath); statErr == nil {
-					if actualBranch, gitErr := te.worktreeMgr.GitRunInDirOutput(parentWtPath, "rev-parse", "--abbrev-ref", "HEAD"); gitErr == nil {
-						sourceBranch = strings.TrimSpace(actualBranch)
-					}
-				}
-			}
-			// Fallback to stored branch if worktree branch unavailable.
-			if sourceBranch == "" && parent.Branch != "" {
-				sourceBranch = parent.Branch
-			}
-		}
+	// A child branches from its parent, which also gives the parent a branch if it has none.
+	sourceBranch, err := te.branchChildFrom(projectID, task)
+	if err != nil {
+		return nil, err
 	}
 	worktreePath, baseRef, err := te.worktreeMgr.CreateWorktree(projectID, taskID, branchName, sourceBranch)
 	if err != nil {
@@ -1134,25 +1124,7 @@ func (te *TaskExecutor) prepareTaskExecution(projectID, taskID string, overrideS
 	if task.BaseRef == "" {
 		task.BaseRef = baseRef
 	}
-	// Capture the base ref's commit hash at task start time.
-	// Used for done-task diffs: after a fast-forward merge, the base ref branch
-	// pointer moves forward, so we need the original commit to compute the diff.
-	if task.BaseCommit == "" && task.BaseRef != "" {
-		project, _ := te.store.GetProject(projectID)
-		if project != nil {
-			c := osexec.Command("git", "-C", project.Path, "rev-parse", task.BaseRef)
-			if out, err := c.CombinedOutput(); err == nil {
-				task.BaseCommit = strings.TrimSpace(string(out))
-			}
-		}
-	}
-	// Use resolved baseline (same as API handler) so card stats match panel display.
-	// BaseCommit is a fixed commit hash captured at task start; BaseRef is the branch name.
-	watchBaseRef := task.BaseRef
-	if task.BaseCommit != "" {
-		watchBaseRef = task.BaseCommit
-	}
-	te.appStreamMgr.WatchWorktree(taskID, projectID, watchBaseRef)
+	te.pinBaselineAndWatch(projectID, task)
 
 	// If the task has a current thread with a specific git branch, checkout that branch
 	if task.CurrentThreadID != "" {

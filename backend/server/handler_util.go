@@ -1,13 +1,10 @@
 package server
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
-
-	"kanban/backend/prompts"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -30,25 +27,6 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSONResponse(w, http.StatusOK, map[string]string{"home": homeDir})
-}
-
-func (s *Server) handleReloadPrompts(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	names, err := prompts.ValidateTemplates()
-	if err != nil {
-		log.Printf("prompts reload failed: %v", err)
-		JSONError(w, http.StatusBadRequest, fmt.Sprintf("template error: %v", err))
-		return
-	}
-	log.Printf("prompts templates validated: %v", names)
-	JSONResponse(w, http.StatusOK, map[string]any{
-		"status":  "ok",
-		"message": "Prompt templates validated successfully",
-		"files":   names,
-	})
 }
 
 // safeNotFoundError returns a generic not-found message without leaking the path.

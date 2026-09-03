@@ -18,6 +18,83 @@ import (
 	"github.com/google/uuid"
 )
 
+// sandboxRecreate describes a mid-turn rebuild of a running task's container: the task
+// changed in a way the container was created around, so it has to be built again.
+type sandboxRecreate struct {
+	logPrefix string // tags the log lines, e.g. "mode-switch"
+	reason    string // the change in user-facing text, e.g. "mode change"
+	// connErrCode is stored when the new container is up but its bridge will not answer.
+	// It differs per caller because the two causes read differently in a message.
+	connErrCode string
+	opts        kanban_sandbox.SandboxOpts
+	// underLock applies the caller's own state beside the new callbacks, in the same
+	// critical section, so the two are never visible apart.
+	underLock func(*executionState)
+}
+
+// recreateTaskSandbox stops a running task container, creates it again with the given
+// options, and points the sandbox tool callbacks at the new bridge connection. The
+// operating-mode and agent-sandbox-config checks both need this and differ only in what
+// they pass.
+//
+// A failure is reported before being returned: the task moves to failed/review with the
+// reason in its Output and the browser gets a persisted error. Callers end the turn when
+// an error comes back. Changed assigned ports are persisted.
+func (te *TaskExecutor) recreateTaskSandbox(setup *taskExecSetup, state *executionState, r sandboxRecreate) error {
+	tag := fmt.Sprintf("[%s] setup.task=%s ", r.logPrefix, setup.task.ID)
+
+	if err := te.sandboxMgr.Stop(setup.task.ID); err != nil {
+		log.Printf(tag+"failed to stop old sandbox: %v", err)
+	}
+
+	assignedPorts, createErr := te.sandboxMgr.Create(setup.task.ID, setup.worktreePath, setup.project, r.opts)
+	if createErr != nil {
+		log.Printf(tag+"failed to recreate sandbox: %v", createErr)
+		te.failSandboxRecreate(setup,
+			fmt.Sprintf("Failed to recreate sandbox for %s: %v", r.reason, createErr),
+			fmt.Sprintf("Sandbox recreation failed: %v", createErr),
+			"sandbox_recreate_failed")
+		return createErr
+	}
+
+	newAgentClient, clientErr := te.sandboxMgr.GetClient(setup.task.ID)
+	if clientErr != nil {
+		log.Printf(tag+"failed to connect to new sandbox bridge: %v", clientErr)
+		te.failSandboxRecreate(setup,
+			fmt.Sprintf("Failed to connect to sandbox bridge after %s: %v", r.reason, clientErr),
+			fmt.Sprintf("Agent connection failed after %s: %v", r.reason, clientErr),
+			r.connErrCode)
+		return clientErr
+	}
+
+	te.taskMu.Lock()
+	state.sandboxExec, state.sandboxExecStream, state.sandboxRead, state.sandboxWrite, state.sandboxEdit = makeSandboxCallbacks(newAgentClient)
+	if r.underLock != nil {
+		r.underLock(state)
+	}
+	te.taskMu.Unlock()
+
+	// Persist and broadcast assigned ports if the recreation changed any.
+	if len(assignedPorts) > 0 {
+		setup.task.AssignedPorts = assignedPorts
+		te.persistTask(setup)
+		te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+	}
+	return nil
+}
+
+// failSandboxRecreate lands a task in review after its container could not be rebuilt.
+// The work is not lost — the worktree is intact — so the task pauses where someone can fix
+// the sandbox configuration and resume it.
+func (te *TaskExecutor) failSandboxRecreate(setup *taskExecSetup, output, userMessage, code string) {
+	setup.task.ExecutionState = types.ExecStateFailed
+	setup.task.Status = types.StatusReview
+	setup.task.Output = output
+	te.persistTask(setup)
+	te.appStreamMgr.BroadcastTaskUpdated(setup.projectID, setup.task)
+	te.sendAndPersistError(setup.task.ID, userMessage, code)
+}
+
 // storeTask writes task back, preserving fields the executor does not own: Title and
 // TitleGenerating belong to the task handlers, so a full-row write from the executor's
 // start-time copy would clobber a title changed while the task was queued or running.
