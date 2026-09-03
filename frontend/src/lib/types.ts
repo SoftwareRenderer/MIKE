@@ -592,9 +592,10 @@ export interface ExtensionSandboxConfig {
     /**
      * Where this server reads resolved dependencies from, inside its own container, and the
      * variable it reads that location from. The host directory that fills it is chosen under
-     * Settings → Extensions — a manifest names where it looks, never what it may read here.
+     * Settings → Extensions — a manifest names where it looks, never what it may read here. It is
+     * read from there, always: the containers that fill it are a task's or a terminal's own work.
      */
-    dependency_cache?: { container_path: string; env: string; read_only: boolean };
+    dependency_cache?: { container_path: string; env: string };
     /**
      * The host directory the user granted to fill that cache, or empty when none is granted.
      * Reported by the server and set only through its own endpoint — a manifest cannot supply it,

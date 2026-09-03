@@ -20,7 +20,6 @@ import (
 	"kanban/backend/agent"
 	"kanban/backend/config"
 	"kanban/backend/httputil"
-	"kanban/backend/lsp"
 	"kanban/backend/prompts"
 	"kanban/backend/sandbox"
 	"kanban/backend/store"
@@ -159,7 +158,6 @@ type TerminalManager struct {
 	cfgStore               *config.ConfigStore
 	sandboxMgr             sandboxOps
 	agentRegistry          *agent.AgentRegistry
-	dependencies           dependencyCaches
 	onPortsAssigned        func(taskID, projectID string, ports []types.AssignedPort) // callback when task ports are assigned
 	onProjectPortsAssigned func(projectID string, ports []types.AssignedPort)         // callback when project-level terminal ports are assigned
 }
@@ -182,26 +180,12 @@ func (tm *TerminalManager) SetAgentRegistry(ar *agent.AgentRegistry) {
 	tm.agentRegistry = ar
 }
 
-// dependencyCaches is the one thing the terminal needs from the LSP side: which host directories the
-// install's LSP extensions have been granted for their resolved dependencies. *lsp.ExtensionLSPManager
-// satisfies it.
-type dependencyCaches interface {
-	DependencyCaches() []lsp.DependencyCache
-}
-
-// SetDependencyProvider attaches the LSP manager after construction: it is built later than the
-// terminal manager, and set once before any session opens. shellSandboxOpts reads the field without a
-// lock for that reason — it runs inside getOrCreate, which already holds tm.mu.
-func (tm *TerminalManager) SetDependencyProvider(p dependencyCaches) {
-	tm.dependencies = p
-}
-
 // shellSandboxOpts is what a sandboxed shell's container is created with. It is a method rather than a
-// literal in the session setup because the dependency caches belong in the answer: a terminal is where
-// somebody warms one by hand, and a shell that cannot see the grant sends that work into a layer the
-// editor never sees.
+// literal in the session setup so it is testable, and so it stays in step with the task container's own
+// options. A dependency directory granted to an LSP extension is not in it: a shell sees the host only
+// through the project's Sandbox Configuration mounts, like every other container here.
 func (tm *TerminalManager) shellSandboxOpts(image string, proj *types.Project, agentSandbox *types.AgentSandbox) sandbox.SandboxOpts {
-	opts := sandbox.SandboxOpts{
+	return sandbox.SandboxOpts{
 		BaseImage:        image,
 		NetworkIsolation: proj.SandboxNetworkIsolation,
 		MemoryLimit:      proj.SandboxMemoryLimit,
@@ -212,10 +196,6 @@ func (tm *TerminalManager) shellSandboxOpts(image string, proj *types.Project, a
 		SandboxEnvs:      proj.SandboxEnvs,
 		Capabilities:     proj.SandboxCapabilities,
 	}
-	if tm.dependencies != nil {
-		opts.DependencyMounts, opts.DependencyEnvs = lsp.DependencySandboxArgs(tm.dependencies.DependencyCaches())
-	}
-	return opts
 }
 
 // getAgentSandbox returns the agent sandbox config for the current agent, or nil.

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"kanban/backend/llama"
-	"kanban/backend/lsp"
 	"kanban/backend/prompts"
 	kanban_sandbox "kanban/backend/sandbox"
 	"kanban/backend/stream"
@@ -771,16 +770,9 @@ func handleLoopDetected(te *TaskExecutor, task *types.Task, projectID, taskID st
 // it, so a new field cannot be set in three of them. Only the image comes from the caller -
 // only EnsureImageForProject knows what it settled on.
 func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, planMode bool) kanban_sandbox.SandboxOpts {
-	// Dependency caches the install's LSP extensions were granted, mounted read-write so a turn's
-	// build fills the cache the language server reads. Asked for here, where all four create paths
-	// assemble their options, so no caller can build a task without it. Plan mode gets it too: a
-	// read-only worktree whose toolchain cannot resolve imports is not a safe place to plan changes.
-	var depMounts []types.SandboxMount
-	var depEnvs []types.SandboxEnv
-	if te.lspMgr != nil {
-		depMounts, depEnvs = lsp.DependencySandboxArgs(te.lspMgr.DependencyCaches())
-	}
-
+	// Everything the container may see on the host comes from the project's own configuration, which is
+	// why all four create paths assemble their options here: a field set in one of them and not the
+	// others is a container that changes shape depending on which way it was started.
 	return kanban_sandbox.SandboxOpts{
 		BaseImage:        image,
 		NetworkIsolation: setup.sandboxOpts.NetworkIsolation,
@@ -791,8 +783,6 @@ func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, pl
 		SandboxMounts:    setup.sandboxOpts.SandboxMounts,
 		SandboxEnvs:      setup.sandboxOpts.SandboxEnvs,
 		Capabilities:     setup.sandboxOpts.Capabilities,
-		DependencyMounts: depMounts,
-		DependencyEnvs:   depEnvs,
 		PlanMode:         planMode,
 	}
 }

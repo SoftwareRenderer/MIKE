@@ -104,9 +104,13 @@ func (d *DependencyCache) Validate() error {
 	if !envName.MatchString(d.Env) {
 		return fmt.Errorf("env %q is not a variable name — letters, digits and underscore, not starting with a digit", d.Env)
 	}
-	// The cache is mounted read-only by default, and a server that cannot write where it thinks
-	// its state lives publishes nothing at all. Refuse the location here, where the message can be
-	// acted on, rather than unmounting it in silence at every container start.
+	// The cache is mounted read-only, always, and a server that cannot write where it thinks
+	// its state lives publishes nothing at all about a file it cannot load. Refuse the location here,
+	// where the message can be acted on, rather than unmounting it in silence at every container start.
+	//
+	// A manifest that still carries the removed `read_only` key validates and ignores it, and that
+	// silence is deliberate: the registry pins already published point at commits whose manifests have
+	// the key, so refusing it would be an install failure for an extension that asks for nothing.
 	if ShadowsToolState(d.ContainerPath) {
 		return fmt.Errorf("container_path %q covers the server's own writable state (the container's tmpfs or its user's .cache) — point it at a location the server only reads from", d.ContainerPath)
 	}

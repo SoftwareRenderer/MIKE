@@ -178,6 +178,18 @@ func TestHandleSetDependencyCache_RejectsWhatIsNotAGrant(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "declares no dependency cache") {
 		t.Errorf("error %q does not say why there is nothing to grant", rec.Body)
 	}
+	// Shape, not just wording: the browser reads the sentence out of {"error": …} and falls back to a
+	// generic label for anything else, so a refusal that is merely *readable* here can still be
+	// useless in the UI. Same for the path refusals above.
+	var shaped struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &shaped); err != nil || shaped.Error == "" {
+		t.Errorf("refusal is not a JSON error the browser can read: %s", rec.Body)
+	}
+	if rec := putDependencyCache(t, h, ext.ID, "/nonexistent/mod-cache"); !strings.Contains(rec.Body.String(), `"error"`) {
+		t.Errorf("grant refusal must answer as JSON so the row can show it: %s", rec.Body)
+	}
 
 	// Unknown id is a 404, not a grant written to nothing.
 	if rec := putDependencyCache(t, h, "no-such-extension", t.TempDir()); rec.Code != http.StatusNotFound {

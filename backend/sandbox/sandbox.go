@@ -94,6 +94,13 @@ func HostToContainer(worktreePath, projectName, p string) string {
 }
 
 // SandboxOpts holds the configuration for sandbox container creation and execution.
+//
+// A dependency directory granted to an LSP extension is deliberately not representable here. What a
+// task container may see on the host is decided per project, in its Sandbox Configuration mounts, and
+// a setting made once for the whole install would both hand that directory read-write to every
+// project's sandbox and cover the project image's own toolchain cache at the same container path. The
+// one container that binds a grant is the extension's own sandbox, read-only — see
+// SandboxConfig.DependencyGrant in backend/extensions.
 type SandboxOpts struct {
 	BaseImage        string
 	NetworkIsolation bool
@@ -103,15 +110,8 @@ type SandboxOpts struct {
 	SkillsDir        string
 	SandboxMounts    []types.SandboxMount
 	SandboxEnvs      []types.SandboxEnv
-	// DependencyMounts are host directories that enabled LSP extensions keep their resolved
-	// dependencies in, granted by the user. Unlike SandboxMounts these come from the install as a
-	// whole, and are mounted read-write here so a turn can fill them.
-	DependencyMounts []types.SandboxMount
-	// DependencyEnvs points a toolchain at each mount above. Lowest priority of all: a project that
-	// sets GOMODCACHE itself means it, and gets it.
-	DependencyEnvs []types.SandboxEnv
-	Capabilities   []string
-	PlanMode       bool
+	Capabilities     []string
+	PlanMode         bool
 }
 
 // shellTERM is what an attached terminal reports. It belongs to the terminal
@@ -119,15 +119,14 @@ type SandboxOpts struct {
 const shellTERM = "xterm-256color"
 
 // containerEnvArgs returns the -e flags for a sandbox container: the variables configured for it and
-// nothing else. Order is lowest to highest priority — dependency assignments, then the agent
-// extension's envs, then the project's own configuration, since podman takes the last -e. Nothing is
-// invented here: -e overrides the image's ENV, so a hardcoded PATH or TERM would silently replace what
-// the image sets.
-func containerEnvArgs(taskID string, opts SandboxOpts, dependencyEnvs []types.SandboxEnv) []string {
+// nothing else. Order is lowest to highest priority — the agent extension's envs, then the project's own
+// configuration, since podman takes the last -e. Nothing is invented here: -e overrides the image's ENV,
+// so a hardcoded PATH or TERM would silently replace what the image sets.
+func containerEnvArgs(taskID string, opts SandboxOpts) []string {
 	var args []string
-	// Dependency assignments first so both the agent's and the project's own configuration win a
-	// clash on the same name (podman takes the last -e): they are an install-wide default, and a
-	// project that names the variable itself has said something more specific than a default.
+	// The agent's declared environment first, so the project's own configuration wins a clash on the
+	// same name (podman takes the last -e): an install-wide default loses to a project that named the
+	// variable itself.
 	add := func(source string, envs []types.SandboxEnv) {
 		for _, e := range envs {
 			if e.Key == "" {
@@ -138,7 +137,6 @@ func containerEnvArgs(taskID string, opts SandboxOpts, dependencyEnvs []types.Sa
 			log.Printf("[sandbox] task=%s setting %s env %s", taskID, source, e.Key)
 		}
 	}
-	add("dependency", dependencyEnvs)
 	if opts.AgentSandbox != nil {
 		add("agent", opts.AgentSandbox.Envs)
 	}
@@ -266,91 +264,6 @@ func (sm *SandboxManager) GetClient(taskID string) (*sandbox.Client, error) {
 // binding every interface would expose a container's listener on the LAN.
 func forwardPortSpec(hostPort, containerPort int) string {
 	return fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort)
-}
-
-// dependencyCaches decides which granted dependency directories this container gets, and the
-// assignments that go with them. Decided together: an assignment pointing at a container path with
-// nothing behind it sends the toolchain to an empty directory instead of the cache its image ships
-// with.
-//
-// Deliberately no ":U": it chowns the *host* directory recursively into the container's mapped uid
-// (measured: the directory came back owned by 525287 and its own account could no longer delete it).
-// Taking someone's module cache out of their ownership to spare one image an EACCES is not this
-// server's trade to make, so the mount is plain rw — see dependency_test.go.
-func dependencyCaches(taskID, worktreeMount, projectPath string, opts SandboxOpts) ([]string, []types.SandboxEnv) {
-	if len(opts.DependencyMounts) == 0 {
-		return nil, nil
-	}
-	var specs []string
-	mounted := map[string]bool{}
-	claimed := claimedContainerPaths(worktreeMount, projectPath, opts)
-	for _, m := range opts.DependencyMounts {
-		if m.HostPath == "" || m.ContainerPath == "" {
-			continue
-		}
-		if claimed[m.ContainerPath] {
-			// The project configured this container path itself: its own configuration is the more
-			// specific intent, and it is the one the user can change without leaving the project.
-			log.Printf("[sandbox] task=%s skipping dependency cache at %s: the project mounts that path", taskID, m.ContainerPath)
-			continue
-		}
-		if info, err := os.Stat(m.HostPath); err != nil || !info.IsDir() {
-			// Never created on the fly, whatever a project's own mount does: a granted directory that
-			// is gone means the grant has gone stale, and an empty directory of our own invention
-			// would read as a cache full of nothing.
-			if err == nil {
-				err = fmt.Errorf("not a directory")
-			}
-			log.Printf("[sandbox] task=%s skipping dependency cache %s: %v", taskID, m.HostPath, err)
-			continue
-		}
-		claimed[m.ContainerPath] = true
-		mounted[m.ContainerPath] = true
-		// rprivate like every other mount here (a bind leaking back into the host's tree is how a
-		// container unmounts something it should not see), and rw whatever the caller's mode said.
-		specs = append(specs, m.HostPath+":"+m.ContainerPath+":rprivate,rw")
-		log.Printf("[sandbox] task=%s mounting dependency cache %s -> %s (rw)", taskID, m.HostPath, m.ContainerPath)
-	}
-	return specs, dependencyEnvArgs(mounted, opts.DependencyEnvs)
-}
-
-// dependencyEnvArgs keeps the assignments that point at a mount which survived, in the order given.
-// The pairing is by container path, which is what DependencyCache.Env is defined against: the variable
-// that points a toolchain at this directory.
-func dependencyEnvArgs(mounted map[string]bool, envs []types.SandboxEnv) []types.SandboxEnv {
-	if len(envs) == 0 {
-		return nil
-	}
-	var out []types.SandboxEnv
-	for _, e := range envs {
-		if mounted[e.Value] {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// claimedContainerPaths is every container path this container already uses, so a dependency cache
-// can be skipped instead of colliding. Two -v specs on one path make podman refuse the whole create,
-// and the failure would surface as a sandbox that never starts, not as a mount question.
-func claimedContainerPaths(worktreeMount, projectPath string, opts SandboxOpts) map[string]bool {
-	claimed := map[string]bool{worktreeMount: true, SkillsMount: true}
-	if projectPath != "" {
-		claimed[filepath.Join(projectPath, ".git")] = true
-	}
-	if opts.AgentSandbox != nil {
-		for _, m := range opts.AgentSandbox.Mounts {
-			if m.ContainerPath != "" {
-				claimed[m.ContainerPath] = true
-			}
-		}
-	}
-	for _, m := range opts.SandboxMounts {
-		if m.ContainerPath != "" {
-			claimed[m.ContainerPath] = true
-		}
-	}
-	return claimed
 }
 
 func createContainerArgs(containerName, mountPath string) []string {
@@ -554,17 +467,9 @@ func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Pro
 		log.Printf("[sandbox] task=%s mounting %s -> %s (%s)", taskID, hostPath, m.ContainerPath, mode)
 	}
 
-	// Dependency caches granted to LSP extensions, read-write here where the extension's own sandbox
-	// mounts the very same directory read-only: a language server reads a module cache, it does not
-	// build one, and the container that builds it is this one.
-	depSpecs, depEnvs := dependencyCaches(taskID, mountPath, projectPath, opts)
-	for _, spec := range depSpecs {
-		createArgs = append(createArgs, "-v", spec)
-	}
-
-	// Environment: exactly what was configured for this sandbox, plus the dependency assignments that
-	// were actually mounted.
-	createArgs = append(createArgs, containerEnvArgs(taskID, opts, depEnvs)...)
+	// Environment: exactly what was configured for this sandbox. A dependency cache granted to an LSP
+	// extension is deliberately not among it — see SandboxOpts.
+	createArgs = append(createArgs, containerEnvArgs(taskID, opts)...)
 
 	// Container entrypoint: just sleep (agent is started via podman exec)
 	createArgs = append(createArgs, image,

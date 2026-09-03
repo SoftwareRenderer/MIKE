@@ -4,7 +4,7 @@
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
-    import { isDangerousPermission, requiresInstallReview, sortPermissions, dependencyCacheDeclaration } from '$lib/utils/extension-permissions';
+    import { isDangerousPermission, requiresInstallReview, sortPermissions, dependencyCacheDeclaration, needsDependencyGrant } from '$lib/utils/extension-permissions';
     import { effectiveConfigFields, initialEditConfig, HOST_OWNED_LSP_CONFIG_KEY, type ConfigField } from '$lib/utils/extension-config';
     import { memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { orderBrowseEntries } from '$lib/composables/use-browse-order';
@@ -352,17 +352,17 @@
         }
     }
 
-    // The one directory a language server may read its resolved dependencies from. One field per
-    // extension, applied on purpose rather than on blur, because the server stops the running
-    // sandbox when it changes — an accidental keystroke must not cost anyone a cold server.
-    let depDraft = $state<Record<string, string>>({});
-    let depBusy = $state<Record<string, boolean>>({});
-    let depError = $state<Record<string, string>>({});
+    // The one directory a language server may read its resolved dependencies from. It lives in the Edit
+    // dialog and rides that dialog's Save, because granting one stops the running sandbox: nothing should
+    // happen until the dialog says save, and Cancel has to mean nothing changed. One draft and one error,
+    // since only one dialog is open at a time.
+    let editDepDraft = $state('');
+    let editDepError = $state('');
     let homeDir = $state('');
-    // Not state: nothing renders from either, and keeping them out of the reactive graph means the
-    // effect below cannot re-trigger itself while it fills the fields it reads.
+    // Not state: nothing renders from either, so the effect below cannot re-trigger itself while it
+    // reads and fills the draft.
     let homeTried = false;
-    const depPrefilled = new Set<string>();
+    let draftFilled = false;
 
     /**
      * Where to suggest putting a dependency directory: the container path the extension declared,
@@ -375,9 +375,14 @@
         return declared && homeDir ? homeDir + declared.container_path : '';
     }
 
+    /** What the dialog's field opens with: the granted directory, or the suggestion where none is. */
+    function depDraftFor(ext: Extension): string {
+        return ext.sandbox_config?.dependency_host_path || suggestedDepPath(ext);
+    }
+
     $effect(() => {
         // Fetch the home directory once, and only if some installed extension declares a dependency
-        // cache. The prefill is editable text, never a value applied behind the user's back.
+        // cache. The suggestion is editable text, never a value applied behind the user's back.
         const home = homeDir;
         if (!home) {
             if (!homeTried && extensions.some((e) => e.sandbox_config?.dependency_cache)) {
@@ -388,46 +393,13 @@
             }
             return;
         }
-        for (const ext of extensions) {
-            const declared = ext.sandbox_config?.dependency_cache;
-            if (!declared || ext.sandbox_config?.dependency_host_path) continue;
-            if (depPrefilled.has(ext.id)) continue;
-            depPrefilled.add(ext.id);
-            depDraft[ext.id] = suggestedDepPath(ext);
+        // The suggestion can land after the dialog opened, since it costs one fetch. It fills an empty
+        // draft once and never overwrites what someone typed.
+        if (!draftFilled && editingExtension && !editDepDraft) {
+            draftFilled = true;
+            editDepDraft = depDraftFor(editingExtension);
         }
     });
-
-    // A rejected path is about one directory, so its message lands on that row and nowhere else.
-    async function applyDependencyCache(ext: Extension) {
-        const path = (depDraft[ext.id] ?? '').trim();
-        depError[ext.id] = '';
-        if (!path) {
-            depError[ext.id] = 'Give a directory, or choose Revoke to stop sharing one.';
-            return;
-        }
-        depBusy[ext.id] = true;
-        try {
-            await setDependencyCache(ext.id, path);
-            await loadExtensions();
-        } catch (e: any) {
-            depError[ext.id] = e.message || 'Could not use that directory';
-        } finally {
-            depBusy[ext.id] = false;
-        }
-    }
-
-    async function revokeDependencyCache(ext: Extension) {
-        depError[ext.id] = '';
-        depBusy[ext.id] = true;
-        try {
-            await setDependencyCache(ext.id, '');
-            await loadExtensions();
-        } catch (e: any) {
-            depError[ext.id] = e.message || 'Could not revoke the directory';
-        } finally {
-            depBusy[ext.id] = false;
-        }
-    }
 
     // Check for updates
     async function handleCheckUpdates() {
@@ -530,6 +502,11 @@
             editor_enabled: lsp?.editor_enabled ?? true,
             tool_calls_enabled: lsp?.tool_calls_enabled ?? true,
         };
+        editDepDraft = depDraftFor(ext);
+        editDepError = '';
+        // "Filled" means the draft holds the real answer rather than a placeholder waiting on the
+        // home directory: a grant is final, and a suggestion needs no home to have been read from.
+        draftFilled = !!ext.sandbox_config?.dependency_host_path || homeDir !== '';
     }
 
     // Close edit form
@@ -538,6 +515,9 @@
         editExtensionId = null;
         editConfig = {};
         editLspSettings = { editor_enabled: true, tool_calls_enabled: true };
+        editDepDraft = '';
+        editDepError = '';
+        draftFilled = false;
     }
 
     // A memory limit input renders blank for "no limit" and parses blank/0/negative back to a numeric 0 (unlimited)
@@ -555,7 +535,24 @@
         if (!editExtensionId) return;
         saving = true;
         error = '';
+        editDepError = '';
         try {
+            // The grant goes first: it is the change that stops a running sandbox, and a refused
+            // directory must not close the dialog with the rest of the edits unsaid. Applying nothing
+            // when the field still shows the stored path is what makes Cancel mean "no change".
+            const stored = editingExtension?.sandbox_config?.dependency_host_path || '';
+            const grant = editDepDraft.trim();
+            if (editingExtension?.sandbox_config?.dependency_cache && grant !== stored) {
+                try {
+                    await setDependencyCache(editExtensionId, grant);
+                    // Read back into the open dialog, so a retry of a save that failed later does not
+                    // grant the same path twice, and the card's dot is right when the modal closes.
+                    if (editingExtension.sandbox_config) editingExtension.sandbox_config.dependency_host_path = grant;
+                } catch (e: any) {
+                    editDepError = e.message || 'That directory cannot be used';
+                    return;
+                }
+            }
             const data: { config?: Record<string, any>; manifest?: Record<string, any> } = { config: editConfig };
             // Include LSP settings for LSP extensions
             if (editingExtension?.type === 'lsp') {
@@ -785,6 +782,17 @@
                                                 onclick={(e) => { e.stopPropagation(); revealedLocalPath = revealedLocalPath === ext.id ? null : ext.id; }}
                                             >Local</button>
                                         {/if}
+                                        {#if needsDependencyGrant(ext)}
+                                            <!-- Same attention color as the dot on the Edit button, and it opens
+                                                  the same dialog: one state, said twice because a dot on an icon
+                                                  is easy to look straight past. -->
+                                            <button
+                                                class="needs-setup-badge"
+                                                type="button"
+                                                title="Its dependencies directory is not configured — click to choose one"
+                                                onclick={(e) => { e.stopPropagation(); openEdit(ext); }}
+                                            >Needs setup</button>
+                                        {/if}
                                         {#if getCapabilityKeys(ext).length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
                                                 {#each getCapabilityKeys(ext) as capKey}
@@ -830,11 +838,20 @@
                                     </button>
                                     {/if}
                                     {#if ext.manifest.config_schema || ext.type === 'lsp'}
-                                    <button class="btn btn-icon" title="Edit" onclick={() => openEdit(ext)}>
+                                    {@const needsDep = needsDependencyGrant(ext)}
+                                    <button
+                                        class="btn btn-icon"
+                                        title={needsDep ? 'Edit — its dependencies directory is not configured' : 'Edit'}
+                                        aria-label={needsDep ? 'Edit — its dependencies directory is not configured' : 'Edit'}
+                                        onclick={() => openEdit(ext)}
+                                    >
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                                         </svg>
+                                        {#if needsDep}
+                                            <span class="ext-needs-dot" aria-hidden="true"></span>
+                                        {/if}
                                     </button>
                                     {/if}
                                     <ToggleSwitch class="card-toggle" checked={ext.enabled} onChange={() => handleToggleEnabled(ext.id, !ext.enabled)} />
@@ -848,46 +865,10 @@
                                     <span class="ext-env-note-text">{ext.environment.note || 'This language server cannot resolve the project it is serving, so its unresolved-import diagnostics are being withheld.'}</span>
                                 </div>
                             {/if}
-                            {#if ext.sandbox_config?.dependency_cache}
-                                {@const dep = ext.sandbox_config.dependency_cache}
-                                {@const granted = ext.sandbox_config.dependency_host_path}
-                                <!-- One directory, one extension, granted by a person: the manifest says where
-                                     this server looks inside its sandbox and nothing more. What fills it is
-                                     the user's, which is why the field has no value until one is applied. -->
-                                <div class="ext-dep" class:ext-dep-granted={!!granted}>
-                                    <div class="ext-dep-row">
-                                        <span class="ext-dep-label">Dependencies</span>
-                                        {#if granted}
-                                            <code class="ext-dep-path" title={`${granted} → ${dep.container_path} in this server’s sandbox (${dep.read_only ? 'read-only' : 'read-write'}); tasks and terminals mount the same directory read-write`}>{granted}</code>
-                                            <button class="btn btn-small" onclick={() => revokeDependencyCache(ext)} disabled={!!depBusy[ext.id]}>Revoke</button>
-                                        {:else}
-                                            <span class="ext-dep-none">Not shared — this server resolves nothing from outside its image.</span>
-                                        {/if}
-                                    </div>
-                                    <div class="ext-dep-edit">
-                                        <input
-                                            type="text"
-                                            class="ext-dep-input"
-                                            aria-label={`Host directory holding ${ext.name} resolved dependencies`}
-                                            placeholder="/path/to/dependency/directory"
-                                            bind:value={depDraft[ext.id]}
-                                            disabled={!!depBusy[ext.id]}
-                                            onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyDependencyCache(ext); } }}
-                                        />
-                                        <button
-                                            class="btn btn-small"
-                                            onclick={() => applyDependencyCache(ext)}
-                                            disabled={!!depBusy[ext.id] || !(depDraft[ext.id] ?? '').trim()}
-                                        >{depBusy[ext.id] ? 'Applying…' : granted ? 'Change' : 'Apply'}</button>
-                                    </div>
-                                    <p class="ext-dep-hint">
-                                        Read-only for this server, at <code>{dep.env}={dep.container_path}</code>. Tasks and sandboxed terminals mount it read-write, so building the project fills it. A project image that runs as a non-root user cannot write into it — its downloads stay inside its own container.
-                                    </p>
-                                    {#if depError[ext.id]}
-                                        <p class="ext-dep-error" role="alert">{depError[ext.id]}</p>
-                                    {/if}
-                                </div>
-                            {/if}
+                            <!-- The dependency directory is configured in the Edit dialog, not on the card:
+                                 granting one stops the running sandbox, so it belongs behind the same Save as
+                                 the rest of the settings. What the card carries is the state — the badge above
+                                 and the dot on Edit, both from needsDependencyGrant(ext). -->
                             {#if buildProgress[ext.name]}
                                 {@const bp = buildProgress[ext.name]}
                                 <div class="ext-build" class:ext-build-error={!!bp.error}>
@@ -942,6 +923,54 @@
         {/snippet}
 
         <BaseModal title={`Edit: ${editingExtension.manifest.display_name || editingExtension.name}`} width="480px" footer={editFooter} onClose={closeEdit}>
+            <!-- Dependencies first: it is the one field that decides whether this server can resolve
+                 anything. It rides this dialog's Save rather than carrying its own Apply, so Cancel means
+                 nothing changed — the grant lands here, and applying it stops the running sandbox. -->
+            {#if editingExtension.sandbox_config?.dependency_cache}
+                {@const dep = editingExtension.sandbox_config.dependency_cache}
+                {@const stored = editingExtension.sandbox_config.dependency_host_path || ''}
+                {@const draft = editDepDraft.trim()}
+                <div class="config-fields">
+                    <h4>Dependencies</h4>
+                    <div class="config-field">
+                        <label class="field-label" for="edit-dep-path">Dependencies directory</label>
+                        <p class="field-desc">
+                            This LSP reads resolved dependencies from <code class="ext-dep-env">{dep.env}={dep.container_path}</code>
+                            inside its sandbox by mounting the following host folder as read-only:
+                        </p>
+                        <input
+                            id="edit-dep-path"
+                            type="text"
+                            class="config-input ext-dep-input"
+                            aria-label={`Host directory holding ${editingExtension.name} resolved dependencies`}
+                            placeholder="/path/to/dependency/directory"
+                            bind:value={editDepDraft}
+                            disabled={saving}
+                        />
+                        <div class="ext-dep-state">
+                            {#if stored}
+                                <span class="ext-dep-state-label">Mounted</span>
+                                <code class="ext-dep-path" title={`${stored} → ${dep.container_path} in this server’s sandbox, read-only`}>{stored}</code>
+                                <button type="button" class="btn-secondary btn-small" onclick={() => { editDepDraft = ''; }} disabled={saving}
+                                    title="Stop sharing this folder with the extension when you save. It deletes nothing on the host.">Don’t share</button>
+                            {:else}
+                                <span class="ext-dep-none">Nothing mounted yet.</span>
+                            {/if}
+                            {#if draft !== stored}
+                                <span class="ext-dep-pending">{draft === '' ? 'Stops sharing this folder' : stored ? 'Replaces the host directory' : 'Mounts this directory'} when you save</span>
+                            {/if}
+                        </div>
+                        <p class="field-desc ext-dep-fill">
+                            Nothing else mounts this folder — not a task, not a terminal. To fill it, run the download
+                            on the host, or add the same path to a project's Sandbox Configuration mounts with
+                            <code>{dep.env}</code> set to its container path, and a task can fill it from there.
+                        </p>
+                        {#if editDepError}
+                            <p class="ext-dep-error" role="alert">{editDepError}</p>
+                        {/if}
+                    </div>
+                </div>
+            {/if}
             <!-- Config Schema Fields -->
             {#if effectiveConfigFields(editingExtension).length > 0}
                 <div class="config-fields">
@@ -1232,13 +1261,9 @@
                             This language server reads already-downloaded dependencies from
                             <code>{pendingDep.env}={pendingDep.container_path}</code> inside its sandbox. Installing it grants
                             nothing by itself: afterwards you can point it at a folder of your choosing, and until you do it
-                            resolves only what its own image contains.
+                            resolves only what its own image contains. That folder is then read by this extension and
+                            mounted nowhere else — you fill it, on the host or from a project whose own mounts name it.
                         </span>
-                        {#if !pendingDep.read_only}
-                            <span class="cap-permission-desc">
-                                It also asks to <strong>write</strong> there, so it can download what is missing on its own.
-                            </span>
-                        {/if}
                     </div>
                 {/if}
                 {#each pendingPerms as perm}
@@ -1445,31 +1470,57 @@
         color: var(--color-text-secondary);
     }
 
-    /* The dependency-directory grant: one path, its current state, and the field that changes it.
-       Deliberately quieter than the warning above it — this is a setting, not a fault. */
-    .ext-dep {
-        margin: 0 0 0.75rem;
-        padding: 0.45rem 0.6rem;
-        border: 1px solid var(--color-border, rgba(128, 128, 128, 0.25));
-        border-radius: 6px;
-        background: rgba(128, 128, 128, 0.05);
-        display: flex;
-        flex-direction: column;
-        gap: 0.35rem;
+    /* The dependency-directory state on a card: a dot on the Edit icon, and a badge beside the name that
+       opens the same dialog. The configuration itself lives in that dialog. The color is the attention
+       this app already uses for "it cannot do the thing you installed it for" (.unpublished-badge). */
+    .needs-setup-badge {
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        padding: 0.12rem 0.5rem;
+        border-radius: 4px;
+        background: var(--color-status-yellow);
+        color: #111;
+        border: 1px solid #111;
+        white-space: nowrap;
+        flex-shrink: 0;
     }
 
-    .ext-dep-granted {
-        border-left: 2px solid var(--color-status-green, #3fb950);
+    .card-actions .btn-icon {
+        position: relative;
     }
 
-    .ext-dep-row {
+    .ext-needs-dot {
+        position: absolute;
+        top: 1px;
+        right: 1px;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--color-status-yellow);
+        pointer-events: none;
+    }
+
+    /* In the Edit dialog: the location the manifest declared, the field that names the host directory,
+       and the grant as it stands. Quieter than a warning — this is a setting, not a fault. */
+    .ext-dep-env,
+    .ext-dep-path,
+    .ext-dep-input {
+        font-family: var(--font-mono, monospace);
+        font-size: 0.75rem;
+    }
+
+    .ext-dep-state {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.45rem;
+        flex-wrap: wrap;
         min-width: 0;
+        margin-top: 0.35rem;
     }
 
-    .ext-dep-label {
+    .ext-dep-state-label {
         font-size: 0.72rem;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -1478,13 +1529,11 @@
     }
 
     .ext-dep-path {
-        font-family: var(--font-mono, monospace);
-        font-size: 0.75rem;
-        color: var(--color-text);
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        color: var(--color-text);
     }
 
     .ext-dep-none {
@@ -1493,38 +1542,18 @@
         font-style: italic;
     }
 
-    .ext-dep-edit {
-        display: flex;
-        align-items: center;
-        gap: 0.4rem;
-        min-width: 0;
-    }
-
-    .ext-dep-input {
-        flex: 1 1 auto;
-        min-width: 0;
-        font-family: var(--font-mono, monospace);
-        font-size: 0.75rem;
-        padding: 0.3rem 0.45rem;
-        border-radius: 4px;
-        border: 1px solid var(--color-border, rgba(128, 128, 128, 0.3));
-        background: var(--color-surface-1, transparent);
-        color: var(--color-text);
-    }
-
-    .ext-dep-hint {
-        margin: 0;
+    .ext-dep-pending {
         font-size: 0.72rem;
-        line-height: 1.45;
-        color: var(--color-text-tertiary);
+        color: var(--color-status-yellow);
     }
 
-    .ext-dep-hint code {
-        font-family: var(--font-mono, monospace);
+    .ext-dep-fill {
+        margin: 0.4rem 0 0;
+        line-height: 1.45;
     }
 
     .ext-dep-error {
-        margin: 0;
+        margin: 0.3rem 0 0;
         font-size: 0.75rem;
         line-height: 1.45;
         color: var(--color-status-red, #f85149);

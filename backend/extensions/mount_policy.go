@@ -388,20 +388,19 @@ func ValidateDependencyGrant(hostPath string) (string, error) {
 	return resolved, nil
 }
 
-// systemGrantRoots are host trees a dependency directory is never in, and that must never be handed
-// read-write to a sandbox. /opt is absent on purpose: real toolchain caches live there.
+// systemGrantRoots are host trees a dependency directory is never in, and that must never be handed to
+// a language server at all. /opt is absent on purpose: real toolchain caches live there.
 var systemGrantRoots = []string{"/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/boot", "/dev", "/proc", "/sys", "/run", "/var"}
 
-// credentialGrantDirs hold secrets rather than dependencies, relative to any home. A grant is mounted
-// read-write into every sandboxed task, where what runs is steered by repository content, so a grant
-// must not point a task at the files an attack would rewrite. A denylist of credential stores: host
-// safety, not language knowledge.
+// credentialGrantDirs hold secrets rather than dependencies, relative to any home. A grant is readable
+// from inside the extension's container, where what a language server does with a file it can open is
+// nobody's promise, so a grant must not point at the stores an attacker would most like to read.
+// A denylist of credential stores: host safety, not language knowledge.
 var credentialGrantDirs = []string{".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".config/gcloud", ".config/gh", ".config/huggingface", ".config/pip"}
 
-// checkGrantShape refuses shapes that make a grant something other than a dependency cache. The
-// language server reads it read-only, but every sandboxed task mounts it read-write so a build can
-// fill it — the path is a host write surface. One text field must not be able to hand over a home
-// directory or the host's /etc; a dependency cache is always somewhere specific, a few levels down.
+// checkGrantShape is the shape rule a dependency directory has to pass, and it costs the user nothing
+// to satisfy: see checkGrantShapeWithHomes for what it refuses and why. A manifest cannot carry a host
+// path, so the user's answer is the only input and this is the only place to catch a wrong one.
 func checkGrantShape(resolved string) error {
 	return checkGrantShapeWithHomes(resolved, hostHomeDirs())
 }
@@ -409,8 +408,16 @@ func checkGrantShape(resolved string) error {
 // checkGrantShapeWithHomes takes the homes as an argument so the rules are testable without touching
 // a real home directory.
 func checkGrantShapeWithHomes(resolved string, homes []string) error {
-	if segments := strings.Count(strings.Trim(resolved, "/"), "/"); segments < 2 {
-		return fmt.Errorf("%s is too close to the filesystem root to grant as a dependency directory — name a directory of your own, a couple of levels down (for example ~/go/pkg/mod)", resolved)
+	// Not the root, and not the bare top level of the tree. Either hands a language server an entire
+	// mount instead of the directory of dependencies under it, and a whole mount is the widest thing
+	// this field could possibly be pointed at. A named directory of the user's own — /data/go/pkg/mod,
+	// /tank/gomodcache — is what a dependency directory actually is.
+	trimmed := strings.Trim(resolved, "/")
+	if trimmed == "" {
+		return fmt.Errorf("the filesystem root is not a dependency directory — name the directory your toolchain's files live in")
+	}
+	if !strings.Contains(trimmed, "/") {
+		return fmt.Errorf("%s is the whole top level of the filesystem — name a directory of your own under it (for example %s/go/pkg/mod)", resolved, resolved)
 	}
 	for _, root := range systemGrantRoots {
 		if resolved == root || strings.HasPrefix(resolved, root+"/") {
@@ -419,7 +426,7 @@ func checkGrantShapeWithHomes(resolved string, homes []string) error {
 	}
 	for _, home := range homes {
 		if resolved == home {
-			return fmt.Errorf("%s is a home directory, not a dependency directory — grant a directory inside it (for example %s/go/pkg/mod), because a task that fills the cache can also write anywhere it points", resolved, home)
+			return fmt.Errorf("%s is a home directory, not a dependency directory — grant a directory inside it (for example %s/go/pkg/mod), so what becomes readable from every language server in the install is the dependencies and not the person", resolved, home)
 		}
 		if strings.HasPrefix(home, resolved+"/") {
 			return fmt.Errorf("%s contains a home directory, so granting it would expose every project and credential on this machine", resolved)

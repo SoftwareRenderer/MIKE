@@ -46,15 +46,42 @@ export function hasNetworkCapability(capabilities?: Record<string, any> | null):
  * manifest is fetched: an extension that declares one is about to ask the user for a folder on
  * their machine, and "install this?" is the last moment that is worth saying so out loud.
  *
- * `read_only` defaults to true here as it does in Go — an absent field means the safe direction,
- * and a disclosure that guessed "writable" would alarm people over nothing.
+ * There is no write permission in here because there is none to disclose: the extension's own
+ * container reads the directory, and the containers that fill it (tasks, sandboxed terminals) are
+ * the user's own work, not this extension's.
  */
 export function dependencyCacheDeclaration(
     capabilities?: Record<string, any> | null,
-): { container_path: string; env: string; read_only: boolean } | null {
+): { container_path: string; env: string } | null {
     const dep = capabilities?.lsp?.dependency_cache;
     if (!dep || typeof dep.container_path !== 'string' || typeof dep.env !== 'string') return null;
-    return { container_path: dep.container_path, env: dep.env, read_only: dep.read_only !== false };
+    return { container_path: dep.container_path, env: dep.env };
+}
+
+/** The two fields `needsDependencyGrant` reads, so a test can hand it one object literal. */
+export type DependencyGrantView = {
+    enabled?: boolean;
+    sandbox_config?: {
+        dependency_cache?: { container_path: string; env: string } | null;
+        dependency_host_path?: string | null;
+    } | null;
+};
+
+/**
+ * True when this extension declared a dependency directory and nobody has named one yet — the state
+ * behind the card's yellow dot and its "Needs setup" badge. Without it the server starts and resolves
+ * only what its own image contains, which for anything but a stdlib-only project means it answers
+ * about imports it could not load.
+ *
+ * Disabled extensions are excluded deliberately: one you switched off is not waiting on you, and a
+ * warning about a thing that cannot run teaches people to ignore warnings. It reappears on enable.
+ *
+ * Today this is the only state worth warning about. "Granted, but it still cannot resolve" — the empty
+ * directory, the one deleted afterwards — needs the environment verdict wired first (TODO task 15), and
+ * will arrive as a second severity here rather than as a louder version of this one.
+ */
+export function needsDependencyGrant(ext: DependencyGrantView): boolean {
+    return !!ext.enabled && !!ext.sandbox_config?.dependency_cache && !(ext.sandbox_config?.dependency_host_path || '').trim();
 }
 
 /**

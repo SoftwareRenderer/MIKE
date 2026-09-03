@@ -145,26 +145,29 @@ func (sm *ExtensionSandboxManager) SetWorkspaceDir(dir string) {
 // it get anyone's granted dependency directory, which belongs to one extension and
 // enters through MountPolicyForExtension.
 func (sm *ExtensionSandboxManager) MountPolicy() *MountPolicy {
-	return sm.mountPolicy("", false)
+	return sm.mountPolicy("")
 }
 
 // MountPolicyForExtension is MountPolicy plus the dependency directory granted to THIS extension
-// only.
+// only, pinned read-only.
 //
 // This is not a widening: a person named that directory for this extension and could already have
 // mounted it as ordinary sandbox configuration. What it buys is that the bind passes the same gate
 // as every other mount (ValidateHostPath, container-path charset, read-only pinning) instead of a
 // path that trusts the stored string.
+//
+// The pin is unconditional. One granted directory is shared by every project this extension serves, and
+// the files in it belong to the user's own toolchain: a language server writing into a cache every
+// project reads is how one project's turn changes another's dependencies.
 func (sm *ExtensionSandboxManager) MountPolicyForExtension(ext *Extension) *MountPolicy {
 	var grant string
-	writable := false
 	if ext != nil {
-		grant, writable = ext.SandboxConfig.DependencyGrant()
+		grant = ext.SandboxConfig.DependencyGrant()
 	}
-	return sm.mountPolicy(grant, writable)
+	return sm.mountPolicy(grant)
 }
 
-func (sm *ExtensionSandboxManager) mountPolicy(grantHostPath string, grantWritable bool) *MountPolicy {
+func (sm *ExtensionSandboxManager) mountPolicy(grantHostPath string) *MountPolicy {
 	var (
 		workspaceDir  string
 		extensionsDir string
@@ -189,9 +192,7 @@ func (sm *ExtensionSandboxManager) mountPolicy(grantHostPath string, grantWritab
 	readOnlyRoots := append([]string(nil), projectMounts...)
 	if grantHostPath != "" {
 		roots = append(roots, grantHostPath)
-		if !grantWritable {
-			readOnlyRoots = append(readOnlyRoots, grantHostPath)
-		}
+		readOnlyRoots = append(readOnlyRoots, grantHostPath)
 	}
 	return newMountPolicyWithReadOnly(roots, readOnlyRoots)
 }
@@ -229,7 +230,7 @@ type DependencyMount struct {
 // its image contains, and its environment check says so; refusing to create the container would turn
 // a deleted directory into an extension that will not load at all.
 func dependencyBind(ext *Extension, policy *MountPolicy) DependencyMount {
-	host, writable := ext.SandboxConfig.DependencyGrant()
+	host := ext.SandboxConfig.DependencyGrant()
 	if host == "" {
 		return DependencyMount{}
 	}
@@ -247,13 +248,9 @@ func dependencyBind(ext *Extension, policy *MountPolicy) DependencyMount {
 		}
 		return DependencyMount{Reason: fmt.Sprintf("the granted path %s is not a directory", resolved)}
 	}
-	mode := "ro"
-	// Writable only if the declaration asked for it and the app does not pin the path read-only.
-	if writable && !policy.ForceReadOnly(resolved) {
-		mode = "rw"
-	}
 	return DependencyMount{
-		Mount: types.SandboxMount{HostPath: resolved, ContainerPath: declared.ContainerPath, Mode: mode},
+		// Read-only, always: the mode is not a manifest's to choose and not this container's to want.
+		Mount: types.SandboxMount{HostPath: resolved, ContainerPath: declared.ContainerPath, Mode: "ro"},
 		// The container path, not the host path: the host path means nothing in there, and must not
 		// reach a process that could report it back.
 		Env: types.SandboxEnv{Key: declared.Env, Value: declared.ContainerPath},
