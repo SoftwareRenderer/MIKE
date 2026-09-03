@@ -186,9 +186,8 @@ export function hoverDocsHTML(plugin: LSPPlugin, hover: RawMarkup | null | undef
     } catch {
         return '';
     }
-    // Markdown comes from the language server, and marked passes raw HTML
-    // through untouched — sanitize before it reaches innerHTML.
-    return DOMPurify.sanitize(html);
+
+    return DOMPurify.sanitize(html, { FORBID_TAGS: ['hr'] });
 }
 
 /**
@@ -659,13 +658,6 @@ const hoverCardTheme = EditorView.baseTheme({
     '& .cm-lsp-action-loading': { color: 'var(--color-text-muted, #888)', padding: '1px 2px' },
     '& .cm-lsp-action-docs': { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
     '& .cm-lsp-action-docs pre': { margin: '2px 0', whiteSpace: 'pre-wrap' },
-    '& .cm-tooltip.cm-lsp-action-card hr': {
-        border: 'none',
-        borderTop: '1px solid var(--color-border)',
-        margin: '2px 0',
-    },
-    '& .cm-tooltip.cm-lsp-action-card hr:first-child': { marginTop: '0' },
-    '& .cm-tooltip.cm-lsp-action-card hr:last-child': { marginBottom: '0' },
     '& .cm-lsp-action-row': { marginTop: '4px', flexShrink: 0 },
     '& .cm-lsp-action-button': {
         background: 'var(--color-accent, #4b6bfb)',

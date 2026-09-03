@@ -258,6 +258,17 @@ describe('hoverDocsHTML', () => {
         expect(html).not.toContain('onerror');
     });
 
+    it('drops the rules a server puts between sections, keeping the sections', () => {
+        // A real server emits these as markdown `---`, which its renderer turns
+        // into <hr> — the stub above does no markdown, so ask for the tag.
+        const html = hoverDocsHTML(plugin, {
+            contents: { kind: 'markdown', value: 'func Documented() int<hr>Does something useful.' },
+        });
+        expect(html).not.toContain('<hr');
+        expect(html).toContain('func Documented() int');
+        expect(html).toContain('Does something useful.');
+    });
+
     it('returns nothing when the server sent no contents', () => {
         expect(hoverDocsHTML(plugin, null)).toBe('');
         expect(hoverDocsHTML(plugin, {})).toBe('');
