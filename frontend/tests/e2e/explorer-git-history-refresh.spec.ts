@@ -39,11 +39,15 @@ test.describe('Explorer Git History Refresh After Commit', () => {
       await page.locator('.explorer-btn').click();
       await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
 
-      // Wait for the git graph to load (History panel)
+      // Wait for the git graph to load (History panel). `.git-graph` is the container and is
+      // on screen while the panel still reads "Loading commits…", so counting rows straight
+      // after it answers 0 for a repo that has commits.
       await expect(page.locator('.git-graph')).toBeVisible({ timeout: 10000 });
+      const commits = page.locator('.git-commit-row');
+      await expect(commits.first(), 'the history panel renders its first commit').toBeVisible({ timeout: 10000 });
 
       // Count commits before (should have at least the init commit)
-      const commitsBefore = await page.locator('.git-commit-row').count();
+      const commitsBefore = await commits.count();
       expect(commitsBefore).toBeGreaterThanOrEqual(1);
 
       // Open the Review Changes panel

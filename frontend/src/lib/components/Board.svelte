@@ -98,8 +98,6 @@
     // Subtask hierarchy management (expanded state, consolidation, auto-expand)
     let hierarchy = useSubtaskHierarchy(() => tasks, expandedTasksContext, () => undefined);
 
-    let draggedTaskId: string | null = $state(null);
-
     // Garbage-collect stale IndexedDB entries for deleted tasks (Board-specific)
     let gcInitialized = $state(false);
     $effect(() => {
@@ -160,10 +158,6 @@
         return columnTasks[status] || [];
     }
 
-    function handleDragStart(taskId: string) {
-        draggedTaskId = taskId;
-    }
-
     /** Walk up the ancestor chain to check if any ancestor is In Progress. Uses shared taskMap. */
     function hasAncestorInProgress(task: Task): boolean {
         let current = task;
@@ -183,7 +177,6 @@
         // Block subtasks from moving to Backlog when an ancestor is In Progress.
         if (targetStatus === 'backlog' && task.parent_task_id && hasAncestorInProgress(task)) {
             dialogStore.showToast('Cannot move to Backlog: parent task is In Progress', 'error');
-            draggedTaskId = null;
             return;
         }
         try {
@@ -211,7 +204,6 @@
             console.error('Failed to move task:', e);
             dialogStore.showToast('Failed to move task: ' + String(e), 'error');
         }
-        draggedTaskId = null;
     }
 
     async function handleClearDone() {
@@ -302,7 +294,6 @@
             childrenMap={hierarchy.childrenMap}
             expandedTasks={hierarchy.expandedTasks}
             onToggleExpanded={hierarchy.toggleTaskExpanded}
-            onDragStart={handleDragStart}
             onDrop={(taskId: string) => handleDrop(taskId, col.id)}
             canDrop={(taskId: string, colId: string) => {
                 const task = tasks.find(t => t.id === taskId);
@@ -321,7 +312,6 @@
     <MultiSelectBar
         {multiSelect}
         {tasks}
-        {projectId}
         onClear={() => multiSelect.clear()}
     />
 </div>

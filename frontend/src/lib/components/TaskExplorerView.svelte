@@ -619,7 +619,6 @@
                 {#if showFind}
                     <FileSearchPanel
                         projectId={projectId}
-                        projectPath={taskPath}
                         taskId={taskId}
                         onFileSelected={handleFileSelected}
                         onClose={() => showFind = false}
@@ -656,7 +655,6 @@
                         <!-- Bottom: Git graph -->
                         <div class="explorer-git-graph" class:mobile={isMobileCtx.isMobile} style:height={isMobileCtx.isMobile ? undefined : (1 - splitRatio) * 100 + '%'}>
                             <BranchGitGraph
-                                projectId={projectId}
                                 currentBranch={selectedBranch}
                                 commits={commits}
                                 originTip={originTip}

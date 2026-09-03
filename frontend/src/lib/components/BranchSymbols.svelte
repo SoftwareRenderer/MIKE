@@ -125,7 +125,8 @@
         return flat;
     });
 
-    // Legacy: heading tree for outline mode
+    // Outline mode: headings re-nested by level (h1 > h2 > h3) and numbered, which is
+    // what the outline renders — `flatHeadings` below is its virtual-list source.
     type HeadingNode = {
         symbol: typeof symbols[0];
         children: HeadingNode[];

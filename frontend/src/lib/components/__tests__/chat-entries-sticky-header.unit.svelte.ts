@@ -12,7 +12,6 @@ vi.mock('$lib/components/Chat/QueueIndicator.svelte', () => ({
     default: () => '<div class="mock-queue-indicator"></div>',
 }));
 vi.mock('$lib/utils/toolArgs', () => ({
-    formatToolArgs: vi.fn(() => ''),
 }));
 vi.mock('$lib/constants', () => ({
     SCROLL_BOTTOM_THRESHOLD: 100,
@@ -60,7 +59,6 @@ const baseProps = {
     onMsgDelete: vi.fn(),
     onMsgFork: vi.fn(),
     onMsgSend: vi.fn(),
-    onMsgEdit: vi.fn(),
     onRegenerate: vi.fn(),
     onNavigateTask: vi.fn(),
 };
