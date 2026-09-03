@@ -931,6 +931,38 @@ func TestGetTaskDiff_BinaryUntrackedByExtension(t *testing.T) {
 	}
 }
 
+// An untracked .svg is source the user can read and review, not an opaque blob: labeling it binary is
+// how a new icon becomes an uninspectable "Binary file — N bytes" row in the diff panel.
+func TestGetTaskDiff_UntrackedSVG_HasLines(t *testing.T) {
+	_, taskID, _, _, wm := setupTestRepo(t)
+
+	_, _, err := wm.CreateWorktree("test-project", taskID, "task/test-task", "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	worktreePath, _ := wm.WorktreePath(taskID)
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16"/></svg>`
+	if err := os.WriteFile(filepath.Join(worktreePath, "logo.svg"), []byte(svg), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	result, err := wm.GetTaskDiff(taskID, "", "")
+	if err != nil {
+		t.Fatalf("GetTaskDiff: %v", err)
+	}
+	if len(result.Untracked) != 1 {
+		t.Fatalf("expected 1 untracked file, got %d", len(result.Untracked))
+	}
+	file := result.Untracked[0]
+	if file.IsBinary {
+		t.Error("an untracked .svg must not be labeled binary — it is XML source")
+	}
+	if len(file.Lines) == 0 {
+		t.Error("expected the svg's content as diff lines, got none")
+	}
+}
+
 func TestGetTaskDiff_TrackedBinaryFile(t *testing.T) {
 	repoDir, taskID, _, _, wm := setupTestRepo(t)
 
@@ -1016,7 +1048,7 @@ func TestIsBinaryExtension(t *testing.T) {
 		}
 	}
 	// Text extensions
-	for _, ext := range []string{"file.go", "script.py", "style.css", "data.json", "page.html", "notes.txt"} {
+	for _, ext := range []string{"file.go", "script.py", "style.css", "data.json", "page.html", "notes.txt", "logo.svg", "page.xhtml"} {
 		if isBinaryExtension(ext) {
 			t.Errorf("expected %s to NOT be detected as binary extension", ext)
 		}
