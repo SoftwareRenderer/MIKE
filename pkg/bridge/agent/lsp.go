@@ -39,12 +39,11 @@ func (s *lspSession) isClosed() bool {
 	return s.closed
 }
 
-// newLSPSession creates a new LSP session by starting the server process
-// and communicating over stdin/stdout with Content-Length framing.
-// newLSPSession starts one language server process with the container's own environment: the image's
-// plus whatever `-e` the container was created with. Nothing on this connection can add to it, so a
-// language server has exactly one view of where its dependencies are, and it is the same view its
-// extension's environment check gets.
+// newLSPSession starts one language server process, spoken to over stdin/stdout with Content-Length
+// framing, using the container's own environment: the image's plus whatever `-e` the container was
+// created with. There is deliberately no per-session environment:
+// the host decided what the server reads its dependencies from at container creation, and the
+// extension's own environment check runs in the same container.
 func newLSPSession(command string, args []string) (*lspSession, error) {
 	cmd := exec.Command(command, args...)
 

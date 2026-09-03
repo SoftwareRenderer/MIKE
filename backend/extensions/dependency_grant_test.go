@@ -1,10 +1,8 @@
 package extensions
 
-// The one field this feature asks of the user is a host directory. Everything downstream — the
-// bind mount, the environment assignment, whether a language server can see a project at all —
-// follows from the string typed into it, so the checks that shape that string are the interesting
-// tests: what is accepted, what is refused with a sentence, and what a manifest is never allowed
-// to supply.
+// Tests for the one field this feature asks of the user: a host directory. Everything downstream
+// follows from the string typed into it, so these pin what is accepted, what is refused with a
+// readable sentence, and what a manifest is never allowed to supply.
 
 import (
 	"encoding/json"
@@ -268,10 +266,9 @@ func TestGrantSurvivesAnUpdateFromTheRegistry(t *testing.T) {
 	}
 }
 
-// TestCheckGrantShapeWithHomes is the read-write half of the grant. The language server reads the
-// directory read-only, but every sandboxed task mounts it read-write — and a task runs code that a
-// repository's content helps steer — so a single text field must not be able to hand over the host's
-// configuration, a whole home directory, or the place a cloud token lives.
+// TestCheckGrantShapeWithHomes: the grant is read-only for the language server but read-write in every
+// sandboxed task, and a task runs code a repository's content helps steer — so one text field must not
+// be able to hand over the host's configuration, a whole home directory, or a credential store.
 func TestCheckGrantShapeWithHomes(t *testing.T) {
 	homes := []string{"/home/dev", "/root"}
 
@@ -318,9 +315,8 @@ func TestCheckGrantShapeWithHomes(t *testing.T) {
 	}
 }
 
-// TestValidateDependencyGrant_RefusesWholeDirectories is the same rule through the function the
-// endpoint actually calls, with real directories: a machine always has /etc, and a user always has a
-// home, and neither is a dependency directory.
+// TestValidateDependencyGrant_RefusesWholeDirectories: the same rule through the function the endpoint
+// calls, with real directories.
 func TestValidateDependencyGrant_RefusesWholeDirectories(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil || filepath.Clean(home) == "/" {
@@ -343,9 +339,9 @@ func putDependencyCacheBody(t *testing.T, h *ExtensionHandler, id, body string) 
 	return rec, nil
 }
 
-// TestHandleSetDependencyCache_RequiresTheKey: an empty host_path revokes, and that is exactly why a
-// body that does not carry the key at all has to be refused rather than read as empty. A caller who
-// types {"path": ...} would otherwise take a working grant away and be told it succeeded.
+// TestHandleSetDependencyCache_RequiresTheKey: an empty host_path revokes, so a body that does not
+// carry the key at all must be refused — otherwise {"path": ...} takes a working grant away and
+// answers 200.
 func TestHandleSetDependencyCache_RequiresTheKey(t *testing.T) {
 	h, store := testHandlerWithStore(t)
 	ext := lspExtWithCache(t, store)

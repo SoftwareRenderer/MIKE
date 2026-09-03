@@ -181,10 +181,9 @@ func (es *ExtensionStore) ListProjectPaths() ([]string, error) {
 	return paths, nil
 }
 
-// ListProjectSandboxMountPaths returns the host paths every project declares in
-// its Sandbox Configuration. They belong to the user's own setup — the task
-// sandbox already bind-mounts them — so the LSP sandbox may borrow them too, but
-// read-only: see MountPolicy.ForceReadOnly.
+// ListProjectSandboxMountPaths returns the host paths every project declares in its Sandbox
+// Configuration. The task sandbox already bind-mounts them, so the LSP sandbox may borrow them too,
+// but read-only: see MountPolicy.ForceReadOnly.
 func (es *ExtensionStore) ListProjectSandboxMountPaths() ([]string, error) {
 	if es == nil || es.projects == nil {
 		return nil, nil

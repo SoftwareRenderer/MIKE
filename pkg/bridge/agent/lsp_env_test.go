@@ -1,10 +1,7 @@
 package main
 
-// The language server's environment is the container's, once, at creation. This pins that the
-// bridge protocol has no second door for it: no field on the wire, and nothing applied to the
-// spawned process. A per-start environment would be a second source of truth for where a server's
-// dependencies are — and it would be a source the extension's own environment check never sees, so
-// the check and the server could disagree about the same workspace with nothing on screen changed.
+// The language server's environment is the container's, set once at creation. This pins that the bridge
+// protocol has no second door for it: no field on the wire, nothing applied to the spawned process.
 
 import (
 	"encoding/json"

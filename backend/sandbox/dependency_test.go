@@ -1,9 +1,8 @@
 package sandbox
 
-// The task sandbox is where a granted dependency directory gets *filled*: it mounts read-write what
-// the language server's own sandbox mounts read-only. These tests hold the two properties that make
-// that safe — the mount never takes a `:U` (which would chown the host directory out of the user's
-// ownership), and a mount that did not happen never leaves its assignment behind.
+// The task sandbox is where a granted dependency directory gets filled: it mounts read-write what the
+// language server's sandbox mounts read-only. These tests pin the two properties that make that safe —
+// no `:U`, and no assignment without its mount.
 
 import (
 	"os"
@@ -27,10 +26,9 @@ func TestDependencyCaches_AreReadWriteAndNeverChownTheHost(t *testing.T) {
 	if len(specs) != 1 || specs[0] != dir+":/go/pkg/mod:rprivate,rw" {
 		t.Fatalf("dependencyCaches() = %v, want one rprivate,rw bind of the granted directory", specs)
 	}
-	// `:U` is not a sharper mode. It chowns the *host* source, recursively, into the container's
-	// mapped uid: measured on a scratch directory, `stat` reported 525287 afterwards and the owner of
-	// the account could no longer delete its own files. Applied to somebody's Go module cache that is
-	// a 1.1 GB tree taken out of their hands, so the mode suffix is exactly what is written here.
+	// `:U` is not a sharper mode. It chowns the *host* source recursively into the container's mapped uid:
+	// measured on a scratch directory, `stat` afterwards reported 525287 and the account owner could no
+	// longer delete their own files.
 	for _, spec := range specs {
 		mode := spec[strings.LastIndex(spec, ":")+1:]
 		if mode != "rprivate,rw" {

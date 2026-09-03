@@ -147,11 +147,9 @@ func environmentResult(st envStatus, gate *extensions.EnvironmentGate) Environme
 	return EnvironmentReport{Healthy: false, Note: note, SuppressCodes: gate.SuppressCodes}
 }
 
-// runEnvCheck runs the declared check inside the language server's own sandbox, in that
-// workspace's directory. It inherits that container's environment — which is where a granted
-// dependency assignment lives — so it asks the toolchain the same question the server would
-// answer, instead of asking it with a different set of roots. An error running it is reported
-// healthy: not knowing is not evidence that the project is broken.
+// runEnvCheck runs the declared check inside the language server's sandbox, in that workspace's
+// directory. It inherits the container's environment — where a granted dependency assignment lives —
+// so it asks the toolchain the question the server would answer.
 func (m *ExtensionLSPManager) runEnvCheck(sc *sandboxClient, gate *extensions.EnvironmentGate, workspacePath string) (bool, string) {
 	cwd := containerWorkspacePath(mustAbs(workspacePath), sc.projectMounts)
 	timeout := gate.Check.Timeout(envCheckDefaultTimeout, envCheckMaxTimeout)

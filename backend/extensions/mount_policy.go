@@ -317,16 +317,13 @@ func (p *MountPolicy) ValidateSandboxAdditions(mounts []types.SandboxMount, capa
 	return ValidateCapabilities(capabilities)
 }
 
-// ShadowsToolState reports whether a path would cover the language server's own writable
-// state inside its container — the container's tmpfs, or the cache directory of the container's
-// own user.
+// ShadowsToolState reports whether a path would cover the language server's own writable state in
+// its container: the tmpfs, or the container user's cache directory.
 //
-// Both users of this rule mount read-only, and a server with a read-only cache publishes nothing
-// about a file it cannot load: not an error, not a warning, nothing. A broken file then looks
-// clean, which is worse than a broken file that shouts. So a borrowed Sandbox Configuration mount
-// over one of these paths is dropped, and a manifest that names one as its dependency_cache
-// container_path is refused where a manifest is refused — at install, with a sentence to act on —
-// instead of being quietly unmounted at every start.
+// Both users mount it read-only, and a server with a read-only cache publishes nothing about a file
+// it cannot load — no error, no warning — so a broken file looks clean. A borrowed Sandbox
+// Configuration mount over one of these paths is therefore dropped, and a manifest naming one as its
+// dependency_cache container_path is refused at install instead of unmounted at every start.
 func ShadowsToolState(containerPath string) bool {
 	// Only the tmpfs roots themselves; a read-only mount over /tmp makes the whole scratch space
 	// unusable, while a subtree of it is fine.
@@ -348,21 +345,18 @@ func ShadowsToolState(containerPath string) bool {
 	return false
 }
 
-// ValidateDependencyGrant checks the one host directory a user grants to one extension's language
-// server, for its resolved dependencies, and returns the cleaned absolute path to store.
+// ValidateDependencyGrant validates the one host directory a user grants to one extension's language
+// server for its resolved dependencies, and returns the cleaned absolute path to store.
 //
-// It is deliberately a different rule than MountPolicy.ValidateHostPath rather than a call to it:
-// the directory this field names — a Go module cache, a Cargo home — lives exactly where that
-// allowlist does not reach, which is the reason it is asked of a human instead of declared by an
-// extension. What stays required: absolute, no `..`, symlinks resolved before storing (the same
-// shared rule as a mount, so a dangling link cannot stand in for a path that is checked), not the
-// filesystem root, and already existing as a directory — a missing one would surface as a podman
-// error nobody can map back to this field.
+// Deliberately a different rule than MountPolicy.ValidateHostPath: a module cache or Cargo home sits
+// exactly where that allowlist does not reach, which is why a human is asked for it rather than an
+// extension declaring it. Still required: absolute, no `..`, symlinks resolved before storing, not
+// the filesystem root, and already existing — a missing directory would surface as a podman error
+// nobody traces back to this field.
 //
-// The consequence to be honest about: whatever this path contains becomes readable inside that
-// extension's container (read-only, unless the manifest declared otherwise and the user allowed
-// it). That is the grant, chosen by the person who owns the machine — which is also why it is one
-// directory per extension, applied deliberately, and never widened by anything the extension says.
+// Consequence: everything under the path is readable inside that extension's container, and writable
+// by task sandboxes when the manifest asked for it. One directory per extension, never widened by
+// anything the extension says.
 func ValidateDependencyGrant(hostPath string) (string, error) {
 	trimmed := strings.TrimSpace(hostPath)
 	if trimmed == "" {
@@ -394,32 +388,26 @@ func ValidateDependencyGrant(hostPath string) (string, error) {
 	return resolved, nil
 }
 
-// systemGrantRoots are the host trees a dependency directory is never in, and which nothing in this
-// server should ever be handed read-write: the machine's own configuration, device and process trees.
-// `/opt` is deliberately absent — real toolchain caches live under it (Homebrew on Apple silicon),
-// and it holds no system configuration.
+// systemGrantRoots are host trees a dependency directory is never in, and that must never be handed
+// read-write to a sandbox. /opt is absent on purpose: real toolchain caches live there.
 var systemGrantRoots = []string{"/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/boot", "/dev", "/proc", "/sys", "/run", "/var"}
 
-// credentialGrantDirs are directories, relative to any user's home, that hold secrets rather than
-// dependencies. A granted directory is mounted READ-WRITE into every sandboxed task, where the code
-// running in it is steered by whatever a repository contains — so a grant must not be able to point a
-// task at the files whose rewrite is the point of an attack. This is a denylist of *credential
-// stores*, which is host safety, not language knowledge: nothing here knows what any toolchain is.
+// credentialGrantDirs hold secrets rather than dependencies, relative to any home. A grant is mounted
+// read-write into every sandboxed task, where what runs is steered by repository content, so a grant
+// must not point a task at the files an attack would rewrite. A denylist of credential stores: host
+// safety, not language knowledge.
 var credentialGrantDirs = []string{".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".config/gcloud", ".config/gh", ".config/huggingface", ".config/pip"}
 
-// checkGrantShape refuses the directory shapes that make a grant something other than what it is for.
-//
-// The reason is the mode: the language server reads the grant read-only, but the task sandbox — the
-// container an agent's tool calls run in — mounts it read-write so a build can fill it. That makes the
-// grant a host write surface, chosen by whoever typed the path, and one text field should not be able
-// to hand the whole home directory or the host's `/etc` to every sandboxed task by a slip of the hand.
-// A dependency cache is always somewhere specific: below a user's own directories, several levels deep.
+// checkGrantShape refuses shapes that make a grant something other than a dependency cache. The
+// language server reads it read-only, but every sandboxed task mounts it read-write so a build can
+// fill it — the path is a host write surface. One text field must not be able to hand over a home
+// directory or the host's /etc; a dependency cache is always somewhere specific, a few levels down.
 func checkGrantShape(resolved string) error {
 	return checkGrantShapeWithHomes(resolved, hostHomeDirs())
 }
 
-// checkGrantShapeWithHomes takes the home directories as an argument so the rules above are testable
-// without writing into a real home directory.
+// checkGrantShapeWithHomes takes the homes as an argument so the rules are testable without touching
+// a real home directory.
 func checkGrantShapeWithHomes(resolved string, homes []string) error {
 	if segments := strings.Count(strings.Trim(resolved, "/"), "/"); segments < 2 {
 		return fmt.Errorf("%s is too close to the filesystem root to grant as a dependency directory — name a directory of your own, a couple of levels down (for example ~/go/pkg/mod)", resolved)
@@ -445,9 +433,8 @@ func checkGrantShapeWithHomes(resolved string, homes []string) error {
 	return nil
 }
 
-// hostHomeDirs is the set of user home directories this machine presents: the server's own, root, and
-// one level of the conventional per-user roots. Bounded on purpose — it is a safety check on a path a
-// person typed, not a directory service.
+// hostHomeDirs returns the server's own home, /root, and one level of /home and /Users. Bounded on
+// purpose: a safety check on a typed path, not a directory service.
 func hostHomeDirs() []string {
 	homes := []string{}
 	if h, err := os.UserHomeDir(); err == nil && h != "" {

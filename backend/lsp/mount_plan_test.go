@@ -60,12 +60,9 @@ func countContainerPath(mounts []types.SandboxMount, containerPath string) int {
 	return n
 }
 
-// TestSandboxMountPlan_ComparesWhatCreateWillRecord is the invariant behind "your grant does nothing"
-// and "the language server restarts every time you open a file" — the two failures this split prevents.
-// Create appends the granted dependency directory itself, so it must not already be in the list handed
-// to it: the recorded snapshot is built from that list plus the same append, and a snapshot holding the
-// mount twice is one no comparison can match, which makes every subsequent workspace open destroy a
-// running language server and start a new one.
+// TestSandboxMountPlan_ComparesWhatCreateWillRecord: Create appends the granted dependency directory
+// itself, so it must not already be in the create list — a snapshot holding it twice can never match,
+// and the sandbox would restart on every file opened.
 func TestSandboxMountPlan_ComparesWhatCreateWillRecord(t *testing.T) {
 	grant := t.TempDir()
 	mgr, ext, wsPath := planFixture(t, grant, nil)
@@ -101,10 +98,9 @@ func TestSandboxMountPlan_ComparesWhatCreateWillRecord(t *testing.T) {
 
 func TestSandboxMountPlan_ProjectMountWantingTheCachePathGivesWay(t *testing.T) {
 	grant := t.TempDir()
-	// The project grafts something else onto the container path the extension declared for its
-	// dependencies. Two -v specs on one path make podman refuse the whole create, and the declared
-	// path cannot move, so the borrowed mount is the one that goes — out of both lists, so the
-	// comparison never expects a mount the create refused.
+	// The project grafts something onto the container path the extension declared for its dependencies.
+	// Two -v specs on one path make podman refuse the create and the declared path cannot move, so the
+	// borrowed mount goes — out of both lists, so the comparison never expects it back.
 	mgr, ext, wsPath := planFixture(t, grant, []types.SandboxMount{{HostPath: "/tmp/graft", ContainerPath: "/go/pkg/mod", Mode: "rw"}})
 	var projectMounts map[string]string
 

@@ -323,7 +323,7 @@
     async function handleDelete(id: string, name: string) {
         const confirmed = await dialogStore.showConfirm({
             title: `Delete "${name}"?`,
-            message: `This will remove the extension and stop its sandbox. This cannot be undone.`,
+            message: `This will stop its sandbox and delete the extension, including its files under the extensions directory. This cannot be undone.`,
             confirmText: 'Delete',
             cancelText: 'Cancel',
         });
@@ -331,8 +331,11 @@
 
         error = '';
         try {
-            await deleteExtension(id);
+            const result = await deleteExtension(id);
             await loadExtensions();
+            if (result.leftover) {
+                error = `Deleted, but its files could not be removed and are still on disk: ${result.leftover}`;
+            }
         } catch (e: any) {
             error = e.message || 'Failed to delete extension';
         }
@@ -373,9 +376,8 @@
     }
 
     $effect(() => {
-        // One fetch for the home directory, and only once some installed extension declares a
-        // dependency cache; then a prefill where nothing is granted yet. The suggestion is text in
-        // the field, editable and reviewable — never a value applied behind the user's back.
+        // Fetch the home directory once, and only if some installed extension declares a dependency
+        // cache. The prefill is editable text, never a value applied behind the user's back.
         const home = homeDir;
         if (!home) {
             if (!homeTried && extensions.some((e) => e.sandbox_config?.dependency_cache)) {

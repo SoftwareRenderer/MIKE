@@ -1,10 +1,10 @@
 package lsp
 
-// A granted dependency directory is used by two containers, and they must not disagree about where
-// it is: the extension's own sandbox mounts it read-only (the server reads a cache, it does not
-// build one), and the task sandbox mounts it read-write so the toolchain in a turn can warm it. The
-// extension side derives both halves of that in backend/extensions; this file is the other door —
-// the question the task sandbox asks, phrased without any knowledge of what a module cache is.
+// A granted dependency directory is used by two containers that must not disagree about where it is:
+// the extension's own sandbox mounts it read-only (the server reads a cache, it does not build one),
+// the task sandbox mounts it read-write so a turn's toolchain can warm it. backend/extensions derives
+// the extension side; this file answers the task sandbox's question, with no knowledge of what a
+// module cache is.
 
 import (
 	"log"
@@ -14,26 +14,23 @@ import (
 	"kanban/backend/types"
 )
 
-// DependencyCache is one granted dependency directory in the shape a container needs it: the host
-// directory, where to mount it, and the variable that points a toolchain at it. There is no mode
-// here on purpose — the mode is the *consumer's* decision (read-only for the language server,
-// read-write for the task that fills it), not something the extension declares.
+// DependencyCache is one granted directory in the shape a container needs: host path, container path,
+// and the variable pointing a toolchain at it. No mode field: the mode is the consumer's decision
+// (read-only for the language server, read-write for the task that fills it).
 type DependencyCache struct {
 	HostPath      string
 	ContainerPath string
-	// Env is the variable that points a toolchain at the directory. Its value is always
-	// ContainerPath — the host path means nothing to a process inside a sandbox — which is why there
-	// is no second field: two that must always agree are two that can disagree.
+	// Its value is always ContainerPath — the host path means nothing inside a sandbox — so there is
+	// no second field that could disagree with the first.
 	Env string
 }
 
-// DependencySandboxArgs is the one translation from the union above to what a container create
-// needs. Both consumers — a task's container and a sandboxed terminal — call it, because two copies
-// would mean one of them mounts the cache read-only, or points the variable at the host path, and
-// the symptom is a toolchain that quietly re-downloads the world.
+// DependencySandboxArgs translates that list into a container create. Both consumers — a task's
+// container and a sandboxed terminal — call it, so they cannot drift into disagreeing about the mode
+// or the variable's value.
 //
-// The mode is read-write whatever the declaration said: these are the containers that *fill* the
-// cache, and the extension's own read-only sandbox is assembled elsewhere.
+// The mode is read-write whatever was declared: these containers fill the cache; the extension's
+// read-only sandbox is assembled elsewhere.
 func DependencySandboxArgs(caches []DependencyCache) ([]types.SandboxMount, []types.SandboxEnv) {
 	var mounts []types.SandboxMount
 	var envs []types.SandboxEnv
@@ -49,16 +46,13 @@ func DependencySandboxArgs(caches []DependencyCache) ([]types.SandboxMount, []ty
 	return mounts, envs
 }
 
-// DependencyCaches reports what every *enabled* LSP extension could bind right now, for the task
-// sandbox. Both halves come from the same derivation the extension sandbox uses
-// (DesiredDependencyMount), so a directory that has stopped existing, or a grant that is not a root
-// for its own extension, is absent here exactly as it is absent there.
+// DependencyCaches reports what every enabled LSP extension can bind right now, for the task sandbox.
+// It uses the same derivation the extension sandbox uses (DesiredDependencyMount), so a directory that
+// stopped existing, or a grant that is not a root for its own extension, is absent here as it is there.
 //
-// Two extensions can declare the same container path or the same variable — a second Go language
-// server declares /go/pkg/mod and GOMODCACHE too. Extensions are walked in ID order so the winner
-// is the same process after a restart as before, and the loser is reported rather than quietly
-// dropped: a silently-lost cache is a language server that answers from an empty directory while a
-// perfectly good one sits mounted somewhere else.
+// Two extensions can declare the same container path or variable. Extensions are walked in ID order so
+// the winner survives a restart, and a loser is logged rather than dropped quietly: an extension
+// resolving from an empty directory, with a good cache mounted elsewhere, looks like a broken server.
 func (m *ExtensionLSPManager) DependencyCaches() []DependencyCache {
 	if m == nil || m.extStore == nil || m.extSandbox == nil {
 		return nil
@@ -68,8 +62,8 @@ func (m *ExtensionLSPManager) DependencyCaches() []DependencyCache {
 		log.Printf("[lsp] dependency caches: cannot list extensions: %v", err)
 		return nil
 	}
-	// Store order is not a contract; ID order is, or which of two extensions claims a path would
-	// change between two runs of the same code.
+	// ID order, not store order: otherwise which of two extensions claims a path would change
+	// between two runs of the same code.
 	sort.Slice(exts, func(i, j int) bool { return exts[i].ID < exts[j].ID })
 
 	var out []DependencyCache
@@ -82,8 +76,8 @@ func (m *ExtensionLSPManager) DependencyCaches() []DependencyCache {
 		}
 		bind := m.extSandbox.DesiredDependencyMount(ext)
 		if !bind.OK {
-			// Nothing to report here: this extension's own container start says the same thing,
-			// with the reason attached to the extension the user was looking at.
+			// Its own container start reports this one, with the reason attached to the extension
+			// the user was looking at.
 			continue
 		}
 		if other, dup := claimedPath[bind.Mount.ContainerPath]; dup {
@@ -95,9 +89,8 @@ func (m *ExtensionLSPManager) DependencyCaches() []DependencyCache {
 		envKey := bind.Env.Key
 		cache := DependencyCache{HostPath: bind.Mount.HostPath, ContainerPath: bind.Mount.ContainerPath}
 		if other, dup := claimedEnv[envKey]; dup && other != ext.ID {
-			// The mount is still worth making — a server that reads the directory through a
-			// different route gets it too — but only the winner's assignment is published, so a
-			// variable never points at a directory that is not mounted.
+			// Still mount it — a server that reads the directory another way gets it too — but
+			// publish only the winner's assignment, so a variable never points at nothing.
 			log.Printf("[lsp] %s: %s is already assigned by %s, leaving it alone", ext.ID, envKey, other)
 		} else if envKey != "" {
 			claimedEnv[envKey] = ext.ID

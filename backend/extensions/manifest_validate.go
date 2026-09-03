@@ -63,10 +63,10 @@ func (c *LSPConfig) Validate() error {
 	// The sandbox block holds three things the runtime acts on directly. Each is checked here,
 	// where a manifest is refused rather than stored and then worked around at every start.
 	if c.Sandbox != nil {
-		// The host directory is a grant, so it is asked of a human and never read from a
-		// manifest — not "stripped from", refused. An extension that names a directory on the
-		// machine it happens to be installed on has crossed the line this whole mechanism walks
-		// carefully: it declares where *it* looks, not what it may read here.
+		// The host directory is a grant: asked of a human, never read from a manifest. An extension that
+		// names a directory on the machine it happens to be installed on has declared where *it* looks and
+		// then reached for the host. Nothing here is derived from a container path either, so a manifest
+		// cannot name a host directory by not filling one in.
 		if c.Sandbox.DependencyHostPath != "" {
 			return fmt.Errorf("capabilities.lsp.sandbox.dependency_host_path is a grant the user applies under Settings -> Extensions and may not come from a manifest (got %q)", c.Sandbox.DependencyHostPath)
 		}
