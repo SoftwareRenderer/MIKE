@@ -829,6 +829,24 @@
                     <div class="readonly-value">{config?.database_path || '\u2014'}</div>
                     <span class="field-help">Path to the server's SQLite database</span>
                 </div>
+                {#if config?.tls_ca_available}
+                    <!-- Only when the server signed its own certificate. A plain link,
+                         not apiFetch: the route is a session-authed GET, so the
+                         browser's own download UI handles the file. -->
+                    <div class="field-label">
+                        <span class="field-label-inline">CA Certificate</span>
+                        <div>
+                            <a class="btn-ca-download" href="/api/tls/ca" download="mike-ca.crt"
+                               title="Download the CA certificate that signed this server's certificate">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                    <path d="M8 2v9M5 8l3 3 3-3M3 12v2h10v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                Download CA Certificate
+                            </a>
+                        </div>
+                        <span class="field-help">This server's certificate is signed by its own certificate authority. Import this file into another device's trust store to trust the connection there.</span>
+                    </div>
+                {/if}
             </div>
 
             <!-- Login sessions: mutates immediately (like the PWA button above),
@@ -1146,6 +1164,27 @@
         transition: background 0.15s, color 0.15s;
     }
     .btn-pwa-install:hover {
+        background: var(--color-accent-dark);
+        color: white;
+    }
+
+    .btn-ca-download {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        width: fit-content;
+        padding: 8px 14px;
+        border-radius: var(--radius-md);
+        background: var(--color-surface-3);
+        color: var(--color-accent);
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-decoration: none;
+        cursor: pointer;
+        border: 1px solid var(--color-accent);
+        transition: background 0.15s, color 0.15s;
+    }
+    .btn-ca-download:hover {
         background: var(--color-accent-dark);
         color: white;
     }

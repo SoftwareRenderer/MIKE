@@ -149,6 +149,10 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 	cfgStore.SetWorkspaceDirOverride(worktreesDir)
 	cfg.WorkspaceDir = worktreesDir
 
+	// The CA download is offered only when a local CA exists: a user-supplied cert
+	// (CAFile empty) or plain HTTP has nothing to advertise.
+	cfgStore.SetTLSCAAvailable(tlsCfg != nil && tlsCfg.CAFile != "")
+
 	// Ensure the effective worktrees directory exists.
 	if err := os.MkdirAll(cfg.WorkspaceDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create worktrees dir: %w", err)

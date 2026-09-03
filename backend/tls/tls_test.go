@@ -1,7 +1,9 @@
 package tls
 
 import (
+	"bytes"
 	"crypto/x509"
+	"encoding/pem"
 	"net"
 	"os"
 	"path/filepath"
@@ -622,5 +624,97 @@ func TestSameIPs_IgnoresIPv4Representation(t *testing.T) {
 	b := []net.IP{net.ParseIP("127.0.0.1").To4()}
 	if !sameIPs(a, b) {
 		t.Errorf("expected %v and %v to be considered equal", a, b)
+	}
+}
+
+// --- CertPEM ---------------------------------------------------------------
+
+func TestCertPEM_ReturnsCertificate(t *testing.T) {
+	cfg, err := LoadWithCert(t.TempDir(), "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	pemBytes, err := CertPEM(cfg.CAFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	block, _ := pem.Decode(pemBytes)
+	if block == nil || block.Type != "CERTIFICATE" {
+		t.Fatalf("expected a CERTIFICATE PEM block, got %+v", block)
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("served bytes are not a parseable certificate: %v", err)
+	}
+	if !cert.IsCA {
+		t.Error("expected the CA certificate itself, got a non-CA certificate")
+	}
+}
+
+// The reason CertPEM re-encodes instead of returning the file: a caller writes
+// the result to an HTTP response, so key material must never come back out.
+func TestCertPEM_ServesOnlyTheCertificate(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := LoadWithCert(dir, "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	keyPEM, err := os.ReadFile(filepath.Join(dir, "tls", caKeyName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM, err := os.ReadFile(cfg.CAFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bundlePath := filepath.Join(dir, "bundle.pem")
+	if err := os.WriteFile(bundlePath, append(append([]byte{}, certPEM...), keyPEM...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := CertPEM(bundlePath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bytes.Contains(out, []byte("PRIVATE KEY")) {
+		t.Error("private key material leaked out of CertPEM")
+	}
+	if !bytes.Equal(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: mustParseCert(t, cfg.CAFile).Raw})) {
+		t.Error("expected exactly the certificate block, nothing else")
+	}
+}
+
+func TestCertPEM_RefusesNonCertificate(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := LoadWithCert(dir, "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(dir, "tls", caKeyName),   // a private key
+		filepath.Join(dir, "tls", leafKeyName), // a private key
+		filepath.Join(dir, "missing.crt"),      // absent file
+	} {
+		if out, err := CertPEM(path); err == nil {
+			t.Errorf("expected an error for %s, got %d bytes", path, len(out))
+		}
+	}
+
+	junkPath := filepath.Join(dir, "junk.crt")
+	if err := os.WriteFile(junkPath, []byte("not a pem file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CertPEM(junkPath); err == nil {
+		t.Error("expected an error for a file with no CERTIFICATE block")
+	}
+
+	// The real CA file must succeed, so the loop above cannot pass for the wrong reason.
+	if _, err := CertPEM(cfg.CAFile); err != nil {
+		t.Errorf("the CA file must be readable: %v", err)
 	}
 }
