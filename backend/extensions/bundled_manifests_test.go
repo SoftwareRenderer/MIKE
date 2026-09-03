@@ -6,6 +6,7 @@ package extensions
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,5 +117,35 @@ func TestBundledLSPManifests_GateIsActionable(t *testing.T) {
 				t.Errorf("%s: environment.check contacts a URL from a sandbox with no network: %q", name, a)
 			}
 		}
+	}
+}
+
+// TestBundledLSPManifests_DeclareWhatTheGrammarEngineNeeds: `pairs` are what folding, bracket matching
+// and bracket pair colorization are all built from, and the two name fields are a language's naming
+// convention written down instead of assumed.
+//
+// A profile missing them still highlights — that is what the engine's defaults are for, and why an
+// extension installed before these fields existed is not left behind. The point of asserting it here is
+// the other half: a bundled manifest is what every install gets, and a convention nobody wrote down is a
+// convention nobody can turn off.
+func TestBundledLSPManifests_DeclareWhatTheGrammarEngineNeeds(t *testing.T) {
+	declared := 0
+	for name, m := range bundledManifests(t) {
+		for profile, spec := range m.Capabilities.GetLSP().Syntax {
+			where := fmt.Sprintf("%s: capabilities.lsp.syntax.%s", name, profile)
+			declared++
+			if len(spec.Pairs) == 0 {
+				t.Errorf("%s declares no pairs — nothing to fold, match or colour in a language with brackets", where)
+			}
+			if spec.CapitalizedTypes == nil {
+				t.Errorf("%s leaves capitalized_types undeclared — an upper-case name is a type in this language because the engine guessed, not because the extension said so", where)
+			}
+			if spec.CallAsFunction == nil {
+				t.Errorf("%s leaves call_as_function undeclared — a name applied to arguments is a function, and an author who disagrees needs a field to say it in", where)
+			}
+		}
+	}
+	if declared == 0 {
+		t.Error("no bundled extension declares a syntax profile — the grammar engine has no real user")
 	}
 }

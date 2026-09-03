@@ -159,11 +159,18 @@ func (g *EnvironmentGate) Validate() error {
 	return nil
 }
 
+// declaresNames reports whether the profile asks for the shape rules: a called name is a function, an
+// upper-case name is a type. Only an explicit true counts — a profile whose only declaration is
+// `capitalized_types: false` declares nothing, and the refusal below is the answer it deserves.
+func (s SyntaxSpec) declaresNames() bool {
+	return (s.CapitalizedTypes != nil && *s.CapitalizedTypes) || (s.CallAsFunction != nil && *s.CallAsFunction)
+}
+
 // Validate checks one syntax profile; the grammar builder cannot guess what a half-declared delimiter meant.
 func (s SyntaxSpec) Validate() error {
 	if s.LineComment == "" && len(s.LineComments) == 0 && s.BlockComment == nil && len(s.Strings) == 0 && len(s.Pairs) == 0 &&
-		len(s.Keywords) == 0 && len(s.Types) == 0 && len(s.Constants) == 0 && len(s.Builtins) == 0 && !s.Numbers {
-		return fmt.Errorf("declares nothing to tokenize — at least one of line_comment, block_comment, strings, pairs, keywords, types, constants, builtins or numbers is required")
+		len(s.Keywords) == 0 && len(s.Types) == 0 && len(s.Constants) == 0 && len(s.Builtins) == 0 && !s.Numbers && !s.declaresNames() {
+		return fmt.Errorf("declares nothing to tokenize — at least one of line_comment, block_comment, strings, pairs, keywords, types, constants, builtins, numbers, capitalized_types or call_as_function is required")
 	}
 	for i, marker := range s.LineComments {
 		if strings.TrimSpace(marker) == "" {

@@ -2,7 +2,8 @@ import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { syntaxTree, Language } from '@codemirror/language';
 import { HIGHLIGHT_CACHE_MAX } from '$lib/constants';
 import { escapeHtml } from '$lib/utils/format';
-import { getLanguageSupport } from '$lib/utils/editor-language';
+import { getLanguageSupport, resolveFile } from '$lib/utils/editor-language';
+import { bracketLevelsForTree } from '$lib/syntax/bracket-pairs';
 import { fileBase, fileSuffix } from '$lib/utils/file-suffix';
 import { extensionManager } from '$lib/services/extension-manager.svelte';
 
@@ -72,6 +73,27 @@ function contentHash(lines: string[]): string {
 }
 
 /**
+ * Merge two span lists, each already in document order, into one sorted stream for the line walk.
+ * A bracket sits where no token is, so the two lists do not overlap in practice; if they ever do, the
+ * span already collected wins and the bracket is dropped rather than emitting a nested `<span>`.
+ */
+function mergeSpans(
+    a: { from: number; to: number; classes: string }[],
+    b: { from: number; to: number; classes: string }[],
+): { from: number; to: number; classes: string }[] {
+    const out: { from: number; to: number; classes: string }[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < a.length || j < b.length) {
+        const next = j >= b.length || (i < a.length && a[i].from <= b[j].from) ? a[i++] : b[j++];
+        const last = out[out.length - 1];
+        if (last && last.to > next.from) continue;
+        out.push(next);
+    }
+    return out;
+}
+
+/**
  * Core highlighting logic — given a loaded Language object, parse and highlight.
  * Results are cached per file path + content hash to avoid redundant parsing.
  */
@@ -116,11 +138,26 @@ function _highlightWithLang(lines: string[], path: string, lang: Language): stri
         }
 
         // Collect styled spans from the syntax tree
-        const styledSpans: { from: number; to: number; classes: string }[] = [];
+        let styledSpans: { from: number; to: number; classes: string }[] = [];
         highlightTree(tree, githubDarkHighlighter, (from, to, classes) => {
             styledSpans.push({ from, to, classes });
         });
 
+        // Bracket pair colorization, at the level the editor gives the same bracket. Only a declared
+        // `pairs` set makes this possible, so a file whose language declares none gets no brackets back.
+        const { spec } = resolveFile(path);
+        if (spec?.pairs?.length) {
+            const brackets = bracketLevelsForTree(tree, spec.pairs, source).map((b) => ({
+                from: b.from,
+                to: b.to,
+                classes: `hl-bracket-l${b.level}`,
+            }));
+            if (brackets.length) styledSpans = mergeSpans(styledSpans, brackets);
+        }
+
+        // Spans are in document order and the lines below run in document order, so one cursor serves
+        // the whole file — restarting it per line made the walk quadratic in the span count.
+        let spanIdx = 0;
         // For each line, interleave gaps (unstyled) and styled spans
         for (let i = 0; i < lines.length; i++) {
             const lStart = lineStarts[i];
@@ -128,7 +165,6 @@ function _highlightWithLang(lines: string[], path: string, lang: Language): stri
             if (lStart === lEnd) continue; // empty line
 
             let cursor = lStart;
-            let spanIdx = 0;
 
             // Advance spanIdx to the first span that overlaps or follows this line
             while (spanIdx < styledSpans.length && styledSpans[spanIdx].to <= cursor) {

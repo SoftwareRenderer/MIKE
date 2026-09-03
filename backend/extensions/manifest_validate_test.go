@@ -1,6 +1,7 @@
 package extensions
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -119,6 +120,21 @@ func TestLSPConfigValidate(t *testing.T) {
 			name:    "profile that tokenizes nothing",
 			mutate:  func(c *LSPConfig) { c.Syntax["empty"] = SyntaxSpec{}; c.FileTypes[0].Syntax = "empty" },
 			wantErr: "declares nothing to tokenize",
+		},
+		{
+			// An author turning both shape rules off, and declaring nothing else, has asked for a
+			// grammar that styles nothing. The refusal is the answer, not a blank editor.
+			name: "profile that only refuses the shape rules",
+			mutate: func(c *LSPConfig) {
+				off := false
+				c.Syntax["ts"] = SyntaxSpec{CapitalizedTypes: &off, CallAsFunction: &off}
+			},
+			wantErr: "declares nothing to tokenize",
+		},
+		{
+			name:    "shape rule asked for on its own",
+			mutate:  func(c *LSPConfig) { on := true; c.Syntax["ts"] = SyntaxSpec{CallAsFunction: &on} },
+			wantErr: "",
 		},
 		{
 			name:    "block comment with no closer",
@@ -278,5 +294,59 @@ func TestFileTypeResolution(t *testing.T) {
 	named := &LSPConfig{Language: "go", FileTypes: []LSPFileType{{Extension: "go", LanguageID: "go"}}}
 	if !named.MatchesFile("worktree/go") {
 		t.Error("MatchesFile(\"worktree/go\") = false, want true for a file named after the language")
+	}
+}
+
+// TestSyntaxSpecNameRulesRoundTrip exists because of how these two fields are declared: the browser
+// reads a missing key as the default (true), so an author's explicit "no" has to survive arriving here,
+// being stored, and being sent back out. A plain bool with omitempty would drop a false on the way out
+// and the refusal would reach the browser as a request.
+func TestSyntaxSpecNameRulesRoundTrip(t *testing.T) {
+	yes, no := true, false
+
+	for _, tt := range []struct {
+		name string
+		json string
+		want *bool
+	}{
+		{"absent stays absent", `{"keywords":["go"]}`, nil},
+		{"false stays false", `{"keywords":["go"],"capitalized_types":false}`, &no},
+		{"true stays true", `{"keywords":["go"],"capitalized_types":true}`, &yes},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec SyntaxSpec
+			if err := json.Unmarshal([]byte(tt.json), &spec); err != nil {
+				t.Fatalf("decode the manifest: %v", err)
+			}
+			out, err := json.Marshal(spec)
+			if err != nil {
+				t.Fatalf("encode it back for the browser: %v", err)
+			}
+			var again SyntaxSpec
+			if err := json.Unmarshal(out, &again); err != nil {
+				t.Fatalf("decode what the browser got: %v (%s)", err, out)
+			}
+
+			switch {
+			case tt.want == nil && again.CapitalizedTypes != nil:
+				t.Errorf("CapitalizedTypes = %v after the round trip, want the key absent (%s)", *again.CapitalizedTypes, out)
+			case tt.want != nil && again.CapitalizedTypes == nil:
+				t.Errorf("CapitalizedTypes came back absent, want %v — absent reads as the default true in the browser (%s)", *tt.want, out)
+			case tt.want != nil && *again.CapitalizedTypes != *tt.want:
+				t.Errorf("CapitalizedTypes = %v, want %v (%s)", *again.CapitalizedTypes, *tt.want, out)
+			}
+		})
+	}
+
+	// The two fields are independent: turning one off must not silently turn the other off too.
+	var spec SyntaxSpec
+	if err := json.Unmarshal([]byte(`{"keywords":["go"],"call_as_function":false}`), &spec); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if spec.CallAsFunction == nil || *spec.CallAsFunction {
+		t.Errorf("CallAsFunction = %v, want an explicit false", spec.CallAsFunction)
+	}
+	if spec.CapitalizedTypes != nil {
+		t.Errorf("CapitalizedTypes = %v, want it untouched by the other field's refusal", *spec.CapitalizedTypes)
 	}
 }
