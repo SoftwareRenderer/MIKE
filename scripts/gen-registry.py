@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXTENSIONS_DIR = os.path.normpath(os.path.join(ROOT, '..', 'MIKE-extensions'))
@@ -167,13 +168,13 @@ def simplify_capabilities(manifest_caps):
     return result
 
 
-def build_entry(ext_type, name, manifest_path, repo, commit):
+def build_entry(ext_type, name, manifest_path, repo, commit, subdir=None):
     with open(manifest_path) as f:
         manifest = json.load(f)
 
     # subdir is the extension's directory relative to the repo root
     # (e.g. "ui/github-issue-importer").
-    subdir = os.path.relpath(os.path.dirname(manifest_path), EXTENSIONS_DIR).replace(os.sep, '/')
+    subdir = subdir or os.path.relpath(os.path.dirname(manifest_path), EXTENSIONS_DIR).replace(os.sep, '/')
     entry = {
         'name': name,
         'version': manifest.get('version', ''),
@@ -211,6 +212,48 @@ def read_existing_registry():
     return existing
 
 
+def git_show_manifest(commit, subdir):
+    """The manifest as `commit` holds it, or None if that commit has no such file.
+
+    This is the only question a pin can be checked against: an entry is a promise about the commit
+    it names, and the commit is the only place the promise can be verified.
+    """
+    if not commit or not subdir:
+        return None
+    try:
+        out = subprocess.run(
+            ['git', '-C', EXTENSIONS_DIR, 'show', '%s:%s/manifest.json' % (commit, subdir)],
+            capture_output=True, text=True, check=True,
+        ).stdout
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return None
+    return out
+
+
+def pinned_entry(existing_entry, ext_type, name, repo):
+    """Project the entry from the commit the registry currently pins, or None if it cannot be."""
+    content = git_show_manifest(existing_entry.get('commit'), existing_entry.get('subdir'))
+    if content is None:
+        return None
+    try:
+        json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    return build_entry_from_text(existing_entry, content, ext_type, name, repo)
+
+
+def build_entry_from_text(existing_entry, content, ext_type, name, repo):
+    path = os.path.join(tempfile.gettempdir(), 'mike-pin-check-%s.json' % os.getpid())
+    with open(path, 'w') as f:
+        f.write(content)
+    try:
+        entry = build_entry(ext_type, name, path, repo, existing_entry.get('commit', ''),
+                            subdir=existing_entry.get('subdir'))
+    finally:
+        os.unlink(path)
+    return entry
+
+
 def entry_matches(entry, other):
     """True if two entries are identical except for the pinned `commit`."""
     if not other:
@@ -233,13 +276,36 @@ def collect_entries(existing):
         if len(parts) != 2:
             continue  # only extensions/<type>/<name>/manifest.json
         ext_type, name = parts
-        entry = build_entry(ext_type, name, os.path.join(dirpath, 'manifest.json'), repo, head)
-        # Only bump the commit hash when the extension actually changed. If the
-        # extension content is unchanged from the last published registry, keep
-        # its previously pinned commit so the registry stays stable across runs
-        # that don't touch that extension.
-        prev = existing.get((ext_type, name))
-        if entry_matches(entry, prev) and prev.get('commit'):
+        manifest_path = os.path.join(dirpath, 'manifest.json')
+        entry = build_entry(ext_type, name, manifest_path, repo, head)
+        prev = existing.get((ext_type, name)) or {}
+        subdir = entry['subdir']
+
+        # A pin is a promise about a commit, so it is checked against that commit and against
+        # nothing else. The old rule compared the entry with the *previous registry file* — a
+        # projection, not the source — and that let a whole class of lie through: edit a manifest,
+        # regenerate (which wrote the new fields while keeping the old pin, because the previous
+        # registry already carried them), commit, regenerate again, and the pin stays behind for
+        # good — every install then checks out a commit without the fields the entry advertises, and
+        # `--check` reports "up to date" the whole time.
+        with open(manifest_path) as f:
+            worktree_manifest = f.read()
+        head_manifest = git_show_manifest(head, subdir)
+        if head_manifest is None:
+            print('%s: %s is not committed at HEAD (%s); commit the extension first — a pin can '
+                  'only point at committed content' % (subdir, name, head[:12] or 'no HEAD'),
+                  file=sys.stderr)
+            sys.exit(1)
+        if json.loads(worktree_manifest) != json.loads(head_manifest):
+            print('%s: %s has uncommitted changes relative to %s; commit them before publishing, '
+                  'or the registry would advertise content its pinned commit does not contain'
+                  % (subdir, name, head[:12]), file=sys.stderr)
+            sys.exit(1)
+
+        # Keep the previous pin only while it still holds this exact content, so a run that touches
+        # nothing leaves the registry stable and an extension that changed moves to HEAD.
+        pinned = pinned_entry(prev, ext_type, name, repo) if prev else None
+        if pinned is not None and entry_matches(entry, pinned):
             entry['commit'] = prev['commit']
         entries.append(entry)
     entries.sort(key=lambda e: e['name'])
