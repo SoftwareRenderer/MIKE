@@ -1,5 +1,5 @@
 import { test, expect, Page, Locator } from '@playwright/test';
-import { getProjectId } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask } from './helpers';
 
 // ============================================================
 // FOCUS MANAGEMENT — inputs that appear on user interaction
@@ -72,7 +72,7 @@ test.describe('Focus management for conditionally rendered inputs', () => {
     });
 
     test('project explorer focuses new-file and new-folder inputs', async ({ page }) => {
-        await page.locator('.project-item').first().click();
+        await page.locator('a.project-item[href]').first().click();
         await page.waitForSelector('.top-bar', { timeout: 10000 });
         await page.getByRole('button', { name: 'Open explorer' }).click();
         const fb = page.locator('.explorer-view .file-browser');
@@ -99,12 +99,14 @@ test.describe('Focus management for conditionally rendered inputs', () => {
 
     test('task explorer focuses new-file and new-folder inputs', async ({ page }) => {
         const projectId = await getProjectId(page);
-        if (!projectId) return;
+        expect(projectId).not.toBe('');
 
-        await page.locator('.project-item').first().click();
-        await page.waitForSelector('.card', { timeout: 10000 });
-        if ((await page.locator('.card').count()) === 0) return;
-        await page.locator('.card').first().click();
+        // Open a task this test created, by URL. Clicking "the first card" is neither
+        // the subject here (focus, not navigation) nor stable: on a shared board another
+        // spec's task is as likely to be first, and the card can sit under a sticky
+        // column header or a neighbour at click time.
+        const taskId = await createTaskViaApi(page, projectId, `focus-task-${Date.now()}`);
+        await navigateToTask(page, taskId, projectId);
         await page.waitForSelector('.task-detail-page', { timeout: 10000 });
 
         // The task detail header has its own explorer button (no .explorer-btn class)

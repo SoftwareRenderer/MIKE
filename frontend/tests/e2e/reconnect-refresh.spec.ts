@@ -1,15 +1,19 @@
 import { test, expect, type Page } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForSendButton, serverApi } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, waitForSendButton, serverApi, isolatedProject, gotoProject } from './helpers';
+//
+// Own project: these tests reconnect a client and expect the board to pick up changes made
+// while it was offline — on a board other specs are creating and moving tasks on, a
+// missing card is indistinguishable from a lost update.
+isolatedProject();
+
 
 const BASE = 'http://localhost:3000';
 
 /**
- * Verify that the UI updates automatically upon WebSocket reconnection.
- *
- * Since page.route doesn't intercept WebSockets in Playwright, the
- * spec wraps the WebSocket constructor via addInitScript to abort
- * /api/stream handshakes. The block flag is seeded in localStorage
- * to survive reloads. Server state is advanced via serverApi().
+ * The UI updates itself after the WebSocket reconnects. page.route cannot intercept WebSockets,
+ * so the spec wraps the WebSocket constructor (addInitScript) to abort /api/stream handshakes,
+ * seeds the block flag in localStorage to survive reloads, and advances server state via
+ * serverApi().
  */
 
 async function installWsBlock(page: Page): Promise<void> {
@@ -49,7 +53,7 @@ test.describe.serial('Reconnection refreshes the current view', () => {
         test.setTimeout(90000);
         await installWsBlock(page);
         // 1. Load board online.
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.card', { timeout: 10000 });
         const projectId = await getProjectId(page);
         const unique = `reconnect-board-${Date.now()}`;
@@ -80,13 +84,13 @@ test.describe.serial('Reconnection refreshes the current view', () => {
         test.setTimeout(120000);
         await installWsBlock(page);
         // 1. Create + open task online.
-        await page.goto('/');
+        await gotoProject(page);
         await page.waitForSelector('.card', { timeout: 10000 });
         const projectId = await getProjectId(page);
         const taskId = await createTaskViaApi(page, projectId, `reconnect-chat ${Date.now()}`);
         await navigateToTask(page, taskId, projectId);
         expect(await ensureTaskStarted(page, projectId, taskId)).toBe(true);
-        await expect(page.locator('.chat-message.assistant')).toBeVisible({ timeout: 60000 });
+        await expect(page.locator('.chat-message.assistant').last()).toBeVisible({ timeout: 60000 });
         await waitForSendButton(page);
         const messagesBefore = await page.locator('.chat-message').count();
         expect(messagesBefore).toBeGreaterThan(0);
@@ -94,7 +98,7 @@ test.describe.serial('Reconnection refreshes the current view', () => {
         // 2. Go offline. Chat loads history via HTTP; stream cannot connect.
         await enterOfflineState(page);
         // Sanity: the warmup turn is visible (loaded from the DB over HTTP).
-        await expect(page.locator('.chat-message.assistant')).toBeVisible({ timeout: 15000 });
+        await expect(page.locator('.chat-message.assistant').last()).toBeVisible({ timeout: 15000 });
 
         // 3. Send message via server API.
         const marker = `offline-marker-${Date.now()}`;

@@ -4,15 +4,45 @@ import { defineConfig, devices } from '@playwright/test';
 const STORAGE_STATE = '/tmp/kanban-test-storage-state.json';
 const STORAGE_STATE_ISOLATED = '/tmp/kanban-test-storage-state.json.isolated';
 
+// Specs that mutate server-global state (/api/config, providers, installed
+// extensions, task concurrency) run against the second server on 3001, serialized.
+// This array is the single source of truth: the chromium lane's testMatch below is
+// derived from it, so the two lanes can never drift out of sync.
+const ISOLATED_SPECS = [
+  'extension-frame-channel',
+  // 13 tests of iframes, preview tokens and a live file listing — the first things to slip when
+  // the lane server is answering six workers at once.
+  'html-preview',
+  'extensions-danger-permissions',
+  'mode-select',
+  'preferences-hide-model-badge',
+  'preferences-keyboard',
+  'provider-task-concurrency',
+  'settings-provider',
+  'settings-sessions',
+];
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
+  // Measured per full run: 6 workers ≈ 2.7 min with 1-4 failures that rotate between runs; 4 workers
+  // ≈ 3.0-3.4 min with 0-1. They are all "waiting for an executor turn", and every worker queues
+  // turns on the one lane server. Slower and boring beats faster and red.
   workers: 4,
   globalSetup: './tests/global-setup.ts',
-  globalTeardown: './tests/global-setup.ts',
+  globalTeardown: './tests/global-teardown.ts',
   reporter: 'list',
-  timeout: 60000,
+  // Median test is ~2 s and p90 ~8 s; anything near a minute is a broken test, and
+  // a long ceiling just turns a dead spec into a long dead spec.
+  // 30s was tight for the tests that wait on an executor turn: every worker shares one
+  // server, so a turn queues behind the other workers'. Timeouts cost nothing when green.
+  timeout: 45000,
+  expect: {
+    // A task turn queues behind every other worker's turn on the one shared server, so
+    // assertions that wait on executor output need slack; they return as soon as they hold.
+    timeout: 15000,
+  },
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'off',
@@ -25,7 +55,7 @@ export default defineConfig({
           storageState: STORAGE_STATE,
       },
       // Exclude config/state-modifying suites (run on isolated server)
-      testMatch: /\/tests\/e2e\/(?!settings-provider|settings-power|settings-model-pricing|settings-agent-provider|settings-sessions|create-task-agent-mode|debug-cards|mode-select|cost-badge|preferences-keyboard|preferences-hide-model-badge|preferences-sort-order|auto-summarize-proceed|extensions-danger-permissions|extensions-install-confirm|sandbox-memory|sandbox-config-memory-unlimited|provider-task-concurrency|lsp-sandbox-memory|pause-after-restart|subtask-parallel|extension-frame-channel).*\.spec\.ts$/,
+      testMatch: new RegExp(`/tests/e2e/(?!${ISOLATED_SPECS.join('|')}).*\\.spec\\.ts$`),
     },
     {
       name: 'isolated',
@@ -35,7 +65,7 @@ export default defineConfig({
           storageState: STORAGE_STATE_ISOLATED,
       },
       // Config/state-modifying suites on isolated server; serialized to avoid races
-      testMatch: ['**/settings-provider.spec.ts', '**/settings-power.spec.ts', '**/settings-model-pricing.spec.ts', '**/settings-agent-provider.spec.ts', '**/settings-sessions.spec.ts', '**/create-task-agent-mode.spec.ts', '**/debug-cards.spec.ts', '**/mode-select.spec.ts', '**/cost-badge.spec.ts', '**/preferences-keyboard.spec.ts', '**/preferences-hide-model-badge.spec.ts', '**/preferences-sort-order.spec.ts', '**/auto-summarize-proceed.spec.ts', '**/extensions-danger-permissions.spec.ts', '**/extensions-install-confirm.spec.ts', '**/sandbox-memory.spec.ts', '**/sandbox-config-memory-unlimited.spec.ts', '**/provider-task-concurrency.spec.ts', '**/lsp-sandbox-memory.spec.ts', '**/pause-after-restart.spec.ts', '**/subtask-parallel.spec.ts', '**/extension-frame-channel.spec.ts'],
+      testMatch: ISOLATED_SPECS.map((s) => `**/${s}.spec.ts`),
       fullyParallel: false,
       workers: 1,
     },

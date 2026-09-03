@@ -2,7 +2,12 @@ import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { getProjectId, csrfFetch } from './helpers';
+import { getProjectId, csrfFetch, isolatedProject, gotoProject } from './helpers';
+
+// Own project: enabling sandboxing on a project is refused (409) while tasks are running
+// on it, so on the shared project this test skipped itself whenever another spec happened
+// to be mid-turn. Its own project has only its own tasks.
+isolatedProject();
 
 test.describe.serial('Sandbox Dockerfile Build', () => {
   let projectId: string;
@@ -73,8 +78,8 @@ test.describe.serial('Sandbox Dockerfile Build', () => {
       expect(project?.sandbox_enabled).toBe(true);
     }).toPass({ timeout: 5000 });
 
-    await page.reload();
-    await page.waitForSelector('.project-item', { timeout: 10000 });
+    await gotoProject(page);
+    await page.waitForSelector('.sandbox-config-btn', { timeout: 10000 });
   });
 
   test.afterEach(async ({ page }) => {
@@ -108,7 +113,9 @@ test.describe.serial('Sandbox Dockerfile Build', () => {
     await expect(page.locator('[role="dialog"]')).toHaveCount(2, { timeout: 5000 });
 
     const dockerfileEntry = page.locator('.file-entry').filter({ hasText: 'Dockerfile' });
-    await expect(dockerfileEntry).toBeVisible({ timeout: 5000 });
+    // The picker lists a real directory; under a full-suite run the server is answering
+    // several of these at once and 5s was regularly too tight.
+    await expect(dockerfileEntry).toBeVisible({ timeout: 20000 });
     await dockerfileEntry.click();
 
     await page.locator('.btn-primary', { hasText: 'Select' }).click();

@@ -1,9 +1,13 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, csrfFetch } from './helpers';
+import { getProjectId, csrfFetch, isolatedProject, gotoProject } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 test.describe.serial('Sandbox Mounts', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
     const projectId = await getProjectId(page);
 

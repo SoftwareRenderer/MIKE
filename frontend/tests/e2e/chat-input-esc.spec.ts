@@ -1,20 +1,21 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted } from './helpers';
+import { getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, isolatedProject, gotoProject } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 // ============================================================
 // CHAT INPUT — ESCAPE REMOVES FOCUS (Task View)
 // ============================================================
-// With the chat input focused (mention dropdown closed), Esc blurs the
-// input — it must NOT close the task view or clear the draft text. Esc
-// while the @ mention dropdown is open closes the dropdown first and
-// keeps focus in the input.
-// Esc NEVER stops generation, streaming or not — an in-flight turn is
-// stopped with the ■ Stop button only. Because Esc blurs first, the
-// NEXT Esc (focus outside any input) is the "back to board" one.
+// With the input focused and no mention dropdown open, Esc blurs it: it must not close
+// the task view or clear the draft. With the dropdown open, Esc closes the dropdown and
+// keeps focus. Esc never stops generation — only the Stop button does. So the SECOND Esc
+// is the "back to board" one.
 
 test.describe.serial('Chat input Escape removes focus', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -88,9 +89,8 @@ test.describe.serial('Chat input Escape removes focus', () => {
     const chatInput = page.locator('#chat-message-input');
     await expect(chatInput).toBeVisible({ timeout: 10000 });
 
-    // The initial prompt must still be streaming (■ Stop visible) so Escape
-    // lands on an in-flight turn — the case that used to cancel it.
-    const streaming = await page.locator('.btn-stop').isVisible({ timeout: 15000 }).catch(() => false);
+    // Escape must land on an in-flight turn, so wait for streaming (Stop button) first.
+    const streaming = await page.locator('.btn-stop').waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
     test.skip(!streaming, 'initial turn was not streaming');
 
     await chatInput.click();

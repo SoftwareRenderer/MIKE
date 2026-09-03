@@ -1,13 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
 import { getProjectId, createTaskViaApi, waitForTaskState, csrfFetch } from './helpers';
 
+
 // ============================================================
 // LINK-LIKE ROWS — sidebar projects and task cards
 // ============================================================
-// Both are anchors, so the browser offers its link actions (right-click, middle
-// click) while an unmodified click keeps navigating inside the SPA. The links use
-// the same `?project=` / `?task=` params the app writes, so a new tab shows what a
-// click would have. Changes nothing on the server → default chromium project.
+// Both are anchors, so the browser offers its link actions (right-click, middle click) while an
+// unmodified click stays inside the SPA, using the same ?project= / ?task= params the app writes.
 
 /** Stamp the current document, so a real (re)navigation can be detected. */
 async function markDocument(page: Page) {
@@ -145,11 +144,11 @@ test.describe.serial('Task cards are links', () => {
   });
 
   test('middle-clicking the card opens the task in a new tab', async ({ page, context }) => {
-    const box = await page.locator(`.card[data-task-id="${taskId}"] .card-title-text`).boundingBox();
-    expect(box).toBeTruthy();
-
-    const popupPromise = context.waitForEvent('page', { timeout: 10000 });
-    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2, { button: 'middle' });
+    // A locator click, not boundingBox + mouse.click: the board re-renders underneath
+    // (diff stats arrive, heights change), and coordinates taken before the click then
+    // hit a neighbouring card — no popup, timeout.
+    const popupPromise = context.waitForEvent('page', { timeout: 20000 });
+    await page.locator(`.card[data-task-id="${taskId}"] .card-title-text`).click({ button: 'middle' });
 
     const tab = await popupPromise;
     try {

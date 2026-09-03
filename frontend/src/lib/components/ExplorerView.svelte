@@ -276,7 +276,15 @@
         editorFullscreen = !editorFullscreen;
     }
     let currentFolderPath = $state('');
+    // The browsed folder belongs to a project, and this component outlives a project switch.
+    // Without the reset, /api/fs (which resolves the project from the path) is asked for the old
+    // project's folder: refused or wrong, and the panel sits on an error nothing retries.
+    let seededForProject = $state<string | null>(null);
     $effect(() => {
+        if (projectPath && seededForProject !== projectPath) {
+            seededForProject = projectPath;
+            currentFolderPath = '';
+        }
         if (!currentFolderPath) {
             currentFolderPath = initialSafeFile ? initialSafeFile.substring(0, initialSafeFile.lastIndexOf('/')) : (sandboxEnabled ? mountPath : projectPath);
         }

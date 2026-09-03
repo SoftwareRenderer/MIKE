@@ -414,7 +414,9 @@ test.describe('Editor gutter line selection → Create Task', () => {
     // entry must appear in the FLOATING chat. The floating task is not
     // appStore.selectedTask, so its events used to be dropped by App's
     // onTaskEvent gate and the chat stayed frozen.
-    await expect(floating.locator('.tool-call-entry')).toBeVisible({ timeout: 30000 });
+    // first(), not a bare locator: the routed flow can emit several tool calls, and the
+    // assertion is about liveness, not about their number.
+    await expect(floating.locator('.tool-call-entry').first()).toBeVisible({ timeout: 30000 });
   });
 
   test('the floating view is chat-only with Close, Delete and Open task buttons', async ({ page }) => {

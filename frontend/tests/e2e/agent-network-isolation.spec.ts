@@ -1,9 +1,14 @@
 import { test, expect } from '@playwright/test';
-import { getProjectId, csrfFetch } from './helpers';
+import { getProjectId, csrfFetch, isolatedProject, gotoProject } from './helpers';
+
+// Own project: this spec turns sandboxing on and off, and the project explorer takes the folder it
+// browses from that flag — so a spec browsing during the window asked the host for the container
+// path and got 400 "path outside allowed project directory".
+isolatedProject();
 
 test.describe.serial('Agent + Network Isolation', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.project-item', { timeout: 10000 });
   });
 
@@ -83,12 +88,15 @@ test.describe.serial('Agent + Network Isolation', () => {
     );
     expect(startResult.ok).toBe(true);
 
-    // Verify task is in_progress
+    // The point of this test is that the start was ACCEPTED: the run has already
+    // moved on by the time this reads, because the agent (`agent://pi`) is not
+    // installed here and its failed turn ends in review. What must not happen is the
+    // network-isolation refusal of the sibling test, i.e. the task staying backlog.
     const taskData = await page.evaluate(async ({ pid, tid }) => {
       const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
       return res.ok ? res.json() : null;
     }, { pid: projectId, tid: taskId });
-    expect(taskData.status).toBe('in_progress');
+    expect(['in_progress', 'review', 'done']).toContain(taskData.status);
   });
 
   test('should allow task start when LLM provider + network isolation enabled', async ({ page }) => {
@@ -153,11 +161,14 @@ test.describe.serial('Agent + Network Isolation', () => {
     );
     expect(startResult.ok).toBe(true);
 
-    // Verify task is in_progress
+    // The point of this test is that the start was ACCEPTED: the run has already
+    // moved on by the time this reads, because the agent (`agent://pi`) is not
+    // installed here and its failed turn ends in review. What must not happen is the
+    // network-isolation refusal of the sibling test, i.e. the task staying backlog.
     const taskData = await page.evaluate(async ({ pid, tid }) => {
       const res = await fetch(`/api/projects/${pid}/tasks/${tid}`);
       return res.ok ? res.json() : null;
     }, { pid: projectId, tid: taskId });
-    expect(taskData.status).toBe('in_progress');
+    expect(['in_progress', 'review', 'done']).toContain(taskData.status);
   });
 });

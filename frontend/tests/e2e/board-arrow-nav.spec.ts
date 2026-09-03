@@ -1,14 +1,16 @@
 import { test, expect, type Page } from '@playwright/test';
-import { getProjectId, createTaskViaApi, csrfFetch } from './helpers';
+import { getProjectId, createTaskViaApi, csrfFetch, isolatedProject, gotoProject, clearBoardExcept } from './helpers';
+
+// Each test file gets its own project: see isolatedProject() in helpers.ts.
+isolatedProject();
+
 
 // ============================================================
 // BOARD ARROW-KEY NAVIGATION (cards + project list)
 // ============================================================
-// Arrows move real DOM focus around the 5-column ring
-// [Projects][Backlog][In Progress][Review][Done]; Down/Up wrap within a
-// column, first Down anchors to the first backlog card, Enter opens the
-// focused card, Alt+Arrow still moves tasks. Chromium project (no config
-// mutation).
+// Arrows move real DOM focus around the 5-column ring [Projects][Backlog][In Progress][Review]
+// [Done]; Down/Up wrap within a column, the first Down anchors to the first backlog card, Enter
+// opens the focused card, Alt+Arrow still moves tasks.
 
 const colIdx = (page: Page) => page.evaluate(() => {
     const card = document.activeElement as HTMLElement | null;
@@ -28,7 +30,7 @@ async function moveTask(page: Page, projectId: string, taskId: string, status: s
 
 test.describe.serial('Board arrow-key navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    await gotoProject(page);
     await page.waitForSelector('.board .column', { timeout: 10000 });
   });
 
@@ -63,22 +65,28 @@ test.describe.serial('Board arrow-key navigation', () => {
 
   test('Left/Right cycle the 5-column ring: projects + 4 board columns', async ({ page }) => {
     const projectId = await getProjectId(page);
-    const ipTask = await createTaskViaApi(page, projectId, `nav-ip-${Date.now()}`);
+    // The ring skips EMPTY columns, and this worker's project carries tasks from
+    // whichever spec ran on it before — so start from a board this test owns.
+    await clearBoardExcept(page, projectId, ['backlog']);
+    // The empty column is IN PROGRESS, not review: moving a task to in_progress starts a turn,
+    // and the mock answer can carry it on into review, changing the ring mid-test.
+    const reviewTask = await createTaskViaApi(page, projectId, `nav-review-${Date.now()}`);
     const doneTask = await createTaskViaApi(page, projectId, `nav-done-${Date.now()}`);
-    await moveTask(page, projectId, ipTask, 'in_progress');
+    await moveTask(page, projectId, reviewTask, 'review');
     await moveTask(page, projectId, doneTask, 'done');
     await page.reload();
     await page.waitForSelector('.board .column', { timeout: 10000 });
 
     // Only one project at this point — the active project item
-    const projItem = page.locator('nav.project-list .project-item').first();
+    // the ring's project step focuses the ACTIVE project — address ours, not `.first()`
+    const projItem = page.locator(`nav.project-list a.project-item[href*="project=${projectId}"]`);
     const firstCol = page.locator('.board .column');
 
     await firstCol.nth(0).locator('.task-wrapper > .card').first().focus();
-    // backlog -> in_progress
+    // backlog -> review (in_progress is empty -> skipped)
     await page.keyboard.press('ArrowRight');
-    expect(await colIdx(page)).toEqual({ col: 1, idx: 0 });
-    // in_progress -> done (review is empty -> skipped)
+    expect(await colIdx(page)).toEqual({ col: 2, idx: 0 });
+    // review -> done
     await page.keyboard.press('ArrowRight');
     expect(await colIdx(page)).toEqual({ col: 3, idx: 0 });
     // done -> projects (active project item focused)
@@ -118,25 +126,29 @@ test.describe.serial('Board arrow-key navigation', () => {
     await expect(page.locator('.board .column').first().locator('.card', { hasText: prompt })).toBeVisible({ timeout: 10000 });
   });
 
-  test('project list: Down/Up select prev/next project and wrap', async ({ page }) => {
-    const res = await csrfFetch(page, '/api/projects', {
-      method: 'POST',
-      body: { path: '/tmp/kanban-test-repo-2' },
-    });
-    if (!res.ok) throw new Error(`create project: ${JSON.stringify(res.data)}`);
-    await page.reload();
-    const emptyItem = page.locator('nav.project-list .project-item', { hasText: 'kanban-test-repo-2' });
-    const mainItem = page.locator('nav.project-list .project-item', { hasText: 'test-project' });
-    const emptyWrap = page.locator('nav.project-list .project-item-wrapper', { hasText: 'kanban-test-repo-2' });
-    const mainWrap = page.locator('nav.project-list .project-item-wrapper', { hasText: 'test-project' });
-    await expect(emptyItem).toBeVisible({ timeout: 10000 });
+  test('project list: Down/Up walk the project ring and wrap', async ({ page }) => {
+    // A ring walk, not a fixed pair of rows: other workers create projects on this
+    // same server, so the test may not assume which project is next to which. What it
+    // can assert is the ring's contract — Down/Up move to the adjacent row in DOM
+    // order, the active project follows the focus, and the ends wrap.
+    const items = page.locator('nav.project-list .project-item');
+    await expect(items.first()).toBeVisible({ timeout: 10000 });
+    const wrappers = page.locator('nav.project-list .project-item-wrapper');
+    const count = await items.count();
+    expect(count).toBeGreaterThanOrEqual(2);
 
-    // Down selects the next project; the board follows
-    await emptyItem.focus();
-    await page.keyboard.press('ArrowDown');
-    await expect(mainItem).toBeFocused();
-    await expect(mainWrap).toHaveClass(/active/);
-    // Focused-project ring (poll: .project-item transitions over 150ms)
+    await items.first().focus();
+    for (let step = 1; step <= count; step++) {
+      await page.keyboard.press('ArrowDown');
+      const idx = step % count;
+      await expect(items.nth(idx)).toBeFocused({ timeout: 5000 });
+      // The board follows the focus: the active row is always the focused one.
+      await expect(wrappers.nth(idx)).toHaveClass(/active/, { timeout: 5000 });
+    }
+    // The count-th press wrapped from the last row back to the first.
+    await expect(items.first()).toBeFocused();
+
+    // The focus ring is an inset box-shadow on the row itself (ancestors clip outlines).
     await expect.poll(async () => page.evaluate(() => {
       const probe = document.createElement('span');
       probe.style.color = 'var(--color-accent)';
@@ -146,13 +158,10 @@ test.describe.serial('Board arrow-key navigation', () => {
       const shadow = getComputedStyle(document.activeElement).boxShadow;
       return shadow.includes('inset') && shadow.includes(accent) && shadow.includes('2px');
     })).toBe(true);
-    await expect(page.locator('.board .card').first()).toBeVisible({ timeout: 10000 });
 
-    // Down on the last project wraps back to the first (empty) one
-    await page.keyboard.press('ArrowDown');
-    await expect(emptyItem).toBeFocused();
-    await expect(emptyWrap).toHaveClass(/active/);
-    await expect(page.locator('.board .card')).toHaveCount(0, { timeout: 10000 });
+    // Up walks back.
+    await page.keyboard.press('ArrowUp');
+    await expect(items.nth(count - 1)).toBeFocused({ timeout: 5000 });
   });
 
   test('Right from a project focuses the board\'s first card', async ({ page }) => {

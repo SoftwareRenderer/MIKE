@@ -1,6 +1,7 @@
-import { expect, Page, Locator } from '@playwright/test';
+import { expect, test, Page, Locator } from '@playwright/test';
 import { execSync } from 'child_process';
-import { existsSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
+import { existsSync, writeFileSync, mkdirSync, readFileSync, cpSync, readdirSync } from 'fs';
+import { join } from 'path';
 import http from 'node:http';
 
 /**
@@ -97,6 +98,24 @@ export async function apiGetConfig(page: Page): Promise<any> {
     return res.json();
   });
 }
+/**
+ * The session file for the lane this test runs in. A spec that creates its own context must use
+ * this: the lanes are different servers, and the wrong file means every API call gets a 401.
+ */
+export function storageStatePath(projectName: string): string {
+    return projectName === 'isolated'
+        ? '/tmp/kanban-test-storage-state.json.isolated'
+        : '/tmp/kanban-test-storage-state.json';
+}
+
+/** GET a JSON endpoint from the page (the page must be on the server origin). */
+export async function apiGetJson<T>(page: Page, path: string): Promise<T> {
+  await getOrigin(page);
+  return await page.evaluate(async (p) => {
+    const res = await fetch(p);
+    return res.ok ? await res.json() : null;
+  }, path) as T;
+}
 
 /** Wait for config to match expected state (replaces blind waitForSettle after PUT). */
 export async function waitForConfig(page: Page, predicate: (config: any) => boolean, timeout = 2000): Promise<void> {
@@ -161,23 +180,150 @@ export async function serverApi(
 
 // --- Project & Task API helpers ---
 
-/** Get the first project ID from the API. */
+/**
+ * The project this worker owns, when a spec has claimed one (see isolatedProject). Module state
+ * is per worker, which is the granularity the project is keyed at.
+ */
+let ownProject: { id: string; path: string } | null = null;
+
+/** Get the first project ID from the API — or this worker's own project, if claimed. */
 export async function getProjectId(page: Page): Promise<string> {
-  return await page.evaluate(async () => {
-    const res = await fetch('/api/projects');
-    const projects = await res.json();
-    return projects[0]?.id || '';
+  if (ownProject) return ownProject.id;
+  const projects = await apiGetJson<any[]>(page, '/api/projects');
+  // Pin the global-setup project by path: with per-worker projects on the same server,
+  // projects[0] is simply whichever was created first.
+  return (projects || []).find((p: any) => p.path === FIXTURE_REPO)?.id || projects?.[0]?.id || '';
+}
+
+// --- Isolated project per worker ---
+//
+// Specs used to share global-setup's one project, so ~9 specs changed one board at once and
+// assertions on counts, "the first card" or an absent class failed at random: identical code
+// differed by 15 failures, and each one passed alone. isolatedProject() gives the current
+// worker its own copy of the fixture repo, plus the same two seed tasks global-setup creates.
+//
+// Keyed by worker, not file: fullyParallel splits one file across workers, and two workers
+// would then claim the same path. A worker runs one file at a time, so files never contend.
+//
+// Usage: isolatedProject() once at file top level, then gotoProject(page) to open it;
+// getProjectId(page) returns it too. Specs that assert on the shared project list (sidebar,
+// add-project flow) must not use it — the shared view is what they test.
+
+const OWN_REPOS_DIR = '/tmp/kanban-test-repos';
+const FIXTURE_REPO = '/tmp/kanban-test-repo';
+
+export function isolatedProject(): void {
+  test.beforeEach(async ({ page }, testInfo) => {
+    // The port keeps the two lanes' slots disjoint (3000 chromium, 3001 isolated).
+    const base = (testInfo.project.use as { baseURL?: string })?.baseURL || 'http://localhost:3000';
+    await ensureOwnProject(page, `w${testInfo.parallelIndex}-${new URL(base).port}`);
   });
 }
 
-/** Get the last task ID from the board API. */
-export async function getLastTaskId(page: Page, projectId: string): Promise<string> {
-  return await page.evaluate(async ({ pid }) => {
-    const res = await fetch(`/api/projects/${pid}/board`);
-    const board = await res.json();
-    return board.tasks[board.tasks.length - 1]?.id || '';
-  }, { pid: projectId });
+async function ensureOwnProject(page: Page, slot: string): Promise<{ id: string; path: string }> {
+  if (ownProject) return ownProject;
+
+  const path = `${OWN_REPOS_DIR}/${slot}`;
+  // Idempotent: a re-import in the same worker must reuse, not re-POST.
+  // apiGetJson, not csrfFetch: csrfFetch sends a JSON content-type with no body, which the
+  // server rejects on a GET.
+  const projects = await apiGetJson<any[]>(page, '/api/projects');
+  const existing = (projects || []).find((p: any) => p.path === path)?.id || '';
+  if (existing) {
+    ownProject = { id: existing, path };
+    // A previous spec on this worker may have deleted the seed tasks — re-seed so the
+    // `waitForSelector('.card')` readiness gate holds for the next file too.
+    await seedIfEmpty(page, existing);
+    return ownProject;
+  }
+
+  if (!existsSync(`${path}/.git`)) {
+    mkdirSync(OWN_REPOS_DIR, { recursive: true });
+    // cpSync keeps the fixture repo's .git (incl. the local identity global-setup set,
+    // which backend commit-and-done commits need).
+    cpSync(FIXTURE_REPO, path, { recursive: true });
+  }
+
+  const created = await csrfFetch(page, '/api/projects', { method: 'POST', body: { name: slot, path } });
+  const id = created?.data?.id;
+  if (!created.ok || !id) {
+    throw new Error(`isolatedProject: could not create project at ${path}: ${created.status} ${JSON.stringify(created.data)}`);
+  }
+  ownProject = { id, path };
+  await seedIfEmpty(page, id);
+  return ownProject;
 }
+
+/** Give the project global-setup's two seed tasks, unless it already has tasks. */
+async function seedIfEmpty(page: Page, id: string): Promise<void> {
+  const board = await apiGetJson<{ tasks?: any[] }>(page, `/api/projects/${id}/board`);
+  if (Array.isArray(board?.tasks) && board.tasks.length > 0) return;
+  const config = await apiGetConfig(page);
+  const seed = (prompt: string) => csrfFetch(page, `/api/projects/${id}/tasks`, {
+    method: 'POST',
+    body: { prompt, llama_server_url: config?.providers?.[0]?.url || '', model_name: config?.worker_model || '' },
+  });
+  await seed('Test task for e2e tests');
+  await seed('Second test task');
+}
+
+/** The URL of this file's own project, e.g. `/?project=xyz`. */
+export function projectUrl(path = '/'): string {
+  if (!ownProject) return path;
+  if (/[?&]project=/.test(path)) return path;
+  const [before, query] = path.split('?');
+  return `${before}?project=${ownProject.id}${query ? `&${query}` : ''}`;
+}
+/**
+ * Delete every task whose status is not in `keep`. Some assertions only hold on a sparse
+ * board, and a worker's project outlives the spec that filled it.
+ */
+export async function clearBoardExcept(page: Page, projectId: string, keep: string[] = []): Promise<void> {
+  const board = await apiGetJson<{ tasks?: any[] }>(page, `/api/projects/${projectId}/board`);
+  const doomed = (board?.tasks || []).filter((t: any) => !keep.includes(t.status));
+  for (const t of doomed) {
+    await csrfFetch(page, `/api/projects/${projectId}/tasks/${t.id}`, { method: 'DELETE' });
+  }
+  await expect(async () => {
+    const after = await apiGetJson<{ tasks?: any[] }>(page, `/api/projects/${projectId}/board`);
+    expect((after?.tasks || []).filter((t: any) => !keep.includes(t.status))).toHaveLength(0);
+  }).toPass({ timeout: 5000 });
+}
+
+/** `page.goto` for the project this file owns. */
+export async function gotoProject(page: Page, path = '/'): Promise<void> {
+  await page.goto(projectUrl(path));
+}
+/**
+ * Click the sidebar row for `projectId`. With per-worker projects, `.project-item` +
+ * `.first()` picks somebody else's project.
+ */
+export async function selectProject(page: Page, projectId: string): Promise<void> {
+  // Suffix match, not substring: `project=kanban-test-repo` is a prefix of
+  // `project=kanban-test-repo-2`, and a substring match there is a strict-mode violation.
+  await page.locator(`a.project-item[href$="project=${projectId}"]`).click();
+}
+/**
+ * The directory a project points at — what its file browser, Review-Changes panel and
+ * project-level git commands read. Not a task worktree: use findWorktreeDir for task flows.
+ */
+export async function projectDirPath(page: Page, projectId: string): Promise<string | null> {
+  const projects = await apiGetJson<any[]>(page, '/api/projects');
+  return (projects || []).find((p: any) => p.id === projectId)?.path || null;
+}
+
+/** Host path of this worker's project repo (null if it did not claim one) — the directory
+ *  the project explorer lists, i.e. where files written from Node show up in the UI. */
+export function ownProjectPath(): string | null {
+  return ownProject?.path ?? null;
+}
+
+/** This file's own project id (throws if the file did not call `isolatedProject()`). */
+export function ownProjectId(): string {
+  if (!ownProject) throw new Error('ownProjectId: this spec does not call isolatedProject()');
+  return ownProject.id;
+}
+
 
 /** Get task data from the API. */
 export async function getTaskData(page: Page, projectId: string, taskId: string): Promise<Record<string, unknown>> {
@@ -200,29 +346,23 @@ export async function waitForTaskState(
     expect(predicate(task)).toBe(true);
   }).toPass({ timeout });
 }
-
-// --- Chat form readiness helpers ---
-
 /**
- * Wait for the send button to be visible (chat form ready for input, isLoading=false).
- * Use this BEFORE interacting with the textarea to ensure the form is stable.
+ * Idle: the send button is up. Budget for a whole LLM turn, not for a DOM wait — the default
+ * 10s expect.timeout is shorter than one queued turn.
  */
-export async function waitForSendButton(page: Page): Promise<void> {
-  await expect(page.locator('.btn-send')).toBeVisible();
+export async function waitForSendButton(page: Page, timeout = 45_000): Promise<void> {
+  await expect(page.locator('.btn-send')).toBeVisible({ timeout });
 }
-
 /**
- * Like waitForSendButton but returns false instead of throwing on timeout.
- * Use this with test.skip() for graceful handling of executor-dependent tests.
+ * Like waitForSendButton, but resolves false instead of throwing. It must actually wait:
+ * callers test.skip() on false, so a check that returns immediately skips runnable tests.
  */
-export async function waitForSendButtonGraceful(page: Page): Promise<boolean> {
-  return page.locator('.btn-send').isVisible().catch(() => false);
+export async function waitForSendButtonGraceful(page: Page, timeout = 45_000): Promise<boolean> {
+  return page.locator('.btn-send').waitFor({ state: 'visible', timeout })
+      .then(() => true)
+      .catch(() => false);
 }
-
-/**
- * Wait for the chat form to be interactive (send OR stop button visible).
- * Use this after starting a task when the executor may be calling the LLM.
- */
+/** Wait until the chat form answers: send (idle) or stop (running) button visible. */
 export async function waitForChatFormReady(page: Page): Promise<void> {
   await expect(page.locator('.chat-form')).toBeVisible();
   // Wait for either the send button (idle) or stop button (LLM responding)
@@ -232,35 +372,24 @@ export async function waitForChatFormReady(page: Page): Promise<void> {
     expect(hasSend || hasStop).toBe(true);
   }).toPass();
 }
-
-// --- Message helpers ---
-
 /**
- * Wait for a new user message to appear in the chat (after sending).
- * Compares count before/after to detect the new message.
- */
-async function waitForNewUserMessage(page: Page): Promise<void> {
-  const countBefore = await page.locator('.chat-message.user').count();
-  await expect(async () => {
-    const count = await page.locator('.chat-message.user').count();
-    expect(count).toBeGreaterThan(countBefore);
-  }).toPass();
-}
-
-/**
- * Send a message via the chat UI.
- * Waits for send button (form stable) → fills → presses Enter → waits for user message to appear.
- * Uses Playwright auto-wait (no arbitrary timeouts).
+ * Send a message through the chat UI and wait for its bubble. The baseline count is read
+ * before Enter: reading it after races the optimistic add, and the poll can then never see
+ * the count grow.
  */
 export async function sendMessage(page: Page, message: string): Promise<void> {
-  // Wait for the send button to be visible (form is stable, not loading).
   await waitForSendButton(page);
-  // Fill and send — Playwright auto-waits for textarea to be actionable
   const chatTextarea = page.locator('textarea[placeholder*="message"]');
+  const userMessages = page.locator('.chat-message.user');
+  const countBefore = await userMessages.count();
+
   await chatTextarea.fill(message);
   await chatTextarea.press('Enter');
-  // Wait for the user message to appear in chat (confirms message was sent)
-  await waitForNewUserMessage(page);
+  await expect(chatTextarea, 'textarea clears on send').toHaveValue('');
+  await expect
+    .poll(() => userMessages.count(), { message: 'the sent message appears in the chat' })
+    .toBeGreaterThan(countBefore);
+  await expect(userMessages.last(), 'the sent message is the one we typed').toContainText(message);
 }
 
 // --- Task lifecycle helpers ---
@@ -339,7 +468,8 @@ export async function waitForChatForm(page: Page): Promise<boolean> {
 export async function ensureChatForm(page: Page, requireSendBtn = true): Promise<void> {
   await waitForChatForm(page);
   if (requireSendBtn) {
-    await expect(page.locator('.btn-send')).toBeVisible();
+    // Turn budget, same as waitForSendButton: the executor may still be answering.
+    await expect(page.locator('.btn-send')).toBeVisible({ timeout: 45_000 });
   }
 }
 
@@ -353,7 +483,10 @@ export async function navigateToTask(page: Page, taskId: string, projectId?: str
   if (!taskId) {
     throw new Error(`navigateToTask called with undefined/empty taskId`);
   }
-  const path = projectId ? `/?project=${projectId}&task=${taskId}` : `/?task=${taskId}`;
+  // Without an explicit project the app resolves `?task=` against its own default
+  // project, which is not this file's project once a spec is isolated — so pass ours.
+  const pid = projectId || ownProject?.id;
+  const path = pid ? `/?project=${pid}&task=${taskId}` : `/?task=${taskId}`;
   await page.evaluate((u) => { window.location.href = u; }, path);
   await expect(page.locator('.task-detail-page')).toBeVisible();
 }
@@ -393,25 +526,52 @@ export async function createTaskViaApi(page: Page, projectId: string, prompt: st
   }).toPass({ timeout: 5000 });
   return taskId;
 }
-
 /**
- * Create a fresh task and open it via URL.
- * Uses the API to create the task (avoids race with LLM title generation replacing card text)
- * then navigates directly to the task detail page.
- * Returns the created task ID.
+ * First worktree directory of `projectId`, polling until it exists (a worktree appears only
+ * once a task starts). Keyed by project: the worktrees dir holds every worker's projects.
  */
-export async function createAndOpenTask(page: Page, title?: string): Promise<string> {
-  const taskPrompt = title || `task-${Date.now()}`;
-  const projectId = await getProjectId(page);
-  const taskId = await createTaskViaApi(page, projectId, taskPrompt);
-  await navigateToTask(page, taskId);
-  return taskId;
+export async function findWorktreeDir(projectId: string, timeoutMs = 10000): Promise<string | null> {
+  const projDir = `/tmp/kanban-test-worktrees/${projectId}`;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const first = readdirSync(projDir).find((t) => existsSync(join(projDir, t, '.git')));
+      if (first) return join(projDir, first);
+    } catch { /* the project has no worktrees directory yet */ }
+    if (Date.now() > deadline) return null;
+    await new Promise((r) => setTimeout(r, 200));
+  }
 }
-
-// --- Worktree helpers (test servers use MIKE_WORKTREES_DIR=/tmp/kanban-test-worktrees) ---
 
 export function getWorktreePath(projectId: string, taskId: string): string {
   return `/tmp/kanban-test-worktrees/${projectId}/${taskId}`;
+}
+/**
+ * Wait until the task's worktree is a real git worktree. Moving to in_progress only schedules
+ * creation, so writing a fixture earlier mkdirs a bogus path or silently skips the test.
+ */
+export async function waitForWorktree(projectId: string, taskId: string, timeoutMs = 20000): Promise<string> {
+  const path = getWorktreePath(projectId, taskId);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(path) && existsSync(`${path}/.git`)) return path;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`worktree for task ${taskId} never appeared at ${path}`);
+}
+/**
+ * Wait until the agent has answered the task's prompt. Until then the review bar offers
+ * "Resume" instead of "Commit and move to Done" (showResumeButton in TaskChat.svelte).
+ */
+export async function waitForTurnAnswered(page: Page, projectId: string, taskId: string, timeoutMs = 30000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const msgs = await apiGetJson<any[]>(page, `/api/projects/${projectId}/tasks/${taskId}/messages`).catch(() => [] as any[]);
+    const last = (msgs || []).filter((m: any) => m.role !== 'error').slice(-1)[0];
+    if (last && last.role !== 'user') return;
+    if (Date.now() > deadline) throw new Error(`task ${taskId} never answered its prompt`);
+    await new Promise((r) => setTimeout(r, 300));
+  }
 }
 
 export function worktreeExists(projectId: string, taskId: string): boolean {
@@ -432,89 +592,17 @@ export function writeFileInWorktree(projectId: string, taskId: string, filePath:
   }
 }
 
-// --- Agent extension helpers (isolated server) ---
-//
-// Agent providers are registry-derived: they exist only while the corresponding
-// agent extension is installed AND enabled. These helpers install/uninstall the
-// local `pi` agent extension (already materialized in the repo's extensions/
-// directory, which the test servers scan from their CWD).
-
-/**
- * Install (if needed) and enable the local `pi` agent extension on the server
- * backing `page`. Returns the extension ID. Idempotent: re-enables if already
- * installed (e.g. a rerun after an interrupted prior run).
- */
-export async function installPiExtension(page: Page): Promise<string> {
-  const existingId = await getPiExtensionId(page);
-  if (existingId) {
-    await setExtensionEnabledById(page, existingId, true);
-    return existingId;
-  }
-
-  const { entry, csrf } = await page.evaluate(async () => {
-    const sessionRes = await fetch('/api/auth/session');
-    const session = await sessionRes.json();
-    const localRes = await fetch('/api/extensions/local');
-    const local = await localRes.json();
-    return { entry: local.find((e: any) => e.name === 'pi') || null, csrf: session.csrf_token || '' };
-  });
-  if (!entry) {
-    throw new Error('pi extension not found in local extensions list (extensions/ dir not materialized?)');
-  }
-
-  // install-local streams SSE; the fetch resolves when the install completes.
-  const install = await page.evaluate(async ({ author, csrfToken }) => {
-    const r = await fetch('/api/extensions/install-local', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-      credentials: 'include',
-      body: JSON.stringify({ author, name: 'pi' }),
-    });
-    const text = await r.text();
-    return { status: r.status, text };
-  }, { author: entry.author, csrfToken: csrf });
-  if (install.status !== 200 && install.status !== 201) {
-    throw new Error(`install-local failed (${install.status}): ${install.text.slice(0, 300)}`);
-  }
-
-  const id = await getPiExtensionId(page);
-  if (!id) throw new Error('pi extension not found after install');
-  await setExtensionEnabledById(page, id, true);
-  return id;
-}
-
-/** Uninstall the local `pi` agent extension if present (best-effort). */
-export async function deletePiExtension(page: Page): Promise<void> {
-  const id = await getPiExtensionId(page);
-  if (!id) return;
-  const res = await csrfFetch(page, `/api/extensions/${id}`, { method: 'DELETE' });
-  if (!res.ok && res.status !== 404) {
-    throw new Error(`delete extension failed (${res.status})`);
-  }
-}
-
-/** The installed `pi` extension's ID, or '' when not installed. */
-export async function getPiExtensionId(page: Page): Promise<string> {
-  return await page.evaluate(async () => {
-    const res = await fetch('/api/extensions');
-    if (!res.ok) return '';
-    const exts = await res.json();
-    return exts.find((e: any) => e.name === 'pi')?.id || '';
-  });
-}
-
-async function setExtensionEnabledById(page: Page, id: string, enabled: boolean): Promise<void> {
-  const res = await csrfFetch(page, `/api/extensions/${id}/enabled`, { method: 'PATCH', body: { enabled } });
-  if (!res.ok) throw new Error(`set extension enabled failed (${res.status})`);
-}
+// --- Extension helpers ---
 
 /**
  * True when an enabled LSP extension declares `suffix`. The host binary is not the prerequisite a
  * language-server test has — without the installed extension there is no server to talk to.
  */
 export async function hasInstalledLspExtension(page: Page, suffix: string): Promise<boolean> {
-  const body = await csrfFetch(page, '/api/extensions');
-  const list: any[] = Array.isArray(body) ? body : (body?.extensions || []);
+  // GET, not csrfFetch: that one always sends a JSON content-type with no body, which
+  // `/api/extensions` (a GET-only route) rejects — the helper then read "no extensions"
+  // and every LSP spec quietly skipped itself.
+  const list = (await apiGetJson<any[]>(page, '/api/extensions')) || [];
   return list.some((e) => {
     if (e?.type !== 'lsp' || !e?.enabled) return false;
     const types = e?.manifest?.capabilities?.lsp?.file_types || [];
