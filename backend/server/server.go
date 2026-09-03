@@ -688,6 +688,21 @@ func (s *Server) tlsConfigToStd() *stdtls.Config {
 	}
 	return &stdtls.Config{Certificates: []stdtls.Certificate{cert}}
 }
+
+// RepairExtensionFiles restores installed extensions whose files are gone, each from the commit its own
+// record pins. An extension with no files is not a disabled extension — it is an enabled one that does
+// nothing, invisibly: a UI extension's iframe 404s, so its document never boots and never registers the
+// button or overlay it exists for.
+//
+// Called from main at process start rather than from Serve or NewServer, so no Go test can reach a git
+// clone. The caller runs it off the boot path and never joins it: a clone that outlives the deadline is
+// not allowed to be the reason a shutdown waits.
+func (s *Server) RepairExtensionFiles(ctx context.Context) {
+	if _, _, err := s.extHandler.RepairMissingFiles(ctx); err != nil {
+		log.Printf("[extensions] repair: could not check installed extension files: %v", err)
+	}
+}
+
 func (s *Server) Serve() error {
 	caFile := ""
 	if s.tlsConfig != nil {

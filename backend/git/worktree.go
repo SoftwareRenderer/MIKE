@@ -1836,10 +1836,15 @@ func extractDiffPaths(line string) (aPath, bPath string) {
 }
 
 // binaryExts is a set of file extensions considered binary.
+//
+// Everything here must be unreadable as text. SVG is deliberately NOT in this set: it is XML source, and
+// this set is what labels a new (untracked) file "Binary file — N bytes" in the diff panel instead of
+// showing its lines. Being an image is a different question — see imageExts in backend/exec/loop.go, the
+// staging allowlist, which does include .svg.
 var binaryExts = map[string]bool{
 	// Images
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
-	".bmp": true, ".ico": true, ".tiff": true, ".tif": true, ".svg": true,
+	".bmp": true, ".ico": true, ".tiff": true, ".tif": true,
 	".avif": true, ".heic": true, ".heif": true, ".psd": true, ".ai": true,
 	".raw": true, ".cr2": true, ".nef": true,
 	// Archives/Compressed
