@@ -1107,6 +1107,9 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 
 				// Not auto-answered and no request_review: stop and wait for the user.
 				if !hadRequestReview && !autoAnswered {
+					// A question hands the task back to the user, so it replaces any pending
+					// commit-and-done click - the merge-conflict prompt invites exactly that question.
+					te.clearCommitAndDone(setup.task.ID)
 					tr := toolResults[askResults[questionIdxs[0]]]
 					setup.task.ExecutionState = types.ExecStateIdle
 					setup.task.Status = types.StatusReview
@@ -1135,18 +1138,23 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 			if hadRequestReview {
 				if setup.task.AutoCommit {
 					if setup.task.HasMergeConflict {
-						_, setup.task = te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
+						res := te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
+						setup.task = res.task
 						if setup.task.HasMergeConflict {
 							// Still conflicted — hand the model the instructions and continue
 							te.prepareMergeConflictTurn(setup, lc, GetConflictedFiles(setup.worktreePath))
 							continue
 						}
-						if !setup.task.AutoMerge {
-							setup.task.ExecutionState = types.ExecStateIdle
-							setup.task.Status = types.StatusReview
-						} else {
+						if res.finishesTask() {
 							setup.task.ExecutionState = types.ExecStateCompleted
 							setup.task.Status = types.StatusDone
+						} else {
+							// No merge, or a failed one: the work is not in the target branch.
+							if res.mergeErr != nil {
+								setup.task.Output = "Merge failed: " + res.mergeErr.Error()
+							}
+							setup.task.ExecutionState = types.ExecStateIdle
+							setup.task.Status = types.StatusReview
 						}
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
@@ -1197,7 +1205,8 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 						}
 					}
 				} else if setup.task.HasMergeConflict {
-					_, setup.task = te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
+					res := te.commitConflictResolution(setup.projectID, setup.task.ID, setup.worktreePath, setup.task)
+					setup.task = res.task
 					if setup.task.HasMergeConflict {
 						log.Printf("[merge] setup.task=%s merge still conflicted after request_review", setup.task.ID)
 						setup.task.ExecutionState = types.ExecStateFailed
@@ -1205,15 +1214,18 @@ func (te *TaskExecutor) executeTask(shared *taskExecSetup) {
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
 						}
-					} else if !setup.task.AutoMerge {
-						setup.task.ExecutionState = types.ExecStateIdle
-						setup.task.Status = types.StatusReview
+					} else if res.finishesTask() {
+						setup.task.ExecutionState = types.ExecStateCompleted
+						setup.task.Status = types.StatusDone
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
 						}
 					} else {
-						setup.task.ExecutionState = types.ExecStateCompleted
-						setup.task.Status = types.StatusDone
+						if res.mergeErr != nil {
+							setup.task.Output = "Merge failed: " + res.mergeErr.Error()
+						}
+						setup.task.ExecutionState = types.ExecStateIdle
+						setup.task.Status = types.StatusReview
 						if te.sandboxMgr != nil {
 							_ = te.sandboxMgr.Stop(setup.task.ID)
 						}

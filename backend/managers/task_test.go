@@ -397,6 +397,80 @@ func TestHandleCommitAndDone_ExcludesUnstagedFiles(t *testing.T) {
 	if out := gitOutput(t, proj.Path, "show", "HEAD:staged.txt"); !strings.Contains(out, "staged content") {
 		t.Errorf("staged.txt not merged into project HEAD, got: %q", out)
 	}
+	// A click that merged cleanly must leave no intent behind for a later turn to act on.
+	if h.executor.CommitAndDonePending(task.ID) {
+		t.Error("a clean commit-and-done left a click armed")
+	}
+}
+
+// TestHandleCommitAndDone_ArmsClickForConflictResolution: when the click's merge conflicts, the turn
+// that resolves it has to know the conflict came from this click, or it can only stop in Review.
+func TestHandleCommitAndDone_ArmsClickForConflictResolution(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	h.commitQueue = exec.NewCommitQueue()
+
+	proj, err := s.GetProject(projID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	target := strings.TrimSpace(gitOutput(t, proj.Path, "rev-parse", "--abbrev-ref", "HEAD"))
+
+	// ExecutionState=running makes the handler re-arm and return without starting an executor, so no
+	// LLM is involved.
+	task := &types.Task{
+		ID:              "arm-on-click",
+		ProjectID:       projID,
+		Title:           "Arm on click",
+		Prompt:          "make changes",
+		Status:          types.StatusInProgress,
+		ExecutionState:  types.ExecStateRunning,
+		Branch:          "task/arm-on-click",
+		BaseRef:         target,
+		CurrentThreadID: "thread-arm",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	wtPath, _, err := h.worktreeMgr.CreateWorktree(projID, task.ID, task.Branch, "")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	// Both sides change the same line: committing is fine, merging conflicts.
+	if err := os.WriteFile(filepath.Join(wtPath, "shared.txt"), []byte("task change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, wtPath, "add", "shared.txt")
+	if err := os.WriteFile(filepath.Join(proj.Path, "shared.txt"), []byte("project change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, proj.Path, "add", "shared.txt")
+	gitRun(t, proj.Path, "commit", "-m", "project change")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectID}/tasks/{taskID}/commit", h.HandleCommitAndDone)
+	body, _ := json.Marshal(map[string]string{"commit_message": "test commit"})
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projID+"/tasks/"+task.ID+"/commit", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("commit-and-done status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	updated, err := s.GetTask(projID, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if !updated.HasMergeConflict {
+		t.Fatal("fixture: the merge should have conflicted")
+	}
+	if updated.Status == types.StatusDone {
+		t.Fatal("a conflicted task must not be marked done")
+	}
+	if !h.executor.CommitAndDonePending(task.ID) {
+		t.Error("the click that hit the conflict was not recorded for the resolution to finish")
+	}
 }
 
 // newTaskHandlerWithExecutor builds a TaskHandler wired to a real executor,
