@@ -127,6 +127,10 @@ input[type="number"] {
     --cm-comment: #8B949E;
     --cm-operator: #FF7B72;
     --cm-punctuation: #C9D1D9;
+    /* Bracket pair colorization — the three levels a pair cycles through (VS Code's defaults). */
+    --cm-bracket-0: #FFD700;
+    --cm-bracket-1: #DA70D6;
+    --cm-bracket-2: #179FFF;
     --cm-class: #FFA657;
     --cm-type: #39D2C0;
     --cm-tag: #7EE787;

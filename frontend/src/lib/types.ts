@@ -543,6 +543,16 @@ export interface SyntaxSpec {
     numbers?: boolean;
     /** Optional region markers ("#region" / "#endregion"), matched inside comment tokens. */
     region?: DelimiterPair;
+    /**
+     * Colour a name whose first letter is upper-case as a type name (Go's exported `ChatMessage`, a
+     * JS class). Default true — declare false where the convention does not hold.
+     */
+    capitalized_types?: boolean;
+    /**
+     * Colour a name applied to arguments (`name(`) as a function name. Default true; the declared
+     * word lists still win, so a keyword before a bracket stays a keyword.
+     */
+    call_as_function?: boolean;
 }
 
 export interface UIExtensionConfig {

@@ -1071,6 +1071,10 @@ import { slide } from 'svelte/transition';
     :global(.diff-line-content .hl-comment) { color: var(--cm-comment); font-style: italic; }
     :global(.diff-line-content .hl-operator) { color: var(--cm-variable); }
     :global(.diff-line-content .hl-punctuation) { color: var(--cm-punctuation); }
+    /* Bracket pair colorization — same levels and colours as the editor. */
+    :global(.diff-line-content .hl-bracket-l0) { color: var(--cm-bracket-0); }
+    :global(.diff-line-content .hl-bracket-l1) { color: var(--cm-bracket-1); }
+    :global(.diff-line-content .hl-bracket-l2) { color: var(--cm-bracket-2); }
     :global(.diff-line-content .hl-tagname) { color: var(--cm-tag); }
     :global(.diff-line-content .hl-meta) { color: var(--cm-variable); }
     :global(.diff-line-content .hl-invalid) { color: var(--color-status-red); }

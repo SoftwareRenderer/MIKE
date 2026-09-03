@@ -37,9 +37,35 @@ pure data: `line_comment`, `line_comments[]` (PHP's `#` beside `//`), `block_com
 `frontend/src/lib/syntax/spec-language.ts` turns one profile into a `StreamLanguage` **plus** the
 generic bracket `foldService` (a fold is an opener still open at its line's end, and brackets inside
 comment/string tokens are skipped, so `// if (a) {` and `const s = "{"` open nothing), a region
-folder (live in the TypeScript profiles as `//#region` / `//#endregion`), an `indentService`, and
-the `commentTokens` / `closeBrackets` language data — colours, folding, indent, Ctrl-/ and
-auto-close all come from the same declaration.
+folder (live in the TypeScript profiles as `//#region` / `//#endregion`), an `indentService`, the
+`commentTokens` / `closeBrackets` language data, and bracket pair colorization built from `pairs` —
+colours, folding, indent, Ctrl-/ and auto-close all come from the same declaration.
+
+## Where a name's colour comes from, and a bracket's
+
+The word lists are a language's *vocabulary*; a name they do not contain gets its colour from its
+**shape**, in this order: declared `keywords`/`types`/`constants`/`builtins` first, then a name with `(`
+after it (spaces only between) is a function, then a name starting with an upper-case letter is a type,
+then nothing. So `func` is a keyword, `formatChatHistory(` is a function and `types.ChatMessage`'s
+`ChatMessage` is a type, while `messages` keeps the theme's default colour. Both shape rules default on
+and are declared per profile as `call_as_function` / `capitalized_types` — declared, not required: an
+extension installed before the fields existed highlights anyway (that is what the default is for), and an
+author whose language breaks the convention (a Lisp, an Erlang, where variables start upper-case) has a
+field to say it in. Go's exported constants (`EOF`, `MaxLen`) start upper-case and so read as types; that
+is the accepted trade, not an open bug.
+
+Bracket pair colorization follows VS Code's rule: a pair's colour is its **nesting level**, so an opener
+always matches the closer it opened (`syntax/bracket-pairs.ts`). Levels count across lines, cycle over
+three slots, skip anything inside a comment or a string, and colour nothing for a closer that opens
+nothing. The colours belong to the theme (`.cm-bracket-l0|1|2`, VS Code's own values, different between
+light and dark), which keeps the engine out of palettes. Two scan bounds and they are not the same
+number: a fold needs its own line and body (`SCAN_LIMIT`), while a level needs everything above the
+viewport, so the bracket scan has its own larger `BRACKET_SCAN_LIMIT` and colours nothing past it.
+
+`buildLanguageSupport(spec, name)` owns everything a declared language does — both arguments, the name
+being `mike-declared` at the one production call site, never a language id. Its consumers are the editor
+(`editor-language.ts`), the outline and the tests; the diff view reads the same specs but feeds
+`bracketLevelsForTree` its parsed `Tree` rather than an editor state, because it has no view.
 
 A spec-built grammar is named `mike-declared`, deliberately *not* a valid language id, so a call
 site that forgets to pass an explicit id gets a loud "no provider" from the server instead of
@@ -57,9 +83,15 @@ transitively, via lang-html).
 
 `backend/extensions/manifest_validate_test.go`, `backend/lsp/docsync_test.go` (per-file wire id),
 `backend/lsp/tsserver_integration_test.go` (real tsserver refuses `.jsx` when the id collapses to
-`typescript`), `frontend/src/lib/syntax/__tests__/spec-language.unit.ts` (tokens, folds, indent out
-of a profile), `frontend/src/lib/utils/__tests__/editor-language.unit.svelte.ts` (resolution order:
-extension → fallback → plain text), and the live probe
+`typescript`), `frontend/src/lib/syntax/__tests__/spec-language.unit.ts` (tokens, folds, indent out of a
+profile, including what each shape rule does switched off),
+`frontend/src/lib/syntax/__tests__/bracket-pairs.unit.ts` (levels, comments and strings, and the classes a
+real `EditorView` puts in the DOM),
+`frontend/src/lib/syntax/__tests__/bundled-profiles.unit.ts` (the shipped manifests, and a profile with
+neither new key — the state of every install that predates them),
+`frontend/src/lib/__tests__/highlighter.unit.ts` (the same answers in a diff),
+`frontend/src/lib/utils/__tests__/editor-language.unit.svelte.ts` (resolution order: extension →
+fallback → plain text), and the live probe
 `frontend/tests/declared-languages-check.mjs` (wire ids sniffed off the WebSocket, plus highlight,
 block/region folding, Ctrl-/ in a real editor:
 `MIKE_CHECK_PROJECT=<scratch project> node tests/declared-languages-check.mjs` — it writes fixtures

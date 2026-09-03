@@ -93,9 +93,48 @@ describe('declared syntax: tokenizing', () => {
     expect(tokens(state).some(([text, name]) => (text === 'true' && name === 'constant') || (text === 'true' && name === 'atom'))).toBe(true);
   });
 
-  it('leaves unlisted identifiers unstyled', () => {
-    const state = stateWith('const plainThing = 1;');
-    expect(tokens(state).some(([text]) => text === 'plainThing')).toBe(false);
+  it('colours a called name and an upper-case name, which is what the word lists cannot know', () => {
+    // The reported line, verbatim: before these rules it produced three styled ranges in all.
+    const state = stateWith(
+      'func formatChatHistory(messages []types.ChatMessage, skipSummaryMsg bool) string {',
+      { ...SPEC, keywords: [...(SPEC.keywords || []), 'func'], types: [...(SPEC.types || []), 'bool'] },
+    );
+    const found = new Map(tokens(state));
+    expect(found.get('func')).toBe('keyword');
+    expect(found.get('formatChatHistory')).toBe('variableName.function');
+    expect(found.get('ChatMessage')).toBe('typeName');
+    expect(found.get('bool')).toBe('typeName');
+    expect(found.get('string')).toBe('typeName');
+    // A parameter is neither a call nor a type, and a package qualifier is not a type either.
+    expect(found.has('messages')).toBe(false);
+    expect(found.has('skipSummaryMsg')).toBe(false);
+    expect(found.has('types')).toBe(false);
+  });
+
+  it('turns each shape rule off on its own, so an author is not stuck with a convention', () => {
+    const doc = 'function plainThing Thing() {}';
+    const noCalls = stateWith(doc, { ...SPEC, call_as_function: false });
+    expect(new Map(tokens(noCalls)).has('Thing')).toBe(true); // upper-case still names a type
+    expect(new Map(tokens(noCalls)).has('plainThing')).toBe(false);
+
+    const noTypes = stateWith(doc, { ...SPEC, capitalized_types: false });
+    expect(new Map(tokens(noTypes)).get('Thing')).toBe('variableName.function'); // the call still reads
+
+    const neither = stateWith(doc, { ...SPEC, capitalized_types: false, call_as_function: false });
+    const off = new Map(tokens(neither));
+    expect(off.get('function')).toBe('keyword');
+    // Both rules off is the old guarantee: a name in no word list is styled by nothing.
+    expect(off.has('plainThing')).toBe(false);
+    expect(off.has('Thing')).toBe(false);
+  });
+
+  it('does not read a name as a call because of a bracket further along the line', () => {
+    const state = stateWith('plain := compute(a) // note (see docs)\nother, last = 1, 2 (x)');
+    const found = new Map(tokens(state));
+    expect(found.get('compute')).toBe('variableName.function');
+    // `note` is followed by a comment whose bracket is not an argument list, and `last` by a comma.
+    expect(found.has('note')).toBe(false);
+    expect(found.has('last')).toBe(false);
   });
 
   it('prefers the repeated quote over the single quote it starts with', () => {
