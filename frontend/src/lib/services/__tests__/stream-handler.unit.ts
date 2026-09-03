@@ -1019,4 +1019,47 @@ describe('advisory events', () => {
         handleEvent(event, false);
         expect(stream.state.entries.length).toBe(1);
     });
+
+    it('ends the card the turn is over: later output opens a card BELOW the note', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'I will fix it.' } }, false);
+        // The note is flushed at the turn boundary, and the executor writes its row
+        // BETWEEN the turn's rows and the next assistant row — so the live view must
+        // break the card here too, or the note stays the newest entry while the
+        // assistant keeps writing into the card above it (and a reload moves it back).
+        handleEvent({ type: 'advisory', data: { id: 'adv-1', kind: 'diagnostics', severity: 'error', text: 'LSP diagnostics: 2 errors' } }, false);
+        handleEvent({ type: 'token', data: { text: 'Fixing those now.' } }, false);
+
+        expect(stream.state.entries.map(e => e.role)).toEqual(['assistant', 'advisory', 'assistant']);
+        const [turn, note, next] = stream.state.entries;
+        expect(turn.content).toBe('I will fix it.');
+        expect(turn.isStreaming).toBe(false);
+        expect(next.content).toBe('Fixing those now.');
+        // The whole complaint in one assertion: the note is not the last message.
+        expect(stream.state.entries[stream.state.entries.length - 1]!.id).toBe(next.id);
+        expect(note.role).toBe('advisory');
+    });
+
+    it('leaves a pending tool call resolvable — the late result still lands on its card', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'Editing.' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'edit_file', args: {} } }, false);
+        handleEvent({ type: 'advisory', data: { id: 'adv-1', kind: 'diagnostics', text: '2 errors' } }, false);
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'ok', duration: 12 } }, false);
+
+        expect(stream.state.entries.length).toBe(2);
+        const tc = stream.state.entries[0]!.toolCalls![0];
+        expect(tc.result).toBe('ok');
+        expect(tc.isPending).toBe(false);
+    });
+
+    it('is inserted before a message the client has not sent yet', () => {
+        const { stream, handleEvent } = setup();
+        // Typed during the diagnostics pass: the server has not accepted it, so its row
+        // will be written after the note's row — it must stay last.
+        stream.state.entries = [{ id: 'u1', role: 'user', content: 'and then?', isStreaming: false, queued: true, createdAt: new Date().toISOString() }];
+        handleEvent({ type: 'advisory', data: { id: 'adv-1', kind: 'diagnostics', text: '2 errors' } }, false);
+
+        expect(stream.state.entries.map(e => e.id)).toEqual(['adv-1', 'u1']);
+    });
 });

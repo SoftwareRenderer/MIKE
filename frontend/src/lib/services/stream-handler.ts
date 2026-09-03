@@ -446,7 +446,8 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 // decides whether it is drawn in the warning colour.
                 const data = event.data as { id?: string; kind?: string; severity?: string; text?: string; created_at?: string };
                 if (data.id && s.entries.some(e => e.id === data.id)) break;
-                s.entries = [...s.entries, {
+                stream.closeCurrentAssistant();
+                const entry: ChatEntry = {
                     id: data.id || genId(),
                     role: 'advisory',
                     kind: data.kind || '',
@@ -454,7 +455,15 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     severity: data.severity || '',
                     isStreaming: false,
                     createdAt: data.created_at || new Date().toISOString(),
-                }];
+                };
+                // Before a message the server has not accepted yet (queued): its row is
+                // written after the note's, so it stays last. Same rule as summarization.
+                const firstQueuedIdx = s.entries.findIndex(e => e.queued);
+                if (firstQueuedIdx >= 0) {
+                    s.entries = [...s.entries.slice(0, firstQueuedIdx), entry, ...s.entries.slice(firstQueuedIdx)];
+                } else {
+                    s.entries = [...s.entries, entry];
+                }
                 break;
             }
             case 'summarization': {
