@@ -16,12 +16,9 @@ import (
 	"kanban/backend/types"
 )
 
-// ErrNotAMergeConflict is returned when git merge failed but no merge is in
-// progress (no MERGE_HEAD). This indicates a non-conflict failure such as a
-// hook error, missing branch, or lock issue. Callers should handle this
-// separately from conflict resolution failures.
-// The sentinel message is empty — it's for errors.Is() detection only.
-// Callers should surface the underlying git error to the user.
+// ErrNotAMergeConflict means git merge failed with no merge in progress (no MERGE_HEAD): a
+// hook error, a missing branch, a lock — not a conflict. Its message is empty because callers
+// detect it with errors.Is and show the underlying git error instead.
 var ErrNotAMergeConflict = errors.New("")
 
 // isMergeInProgress checks whether a git merge is currently in progress in the given directory.
@@ -90,14 +87,10 @@ func addUnique(files []string, seen map[string]struct{}, f string) []string {
 	return append(files, f)
 }
 
-// getAllConflictsResolved checks whether ALL conflicted files have been
-// resolved by running `git diff --check MERGE_HEAD -- <files>` and looking
-// for conflict marker warnings. This delegates detection to Git instead of
-// scanning file contents for marker strings.
-//
-// Returns true when every conflicted file is clean — git requires all
-// conflicts to be staged before a merge commit can be made, so partial
-// resolution is not sufficient.
+// GetAllConflictsResolved reports whether every conflicted file is resolved, by asking
+// `git diff --check MERGE_HEAD -- <files>` for conflict markers rather than scanning file
+// contents. It needs all of them clean: git refuses the merge commit until every conflict is
+// staged, so partial resolution does not count.
 func GetAllConflictsResolved(dir string) bool {
 	conflictedFiles := GetConflictedFiles(dir)
 	if len(conflictedFiles) == 0 {
@@ -324,12 +317,11 @@ func (te *TaskExecutor) commitMergeConflictResolution(taskID, worktreePath strin
 // resolution, drops the stale stash, clears the merge conflict flag, and
 // attempts the final merge. Returns (commitOK, refreshedTask).
 //
-// This encapsulates the git operations shared by all merge-conflict resolution
-// paths in the execution loop. Callers handle the divergent post-resolution
-// control flow (inject prompt vs. mark done vs. mark failed).
+// commitConflictResolution runs the git operations every merge-conflict resolution path
+// shares. Callers handle the divergent part afterwards: inject a prompt, mark done, or fail.
 func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath string, task *types.Task) (commitOK bool, updatedTask *types.Task) {
-	// Don't acquire worktree mutex — MergeBranch→syncTargetIntoTask does. Would deadlock.
-	// Safe: LLM is done, loop is single-threaded, syncTargetIntoTask locks below.
+	// No worktree mutex here: MergeBranch→syncTargetIntoTask takes it and would deadlock.
+	// Safe because the LLM is done and the loop is single-threaded.
 	commitOK = true
 
 	if isMergeInProgress(worktreePath) {

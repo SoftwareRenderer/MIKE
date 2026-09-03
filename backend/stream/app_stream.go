@@ -181,21 +181,18 @@ func NewAppStreamManager(store *store.Store, worktreeMgr *git.WorktreeManager) *
 		taskBuffers: make(map[string][]taskFrame),
 		taskBufSize: DefaultBufferSize,
 	}
-	// Initialize the filesystem watcher for task worktrees
-	// Cache update callback is set later via SetDiffCacheUpdate (after GitHandler is created)
+	// The diff cache callback is set later via SetDiffCacheUpdate, once GitHandler exists.
 	var err error
 	asm.watcher, err = NewWorktreeWatcher(worktreeMgr, asm.BroadcastDiffStats, nil, asm.BroadcastFsEvent)
 	if err == nil {
 		go asm.watcher.StartEventLoop()
 	}
 
-	// Initialize the project directory watcher
 	asm.projectWatcher, err = NewProjectWatcher(asm.BroadcastFsEvent)
 	if err == nil {
 		go asm.projectWatcher.StartEventLoop()
 	}
 
-	// Initialize the branch watcher (event-driven, replaces polling)
 	asm.branchWatcher, err = NewBranchWatcher(asm.BroadcastBranch)
 	if err == nil {
 		go asm.branchWatcher.StartEventLoop()
@@ -1025,9 +1022,8 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			client.writeMu.Lock()
 			conn.Write(ctx, websocket.MessageText, statsMsg)
 			client.writeMu.Unlock()
-			// Note: the per-file task_diff manifest frame that was sent here is no
-			// longer broadcast — no component reads it; the task detail view
-			// fetches its data via the REST diff endpoint.
+			// No per-file task_diff manifest frame is broadcast: no component reads it, and the
+			// task detail view fetches its data from the REST diff endpoint.
 		}
 	}
 

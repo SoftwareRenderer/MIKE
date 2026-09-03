@@ -25,9 +25,4 @@ type lspManager interface {
 	// extension declared one of the changed files as a reason to re-read the
 	// project (`reload_files`). Returns true if any connection was ended.
 	FilesChanged(workspacePath string, changed []string) bool
-	// Environment reports whether the language server for this file can resolve
-	// its workspace at all, and which diagnostic codes mean "could not load" when
-	// it cannot. The codes come from the extension's manifest; nothing in core
-	// knows what any of them mean.
-	Environment(workspacePath, filePath string) lsp.EnvironmentReport
 }

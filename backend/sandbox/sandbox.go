@@ -287,22 +287,18 @@ func createContainerArgs(containerName, mountPath string) []string {
 
 // Create creates a gVisor sandbox container for a task.
 //
-// Mounts:
-//   - Worktree: /home/sandbox/<project.Name>, read-only in plan mode, read-write otherwise.
-//   - Git metadata: project.Path/.git mounted read-only at its own absolute path, so git
-//     can resolve refs, objects and worktree metadata.
-//   - Agent sandbox: opts.AgentSandbox mounts and envs (default /root/.config/agent).
-//   - Skills: skillsDir read-only at SkillsMount, when non-empty.
-//   - Custom: opts.SandboxMounts, appended after the standard mounts.
+// Mounts: the worktree at /home/sandbox/<project.Name> (read-only in plan mode, read-write
+// otherwise); project.Path/.git read-only at its own absolute path, so git can resolve refs,
+// objects and worktree metadata; opts.AgentSandbox mounts and envs (default
+// /root/.config/agent); skillsDir read-only at SkillsMount when non-empty; opts.SandboxMounts
+// appended last.
 //
-// Configuration: opts.BaseImage, else the BaseImage constant; --network none when
-// networkIsolation; --memory=<limit>M when memoryLimit > 0; environment limited to what was
-// configured (see containerEnvArgs) - PATH and the rest stay as the image sets them.
+// Configuration: opts.BaseImage or the BaseImage constant; --network none when networkIsolation;
+// --memory=<limit>M when memoryLimit > 0; environment limited to what was configured (see
+// containerEnvArgs) — PATH and the rest stay as the image sets them.
 //
-// Port forwarding: each opts.ForwardPorts entry gets an ephemeral host port (net.Listen
-// ":0") mapped to the container port and bound to loopback.
-//
-// assignedPorts lists the host→container mappings; nil on failure.
+// Each opts.ForwardPorts entry gets an ephemeral host port (net.Listen ":0") mapped to the
+// container port and bound to loopback; the returned slice lists those mappings, nil on failure.
 func (sm *SandboxManager) Create(taskID, worktreePath string, project *types.Project, opts SandboxOpts) ([]types.AssignedPort, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

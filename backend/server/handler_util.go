@@ -1,6 +1,7 @@
 package server
 
 import (
+	"kanban/backend/httputil"
 	"log"
 	"net/http"
 	"os"
@@ -9,7 +10,7 @@ import (
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -17,7 +18,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	homeDir, err := os.UserHomeDir()

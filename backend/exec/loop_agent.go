@@ -629,12 +629,10 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 	te.appStreamMgr.BroadcastTaskUpdated(projectID, task)
 }
 
-// persistAgentTurnEntries persists pre-parsed agent turn entries to the DB.
-// This is a generic function that works with any agent adapter — it only iterates
-// PersistEntry objects and creates TaskMessage rows.
-// The sandbox flag is injected into tool_call ToolCallsJSON so the frontend
-// can display the sandbox icon correctly after page refresh (the adapter
-// doesn't know about sandbox mode — this mirrors the non-agent loop).
+// persistAgentTurnEntries writes pre-parsed agent turn entries to the DB. It is generic over
+// adapters: it only iterates PersistEntry values into TaskMessage rows. The sandbox flag goes
+// into tool_call ToolCallsJSON so the frontend still shows the sandbox icon after a refresh —
+// the adapter knows nothing about sandbox mode, and this mirrors the non-agent loop.
 func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID string, entries []pkgagent.PersistEntry, startTime time.Time, sandbox bool) (totalPromptTokens, totalPredictedTokens int) {
 	if len(entries) == 0 {
 		return 0, 0

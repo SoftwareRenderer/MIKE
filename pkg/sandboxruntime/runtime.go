@@ -426,11 +426,10 @@ func ReadCgroupMemory(dir string) (CgroupMemory, error) {
 }
 
 // ApplyMemoryLimit enforces a hard memory limit on a running container by writing into its
-// cgroup. Necessary because runsc - which needs --runtime-flag ignore-cgroups under rootless -
-// ignores the OCI spec's linux.resources, so podman's --memory alone is never enforced.
-//
-// Writes memory.max = limitMB MiB and, best-effort, memory.swap.max = 0: with swap available the
-// host reclaims the overshoot instead of OOM-killing, which makes the limit soft. On error the
+// cgroup, because runsc — which needs --runtime-flag ignore-cgroups under rootless — ignores the
+// OCI spec's linux.resources, so podman's --memory alone is never enforced. It writes
+// memory.max = limitMB MiB and, best-effort, memory.swap.max = 0: with swap available the host
+// reclaims the overshoot instead of OOM-killing, which would make the limit soft. On error the
 // caller decides whether to fail open or closed.
 func (r *Runtime) ApplyMemoryLimit(name string, limitMB int) error {
 	if limitMB <= 0 {
