@@ -198,7 +198,7 @@ type LSPDiagnostic struct {
 	Message            string                  `json:"message"`
 	Severity           int                     `json:"severity"`
 	Source             string                  `json:"source"`
-	Code               interface{}             `json:"code"`
+	Code               any                     `json:"code"`
 	RelatedInformation []LSPRelatedInformation `json:"relatedInformation"`
 }
 
@@ -719,15 +719,11 @@ func (te *TaskExecutor) StartSubtask(projectID, subtaskID string, autostarted bo
 	return te.StartTask(projectID, subtaskID, autostarted)
 }
 
-// EnsureParentBranch creates the parent task's branch when the parent has not started
-// yet (parent.Branch == ""). The branch is the merge target once a subtask finishes
-// with auto_merge.
-//
-// A full worktree is created, not a bare branch, so that when the parent eventually
-// starts, prepareTaskExecution finds the worktree and reuses it.
-//
-// The parent's status is NOT changed — it stays in its column (e.g. backlog) while
-// subtasks run; only Branch is set. A parent that already has a branch is left alone.
+// EnsureParentBranch creates the parent task's branch when the parent has not started yet
+// (parent.Branch == ""); that branch is the merge target when a subtask finishes with
+// auto_merge. A full worktree is created rather than a bare branch so prepareTaskExecution
+// reuses it when the parent eventually starts. Only Branch is set — the parent keeps its
+// status and column while subtasks run — and a parent that already has a branch is left alone.
 func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task) error {
 	project, err := te.store.GetProject(projectID)
 	if err != nil {
@@ -794,12 +790,11 @@ func (te *TaskExecutor) EnsureParentBranch(projectID string, parent *types.Task)
 	return nil
 }
 
-// AutoStartNextSibling continues the autostart chain after a task finishes:
-// start the next startable sibling (deepest first, LLM picks when several), or
-// the parent itself once all its children are done — but only if the parent was
-// already started (in_progress); a Backlog parent is never autostarted. A child
-// in review/failed halts that branch, while the scheduler bubbles up so the
-// ancestor's other branches can still progress.
+// AutoStartNextSibling continues the autostart chain after a task finishes: start the next
+// startable sibling (deepest first, the LLM picks when several), or the parent once all its
+// children are done — but only a parent already in_progress, never a Backlog one. A child in
+// review/failed halts that branch while the scheduler bubbles up, so an ancestor's other
+// branches still progress.
 func (te *TaskExecutor) AutoStartNextSibling(projectID, finishedTaskID, parentTaskID string) error {
 	parent, err := te.store.GetTaskByID(parentTaskID)
 	if err != nil {
@@ -1740,13 +1735,11 @@ func (te *TaskExecutor) CommitAndMerge(projectID, taskID, worktreePath, commitMs
 	return nil
 }
 
-// syncTargetIntoTask merges the target branch into the task's branch (in the task's
-// worktree) when the target has new commits since the task diverged, so conflicts
-// surface while the LLM still has the task's changes in context.
-//
-// Returns nil on a clean merge, when there is nothing to merge, or when merge_conflict
-// state was entered. MergeBranch must check task.ExecutionState afterwards and skip the
-// final merge on "merge_conflict".
+// syncTargetIntoTask merges the target branch into the task's branch in the task's worktree
+// when the target has new commits since the task diverged, so conflicts surface while the LLM
+// still has the task's changes in context. It returns nil on a clean merge, when there is
+// nothing to merge, or when merge_conflict state was entered — MergeBranch must check
+// task.ExecutionState afterwards and skip the final merge on "merge_conflict".
 func (te *TaskExecutor) syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch string, task *types.Task) error {
 	// Serialize against the task's own tool execution.
 	te.GetWorktreeMu(taskID).Lock()
@@ -1859,14 +1852,11 @@ func (te *TaskExecutor) ResolveMergeTarget(projectID string, task *types.Task) s
 	return project.OriginBranch
 }
 
-// mergeBranch merges the task's branch into the target branch.
-// For child tasks, merges into the parent's branch. For root tasks, merges into origin.
-// Returns nil on success or if merge is not applicable.
-//
-// If the target branch is checked out in another worktree (e.g., a parent whose
-// worktree was created by EnsureParentBranch), the merge is performed inside
-// that worktree instead of the main repo, since git won't allow checking out
-// a branch that's already used by a worktree.
+// mergeBranch merges the task's branch into the target branch: a child task merges into its
+// parent's branch, a root task into origin. It returns nil on success or when a merge does
+// not apply. When the target is checked out in another worktree (a parent created by
+// EnsureParentBranch, say) the merge runs inside that worktree, since git refuses to check
+// out a branch another worktree already holds.
 func (te *TaskExecutor) MergeBranch(projectID, taskID string, task *types.Task) error {
 	project, err := te.store.GetProject(projectID)
 	if err != nil {

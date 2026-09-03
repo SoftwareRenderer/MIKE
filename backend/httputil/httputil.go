@@ -25,6 +25,13 @@ func JSONError(w http.ResponseWriter, status int, message string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
+// MethodNotAllowed answers 405 for a handler registered without a method in its
+// route. The body is plain text; a handler whose client parses error bodies
+// answers with JSONError instead.
+func MethodNotAllowed(w http.ResponseWriter) {
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
 // DecodeJSON decodes the JSON request body into v. On failure it writes the
 // standard 400 "invalid request body" response and returns false, so handlers
 // read as a linear happy path:

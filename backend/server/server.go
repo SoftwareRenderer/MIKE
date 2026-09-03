@@ -343,7 +343,7 @@ func NewServer(dbPath, worktreesDir, addr, frontendDist, allowedHosts string, tl
 // It supports both standard OpenAI-compatible LLM servers and Pi agent extensions.
 func (s *Server) handleFetchModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -492,19 +492,15 @@ type hybridListener struct {
 	last  error // why the accept loop stopped, if a real failure caused it
 }
 
-// Accept hands net/http a connection whose protocol is already known.
+// Accept hands net/http a connection whose protocol is already known. The first byte decides TLS
+// vs plain HTTP and net/http only looks at the concrete type Accept returns, so that read cannot
+// be deferred — but it must not happen inside Accept: net/http accepts serially, so a peer that
+// connects and sends nothing would delay every later handshake, and its EOF or ECONNRESET would
+// reach Serve as a dead listener and end it.
 //
-// The first byte decides TLS vs plain HTTP, and net/http only looks at the concrete
-// type Accept returns, so that read cannot be deferred — but it must not happen
-// inside Accept: net/http accepts serially, so a peer that connects and sends nothing
-// would delay every later handshake, and its EOF or ECONNRESET would reach Serve as a
-// dead listener and end it.
-//
-// So Accept never touches a socket — acceptLoop sniffs each connection in its own
-// goroutine and queues the result. No worker pool: a pool of N only moves the stall to
-// the Nth silent peer. Only the listener's own error is returned, since it is the only
-// one that can end Serve.
-// one that can end Serve.
+// So Accept never touches a socket — acceptLoop sniffs each connection in its own goroutine and
+// queues the result. No worker pool: a pool of N only moves the stall to the Nth silent peer. Only
+// the listener's own error is returned, since it is the only one that can end Serve.
 func (l *hybridListener) Accept() (net.Conn, error) {
 	select {
 	case conn := <-l.ready:
@@ -692,6 +688,21 @@ func (s *Server) tlsConfigToStd() *stdtls.Config {
 	}
 	return &stdtls.Config{Certificates: []stdtls.Certificate{cert}}
 }
+
+// RepairExtensionFiles restores installed extensions whose files are gone, each from the commit its own
+// record pins. An extension with no files is not a disabled extension — it is an enabled one that does
+// nothing, invisibly: a UI extension's iframe 404s, so its document never boots and never registers the
+// button or overlay it exists for.
+//
+// Called from main at process start rather than from Serve or NewServer, so no Go test can reach a git
+// clone. The caller runs it off the boot path and never joins it: a clone that outlives the deadline is
+// not allowed to be the reason a shutdown waits.
+func (s *Server) RepairExtensionFiles(ctx context.Context) {
+	if _, _, err := s.extHandler.RepairMissingFiles(ctx); err != nil {
+		log.Printf("[extensions] repair: could not check installed extension files: %v", err)
+	}
+}
+
 func (s *Server) Serve() error {
 	caFile := ""
 	if s.tlsConfig != nil {

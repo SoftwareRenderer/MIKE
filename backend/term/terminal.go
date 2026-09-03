@@ -478,7 +478,7 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -508,7 +508,7 @@ func (tm *TerminalManager) HandleTerminal(w http.ResponseWriter, r *http.Request
 func (tm *TerminalManager) HandleProjectTerminal(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 

@@ -91,7 +91,7 @@ func (cs *ConfigStore) TestConnection(req TestConnectionRequest) TestConnectionR
 }
 
 // ResolveAPIKey returns the effective API key for a provider URL, substituting
-// the stored key when the client sends the masked placeholder or an empty value.
+// the stored key when the client sends the masked placeholder or nothing.
 func (cs *ConfigStore) ResolveAPIKey(serverURL string, providedKey string) string {
 	if providedKey != "" && providedKey != maskedAPIKey {
 		return providedKey
@@ -100,19 +100,13 @@ func (cs *ConfigStore) ResolveAPIKey(serverURL string, providedKey string) strin
 	if err != nil {
 		return ""
 	}
-	serverURL = strings.TrimRight(serverURL, "/")
-	for _, provider := range cfg.Providers {
-		if strings.TrimRight(provider.URL, "/") == serverURL {
-			return provider.APIKeyValue()
-		}
-	}
-	return ""
+	return storedAPIKey(cfg.Providers, serverURL)
 }
 
 // HandleTestConnection handles POST /api/config/test-connection.
 func (cs *ConfigStore) HandleTestConnection(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
