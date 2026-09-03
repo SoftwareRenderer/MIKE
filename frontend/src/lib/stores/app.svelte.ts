@@ -1,5 +1,7 @@
 import type { Project, Board, Config, Task, Provider } from '$lib/types';
 import { loadCollapsedTasks, saveCollapsedTasks, loadAppSetting, saveAppSetting } from '$lib/storage';
+import { getConfig } from '$lib/api/config';
+import { isFromCache } from '$lib/api/cache';
 
 // ─── Board Helpers ───
 
@@ -60,6 +62,11 @@ export class AppStore {
     public pwaInstallPrompt = $state<Event | null>(null);
     public pwaInstalled = $state(false);
 
+    // One in-flight config refresh — see refreshConfig(). Not reactive state: nothing
+    // renders it, and making it $state would give every reader a dependency on a
+    // bookkeeping field.
+    private configRefresh: Promise<void> | null = null;
+
     constructor() {
         // Load sidebar state from IndexedDB
         loadAppSetting('kanban-sidebar-collapsed', false).then((v: unknown) => {
@@ -70,6 +77,32 @@ export class AppStore {
     /** Persist sidebar state to IndexedDB. Call from a component $effect. */
     persistSidebarCollapsed(): void {
         saveAppSetting('kanban-sidebar-collapsed', this.sidebarCollapsed).catch(() => {});
+    }
+
+    /**
+     * Re-read the server config so providers the server derives per request — an agent
+     * extension IS a provider (`agent://<name>`) from the moment it is installed and
+     * enabled — reach every provider list in the UI without a page reload.
+     *
+     * Best-effort: a failed fetch leaves the config in hand untouched (the reconnect
+     * refresh retries), and a copy served from the offline cache is never applied over a
+     * live one — that copy predates the very change this call exists to pick up.
+     *
+     * Concurrent calls share one request: installing or toggling extensions broadcasts an
+     * extension_change per operation, and each would otherwise fetch.
+     */
+    refreshConfig(): Promise<void> {
+        this.configRefresh ??= (async () => {
+            try {
+                const c = await getConfig();
+                if (!isFromCache(c) || !this.config) this.config = c;
+            } catch {
+                // Offline with nothing cached — keep showing the config we already have.
+            } finally {
+                this.configRefresh = null;
+            }
+        })();
+        return this.configRefresh;
     }
 }
 

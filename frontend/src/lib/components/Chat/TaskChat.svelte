@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount, onDestroy, untrack } from 'svelte';
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, DiffData } from '$lib/types';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { sendTaskMessage, getTaskMessages, createTaskMessage, deleteTaskMessagesAfter, deleteTaskMessage, regenerateTaskMessages, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, getQueuedTaskIds, getTask } from '$lib/api';
@@ -16,7 +16,7 @@
     import { DRAFT_SAVE_DEBOUNCE_MS } from '$lib/constants';
     import { mergeQueuedUpdate } from '$lib/utils/task-utils';
     import { effectiveStartTaskKey, matchShortcut } from '$lib/utils/keyboard';
-    import { resolveWorker, getModelName } from '$lib/utils/providers';
+    import { reselectProvider } from '$lib/utils/providers';
     import { mergeToolCallsIntoAssistant, getCheckpointThreads as getCheckpointThreadsUtil, buildEntriesFromMessages, buildCheckpointStateMap, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, type EntryMeta } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { wsConnection } from '$lib/stores/connection';
@@ -431,20 +431,27 @@
         const cfg = appStore.config;
         if (cfg && cfg.providers) {
             providers = cfg.providers;
-            // Initialize model selection from the configured Worker provider/model pair
-            if (providers.length > 0 && (!selectedModel || !providers.some(p => p.url === selectedUrl))) {
-                const worker = resolveWorker(cfg);
-                if (worker.provider && worker.modelName) {
-                    selectedUrl = worker.url;
-                    selectedModel = worker.modelName;
-                } else if ((providers[0].models?.length ?? 0) > 0) {
-                    selectedUrl = providers[0].url;
-                    selectedModel = getModelName(providers[0].models[0]);
-                }
+            // Keep a still-valid selection, otherwise follow the configured worker pair.
+            const next = reselectProvider(cfg, providers, selectedUrl, selectedModel);
+            if (next) {
+                selectedUrl = next.url;
+                selectedModel = next.model;
             }
             updateContextLimit();
         }
     }
+
+    // The provider list is not fixed while this chat stays open: installing or enabling an
+    // agent extension makes the server report a new provider (agent://<name>) in
+    // GET /api/config, and the app re-reads the config on that broadcast. So the selector
+    // gains (or loses) the agent without a page reload.
+    //
+    // untrack(): the sync reads and writes provider/selection/context-limit state of its
+    // own, and as dependencies those would make this effect re-run itself.
+    $effect(() => {
+        const cfg = appStore.config;
+        if (cfg) untrack(updateProvidersFromStore);
+    });
 
     /** Look up the context window for the currently selected model. */
     function updateContextLimit() {
@@ -1171,8 +1178,7 @@
         let unsubViewport: (() => void) | null | undefined = null;
         const handleUrlChange = () => syncThreadFromUrl();
         window.addEventListener('urlchanged', handleUrlChange);
-        // Config changes are now tracked via $effect on appStore.config
-        updateProvidersFromStore();
+        // Providers come from the $effect on appStore.config above — it runs at mount too.
         unsubViewport = setupViewportListener();
 
         (async () => {
