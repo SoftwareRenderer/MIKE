@@ -8,9 +8,9 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
-	"syscall"
 
 	"kanban/pkg/bridge/protocol"
+	"kanban/pkg/procterm"
 )
 
 // handler manages request dispatch for a single client connection.
@@ -49,22 +49,19 @@ type bashProc struct {
 	finished bool
 }
 
-// kill stops the command's whole process group (it runs with Setpgid, so the group id is its
-// pid). The grandchildren are the point: they keep an inherited stdout open after the command
-// itself finishes.
+// kill stops the command's whole process group. The reaped guard is this caller's
+// business: once the leader is reaped its pid, which is the pgid, can be recycled onto an
+// unrelated process.
 func (bp *bashProc) kill() {
 	if bp.cmd == nil {
 		return
 	}
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
-	if bp.reaped.Load() || bp.cmd.Process == nil {
+	if bp.reaped.Load() {
 		return
 	}
-	if err := syscall.Kill(-bp.cmd.Process.Pid, syscall.SIGKILL); err != nil {
-		// Group already gone (or not permitted) — fall back to the direct child.
-		_ = bp.cmd.Process.Kill()
-	}
+	_ = procterm.KillGroup(bp.cmd.Process)
 }
 
 // pid returns the command's pid, or 0 before it started.

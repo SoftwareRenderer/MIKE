@@ -1487,30 +1487,18 @@ type ExtensionUpdate struct {
 	Changelog []ChangelogEntry `json:"changelog,omitempty"`
 }
 
-// maskConfig masks sensitive config values based on the manifest's config_schema.
-// Sensitive fields are replaced with a bullet placeholder.
+// maskedValue is what a sensitive field shows in the browser.
 const maskedValue = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // 10 bullets
 
+// maskConfig replaces every schema-declared sensitive value with maskedValue. An empty
+// value passes through — a mask in a blank field reads as if a secret were set.
 func maskConfig(config map[string]any, schema *ConfigSchema) map[string]any {
-	if schema == nil || len(schema.Properties) == 0 || config == nil {
-		return config
-	}
-	result := make(map[string]any, len(config))
-	for k, v := range config {
-		prop := schema.GetProperty(k)
-		if prop == nil || !prop.Sensitive {
-			result[k] = v
-			continue
+	return mapSensitiveConfig(config, schema, func(v any) (any, bool) {
+		if fmt.Sprintf("%v", v) == "" {
+			return nil, false
 		}
-		// Mask non-empty sensitive values
-		strVal := fmt.Sprintf("%v", v)
-		if strVal != "" {
-			result[k] = maskedValue
-		} else {
-			result[k] = v
-		}
-	}
-	return result
+		return maskedValue, true
+	})
 }
 
 // toResponse converts an Extension to an ExtensionResponse with runtime status.

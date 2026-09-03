@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"reflect"
 	"time"
 
@@ -113,16 +114,7 @@ func (s *Store) ListProjects() ([]types.Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	projects := []types.Project{}
-	for rows.Next() {
-		var p types.Project
-		if err := scanProject(rows, &p); err != nil {
-			return nil, err
-		}
-		projects = append(projects, p)
-	}
-	return projects, rows.Err()
+	return scanRows(rows, scanInto(scanProject))
 }
 
 // UpdateProject updates a project's name.
@@ -272,6 +264,11 @@ func (s *Store) GetAllProjectCounts() map[string]types.ProjectCounts {
 			c.Review = count
 		}
 		counts[projectID] = c
+	}
+	// A truncated iteration would under-count a project's badge silently, and the caller
+	// cannot re-check these counts.
+	if err := rows.Err(); err != nil {
+		log.Printf("[store] project task counts incomplete: %v", err)
 	}
 	return counts
 }

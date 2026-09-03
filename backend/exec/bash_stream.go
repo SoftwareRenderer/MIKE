@@ -14,17 +14,12 @@ import (
 	"time"
 
 	"kanban/backend/agent"
+	"kanban/pkg/procterm"
 )
 
-// Bounds for flushing a finished command's output; mirrors pkg/bridge/agent/bash.go.
-// Output already produced must reach the caller before the tool returns, but a
-// child the command detached keeps the pipe write end open, so real EOF may never
-// come and must not be waited for — that hang is what makes a finished bash call
-// look like it is still running.
+// Bounds for the tool's bash timeout. Ending the command — killing its group, flushing
+// its output — is pkg/procterm, shared with the sandbox-bridge's bash handler.
 const (
-	bashDrainGrace = 250 * time.Millisecond
-	bashDrainCap   = 2 * time.Second
-
 	defaultBashTimeoutSec = 5
 	maxBashTimeoutSec     = 300
 )
@@ -40,21 +35,6 @@ func normalizeBashTimeout(timeout int64) int64 {
 	default:
 		return timeout
 	}
-}
-
-// killProcessGroup SIGKILLs the command's whole process group (commands run with
-// Setpgid, so the group id equals the pid). Killing only the direct child leaves
-// grandchildren running with the inherited stdout still open.
-// Callers must hold them off once the leader is reaped — its pid can be recycled.
-func killProcessGroup(p *os.Process) error {
-	if p == nil {
-		return nil
-	}
-	if err := syscall.Kill(-p.Pid, syscall.SIGKILL); err != nil {
-		// Group already gone (or not permitted) — fall back to the direct child.
-		return p.Kill()
-	}
-	return nil
 }
 
 // streamLineWriter accumulates a command's output and hands each completed line
@@ -81,7 +61,7 @@ func (w *streamLineWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// WriteFrom streams a pipe into the writer until EOF, or until drainCopiers closes
+// WriteFrom streams a pipe into the writer until EOF, or until procterm.Drain closes
 // the fd (the normal end for a command that detached a child still holding it).
 func (w *streamLineWriter) WriteFrom(r io.Reader) (int64, error) {
 	return io.Copy(w, r)
@@ -117,37 +97,6 @@ func (w *streamLineWriter) emitLocked(chunk string) {
 	}
 }
 
-// drainCopiers waits for the output copiers once the command exited, bounded by
-// bashDrainGrace (normal flush) and bashDrainCap (hard stop). At the grace deadline
-// it closes the read ends, freeing a copier parked on a pipe a detached child still
-// holds open.
-func drainCopiers(copiers <-chan struct{}, readers ...*os.File) {
-	grace := time.NewTimer(bashDrainGrace)
-	defer grace.Stop()
-	hardStop := time.NewTimer(bashDrainCap)
-	defer hardStop.Stop()
-
-	forceEOF := func() {
-		for _, r := range readers {
-			_ = r.Close()
-		}
-	}
-
-	drained := 0
-loop:
-	for drained < len(readers) {
-		select {
-		case <-copiers:
-			drained++
-		case <-grace.C:
-			forceEOF()
-		case <-hardStop.C:
-			forceEOF()
-			break loop
-		}
-	}
-}
-
 // execCommandStream runs a shell command directly (no sandbox) in dir, returns its
 // combined output, and forwards it line by line to onLine (may be nil).
 //
@@ -175,13 +124,13 @@ func execCommandStream(ctx context.Context, dir, command string, timeout int64, 
 	// Cancel error into the Wait error, hiding the result of a process that had
 	// already exited.
 	c.Cancel = func() error {
-		_ = killProcessGroup(c.Process)
+		_ = procterm.KillGroup(c.Process)
 		return nil
 	}
 
 	// Own the pipe ends. With exec-managed pipes, Wait() blocks on its copy
 	// goroutines for the whole WaitDelay whenever a child survives — owning the fds
-	// keeps the flush to bashDrainGrace.
+	// keeps the flush to procterm's grace period.
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
 		return "", fmt.Errorf("stdout pipe: %w", err)
@@ -215,7 +164,7 @@ func execCommandStream(ctx context.Context, dir, command string, timeout int64, 
 	go copyStream(stderrR)
 
 	waitErr := c.Wait() // returns at process exit; the copiers are drained below
-	drainCopiers(copiers, stdoutR, stderrR)
+	procterm.Drain(copiers, stdoutR, stderrR)
 	w.flush()
 
 	out := w.String()

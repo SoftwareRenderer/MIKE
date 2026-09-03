@@ -23,9 +23,27 @@ build-backend: ## Build Go binary only (no frontend rebuild)
 frontend: ## Build frontend (Vite)
 	cd frontend && npm run build
 
-.PHONY: check
-check: ## Run TypeScript type check
-	cd frontend && npm run check
+# The sandbox-bridge is a second binary: static, linux-only, and it runs INSIDE every
+# sandbox container. It is committed at sandbox/sandbox-bridge, so an artifact that was not
+# rebuilt after an edit is an edit that never runs — silently, because the server and the
+# sandbox both start fine and only the bridge behaves older.
+#
+# `make bridge` records what it built from; `make bridge-check` refuses a binary whose
+# sources have moved. The stamp hashes the bridge's inputs (module sources plus
+# go.mod/go.sum), not the artifact: a toolchain upgrade changes every byte of the binary
+# while changing none of those, and a check that cries wolf gets ignored.
+# Stamp logic + its test: scripts/bridge-stamp.sh, scripts/bridge-stamp_test.sh.
+BRIDGE_BIN   := sandbox/sandbox-bridge
+BRIDGE_STAMP := $(BRIDGE_BIN).srcs
+
+.PHONY: bridge
+bridge: ## Build the sandbox-bridge binary committed at sandbox/sandbox-bridge
+	CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o $(BRIDGE_BIN) ./pkg/bridge/agent
+	@scripts/bridge-stamp.sh record $(BRIDGE_STAMP)
+
+.PHONY: bridge-check
+bridge-check: ## Fail if sandbox/sandbox-bridge was not built from this tree's sources
+	@scripts/bridge-stamp.sh check $(BRIDGE_STAMP)
 
 # ---------------------------------------------------------------------------
 # Test

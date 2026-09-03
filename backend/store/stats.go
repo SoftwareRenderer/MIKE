@@ -1,6 +1,8 @@
 package store
 
 import (
+	"log"
+
 	"kanban/backend/types"
 )
 
@@ -106,6 +108,10 @@ func (s *Store) GetProjectStats(projectID string) (*types.ProjectStats, error) {
 					break
 				}
 			}
+		}
+		// A truncated join would show as an unexplained 0; the token totals are complete.
+		if err := taskRows.Err(); err != nil {
+			log.Printf("[store] project=%s task counts incomplete: %v", projectID, err)
 		}
 	}
 

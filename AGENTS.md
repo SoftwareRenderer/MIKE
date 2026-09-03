@@ -46,7 +46,7 @@ Invariants to preserve (the why, and the open work, are in `docs/sandbox-bridge.
 - Absent diagnostics while a file is unloaded are **unknown, not clean**: `backend/exec/diagnostics.go` refuses to read loader-state entries as findings and counts the file `unloaded`.
 - Wire method IDs `0x05`-`0x08` are retired (they were `shell_open`/`shell_io`/`shell_resize`/`shell_close`) and **must not be reused** — a stale bridge binary must get a clean "unknown method" error, not a wrong handler.
 - The only `-p` publishing on a sandbox container is **user-configured** forwarded ports (`forwardPortSpec` binds `127.0.0.1`), never the bridge; container ports outside 1-65535 are skipped.
-- **Build:** `CGO_ENABLED=0 GOOS=linux go build -trimpath -o sandbox/sandbox-bridge -ldflags="-s -w" ./pkg/bridge/agent`. **Discovery** (`pkg/sandboxruntime/runtime.go`): `MIKE_AGENT_PATH`, then `sandbox-bridge` / `sandbox/sandbox-bridge` next to the executable, then the same paths in the CWD; container creation fails if not found. **Protocol:** binary framing — 9-byte header (MsgID + Type + Length) + typed payload, Chunk frames stream before the final Result/Error, `MethodLSP` (0x0A) is the JSON-RPC passthrough.
+- **Build:** `make bridge` — `CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o sandbox/sandbox-bridge ./pkg/bridge/agent`. The artifact is **committed**, and it is what a source checkout hands to a container, so an edit under `pkg/` that is not re-built is an edit that never runs: `make bridge-check` fails when the committed binary is not a build of this tree. **Discovery** (`pkg/sandboxruntime/runtime.go`): `MIKE_AGENT_PATH`, then `sandbox-bridge` / `sandbox/sandbox-bridge` next to the executable, then the same paths in the CWD; container creation fails if not found. **Protocol:** binary framing — 9-byte header (MsgID + Type + Length) + typed payload, Chunk frames stream before the final Result/Error, `MethodLSP` (0x0A) is the JSON-RPC passthrough.
 
 ## Server Management
 
@@ -302,6 +302,7 @@ Read the file before editing that subsystem — each holds the detail and histor
 | File | Subsystem |
 |---|---|
 | `docs/sandbox-bridge.md` | bridge connections, LSP session binding, per-(extension, project) open work |
+| `docs/threads-checkpoints.md` | branch vs snapshot layers, checkpoint pinning/restore, fork inheritance |
 | `docs/tls.md` | certs/SANs, distribution, proxy + `Host`, weak-password startup rule |
 | `docs/sessions.md` | session storage shape, `/api/sessions*` responses, Settings → About UI |
 | `docs/languages.md` | `language` vs `language_id`, `syntax` as data, dependency-set trade-offs |

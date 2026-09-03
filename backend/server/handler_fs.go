@@ -43,11 +43,8 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 	}
 	taskID := r.URL.Query().Get("task")
 
-	if project.SandboxEnabled {
-		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
-			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
-			return
-		}
+	if !s.requireSandboxAvailable(w, project) {
+		return
 	}
 	// Resolve the host worktree path and translate sandbox mount paths
 	// (shared with /api/preview).
@@ -277,24 +274,14 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "project parameter is required")
 		return
 	}
-	taskID := r.URL.Query().Get("task")
-
-	var worktreePath string
-	if taskID != "" {
-		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
-		if err != nil {
-			Fail(w, err, "resolve worktree", "task worktree not found")
-			return
-		}
-		worktreePath = wtPath
-	} else {
-		worktreePath = project.Path
+	worktreePath, ok := s.fsWorktreeRoot(w, r, project)
+	if !ok {
+		return
+	}
+	if !s.requireSandboxAvailable(w, project) {
+		return
 	}
 	if project.SandboxEnabled {
-		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
-			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
-			return
-		}
 		// Translate sandbox path to host path
 		if host, ok := sandbox.ContainerToHost(worktreePath, project.Name, req.Path); ok {
 			req.Path = host
@@ -336,16 +323,9 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	project, _ := s.optionalProject(r)
 	taskID := r.URL.Query().Get("task")
 
-	var worktreePath string
-	if taskID != "" {
-		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
-		if err != nil {
-			Fail(w, err, "resolve worktree", "task worktree not found")
-			return
-		}
-		worktreePath = wtPath
-	} else if project != nil {
-		worktreePath = project.Path
+	worktreePath, rootOK := s.fsWorktreeRoot(w, r, project)
+	if !rootOK {
+		return
 	}
 	// Use the form validateFSPath returns for the host listing below, so a
 	// symlinked directory cannot expose anything outside the root.
@@ -374,11 +354,10 @@ func (s *Server) handleFS(w http.ResponseWriter, r *http.Request) {
 	result.Entries = []fsEntry{}
 
 	// Enforce sandbox if enabled — no fallback to host
+	if !s.requireSandboxAvailable(w, project) {
+		return
+	}
 	if project != nil && project.SandboxEnabled {
-		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
-			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
-			return
-		}
 		// Accepts both host and container paths.
 		mountPath := sandbox.MountPath(project.Name)
 		sandboxPath := fsSandboxPath(worktreePath, project, path)
@@ -815,6 +794,40 @@ func (s *Server) optionalProject(r *http.Request) (*types.Project, error) {
 	return project, nil
 }
 
+// fsWorktreeRoot answers which host directory a file request operates on: the task's
+// worktree when ?task names one, otherwise the project checkout. An empty root means
+// neither was supplied, which /api/fs allows for a bare browse.
+// ok is false after writing the response, when the task has no worktree.
+func (s *Server) fsWorktreeRoot(w http.ResponseWriter, r *http.Request, project *types.Project) (root string, ok bool) {
+	if taskID := r.URL.Query().Get("task"); taskID != "" {
+		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
+		if err != nil {
+			Fail(w, err, "resolve worktree", "task worktree not found")
+			return "", false
+		}
+		return wtPath, true
+	}
+	if project != nil {
+		return project.Path, true
+	}
+	return "", true
+}
+
+// requireSandboxAvailable refuses a request whose project wants a sandbox the server
+// cannot run. There is no fallback to the host: a sandboxed project's files are only ever
+// read and written inside its container, so serving one from the host would be the escape,
+// not a degraded mode. ok is false after writing the response.
+func (s *Server) requireSandboxAvailable(w http.ResponseWriter, project *types.Project) bool {
+	if project == nil || !project.SandboxEnabled {
+		return true
+	}
+	if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
+		JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
+		return false
+	}
+	return true
+}
+
 // fsSandboxPath returns the in-container path for p, which may arrive either as
 // a host path under the worktree or as a container path under the project's mount.
 func fsSandboxPath(worktreePath string, project *types.Project, p string) string {
@@ -1065,24 +1078,16 @@ func (s *Server) handleFSMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 	taskID := r.URL.Query().Get("task")
 
-	var worktreePath string
-	if taskID != "" {
-		wtPath, err := s.executor.WorktreeMgr().WorktreePath(taskID)
-		if err != nil {
-			Fail(w, err, "resolve worktree", "task worktree not found")
-			return
-		}
-		worktreePath = wtPath
-	} else if project != nil {
-		worktreePath = project.Path
+	worktreePath, rootOK := s.fsWorktreeRoot(w, r, project)
+	if !rootOK {
+		return
 	}
 
 	// Enforce sandbox if enabled — no fallback to host
+	if !s.requireSandboxAvailable(w, project) {
+		return
+	}
 	if project != nil && project.SandboxEnabled {
-		if s.sandboxMgr == nil || !s.sandboxMgr.IsAvailable() {
-			JSONError(w, http.StatusBadGateway, "sandbox is enabled but not available")
-			return
-		}
 		sandboxPath := fsSandboxPath(worktreePath, project, req.Path)
 		sandboxParent := filepath.Dir(sandboxPath)
 
