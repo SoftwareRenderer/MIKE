@@ -93,11 +93,7 @@ export const darkTheme = EditorView.theme({
         borderRadius: '4px',
         tabSize: 4,
     },
-    '.cm-tooltip hr': {
-        border: 'none',
-        borderTop: '1px solid var(--color-border)',
-        margin: '6px 0',
-    },
+    '.cm-tooltip hr': { display: 'none' },
     '.cm-panels': { border: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-1)', color: '#C9D1D9' },
     '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--color-border)' },
     '.cm-panels.cm-panels-bottom': { borderTop: '1px solid var(--color-border)' },
@@ -273,11 +269,8 @@ export const lightTheme = EditorView.theme({
         borderRadius: '4px',
         tabSize: 4,
     },
-    '.cm-tooltip hr': {
-        border: 'none',
-        borderTop: '1px solid var(--color-border)',
-        margin: '6px 0',
-    },
+    // See the dark theme: a language server's `---` divider renders no line.
+    '.cm-tooltip hr': { display: 'none' },
     '.cm-panels': { border: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-1)', color: '#24292F' },
     '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--color-border)' },
     '.cm-panels.cm-panels-bottom': { borderTop: '1px solid var(--color-border)' },
