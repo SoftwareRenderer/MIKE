@@ -166,7 +166,7 @@ func (h *ExtensionHandler) mountPolicy() *MountPolicy {
 // HandleList returns all installed extensions with runtime status.
 func (h *ExtensionHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -194,16 +194,57 @@ func (h *ExtensionHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, result)
 }
 
-// HandleGet returns a single extension by ID.
-func (h *ExtensionHandler) HandleGet(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
+// extensionOr404 returns the stored record for an extension ID, answering 404 (500, logged,
+// for any other store failure) and returning false when it is not there.
+func (h *ExtensionHandler) extensionOr404(w http.ResponseWriter, id string) (*Extension, bool) {
 	ext, err := h.store.GetByID(id)
 	if err != nil {
 		httputil.Fail(w, err, "get extension", "extension not found")
+		return nil, false
+	}
+	return ext, true
+}
+
+// registrySource returns the configured registry URL, answering 400 when there is none.
+func (h *ExtensionHandler) registrySource(w http.ResponseWriter) (string, bool) {
+	url := h.config.RegistryURL
+	if url == "" {
+		httputil.JSONError(w, http.StatusBadRequest, "registry URL not configured")
+		return "", false
+	}
+	return url, true
+}
+
+// fetchRegistryIndex reads the registry index, answering 500 with the fetch error when the
+// registry cannot be reached.
+func (h *ExtensionHandler) fetchRegistryIndex(w http.ResponseWriter, url string) (RegistryIndex, bool) {
+	index, err := h.registry.FetchIndex(url)
+	if err != nil {
+		httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch registry: "+err.Error())
+		return nil, false
+	}
+	return index, true
+}
+
+// findRegistryEntry returns the entry with this name, or nil.
+func findRegistryEntry(index RegistryIndex, name string) *RegistryEntry {
+	for i := range index {
+		if index[i].Name == name {
+			return &index[i]
+		}
+	}
+	return nil
+}
+
+// HandleGet returns a single extension by ID.
+func (h *ExtensionHandler) HandleGet(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		httputil.MethodNotAllowed(w)
+		return
+	}
+
+	ext, ok := h.extensionOr404(w, id)
+	if !ok {
 		return
 	}
 
@@ -214,13 +255,12 @@ func (h *ExtensionHandler) HandleGet(w http.ResponseWriter, r *http.Request, id 
 // HandleUpdate updates an existing extension.
 func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
-	ext, err := h.store.GetByID(id)
-	if err != nil {
-		httputil.Fail(w, err, "get extension", "extension not found")
+	ext, ok := h.extensionOr404(w, id)
+	if !ok {
 		return
 	}
 
@@ -407,7 +447,7 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 // HandleDelete removes an extension.
 func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -445,7 +485,7 @@ func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, r *http.Request, 
 // HandleSetEnabled toggles the enabled state of an extension.
 func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPatch && r.Method != http.MethodPut {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -467,9 +507,8 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 		_ = h.sandbox.Stop(id)
 	}
 
-	ext, err := h.store.GetByID(id)
-	if err != nil {
-		httputil.Fail(w, err, "get extension", "extension not found")
+	ext, ok := h.extensionOr404(w, id)
+	if !ok {
 		return
 	}
 	statuses := h.sandbox.ListRunning()
@@ -482,17 +521,14 @@ func (h *ExtensionHandler) HandleSetEnabled(w http.ResponseWriter, r *http.Reque
 }
 
 // HandleSetDependencyCache grants — or revokes — the one host directory an extension's language
-// server reads its resolved dependencies from.
-//
-// Its own endpoint, not a field on the sandbox form: an empty value here means "revoke", and the
-// form handler copies only non-empty fields. Applying it also has to destroy the running container,
-// whose mount set is fixed at creation.
-//
-// The manifest declares the location; only a human names the directory — a manifest carrying
-// dependency_host_path is refused at install.
+// server reads its resolved dependencies from. It is its own endpoint rather than a field on the
+// sandbox form because an empty value here means "revoke" while the form handler copies only
+// non-empty fields, and because applying it must destroy the running container, whose mount set
+// is fixed at creation. The manifest declares the location; only a human names the directory, and
+// a manifest carrying dependency_host_path is refused at install.
 func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -511,9 +547,8 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 		return
 	}
 
-	ext, err := h.store.GetByID(id)
-	if err != nil {
-		httputil.Fail(w, err, "get extension", "extension not found")
+	ext, ok := h.extensionOr404(w, id)
+	if !ok {
 		return
 	}
 	declared := ext.SandboxConfig.Dependency
@@ -524,11 +559,12 @@ func (h *ExtensionHandler) HandleSetDependencyCache(w http.ResponseWriter, r *ht
 
 	granted := strings.TrimSpace(*req.HostPath)
 	if granted != "" {
-		granted, err = ValidateDependencyGrant(granted)
+		validated, err := ValidateDependencyGrant(granted)
 		if err != nil {
 			httputil.JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		granted = validated
 	}
 
 	previous := ext.SandboxConfig.DependencyHostPath
@@ -677,7 +713,7 @@ func findLocalExtension(root, author, name string) *localExtension {
 // (extensions/<author>/<name>/manifest.json).
 func (h *ExtensionHandler) HandleLocalExtensions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -709,19 +745,16 @@ func (h *ExtensionHandler) HandleLocalExtensions(w http.ResponseWriter, r *http.
 // HandleRegistryIndex fetches the registry index.
 func (h *ExtensionHandler) HandleRegistryIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
-	url := h.config.RegistryURL
-	if url == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "registry URL not configured")
+	url, ok := h.registrySource(w)
+	if !ok {
 		return
 	}
-
-	index, err := h.registry.FetchIndex(url)
-	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch registry: "+err.Error())
+	index, ok := h.fetchRegistryIndex(w, url)
+	if !ok {
 		return
 	}
 
@@ -733,7 +766,7 @@ func (h *ExtensionHandler) HandleRegistryIndex(w http.ResponseWriter, r *http.Re
 // a client disconnect) while this handler streams SSE progress.
 func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -746,25 +779,16 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	url := h.config.RegistryURL
-	if url == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "registry URL not configured")
+	url, ok := h.registrySource(w)
+	if !ok {
+		return
+	}
+	index, ok := h.fetchRegistryIndex(w, url)
+	if !ok {
 		return
 	}
 
-	index, err := h.registry.FetchIndex(url)
-	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch registry: "+err.Error())
-		return
-	}
-
-	var entry *RegistryEntry
-	for i, e := range index {
-		if e.Name == req.Name {
-			entry = &index[i]
-			break
-		}
-	}
+	entry := findRegistryEntry(index, req.Name)
 	if entry == nil {
 		httputil.JSONError(w, http.StatusNotFound, "extension not found in registry: "+req.Name)
 		return
@@ -796,7 +820,7 @@ func (h *ExtensionHandler) HandleInstall(w http.ResponseWriter, r *http.Request)
 // actual install runs in a detached goroutine and streams SSE progress.
 func (h *ExtensionHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -1052,19 +1076,16 @@ func (h *ExtensionHandler) streamOperation(w http.ResponseWriter, r *http.Reques
 // HandleCheckUpdates checks for available updates.
 func (h *ExtensionHandler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
-	url := h.config.RegistryURL
-	if url == "" {
-		httputil.JSONError(w, http.StatusBadRequest, "registry URL not configured")
+	url, ok := h.registrySource(w)
+	if !ok {
 		return
 	}
-
-	index, err := h.registry.FetchIndex(url)
-	if err != nil {
-		httputil.JSONError(w, http.StatusInternalServerError, "failed to fetch registry: "+err.Error())
+	index, ok := h.fetchRegistryIndex(w, url)
+	if !ok {
 		return
 	}
 
@@ -1131,7 +1152,7 @@ func (h *ExtensionHandler) changelogForUpdate(entry RegistryEntry, sinceHash str
 // HandleSandboxLogs returns sandbox logs (streaming).
 func (h *ExtensionHandler) HandleSandboxLogs(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -1158,13 +1179,12 @@ func (h *ExtensionHandler) HandleSandboxLogs(w http.ResponseWriter, r *http.Requ
 // Rebuilds from Dockerfile if available, otherwise pulls latest pre-built image.
 func (h *ExtensionHandler) HandleUpdateImage(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
-	ext, err := h.store.GetByID(id)
-	if err != nil {
-		httputil.Fail(w, err, "get extension", "extension not found")
+	ext, ok := h.extensionOr404(w, id)
+	if !ok {
 		return
 	}
 	if ext.InstallSource != "registry" {
@@ -1209,13 +1229,7 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 		return
 	}
 
-	var entry *RegistryEntry
-	for i, e := range index {
-		if e.Name == name {
-			entry = &index[i]
-			break
-		}
-	}
+	entry := findRegistryEntry(index, name)
 	if entry == nil {
 		fail(fmt.Errorf("extension not found in registry: %s", name))
 		return
@@ -1352,13 +1366,12 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, events 
 // allowed_domains and optional header templates.
 func (h *ExtensionHandler) HandleProxy(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
-	ext, err := h.store.GetByID(id)
-	if err != nil {
-		httputil.Fail(w, err, "get extension", "extension not found")
+	ext, ok := h.extensionOr404(w, id)
+	if !ok {
 		return
 	}
 	if !ext.Enabled {
@@ -1529,7 +1542,7 @@ func (h *ExtensionHandler) HandleStorage(w http.ResponseWriter, r *http.Request,
 		}
 		httputil.JSONResponse(w, http.StatusOK, map[string]string{"status": "deleted"})
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 	}
 }
 

@@ -12,16 +12,12 @@ type MemoryUsageMB struct {
 	OOMKills uint64 // oom_kill counter
 }
 
-// MemoryTracker answers "how much memory is this container using" for the two sandbox
-// managers' status displays. Three rules made the duplication worth removing:
-//
-//   - resolving the cgroup directory costs a podman inspect plus a /proc read, so it is
-//     resolved once per container and reused;
-//   - that path goes stale silently — the cgroup disappears when the container stops, so
-//     a failed read must drop the cache rather than keep reading a dead path;
-//   - a container that stopped between polls is not an error: it is no data.
-//
-// Safe for concurrent use without a caller-side lock.
+// MemoryTracker answers "how much memory is this container using" for the two sandbox managers'
+// status displays. Three rules: the cgroup directory costs a podman inspect plus a /proc read, so
+// it is resolved once per container and reused; that path goes stale silently, because the cgroup
+// disappears when the container stops, so a failed read must drop the cache rather than keep
+// reading a dead path; and a container that stopped between polls is no data, not an error.
+// Safe for concurrent use.
 type MemoryTracker struct {
 	// resolve finds a container's cgroup v2 directory; a field so the caching rules are
 	// testable without podman.

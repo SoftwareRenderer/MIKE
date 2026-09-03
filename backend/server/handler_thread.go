@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"kanban/backend/httputil"
 	"log"
 	"net/http"
 	"strings"
@@ -30,7 +31,7 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		s.handleThreadDelete(w, r, projectID, taskID)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 	}
 }
 
@@ -162,7 +163,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	var req struct {
@@ -280,7 +281,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	var req struct {

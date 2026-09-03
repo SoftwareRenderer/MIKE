@@ -18,7 +18,7 @@ func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	if err := te.RetryTask(projectID, taskID); err != nil {
@@ -33,7 +33,7 @@ func (te *TaskExecutor) HandleRetry(w http.ResponseWriter, r *http.Request) {
 // HandleResume resumes a paused task (delegates to HandleRetry).
 func (te *TaskExecutor) HandleResume(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	te.HandleRetry(w, r)
@@ -44,7 +44,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	var req struct {
@@ -72,12 +72,12 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 
 	// A duplicate is the same submit arriving twice (double-click, WS replay, offline queue
 	// flush): the thread's last row is still that identical user message. Once the agent has
-	// said anything since, the same words again are a new answer.
+	// answered anything since, the same words are a new answer.
 	//
-	// A regenerate is not one of those: the row it matches IS the question being re-answered, and the
-	// request is to run the thread as it already stands. That is how "New Thread" arrives — the fork
-	// writes the edited question into the new thread, and this send is what starts it. So the row is not
-	// written twice, but the executor is still triggered.
+	// A regenerate is not one: the row it matches is the question being re-answered, and the
+	// request is to run the thread as it stands — that is how "New Thread" arrives, the fork
+	// writing the edited question and this send starting it. So the row is not written twice,
+	// but the executor still runs.
 	msgID := uuid.New().String()
 	lastRowIsThisMessage := false
 	if last, err := te.store.GetLastMessageInThread(threadID); err == nil && last != nil &&
@@ -182,7 +182,7 @@ func (te *TaskExecutor) HandleSummarize(w http.ResponseWriter, r *http.Request) 
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 
@@ -394,7 +394,7 @@ func (te *TaskExecutor) HandleCompact(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 

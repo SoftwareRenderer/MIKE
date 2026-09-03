@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 	"time"
 
@@ -111,42 +110,6 @@ func (te *TaskExecutor) worktreeChangedFiles(taskID string) ([]string, error) {
 		return nil, err
 	}
 	return git.ParseStatusPaths(out), nil
-}
-
-// diagnosticCode returns a finding's code as the opaque string the extension
-// declared it with, or "" when it has none.
-func diagnosticCode(d LSPDiagnostic) string {
-	switch c := d.Code.(type) {
-	case string:
-		return c
-	case float64:
-		return strconv.Itoa(int(c))
-	case json.Number:
-		return c.String()
-	}
-	return ""
-}
-
-// filterUnresolvable drops the findings a language server produces because it
-// could not load the project at all — "no required module provides package X",
-// "no active builds contain Y". They are not facts about the code; they are the
-// server guessing about a dependency root it was never given, and a model told
-// about them spends its turns "fixing" imports that resolve fine in the sandbox.
-//
-// Nothing is dropped while the server's own environment check says the workspace
-// resolves, so a healthy session keeps reporting everything it always did.
-func filterUnresolvable(env lsp.EnvironmentReport, findings []LSPDiagnostic) []LSPDiagnostic {
-	if env.Healthy || len(env.SuppressCodes) == 0 || len(findings) == 0 {
-		return findings
-	}
-	kept := make([]LSPDiagnostic, 0, len(findings))
-	for _, d := range findings {
-		if env.Suppresses(diagnosticCode(d)) {
-			continue
-		}
-		kept = append(kept, d)
-	}
-	return kept
 }
 
 // composeDiagnosticsAdvisory turns one pass's per-file findings into the single note the

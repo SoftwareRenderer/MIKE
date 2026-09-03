@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"kanban/backend/httputil"
 	"net/http"
 	"time"
 
@@ -129,7 +130,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	// Get the task to find its current thread
@@ -230,7 +231,7 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 		JSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
-	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	httputil.MethodNotAllowed(w)
 }
 
 // cleanupDeletedMessageForks deletes orphan fork threads when a checkpoint message is deleted.

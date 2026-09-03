@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"kanban/backend/httputil"
 	"log"
 	"mime"
 	"net/http"
@@ -284,7 +285,7 @@ type previewServeRequest struct {
 // siblings.
 func (s *Server) HandlePreviewServe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	// +8 KB slack over the cap for JSON framing/escaping.
@@ -378,7 +379,7 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	rel := strings.TrimPrefix(r.PathValue("path"), "/")
@@ -488,7 +489,7 @@ func (s *Server) HandlePreviewGet(w http.ResponseWriter, r *http.Request) {
 // this route (documented limitation).
 func (s *Server) HandlePreviewNav(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	seq, nav, ok := s.previewStore.lastNav(r.PathValue("token"))
@@ -508,7 +509,7 @@ func (s *Server) HandlePreviewNav(w http.ResponseWriter, r *http.Request) {
 // TTL sweep is the backstop.
 func (s *Server) HandlePreviewDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		httputil.MethodNotAllowed(w)
 		return
 	}
 	s.previewStore.delete(r.PathValue("token"))

@@ -97,19 +97,16 @@ func (w *streamLineWriter) emitLocked(chunk string) {
 	}
 }
 
-// execCommandStream runs a shell command directly (no sandbox) in dir, returns its
-// combined output, and forwards it line by line to onLine (may be nil).
+// execCommandStream runs a shell command on the host in dir, returns its combined output,
+// and forwards it line by line to onLine (may be nil).
 //
-// The command gets the allowlisted environment only (agent.SafeAgentEnv): these
-// commands are LLM-driven (prompt injection lifts instructions out of repo
-// content) and run on the host for sandbox-disabled projects, so the server
-// environment — above all MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY — must
-// never reach them. GIT_TERMINAL_PROMPT=0 keeps an injected git transfer from
-// blocking on a credential prompt until the tool timeout kills it.
+// The command gets the allowlisted environment only (agent.SafeAgentEnv): these commands are
+// LLM-driven and run on the host for sandbox-disabled projects, so the server environment —
+// above all MIKE_LOGIN_PASSWORD and MIKE_ENCRYPTION_KEY — must never reach them.
+// GIT_TERMINAL_PROMPT=0 stops an injected git transfer from blocking on a credential prompt.
 //
-// timeout is seconds and is enforced: the whole process group is killed when it
-// expires and the error says so. A command that detaches a child returns as soon as
-// the command itself exits — the detached child is left running on purpose.
+// timeout is seconds and is enforced: the whole process group is killed when it expires and
+// the error says so. A child the command detaches keeps running, on purpose.
 func execCommandStream(ctx context.Context, dir, command string, timeout int64, onLine func(text string)) (string, error) {
 	secs := normalizeBashTimeout(timeout)
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(secs)*time.Second)

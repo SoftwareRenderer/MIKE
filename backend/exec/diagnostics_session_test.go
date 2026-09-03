@@ -39,12 +39,6 @@ type recordingLSPManager struct {
 	// A server that has not loaded the package publishes its loader state first and the real
 	// findings a moment later, and the pass treats those two frames differently.
 	publishSequence func(file string) [][]LSPDiagnostic
-	// environment, when set, is what the fake reports for a file. Unset means healthy,
-	// so a test that says nothing about the environment sees every finding: the gate can
-	// only ever subtract, and that must be the default a test starts from.
-	environment func(file string) lsp.EnvironmentReport
-	// reloadQuestions records each FilesChanged call, so a test can pin which files a turn
-	// handed to the manager as "the project changed".
 	reloadQuestions [][]string
 }
 
@@ -53,13 +47,6 @@ func newRecordingLSPManager(registry *lsp.ExtensionRegistry) *recordingLSPManage
 }
 
 func (m *recordingLSPManager) GetRegistry() *lsp.ExtensionRegistry { return m.registry }
-
-func (m *recordingLSPManager) Environment(_, filePath string) lsp.EnvironmentReport {
-	if m.environment != nil {
-		return m.environment(filePath)
-	}
-	return lsp.EnvironmentReport{Healthy: true}
-}
 
 func (m *recordingLSPManager) FilesChanged(_ string, changed []string) bool {
 	m.mu.Lock()

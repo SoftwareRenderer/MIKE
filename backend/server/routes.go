@@ -2,6 +2,7 @@ package server
 
 import (
 	"io/fs"
+	"kanban/backend/httputil"
 	"net/http"
 	"os"
 	"strings"
@@ -57,7 +58,7 @@ func (s *Server) setupRoutes() {
 		case http.MethodDelete:
 			s.extHandler.HandleDelete(w, r, id)
 		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			httputil.MethodNotAllowed(w)
 		}
 	})
 	s.mux.HandleFunc("/api/extensions/{id}/enabled", func(w http.ResponseWriter, r *http.Request) {
