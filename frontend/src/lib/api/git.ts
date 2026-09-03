@@ -1,10 +1,5 @@
 import type { GitLogResponse, TaskCommit } from '../types';
 import { API_BASE, apiFetch, apiError, ensureCsrfToken } from './helpers';
-import {
-    getOfflineStatus,
-    queueWrite,
-    resetWorktreeRaw,
-} from './queue';
 import { setBoardCache, getBoardCache, diffCacheKey, doneDiffCacheKey } from '../storage';
 import { markCached } from './cache';
 
@@ -208,14 +203,6 @@ export async function getDiffFile(projectId: string, taskId: string, path: strin
     return res.json();
 }
 
-/** Reset a task's worktree to a specific commit. Queued when offline. */
-export async function resetWorktree(projectId: string, taskId: string, commitHash: string): Promise<{ status: string }> {
-    if (getOfflineStatus()) {
-        return await queueWrite('resetWorktree', { projectId, taskId, commitHash }, { status: 'queued' });
-    }
-    return resetWorktreeRaw(projectId, taskId, commitHash);
-}
-
 /** Stage or unstage a single file in the task's worktree. */
 export async function stageFile(projectId: string, taskId: string, path: string, stage: boolean): Promise<{ status: string; action: string }> {
     const csrfToken = await ensureCsrfToken();
@@ -239,25 +226,6 @@ export async function getTaskGitLog(projectId: string, taskId: string, options?:
     if (options?.offset != null) params.set('offset', String(options.offset));
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/git/log?${params}`);
     if (!res.ok) throw await apiError(res, 'Failed to fetch task git log');
-    return res.json();
-}
-
-/** List all branches in a task's worktree. */
-export async function getTaskGitBranches(projectId: string, taskId: string): Promise<string[]> {
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/git/branches`);
-    if (!res.ok) throw await apiError(res, 'Failed to fetch task branches');
-    return res.json();
-}
-
-/** Checkout a branch in a task's worktree. Requires CSRF token. */
-export async function checkoutTaskBranch(projectId: string, taskId: string, branch: string): Promise<{ status: string; branch: string }> {
-    const csrfToken = await ensureCsrfToken();
-    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/git/checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}) },
-        body: JSON.stringify({ branch }),
-    });
-    if (!res.ok) throw await apiError(res, 'Failed to checkout branch');
     return res.json();
 }
 

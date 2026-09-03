@@ -3,6 +3,7 @@
     import type { DiffDisplayItem, CollapsedBlock } from '$lib/utils/diff-parser';
     import { buildDisplayItems, truncatePath, getStatusBadge } from '$lib/utils/diff-parser';
     import { highlightLinesAsync } from '$lib/highlighter';
+    import { formatBytes } from '$lib/utils/format';
     import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
 import { slide } from 'svelte/transition';
     import '$lib/styles/diff-viewer.css';
@@ -297,11 +298,6 @@ import { slide } from 'svelte/transition';
         return buildDisplayItems(rows);
     }
 
-    function formatFileSize(bytes: number): string {
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    }
 
     function handleRowClick(filePath: string, lineNumber: number | null) {
         if (onLineClick && lineNumber != null) {
@@ -361,7 +357,7 @@ import { slide } from 'svelte/transition';
                                     <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
                                     <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                                 </svg>
-                                <span>Binary file — {formatFileSize(file.fileSize)}</span>
+                                <span>Binary file — {formatBytes(file.fileSize)}</span>
                             </div>
                             {:else}
                             <div class="diff-large-file-notice">
@@ -369,7 +365,7 @@ import { slide } from 'svelte/transition';
                                     <path d="M3 2h10l1 1v11a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.5"/>
                                     <path d="M6 6h4M6 8h4M6 10h2" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
                                 </svg>
-                                <span>Large file — {formatFileSize(file.fileSize)} (+{file.origAdded ?? file.added}/-{file.origRemoved ?? file.removed})</span>
+                                <span>Large file — {formatBytes(file.fileSize)} (+{file.origAdded ?? file.added}/-{file.origRemoved ?? file.removed})</span>
                             </div>
                             {/if}
                         </div>
@@ -544,7 +540,7 @@ import { slide } from 'svelte/transition';
                 <span class="diff-file-path" title={entry.path}>{truncatePath(entry.path)}</span>
                 {#if isLarge && !isBin}
                     <span class="diff-file-stats">
-                        <span class="diff-large-size">{formatFileSize(entry.fileSize ?? 0)}</span>
+                        <span class="diff-large-size">{formatBytes(entry.fileSize ?? 0)}</span>
                     </span>
                 {:else if !isBin && (entry.origAdded ?? ufile.added ?? 0) > 0}
                     <span class="diff-file-stats">
@@ -575,7 +571,7 @@ import { slide } from 'svelte/transition';
                                     <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
                                     <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
                                 </svg>
-                                <span>Binary file — {formatFileSize(entry.fileSize ?? 0)}</span>
+                                <span>Binary file — {formatBytes(entry.fileSize ?? 0)}</span>
                             </div>
                             {:else}
                             <div class="diff-large-file-notice">
@@ -583,7 +579,7 @@ import { slide } from 'svelte/transition';
                                     <path d="M3 2h10l1 1v11a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity="0.5"/>
                                     <path d="M6 6h4M6 8h4M6 10h2" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
                                 </svg>
-                                <span>Large file — {formatFileSize(entry.fileSize ?? 0)}</span>
+                                <span>Large file — {formatBytes(entry.fileSize ?? 0)}</span>
                             </div>
                             {/if}
                         </div>

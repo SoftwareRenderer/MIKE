@@ -1,8 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, fireEvent, cleanup, act } from '@testing-library/svelte';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 // Mock all sub-components that ChatEntries depends on
 vi.mock('$lib/components/Chat/ChatMessage.svelte', () => ({
@@ -15,7 +12,6 @@ vi.mock('$lib/components/Chat/QueueIndicator.svelte', () => ({
     default: () => '<div class="mock-queue-indicator"></div>',
 }));
 vi.mock('$lib/utils/toolArgs', () => ({
-    formatToolArgs: vi.fn(() => ''),
 }));
 // The follow tracker reads its bottom threshold from this module, so stub it here.
 vi.mock('$lib/constants', () => ({
@@ -24,9 +20,6 @@ vi.mock('$lib/constants', () => ({
 
 import ChatEntries from '$lib/components/Chat/ChatEntries.svelte';
 import { createChatFollow } from '$lib/composables/use-chat-follow.svelte';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const source = readFileSync(resolve(__dirname, '../Chat/ChatEntries.svelte'), 'utf-8');
 
 async function flush() {
     for (let i = 0; i < 6; i++) await Promise.resolve();
@@ -79,7 +72,6 @@ const baseProps = {
     onMsgDelete: vi.fn(),
     onMsgFork: vi.fn(),
     onMsgSend: vi.fn(),
-    onMsgEdit: vi.fn(),
     onRegenerate: vi.fn(),
     onNavigateTask: vi.fn(),
 };
@@ -178,26 +170,5 @@ describe('ChatEntries — Jump to latest button', () => {
         expect(container.querySelector('.chat-messages')?.contains(content ?? null)).toBe(true);
         expect(content?.querySelectorAll('.chat-entry').length).toBe(3);
         cleanup();
-    });
-});
-
-describe('ChatEntries — Jump to latest styling', () => {
-    it('is positioned absolutely within the chat-messages-wrapper', () => {
-        expect(source).toMatch(/\.chat-jump-latest\s*\{[\s\S]*?position:\s*absolute/);
-        expect(source).toMatch(/\.chat-jump-latest\s*\{[\s\S]*?bottom:/);
-        expect(source).toMatch(/\.chat-jump-latest\s*\{[\s\S]*?right:/);
-    });
-
-    it('stays at or below the sticky header z-index of 5', () => {
-        const m = source.match(/\.chat-jump-latest\s*\{[\s\S]*?z-index:\s*(\d+)/);
-        expect(m).toBeTruthy();
-        expect(parseInt(m![1])).toBeLessThanOrEqual(5);
-    });
-
-    it('is touch-friendly and animated, and themed like the rest of the chat', () => {
-        expect(source).toMatch(/\.chat-jump-latest[^{]*\{[\s\S]*?(min-width|min-height|width|height):\s*\d+px/);
-        expect(source).toMatch(/\.chat-jump-latest[^{]*\{[\s\S]*?(transition|animation|@keyframes)/);
-        expect(source).toMatch(/\.chat-jump-latest[^{]*\{[\s\S]*?(background|border)/);
-        expect(source).toMatch(/\.chat-jump-latest.*:hover[\s\S]*?(accent|hover)/);
     });
 });

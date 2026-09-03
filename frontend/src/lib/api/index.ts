@@ -76,7 +76,6 @@ export {
     getTaskThreads,
     switchTaskThread,
     forkTaskThread,
-    deleteTaskThread,
 } from './threads';
 
 // -- Config --
@@ -92,7 +91,6 @@ export {
     getTaskDiff,
     getTaskCommits,
     getDiffFile,
-    resetWorktree,
     stageFile,
     getGitLogFull,
     getCommitDiff,
@@ -103,8 +101,6 @@ export {
     stageProjectFile,
     commitProject,
     getTaskGitLog,
-    getTaskGitBranches,
-    checkoutTaskBranch,
     getTaskCommitDiff,
 } from './git';
 
@@ -129,7 +125,6 @@ export {
 export {
     listExtensions,
     listLocalExtensions,
-    getExtension,
     updateExtension,
     updateExtensionImage,
     deleteExtension,
@@ -140,6 +135,4 @@ export {
     installExtension,
     installLocalExtension,
     checkUpdates,
-    getExtensionLogs,
-    type BuildProgressEvent,
 } from './extensions';

@@ -1,5 +1,59 @@
 import { describe, it, expect } from 'vitest';
-import { formatRelativeTime, formatTimestamp, formatElapsed, formatDuration } from '$lib/utils/format-time';
+import { formatRelativeTime, formatTimestamp, formatElapsed, formatDuration, timeAgo } from '$lib/utils/format-time';
+
+const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
+const WEEK = 7 * DAY, MONTH = 30 * DAY, YEAR = 365 * DAY;
+const ago = (ms: number) => new Date(Date.now() - ms);
+
+describe('timeAgo', () => {
+    it('answers "just now" below a minute', () => {
+        expect(timeAgo(ago(30_000))).toBe('just now');
+    });
+
+    it('counts minutes, then hours, then days', () => {
+        expect(timeAgo(ago(5 * MIN))).toBe('5m ago');
+        expect(timeAgo(ago(3 * HOUR))).toBe('3h ago');
+        expect(timeAgo(ago(2 * DAY))).toBe('2d ago');
+    });
+
+    it('accepts an epoch number, an ISO string and a Date alike', () => {
+        const when = ago(10 * MIN);
+        expect(timeAgo(when.getTime())).toBe('10m ago');
+        expect(timeAgo(when.toISOString())).toBe('10m ago');
+        expect(timeAgo(when)).toBe('10m ago');
+    });
+
+    it('keeps counting in weeks, months and years on the compact scale', () => {
+        expect(timeAgo(ago(3 * WEEK), { scale: 'compact' })).toBe('3w ago');
+        expect(timeAgo(ago(4 * WEEK))).toBe('4w ago');
+        expect(timeAgo(ago(6 * WEEK))).toBe('1mo ago');
+        expect(timeAgo(ago(3 * MONTH))).toBe('3mo ago');
+        expect(timeAgo(ago(2 * YEAR))).toBe('2y ago');
+    });
+
+    it('switches to the date itself on the calendar scale', () => {
+        const result = timeAgo(ago(10 * DAY), { scale: 'calendar' });
+        expect(result).not.toContain('ago');
+        expect(result).toMatch(/[A-Za-z]+ \d+/);
+    });
+
+    it('adds the year to a calendar date from another year', () => {
+        expect(timeAgo(new Date(new Date().getFullYear() - 2, 2, 4), { scale: 'calendar' }))
+            .toMatch(/\d{4}$/);
+    });
+
+    it('prefixes every rung, including "just now"', () => {
+        expect(timeAgo(ago(30_000), { prefix: 'Built ' })).toBe('Built just now');
+        expect(timeAgo(ago(5 * MIN), { prefix: 'Built ' })).toBe('Built 5m ago');
+    });
+
+    it('returns an empty string for something that is not a moment', () => {
+        // Callers use that as "fall back to whatever raw text I was given".
+        expect(timeAgo('not-a-date')).toBe('');
+        expect(timeAgo('')).toBe('');
+        expect(timeAgo(NaN)).toBe('');
+    });
+});
 
 describe('formatRelativeTime', () => {
     it('returns empty string for empty input', () => {

@@ -1,17 +1,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { render, cleanup } from '@testing-library/svelte';
+import { render, cleanup, fireEvent } from '@testing-library/svelte';
 import StartPanel from '../Chat/StartPanel.svelte';
 import { appStore } from '$lib/stores';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const startPanelPath = resolve(__dirname, '../Chat/StartPanel.svelte');
-const source = readFileSync(startPanelPath, 'utf-8');
+import type { Provider } from '$lib/types';
 
 const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 const WIN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+
+const LLM: Provider = {
+    id: 1, name: 'Test Provider', url: 'http://neptune:8010/v1', kind: 'llm',
+    models: [{ name: 'gpt-test' }], concurrency: 1, max_requests_per_second: 0,
+} as unknown as Provider;
 
 afterEach(() => {
     cleanup();
@@ -19,8 +18,10 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
-function renderPanel(config: unknown = null) {
+function renderPanel(config: unknown = null, overrides: Record<string, unknown> = {}) {
     appStore.config = config as never;
+    const onStartTask = vi.fn();
+    const onOperatingModeToggle = vi.fn();
     const utils = render(StartPanel, {
         props: {
             providers: [],
@@ -32,61 +33,73 @@ function renderPanel(config: unknown = null) {
             disabled: false,
             isAgentSelected: () => false,
             onModelSelect: vi.fn(),
-            onOperatingModeToggle: vi.fn(),
-            onStartTask: vi.fn(),
+            onOperatingModeToggle,
+            onStartTask,
+            ...overrides,
         },
     });
     const button = () => utils.container.querySelector('.btn-start-task') as HTMLButtonElement;
     const keyHint = () => button()?.querySelector('kbd.key-hint') as HTMLElement | null;
-    return { utils, button, keyHint };
+    const modeToggle = () => utils.container.querySelector('.btn-plan-toggle') as HTMLButtonElement | null;
+    return { utils, container: utils.container, button, keyHint, modeToggle, onStartTask, onOperatingModeToggle };
 }
 
 describe('StartPanel rendering', () => {
-    it('shows Start Task button', () => {
-        expect(source).toContain('btn-start-task');
-        expect(source).toContain('Start Task');
+    it('offers a Start Task button', () => {
+        const { button } = renderPanel();
+        expect(button()).toBeTruthy();
+        expect(button()?.textContent).toContain('Start Task');
     });
 
-    it('shows model selector when providers are available', () => {
-        expect(source).toContain('providers.length > 0');
-        expect(source).toContain('ModelSelector');
+    it('starts the task when the button is clicked', async () => {
+        const { button, onStartTask } = renderPanel();
+        await fireEvent.click(button());
+        expect(onStartTask).toHaveBeenCalledTimes(1);
     });
 
-    it('shows operating mode toggle when not in agent mode', () => {
-        expect(source).toContain('!isAgentSelected()');
-        expect(source).toContain('btn-plan-toggle');
+    it('offers no model selector while there is no provider, and one once there is', () => {
+        const none = renderPanel();
+        expect(none.container.querySelector('.model-selector')).toBeNull();
+        cleanup();
+
+        const one = renderPanel(null, { providers: [LLM], selectedModel: 'gpt-test' });
+        expect(one.container.querySelector('.model-selector')).toBeTruthy();
     });
 
-    it('shows Plan mode indicator', () => {
-        expect(source).toContain('operatingMode === \'plan\'');
-        expect(source).toContain('Plan');
+    it('names the current operating mode on the toggle', () => {
+        expect(renderPanel(null, { operatingMode: 'act' }).modeToggle()?.textContent).toContain('Act');
+        cleanup();
+        expect(renderPanel(null, { operatingMode: 'plan' }).modeToggle()?.textContent).toContain('Plan');
+        cleanup();
+        expect(renderPanel(null, { operatingMode: 'explore' }).modeToggle()?.textContent).toContain('Explore');
     });
 
-    it('shows Act mode indicator', () => {
-        expect(source).toContain('Act');
+    it('switches the operating mode from the toggle', async () => {
+        const { modeToggle, onOperatingModeToggle } = renderPanel();
+        await fireEvent.click(modeToggle()!);
+        expect(onOperatingModeToggle).toHaveBeenCalledTimes(1);
     });
 
-    it('shows Explore mode indicator', () => {
-        expect(source).toContain('Explore');
-        expect(source).toContain('explore');
+    it('hides the mode toggle for an agent provider, which has no modes', () => {
+        const { modeToggle } = renderPanel(null, { isAgentSelected: () => true });
+        expect(modeToggle()).toBeNull();
     });
 
-    it('disables Start Task button while starting', () => {
-        expect(source).toContain('disabled={isStarting || disabled');
-        expect(source).toContain('Starting...');
+    it('disables the button while starting and says so', () => {
+        const { button } = renderPanel(null, { isStarting: true });
+        expect(button()?.disabled).toBe(true);
+        expect(button()?.textContent).toContain('Starting...');
+        expect(button()?.querySelector('.spinner-inline')).toBeTruthy();
     });
 
-    it('disables Start Task button when no model selected', () => {
-        expect(source).toContain('!selectedModel');
+    it('disables the button when a provider is configured but no model is chosen', () => {
+        expect(renderPanel(null, { providers: [LLM], selectedModel: '' }).button()?.disabled).toBe(true);
+        cleanup();
+        expect(renderPanel(null, { providers: [LLM], selectedModel: 'gpt-test' }).button()?.disabled).toBe(false);
     });
 
-    it('shows spinner while starting', () => {
-        expect(source).toContain('spinner-inline');
-        expect(source).toContain('animation: spin');
-    });
-
-    it('has proper aria-label on mode toggle', () => {
-        expect(source).toContain('aria-label="Toggle operating mode"');
+    it('disables the button when the caller says so', () => {
+        expect(renderPanel(null, { disabled: true }).button()?.disabled).toBe(true);
     });
 });
 

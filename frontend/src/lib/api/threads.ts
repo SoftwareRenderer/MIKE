@@ -5,7 +5,6 @@ import {
     queueWrite,
     switchTaskThreadRaw,
     forkTaskThreadRaw,
-    deleteTaskThreadRaw,
 } from './queue';
 
 // -- Thread endpoints --
@@ -36,12 +35,4 @@ export async function forkTaskThread(projectId: string, taskId: string, fromThre
         } as Thread);
     }
     return forkTaskThreadRaw(projectId, taskId, fromThreadId, fromMessageId, newContent);
-}
-
-/** Delete a conversation thread. Queued when offline. */
-export async function deleteTaskThread(projectId: string, taskId: string, threadId: string): Promise<{ status: string }> {
-    if (getOfflineStatus()) {
-        return await queueWrite('deleteTaskThread', { projectId, taskId, threadId }, { status: 'queued' });
-    }
-    return deleteTaskThreadRaw(projectId, taskId, threadId);
 }
