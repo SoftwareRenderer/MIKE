@@ -1,10 +1,10 @@
 <script lang="ts">
     import type { Extension, RegistryEntry, ExtensionUpdate, SandboxMount, SandboxEnv } from '$lib/types';
-    import { listExtensions, listLocalExtensions, getRegistryIndex, installExtension, installLocalExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension, updateExtensionImage } from '$lib/api';
+    import { listExtensions, listLocalExtensions, getRegistryIndex, installExtension, installLocalExtension, deleteExtension, setExtensionEnabled, setDependencyCache, getHomeDirectory, checkUpdates, updateExtension, updateExtensionImage } from '$lib/api';
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
-    import { isDangerousPermission, requiresInstallReview, sortPermissions } from '$lib/utils/extension-permissions';
+    import { isDangerousPermission, requiresInstallReview, sortPermissions, dependencyCacheDeclaration } from '$lib/utils/extension-permissions';
     import { effectiveConfigFields, initialEditConfig, HOST_OWNED_LSP_CONFIG_KEY, type ConfigField } from '$lib/utils/extension-config';
     import { memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { orderBrowseEntries } from '$lib/composables/use-browse-order';
@@ -346,6 +346,84 @@
             await loadExtensions();
         } catch (e: any) {
             error = e.message || 'Failed to update extension';
+        }
+    }
+
+    // The one directory a language server may read its resolved dependencies from. One field per
+    // extension, applied on purpose rather than on blur, because the server stops the running
+    // sandbox when it changes — an accidental keystroke must not cost anyone a cold server.
+    let depDraft = $state<Record<string, string>>({});
+    let depBusy = $state<Record<string, boolean>>({});
+    let depError = $state<Record<string, string>>({});
+    let homeDir = $state('');
+    // Not state: nothing renders from either, and keeping them out of the reactive graph means the
+    // effect below cannot re-trigger itself while it fills the fields it reads.
+    let homeTried = false;
+    const depPrefilled = new Set<string>();
+
+    /**
+     * Where to suggest putting a dependency directory: the container path the extension declared,
+     * mirrored under the server's own home. Language-blind by construction — it reads nothing but
+     * the declaration and one path the server already reports at /api/home, never a probe — and for
+     * the common case it lands on the directory the toolchain already uses.
+     */
+    function suggestedDepPath(ext: Extension): string {
+        const declared = ext.sandbox_config?.dependency_cache;
+        return declared && homeDir ? homeDir + declared.container_path : '';
+    }
+
+    $effect(() => {
+        // One fetch for the home directory, and only once some installed extension declares a
+        // dependency cache; then a prefill where nothing is granted yet. The suggestion is text in
+        // the field, editable and reviewable — never a value applied behind the user's back.
+        const home = homeDir;
+        if (!home) {
+            if (!homeTried && extensions.some((e) => e.sandbox_config?.dependency_cache)) {
+                homeTried = true;
+                getHomeDirectory()
+                    .then((h) => { homeDir = h; })
+                    .catch(() => { /* a suggestion is a convenience; typing the path is the fallback */ });
+            }
+            return;
+        }
+        for (const ext of extensions) {
+            const declared = ext.sandbox_config?.dependency_cache;
+            if (!declared || ext.sandbox_config?.dependency_host_path) continue;
+            if (depPrefilled.has(ext.id)) continue;
+            depPrefilled.add(ext.id);
+            depDraft[ext.id] = suggestedDepPath(ext);
+        }
+    });
+
+    // A rejected path is about one directory, so its message lands on that row and nowhere else.
+    async function applyDependencyCache(ext: Extension) {
+        const path = (depDraft[ext.id] ?? '').trim();
+        depError[ext.id] = '';
+        if (!path) {
+            depError[ext.id] = 'Give a directory, or choose Revoke to stop sharing one.';
+            return;
+        }
+        depBusy[ext.id] = true;
+        try {
+            await setDependencyCache(ext.id, path);
+            await loadExtensions();
+        } catch (e: any) {
+            depError[ext.id] = e.message || 'Could not use that directory';
+        } finally {
+            depBusy[ext.id] = false;
+        }
+    }
+
+    async function revokeDependencyCache(ext: Extension) {
+        depError[ext.id] = '';
+        depBusy[ext.id] = true;
+        try {
+            await setDependencyCache(ext.id, '');
+            await loadExtensions();
+        } catch (e: any) {
+            depError[ext.id] = e.message || 'Could not revoke the directory';
+        } finally {
+            depBusy[ext.id] = false;
         }
     }
 
@@ -760,6 +838,54 @@
                                     <ToggleSwitch class="card-toggle" checked={ext.enabled} onChange={() => handleToggleEnabled(ext.id, !ext.enabled)} />
                                 </div>
                             </div>
+                            {#if ext.environment && !ext.environment.healthy}
+                                <!-- One honest sentence for the state behind the diagnostics core
+                                     withheld: the server could not resolve this project, so its
+                                     "package not found" answers were never facts about the code. -->
+                                <div class="ext-env-note" role="status">
+                                    <span class="ext-env-note-text">{ext.environment.note || 'This language server cannot resolve the project it is serving, so its unresolved-import diagnostics are being withheld.'}</span>
+                                </div>
+                            {/if}
+                            {#if ext.sandbox_config?.dependency_cache}
+                                {@const dep = ext.sandbox_config.dependency_cache}
+                                {@const granted = ext.sandbox_config.dependency_host_path}
+                                <!-- One directory, one extension, granted by a person: the manifest says where
+                                     this server looks inside its sandbox and nothing more. What fills it is
+                                     the user's, which is why the field has no value until one is applied. -->
+                                <div class="ext-dep" class:ext-dep-granted={!!granted}>
+                                    <div class="ext-dep-row">
+                                        <span class="ext-dep-label">Dependencies</span>
+                                        {#if granted}
+                                            <code class="ext-dep-path" title={`${granted} → ${dep.container_path} in this server’s sandbox (${dep.read_only ? 'read-only' : 'read-write'}); tasks and terminals mount the same directory read-write`}>{granted}</code>
+                                            <button class="btn btn-small" onclick={() => revokeDependencyCache(ext)} disabled={!!depBusy[ext.id]}>Revoke</button>
+                                        {:else}
+                                            <span class="ext-dep-none">Not shared — this server resolves nothing from outside its image.</span>
+                                        {/if}
+                                    </div>
+                                    <div class="ext-dep-edit">
+                                        <input
+                                            type="text"
+                                            class="ext-dep-input"
+                                            aria-label={`Host directory holding ${ext.name} resolved dependencies`}
+                                            placeholder="/path/to/dependency/directory"
+                                            bind:value={depDraft[ext.id]}
+                                            disabled={!!depBusy[ext.id]}
+                                            onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyDependencyCache(ext); } }}
+                                        />
+                                        <button
+                                            class="btn btn-small"
+                                            onclick={() => applyDependencyCache(ext)}
+                                            disabled={!!depBusy[ext.id] || !(depDraft[ext.id] ?? '').trim()}
+                                        >{depBusy[ext.id] ? 'Applying…' : granted ? 'Change' : 'Apply'}</button>
+                                    </div>
+                                    <p class="ext-dep-hint">
+                                        Read-only for this server, at <code>{dep.env}={dep.container_path}</code>. Tasks and sandboxed terminals mount it read-write, so building the project fills it. A project image that runs as a non-root user cannot write into it — its downloads stay inside its own container.
+                                    </p>
+                                    {#if depError[ext.id]}
+                                        <p class="ext-dep-error" role="alert">{depError[ext.id]}</p>
+                                    {/if}
+                                </div>
+                            {/if}
                             {#if buildProgress[ext.name]}
                                 {@const bp = buildProgress[ext.name]}
                                 <div class="ext-build" class:ext-build-error={!!bp.error}>
@@ -1068,6 +1194,7 @@
 
         {@const pendingPerms = sortPermissions((pendingInstall.entry.capabilities?.ui?.permissions ?? []) as string[])}
         {@const pendingNetwork = pendingInstall.entry.capabilities?.network}
+        {@const pendingDep = dependencyCacheDeclaration(pendingInstall.entry.capabilities)}
         <BaseModal
             title={`Install "${pendingInstall.entry.display_name || pendingInstall.entry.name}"?`}
             width="480px"
@@ -1090,6 +1217,25 @@
                                     <span class="cap-detail-tag">{domain}</span>
                                 {/each}
                             </div>
+                        {/if}
+                    </div>
+                {/if}
+                {#if pendingDep}
+                    <!-- Not a sandbox escape and not labelled as one: installing grants nothing.
+                         What it does is mean a folder on this machine gets asked about afterwards,
+                         which is the part worth saying before anyone clicks Install. -->
+                    <div class="cap-permission">
+                        <span class="cap-permission-name">A dependencies folder on this machine</span>
+                        <span class="cap-permission-desc">
+                            This language server reads already-downloaded dependencies from
+                            <code>{pendingDep.env}={pendingDep.container_path}</code> inside its sandbox. Installing it grants
+                            nothing by itself: afterwards you can point it at a folder of your choosing, and until you do it
+                            resolves only what its own image contains.
+                        </span>
+                        {#if !pendingDep.read_only}
+                            <span class="cap-permission-desc">
+                                It also asks to <strong>write</strong> there, so it can download what is missing on its own.
+                            </span>
                         {/if}
                     </div>
                 {/if}
@@ -1278,6 +1424,108 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+
+    /* The withheld-diagnostics state, in the extension's own words (its manifest
+       note). Wraps on purpose: it is a sentence to read, not a status to ellipsize. */
+    .ext-env-note {
+        margin: 0 0 0.75rem;
+        padding: 0.4rem 0.6rem;
+        border-left: 2px solid var(--color-status-yellow, #f0c000);
+        background: rgba(240, 192, 0, 0.07);
+        border-radius: 0 4px 4px 0;
+    }
+
+    .ext-env-note-text {
+        display: block;
+        font-size: 0.75rem;
+        line-height: 1.45;
+        color: var(--color-text-secondary);
+    }
+
+    /* The dependency-directory grant: one path, its current state, and the field that changes it.
+       Deliberately quieter than the warning above it — this is a setting, not a fault. */
+    .ext-dep {
+        margin: 0 0 0.75rem;
+        padding: 0.45rem 0.6rem;
+        border: 1px solid var(--color-border, rgba(128, 128, 128, 0.25));
+        border-radius: 6px;
+        background: rgba(128, 128, 128, 0.05);
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+
+    .ext-dep-granted {
+        border-left: 2px solid var(--color-status-green, #3fb950);
+    }
+
+    .ext-dep-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        min-width: 0;
+    }
+
+    .ext-dep-label {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--color-text-tertiary);
+        flex: none;
+    }
+
+    .ext-dep-path {
+        font-family: var(--font-mono, monospace);
+        font-size: 0.75rem;
+        color: var(--color-text);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .ext-dep-none {
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        font-style: italic;
+    }
+
+    .ext-dep-edit {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-width: 0;
+    }
+
+    .ext-dep-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        font-family: var(--font-mono, monospace);
+        font-size: 0.75rem;
+        padding: 0.3rem 0.45rem;
+        border-radius: 4px;
+        border: 1px solid var(--color-border, rgba(128, 128, 128, 0.3));
+        background: var(--color-surface-1, transparent);
+        color: var(--color-text);
+    }
+
+    .ext-dep-hint {
+        margin: 0;
+        font-size: 0.72rem;
+        line-height: 1.45;
+        color: var(--color-text-tertiary);
+    }
+
+    .ext-dep-hint code {
+        font-family: var(--font-mono, monospace);
+    }
+
+    .ext-dep-error {
+        margin: 0;
+        font-size: 0.75rem;
+        line-height: 1.45;
+        color: var(--color-status-red, #f85149);
     }
 
     .error-banner {

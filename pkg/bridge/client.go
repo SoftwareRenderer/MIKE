@@ -596,6 +596,11 @@ func (c *Client) LSPNotify(ctx context.Context, raw json.RawMessage) error {
 
 // LSPStart starts the LSP server process inside the sandbox.
 // Command and args specify the LSP server to start.
+//
+// There is deliberately no environment parameter. The server's environment is the container's,
+// which is set once when the container is created — the same source the extension's own environment
+// check inherits. A per-start env would be a second place that decides what a language server sees,
+// and the two could disagree about a dependency root without anything visible changing.
 // Communication is over stdin/stdout with Content-Length framing.
 func (c *Client) LSPStart(ctx context.Context, command string, args []string) error {
 	ctx, cancel := lspCallCtx(ctx)

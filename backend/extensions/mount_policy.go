@@ -56,14 +56,19 @@ var deniedCapabilities = map[string]string{
 // empty allowlist.
 type MountPolicy struct {
 	roots []string
+	// readOnlyRoots are roots the sandbox may read but never write. They are the
+	// host paths a project's own Sandbox Configuration declares — borrowed so a
+	// language server can see the same caches its workspace sees (a Go module
+	// cache, a node_modules bind) — and a third-party extension must never be able
+	// to turn one of them into a writable host directory.
+	readOnlyRoots []string
 }
 
-// newMountPolicy builds a policy from raw root paths. Each is made absolute and
-// symlink-resolved (a root that does not exist yet keeps its cleaned absolute
-// form) so it matches the resolved form of a candidate path. Blanks and
-// duplicates are dropped.
-func newMountPolicy(roots []string) *MountPolicy {
-	p := &MountPolicy{}
+// normalizeRoots makes each root absolute, symlink-resolved and cleaned, dropping
+// blanks and duplicates, so a candidate path is compared against the same form it
+// will be resolved to.
+func normalizeRoots(roots []string) []string {
+	out := make([]string, 0, len(roots))
 	seen := map[string]bool{}
 	for _, raw := range roots {
 		raw = strings.TrimSpace(raw)
@@ -84,9 +89,22 @@ func newMountPolicy(roots []string) *MountPolicy {
 			continue
 		}
 		seen[abs] = true
-		p.roots = append(p.roots, abs)
+		out = append(out, abs)
 	}
-	return p
+	return out
+}
+
+// newMountPolicy builds a policy from raw root paths. Each is made absolute and
+// symlink-resolved (a root that does not exist yet keeps its cleaned absolute
+// form) so it matches the resolved form of a candidate path.
+func newMountPolicy(roots []string) *MountPolicy {
+	return &MountPolicy{roots: normalizeRoots(roots)}
+}
+
+// newMountPolicyWithReadOnly is newMountPolicy plus the subset of those roots that
+// may only ever be bind-mounted read-only.
+func newMountPolicyWithReadOnly(roots, readOnlyRoots []string) *MountPolicy {
+	return &MountPolicy{roots: normalizeRoots(roots), readOnlyRoots: normalizeRoots(readOnlyRoots)}
 }
 
 // Roots returns a copy of the policy's allowlist roots.
@@ -176,17 +194,33 @@ func resolvePath(p string) (string, error) {
 	return fsutil.ResolveSymlinks(p)
 }
 
-// insideRoot reports whether the resolved path is one of the roots or below it.
-func (p *MountPolicy) insideRoot(resolved string) bool {
-	if p == nil {
-		return false
-	}
-	for _, root := range p.roots {
+// insideAny reports whether the resolved path is one of roots or below it.
+func insideAny(resolved string, roots []string) bool {
+	for _, root := range roots {
 		if resolved == root || strings.HasPrefix(resolved, root+string(filepath.Separator)) {
 			return true
 		}
 	}
 	return false
+}
+
+// insideRoot reports whether the resolved path is one of the roots or below it.
+func (p *MountPolicy) insideRoot(resolved string) bool {
+	if p == nil {
+		return false
+	}
+	return insideAny(resolved, p.roots)
+}
+
+// ForceReadOnly reports whether a host path comes from a project's Sandbox
+// Configuration rather than from the app's own roots, in which case the mount is
+// read-only whatever the caller asked for. Call it with a resolved path (see
+// ValidateHostPath).
+func (p *MountPolicy) ForceReadOnly(resolved string) bool {
+	if p == nil {
+		return true
+	}
+	return insideAny(resolved, p.readOnlyRoots)
 }
 
 // ValidateHostPath checks a mount's host path: absolute, no ".." segment, and
@@ -281,4 +315,153 @@ func (p *MountPolicy) ValidateSandboxAdditions(mounts []types.SandboxMount, capa
 		return err
 	}
 	return ValidateCapabilities(capabilities)
+}
+
+// ShadowsToolState reports whether a path would cover the language server's own writable
+// state inside its container — the container's tmpfs, or the cache directory of the container's
+// own user.
+//
+// Both users of this rule mount read-only, and a server with a read-only cache publishes nothing
+// about a file it cannot load: not an error, not a warning, nothing. A broken file then looks
+// clean, which is worse than a broken file that shouts. So a borrowed Sandbox Configuration mount
+// over one of these paths is dropped, and a manifest that names one as its dependency_cache
+// container_path is refused where a manifest is refused — at install, with a sentence to act on —
+// instead of being quietly unmounted at every start.
+func ShadowsToolState(containerPath string) bool {
+	// Only the tmpfs roots themselves; a read-only mount over /tmp makes the whole scratch space
+	// unusable, while a subtree of it is fine.
+	switch containerPath {
+	case "/tmp", "/var/tmp":
+		return true
+	}
+	// A .cache directory of the container's own user (/root/.cache, /home/node/.cache) or
+	// anything under it. Depth-bounded so a project's own .cache, deep under /mnt, stays borrowed.
+	parts := strings.Split(strings.TrimPrefix(containerPath, "/"), "/")
+	for i, part := range parts {
+		if i > 2 {
+			break
+		}
+		if part == ".cache" {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateDependencyGrant checks the one host directory a user grants to one extension's language
+// server, for its resolved dependencies, and returns the cleaned absolute path to store.
+//
+// It is deliberately a different rule than MountPolicy.ValidateHostPath rather than a call to it:
+// the directory this field names — a Go module cache, a Cargo home — lives exactly where that
+// allowlist does not reach, which is the reason it is asked of a human instead of declared by an
+// extension. What stays required: absolute, no `..`, symlinks resolved before storing (the same
+// shared rule as a mount, so a dangling link cannot stand in for a path that is checked), not the
+// filesystem root, and already existing as a directory — a missing one would surface as a podman
+// error nobody can map back to this field.
+//
+// The consequence to be honest about: whatever this path contains becomes readable inside that
+// extension's container (read-only, unless the manifest declared otherwise and the user allowed
+// it). That is the grant, chosen by the person who owns the machine — which is also why it is one
+// directory per extension, applied deliberately, and never widened by anything the extension says.
+func ValidateDependencyGrant(hostPath string) (string, error) {
+	trimmed := strings.TrimSpace(hostPath)
+	if trimmed == "" {
+		return "", fmt.Errorf("no directory given")
+	}
+	if !strings.HasPrefix(trimmed, "/") {
+		return "", fmt.Errorf("%q is not an absolute path — give the full path to the directory", trimmed)
+	}
+	if hasDotDotSegment(trimmed) {
+		return "", fmt.Errorf("%q must not contain '..'", trimmed)
+	}
+	resolved, err := resolvePath(trimmed)
+	if err != nil {
+		return "", err
+	}
+	if resolved == "/" {
+		return "", fmt.Errorf("the filesystem root is not a dependency directory")
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("%s cannot be read: %w (create it first — a task running the toolchain's download command is the usual way)", resolved, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", resolved)
+	}
+	if err := checkGrantShapeWithHomes(resolved, hostHomeDirs()); err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+// systemGrantRoots are the host trees a dependency directory is never in, and which nothing in this
+// server should ever be handed read-write: the machine's own configuration, device and process trees.
+// `/opt` is deliberately absent — real toolchain caches live under it (Homebrew on Apple silicon),
+// and it holds no system configuration.
+var systemGrantRoots = []string{"/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/boot", "/dev", "/proc", "/sys", "/run", "/var"}
+
+// credentialGrantDirs are directories, relative to any user's home, that hold secrets rather than
+// dependencies. A granted directory is mounted READ-WRITE into every sandboxed task, where the code
+// running in it is steered by whatever a repository contains — so a grant must not be able to point a
+// task at the files whose rewrite is the point of an attack. This is a denylist of *credential
+// stores*, which is host safety, not language knowledge: nothing here knows what any toolchain is.
+var credentialGrantDirs = []string{".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".config/gcloud", ".config/gh", ".config/huggingface", ".config/pip"}
+
+// checkGrantShape refuses the directory shapes that make a grant something other than what it is for.
+//
+// The reason is the mode: the language server reads the grant read-only, but the task sandbox — the
+// container an agent's tool calls run in — mounts it read-write so a build can fill it. That makes the
+// grant a host write surface, chosen by whoever typed the path, and one text field should not be able
+// to hand the whole home directory or the host's `/etc` to every sandboxed task by a slip of the hand.
+// A dependency cache is always somewhere specific: below a user's own directories, several levels deep.
+func checkGrantShape(resolved string) error {
+	return checkGrantShapeWithHomes(resolved, hostHomeDirs())
+}
+
+// checkGrantShapeWithHomes takes the home directories as an argument so the rules above are testable
+// without writing into a real home directory.
+func checkGrantShapeWithHomes(resolved string, homes []string) error {
+	if segments := strings.Count(strings.Trim(resolved, "/"), "/"); segments < 2 {
+		return fmt.Errorf("%s is too close to the filesystem root to grant as a dependency directory — name a directory of your own, a couple of levels down (for example ~/go/pkg/mod)", resolved)
+	}
+	for _, root := range systemGrantRoots {
+		if resolved == root || strings.HasPrefix(resolved, root+"/") {
+			return fmt.Errorf("%s is inside %s, which belongs to the machine rather than to a project's dependencies", resolved, root)
+		}
+	}
+	for _, home := range homes {
+		if resolved == home {
+			return fmt.Errorf("%s is a home directory, not a dependency directory — grant a directory inside it (for example %s/go/pkg/mod), because a task that fills the cache can also write anywhere it points", resolved, home)
+		}
+		if strings.HasPrefix(home, resolved+"/") {
+			return fmt.Errorf("%s contains a home directory, so granting it would expose every project and credential on this machine", resolved)
+		}
+		for _, cred := range credentialGrantDirs {
+			if bad := filepath.Join(home, filepath.ToSlash(cred)); resolved == bad || strings.HasPrefix(resolved, bad+"/") {
+				return fmt.Errorf("%s holds credentials, not dependencies", bad)
+			}
+		}
+	}
+	return nil
+}
+
+// hostHomeDirs is the set of user home directories this machine presents: the server's own, root, and
+// one level of the conventional per-user roots. Bounded on purpose — it is a safety check on a path a
+// person typed, not a directory service.
+func hostHomeDirs() []string {
+	homes := []string{}
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		homes = append(homes, filepath.Clean(h))
+	}
+	homes = append(homes, "/root")
+	for _, parent := range []string{"/home", "/Users"} {
+		if entries, err := os.ReadDir(parent); err == nil {
+			for _, e := range entries {
+				if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+					homes = append(homes, filepath.Join(parent, e.Name()))
+				}
+			}
+		}
+	}
+	return homes
 }

@@ -1,0 +1,29 @@
+{
+    "display_name": "Dependency Cache Fixture",
+    "description": "Local fixture: an LSP extension that declares a dependency cache, so the grant UI has something real to ask about.",
+    "author": "Test Dev",
+    "version": "0.1.0",
+    "capabilities": {
+        "lsp": {
+            "command": "dep-cache-lsp",
+            "args": ["--stdio"],
+            "language": "qf",
+            "file_types": [
+                { "extension": "qf", "language_id": "qf", "label": "QF" }
+            ],
+            "sandbox": {
+                "dependency_cache": {
+                    "container_path": "/fake/mod",
+                    "env": "FAKE_CACHE",
+                    "read_only": true
+                },
+                "reload_files": ["fake.mod"],
+                "environment": {
+                    "check": { "command": "/bin/sh", "args": ["-c", "test -f fake.mod"] },
+                    "suppress_codes": ["FakeImport"],
+                    "note": "Fixture note: this server cannot see the project it is serving."
+                }
+            }
+        }
+    }
+}

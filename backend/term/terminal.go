@@ -20,6 +20,7 @@ import (
 	"kanban/backend/agent"
 	"kanban/backend/config"
 	"kanban/backend/httputil"
+	"kanban/backend/lsp"
 	"kanban/backend/prompts"
 	"kanban/backend/sandbox"
 	"kanban/backend/store"
@@ -158,6 +159,7 @@ type TerminalManager struct {
 	cfgStore               *config.ConfigStore
 	sandboxMgr             sandboxOps
 	agentRegistry          *agent.AgentRegistry
+	dependencies           dependencyCaches
 	onPortsAssigned        func(taskID, projectID string, ports []types.AssignedPort) // callback when task ports are assigned
 	onProjectPortsAssigned func(projectID string, ports []types.AssignedPort)         // callback when project-level terminal ports are assigned
 }
@@ -178,6 +180,44 @@ func (tm *TerminalManager) SetAgentRegistry(ar *agent.AgentRegistry) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	tm.agentRegistry = ar
+}
+
+// dependencyCaches is the one thing the terminal needs from the LSP side: which host directories the
+// install's LSP extensions have been granted for their resolved dependencies. *lsp.ExtensionLSPManager
+// satisfies it.
+type dependencyCaches interface {
+	DependencyCaches() []lsp.DependencyCache
+}
+
+// SetDependencyProvider attaches the LSP manager after construction, the way the agent registry is
+// attached: both are built later than the terminal manager, and both are set once, before any session
+// opens. shellSandboxOpts reads the field without a lock for that reason — it runs inside getOrCreate,
+// which already holds tm.mu, and a second RLock on the same mutex would deadlock the terminal.
+func (tm *TerminalManager) SetDependencyProvider(p dependencyCaches) {
+	tm.dependencies = p
+}
+
+// shellSandboxOpts is what a sandboxed shell's container gets created with. It is a method and not a
+// literal in the middle of session setup because the dependency caches belong in the answer: a
+// terminal is where somebody warms a dependency directory by hand, and a shell that cannot see the
+// grant downloads the world into a container layer that is deleted with the task, while the language
+// server next door keeps reading the empty one it was given.
+func (tm *TerminalManager) shellSandboxOpts(image string, proj *types.Project, agentSandbox *types.AgentSandbox) sandbox.SandboxOpts {
+	opts := sandbox.SandboxOpts{
+		BaseImage:        image,
+		NetworkIsolation: proj.SandboxNetworkIsolation,
+		MemoryLimit:      proj.SandboxMemoryLimit,
+		ForwardPorts:     proj.ForwardPorts,
+		AgentSandbox:     agentSandbox,
+		SkillsDir:        prompts.SkillsDir(),
+		SandboxMounts:    proj.SandboxMounts,
+		SandboxEnvs:      proj.SandboxEnvs,
+		Capabilities:     proj.SandboxCapabilities,
+	}
+	if tm.dependencies != nil {
+		opts.DependencyMounts, opts.DependencyEnvs = lsp.DependencySandboxArgs(tm.dependencies.DependencyCaches())
+	}
+	return opts
 }
 
 // getAgentSandbox returns the agent sandbox config for the current agent, or nil.
@@ -294,17 +334,7 @@ func (tm *TerminalManager) getOrCreate(sessionKey string, taskID string, worktre
 		if strings.HasPrefix(taskID, "proj:") {
 			shellProject = &types.Project{ID: proj.ID, Name: proj.Name}
 		}
-		shell, assignedPorts, err := tm.sandboxMgr.StartShell(taskID, worktreePath, shellProject, sandbox.SandboxOpts{
-			BaseImage:        imageToUse,
-			NetworkIsolation: proj.SandboxNetworkIsolation,
-			MemoryLimit:      proj.SandboxMemoryLimit,
-			ForwardPorts:     proj.ForwardPorts,
-			AgentSandbox:     agentSandbox,
-			SkillsDir:        prompts.SkillsDir(),
-			SandboxMounts:    proj.SandboxMounts,
-			SandboxEnvs:      proj.SandboxEnvs,
-			Capabilities:     proj.SandboxCapabilities,
-		})
+		shell, assignedPorts, err := tm.sandboxMgr.StartShell(taskID, worktreePath, shellProject, tm.shellSandboxOpts(imageToUse, proj, agentSandbox))
 		if err != nil {
 			log.Printf("[terminal] %s sandbox shell start failed: %v", sessionKey, err)
 			return nil, fmt.Errorf("sandbox not available: %w", err)

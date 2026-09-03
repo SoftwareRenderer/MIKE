@@ -584,6 +584,23 @@ export interface ExtensionSandboxConfig {
     mounts?: SandboxMount[];
     envs?: SandboxEnv[];
     capabilities?: string[];
+    /** How the extension checks that it can resolve a workspace at all, and which
+     *  diagnostic codes mean "could not load" when it cannot. */
+    environment?: { check: { command: string; args?: string[]; timeout_seconds?: number }; suppress_codes?: string[]; note?: string };
+    /** Workspace files whose change makes the language server re-read the project. */
+    reload_files?: string[];
+    /**
+     * Where this server reads resolved dependencies from, inside its own container, and the
+     * variable it reads that location from. The host directory that fills it is chosen under
+     * Settings → Extensions — a manifest names where it looks, never what it may read here.
+     */
+    dependency_cache?: { container_path: string; env: string; read_only: boolean };
+    /**
+     * The host directory the user granted to fill that cache, or empty when none is granted.
+     * Reported by the server and set only through its own endpoint — a manifest cannot supply it,
+     * which is the whole reason the two fields are separate.
+     */
+    dependency_host_path?: string;
 }
 
 export interface Extension {
@@ -607,6 +624,14 @@ export interface Extension {
     built_at: string;
     repo?: string;
     commit?: string;
+    /**
+     * Runtime report for a language-server extension that declares an environment
+     * check: can it actually resolve the workspace it is serving? When it cannot,
+     * the server withholds that extension's unresolvable diagnostics instead of
+     * reporting them as errors in the user's code — `note` is the sentence that
+     * stands in for them. Absent for every other extension, and while healthy.
+     */
+    environment?: { healthy: boolean; note?: string };
 }
 
 export interface RegistryEntry {

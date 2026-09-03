@@ -251,3 +251,34 @@ func containsAny(messages []types.ChatMessage, fragment string) bool {
 	}
 	return false
 }
+
+// TestFormatChatHistory_AdvisoryIsNotSummarized pins the decision that an advisory —
+// the turn-boundary LSP note — is NOT folded into the summarization input. The model saw
+// it in the turn it belonged to, and the next turn may not report it at all: a
+// diagnostics advisory is the one message whose content is deliberately temporary. In a
+// *rolling* summary that matters more than usual, because whatever is carried once is
+// re-told by every later pass.
+//
+// "Not summarized" is not "forgotten": the row keeps its own role and is rebuilt into the
+// live context after a restart (see toAPIMessage), which is what the merge-conflict
+// instructions depend on.
+func TestFormatChatHistory_AdvisoryIsNotSummarized(t *testing.T) {
+	note := "LSP diagnostics for this turn's changes (1 file with findings):\n\n" +
+		"Fix issues in a.go:\n1. line 12, col 5 [compiler]: undefined: widget (error)"
+
+	hist := formatChatHistory([]types.ChatMessage{
+		{Role: "system", Content: "SYSTEM"},
+		{Role: "user", Content: "wire it up"},
+		{Role: "advisory", Content: note},
+		{Role: "assistant", Content: "fixed it"},
+	}, false)
+
+	if strings.Contains(hist, "widget") {
+		t.Errorf("the advisory reached the summarization input:\n%s", hist)
+	}
+	if strings.Contains(hist, "Environment note") {
+		t.Errorf("advisory rendered under any label:\n%s", hist)
+	}
+	// Skipping one role must not skip the conversation around it.
+	mustContain(t, hist, "conversation around the advisory", "wire it up", "fixed it")
+}

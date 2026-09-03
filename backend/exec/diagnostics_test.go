@@ -191,6 +191,83 @@ func TestPrepareMergeConflictTurn_DeliversBeforeTheNextCall(t *testing.T) {
 	}
 }
 
+// TestFilterUnresolvable: a language server that could not load the project
+// answers with confident specifics. Those are the one class of finding the model
+// must not be handed — it "fixes" imports that resolve fine in the sandbox.
+func TestFilterUnresolvable(t *testing.T) {
+	findings := []LSPDiagnostic{
+		{Message: "could not import github.com/coder/websocket", Source: "compiler", Code: "BrokenImport", Severity: 1},
+		{Message: "No active builds contain /mnt/app/main.go", Source: "go list", Code: "go list", Severity: 2},
+		{Message: "declared and not used: x", Source: "compiler", Code: "UnusedVar", Severity: 1},
+		{Message: "no code", Source: "compiler", Code: nil, Severity: 1},
+	}
+	unhealthy := lsp.EnvironmentReport{
+		Healthy:       false,
+		Note:          "no dependency root",
+		SuppressCodes: []string{"BrokenImport", "go list"},
+	}
+
+	kept := filterUnresolvable(unhealthy, findings)
+	if len(kept) != 2 {
+		t.Fatalf("kept %d findings, want the 2 that are not load failures: %+v", len(kept), kept)
+	}
+	if kept[0].Code != "UnusedVar" || kept[1].Code != nil {
+		t.Errorf("wrong survivors: %+v", kept)
+	}
+
+	// Healthy: nothing is dropped, whatever the extension declared.
+	healthy := unhealthy
+	healthy.Healthy = true
+	if got := filterUnresolvable(healthy, findings); len(got) != len(findings) {
+		t.Errorf("healthy server lost findings: %d of %d", len(got), len(findings))
+	}
+
+	// Unhealthy but declaring no codes: also nothing dropped. Core knows what a
+	// code is, never what one means, so an undeclared code stays reported.
+	undeclared := unhealthy
+	undeclared.SuppressCodes = nil
+	if got := filterUnresolvable(undeclared, findings); len(got) != len(findings) {
+		t.Errorf("undeclared codes suppressed findings: %d of %d", len(got), len(findings))
+	}
+
+	// Nothing to filter when there is nothing reported.
+	if got := filterUnresolvable(unhealthy, nil); got != nil {
+		t.Errorf("nil findings became %+v", got)
+	}
+}
+
+func TestDiagnosticCode(t *testing.T) {
+	cases := []struct {
+		name string
+		d    LSPDiagnostic
+		want string
+	}{
+		{"string code", LSPDiagnostic{Code: "BrokenImport"}, "BrokenImport"},
+		{"numeric code", LSPDiagnostic{Code: float64(42)}, "42"},
+		{"no code", LSPDiagnostic{Code: nil}, ""},
+		{"unusable code type", LSPDiagnostic{Code: []string{"no"}}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := diagnosticCode(tc.d); got != tc.want {
+				t.Errorf("diagnosticCode = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestComposeDiagnosticsAdvisory_SilentWhenNothingSurvives(t *testing.T) {
+	// The whole point of suppressing: no findings left means no note at all, not
+	// "Fix issues in …" with nothing under it.
+	if _, ok := composeDiagnosticsAdvisory(0, nil); ok {
+		t.Error("an empty pass produced an advisory")
+	}
+	a, ok := composeDiagnosticsAdvisory(1, []string{"Fix issues in a.go:\n1. unused: x"})
+	if !ok || !strings.Contains(a.text, "a.go") {
+		t.Errorf("advisory = %+v", a)
+	}
+}
+
 // --- diagnostics discovery -------------------------------------------------------
 
 func lspGoExtension() *extensions.Extension {
@@ -390,6 +467,23 @@ type wedgedLSPManager struct {
 }
 
 func (m *wedgedLSPManager) GetRegistry() *lsp.ExtensionRegistry { return m.registry }
+
+// The rest of the session contract is not what this fake is about — it exists to
+// be wedged in `lsp_start` — so each answers the benign thing: nothing to
+// recycle, nothing known about the environment (which means "report everything"),
+// and no handshake completed yet.
+func (m *wedgedLSPManager) FilesChanged(string, []string) bool { return false }
+
+func (m *wedgedLSPManager) DependencyCaches() []lsp.DependencyCache { return nil }
+
+func (m *wedgedLSPManager) Environment(string, string) lsp.EnvironmentReport {
+	return lsp.EnvironmentReport{Healthy: true}
+}
+
+func (m *wedgedLSPManager) SessionInitialized(string, string) bool { return false }
+func (m *wedgedLSPManager) MarkSessionInitialized(string, string)  {}
+
+func (m *wedgedLSPManager) Release(string, string) {}
 
 func (m *wedgedLSPManager) GetOrCreate(ctx context.Context, _, _ string, _ *lsp.ServerConfig) (*lsp.LSPProcess, error) {
 	select {

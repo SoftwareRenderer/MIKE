@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"kanban/backend/types"
 )
@@ -477,6 +478,152 @@ type SandboxConfig struct {
 	Mounts           []types.SandboxMount `json:"mounts,omitempty"`
 	Envs             []types.SandboxEnv   `json:"envs,omitempty"`
 	Capabilities     []string             `json:"capabilities,omitempty"`
+
+	// Environment says how to tell whether this server can answer *at all* in this
+	// workspace (a dependency root that is missing, a cache that is cold). When it
+	// cannot, the listed diagnostic codes are the server guessing, and core does not
+	// forward them to the model.
+	Environment *EnvironmentGate `json:"environment,omitempty"`
+	// ReloadFiles are workspace-relative paths whose change means the language
+	// server has to re-read the project (a go.mod, a lockfile). A server sees no
+	// file-watch events through a bind mount, so the turn's changed-file list is
+	// what tells us.
+	ReloadFiles []string `json:"reload_files,omitempty"`
+	// Dependency names where this server reads its resolved dependencies from, so the
+	// host can supply them without being told where to look. Manifest data.
+	Dependency *DependencyCache `json:"dependency_cache,omitempty"`
+	// DependencyHostPath is the host directory the *user* granted to fill that cache — the
+	// answer to the one field Settings → Extensions asks. It lives beside the declaration and
+	// not inside it so the two origins stay distinguishable in the stored record: a manifest
+	// declares a location in its own container, a human names a directory on this machine, and
+	// the difference is the whole security argument. A manifest that carries it is refused
+	// (manifest_validate.go), never merged.
+	//
+	// It is also why the grant has its own endpoint: an empty value must mean "revoke", which a
+	// handler that copies non-empty fields cannot express.
+	DependencyHostPath string `json:"dependency_host_path,omitempty"`
+}
+
+// DependencyCache is a language server's declaration of where *it* looks for resolved
+// dependencies: a path inside its own container and the environment variable that names it.
+// It says nothing about the host — which directory fills that path is the user's choice, made
+// once in Settings → Extensions, and a manifest that named a host directory would be naming a
+// path on someone else's machine.
+//
+// This is deliberately a location and not a command. A declared command ("run go mod
+// download") would be the core executing extension-supplied code, and a location *discovered*
+// by running the toolchain would be the core starting a server to learn where to point it —
+// each workspace, cold, on every restart. A location plus an environment gate (see
+// EnvironmentGate) closes the loop instead: the core assigns, and the server's own loader
+// says whether what it found was enough.
+type DependencyCache struct {
+	// ContainerPath is where the cache appears inside the extension's container. It must not
+	// shadow a path the server keeps its own state in — that is checked at bind time, where
+	// the container's real paths are known, not here.
+	ContainerPath string `json:"container_path"`
+	// Env is the variable the server reads the location from: a NAME, never an assignment, and
+	// never a value. The value is ContainerPath, which the manifest already declared; taking
+	// arbitrary values here would turn this field into a second, unvalidated `envs`.
+	Env string `json:"env"`
+	// ReadOnly defaults to true, which is the direction that can only ever fail to make a
+	// server slow rather than able to change a machine. Set false when the toolchain must warm
+	// the cache itself — and read_only is then the user's switch, not the extension's.
+	ReadOnly *bool `json:"read_only,omitempty"`
+}
+
+// DependencyGrant is the pair the runtime binds: the directory the user granted, and whether this
+// extension's declaration allows writing to it. Both halves are required — a grant with no
+// declaration has nowhere to mount and nothing to point at, and a declaration with no grant is the
+// normal state before anyone has been asked — so a missing half answers "bind nothing" rather than
+// half a configuration.
+//
+// The writable answer comes from the *manifest*, so an extension can only ever widen itself into
+// writing a directory its author already declared it would write; the user cannot make it writable
+// by granting alone.
+func (sc *SandboxConfig) DependencyGrant() (hostPath string, writable bool) {
+	if sc == nil || sc.DependencyHostPath == "" || sc.Dependency == nil {
+		return "", false
+	}
+	return sc.DependencyHostPath, sc.Dependency.Writable()
+}
+
+// Writable reports whether the declared cache may be mounted read-write. Absent means the
+// safe default: read-only.
+func (d *DependencyCache) Writable() bool {
+	return d != nil && d.ReadOnly != nil && !*d.ReadOnly
+}
+
+// Assignments returns the environment assignments that point this server at its declared
+// cache — one `ENV=/container/path`, derived from fields the manifest already states, so
+// nothing here is a value the manifest could invent at runtime. Returns nil when no cache is
+// declared, which is every language whose dependencies sit in the checkout (node_modules) or
+// in the image: for those there is nothing to bind and the honest answer is no assignments.
+func (d *DependencyCache) Assignments() []string {
+	if d == nil || d.Env == "" || d.ContainerPath == "" {
+		return nil
+	}
+	return []string{d.Env + "=" + d.ContainerPath}
+}
+
+// CommandRef is a manifest-declared command. Core never runs it on the host: it
+// runs in the extension's own sandbox (EnvironmentGate.Check).
+type CommandRef struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+	// TimeoutSeconds bounds one run. 0 means the default; every value is clamped
+	// so a manifest cannot stall a turn.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+}
+
+// Timeout returns the declared bound, clamped to (0, max]. A manifest that
+// declares nothing gets def, and nothing declared may outrank max.
+func (c CommandRef) Timeout(def, max time.Duration) time.Duration {
+	if c.TimeoutSeconds <= 0 {
+		return def
+	}
+	t := time.Duration(c.TimeoutSeconds) * time.Second
+	if t > max {
+		return max
+	}
+	return t
+}
+
+// Argv is the command line to run, command first. Returns false when no command
+// is declared, so a half-written manifest is skipped instead of run empty.
+func (c CommandRef) Argv() ([]string, bool) {
+	if strings.TrimSpace(c.Command) == "" {
+		return nil, false
+	}
+	return append([]string{c.Command}, c.Args...), true
+}
+
+// EnvironmentGate describes the health check for a language server's workspace,
+// and what to do with the noise it produces when the workspace cannot be
+// resolved. Codes are opaque strings: core compares them to the diagnostic's
+// `code` and knows nothing about what any of them mean.
+type EnvironmentGate struct {
+	// Check runs inside the extension's own sandbox, in the workspace it is
+	// answering for.
+	Check CommandRef `json:"check"`
+	// SuppressCodes are diagnostic codes that only mean "I could not load the
+	// project" — dropped when Check says the environment is unusable.
+	SuppressCodes []string `json:"suppress_codes,omitempty"`
+	// Note is one sentence shown to the user instead of the suppressed noise.
+	Note string `json:"note,omitempty"`
+}
+
+// Suppresses reports whether a diagnostic code is one this gate hides while the
+// environment is unhealthy.
+func (g *EnvironmentGate) Suppresses(code string) bool {
+	if g == nil || code == "" {
+		return false
+	}
+	for _, c := range g.SuppressCodes {
+		if c == code {
+			return true
+		}
+	}
+	return false
 }
 
 // lspSandboxFromManifest returns the LSP capability's sandbox config, or nil.
@@ -503,6 +650,12 @@ func sandboxConfigFromManifest(m *SandboxConfig) SandboxConfig {
 	sc.Envs = m.Envs
 	sc.ForwardPorts = m.ForwardPorts
 	sc.Capabilities = m.Capabilities
+	// The gate and the reload list are manifest data, not user config: they travel
+	// with the stored record so the runtime can act on them without re-reading the
+	// manifest.
+	sc.Environment = m.Environment
+	sc.ReloadFiles = m.ReloadFiles
+	sc.Dependency = m.Dependency
 	return sc
 }
 
@@ -633,5 +786,11 @@ func mergeManifestSandboxAdditions(stored SandboxConfig, declared *SandboxConfig
 			stored.Capabilities = append(stored.Capabilities, c)
 		}
 	}
+	// These three are the manifest's own declarations, not user-additive lists: a new manifest
+	// replaces them. Merging them additively would keep acting on the previous commit's gate and
+	// reload list forever, and a manifest that deliberately dropped one would keep it.
+	stored.Environment = declared.Environment
+	stored.ReloadFiles = declared.ReloadFiles
+	stored.Dependency = declared.Dependency
 	return stored
 }

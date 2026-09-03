@@ -39,6 +39,14 @@ type recordingLSPManager struct {
 	// A server that has not loaded the package publishes its loader state first and the real
 	// findings a moment later, and the pass treats those two frames differently.
 	publishSequence func(file string) [][]LSPDiagnostic
+	// environment, when set, is what the fake reports for a file. Unset means healthy,
+	// so a test that says nothing about the environment sees every finding: the gate can
+	// only ever subtract, and that must be the default a test starts from.
+	environment func(file string) lsp.EnvironmentReport
+	depCaches   []lsp.DependencyCache
+	// reloadQuestions records each FilesChanged call, so a test can pin which files a turn
+	// handed to the manager as "the project changed".
+	reloadQuestions [][]string
 }
 
 func newRecordingLSPManager(registry *lsp.ExtensionRegistry) *recordingLSPManager {
@@ -46,6 +54,27 @@ func newRecordingLSPManager(registry *lsp.ExtensionRegistry) *recordingLSPManage
 }
 
 func (m *recordingLSPManager) GetRegistry() *lsp.ExtensionRegistry { return m.registry }
+
+// DependencyCaches lets a test see the task sandbox's dependency mounts being fed. The task sandbox
+// mounts what the enabled extensions were granted; whether a *turn* resolves its dependencies is
+// decided downstream of this call, so this fake only has to answer.
+func (m *recordingLSPManager) DependencyCaches() []lsp.DependencyCache { return m.depCaches }
+
+func (m *recordingLSPManager) Environment(_, filePath string) lsp.EnvironmentReport {
+	if m.environment != nil {
+		return m.environment(filePath)
+	}
+	return lsp.EnvironmentReport{Healthy: true}
+}
+
+func (m *recordingLSPManager) FilesChanged(_ string, changed []string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(changed) > 0 {
+		m.reloadQuestions = append(m.reloadQuestions, append([]string(nil), changed...))
+	}
+	return false
+}
 
 func (m *recordingLSPManager) GetOrCreate(_ context.Context, _, language string, _ *lsp.ServerConfig) (*lsp.LSPProcess, error) {
 	m.mu.Lock()

@@ -63,6 +63,12 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/extensions/{id}/enabled", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleSetEnabled(w, r, r.PathValue("id"))
 	})
+	// The user's grant of a host directory to one extension's language server, for its resolved
+	// dependencies. Separate from PUT /api/extensions/{id} because an empty value must mean
+	// "revoke" and because applying it stops the sandbox.
+	s.mux.HandleFunc("/api/extensions/{id}/dependency-cache", func(w http.ResponseWriter, r *http.Request) {
+		s.extHandler.HandleSetDependencyCache(w, r, r.PathValue("id"))
+	})
 	s.mux.HandleFunc("GET /api/extensions/registry", s.extHandler.HandleRegistryIndex)
 	s.mux.HandleFunc("GET /api/extensions/local", s.extHandler.HandleLocalExtensions)
 	s.mux.HandleFunc("POST /api/extensions/install", s.extHandler.HandleInstall)
