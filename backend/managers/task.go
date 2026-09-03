@@ -999,6 +999,11 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	// Reload task — MergeBranch may have set merge conflict flag
 	task, _ = h.store.GetTask(projectID, taskID)
 	if task.HasMergeConflict {
+		// The turn that resolves this conflict has to finish the click that produced it, and only here
+		// do we learn the click did. Armed ahead of the hand-off and the early return below.
+		if h.executor != nil {
+			h.executor.ArmCommitAndDone(taskID)
+		}
 		// Already resolving a merge conflict — don't add duplicate messages
 		if task.ExecutionState == types.ExecStateRunning {
 			log.Printf("[commit-and-done] task=%s already resolving merge conflict, skipping", taskID)

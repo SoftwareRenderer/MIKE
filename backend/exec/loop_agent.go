@@ -495,6 +495,8 @@ func (te *TaskExecutor) executeTaskWithAgent(ctx context.Context, task *types.Ta
 func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, taskID, worktreePath string, runner *agent.AgentRunner, stopReason string, agentEnded *bool) {
 	// Check auto-commit/merge
 	if task.AutoCommit {
+		// A commit-and-done click merges whatever auto_merge says: read it here, consume it after.
+		commitDone := task.HasMergeConflict && te.CommitAndDonePending(task.ID)
 		if task.HasMergeConflict {
 			log.Printf("[agent] task=%s agent finished resolving conflicts, committing resolution", task.ID)
 			// Same stage + commit steps the LLM loop runs (commitConflictResolution).
@@ -517,7 +519,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			_ = te.store.UpdateTaskExecutionState(task.ID, projectID, "idle")
 		}
 		commitMsg := te.GenerateCommitMessage(context.Background(), task)
-		mergeErr := te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge)
+		mergeErr := te.CommitAndMerge(projectID, task.ID, worktreePath, commitMsg, task.AutoMerge || commitDone)
 		task, _ = te.store.GetTaskByID(task.ID)
 		if task.HasMergeConflict {
 			conflictedFiles := GetConflictedFiles(worktreePath)
@@ -536,6 +538,8 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			}
 			return
 		}
+		// The conflict is over, so the click is spent - merge failure included.
+		commitDone = te.takeCommitAndDone(task.ID, mergeErr == nil)
 		if mergeErr != nil {
 			log.Printf("[agent] task=%s merge failed, moving to review: %v", task.ID, mergeErr)
 			task.ExecutionState = types.ExecStateIdle
@@ -548,8 +552,8 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 			*agentEnded = true
 			return
 		}
-		if !task.AutoMerge {
-			// Merge was skipped (auto_merge=false) — don't mark done
+		if !task.AutoMerge && !commitDone {
+			// Nothing asked for this merge (auto_merge=false, no click) - don't mark done
 			task.ExecutionState = types.ExecStateIdle
 			task.Status = types.StatusReview
 			if te.sandboxMgr != nil {
@@ -571,7 +575,8 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 	}
 
 	if task.HasMergeConflict {
-		_, task = te.commitConflictResolution(projectID, task.ID, worktreePath, task)
+		res := te.commitConflictResolution(projectID, task.ID, worktreePath, task)
+		task = res.task
 		if task.HasMergeConflict {
 			log.Printf("[agent] task=%s merge still conflicted after agent ended", task.ID)
 			task.ExecutionState = types.ExecStateFailed
@@ -580,21 +585,25 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, tas
 				_ = te.sandboxMgr.Stop(task.ID)
 			}
 			task.Output = fmt.Sprintf("Agent finished but merge still conflicted (%s)", stopReason)
-		} else if !task.AutoMerge {
-			// Merge was skipped (auto_merge=false) — don't mark done
-			task.ExecutionState = types.ExecStateIdle
-			task.Status = types.StatusReview
-			if te.sandboxMgr != nil {
-				_ = te.sandboxMgr.Stop(task.ID)
-			}
-			task.Output = fmt.Sprintf("Agent finished (%s)", stopReason)
-		} else {
+		} else if res.finishesTask() {
 			task.ExecutionState = types.ExecStateCompleted
 			task.Status = types.StatusDone
 			if te.sandboxMgr != nil {
 				_ = te.sandboxMgr.Stop(task.ID)
 			}
 			task.Output = fmt.Sprintf("Agent finished (%s)", stopReason)
+		} else {
+			// No merge, or a failed one: the work is not in the target branch.
+			task.ExecutionState = types.ExecStateIdle
+			task.Status = types.StatusReview
+			if te.sandboxMgr != nil {
+				_ = te.sandboxMgr.Stop(task.ID)
+			}
+			if res.mergeErr != nil {
+				task.Output = "Merge failed: " + res.mergeErr.Error()
+			} else {
+				task.Output = fmt.Sprintf("Agent finished (%s)", stopReason)
+			}
 		}
 		te.storeTask(task, projectID)
 		*agentEnded = true

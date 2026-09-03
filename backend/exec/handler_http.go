@@ -68,6 +68,11 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		httputil.Fail(w, err, "get task", "task not found")
 		return
 	}
+
+	// Every user message arrives here, and it replaces any commit-and-done click still waiting on a
+	// merge conflict.
+	te.clearCommitAndDone(taskID)
+
 	threadID := task.CurrentThreadID
 
 	// A duplicate is the same submit arriving twice (double-click, WS replay, offline queue

@@ -927,8 +927,8 @@ func TestCommitConflictResolution_DoesNotSweepUntrackedFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(wtPath, "shared.txt"), []byte("resolved\n"), 0o644)
 	os.WriteFile(filepath.Join(wtPath, "untracked.txt"), []byte("unstaged content\n"), 0o644)
 
-	commitOK, _ := te.commitConflictResolution(projectID, taskID, wtPath, task)
-	if !commitOK {
+	res := te.commitConflictResolution(projectID, taskID, wtPath, task)
+	if !res.committed {
 		t.Fatal("commitConflictResolution should succeed")
 	}
 
@@ -949,6 +949,184 @@ func TestCommitConflictResolution_DoesNotSweepUntrackedFiles(t *testing.T) {
 	}
 	if status := runGitCmd(wtPath, "status", "--porcelain").output; !strings.Contains(status, "untracked.txt") {
 		t.Errorf("untracked.txt should still be untracked in the worktree, status:\n%s", status)
+	}
+}
+
+// syncConflict is a task worktree sitting in a sync-merge conflict: the task branch and the target
+// branch changed the same line, the target was merged in, and nothing has resolved it yet.
+type syncConflict struct {
+	te        *TaskExecutor
+	repoDir   string
+	projectID string
+	taskID    string
+	wtPath    string
+}
+
+// syncResolved resolves the conflict the fixture creates.
+const syncResolved = "line 1\ncombined task and master\nline 3\n"
+
+// newSyncConflictFixture builds that state. autoMerge is the setting the tests vary: a click merges
+// whatever it says.
+func newSyncConflictFixture(t *testing.T, taskID, branch string, autoMerge bool) syncConflict {
+	t.Helper()
+	te, repoDir, projectID := setupExecutorWithGitForSubtask(t)
+
+	task := &types.Task{
+		ID:               taskID,
+		ProjectID:        projectID,
+		Title:            "Sync conflict task",
+		Prompt:           "resolve conflicts",
+		Status:           types.StatusInProgress,
+		Branch:           branch,
+		BaseRef:          "master",
+		LlamaServerURL:   "http://localhost:8080",
+		ModelName:        "test-model",
+		HasMergeConflict: true,
+		AutoMerge:        autoMerge,
+		CurrentThreadID:  "thread-1",
+	}
+	if err := te.rawStore().CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Task branch changes the middle line.
+	runGit(t, repoDir, "checkout", "-b", branch)
+	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("line 1\ntask change\nline 3\n"), 0o644)
+	runGit(t, repoDir, "add", "shared.txt")
+	runGit(t, repoDir, "commit", "-m", "task edit")
+	runGit(t, repoDir, "checkout", "master")
+
+	wtPath, err := te.worktreeMgr.WorktreePath(taskID)
+	if err != nil {
+		t.Fatalf("worktree path: %v", err)
+	}
+	os.MkdirAll(wtPath, 0o755)
+	runGit(t, repoDir, "worktree", "add", "--detach", wtPath, branch)
+	runGitInDir(t, wtPath, "checkout", branch)
+
+	// The target branch changes the same line, then gets merged into the task branch.
+	os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("line 1\nmaster change\nline 3\n"), 0o644)
+	runGit(t, repoDir, "add", "shared.txt")
+	runGit(t, repoDir, "commit", "-m", "master edit")
+	runGitCmd(wtPath, "merge", "master", "--no-edit")
+
+	if !isMergeInProgress(wtPath) {
+		t.Fatal("fixture: the task worktree should be mid-merge with conflicts")
+	}
+	if out := runGitCmd(wtPath, "status", "--porcelain").output; !strings.Contains(out, "shared.txt") {
+		t.Fatalf("fixture: shared.txt should be conflicted, status:\n%s", out)
+	}
+	return syncConflict{te: te, repoDir: repoDir, projectID: projectID, taskID: taskID, wtPath: wtPath}
+}
+
+// TestCommitConflictResolution_CommitAndDoneClickMergesWithAutoMergeOff: the click means commit,
+// merge, Done, so a resolution has to reach the target branch even when auto_merge says no.
+func TestCommitConflictResolution_CommitAndDoneClickMergesWithAutoMergeOff(t *testing.T) {
+	fx := newSyncConflictFixture(t, "click-merge-task", "task/click-merge", false)
+	os.WriteFile(filepath.Join(fx.wtPath, "shared.txt"), []byte(syncResolved), 0o644)
+	fx.te.ArmCommitAndDone(fx.taskID)
+
+	task, err := fx.te.rawStore().GetTaskByID(fx.taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	res := fx.te.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
+
+	if !res.committed {
+		t.Fatal("the resolution was not committed")
+	}
+	if res.mergeErr != nil {
+		t.Fatalf("the click's merge failed: %v", res.mergeErr)
+	}
+	if res.task.HasMergeConflict {
+		t.Fatal("the conflict flag should be cleared")
+	}
+	if !res.commitDone {
+		t.Error("the result does not report the click that produced this conflict")
+	}
+	if !res.finishesTask() {
+		t.Error("finishing the conflict did not finish the click")
+	}
+	if fx.te.CommitAndDonePending(fx.taskID) {
+		t.Error("the click survived the resolution it asked for")
+	}
+	// The point: the work reached the target branch.
+	if out := runGitCmd(fx.repoDir, "show", "master:shared.txt").output; !strings.Contains(out, "combined task and master") {
+		t.Errorf("master must hold the resolution, got:\n%s", out)
+	}
+}
+
+// TestCommitConflictResolution_NoClickNoMergeWithAutoMergeOff: with no click behind the conflict,
+// auto_merge alone decides, and false keeps the resolution local and hands the task to the user.
+func TestCommitConflictResolution_NoClickNoMergeWithAutoMergeOff(t *testing.T) {
+	fx := newSyncConflictFixture(t, "noclick-merge-task", "task/noclick-merge", false)
+	os.WriteFile(filepath.Join(fx.wtPath, "shared.txt"), []byte(syncResolved), 0o644)
+
+	task, err := fx.te.rawStore().GetTaskByID(fx.taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	res := fx.te.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
+
+	if !res.committed {
+		t.Fatal("the resolution was not committed")
+	}
+	if res.commitDone || res.finishesTask() {
+		t.Error("a conflict nobody clicked about reported itself as finishing a click")
+	}
+	if out := runGitCmd(fx.repoDir, "show", "master:shared.txt").output; strings.Contains(out, "combined task and master") {
+		t.Errorf("master must NOT hold the resolution without auto_merge or a click, got:\n%s", out)
+	}
+}
+
+// TestCommitConflictResolution_StillConflictedKeepsTheClick: a resolution that hits a fresh conflict
+// is not over, and spending the click here would leave the turn that does resolve it in Review.
+func TestCommitConflictResolution_StillConflictedKeepsTheClick(t *testing.T) {
+	fx := newSyncConflictFixture(t, "reconflict-task", "task/reconflict", false)
+	os.WriteFile(filepath.Join(fx.wtPath, "shared.txt"), []byte(syncResolved), 0o644)
+
+	// The target branch moves again while the resolution is in flight, so the merge the click asks
+	// for conflicts once more.
+	os.WriteFile(filepath.Join(fx.repoDir, "shared.txt"), []byte("line 1\nmaster moved again\nline 3\n"), 0o644)
+	runGit(t, fx.repoDir, "add", "shared.txt")
+	runGit(t, fx.repoDir, "commit", "-m", "master moved")
+
+	fx.te.ArmCommitAndDone(fx.taskID)
+	task, err := fx.te.rawStore().GetTaskByID(fx.taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	res := fx.te.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
+
+	if !res.committed {
+		t.Fatal("fixture: the first resolution should have been committed")
+	}
+	if !res.task.HasMergeConflict {
+		t.Fatal("fixture: the merge should have re-conflicted against the moved target branch")
+	}
+	if res.finishesTask() {
+		t.Error("a still-conflicted task finished")
+	}
+	if !fx.te.CommitAndDonePending(fx.taskID) {
+		t.Error("a resolution that is not over spent the click")
+	}
+
+	// Resolve the new conflict and run it again: the click still completes.
+	os.WriteFile(filepath.Join(fx.wtPath, "shared.txt"), []byte(syncResolved), 0o644)
+	task, err = fx.te.rawStore().GetTaskByID(fx.taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	res = fx.te.commitConflictResolution(fx.projectID, fx.taskID, fx.wtPath, task)
+	if !res.finishesTask() {
+		t.Errorf("the second resolution did not finish the click: committed=%v mergeErr=%v conflicted=%v",
+			res.committed, res.mergeErr, res.task.HasMergeConflict)
+	}
+	if fx.te.CommitAndDonePending(fx.taskID) {
+		t.Error("the click survived the resolution that finished it")
+	}
+	if out := runGitCmd(fx.repoDir, "show", "master:shared.txt").output; !strings.Contains(out, "combined task and master") {
+		t.Errorf("master must hold the resolution, got:\n%s", out)
 	}
 }
 

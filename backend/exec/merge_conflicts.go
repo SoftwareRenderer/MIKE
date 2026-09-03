@@ -313,16 +313,44 @@ func (te *TaskExecutor) commitMergeConflictResolution(taskID, worktreePath strin
 	return true
 }
 
+// conflictResolution is the outcome of commitConflictResolution: everything a caller needs to decide
+// what the task becomes once the conflict is gone.
+type conflictResolution struct {
+	// task is the task as the store holds it now. Never nil.
+	task *types.Task
+	// committed records that the resolution became a commit. Nothing merges without it.
+	committed bool
+	// mergeErr is the error from the merge into the target branch, nil when it ran cleanly or was
+	// not wanted (see mergeWanted).
+	mergeErr error
+	// commitDone says a "Commit and move to done" click produced this conflict, so it merges even
+	// when auto_merge says no.
+	commitDone bool
+}
+
+// mergeWanted reports whether anything asked for this work to land in the target branch: the task's
+// auto_merge setting, or the user's click.
+func (r conflictResolution) mergeWanted() bool {
+	return r.commitDone || (r.task != nil && r.task.AutoMerge)
+}
+
+// finishesTask reports whether the resolution delivered what mergeWanted asked for: committed,
+// merged cleanly, nothing re-conflicted. Otherwise the task goes back to the user.
+func (r conflictResolution) finishesTask() bool {
+	return r.committed && r.mergeWanted() && r.mergeErr == nil && r.task != nil && !r.task.HasMergeConflict
+}
+
 // commitConflictResolution stages resolved conflicted files, commits the
 // resolution, drops the stale stash, clears the merge conflict flag, and
-// attempts the final merge. Returns (commitOK, refreshedTask).
+// attempts the final merge.
 //
 // commitConflictResolution runs the git operations every merge-conflict resolution path
 // shares. Callers handle the divergent part afterwards: inject a prompt, mark done, or fail.
-func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath string, task *types.Task) (commitOK bool, updatedTask *types.Task) {
+func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath string, task *types.Task) conflictResolution {
 	// No worktree mutex here: MergeBranch→syncTargetIntoTask takes it and would deadlock.
 	// Safe because the LLM is done and the loop is single-threaded.
-	commitOK = true
+	commitDone := te.CommitAndDonePending(taskID)
+	commitOK := true
 
 	if isMergeInProgress(worktreePath) {
 		// Sync-merge conflict: worktree has MERGE_HEAD with conflict markers.
@@ -359,14 +387,29 @@ func (te *TaskExecutor) commitConflictResolution(projectID, taskID, worktreePath
 
 	_ = te.store.SetTaskMergeConflict(taskID, projectID, false)
 
-	if commitOK && task.AutoMerge {
-		if mergeErr := te.MergeBranch(projectID, taskID, task); mergeErr != nil {
+	var mergeErr error
+	// A click merges whatever auto_merge says; without one, auto_merge alone decides, as before.
+	if commitOK && (task.AutoMerge || commitDone) {
+		mergeErr = te.MergeBranch(projectID, taskID, task)
+		if mergeErr != nil {
 			log.Printf("[merge] task=%s final merge failed: %v", taskID, mergeErr)
 		}
-	} else if commitOK && !task.AutoMerge {
-		log.Printf("[merge] task=%s merge skipped (auto_merge=false)", taskID)
+	} else if commitOK {
+		log.Printf("[merge] task=%s merge skipped (auto_merge=false, no commit-and-done click)", taskID)
 	}
 
-	updatedTask, _ = te.store.GetTaskByID(taskID)
-	return commitOK, updatedTask
+	updatedTask, err := te.store.GetTaskByID(taskID)
+	if err != nil || updatedTask == nil {
+		// Callers overwrite their own task with this, so a store hiccup must not hand them a nil.
+		log.Printf("[merge] task=%s refresh after conflict resolution failed: %v", taskID, err)
+		updatedTask = task
+	}
+
+	res := conflictResolution{task: updatedTask, committed: commitOK, mergeErr: mergeErr, commitDone: commitDone}
+	if !updatedTask.HasMergeConflict {
+		// The conflict is over, so the click is spent, merge failure included; a still conflicted
+		// task keeps it for the turn that finishes it.
+		res.commitDone = te.takeCommitAndDone(taskID, mergeErr == nil)
+	}
+	return res
 }

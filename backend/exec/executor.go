@@ -99,6 +99,12 @@ type TaskExecutor struct {
 		mu    sync.Mutex
 		tasks map[string]struct{}
 	}
+	// commitDone tracks tasks whose merge conflict came from a commit-and-done click
+	// (commit_and_done.go).
+	commitDone struct {
+		mu    sync.Mutex
+		tasks map[string]struct{}
+	}
 }
 
 // AgentRegistry returns the agent registry used by this executor.
