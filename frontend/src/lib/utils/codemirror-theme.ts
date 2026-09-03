@@ -73,6 +73,11 @@ export const darkTheme = EditorView.theme({
     },
     '.cm-lineSel': { backgroundColor: 'rgba(88,166,255,0.14)' },
     '.cm-matchingBracket': { backgroundColor: 'rgba(88,166,255,0.3)' },
+    // Bracket pair colorization (syntax/bracket-pairs.ts): a pair's colour is its nesting level, so an
+    // opener always matches the closer it opened. VS Code's defaults, cycled over three slots.
+    '.cm-bracket-l0': { color: '#FFD700' },
+    '.cm-bracket-l1': { color: '#DA70D6' },
+    '.cm-bracket-l2': { color: '#179FFF' },
     '.cm-cursor': { borderLeftColor: '#C9D1D9' },
     '.cm-dropCursor': { borderLeftColor: '#C9D1D9' },
     '.cm-searchMatch': { backgroundColor: 'rgba(232,164,20,0.25)', outline: '1px solid rgba(232,164,20,0.5)' },
@@ -249,6 +254,10 @@ export const lightTheme = EditorView.theme({
     },
     '.cm-lineSel': { backgroundColor: 'rgba(9,105,218,0.12)' },
     '.cm-matchingBracket': { backgroundColor: 'rgba(9,105,218,0.2)' },
+    // Same three levels as the dark theme, at the weights VS Code uses on a light background.
+    '.cm-bracket-l0': { color: '#795E26' },
+    '.cm-bracket-l1': { color: '#AF00DB' },
+    '.cm-bracket-l2': { color: '#001080' },
     '.cm-cursor': { borderLeftColor: '#24292F' },
     '.cm-dropCursor': { borderLeftColor: '#24292F' },
     '.cm-searchMatch': { backgroundColor: 'rgba(220,160,0,0.25)', outline: '1px solid rgba(220,160,0,0.5)' },

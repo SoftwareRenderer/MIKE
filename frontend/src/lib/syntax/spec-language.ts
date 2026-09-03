@@ -1,42 +1,26 @@
 /**
  * The generic syntax engine: a `SyntaxSpec` from an LSP extension's manifest, turned into a
- * CodeMirror language — tokenizer, bracket and region folding, indentation, Ctrl-/ and auto-close.
- * Nothing here knows a language; see "Language Knowledge Lives in Extensions" in AGENTS.md.
+ * CodeMirror language — tokenizer, bracket and region folding, indentation, bracket pair colorization,
+ * Ctrl-/ and auto-close. Nothing here knows a language; see "Language Knowledge Lives in Extensions".
  */
 import {
   Language,
   LanguageSupport,
   StreamLanguage,
-  ensureSyntaxTree,
   foldService,
   indentService,
-  syntaxTree,
 } from '@codemirror/language';
 import type { StringStream } from '@codemirror/language';
 import type { EditorState } from '@codemirror/state';
 import type { SyntaxSpec } from '$lib/types';
-
-/** Token names are CodeMirror tag names, so `defaultHighlightStyle` and the app theme apply. */
-const TOK = {
-  comment: 'comment',
-  string: 'string',
-  keyword: 'keyword',
-  type: 'typeName',
-  constant: 'atom',
-  builtin: 'className',
-  number: 'number',
-  operator: 'operator',
-} as const;
-
-/** Token classes that are not code — skipped by the fold and indent scans. */
-const OPAQUE = new Set<string>([TOK.comment, TOK.string]);
-
-/** How far a single fold/indent scan will run through the document. */
-const SCAN_LIMIT = 200_000;
+import { SCAN_LIMIT, TOK, TokenWalker, opaqueTokens } from './stream-tokens';
+import { specBracketPairColorization } from './bracket-pairs';
 
 const NUMBER = /0[xXbBoO][\da-fA-F_]+|(?:\d[\d_]*(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?/;
 const WORD = /[\w$]/;
 const OPERATOR_CHARS = '+-*/%=<>!&|^~?:';
+/** Where the upper-case-first-is-a-type convention starts: an identifier's first letter. */
+const UPPER_FIRST = /^\p{Lu}/u;
 
 interface SpecState {
   blockComment: boolean;
@@ -57,6 +41,10 @@ function parserFor(spec: SyntaxSpec) {
     .filter((m): m is string => Boolean(m))
     .sort((a, b) => b.length - a.length);
   const strings = [...(spec.strings || [])].sort((a, b) => b.quote.length - a.quote.length);
+  // The word lists above are a language's vocabulary. What is left gets its colour from the shape of
+  // the name, and an author may turn either shape rule off — hence defaults, not requirements.
+  const callAsFunction = spec.call_as_function !== false;
+  const capitalizedTypes = spec.capitalized_types !== false;
 
   return {
     startState: (): SpecState => ({ blockComment: false, string: null }),
@@ -112,7 +100,12 @@ function parserFor(spec: SyntaxSpec) {
         if (types.has(word)) return TOK.type;
         if (constants.has(word)) return TOK.constant;
         if (builtins.has(word)) return TOK.builtin;
-        return null; // plain identifiers keep the theme's default colour
+        // A stream grammar has no parse tree to ask, so the two conventions most of these languages
+        // share answer instead: a name applied to arguments is a function, a name that starts
+        // upper-case names a type. Everything else keeps the theme's default colour.
+        if (callAsFunction && appliedToArguments(stream)) return TOK.func;
+        if (capitalizedTypes && UPPER_FIRST.test(word)) return TOK.type;
+        return null;
       }
 
       if (stream.eat(isOperator)) {
@@ -129,6 +122,21 @@ function parserFor(spec: SyntaxSpec) {
 
 function isOperator(ch: string): boolean {
   return OPERATOR_CHARS.includes(ch);
+}
+
+/**
+ * Is the next thing on this line, past nothing but spaces, an opening bracket? Looking no further
+ * than the first non-space is what makes this cheap and safe: the `/` of a trailing comment, or the
+ * `,` ending a parameter, stops the scan, so neither makes a name look like a call.
+ */
+function appliedToArguments(stream: StringStream): boolean {
+  const { string, pos } = stream;
+  for (let i = pos; i < string.length; i++) {
+    const ch = string[i];
+    if (ch === '(') return true;
+    if (ch !== ' ' && ch !== '\t') return false;
+  }
+  return false;
 }
 
 /** Consume the rest of a string, honouring declared escapes and ending at the newline unless declared multiline. */
@@ -175,47 +183,8 @@ export function buildLanguageSupport(spec: SyntaxSpec, name: string): LanguageSu
     specRegionFoldService(spec),
     specBracketFoldService(spec),
     specIndentService(spec),
+    specBracketPairColorization(spec),
   ]);
-}
-
-/** A comment or string token — the parts of a document that are not code. */
-interface Token {
-  name: string;
-  from: number;
-  to: number;
-}
-
-/** Comment/string token ranges in `[from, to)`, in document order, at absolute offsets. */
-function opaqueTokens(state: EditorState, from: number, to: number): Token[] {
-  const end = Math.min(to, from + SCAN_LIMIT);
-  if (end <= from) return [];
-  // Parse the window first: an unparsed tail reports its brackets as code, costing a fold at worst.
-  ensureSyntaxTree(state, end, 20);
-  const out: Token[] = [];
-  const cursor = syntaxTree(state).cursor();
-  cursor.moveTo(from, 1);
-  for (;;) {
-    if (cursor.from >= end) break;
-    if (cursor.to > from && OPAQUE.has(cursor.name)) {
-      out.push({ name: cursor.name, from: cursor.from, to: cursor.to });
-      if (!cursor.next(false)) break; // step over its children: nothing opaque hides inside
-      continue;
-    }
-    if (!cursor.next()) break;
-  }
-  return out;
-}
-
-/** Forward-only cursor over sorted token ranges: `skip` jumps past the token covering a position. */
-class TokenWalker {
-  private i = 0;
-  constructor(private readonly tokens: Token[]) {}
-
-  skip(pos: number): number | null {
-    while (this.i < this.tokens.length && this.tokens[this.i].to <= pos) this.i++;
-    const token = this.tokens[this.i];
-    return token && pos >= token.from && pos < token.to ? token.to : null;
-  }
 }
 
 /** Does this line leave a bracket open? Closing something it did not open counts as no. */
@@ -358,6 +327,7 @@ export function specHasContent(spec: SyntaxSpec | undefined | null): spec is Syn
   if (!spec) return false;
   return Boolean(
     spec.line_comment || spec.block_comment || spec.strings?.length || spec.pairs?.length ||
-      spec.keywords?.length || spec.types?.length || spec.constants?.length || spec.builtins?.length || spec.numbers,
+      spec.keywords?.length || spec.types?.length || spec.constants?.length || spec.builtins?.length || spec.numbers ||
+      spec.capitalized_types === true || spec.call_as_function === true,
   );
 }

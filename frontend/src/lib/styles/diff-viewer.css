@@ -319,6 +319,17 @@
 .diff-text .hl-punctuation {
     color: var(--cm-punctuation);
 }
+/* Bracket pair colorization: a pair's colour is its nesting level, so which } belongs to which {
+   is visible. Shared with the editor (syntax/bracket-pairs.ts) — same levels, same three colours. */
+.diff-text .hl-bracket-l0 {
+    color: var(--cm-bracket-0);
+}
+.diff-text .hl-bracket-l1 {
+    color: var(--cm-bracket-1);
+}
+.diff-text .hl-bracket-l2 {
+    color: var(--cm-bracket-2);
+}
 .diff-text .hl-tagname {
     color: var(--cm-tag);
 }
