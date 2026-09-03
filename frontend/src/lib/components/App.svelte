@@ -546,9 +546,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onSandboxImageStatus: (status) => {
                 sandboxImageStatus.update(status);
             },
-            onExtensionChange: () => {
-                extensionManager.loadExtensions().catch(() => {});
-            },
+            onExtensionChange: handleExtensionChange,
         }, {
             // Declare which done-task stats we already have, so the server
             // can skip re-sending them on (re)subscribe.
@@ -786,9 +784,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 stopCountdown();
                 countdownSeconds = 0;
             },
-            onExtensionChange: () => {
-                extensionManager.loadExtensions().catch(() => {});
-            },
+            onExtensionChange: handleExtensionChange,
         });
         setAppStreamRef(appStream);
         await loadAppData(); // sets initialLoadComplete on completion
@@ -939,6 +935,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         } finally {
             boardRefreshPending = false;
         }
+    }
+
+    function handleExtensionChange() {
+        extensionManager.loadExtensions().catch(() => {});
+        appStore.refreshConfig();
     }
 
     /** Silently refresh all cached data after reconnection. No flicker, no URL changes. */
