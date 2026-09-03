@@ -4,7 +4,7 @@
     import ToggleSwitch from '../ToggleSwitch.svelte';
     import BaseModal from '../BaseModal.svelte';
     import { dialogStore } from '$lib/stores';
-    import { isDangerousPermission, requiresInstallReview, sortPermissions, dependencyCacheDeclaration, needsDependencyGrant } from '$lib/utils/extension-permissions';
+    import { isDangerousPermission, requiresInstallReview, sortPermissions, dependencyCacheDeclaration, needsDependencyGrant, requiresSetupAfterInstall } from '$lib/utils/extension-permissions';
     import { effectiveConfigFields, initialEditConfig, HOST_OWNED_LSP_CONFIG_KEY, type ConfigField } from '$lib/utils/extension-config';
     import { memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { orderBrowseEntries } from '$lib/composables/use-browse-order';
@@ -1299,6 +1299,8 @@
                         {@const regCapKeys = getRegistryCapabilityKeys(entry)}
                         {@const isUnpublished = unpublishedKeys.has(identityKey(entry.author, entry.name))}
                         {@const isInstalled = installedKeys.has(identityKey(entry.author, entry.name))}
+                        {@const needsSetup = requiresSetupAfterInstall(entry.capabilities)}
+                        {@const setupDep = dependencyCacheDeclaration(entry.capabilities)}
                         <div class="extension-card registry-card" class:unpublished-card={isUnpublished}>
                             <div class="card-header">
                                 <div class="ext-icon" class:ext-lsp={entry.type === 'lsp'} class:ext-ui={entry.type === 'ui'} class:ext-css={entry.type === 'css'} class:ext-agent={entry.type === 'agent'} class:ext-llm={entry.type === 'llm'}>
@@ -1318,6 +1320,13 @@
                                                 aria-expanded={revealedLocalPath === identityKey(entry.author, entry.name)}
                                                 onclick={(e) => { e.stopPropagation(); const k = identityKey(entry.author, entry.name); revealedLocalPath = revealedLocalPath === k ? null : k; }}
                                             >Local</button>
+                                        {/if}
+                                        {#if needsSetup}
+                                            <!-- A plain label, not a button: nothing is installed yet, so there is no record to open. -->
+                                            <span
+                                                class="needs-setup-badge"
+                                                title="Needs setup after installation — it reads resolved dependencies from {setupDep?.env}={setupDep?.container_path} inside its sandbox"
+                                            >Needs setup</span>
                                         {/if}
                                         {#if regCapKeys.length > 0}
                                             <div class="capability-badges" role="group" aria-label="Capabilities">
@@ -1374,6 +1383,15 @@
                             {/if}
                             {#if entry.description}
                                 <p class="ext-description">{entry.description}</p>
+                            {/if}
+                            {#if needsSetup}
+                                <!-- Not a permission warning: installing grants nothing. The step is a folder to pick. -->
+                                <p class="ext-note ext-needs-setup-note">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                    <span>Requires additional setup after installation: it reads resolved dependencies from
+                                        <code>{setupDep?.env}={setupDep?.container_path}</code> inside its sandbox. Point it at a folder
+                                        of your choosing afterwards — until you do, it resolves only what its own image contains.</span>
+                                </p>
                             {/if}
                             {#if entry.capabilities?.network?.allowed_domains?.length}
                                 <div class="ext-proxy-domains">
@@ -1465,9 +1483,9 @@
         color: var(--color-text-secondary);
     }
 
-    /* The dependency-directory state on a card: a dot on the Edit icon, and a badge beside the name that
-       opens the same dialog. The configuration itself lives in that dialog. The color is the attention
-       this app already uses for "it cannot do the thing you installed it for" (.unpublished-badge). */
+    /* The dependency-directory warning on a card: the Installed card shows a dot on the Edit icon and
+       a badge that opens that dialog; a Browse card shows the badge as a plain label, because nothing
+       is installed there yet. Same attention color as .unpublished-badge. */
     .needs-setup-badge {
         font-size: 0.68rem;
         font-weight: 700;
