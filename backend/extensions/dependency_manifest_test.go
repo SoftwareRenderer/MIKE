@@ -1,10 +1,8 @@
 package extensions
 
-// dependency_cache is a manifest telling the core where *it* reads resolved dependencies from.
-// Everything the core later binds is derived from these few characters, so they are checked where
-// the manifest is refused rather than stored: a container path that rewrites the podman mount spec,
-// an environment name that is really an assignment, or a reload path that escapes the workspace are
-// all things a runtime would otherwise discover by doing something wrong.
+// Tests for dependency_cache: a manifest saying where it reads resolved dependencies from. Everything
+// the core later binds is derived from these few characters, so they are refused at the manifest, not
+// stored.
 
 import (
 	"strings"
@@ -53,11 +51,9 @@ func TestValidate_DependencyCache(t *testing.T) {
 		{"env starts with a digit", DependencyCache{ContainerPath: "/go/pkg/mod", Env: "2CACHE"}, "not a variable name"},
 		{"env has a metacharacter", DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GO$(id)"}, "not a variable name"},
 		{"env has a space", DependencyCache{ContainerPath: "/go/pkg/mod", Env: "GO MOD"}, "not a variable name"},
-		// The server's own writable state. A read-only mount over it makes the server publish
-		// nothing about a file it cannot load, so a broken file looks clean — the one failure mode
-		// worse than the noise this mechanism exists to remove.
-		// The tmpfs roots only — a subtree like /tmp/modcache leaves the scratch space usable, so
-		// it is a location like any other (see the deep .cache case below).
+		// The server's own writable state: a read-only mount over it makes the server publish nothing about a
+		// file it cannot load, so a broken file looks clean. Only the tmpfs roots count; a subtree like
+		// /tmp/modcache leaves the scratch space usable.
 		{"container tmpfs", DependencyCache{ContainerPath: "/tmp", Env: "GOMODCACHE"}, "own writable state"},
 		{"container cache dir", DependencyCache{ContainerPath: "/root/.cache/go", Env: "GOMODCACHE"}, "own writable state"},
 		// A project's own .cache, deep under the mount, is not the server's state.

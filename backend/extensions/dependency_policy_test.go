@@ -1,10 +1,8 @@
 package extensions
 
-// A granted dependency directory becomes a mount root at exactly one moment and for exactly one
-// extension: when that extension's container is being built. Everywhere else — install, the
-// settings form, another extension's container — the allowlist must stay as narrow as it was
-// before this feature existed, or "the user gave gopls a folder" would quietly become "any
-// extension may ask for that folder".
+// A granted dependency directory becomes a mount root for exactly one extension, at exactly one moment:
+// when that extension's container is built. Everywhere else — install, the settings form, another
+// extension's container — the allowlist must be as narrow as it was before.
 
 import (
 	"os"
@@ -15,13 +13,9 @@ import (
 	"kanban/backend/types"
 )
 
-// grantCandidate returns an existing absolute directory that is NOT inside any policy root.
-//
-// The requirement sounds trivial and is not: the policy always allows the system temp dir, and a
-// test's own temp directory lives in it, so a t.TempDir() would be accepted by every variant
-// including the ones that are supposed to refuse. The home directory is outside the workspace,
-// the project paths, the extensions dir and the temp dir alike, which is also exactly what a real
-// Go module cache or Cargo home looks like.
+// grantCandidate returns an existing absolute directory that is NOT inside any policy root. Not
+// trivial: the policy always allows the system temp dir, and a test's own temp dir lives in it, so
+// t.TempDir() would be accepted by every variant including the ones that must refuse.
 func grantCandidate(t *testing.T) string {
 	t.Helper()
 	home, err := os.UserHomeDir()

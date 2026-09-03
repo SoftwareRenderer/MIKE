@@ -25,11 +25,10 @@ type lspManager interface {
 	// extension declared one of the changed files as a reason to re-read the
 	// project (`reload_files`). Returns true if any connection was ended.
 	FilesChanged(workspacePath string, changed []string) bool
-	// DependencyCaches reports the host directories that the enabled LSP extensions have been
-	// granted for their resolved dependencies, with the container path and the variable each one is
-	// read from. The task sandbox mounts them read-write so a turn that downloads dependencies
-	// warms the cache the language server reads read-only; nothing in exec decides what any of it
-	// means beyond "host directory, container path, variable".
+	// DependencyCaches reports the host directories the enabled LSP extensions were granted for their
+	// resolved dependencies, with the container path and variable each is read from. The task sandbox
+	// mounts them read-write so a turn that downloads dependencies warms the cache the language server
+	// reads. Implemented by the LSP manager; nil means the install has no LSP extensions.
 	DependencyCaches() []lsp.DependencyCache
 	// Environment reports whether the language server for this file can resolve
 	// its workspace at all, and which diagnostic codes mean "could not load" when

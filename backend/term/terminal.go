@@ -189,19 +189,17 @@ type dependencyCaches interface {
 	DependencyCaches() []lsp.DependencyCache
 }
 
-// SetDependencyProvider attaches the LSP manager after construction, the way the agent registry is
-// attached: both are built later than the terminal manager, and both are set once, before any session
-// opens. shellSandboxOpts reads the field without a lock for that reason — it runs inside getOrCreate,
-// which already holds tm.mu, and a second RLock on the same mutex would deadlock the terminal.
+// SetDependencyProvider attaches the LSP manager after construction: it is built later than the
+// terminal manager, and set once before any session opens. shellSandboxOpts reads the field without a
+// lock for that reason — it runs inside getOrCreate, which already holds tm.mu.
 func (tm *TerminalManager) SetDependencyProvider(p dependencyCaches) {
 	tm.dependencies = p
 }
 
-// shellSandboxOpts is what a sandboxed shell's container gets created with. It is a method and not a
-// literal in the middle of session setup because the dependency caches belong in the answer: a
-// terminal is where somebody warms a dependency directory by hand, and a shell that cannot see the
-// grant downloads the world into a container layer that is deleted with the task, while the language
-// server next door keeps reading the empty one it was given.
+// shellSandboxOpts is what a sandboxed shell's container is created with. It is a method rather than a
+// literal in the session setup because the dependency caches belong in the answer: a terminal is where
+// somebody warms one by hand, and a shell that cannot see the grant sends that work into a layer the
+// editor never sees.
 func (tm *TerminalManager) shellSandboxOpts(image string, proj *types.Project, agentSandbox *types.AgentSandbox) sandbox.SandboxOpts {
 	opts := sandbox.SandboxOpts{
 		BaseImage:        image,

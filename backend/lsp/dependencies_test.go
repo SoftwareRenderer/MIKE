@@ -1,9 +1,8 @@
 package lsp
 
-// The task sandbox is told about granted dependency directories by DependencyCaches, and the rules
-// here are what keeps two extensions sharing an install from disagreeing about one path: the same
-// derivation the extension's own sandbox uses decides what is bindable at all, and a claim is won in
-// a stable order and reported when it is lost.
+// Tests for DependencyCaches, the task sandbox's view of granted directories: the same derivation the
+// extension's own sandbox uses decides what is bindable, and a contested path or variable is claimed in
+// extension-ID order with the loser logged.
 
 import (
 	"os"

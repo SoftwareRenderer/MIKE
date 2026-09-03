@@ -594,14 +594,10 @@ func (c *Client) LSPNotify(ctx context.Context, raw json.RawMessage) error {
 	return c.writeFrameCtx(ctx, frame)
 }
 
-// LSPStart starts the LSP server process inside the sandbox.
-// Command and args specify the LSP server to start.
+// LSPStart starts the LSP server process inside the sandbox. Command and args specify the server.
 //
-// There is deliberately no environment parameter. The server's environment is the container's,
-// which is set once when the container is created — the same source the extension's own environment
-// check inherits. A per-start env would be a second place that decides what a language server sees,
-// and the two could disagree about a dependency root without anything visible changing.
-// Communication is over stdin/stdout with Content-Length framing.
+// There is deliberately no environment parameter: the server's environment is the container's, set at
+// creation, which is also what the extension's own environment check sees.
 func (c *Client) LSPStart(ctx context.Context, command string, args []string) error {
 	ctx, cancel := lspCallCtx(ctx)
 	defer cancel()

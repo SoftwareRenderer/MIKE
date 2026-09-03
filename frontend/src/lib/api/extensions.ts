@@ -33,11 +33,19 @@ export async function updateExtension(id: string, data: {
 }
 
 /** Delete an extension and destroy its sandbox. */
-export async function deleteExtension(id: string): Promise<void> {
+export async function deleteExtension(id: string): Promise<DeleteExtensionResult> {
     const res = await apiFetch(`${API_BASE}/extensions/${id}`, {
         method: 'DELETE',
     });
     if (!res.ok) throw await apiError(res, 'Failed to delete extension');
+    return (await res.json().catch(() => ({}))) as DeleteExtensionResult;
+}
+
+/** `leftover` is set when the extension was deleted but its materialized files could not be removed —
+ * files that are still served and still offered for install, and that nothing else in the UI can see. */
+export interface DeleteExtensionResult {
+    status?: string;
+    leftover?: string;
 }
 
 /** Toggle the enabled state of an extension. */
