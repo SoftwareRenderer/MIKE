@@ -8,6 +8,7 @@
     import { effectiveConfigFields, initialEditConfig, HOST_OWNED_LSP_CONFIG_KEY, type ConfigField } from '$lib/utils/extension-config';
     import { memoryLimitToInput, parseMemoryLimitMB } from '$lib/utils/memory-stats';
     import { timeAgo } from '$lib/utils/format-time';
+    import { t } from '$lib/i18n/runtime.svelte';
     import { orderBrowseEntries } from '$lib/composables/use-browse-order';
     import { identityKey } from '$lib/utils/extension-identity';
 
@@ -580,7 +581,7 @@
     function formatBuiltAt(builtAt: string): string {
         if (!builtAt) return 'Not built';
         // 'calendar': a build from last March is a date, not an age.
-        return timeAgo(builtAt, { scale: 'calendar', prefix: 'Built ' }) || `Built ${builtAt}`;
+        return timeAgo(builtAt, { scale: 'calendar', template: 'time.built' }) || t('time.built', { when: builtAt });
     }
 
     // Filter extensions by search, with local (unpublished) extensions first

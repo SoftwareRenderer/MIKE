@@ -2,6 +2,11 @@ import './app.css';
 import { mount } from 'svelte';
 import App from './lib/components/App.svelte';
 import { appStore } from './lib/stores';
+import { initLocale } from './lib/i18n/runtime.svelte';
+
+// Apply the active locale before the first mount: <html lang> drives the :lang()
+// typography rules, so mounting first would paint one frame in the wrong font stack.
+initLocale();
 
 // Centralized unhandled promise rejection handler
 // Catches errors from fire-and-forget async operations (storage init, etc.)
