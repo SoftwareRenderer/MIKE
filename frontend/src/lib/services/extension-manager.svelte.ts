@@ -1,6 +1,7 @@
 import type { Extension, RegistryEntry, ExtensionUpdate } from '$lib/types';
 import { listExtensions, getRegistryIndex, installExtension, deleteExtension, setExtensionEnabled, checkUpdates, updateExtension } from '$lib/api';
 import { uiInjector } from './ui-injector.svelte';
+import { t } from '$lib/i18n/index.svelte';
 
 /** Runtime status of an extension sandbox. */
 export type ExtensionStatus = 'running' | 'stopped' | 'error' | 'unknown';
@@ -25,7 +26,7 @@ export class ExtensionManager {
             this.state.extensions = await listExtensions();
             uiInjector.registerFromExtensions(this.state.extensions);
         } catch (e: any) {
-            this.state.error = e.message || 'Failed to load extensions';
+            this.state.error = e.message || t('api.loadExtensions');
         } finally {
             this.state.loading = false;
         }
@@ -54,7 +55,7 @@ export class ExtensionManager {
         try {
             this.state.registry = await getRegistryIndex();
         } catch (e: any) {
-            this.state.error = e.message || 'Failed to load registry';
+            this.state.error = e.message || t('api.loadRegistry');
         } finally {
             this.state.loadingRegistry = false;
         }
@@ -72,7 +73,7 @@ export class ExtensionManager {
             }
             await this.loadExtensions();
         } catch (e: any) {
-            this.state.error = e.message || 'Failed to install extension';
+            this.state.error = e.message || t('api.installExtension');
         }
     }
 
@@ -83,7 +84,7 @@ export class ExtensionManager {
             await deleteExtension(id);
             await this.loadExtensions();
         } catch (e: any) {
-            this.state.error = e.message || 'Failed to delete extension';
+            this.state.error = e.message || t('api.deleteExtension');
         }
     }
 
@@ -94,7 +95,7 @@ export class ExtensionManager {
             await setExtensionEnabled(id, enabled);
             await this.loadExtensions();
         } catch (e: any) {
-            this.state.error = e.message || 'Failed to update extension';
+            this.state.error = e.message || t('api.updateExtension');
         }
     }
 
@@ -105,7 +106,7 @@ export class ExtensionManager {
         try {
             this.state.updates = await checkUpdates();
         } catch (e: any) {
-            this.state.error = e.message || 'Failed to check for updates';
+            this.state.error = e.message || t('api.checkForUpdates');
         } finally {
             this.state.loadingUpdates = false;
         }
@@ -118,7 +119,7 @@ export class ExtensionManager {
             await updateExtension(id, { config });
             await this.loadExtensions();
         } catch (e: any) {
-            this.state.error = e.message || 'Failed to update extension';
+            this.state.error = e.message || t('api.updateExtension');
         }
     }
 
