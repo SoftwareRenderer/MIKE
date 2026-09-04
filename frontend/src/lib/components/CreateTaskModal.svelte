@@ -13,6 +13,7 @@
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
     import { createTask, getTask, enqueueAction, getOfflineStatus, setOfflineStatus, generateId, startTask } from '$lib/api';
     import { appStore, uiStore, dialogStore } from '$lib/stores';
+    import { t } from '$lib/i18n';
     import { readImageAttachments, describeRejectedImages, MAX_IMAGES } from '$lib/utils/attachments';
     import BaseModal from './BaseModal.svelte';
     import ModelSelector from './Chat/ModelSelector.svelte';
@@ -232,7 +233,7 @@
                 autoCommit = parentTask.auto_commit ?? autoCommit;
                 autoMerge = parentTask.subtasks_auto_merge ?? autoMerge;
             } catch {
-                parentTitle = 'Parent task';
+                parentTitle = t('app.task.parentFallback');
             }
         }
         // Fetch available branches for root tasks
@@ -278,7 +279,7 @@
     function startTaskIfEnabled(taskProjectId: string, taskId: string) {
         if (!lineTask || !autoStart) return;
         startTask(taskProjectId, taskId).catch(() => {
-            dialogStore.showToast('Task created, but auto-start failed.', 'error');
+            dialogStore.showToast(t('app.task.autoStartFailed'), 'error');
         });
     }
 
@@ -331,7 +332,7 @@
 
         if (isOfflineNow) {
             if (lineTaskFlow) {
-                dialogStore.showToast('Offline — task creation and start are queued; it will run when you are back online.');
+                dialogStore.showToast(t('app.task.queuedOffline'));
             }
             return;
         }
@@ -349,7 +350,7 @@
                 const queued = await enqueueAction({ type: 'createTask', params: { projectId, taskData: taskDataWithId } });
                 (optimisticTask as any).actionId = queued.id;
                 await queueStartIfEnabled();
-                dialogStore.showToast('Offline — task creation and start are queued; it will run when you are back online.');
+                dialogStore.showToast(t('app.task.queuedOffline'));
             }
             return;
         }
@@ -378,10 +379,10 @@
         if (prompt.trim()) {
             if (dialogStore.confirmation) return false;
             const confirmed = await dialogStore.showConfirm({
-                title: 'Discard task?',
-                message: 'Your task description has not been saved. If you close now, your changes will be lost.',
-                confirmText: 'Discard',
-                cancelText: 'Keep editing',
+                title: t('app.task.discardTitle'),
+                message: t('app.task.discardMessage'),
+                confirmText: t('app.discard'),
+                cancelText: t('app.keepEditing'),
             });
             if (!confirmed) return false;
         }
@@ -398,25 +399,25 @@
 </script>
 
 {#snippet footer()}
-    <button type="button" class="btn-secondary" onclick={handleCancel} title="Cancel">Cancel</button>
+    <button type="button" class="btn-secondary" onclick={handleCancel} title="Cancel">{t('app.cancel')}</button>
     {#if lineTask}
         <span class="auto-start-option" role="button" tabindex="-1" title="Start the task immediately after creating it" onclick={() => { autoStart = !autoStart; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); autoStart = !autoStart; } }}>
-            <span class="auto-start-label">Auto start</span>
+            <span class="auto-start-label">{t('app.task.autoStart')}</span>
             <ToggleSwitch bind:checked={autoStart} ariaLabel="Auto start after creating" />
         </span>
     {/if}
     <button type="button" class="btn-primary" disabled={!canSubmit} onclick={() => handleSubmit()} title={`Create the task${submitHintLabel ? ` (${submitHintLabel})` : ''}`}>
-        {loading ? 'Creating...' : 'Create Task'}{#if submitHintLabel && !hintsHidden}<kbd class="key-hint">{submitHintLabel}</kbd>{/if}
+        {loading ? t('app.task.creating') : t('app.task.create')}{#if submitHintLabel && !hintsHidden}<kbd class="key-hint">{submitHintLabel}</kbd>{/if}
     </button>
 {/snippet}
 
-<BaseModal title={parentId ? 'Create Subtask' : 'Create Task'} width="480px" footer={footer} onClose={closeModal} onBeforeClose={requestClose} closeOnOverlayClick={false} floating={lineTask}>
+<BaseModal title={parentId ? t('app.task.createSubtask') : t('app.task.create')} width="480px" footer={footer} onClose={closeModal} onBeforeClose={requestClose} closeOnOverlayClick={false} floating={lineTask}>
     {#if parentId}
-        <div class="parent-label">Subtask of: <strong>{parentTitle || 'Parent task'}</strong></div>
+        <div class="parent-label">{t('app.task.subtaskOf')} <strong>{parentTitle || t('app.task.parentFallback')}</strong></div>
     {/if}
     <label for="task-description">
         <span class="label-row">
-            Description
+            {t('app.task.description')}
             <button type="button" class="btn-attach" onclick={() => fileInput?.click()} aria-label="Attach image" title="Attach image">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
@@ -440,7 +441,7 @@
     <input type="file" accept="image/*" multiple bind:this={fileInput} onchange={handleFileSelect} style="display:none" />
     {#if hasProviders}
         <div class="model-select-row">
-            <span id="model-label" class="model-label" style="margin:0">Model</span>
+            <span id="model-label" class="model-label" style="margin:0">{t('app.task.model')}</span>
             <ModelSelector
                 providers={providers}
                 currentModel={selectedModel}
@@ -455,7 +456,7 @@
         <div class="config-row">
             <div class="config-info">
                 <div class="config-text">
-                    <span class="config-label">Operating mode</span>
+                    <span class="config-label">{t('app.task.operatingMode')}</span>
                     <span class="config-desc">{MODE_DESCRIPTIONS[operatingMode] || ''}</span>
                 </div>
             </div>
@@ -464,13 +465,13 @@
         {/if}
     </div>
     <div class="options-section">
-        <div class="section-label">Repository</div>
+        <div class="section-label">{t('app.task.repository')}</div>
         {#if !parentId}
         <div class="config-row">
             <div class="config-info">
                 <div class="config-text">
-                    <span class="config-label">Branch</span>
-                    <span class="config-desc">Base branch for this task's changes</span>
+                    <span class="config-label">{t('app.task.branch')}</span>
+                    <span class="config-desc">{t('app.task.branchDesc')}</span>
                 </div>
             </div>
             <div class="branch-input-wrapper">
@@ -503,12 +504,12 @@
         <div class="config-row">
             <div class="config-info">
                 <div class="config-text">
-                    <span class="config-label">Auto-merge</span>
+                    <span class="config-label">{t('app.task.autoMerge')}</span>
                     <span class="config-desc">
                         {#if parentId}
-                        Merge changes into parent task when complete
+                        {t('app.task.autoMergeParentDesc')}
                         {:else}
-                        Merge changes into <span class="branch-badge" title={`Branch: ${branchDraft || targetBranch}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{branchDraft || targetBranch}</span> when complete
+                        {t('app.task.autoMergeInto.before')} <span class="branch-badge" title={`Branch: ${branchDraft || targetBranch}`}><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="10" cy="10" r="2.5"/><line x1="7.8" y1="7.8" x2="8.2" y2="8.2"/><line x1="6" y1="3.5" x2="6" y2="2"/><line x1="10" y1="12.5" x2="10" y2="14"/></svg>{branchDraft || targetBranch}</span> {t('app.task.autoMergeInto.after')}
                         {/if}
                     </span>
                 </div>
@@ -519,8 +520,8 @@
         <div class="config-row">
             <div class="config-info">
                 <div class="config-text">
-                    <span class="config-label">Allow subtasks to auto-merge</span>
-                    <span class="config-desc">Subtasks created under this task will auto-merge into it</span>
+                    <span class="config-label">{t('app.task.subtasksAutoMerge')}</span>
+                    <span class="config-desc">{t('app.task.subtasksAutoMergeDesc')}</span>
                 </div>
             </div>
             <ToggleSwitch bind:checked={subtasksAutoMerge} ariaLabel="Allow subtasks to auto-merge" />

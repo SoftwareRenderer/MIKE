@@ -7,7 +7,7 @@ import {
 } from './queue';
 import { setBoardCache, getBoardCache } from '../storage';
 import { markCached } from './cache';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 // -- Configuration endpoints --
 

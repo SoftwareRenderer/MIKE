@@ -2,7 +2,7 @@
     import { fade } from 'svelte/transition';
     import { sandboxImageStatus } from '$lib/services/sandbox-image-status.svelte';
     import { sandboxImageLabel, sandboxImageVisible } from '$lib/utils/sandbox-image-status';
-    import { t } from '$lib/i18n/index.svelte';
+    import { t } from '$lib/i18n';
 
     /**
      * Progress for a project's sandbox image being built (from its Dockerfile) or pulled.

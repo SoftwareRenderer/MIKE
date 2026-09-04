@@ -21,12 +21,15 @@
     import { appStore, dialogStore, uiStore } from '$lib/stores';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
+    import { t } from '$lib/i18n';
 
     // Terminal button tooltip — always shows the effective shortcut (tooltips
     // keep the shortcut text even when keycap hints are hidden).
     const terminalButtonTitle = $derived.by(() => {
         const key = effectiveOpenTerminalKey(appStore.config);
-        return key ? `Open terminal (${formatShortcut(key)})` : 'Open terminal';
+        return key
+            ? t('explorer.shared.terminalTitle', { shortcut: formatShortcut(key) })
+            : t('explorer.shared.openTerminal');
     });
 
     let { projectId, projectPath, currentBranch, initialFile, sandboxEnabled, onClose, fsEventQueue, onOpenTerminal, onUpdateFile, changesOpen, onChangesOpen }: {
@@ -461,10 +464,10 @@
         if (unsavedFiles.has(path)) {
             const fileName = path.split('/').pop() || path;
             const confirmed = await dialogStore.showConfirm({
-                title: 'Unsaved changes',
-                message: `"${fileName}" has unsaved changes. Discard them?`,
-                confirmText: 'Discard',
-                cancelText: 'Cancel',
+                title: t('explorer.shared.unsavedChanges'),
+                message: t('explorer.shared.unsavedDiscardMessage', { file: fileName }),
+                confirmText: t('explorer.shared.discard'),
+                cancelText: t('explorer.shared.cancel'),
                 variant: 'destructive',
             });
             if (!confirmed) return;
@@ -691,10 +694,10 @@
     });
 </script>
 
-<div class="explorer-view" class:fullscreen={editorFullscreen && activeFilePath} role="dialog" aria-label="Explorer view">
+<div class="explorer-view" class:fullscreen={editorFullscreen && activeFilePath} role="dialog" aria-label={t('explorer.view.aria')}>
     <!-- Header bar (replaces top-bar when explorer is open) -->
     <div class="explorer-header">
-        <button class="close-btn" onclick={() => { if (showChanges) { onChangesOpen(false); } else { editorFullscreen = false; closeCommitDiff(); onClose(); } }} aria-label="Close branch view" title="Close (Escape)">
+        <button class="close-btn" onclick={() => { if (showChanges) { onChangesOpen(false); } else { editorFullscreen = false; closeCommitDiff(); onClose(); } }} aria-label={t('explorer.view.closeAria')} title={t('explorer.shared.closeEscape')}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
@@ -721,7 +724,7 @@
                 <button
                     class="explorer-dropdown-btn"
                     onclick={toggleDropdown}
-                    title="Switch branch"
+                    title={t('explorer.view.switchBranch')}
                     disabled={checkoutLoading}
                 >
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -740,7 +743,7 @@
                 {#if showDropdown}
                     <div class="explorer-dropdown-list" role="listbox">
                         {#if loadingBranches}
-                            <div class="explorer-dropdown-item loading">Loading...</div>
+                            <div class="explorer-dropdown-item loading">{t('explorer.shared.loading')}</div>
                         {:else}
                             {#each branches as branch}
                                 <button
@@ -761,7 +764,7 @@
                                 </button>
                             {/each}
                             {#if branches.length === 0}
-                                <div class="explorer-dropdown-item empty">No branches</div>
+                                <div class="explorer-dropdown-item empty">{t('explorer.view.noBranches')}</div>
                             {/if}
                         {/if}
                     </div>
@@ -769,10 +772,10 @@
             </div>
         {/if}
         <div class="explorer-header-spacer"></div>
-        <button class="icon-btn git-status-btn" class:active={showChanges} onclick={() => onChangesOpen(!showChanges)} aria-label="Review Changes" title="Review Changes">
+        <button class="icon-btn git-status-btn" class:active={showChanges} onclick={() => onChangesOpen(!showChanges)} aria-label={t('explorer.shared.reviewChanges')} title={t('explorer.shared.reviewChanges')}>
             <Icon src={commitPushIcon} color="currentColor" width={14} height={14} />
         </button>
-        <button class="icon-btn terminal-btn" onclick={onOpenTerminal} aria-label="Open terminal" title={terminalButtonTitle}>
+        <button class="icon-btn terminal-btn" onclick={onOpenTerminal} aria-label={t('explorer.shared.openTerminal')} title={terminalButtonTitle}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
                 <path d="M4 6l2 2-2 2M7 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
@@ -786,7 +789,7 @@
             <button
                 class="tab-btn {activeTab === 'files' ? 'active' : ''}"
                 onclick={() => activeTab = 'files'}
-                title="File browser"
+                title={t('explorer.shared.fileBrowser')}
             >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 3h4l1.5 2H13l1.5 2.5V13a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
                 <span class="tab-label">{getFolderName(currentFolderPath)}</span>
@@ -794,18 +797,18 @@
             <button
                 class="tab-btn {activeTab === 'editor' ? 'active' : ''}"
                 onclick={() => activeTab = 'editor'}
-                title="Editor"
+                title={t('explorer.shared.editor')}
             >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 2h6l4 4v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-                {activeFilePath ? activeFilePath.split('/').pop() : 'Editor'}
+                {activeFilePath ? activeFilePath.split('/').pop() : t('explorer.shared.editor')}
             </button>
             <button
                 class="tab-btn {activeTab === 'symbols' ? 'active' : ''}"
                 onclick={() => activeTab = 'symbols'}
-                title="Symbols"
+                title={t('explorer.shared.symbols')}
             >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h10M3 12h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-                Symbols
+                {t('explorer.shared.symbols')}
             </button>
         </div>
     {/if}
@@ -865,7 +868,7 @@
                         {#if !isMobileCtx.isMobile}
                         <ResizeHandle
                             axis="horizontal"
-                            ariaLabel="Resize file browser and git graph panels"
+                            ariaLabel={t('explorer.shared.resizeSplitAria')}
                             onDragStart={handleSplitDragStart}
                             onDragMove={handleSplitDragMove}
                             onDragEnd={handleSplitDragEnd}
@@ -892,7 +895,7 @@
             <!-- Resize handle: left column -->
             {#if !isMobileCtx.isMobile}
             <ResizeHandle
-                ariaLabel="Resize left panel"
+                ariaLabel={t('explorer.shared.resizeLeftAria')}
                 onDragStart={handleLeftDragStart}
                 onDragMove={handleLeftDragMove}
                 onDragEnd={handleLeftDragEnd}
@@ -944,7 +947,7 @@
                                 <path d="M3 1h6l4 4v8a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z"/>
                                 <polyline points="9,1 9,5 13,5"/>
                             </svg>
-                            <p>Select a file to edit</p>
+                            <p>{t('explorer.shared.selectFileToEdit')}</p>
                         </div>
                     {/if}
                 {/if}
@@ -953,7 +956,7 @@
             <!-- Resize handle: right column (only when symbols exist and no diff is open) -->
             {#if !isMobileCtx.isMobile && symbols.length > 0 && !diffCommit}
             <ResizeHandle
-                ariaLabel="Resize right panel"
+                ariaLabel={t('explorer.shared.resizeRightAria')}
                 onDragStart={handleRightDragStart}
                 onDragMove={handleRightDragMove}
                 onDragEnd={handleRightDragEnd}

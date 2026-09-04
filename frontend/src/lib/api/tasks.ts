@@ -24,7 +24,7 @@ import {
     deleteTaskMessageRaw,
     updateTaskMessageRaw,
 } from './queue';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 // -- Task CRUD endpoints --
 

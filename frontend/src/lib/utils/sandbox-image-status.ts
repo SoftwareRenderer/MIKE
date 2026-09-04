@@ -8,7 +8,7 @@
  * the state machine below never does, so a frame folds the same whatever language is on screen.
  */
 
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 /** A frame from the server (`sandbox_image_status`). Mirrors types.SandboxImageStatus. */
 export interface SandboxImageStatusEvent {

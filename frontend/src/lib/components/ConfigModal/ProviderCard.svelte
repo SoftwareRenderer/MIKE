@@ -2,6 +2,7 @@
     import { slide } from 'svelte/transition';
     import { dialogStore } from '$lib/stores';
     import { getProviderDisplayName } from '$lib/utils/providers';
+    import { t } from '$lib/i18n';
     import AgentSection from './AgentSection.svelte';
     import HelpIcon from './HelpIcon.svelte';
     import ModelList from './ModelList.svelte';
@@ -64,10 +65,10 @@
     async function handleRemove(e: MouseEvent) {
         e.stopPropagation();
         const confirmed = await dialogStore.showConfirm({
-            title: 'Remove Provider',
-            message: 'Remove this provider? This cannot be undone.',
-            confirmText: 'Remove',
-            cancelText: 'Cancel',
+            title: t('settings.provider.removeTitle'),
+            message: t('settings.provider.removeMessage'),
+            confirmText: t('settings.provider.remove'),
+            cancelText: t('settings.cancel'),
         });
         if (!confirmed) return;
         onRemove();
@@ -76,9 +77,9 @@
 
 <div class="provider-card" data-index={index} class:dragging={isDragging}>
     <!-- Card header: always visible -->
-    <div class="provider-card-header" onclick={handleToggle} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleToggle(); } }} role="button" aria-expanded={provider.expanded} aria-label={`Toggle ${provider.name || provider.url ? getProviderDisplayName(provider, providers) : 'New Provider'} settings`} tabindex="0">
+    <div class="provider-card-header" onclick={handleToggle} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleToggle(); } }} role="button" aria-expanded={provider.expanded} aria-label={t('settings.provider.toggleAria', { name: provider.name || provider.url ? getProviderDisplayName(provider, providers) : t('settings.provider.newProvider') })} tabindex="0">
         <div class="reorder-buttons">
-            <button type="button" class="btn-drag-handle" onpointerdown={onDragStart} title="Drag to reorder" aria-label="Drag to reorder provider">
+            <button type="button" class="btn-drag-handle" onpointerdown={onDragStart} title={t('settings.provider.dragHint')} aria-label={t('settings.provider.dragAria')}>
                 <svg width="16" height="16" viewBox="0 0 16 20" fill="currentColor">
                     <circle cx="5" cy="3" r="1.5"/>
                     <circle cx="11" cy="3" r="1.5"/>
@@ -92,7 +93,7 @@
         <div class="provider-title-section">
             <div class="provider-title-main">
                 {#if provider.kind === 'agent'}
-                    <span class="agent-icon" title="Agent">
+                    <span class="agent-icon" title={t('settings.provider.agent')}>
                         <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
                             <rect x="3" y="5" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
                             <circle cx="6" cy="9" r="1" fill="currentColor"/>
@@ -101,21 +102,21 @@
                         </svg>
                     </span>
                 {/if}
-                <span class="provider-display-name">{provider.name || provider.url ? getProviderDisplayName(provider, providers) : 'New Provider'}</span>
+                <span class="provider-display-name">{provider.name || provider.url ? getProviderDisplayName(provider, providers) : t('settings.provider.newProvider')}</span>
             </div>
         </div>
         <div class="provider-actions">
             {#if provider.kind !== 'agent'}
                 <!-- Agent providers are derived from enabled agent extensions and can't be
                      removed here — disabling/uninstalling the extension removes the provider. -->
-                <button type="button" class="btn-remove-provider" onclick={handleRemove} title="Remove provider" aria-label="Remove provider">
+                <button type="button" class="btn-remove-provider" onclick={handleRemove} title={t('settings.provider.removeHint')} aria-label={t('settings.provider.removeHint')}>
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                         <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                         <path d="M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
             {/if}
-            <button type="button" class="btn-expand" onclick={(e) => { e.stopPropagation(); handleToggle(); }} aria-expanded={provider.expanded} aria-label={provider.expanded ? 'Collapse provider details' : 'Expand provider details'} title={provider.expanded ? 'Collapse' : 'Expand'}>
+            <button type="button" class="btn-expand" onclick={(e) => { e.stopPropagation(); handleToggle(); }} aria-expanded={provider.expanded} aria-label={provider.expanded ? t('settings.provider.collapseAria') : t('settings.provider.expandAria')} title={provider.expanded ? t('settings.provider.collapse') : t('settings.provider.expand')}>
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" class:expanded={provider.expanded}>
                     <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -132,16 +133,16 @@
                 <!-- LLM Provider Fields -->
                 <div class="url-and-key-row">
                     <div class="url-field">
-                        <label class="url-label" for={`provider-url-${index}`}>Provider URL</label>
-                        <input id={`provider-url-${index}`} type="text" bind:value={provider.url} placeholder="http://localhost:8080/v1" oninput={() => onDirty?.()} onclick={(e) => e.stopPropagation()} aria-label="Provider URL" />
+                        <label class="url-label" for={`provider-url-${index}`}>{t('settings.provider.url')}</label>
+                        <input id={`provider-url-${index}`} type="text" bind:value={provider.url} placeholder="http://localhost:8080/v1" oninput={() => onDirty?.()} onclick={(e) => e.stopPropagation()} aria-label={t('settings.provider.url')} />
                     </div>
                     <div class="api-key-field">
-                        <label class="api-key-label" for={`provider-key-${index}`}>API key <span class="optional-text">(optional)</span></label>
+                        <label class="api-key-label" for={`provider-key-${index}`}>{t('settings.provider.apiKey')} <span class="optional-text">{t('settings.provider.optional')}</span></label>
                         <input
                             id={`provider-key-${index}`}
                             type="password"
                             bind:value={provider.api_key}
-                            placeholder="API key..."
+                            placeholder={t('settings.provider.apiKeyPlaceholder')}
                             onclick={(e) => e.stopPropagation()}
                             onchange={() => onDirty?.()}
                         />
@@ -149,30 +150,30 @@
                 </div>
 
                 <div class="details-actions">
-                    <button type="button" class="btn-fetch" onclick={onFetchModels} disabled={provider.fetchingModels || !provider.url.trim()} title="Fetch available models from this provider">
+                    <button type="button" class="btn-fetch" onclick={onFetchModels} disabled={provider.fetchingModels || !provider.url.trim()} title={t('settings.provider.fetchHint')}>
                         {#if provider.fetchingModels}
                             <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
                                 <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
                             </svg>
-                            Fetching...
+                            {t('settings.provider.fetching')}
                         {:else}
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                                 <path d="M8 2v4M8 10v4M2 8h4M10 8h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                             </svg>
-                            Fetch Models
+                            {t('settings.provider.fetchModels')}
                         {/if}
                     </button>
-                    <button type="button" class="btn-test" onclick={onTestConnection} disabled={provider.testingConnection || !provider.url.trim()} title="Test connection to this provider">
+                    <button type="button" class="btn-test" onclick={onTestConnection} disabled={provider.testingConnection || !provider.url.trim()} title={t('settings.provider.testHint')}>
                         {#if provider.testingConnection}
                             <svg class="spin-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
                                 <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" stroke-dasharray="28" stroke-dashoffset="8"/>
                             </svg>
-                            Testing...
+                            {t('settings.provider.testing')}
                         {:else}
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                                 <path d="M2 8l4 4L14 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-                            Test Connection
+                            {t('settings.provider.testConnection')}
                         {/if}
                     </button>
                 </div>
@@ -204,15 +205,15 @@
                 <div class="provider-options">
                     <div class="option-row">
                         <div class="option-label-group">
-                            <label class="option-label" for={`concurrency-${index}`}>Concurrency</label>
-                            <HelpIcon label="Concurrency" text="Max tasks running concurrently on this provider; also caps in-flight LLM requests to this number." />
+                            <label class="option-label" for={`concurrency-${index}`}>{t('settings.provider.concurrency')}</label>
+                            <HelpIcon label={t('settings.provider.concurrency')} text={t('settings.provider.concurrencyHelp')} />
                         </div>
                         <input id={`concurrency-${index}`} type="number" bind:value={provider.concurrency} min="1" max="20" class="option-input" onchange={() => onDirty?.()} />
                     </div>
                     <div class="option-row">
                         <div class="option-label-group">
-                            <label class="option-label" for={`max-rps-${index}`}>Max requests/sec</label>
-                            <HelpIcon label="Max requests/sec" text="Maximum new requests started per second to this provider. 0 = unlimited." />
+                            <label class="option-label" for={`max-rps-${index}`}>{t('settings.provider.maxRps')}</label>
+                            <HelpIcon label={t('settings.provider.maxRps')} text={t('settings.provider.maxRpsHelp')} />
                         </div>
                         <input id={`max-rps-${index}`} type="number" min="0" step="1" bind:value={provider.max_requests_per_second} class="option-input" onchange={() => onDirty?.()} />
                     </div>

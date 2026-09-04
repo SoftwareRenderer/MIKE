@@ -12,7 +12,7 @@ import {
 import { setBoardCache, getBoardCache, boardCacheKey } from '../storage';
 import { markCached } from './cache';
 import { repoNameFromGitUrl } from '../utils/repo-name';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 /** Fetch all projects from the server. Falls back to cached copy on failure.
  * Always tries the network first — the isOffline flag tracks WebSocket state,
@@ -98,7 +98,7 @@ export function parseCloneEvent(data: string): CloneEvent | null {
             case 'done':
                 return { type: 'done', project: obj.project as Project };
             case 'error':
-                return { type: 'error', message: String(obj.message ?? 'clone failed') };
+                return { type: 'error', message: String(obj.message ?? t('api.cloneFailed')) };
             default:
                 return null;
         }

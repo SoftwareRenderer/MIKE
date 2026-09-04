@@ -1,6 +1,6 @@
 import { API_BASE } from './helpers';
 import { STALE_THRESHOLD_MS } from '$lib/constants';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 // Track last activity per terminal WebSocket for stale connection detection
 const terminalActivity = new WeakMap<WebSocket, number>();

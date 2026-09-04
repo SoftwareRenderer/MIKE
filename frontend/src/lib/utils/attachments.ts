@@ -9,7 +9,7 @@
  * answers the same way.
  */
 import type { DraftAttachment } from '$lib/storage';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 /** Largest image we accept, in bytes. */
 export const MAX_IMAGE_SIZE = 4 * 1024 * 1024;

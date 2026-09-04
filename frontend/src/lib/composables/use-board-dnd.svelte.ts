@@ -1,7 +1,7 @@
 import type { Task } from '$lib/types';
 import { appStore, dialogStore, updateTaskInBoard } from '$lib/stores';
 import { moveTask } from '$lib/api';
-import { t } from '$lib/i18n/index.svelte';
+import { t } from '$lib/i18n';
 
 /** Reactive state for board section drag-and-drop. */
 export interface SectionDragState {

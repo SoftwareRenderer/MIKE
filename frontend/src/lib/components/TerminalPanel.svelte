@@ -10,7 +10,7 @@
     import { createFocusTrap } from '$lib/a11y';
     import { effectiveOpenTerminalKey, effectiveToggleFullscreenKey, fullscreenToggleTitle, formatShortcut, matchShortcut } from '$lib/utils/keyboard';
     import ResizeHandle from './ResizeHandle.svelte';
-    import { t } from '$lib/i18n/index.svelte';
+    import { t } from '$lib/i18n';
     import '@xterm/xterm/css/xterm.css';
 
     const HEIGHT_KEY = 'kanban:terminal:height';
