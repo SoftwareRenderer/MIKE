@@ -14,24 +14,28 @@ and everything a pack has not translated falls back to English.
 <button>{t('app.title.review', { name, count })}</button>  {# counts are plural tables }
 ```
 
-## The convention: `aria-label` / `title` / `placeholder` are NOT converted
+## `aria-label` / `title` / `placeholder`: this batch keeps them literal
 
-Text in an `aria-label`, `aria-labelledby`, `aria-describedby`, `title` or
-`placeholder` attribute stays a **literal English string in the component**. Visible
-text — text nodes, and the script/template expressions that produce them — converts.
-This applies to every batch, and it is not an oversight to "finish" later.
+In the app shell and shared primitives, text in an `aria-label`, `aria-labelledby`,
+`aria-describedby`, `title` or `placeholder` attribute stays a **literal English string
+in the component**. Visible text — text nodes, and the script/template expressions that
+produce them — converts.
 
-**The reason is measured, not stylistic.** The a11y spec
+Other batches made the opposite call and put their labelling copy in the catalog
+(`settings.pair.providerAria`, `explorer.symbols.treeAria`, …). Both work, and the
+reason they work is the invariant worth keeping: **a `t()` call and the key it names
+must land in the same tree, and one component's copy converts in one pass.**
+
+**The reason this side stays literal is measured, not stylistic.** The a11y spec
 (`src/lib/components/__tests__/accessibility.unit.svelte.ts`) walks the rendered DOM
 and compares a control's labelled-by / `aria-label` text set against the *rendered
 text* of every button in it. A missing key does not fail loudly: the runtime answers
 with the key itself (`common.add`) so a hole in the catalog is visible instead of
 blank. That is the right call for visible copy, and it is fatal for that invariant —
-the moment a `<button>` gained `t()` text while its `aria-label` stayed English, the
-comparison broke for ~27 components, including files whose conversion lived in other
-batches. Converting visible text while leaving the labelling attributes literal keeps
-the invariant true **by construction**: the two sides of the comparison can never
-disagree, in any locale, for any catalog state.
+the moment a `<button>` gained `t()` text whose keys had not landed yet, the comparison
+broke for ~27 components, including files whose keys lived in another batch. Leaving
+the labelling attributes literal keeps the invariant true **by construction**: the two
+sides of the comparison can never disagree, in any locale, for any catalog state.
 
 The same argument covers the 48 e2e locators of the shape
 `getByRole('button', { name })`: the accessible name is the `aria-label`, so those
@@ -49,7 +53,10 @@ Consequences, accepted deliberately:
   is byte-identical either way so no locator moves.
 - A script-level `title:` **object property** is different text: `showConfirm({ title })`
   renders an `<h2>`, so it is visible copy and it converts.
-- Adding a `t()` call to an attribute is a review error, not a style preference.
+- Inside **this batch's files**, adding a `t()` call to a labelling attribute is a
+  review error: it half-converts a component. Copying the `…Aria` key style from the
+  settings/explorer batches into them is the same mistake — pick one shape per
+  component, not one per repository.
 
 ## Rules for a converted string
 

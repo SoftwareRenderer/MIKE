@@ -1,5 +1,6 @@
 <script lang="ts">
     import { REASONING_EFFORT_OPTIONS } from '$lib/types';
+    import { t } from '$lib/i18n';
 
     interface ModelEntry {
         name: string;
@@ -98,20 +99,20 @@
 
 <div class="models-section">
     <div class="models-header">
-        <span class="models-label">MODELS <span class="model-count">{models.filter(m => m.name.trim()).length}</span></span>
-        <button type="button" class="btn-add-model" onclick={onAdd} title="Add a model manually">
+        <span class="models-label">{t('settings.models.title')} <span class="model-count">{models.filter(m => m.name.trim()).length}</span></span>
+        <button type="button" class="btn-add-model" onclick={onAdd} title={t('settings.models.addModelHint')}>
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                 <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
-            Add Model
+            {t('settings.models.addModel')}
         </button>
     </div>
     <div class="models-list">
         {#if models.length > 0}
             <div class="models-col-headers">
-                <span class="col-model">Model</span>
-                <span class="col-ctx">Context Window</span>
-                <span class="col-reasoning">Reasoning Effort</span>
+                <span class="col-model">{t('settings.models.colModel')}</span>
+                <span class="col-ctx">{t('settings.models.colContext')}</span>
+                <span class="col-reasoning">{t('settings.models.colEffort')}</span>
                 <span class="col-expand" aria-hidden="true"></span>
                 <span class="col-remove" aria-hidden="true"></span>
             </div>
@@ -123,20 +124,20 @@
                         {#if model.readonly}
                             <span class="model-name-label" title={model.name}>{model.name}</span>
                         {:else}
-                            <input type="text" bind:value={model.name} placeholder="Model name" class="model-input" aria-label="Model name" oninput={() => onDirty?.()} />
+                            <input type="text" bind:value={model.name} placeholder={t('settings.models.nameField')} class="model-input" aria-label={t('settings.models.nameField')} oninput={() => onDirty?.()} />
                         {/if}
                     </div>
-                    <div class="ctx-field" title="Context window in tokens. Pre-populated from Fetch Models; edit to override, or leave empty for auto-discovery.">
+                    <div class="ctx-field" title={t('settings.models.ctxHint')}>
                         <input
                             type="number"
                             inputmode="numeric"
                             min="0"
                             step="any"
                             class="ctx-input"
-                            placeholder="auto"
+                            placeholder={t('settings.models.auto')}
                             value={model.context_window ? String(model.context_window) : ''}
                             oninput={(e) => { model.context_window = parseIntOrNull((e.target as HTMLInputElement).value); onDirty?.(); }}
-                            aria-label="Context window for {model.name || 'this model'}"
+                            aria-label={t('settings.models.ctxAria', { model: model.name || t('settings.models.thisModel') })}
                         />
                     </div>
                     <div class="reasoning-effort-field">
@@ -153,8 +154,8 @@
                             aria-expanded={effortOpen === mi && visibleEffortOptions().length > 0}
                             aria-controls={`reasoning-effort-list-${index}-${mi}`}
                             aria-activedescendant={effortOpen === mi ? `reasoning-effort-opt-${index}-${mi}-${Math.min(effortActive, Math.max(visibleEffortOptions().length - 1, 0))}` : undefined}
-                            aria-label="Reasoning effort for {model.name || 'this model'}"
-                            title="Reasoning effort (thinking budget). Pick a known level or type a custom value; custom values are sent to the server as-is."
+                            aria-label={t('settings.models.effortAria', { model: model.name || t('settings.models.thisModel') })}
+                            title={t('settings.models.effortHint')}
                         />
                         {#if effortOpen === mi && visibleEffortOptions().length > 0}
                             <div class="reasoning-effort-list" role="listbox" id={`reasoning-effort-list-${index}-${mi}`}>
@@ -177,58 +178,58 @@
                         class="btn-expand-model"
                         onclick={() => toggleExpand(mi)}
                         aria-expanded={expandedRows.has(mi)}
-                        aria-label={expandedRows.has(mi) ? `Collapse pricing for ${model.name || 'this model'}` : `Expand pricing for ${model.name || 'this model'}`}
-                        title={expandedRows.has(mi) ? 'Collapse model pricing & power' : 'Model pricing & power'}
+                        aria-label={expandedRows.has(mi) ? t('settings.models.collapsePricingAria', { model: model.name || t('settings.models.thisModel') }) : t('settings.models.expandPricingAria', { model: model.name || t('settings.models.thisModel') })}
+                        title={expandedRows.has(mi) ? t('settings.models.collapsePricingTitle') : t('settings.models.expandPricingTitle')}
                     >
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" class:expanded={expandedRows.has(mi)}>
                             <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </button>
-                    <button type="button" class="btn-remove-model" onclick={() => onRemove(mi)} aria-label={`Remove ${model.name || 'model'}`} title={`Remove ${model.name || 'model'}`}>
+                    <button type="button" class="btn-remove-model" onclick={() => onRemove(mi)} aria-label={t('settings.models.removeAria', { model: model.name || t('settings.models.modelWord') })} title={t('settings.models.removeAria', { model: model.name || t('settings.models.modelWord') })}>
                         ✕
                     </button>
                 </div>
                 {#if expandedRows.has(mi)}
                     <div class="model-details">
                         <div class="model-details-header">
-                            <span class="model-details-title">Model Pricing & Power</span>
-                            <span class="model-details-hint">Leave empty to use the provider defaults below.</span>
+                            <span class="model-details-title">{t('settings.models.detailsTitle')}</span>
+                            <span class="model-details-hint">{t('settings.models.detailsHint')}</span>
                         </div>
                         <div class="model-price-grid">
                             <div class="mp-field">
-                                <label for={`model-input-price-${index}-${mi}`}>Input</label>
+                                <label for={`model-input-price-${index}-${mi}`}>{t('settings.pricing.input')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
                                     <input id={`model-input-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.input_price ?? ''} oninput={(e) => { model.input_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
-                                <label for={`model-output-price-${index}-${mi}`}>Output</label>
+                                <label for={`model-output-price-${index}-${mi}`}>{t('settings.pricing.output')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
                                     <input id={`model-output-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.output_price ?? ''} oninput={(e) => { model.output_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
-                                <label for={`model-cache-read-price-${index}-${mi}`}>Cache Read</label>
+                                <label for={`model-cache-read-price-${index}-${mi}`}>{t('settings.pricing.cacheRead')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
                                     <input id={`model-cache-read-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.cache_read_price ?? ''} oninput={(e) => { model.cache_read_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
-                                <label for={`model-cache-write-price-${index}-${mi}`}>Cache Write</label>
+                                <label for={`model-cache-write-price-${index}-${mi}`}>{t('settings.pricing.cacheWrite')}</label>
                                 <div class="mp-input-wrap">
                                     <span class="mp-prefix">{currencySymbol}</span>
                                     <input id={`model-cache-write-price-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input" placeholder="default" value={model.cache_write_price ?? ''} oninput={(e) => { model.cache_write_price = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} />
                                 </div>
                             </div>
                             <div class="mp-field">
-                                <label for={`model-power-w-${index}-${mi}`}>Power (W)</label>
-                                <input id={`model-power-w-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input mp-power-input" placeholder="default" value={model.power_consumption_w ?? ''} oninput={(e) => { model.power_consumption_w = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} title="Power draw override in watts. Empty = use provider default. Used for electricity cost estimates." />
+                                <label for={`model-power-w-${index}-${mi}`}>{t('settings.models.power')}</label>
+                                <input id={`model-power-w-${index}-${mi}`} type="number" inputmode="decimal" min="0" step="any" class="mp-input mp-power-input" placeholder="default" value={model.power_consumption_w ?? ''} oninput={(e) => { model.power_consumption_w = parseFloatOrNull((e.target as HTMLInputElement).value); onDirty?.(); }} title={t('settings.models.powerHint')} />
                             </div>
                             <div class="mp-field mp-note-field">
-                                <span class="mp-note">Prices are USD per 1M tokens. Cache Write replaces Input for non-cached tokens when set.</span>
+                                <span class="mp-note">{t('settings.models.note')}</span>
                             </div>
                         </div>
                     </div>
@@ -237,7 +238,7 @@
         {/each}
     </div>
     {#if models.length === 0}
-        <div class="models-empty">No models added. Use "Fetch Models" or add manually.</div>
+        <div class="models-empty">{t('settings.models.empty')}</div>
     {/if}
 </div>
 
